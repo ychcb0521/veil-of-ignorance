@@ -1,5 +1,5 @@
 import { fishProgramForLookback, limitFishLookback } from '@/lib/fish/lookback';
-import { checkFishDownwardWick, describeFishWick, fishWickCount, type FishDownwardWick } from '@/lib/fish/downwardWick';
+import { checkFishDownwardWick, describeFishWick, fishWickCount, type FishDownwardWick, type FishWickRejection } from '@/lib/fish/downwardWick';
 import { saveFishRound, summarizeFishRound, type FishRoundRow } from '@/lib/fish/roundSummary';
 import { fishCombinationKey, combineFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput, type FishCombination } from '@/lib/fish/intersection';
 import {collectFishSuggestion,type FishSuggestionOptions,type FishSampleRow} from '@/lib/fish/suggestions';
@@ -39,6 +39,8 @@ const formula = compileFeatureFormula(`${CBI2_FORMULA}\nfishAvg = avg(CBI2, 24)`
 export type FishReading = FishSnapshot;
 export type FishOutcome = 'hit' | 'below' | 'unknown' | 'gap' | 'readings' | 'failed' | 'outside';
 export interface FishProgress {
+  /** One rejection per venue/market/instrument, even when several algorithms reject it. */
+  wickDetails?: FishWickRejection[];
   lookbackHours?:number;
   /** 本轮跳过了某家但扫描仍在继续时的说明（如 BTC 参考取不到），淡色显示。 */
   notice?: string;
@@ -436,6 +438,10 @@ export class FishScanner {
         progress.notice=[...new Set(states.flatMap(p=>p?.notice?p.notice.split('；'):[]))].join('；')||undefined;
         progress.total=total;
         progress.wickSkipped=[...results.values()].filter(m=>[...m.values()].some(r=>r.outcome==='wick')).length;
+        progress.wickDetails=[...results.values()].flatMap(m=>{
+          const evidence=[...m.values()].find(r=>r.outcome==='wick'&&r.wick)?.wick;
+          return evidence?[evidence]:[];
+        });
         options.onProgress({...progress,counts:{...progress.counts}});
       };
       // 【用户要求】2026-10-20「交集这里还是有问题…合并到一起却捕捉不到」：一个币的各算法结论到齐就当场合并、当场出信号，
@@ -523,6 +529,7 @@ export class FishScanner {
         }
       }
       const all = Object.values(venues);
+      progress.wickDetails=[...memberResults.values()].flatMap(m=>m.get(0)?.wick?[m.get(0)!.wick!]:[]);
       if(all.length) {
         progress.history=all.reduce((n,p)=>n+(p.history??0),0);
         progress.wickSkipped=all.reduce((n,p)=>n+(p.wickSkipped??0),0);
@@ -614,7 +621,10 @@ export class FishScanner {
                   if(local.signal.aborted)return;
                   p.wickSkipped=(p.wickSkipped??0)+1;
                   roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:'wick'});
-                  const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,member:FishMemberResult={outcome:'wick'};
+                  const evidence:FishWickRejection={...wick,symbol:market.symbol,exchange,market:market.market,underlying:market.underlying,
+                    binanceSymbol:exchange==='binance'?market.symbol:binanceByBase.get(fishBase(market.base))??null,
+                    cutoffMs:Math.floor(node/FISH_STEP)*FISH_STEP,rule:{...options.downwardWick!}};
+                  const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,member:FishMemberResult={outcome:'wick',wick:evidence};
                   memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
                   p.done++;publish();await fishDelay(0,local.signal);continue;
                 }

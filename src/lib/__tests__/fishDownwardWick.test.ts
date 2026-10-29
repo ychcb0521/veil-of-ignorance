@@ -75,10 +75,23 @@ it('single, AND and OR reject the coin; completion count and stricter re-filter 
   const {scanner}=fixture(),hits:string[]=[],members=new Map(),rounds:FishCombinationRound[]=[];
   const p=await scanner.scan({feature,algorithm,anchorMs:cut,includeDuplicates:true,downwardWick:{...rule},...(combination?{algorithms:[{feature,algorithm},{feature,algorithm:{...algorithm,threshold:100.5}}],combination}:{}),signal,onProgress:()=>{},onSignal:s=>hits.push(s.symbol),onResult:(k,r)=>members.set(k,r),onRound:r=>rounds.push(r)});
   expect(hits).toEqual(['OKUSDT']);expect(p.wickSkipped).toBe(1);expect(p.done).toBe(p.total);expect(p.status).toBe('complete');
-  if(!combination)expect(members.get('binance|crypto|WICKUSDT')).toEqual({outcome:'wick'});
+  if(!combination)expect(members.get('binance|crypto|WICKUSDT')).toMatchObject({outcome:'wick',wick:{symbol:'WICKUSDT',openTime:cut-2*STEP,drop:9,atr:29/14,rule}});
+  expect(p.wickDetails).toHaveLength(1);
+  expect(p.wickDetails![0]).toMatchObject({symbol:'WICKUSDT',exchange:'binance',cutoffMs:cut,openTime:cut-2*STEP,open:100,low:91,rule});
+  expect(p.wickDetails![0].candles.every(b=>b.openTime+STEP<=cut)).toBe(true);
+  expect(p.wickDetails![0].candles.find(b=>b.openTime===cut-2*STEP)?.low).toBe(91);
   const round=rounds.at(-1)!;const strict=deriveFishRound(round,round.plans.map(p=>compileFishProgram(p.def,{...p.settings,threshold:100.8})))!;
   expect(strict.results.get('binance|crypto|WICKUSDT')!.get(0)?.outcome).toBe('wick');
  }
+});
+
+it('reuses exact rejection evidence from checkpoints and keeps cancelled partial progress inspectable',async()=>{
+ const {scanner}=fixture(),checkpoint=new Map(),stop=new AbortController();
+ const first=await scanner.scan({feature,algorithm,anchorMs:cut,includeDuplicates:true,downwardWick:{...rule},checkpoint,signal,onProgress:()=>{},onSignal:()=>{}});
+ const second=await scanner.scan({feature,algorithm,anchorMs:cut,includeDuplicates:true,downwardWick:{...rule},checkpoint,signal,onProgress:()=>{},onSignal:()=>{}});
+ expect(second.wickDetails).toEqual(first.wickDetails);expect(second.wickSkipped).toBe(1);
+ const third=await scanner.scan({feature,algorithm,anchorMs:cut,includeDuplicates:true,downwardWick:{...rule},signal:stop.signal,onProgress:p=>{if(p.wickDetails?.length)stop.abort();},onSignal:()=>{}});
+ expect(third.status).toBe('cancelled');expect(third.wickDetails).toHaveLength(1);
 });
 it('diagnose shares the rejection rule, and disabling the gate retains former behavior',async()=>{
  const {scanner,adapter}=fixture();const d=await scanner.diagnose({symbol:'WICK',feature,algorithm,anchorMs:cut,downwardWick:{...rule},signal});

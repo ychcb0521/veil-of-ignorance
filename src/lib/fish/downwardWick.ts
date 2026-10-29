@@ -1,6 +1,6 @@
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishDataAdapter } from './adapters';
-import type { FishMarket } from './exchanges';
+import type { FishExchange, FishMarket } from './exchanges';
 import { FISH_STEP, FishError, validateFishBars } from './shared';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -27,7 +27,13 @@ export function readFishDownwardWick(): FishDownwardWick {
 export function saveFishDownwardWick(value: FishDownwardWick): void {
   writePersistedStateRaw(key(), JSON.stringify(value));
 }
-export interface FishWickHit { openTime: number; drop: number; atr: number }
+export type FishWickCandle = Pick<ResearchBar, 'openTime' | 'open' | 'high' | 'low' | 'close'>;
+export interface FishWickHit extends FishWickCandle { drop: number; atr: number; candles: FishWickCandle[] }
+/** Frozen evidence from the actual venue and rule used in this round. Not a tradable signal. */
+export interface FishWickRejection extends FishWickHit {
+  symbol: string; exchange: FishExchange; market?: 'us_stock'; underlying?: string; binanceSymbol?: string | null;
+  cutoffMs: number; rule: FishDownwardWick;
+}
 export const fishWickCount = (rule: FishDownwardWick) => rule.hours * 12 + 15;
 /** Fixed closed 5m bars. Downward excursion includes the body: open - low.
  * ATR is the mean TR of the preceding 14 bars, excluding the candidate and all later bars. */
@@ -44,7 +50,10 @@ export function findFishDownwardWick(bars: readonly ResearchBar[], cutoffMs: num
   for (let i = 15; i < count; i++) {
     const b = sample[i], drop = b.open-b.low;
     const atr = tr.subarray(i-14,i).reduce((sum,x)=>sum+x,0)/14;
-    if (drop > atr*rule.atrMultiple) return { openTime:b.openTime, drop, atr };
+    if (drop > atr*rule.atrMultiple) return {
+      openTime:b.openTime, open:b.open, high:b.high, low:b.low, close:b.close, drop, atr,
+      candles:sample.slice(Math.max(0,i-15),i+16).map(({openTime,open,high,low,close})=>({openTime,open,high,low,close})),
+    };
   }
   return null;
 }

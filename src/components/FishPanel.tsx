@@ -30,6 +30,7 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishAlgorithmSettings } from '@/lib/fish/algorithm';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
+import { FishWickDetails } from '@/components/FishWickDetails';
 import { FishQuality } from '@/components/FishQuality';
 import { ModuleErrorBoundary } from '@/components/ModuleErrorBoundary';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -315,7 +316,7 @@ export function FishPanel(p: FishPanelProps) {
           <span className="text-muted-foreground">命中 <span className="font-mono text-[12px] font-semibold tabular-nums text-primary">{x.counts.hit}</span></span>
           <span className="text-muted-foreground/40">·</span>
           <span className="font-mono tabular-nums text-muted-foreground">{x.done} / {x.total}</span>
-          {!!x.wickSkipped&&<><span className="text-muted-foreground/40">·</span><span className="text-muted-foreground" data-testid="fish-wick-skipped">插针过滤 {x.wickSkipped}</span></>}
+          {!!x.wickSkipped&&<><span className="text-muted-foreground/40">·</span><FishWickDetails progress={x} onJump={p.onJumpQuality} jumpingSignalId={p.jumpingSignalId}/></>}
           {x.cutoffMs!=null&&<><span className="text-muted-foreground/40">·</span><span className="font-mono tabular-nums text-muted-foreground" data-testid="fish-cutoff" title="本轮实际使用的截止时刻（时间留空 = 币安服务器当前时间）">截止 {formatUTC8(x.cutoffMs).slice(0,16)}</span></>}
         </p>
       </div>}

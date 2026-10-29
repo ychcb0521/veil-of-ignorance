@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { STATE_DEF } from '@/lib/deepDig/features';
 import { compileFishProgram } from '@/lib/fish/algorithm';
 import { loadFishSession, saveFishSession, type FishSession } from '@/lib/fish/session';
+import { initialFishProgress } from '@/lib/fishScanner';
+import type { FishWickRejection } from '@/lib/fish/downwardWick';
 
 const rows = new Map<string, unknown>(), key = (k: unknown) => JSON.stringify(k);
 beforeEach(() => {
@@ -56,4 +58,14 @@ it('restores the exact frozen coverage window and extended history after refresh
  const saved=session('结果');saved.data.lookbackHours=72;
  await saveFishSession('window',saved);const loaded=await loadFishSession('window');
  expect(loaded?.data.lookbackHours).toBe(72);expect(loaded?.needsRescan).toBeUndefined();expect(loaded!.data.plans[0].N).toBeGreaterThanOrEqual(saved.data.plans[0].N);
+});
+
+it('round conclusions and progress retain frozen wick evidence after durable reload',async()=>{
+ const saved=session('结果'),wick:FishWickRejection={symbol:'WICKUSDT',exchange:'binance',openTime:300000,open:100,high:101,low:91,close:92,drop:9,atr:2,cutoffMs:900000,rule:{enabled:true,hours:48,atrMultiple:3},candles:[{openTime:300000,open:100,high:101,low:91,close:92}]};
+ saved.data.results.set('binance|crypto|WICKUSDT',new Map([[0,{outcome:'wick',wick}]]));
+ saved.progress={...initialFishProgress(),status:'complete',wickSkipped:1,wickDetails:[wick]};
+ await saveFishSession('wick',saved);const loaded=await loadFishSession('wick');
+ expect(loaded?.progress?.wickDetails).toEqual([wick]);
+ expect(loaded?.data.results.get('binance|crypto|WICKUSDT')?.get(0)?.wick).toEqual(wick);
+ wick.rule.atrMultiple=1;expect(loaded?.progress?.wickDetails?.[0].rule.atrMultiple).toBe(3);
 });

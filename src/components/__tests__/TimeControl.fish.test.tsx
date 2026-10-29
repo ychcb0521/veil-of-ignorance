@@ -34,6 +34,18 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {
+  it('插针过滤详情打开历史盘面，不把被过滤标的加入鱼或信号库', async () => {
+    const openTime=Date.UTC(2026,9,29,2),wick={symbol:'WICKUSDT',exchange:'binance' as const,cutoffMs:openTime+600000,openTime,open:100,high:101,low:91,close:92,drop:9,atr:2,rule:{enabled:true,hours:48,atrMultiple:3},candles:[{openTime,open:100,high:101,low:91,close:92}]};
+    mocks.scan.mockImplementation(async o=>{const p={...initialFishProgress(),status:'complete' as const,wickSkipped:1,wickDetails:[wick]};o.onProgress(p);return p;});
+    const jump=vi.fn(async()=>({ok:true as const}));render(control(jump));
+    fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+    fireEvent.click(await screen.findByRole('button',{name:'查看插针过滤详情（1 个）'}));
+    fireEvent.click(screen.getByRole('button',{name:'查看 WICKUSDT 币安 的触发 K 线'}));
+    fireEvent.click(screen.getByRole('button',{name:'打开历史盘面'}));
+    await waitFor(()=>expect(jump).toHaveBeenCalledWith('WICKUSDT',openTime+300000));
+    expect(loadFishSignals().some(s=>s.symbol==='WICKUSDT')).toBe(false);
+    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toEqual([]);
+  });
   it('按钮紧邻信号库并互斥，评分/删除独立，无加入信号库入口，不显示快照悬停框', async () => {
     render(control());
     const fishButton = screen.getByRole('button',{name:/^渔/});
