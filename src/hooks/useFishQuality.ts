@@ -1,3 +1,4 @@
+import { additionIdentity, validateQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
 import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
 import { useFeatureDefinitions } from './useFeatureDefinitions';
 import { mirrorIdentity, validateQualityMirror, type QualityMirrorTakeProfit } from '@/lib/fish/qualityMirror';
@@ -248,15 +249,17 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => ({...s,buyFilters:structuredClone(filters)}));
   }, [change,cancelFilter]);
   /** 只改某套卖出方案的持仓一票否决：买入条件和过滤读数不动；变了就立刻按新设置重算卖出（正在跑的旧批次直接作废）。 */
-  const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[], mirror?: QualityMirrorTakeProfit) => {
+  const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[], mirror?: QualityMirrorTakeProfit, addition?: QualityAdditionRule) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
-    validateQualityMirror(mirror);
-    if (!plan || JSON.stringify([holdingVetoIdentity(plan.holdingVetoes),mirrorIdentity(plan.mirrorTakeProfit)]) === JSON.stringify([holdingVetoIdentity(vetoes),mirrorIdentity(mirror ?? plan.mirrorTakeProfit)])) return;
+    validateQualityMirror(mirror); validateQualityAddition(addition);
+    const additionChanged = JSON.stringify(additionIdentity(addition ?? plan?.addition)) !== JSON.stringify(additionIdentity(plan?.addition));
+    if (!plan || !additionChanged && JSON.stringify([holdingVetoIdentity(plan.holdingVetoes),mirrorIdentity(plan.mirrorTakeProfit)]) === JSON.stringify([holdingVetoIdentity(vetoes),mirrorIdentity(mirror ?? plan.mirrorTakeProfit)])) return;
+    if (additionChanged) { intentRevision.current++; rerun.current = false; controller.current?.abort(); controller.current = null; }
     change(s => {
       const saved = materializePlanBuyFilters(archiveQualityStudy(s));
-      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes), ...(mirror ? {mirrorTakeProfit:structuredClone(mirror)} : {}) } : p) };
+      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes), ...(mirror ? {mirrorTakeProfit:structuredClone(mirror)} : {}), ...(addition ? {addition:structuredClone(addition)} : {}) } : p) };
     });
-    defer(() => { if (controller.current) void restart(); else void start(); });
+    defer(() => { if (additionChanged) void start(false, 'restart'); else if (controller.current) void restart(); else void start(); });
   }, [change, start, restart, defer]);
   const setSellPlans = useCallback((plans: import('@/lib/fish/quality').QualityGroup[]) => {
     if (!readyRef.current) return;

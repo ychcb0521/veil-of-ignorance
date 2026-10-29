@@ -1,3 +1,5 @@
+import { additionIdentity, additionPosition, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
 import type { QualityMonitorLibrary } from './qualityMonitorLibrary';
@@ -7,7 +9,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { compileFeatureFormula, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
-import { compileFishProgram, evaluateFishProgram, shortFishHash, type FishSnapshot, type FishProgram } from './algorithm';
+import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD_TEXT, type FishSnapshot, type FishProgram } from './algorithm';
 import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -29,6 +31,7 @@ export interface QualityGroup {
   definitionSource?: 'account';
   holdingVetoes?: QualityHoldingVeto[];
   mirrorTakeProfit?: QualityMirrorTakeProfit;
+  addition?: QualityAdditionRule;
   /** 回撤否决的成交方式版本：'stop' = 盘中触及止损价即按止损价成交（2026-10-26 起）；缺省 = 旧版（下一分钟开盘价）。 */
   vetoFill?: 'stop';
   /**
@@ -48,10 +51,11 @@ export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo 
 /** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
 export function qualityRuleText(g: QualityGroup): string {
   if (g.combo && g.rule) return `${g.combo.beforeLabel} ${g.rule.direction} ${g.rule.threshold} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${g.combo.after.rule.direction} ${g.combo.after.rule.threshold}`;
-  return g.rule ? `${g.rule.direction} ${g.rule.threshold}` : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : '仅一票否决' : '设置门槛';
+  return g.rule ? `${g.rule.direction} ${g.rule.threshold}` : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
-export const hasQualityExit = (group: QualityGroup) => group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0;
+// An addition-only plan still needs a valued holding path, even without an exit threshold.
+export const hasQualityExit = (group: QualityGroup) => !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
@@ -71,6 +75,8 @@ export interface QualityResult {
   /** First and only mirror sale, as a fraction of original coin quantity. */
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
+  additionFill?: QualityAdditionFill; additionNote?: string; totalInvested?: number;
+  averageEntryPrice?: number; remainingQuantity?: number; remainingCost?: number;
   exitReading?: number;
   pendingExit?: QualityTrigger;
   exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean; stage?: 'before' | 'after' };
@@ -238,6 +244,10 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
   const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
   if (mirrorIdentity(g.mirrorTakeProfit).length) identity.push(mirrorIdentity(g.mirrorTakeProfit));
   if (mirrorExecutionIdentity(g).length) identity.push(mirrorExecutionIdentity(g));
+  if (additionIdentity(g.addition).length) {
+    identity.push(additionIdentity(g.addition));
+    if(g.addition?.source==='detector') identity.push(Object.entries(s.readings ?? Object.fromEntries(qualityMembers(s.source).map(f=>[qualityGroupId(f),f]))).sort(([a],[b])=>a.localeCompare(b)).map(([id,f])=>[id,f.definitionKey,f.statistic,f.threshold,f.direction,f.H,f.constraints]));
+  }
   return shortFishHash(JSON.stringify(identity));
 };
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
@@ -385,6 +395,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       return { ...base, status: 'waiting', entryTime: entry, entryPrice: bars[0].open, reason: '已登记买入，待选择卖出规则后评估收益' };
     }
     validateQualityMirror(group.mirrorTakeProfit);
+    validateQualityAddition(group.addition);
     const prior = previous?.key === key && previous.status === 'open' && previous.entryPrice! > 0 && previous.endTime! >= entry && previous.endTime! <= end ? previous : undefined;
     const since = prior?.endTime ?? entry;
     if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
@@ -451,7 +462,28 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
     const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
     const breakdown = mirrorPnlBreakdown(QUALITY_NOTIONAL, entryPrice, finalPrice, mirrorFill);
-    const returnPct = breakdown.returnPct;
+    let additionFill=prior?.additionFill, additionNote: string | undefined;
+    if(group.addition?.enabled && !additionFill) {
+      const config=group.addition, candidates: AdditionCandidate[]=[];
+      const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
+        const base=qualityMetricPlan(snapshot,metric);
+        const plan=compileFishProgram(base.plan.def,{...base.plan.settings,direction,constraints:constraints.filter(text=>text!==FISH_STATE_HOLD_TEXT).map((text,i)=>({id:'add-'+i,text,enabled:true}))});
+        candidates.push({plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
+      };
+      if(config.source==='custom') {
+        const f=config.condition!; addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
+      } else {
+        const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
+        for(const f of detectors) {
+          const direction=f.direction??'>';
+          addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,config.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints);
+        }
+        if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
+      }
+      additionFill=await findQualityAddition({candidates,row,entry,end:closed && trigger?.fillPrice != null && !trigger.atOpen ? finalTime + QUALITY_MINUTE : finalTime,notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt,load,signal});
+    }
+    const position=additionFill?additionPosition(QUALITY_NOTIONAL,entryPrice,finalPrice,closed,additionFill,mirrorFill):undefined;
+    const returnPct = position?.returnPct ?? breakdown.returnPct;
     let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
     // The exit open itself is observable and belongs to the holding path; the rest of the exit candle does not.
@@ -474,7 +506,11 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
-      returnPct, pnl: breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
+      ...(additionFill && position ? {additionFill,totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
+        initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
+        remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
+      ...(additionNote?{additionNote}:{}),
+      returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,

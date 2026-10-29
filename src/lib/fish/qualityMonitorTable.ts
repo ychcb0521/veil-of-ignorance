@@ -1,3 +1,4 @@
+import { additionLabel } from './qualityAddition';
 import { buildXlsx, type XlsxCell, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
@@ -22,7 +23,7 @@ export function monitorStatus(r: QualityMonitorRecord, s: QualityMonitorSetting)
     if (r.filterStatus.state === 'error') return '过滤缺数据';
     if (r.filterStatus.state === 'pending') return '待过滤';
   }
-  return r.result?.status === 'closed' ? '已卖出' : r.result?.status === 'open' ? r.result.mirrorFill ? `余仓 ${+((r.result.remainingFraction ?? 1)*100).toPrecision(8)}%` : '持有中' : r.result?.status === 'error' ? '缺数据' : r.result?.entryPrice ? '待设卖出' : '待评估';
+  return r.result?.additionFill ? `${r.result.status === 'closed' ? '已卖出' : '持有中'} · 已加仓一次` : r.result?.status === 'closed' ? '已卖出' : r.result?.status === 'open' ? r.result.mirrorFill ? `余仓 ${+((r.result.remainingFraction ?? 1)*100).toPrecision(8)}%` : '持有中' : r.result?.status === 'error' ? '缺数据' : r.result?.entryPrice ? '待设卖出' : '待评估';
 }
 export const monitorColumns = [
   ['symbol', '标的', 24], ['time', '信号时间', 24], ['algorithm', '监测算法', 48], ['buying', '买前过滤', 56],
@@ -65,7 +66,7 @@ function formula(g: QualityGroup['snapshot']): string { try { return qualityDefi
 export function buildMonitorSheets(records: readonly QualityMonitorRecord[], settings: ReadonlyMap<string, QualityMonitorSetting>): XlsxSheet[] {
   const rows = records.filter(r => settings.has(r.settingId));
   const used = [...new Set(rows.map(r => r.settingId))].map(id => settings.get(id)!);
-  return [{ name: '监测记录', columns: [
+  const output: XlsxSheet[] = [{ name: '监测记录', columns: [
     ...monitorColumns.map(([key, header, width]) => ({ header: `${header}${['return', 'static', 'dynamic'].includes(key) ? ' %' : key === 'held' ? ' 小时' : ''}`, width })),
     ...['交易所', '买入价', '卖出 / 估值时间', '卖出 / 估值价', '盈亏 USDT', '结果说明', '过滤判断', '过滤读数 JSON', '记录编号', '配置编号', '交易战役链接', '镜像止盈门槛 %', '镜像卖出比例 %', '镜像成交时间', '镜像成交价', '镜像卖出币数', '剩余币数', '已兑现盈亏 USDT', '镜像已兑现盈亏 USDT', '余仓盈亏 USDT', '开仓总金额 USDT', '镜像成交实际涨幅 %'].map(header => ({ header, width: header.includes('JSON') ? 70 : 28 })),
   ], rows: rows.map(r => {
@@ -75,16 +76,21 @@ export function buildMonitorSheets(records: readonly QualityMonitorRecord[], set
       result?.reason ?? null, r.filterStatus.detail, JSON.stringify(r.readings), r.id, s.id,
       monitorCampaignUnavailable(r,s)?null:new URL(qualityMonitorCampaignPath(r.id),window.location.origin).href,
       s.plan.mirrorTakeProfit?.enabled ? s.plan.mirrorTakeProfit.gainPct : null, s.plan.mirrorTakeProfit?.enabled ? s.plan.mirrorTakeProfit.sellPct : null,
-      date(result?.mirrorFill?.at), result?.mirrorFill?.price ?? null, result?.mirrorFill && result.entryPrice ? s.notional/result.entryPrice*result.mirrorFill.fraction : null,
-      result?.mirrorFill && result.entryPrice ? s.notional/result.entryPrice*(result.remainingFraction ?? 0) : null, result?.realizedPnl ?? null, result?.mirrorRealizedPnl ?? null, result?.remainingPnl ?? null, result?.initialNotional ?? s.notional, mirrorFillGainPct(result?.entryPrice,result?.mirrorFill)];
+      date(result?.mirrorFill?.at), result?.mirrorFill?.price ?? null, result?.mirrorFill && result.entryPrice ? result.additionFill && result.mirrorFill.fraction===1 ? s.notional/result.entryPrice+result.additionFill.quantity : s.notional/result.entryPrice*result.mirrorFill.fraction : null,
+      result?.remainingQuantity ?? (result?.mirrorFill && result.entryPrice ? s.notional/result.entryPrice*(result.remainingFraction ?? 0) : null), result?.realizedPnl ?? null, result?.mirrorRealizedPnl ?? null, result?.remainingPnl ?? null, result?.initialNotional ?? s.notional, mirrorFillGainPct(result?.entryPrice,result?.mirrorFill)];
   }) }, { name: '算法与公式', columns: ['配置编号', '监测算法', '买前过滤', '持仓否决', '探测算法', '观察小时（0=持续至卖出）', '本金 USDT', '杠杆', '类型', '算法', '公式', '原始快照 JSON'].map(header => ({ header, width: header.includes('公式') || header.includes('JSON') ? 80 : 35 })),
     rows: used.flatMap(s => {
       const snapshots = [{ type: '监测', label: qualityRuleLabel(s.plan), snapshot: s.plan.snapshot },
         ...(s.plan.buyFilters ?? []).map(f => ({ type: '买前过滤', label: `${f.label} ${f.direction} ${f.threshold}`, snapshot: f.snapshot })),
         ...activeHoldingVetoes(s.plan.holdingVetoes).filter(v => v.snapshot).map(v => ({ type: '持仓否决', label: `${v.label} ${v.direction} ${v.threshold}`, snapshot: v.snapshot! })),
+        ...(s.plan.addition?.enabled && s.plan.addition.source==='custom' && s.plan.addition.condition ? [{type:'加仓',label:additionLabel(s.plan.addition),snapshot:s.plan.addition.condition.snapshot}] : []),
         ...s.detectors.map(g => ({ type: '探测', label: monitorDetectorLabel(g), snapshot: g.snapshot }))];
       return snapshots.map(g => [s.id, qualityVersionedRuleLabel(s.plan), monitorBuying(s), monitorVetoes(s), monitorDetectors(s), s.observeHours, s.notional, s.leverage, g.type, g.label, formula(g.snapshot), JSON.stringify(g.snapshot)]);
     }) }];
+  output.push({name:'加仓记录',columns:['标的','配置编号','加仓条件','加仓时间','金额 USDT','成交价','数量','触发读数','触发门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON'].map(header=>({header,width:28})),
+    rows:rows.map(record=>{const setting=settings.get(record.settingId)!,r=record.result,a=r?.additionFill;return [record.source.symbol,record.settingId,additionLabel(setting.plan.addition),a?formatUTC8(a.at):null,a?.notional??null,a?.price??null,a?.quantity??null,a?.reading??null,a?.threshold??null,r?.totalInvested??100,r?.averageEntryPrice??r?.entryPrice??null,a?.definitionKey??setting.plan.addition?.condition?.snapshot.definitionKey??null];})});
+  return output;
+
 }
 export function downloadMonitorRecords(records: readonly QualityMonitorRecord[], settings: ReadonlyMap<string, QualityMonitorSetting>, at = Date.now()): string {
   if (!records.length) throw new Error('暂无可导出的监测记录');

@@ -34,14 +34,14 @@ export function QualityMirrorBoard({campaign,onHeightChange}: {campaign: TradeCa
       <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
         <div><div className="text-[10px] text-muted-foreground">止盈时实际涨幅</div><div data-testid="mirror-actual-gain" className={`font-mono text-[14px] font-semibold ${color(board.gainPct)}`}>{pct(board.gainPct)}</div></div>
         <div><div className="text-[10px] text-muted-foreground">开仓价 → 止盈成交价</div><div className="font-mono">{price(board.entryPrice)} → {price(fill.price)}</div></div>
-        <div><div className="text-[10px] text-muted-foreground">已卖出初始币数</div><div className="font-mono">{mirrorPercentText(board.soldFraction)}%{board.quantity != null ? ` · ${+board.quantity.toPrecision(8)} 币` : ''}</div></div>
+        <div><div className="text-[10px] text-muted-foreground">{board.addition && fill.fraction === 1 ? '已卖出全部币数' : '已卖出初始币数'}</div><div className="font-mono">{mirrorPercentText(board.soldFraction)}%{board.quantity != null ? ` · ${+board.quantity.toPrecision(8)} 币` : ''}</div></div>
         <div><div className="text-[10px] text-muted-foreground">{board.closed ? '最终投资回报率' : '本次估值回报率'}</div><div data-testid="mirror-total-roi" className={`font-mono text-[14px] font-semibold ${color(board.returnPct)}`}>{pct(board.returnPct)}</div></div>
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-muted-foreground">
         <span>止盈已兑现 <b className={`font-mono ${color(board.mirrorPnl)}`}>{money(board.mirrorPnl)}</b></span><span>＋</span>
         <span>余仓{board.closed ? '已实现' : '估值'} <b className={`font-mono ${color(board.remainingPnl)}`}>{money(board.remainingPnl)}</b></span><span>＝</span>
         <span>合计 <b className={`font-mono ${color(board.totalPnl)}`}>{money(board.totalPnl)}</b></span>
-        <span>· 回报率分母：开仓总金额 {board.initialNotional?.toFixed(2) ?? '—'} USDT</span>
+        <span>· 回报率分母：{board.addition ? '累计投入' : '开仓总金额'} {board.totalInvested?.toFixed(2) ?? '—'} USDT</span>
       </div>
     </> : <p className="mt-1 text-[10px] text-muted-foreground">未触发不记作零涨幅；只以保存的实际成交确认止盈，不根据峰值或盘面 K 线推测成交。</p>}
   </section>;

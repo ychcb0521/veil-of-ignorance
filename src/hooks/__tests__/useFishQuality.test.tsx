@@ -567,3 +567,17 @@ it('adds and edits dynamic sell plans, aborts obsolete batches and preserves rem
   const restored = renderHook(() => useFishQuality('a', [signal], vi.fn(async () => {})));
   await flush(); expect(restored.result.current.study.sellPlans).toEqual([]); restored.unmount();
 });
+
+it('saves per-plan addition settings, immediately rejects obsolete monitoring results and preserves them on reload',async()=>{
+ const {defaultQualityAddition}=await import('@/lib/fish/qualityAddition');
+ const tasks:QualityRunOptions[]=[];
+ const h=renderHook(()=>useFishQuality('a',[signal],async task=>{tasks.push(task);await new Promise<void>(resolve=>task.signal.addEventListener('abort',()=>resolve()));}));
+ await flush();chooseAndStart(h);await flush();const old=tasks[0],plan=old.study.sellPlans![0],row=qualityRunSamples(old.study)[0];
+ const addition={...defaultQualityAddition(),enabled:true,amountMode:'fixed' as const,amountUsdt:75};
+ act(()=>h.result.current.setHoldingVetoes(plan.id,[],undefined,addition));expect(old.signal.aborted).toBe(true);await flush(600);
+ expect(tasks[1].study.sellPlans![0].addition).toEqual(addition);expect(tasks[1].study.sellPlans![1].addition).toBeUndefined();
+ act(()=>old.onResult({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',complete:true,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:999,pnl:899,returnPct:899}));
+ expect(h.result.current.study.results.some(r=>r.returnPct===899)).toBe(false);
+ const saved=structuredClone(h.result.current.study);act(()=>h.result.current.cancel());h.unmount();storage.load.mockResolvedValue({study:saved});
+ const restored=renderHook(()=>useFishQuality('a',[signal],vi.fn(async()=>{})));await flush();expect(restored.result.current.study.sellPlans![0].addition).toEqual(addition);restored.unmount();
+});

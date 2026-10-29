@@ -1,3 +1,4 @@
+import type { QualityAdditionRule, QualityAdditionFill } from '@/lib/fish/qualityAddition';
 /**
  * 错题集（Trade Journal）相关类型定义
  * 字段命名与数据库列名保持一致（snake_case），与 supabase/types.ts 风格统一。
@@ -394,7 +395,7 @@ export interface TradeCampaign {
     /** 探测信号类别：命中的探测算法组合（如「CBI-2·avg₂ + CBA·avg₂」），用于分类观察与统计。 */
     category?: string;
     /** Frozen monitoring metrics shared with the fish-quality table. */
-    holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
+    holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     sellEvidence?: {
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';
@@ -403,6 +404,7 @@ export interface TradeCampaign {
       executedAt?: number;
       triggerAtOpen?:boolean;
       mirrorTakeProfit?: {enabled:boolean;gainPct:number;sellPct:number};
+      addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; totalInvested?: number; averageEntryPrice?: number;
       mirrorFill?: {at:number;price:number;fraction:number;gainPct:number;atOpen:boolean};
       triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator'|'mirror-take-profit';direction:'<'|'>'|'<='|'>=';threshold:number };
       holdingVetoes?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number;formula?:string }[];

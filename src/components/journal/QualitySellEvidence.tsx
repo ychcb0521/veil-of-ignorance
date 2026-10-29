@@ -38,7 +38,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
   </aside>;
 }
 
-export function QualitySellEvidence({ evidence, repair }: { evidence: NonNullable<TradeCampaign['comparison']>['sellEvidence']; repair?: NonNullable<TradeCampaign['comparison']>['repair'] }) {
+function SellEvidenceBody({ evidence, repair }: { evidence: NonNullable<TradeCampaign['comparison']>['sellEvidence']; repair?: NonNullable<TradeCampaign['comparison']>['repair'] }) {
   if (!evidence) return null;
   const current = chartFeatureDef(evidence.featureId);
   const differs = !!current && definitionKey({ ...current, interval: evidence.interval as '5m' }) !== evidence.definitionKey;
@@ -62,4 +62,11 @@ export function QualitySellEvidence({ evidence, repair }: { evidence: NonNullabl
     {!!evidence.holdingVetoes?.length && <details><summary className="cursor-pointer text-muted-foreground">查看持仓一票否决条件</summary><ul className="mt-1 space-y-1">{evidence.holdingVetoes.map(v=><li key={v.id}>{v.label} {v.direction} {v.threshold}{v.kind==='indicator'?'':'%'}{v.formula&&<pre className="whitespace-pre-wrap rounded bg-muted/40 p-2">{v.formula}</pre>}</li>)}</ul></details>}
     <details><summary className="cursor-pointer text-muted-foreground">查看本次实际卖出公式</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-[11px]">{evidence.formula}</pre></details>
   </section>;
+}
+
+export function QualitySellEvidence(props: { evidence: SellEvidence; repair?: NonNullable<TradeCampaign['comparison']>['repair'] }) {
+ const e=props.evidence,fill=e?.additionFill;
+ return <>{e?.addition?.enabled&&<aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-2 text-[11px]" data-testid="quality-addition-evidence"><b className="font-medium">条件加仓 · {fill?'已成交一次':'未触发'}</b>
+  {fill?<><p>{formatUTC8(fill.at)} · {fill.label} · 读数 {fill.reading.toPrecision(8)} {fill.direction} {fill.threshold}</p><p>加仓 {fill.notional} USDT · 成交价 {fill.price.toPrecision(8)} · 数量 {fill.quantity.toPrecision(8)}</p><p>累计投入 {e.totalInvested} USDT · 持仓均价 {e.averageEntryPrice?.toPrecision(8)}；收益率按累计投入计算。</p></>:<p>从本笔买入时刻重新探测；没有满足条件的加仓成交。</p>}
+ </aside>}<SellEvidenceBody {...props}/></>;
 }

@@ -1,10 +1,11 @@
+import { additionLabel } from './qualityAddition';
 import { qualityPeakPct, qualityHalfMirror } from './qualityPresentation';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from './qualityFilterColumns';
 import { activeHoldingVetoes } from './qualityVeto';
 import { buildXlsx, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
-import { hasQualityExit, activeBuyFilters, expandQualityRows, qualityDrawdownPct, qualityFilterStatus, type FishQualityStudy, type QualitySample } from './quality';
+import { hasQualityExit, qualityRuleText, activeBuyFilters, expandQualityRows, qualityDrawdownPct, qualityFilterStatus, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityRowResult, qualityResultMap } from './qualityComparison';
 import { archiveQualityStudy, isCurrentQualityRun, qualityRuleLabel, qualityFormulaVersion } from './qualityCampaignArchive';
 import { qualityDefinition } from './quality';
@@ -19,7 +20,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   const sheets: XlsxSheet[] = [{ name: '鱼质量', columns: [
     { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
-    ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${p.rule ? `${p.rule.direction} ${p.rule.threshold}` : hasQualityExit(p) ? '仅一票否决' : '未设置'}）收益率 %`, width: 34 },
+    ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${hasQualityExit(p) ? qualityRuleText(p) : '未设置'}）收益率 %`, width: 34 },
       {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22}]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [
@@ -61,6 +62,10 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
       r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label];
   }) });
+  const addHeaders=['加仓条件','加仓时间','加仓金额 USDT','加仓成交价','加仓数量','加仓触发读数','加仓门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON'];
+  const values=(run: typeof runs[number])=>{const a=run.result.additionFill;return [additionLabel(run.plan.addition),a?formatUTC8(a.at):null,a?.notional??null,a?.price??null,a?.quantity??null,a?.reading??null,a?.threshold??null,run.result.totalInvested??100,run.result.averageEntryPrice??run.result.entryPrice??null,a?.definitionKey??run.plan.addition?.condition?.snapshot.definitionKey??null];};
+  const outputIndex=sheets.findIndex(s=>s.name==='运行结果'),output=sheets[outputIndex];
+  sheets[outputIndex]={...output,columns:[...output.columns,...addHeaders.map(header=>({header,width:28}))],rows:output.rows.map((row,i)=>[...row,...values(runs[i])])};
   if (study.campaignRepair) {
     const byKey = new Map(allRuns.map(run => [run.result.key,run]));
     sheets.push({name:'纠错记录',columns:['标的','原试验编号','状态','纠正后试验编号','核验时间','原卖出时间','原收益率 %','纠正后卖出时间','纠正后收益率 %','未通过原因','原实际公式','纠正后实际公式','原卖出时机','纠正后卖出时机'].map(header => ({header,width:header.includes('公式')?60:25})),

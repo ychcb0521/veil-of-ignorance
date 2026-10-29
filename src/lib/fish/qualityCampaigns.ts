@@ -1,3 +1,4 @@
+import { withQualityAdditionCampaign } from './qualityAdditionCampaign';
 import { qualityPeakPct } from './qualityPresentation';
 import type { TradeCampaign, TradeJournal, CampaignEvent } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -67,7 +68,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
         execution: plan.execution,barOpenAt:r.exitSnapshot?.barOpenTime,
         executedAt:closed ? r.endTime : undefined,
         previousAt:r.exitSnapshot?.previous?.at,previousReading:r.exitSnapshot?.previous?.reading,
-        mirrorTakeProfit:plan.mirrorTakeProfit,mirrorFill:r.mirrorFill,
+        mirrorTakeProfit:plan.mirrorTakeProfit,mirrorFill:r.mirrorFill,addition:plan.addition,additionFill:r.additionFill,totalInvested:r.totalInvested,averageEntryPrice:r.averageEntryPrice,
         triggerCause:r.exitSnapshot?.cause??r.pendingExit?.cause,triggerAtOpen:r.exitSnapshot?.atOpen,holdingVetoes:activeHoldingVetoes(plan.holdingVetoes).map(v=>({id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,formula:v.snapshot?qualityDefinition(v.snapshot).formula:undefined})),
       },
       repair: run.repair,
@@ -90,8 +91,9 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,openTime:entry,closeTime:at,openedRealAt:run.firstEvaluatedAt,closedRealAt:r.evaluatedAt,exit_reason_text:reason});
   const tradeRecords:TradeRecord[]=[...(mirror?[closeRecord(mirrorId,mirror.at,mirror.price,fraction,mirrorPnl,'镜像止盈')]:[]),
     ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];
-  return { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
+  const data: QualityCampaignData = { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
+  return r.additionFill ? withQualityAdditionCampaign(data, run) : data;
 }
 /** 各卖出方案的买入过滤，一行写完：「状态 S 原始值：状态 S 原始值 > 0.7；CDA 原始值：不过滤」。都没开过滤时为空。 */
 export function qualityBuyFilterSummary(study: FishQualityStudy): string {
