@@ -3,7 +3,7 @@ import { AUTH_REQUEST_TIMEOUT_MS, AuthActionTimeout, boundedAuthAction, createAu
 afterEach(()=>vi.useRealTimers());
 const url='https://example.supabase.co/auth/v1/token?grant_type=password';
 it('aborts a stalled connection and settles even when the fetch implementation ignores cancellation',async()=>{
- vi.useFakeTimers();const fetcher=vi.fn<typeof fetch>(()=>new Promise(()=>{})),request=createAuthFetch(fetcher)(url,{method:'POST'});
+ vi.useFakeTimers();const fetcher=vi.fn<typeof fetch>(()=>new Promise<Response>(()=>{})),request=createAuthFetch(fetcher)(url,{method:'POST'});
  const assertion=expect(request).rejects.toThrow('15 秒');await vi.advanceTimersByTimeAsync(AUTH_REQUEST_TIMEOUT_MS);await assertion;
  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
 });

@@ -12,7 +12,7 @@ const coins=['RECENT','BOUNDARY','OLD','STALE','ENDED'].map(symbol=>({symbol:sym
 const adapter:FishDataAdapter={exchange:'binance',list:async()=>coins,btc:()=>coins[0],taker:async(_m,b)=>b,candles:async(m,cut,_s,q)=>Array.from({length:q.count},(_,i)=>{
  const at=cut-(q.count-i)*step,age={RECENT:.5,BOUNDARY:1,OLD:2,STALE:30,ENDED:.5}[m.instrument]!,start=T-age*H;
  const close=at+step>=start?at+step>=T-.25*H?3:2:0.5;
- return {openTime:at,open:close,high:close,low:close,close:m.instrument==='ENDED'&&at+step===cut?.5:close,volume:100,quoteVolume:1e9};
+ return {openTime:at,open:close,high:close,low:close,close:m.instrument==='ENDED'&&at+step===cut?.5:close,volume:100,quoteVolume:1e9,takerBuyVolume:50,takerBuyQuoteVolume:5e8};
 })};
 const makeScanner=()=>new FishScanner(vi.fn(async()=>new Response(JSON.stringify({serverTime:T+1}))) as typeof fetch,undefined,undefined,{binance:adapter});
 async function scan(hours:number|undefined,multi=false,threshold=1){

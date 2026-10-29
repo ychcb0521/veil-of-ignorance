@@ -157,8 +157,8 @@ export function coalesceJournalRecords(journals: TradeJournal[]): TradeJournal[]
     let merged = { ...canonical } as TradeJournal;
     group.forEach(sibling => {
       Object.entries(sibling).forEach(([key, value]) => {
-        if ((merged as Record<string, unknown>)[key] == null && value != null) {
-          (merged as Record<string, unknown>)[key] = value;
+        if ((merged as unknown as Record<string, unknown>)[key] == null && value != null) {
+          (merged as unknown as Record<string, unknown>)[key] = value;
         }
       });
     });

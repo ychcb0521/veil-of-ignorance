@@ -164,7 +164,7 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
 
     // 合并后：本地镜像把所填内容补回 → 汇总 1/1。
     const merged = applyLocalMirror(OWNER, [serverRow()]);
-    expect((merged[0] as Record<string, unknown>).post_emo_disturbance).toBe('价格一回撤我就慌');
+    expect((merged[0] as unknown as Record<string, unknown>).post_emo_disturbance).toBe('价格一回撤我就慌');
     const after = summarizeField(merged as TradeJournal[], emoSpec);
     expect(after.filled).toBe(1);
   });
@@ -176,8 +176,8 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     await finalizeJournalReview('journal-1', FINALIZE_INPUT);
 
     const merged = applyLocalMirror(OWNER, [serverRow()]);
-    expect((merged[0] as Record<string, unknown>).post_entry_payoff_estimate_grade).toBe('rr_2_5');
-    expect((merged[0] as Record<string, unknown>).post_entry_payoff_basis_review)
+    expect((merged[0] as unknown as Record<string, unknown>).post_entry_payoff_estimate_grade).toBe('rr_2_5');
+    expect((merged[0] as unknown as Record<string, unknown>).post_entry_payoff_basis_review)
       .toBe('当时把目标空间估得太满，没扣掉上方密集抛压');
     expect(summarizeField(merged as TradeJournal[], payoffGradeSpec).filled).toBe(1);
     expect(summarizeField(merged as TradeJournal[], payoffBasisSpec).filled).toBe(1);
@@ -189,7 +189,7 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
     await finalizeJournalReview('journal-1', FINALIZE_INPUT);
 
     const merged = applyLocalMirror(OWNER, [serverRow()]);
-    expect((merged[0] as Record<string, unknown>).post_every_ball_pct).toBe(87);
+    expect((merged[0] as unknown as Record<string, unknown>).post_every_ball_pct).toBe(87);
     expect(summarizeField(merged as TradeJournal[], everyBallSpec).filled).toBe(1);
   });
 
@@ -202,7 +202,7 @@ describe('平仓评价 → 本地镜像 → 错题集汇总（闭环）', () => 
 
     const remoteRow = { ...serverRow(), post_emo_disturbance: '修改后的完整评价' };
     const merged = applyLocalMirror(OWNER, [remoteRow]);
-    expect((merged[0] as Record<string, unknown>).post_emo_disturbance).toBe('修改后的完整评价');
+    expect((merged[0] as unknown as Record<string, unknown>).post_emo_disturbance).toBe('修改后的完整评价');
   });
 
   it('回归：即便 auth.getUser() 抖动返回 null，镜像仍用「行自带 user_id」写入 → 汇总不再 0/N', async () => {

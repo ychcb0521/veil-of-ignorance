@@ -49,7 +49,7 @@ describe('pickPrimaryMainLeg', () => {
 
   it('没有 main_open 时才退回 reentry_main', () => {
     const legs = [
-      leg({ id: 'hedge', leg_role: 'hedge_a', pre_position_size: 500 }),
+      leg({ id: 'hedge', leg_role: 'hedge_initial_a', pre_position_size: 500 }),
       leg({ id: 'reentry', leg_role: 'reentry_main', pre_position_size: 100 }),
     ];
     expect(pickPrimaryMainLeg(legs)?.id).toBe('reentry');

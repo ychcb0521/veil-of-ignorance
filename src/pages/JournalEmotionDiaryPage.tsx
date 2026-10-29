@@ -83,7 +83,7 @@ function PomsScale({
   values: Array<PomsItemScore | null>;
   onChange: (next: Array<PomsItemScore | null>) => void;
 }) {
-  const complete = isCompletePomsScores(values);
+  const complete = Boolean(isCompletePomsScores(values));
   const scores = complete ? scorePomsSubscales(values) : null;
   const tmd = scores ? scorePomsTotalMoodDisturbance(scores) : null;
   const subscaleOrder: PomsSubscaleKey[] = [
@@ -183,7 +183,7 @@ function PanasScale({
   values: Array<PanasItemScore | null>;
   onChange: (next: Array<PanasItemScore | null>) => void;
 }) {
-  const complete = isCompletePanasScores(values);
+  const complete = Boolean(isCompletePanasScores(values));
   const scores = complete ? scorePanas(values) : null;
 
   return (

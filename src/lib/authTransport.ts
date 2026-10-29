@@ -10,7 +10,7 @@ export async function boundedAuthAction<T>(action:()=>Promise<T>, timeoutMs=AUTH
   try { return await Promise.race([Promise.resolve().then(action),timeout]); }
   finally { clearTimeout(timer!); }
 }
-export function createAuthFetch(fetcher:typeof fetch=(...args)=>fetch(...args),timeoutMs=AUTH_REQUEST_TIMEOUT_MS):typeof fetch {
+export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,init),timeoutMs=AUTH_REQUEST_TIMEOUT_MS):typeof fetch {
   return async(input,init)=>{
     const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
     if(!new URL(url).pathname.startsWith('/auth/v1/'))return fetcher(input,init);

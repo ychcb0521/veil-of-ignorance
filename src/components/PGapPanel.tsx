@@ -266,7 +266,7 @@ export function PGapPanel({
     ? clamp(gap / anchorGap, 0, 1)
     : positive ? 1 : 0;
 
-  const invalidMessage = result.valid
+  const invalidMessage = result.valid === true
     ? null
     : result.reason === 'incomplete'
       ? hasPrice ? '请填写止损 K 与目标 T' : '等待行情数据…'

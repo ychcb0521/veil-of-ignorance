@@ -21,6 +21,8 @@ const missingCampaignTableError = {
 function baseCampaign(events: CampaignEvent[] = []): TradeCampaign {
   return {
     id: 'campaign-1',
+    campaign_code: 'C-TEST001',
+    deviation_notes: {},
     user_id: 'user-1',
     symbol: 'ASTERUSDT',
     direction: 'main_long',

@@ -91,8 +91,13 @@ describe('computeAdvantageGap', () => {
   });
 
   it('方向由 T 相对 K 定义，与 S 的位置无关', () => {
-    expect(computeAdvantageGap(80, 90, 110, null).valid && computeAdvantageGap(80, 90, 110, null).direction).toBe('long');
-    expect(computeAdvantageGap(200, 110, 90, null).valid && computeAdvantageGap(200, 110, 90, null).direction).toBe('short');
+    const long = computeAdvantageGap(80, 90, 110, null);
+    const short = computeAdvantageGap(200, 110, 90, null);
+    if (long.valid !== true || short.valid !== true) {
+      throw new Error('Expected valid advantage gaps');
+    }
+    expect(long.direction).toBe('long');
+    expect(short.direction).toBe('short');
   });
 
   it('动态赔率 b =（T − S）÷（S − K），多空两向均为正', () => {

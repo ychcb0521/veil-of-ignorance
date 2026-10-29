@@ -347,7 +347,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
     post_real_close_time: overrides.post_real_close_time ?? null,
     created_at: overrides.created_at ?? now,
     updated_at: overrides.updated_at ?? now,
-  } as TradeJournal;
+  } as unknown as TradeJournal;
 }
 
 function cardOrder(): string[] {

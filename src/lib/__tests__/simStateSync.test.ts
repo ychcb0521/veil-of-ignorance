@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
-  const upsert = vi.fn(async () => ({ error: null }));
+  const upsert = vi.fn(
+    async (_payload: { key: string; value: unknown }) => ({ error: null }),
+  );
   const eq = vi.fn(async () => ({ data: [], error: null }));
   const select = vi.fn(() => ({ eq, not: () => ({ eq }) }));
   const from = vi.fn(() => ({ upsert, select }));

@@ -3003,7 +3003,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       if (closedTimelineId !== provisionalTimelineId) execution = plan(closedTimelineId);
     }
 
-    if (!execution.ok) {
+    if (execution.ok === false) {
       const previousReason = reduceOnlyDeferredReasonRef.current.get(order.id);
       if (execution.reason === 'order_missing') {
         reduceOnlyDeferredReasonRef.current.delete(order.id);
@@ -3218,7 +3218,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const transferFunds = useCallback((from: WalletId, to: WalletId, amount: number): boolean => {
     const balances: WalletBalances = { futures: balance, spot: spotBalance, funding: fundingBalance };
     const check = validateTransfer(balances, { from, to, amount });
-    if (!check.ok) {
+    if (check.ok === false) {
       toast.error(check.message);
       return false;
     }

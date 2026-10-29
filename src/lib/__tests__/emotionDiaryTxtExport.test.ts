@@ -17,7 +17,7 @@ const campaign = {
   strategy_template: 'main_hedge_mirror',
   opened_at: '2026-07-25T01:00:00.000Z',
   closed_at: '2026-07-25T03:00:00.000Z',
-} as TradeCampaign;
+} as unknown as TradeCampaign;
 
 const diary: DecisionEmotionDiary = {
   id: 'diary-1',

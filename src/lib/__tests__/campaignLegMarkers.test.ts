@@ -54,7 +54,7 @@ function record(overrides: Partial<TradeRecord>): TradeRecord {
   return {
     id: 'record-1',
     symbol: 'BTCUSDT',
-    side: 'long',
+    side: 'LONG',
     type: 'MARKET',
     action: 'CLOSE',
     entryPrice: 1,

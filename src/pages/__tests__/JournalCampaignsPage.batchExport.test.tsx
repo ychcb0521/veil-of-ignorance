@@ -144,7 +144,7 @@ async function openPreview() {
 describe('JournalCampaignsPage batch export wiring', () => {
   it('folds secondary actions into one subtle accessible control and closes the menu after choosing batch selection', () => {
     renderPage();
-    const more = screen.getByRole('button', { name: '导出与下载', exact: true });
+    const more = screen.getByRole('button', { name: '导出与下载' });
     expect(more).toHaveClass('text-muted-foreground/40');
     expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();

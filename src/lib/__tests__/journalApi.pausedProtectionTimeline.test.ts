@@ -43,7 +43,7 @@ const record = (id: string, closeTime: number, closedRealAt: number): TradeRecor
   openTime: SIM, closeTime, openedRealAt: REAL, closedRealAt,
   openedTimelineId: TIMELINE, closedTimelineId: TIMELINE,
   exit_method: 'manual',
-} as TradeRecord);
+} as unknown as TradeRecord);
 
 const attached = (id: string, role: 'main_open' | 'mirror_tp', closeTime: number, closedRealAt: number): CampaignEvent => ({
   id: `event-${id}`, timestamp: iso(SIM), event_type: 'historical_leg_attached',
@@ -113,7 +113,9 @@ beforeEach(() => {
   clearPersistedStateMemoryForTests();
   localStorage.clear();
   campaign = {
-    id: 'paused-protection-campaign', user_id: OWNER, symbol: SYMBOL,
+    id: 'paused-protection-campaign', campaign_code: 'C-PAUSED001',
+    importance_weight: 0, deviation_notes: {},
+    user_id: OWNER, symbol: SYMBOL,
     direction: 'main_long', status: 'closed_profit', strategy_template: 'custom',
     title: 'Paused protection fixture', opened_at: iso(SIM), closed_at: iso(CLOSE_SIM),
     initial_main_size_usdt: 1_000, initial_leverage: 5,

@@ -168,7 +168,7 @@ export function TransferDialog({ open, onClose, balances, onTransfer }: Props) {
             </div>
           </div>
 
-          {showError && !check.ok && (
+          {showError && check.ok === false && (
             <p data-testid="transfer-error" className="text-[11px] trading-red">{check.message}</p>
           )}
 

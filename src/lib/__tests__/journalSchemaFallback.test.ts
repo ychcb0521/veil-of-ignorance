@@ -214,7 +214,6 @@ describe('schema-cache column fallback', () => {
     })).toBe('pre_confidence_basis');
     // 加引号的 42703 也能解析。
     expect(missingSchemaColumn({
-      code: '42703',
       message: 'column "pre_market_regime" does not exist',
     })).toBe('pre_market_regime');
     // schema 限定前缀（public.trade_journals.xxx）同样能解析。
