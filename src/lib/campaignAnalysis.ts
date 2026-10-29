@@ -1557,7 +1557,7 @@ export function buildCampaignEventStream(
   const events: CampaignEvent[] = [...(campaign.actual_evolution ?? [])].flatMap(event => {
     const record = eventTradeRecord(event, tradeRecords, journalRecordIds);
     if (!record) return [{ ...event }];
-    const leg = (event.journal_id ? legByJournalId.get(event.journal_id) ?? null : null)
+    const leg = (event.journal_id ? legByJournalId.get(event.journal_id) : undefined)
       ?? legByRecordId.get(record.id)
       ?? null;
     const normalized = normalizeEventSnapshotFromRecord(event, record);
