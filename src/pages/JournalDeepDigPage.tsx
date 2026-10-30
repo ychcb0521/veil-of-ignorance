@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChevronRight, Copy, Plus, X as XIcon } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
+import { FeatureCreationTime } from '@/components/journal/deepDig/FeatureCreationTime';
 import { DEEP_DIG_TABS, FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/journal/deepDig/FeatureView';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -314,7 +315,7 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
           <li key={f.id} className="group/entry grid grid-cols-[22px_1fr] gap-x-1 py-2.5" data-testid="deep-dig-entry" onMouseLeave={() => setConfirming(c => (c === f.id ? null : c))}>
             <span className="pt-px font-mono tabular-nums text-muted-foreground">{String(++ordinal).padStart(2, '0')}</span>
             <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <button
                   type="button"
                   data-testid={`deep-dig-open-${f.id}`}
@@ -346,6 +347,7 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
                     <XIcon className="h-3 w-3" />
                   </button>
                 ))}
+                <FeatureCreationTime def={f} />
               </div>
               <div className="flex flex-wrap items-center gap-x-1 text-[11.5px]">
                 {DEEP_DIG_TABS.map((t, k) => (

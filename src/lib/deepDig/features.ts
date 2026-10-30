@@ -957,7 +957,10 @@ export function ensureSellerRetentionCopies(saved:readonly DeepDigFeatureDef[]):
 
 /** Always retain all saved parameters, even when the formula still equals a builtin. */
 export function saveFeatureDefinition(saved: readonly DeepDigFeatureDef[], next: DeepDigFeatureDef): DeepDigFeatureDef[] {
-  return [...ensureSellerRetentionCopies(saved).filter(d => d.id !== next.id), { ...next, builtin: undefined }];
+  const previous=saved.find(d=>d.id===next.id),createdAt=previous?.createdAt;
+  // Creation is immutable: editing a definition must not lose or replace its original timestamp.
+  const creation=typeof createdAt==='number'&&Number.isFinite(createdAt)&&createdAt>0&&createdAt<=8.64e15-8*3600000?{createdAt}:{};
+  return [...ensureSellerRetentionCopies(saved).filter(d => d.id !== next.id), { ...next, ...creation, builtin: undefined }];
 }
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
