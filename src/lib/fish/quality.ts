@@ -97,6 +97,7 @@ export interface QualityBuyFilter { id: string; label: string; metric: string; d
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
+  entryReadings?: import('./qualityEntry').QualityEntryReading[];
   postExitReadings?: import('./qualityPostExit').QualityPostExitReading[];
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   /** Legacy saved field; automatic periodic evaluation has been removed. */
@@ -533,7 +534,9 @@ export interface QualityRunOptions {
   /** Filter modes reuse saved trades; restart replays selected sell experiments from entry, including completed results. */
   mode?: 'filter' | 'filter-only' | 'restart';
   /** Independent UI tasks; filtering never evaluates exits. Legacy callers retain automatic filter-only behavior. */
-  task?: 'filter' | 'monitor' | 'post-exit';
+  task?: 'filter' | 'monitor' | 'post-exit' | 'entry';
+  entryTargets?: readonly import('./qualityEntry').QualityEntryTarget[];
+  onEntryReading?: (r: import('./qualityEntry').QualityEntryReading) => void;
   postExitTargets?: readonly import('./qualityPostExit').QualityPostExitTarget[];
   onPostExitReading?: (r: import('./qualityPostExit').QualityPostExitReading) => void;
   /** 当前界面上的行顺序（看得见的在前）。每算完一条都重新读取，换筛选 / 排序 / 滚动后先算新露出来的行。 */
@@ -558,6 +561,7 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
+  if(options.task==='entry'){const {collectQualityEntry}=await import('./qualityEntry');await collectQualityEntry(options.entryTargets??[],load,now,options.signal,r=>options.onEntryReading?.(r),options.onProgress);return;}
   if(options.task==='post-exit'){const {collectQualityPostExit}=await import('./qualityPostExit');await collectQualityPostExit(options.postExitTargets??[],load,now,options.signal,r=>options.onPostExitReading?.(r),options.onProgress,options.study.postExitReadings);return;}
   if (options.study.independentFilters && (options.task === 'filter' || options.mode === 'filter-only' || options.task !== 'monitor' && onlyQualityFilters(options.study))) {
     const {study,signal} = options, filters = activeStandaloneBuyFilters(study);

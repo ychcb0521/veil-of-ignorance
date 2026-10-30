@@ -1,4 +1,5 @@
 import { preserveQualityPostExit } from './qualityPostExit';
+import { preserveQualityEntry } from './qualityEntry';
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
@@ -8,7 +9,7 @@ import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
 // 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
-const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming)));
+const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming))));
 const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

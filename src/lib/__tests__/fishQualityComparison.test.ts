@@ -71,13 +71,13 @@ it('computes disjoint return bins, interpolated quantiles and no-sample values w
 it('exports one row per detector with a single detector column and shared sell returns', () => {
   const s = study(), { rows } = seed(s); s.results[0] = {...s.results[0],adversePct:-4,drawdownPct:7,peakPct:12}; s.results[1] = {...s.results[1],adversePct:-9,drawdownPct:15,peakPct:17};
   const sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
-  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(53);
+  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(57);
   expect(sheet.columns[1].header).toBe('运行状态（过滤 / 监测）');
   expect(sheet.rows[0][2]).toBe('鱼');
   // 每套方案：收益率、静态回撤、峰值涨幅、镜像涨幅及状态、持仓小时。
-  expect(sheet.rows.map(r=>[...r.slice(7,10),...r.slice(29,32)])).toEqual([[10,4,12,-5,9,17],[10,4,12,-5,9,17]]);
+  expect(sheet.rows.map(r=>[...r.slice(8,11),...r.slice(32,35)])).toEqual([[10,4,12,-5,9,17],[10,4,12,-5,9,17]]);
   expect(sheet.columns.map(c => c.header).filter(h => h.endsWith('持仓小时'))).toHaveLength(2);
-  expect(sheet.rows[0][51]).not.toEqual(sheet.rows[1][51]);
+  expect(sheet.rows[0][55]).not.toEqual(sheet.rows[1][55]);
   expect(sheet.columns.slice(6).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
 });
 it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {

@@ -51,8 +51,8 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   const ids = new Set([...(prior?.detectors.map(d => d.id) ?? []), ...selectedDetectors]);
   const detectors = study.groups.filter(group => ids.has(group.id));
   // Keep the trade's display identity. The source fish and its large reconstruction snapshots already live in samples/groups.
-  const { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market } = sample.source;
-  const frozenSample = prior?.sample ?? { ...sample, groups: [...sample.groups], readings: undefined, source: { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market } };
+  const { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying } = sample.source;
+  const frozenSample = prior?.sample ?? { ...sample, groups: [...sample.groups], readings: undefined, source: { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying } };
   const run: QualityCampaignRun = {
     ...prior,
     sample: frozenSample, plan: freezePlan(plan), detectors: detectors.map(freezePlan), result: structuredClone(result),

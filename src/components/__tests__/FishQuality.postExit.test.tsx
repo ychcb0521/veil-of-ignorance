@@ -20,9 +20,9 @@ it('adds exactly ten columns per expanded sub-algorithm, aligns all header/body 
  expect(screen.queryAllByTestId('quality-post-exit-header')).toHaveLength(0);expect(screen.getAllByTestId('quality-post-exit-folded')).toHaveLength(2);
  fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖后反事实'}));
  expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);expect(screen.getAllByTestId('quality-post-exit-value')).toHaveLength(20);
- expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','23');
+ expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','29');
  expect(screen.getByRole('button',{name:'展开'+b.label+'卖后反事实'})).toHaveAttribute('aria-expanded','false');
- for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getAllByRole('cell')).toHaveLength(32);
+ for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getAllByRole('cell')).toHaveLength(38);
  expect(s.postExit.request).toHaveBeenCalledWith([a.id],expect.any(Array),true);
  fireEvent.click(screen.getByRole('button',{name:'展开'+b.label+'卖后反事实'}));expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(20);
  fireEvent.click(screen.getByRole('button',{name:'收起'+a.label+'卖后反事实'}));expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);

@@ -5,6 +5,11 @@ import type { QualityMirrorFill, QualityMirrorTakeProfit } from './qualityMirror
 import { mirrorFillGainPct } from './qualityMirror';
 import { formatUTC8 } from '@/lib/timeFormat';
 export const qualityPeakPct = (result?: QualityResult): number | null => result && ['open','closed'].includes(result.status) && result.peakPct != null && Number.isFinite(result.peakPct) ? Math.max(0,result.peakPct) : null;
+/** Original buy price to actual final sale price; independent of partial sales/addition sizing. */
+export const qualitySalePriceChangePct=(result?:QualityResult):number|null=>{
+ if(result?.status!=='closed'||!Number.isFinite(result.entryPrice)||!(result.entryPrice!>0)||!Number.isFinite(result.endPrice)||!(result.endPrice!>0))return null;
+ const value=(result.endPrice!/result.entryPrice!-1)*100;return Number.isFinite(value)?value:null;
+};
 export interface HalfMirrorSummary { state:'disabled'|'pending'|'error'|'untriggered'|'filled'; label:string; value:number|null; text:string; detail:string }
 const pct=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;
 type MirrorResult = Pick<QualityResult,'status'|'returnPct'|'entryPrice'|'initialNotional'|'mirrorRealizedPnl'|'remainingPnl'> & {mirrorFill?:QualityMirrorFill};

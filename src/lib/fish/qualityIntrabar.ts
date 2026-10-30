@@ -35,7 +35,7 @@ export function aggregateQualityMinute(previous: ResearchBar | undefined, minute
     refClose:minute.refClose };
 }
 let priceBase: FishProgram | undefined;
-function minuteTransport(plan: FishProgram): FishProgram {
+export function minuteTransport(plan: FishProgram): FishProgram {
   priceBase ??= compileFishProgram({id:'quality-intrabar-price',name:'分钟行情',short:'分钟',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'1m'},
     {statistic:'结果',direction:'>',threshold:0,constraints:[]});
   // The transport must supply the selected formula's inputs, including per-minute
