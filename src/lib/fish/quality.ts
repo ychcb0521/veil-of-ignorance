@@ -12,6 +12,7 @@ import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD_TEXT, type FishSnapshot, type FishProgram } from './algorithm';
 import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey } from '@/lib/signalLibrary';
+import {qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
 import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
@@ -59,8 +60,8 @@ export const hasQualityExit = (group: QualityGroup) => !!group.addition?.enabled
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
-  /** 'library' = 信号库的信号：只参加卖出比较，不属于任何探测算法，也不与鱼舱的鱼合并。缺省 = 鱼。 */
-  origin?: 'library';
+  /** Independent upstream memberships; identical signal and entry times share one display row. */
+  origin?: QualityOrigin; origins?:QualityOrigin[];
   /** Derived per-row capture readings; never replaces any saved source snapshot. */
   readings?: Record<string, FishSnapshot>;
   /** Derived display rows share one signalId / paper trade; detectorId selects their attribution. */
@@ -99,6 +100,7 @@ export interface QualityFilterReading { key: string; value?: number; at?: number
 export interface FishQualityStudy {
   deletedReadings?: import('./libraryDeletion').SourceDeletions;
   deletedSources?: import('./libraryDeletion').SourceDeletions;
+  resolvedLegacySources?:LegacySourceResolutions;
   entryReadings?: import('./qualityEntry').QualityEntryReading[];
   postExitReadings?: import('./qualityPostExit').QualityPostExitReading[];
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
@@ -135,7 +137,7 @@ export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQuali
   let changed = study.entryMode !== 'capture';
   const reset = new Set<string>();
   const samples = study.samples.map(sample => {
-    if (sample.basis === 'detected' || sample.origin === 'library') return sample;
+    if (sample.basis === 'detected' || qualityOrigins(sample).includes('library')) return sample;
     const cutoff = sample.source.fish?.cutoffMs;
     const enteredAt = cutoff != null && Number.isFinite(cutoff) && cutoff > 0 ? cutoff : null;
     const basis = enteredAt == null ? 'missing' : 'capture';
@@ -202,22 +204,23 @@ export function qualityMetricPlan(f: FishSnapshot, metric = 'capture'): { plan: 
   if (plan.unavailable) throw new Error(plan.unavailable);
   return { plan, scale: metric === 'capture' ? f.scale ?? 1 : 1 };
 }
-export function importQualityFish(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now()): FishQualityStudy {
+export function importQualityFish(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(),origin:QualityOrigin='fish'): FishQualityStudy {
+  const previous=study;study=resolveLegacySourceMemberships(study,signals,origin);
   const groups = new Map(study.groups.map(g => [g.id, g])), samples = new Map(study.samples.map(s => [s.id, s]));
-  const seen = new Set(study.samples.flatMap(s => qualityMembers(s.source).filter(f => s.groups.includes(qualityGroupId(f))).map(f => memberKey(s.source, f))));
-  let changed = false;
+  const seen = new Set(study.samples.filter(s=>qualityOrigins(s).includes(origin)).flatMap(s => qualityMembers(s.source).filter(f => s.groups.includes(qualityGroupId(f))).map(f => memberKey(s.source, f))));
+  let changed = previous!==study;
   for (const source of signals) {
     const members = [...new Map(qualityMembers(source).map(f => [qualityGroupId(f), f])).values()].filter(f => !seen.has(memberKey(source, f)));
     const ids = members.map(qualityGroupId);
     if (!ids.length) continue;
     // Archiving/reopening a panel cannot buy the same signal again; changed capture settings are a new experiment.
-    const id = shortFishHash(JSON.stringify(members.map(f => memberKey(source, f)).sort()));
-    if (samples.has(id)) continue;
-    const cutoff = source.fish?.cutoffMs;
+    const id = `${origin==='mined'?'mine-':''}${shortFishHash(JSON.stringify(members.map(f => memberKey(source, f)).sort()))}`;
+    if (samples.has(id)) {const prior=samples.get(id)!;if(!qualityOrigins(prior).includes(origin)){samples.set(id,{...prior,origins:[...qualityOrigins(prior),origin]});changed=true;}continue;}
+    const cutoff = origin==='mined'?source.mined?.anchorMs??source.fish?.cutoffMs:source.fish?.cutoffMs;
     const live = source.freshCatch && (source.caughtAt ?? 0) >= study.startedAt && cutoff != null && Math.abs((source.caughtAt ?? 0) - cutoff) < 3_600_000;
     const enteredAt = live ? source.caughtAt : study.entryMode === 'signal' ? source.timeMs : cutoff;
     samples.set(id, { id, source: structuredClone(source), groups: ids, enteredAt: Number.isFinite(enteredAt) && enteredAt! > 0 ? enteredAt! : null,
-      basis: !Number.isFinite(enteredAt) || enteredAt! <= 0 ? 'missing' : live ? 'detected' : study.entryMode === 'signal' ? 'signal' : 'capture', importedAt: now });
+      basis: !Number.isFinite(enteredAt) || enteredAt! <= 0 ? 'missing' : live ? 'detected' : study.entryMode === 'signal' ? 'signal' : 'capture', importedAt: now,origin,origins:[origin] });
     members.forEach(f => { const key = qualityGroupId(f); if (!groups.has(key)) groups.set(key, { id: key, label: fishSourceLabel(f), metric: fishMetricLabel(f), snapshot: structuredClone(f) }); });
     members.forEach(f => seen.add(memberKey(source, f)));
     changed = true;
@@ -227,17 +230,18 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
 /**
  * 【用户要求】2026-10-26「在检查卖出算法时，需要将信号库中的信号也纳入进来（注意要与鱼舱里的鱼做区分）」
  * 信号库的信号复制一份进来，按信号时间买入；没有探测算法（groups 为空），只参加第一步卖出比较。
- * 删掉信号库里的信号不删副本；同一信号只复制一次。
+ * 三个来源独立保存；同一信号和入场时刻合并显示，删除只清理对应来源。
  */
 export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(signalDedupKey(source))}`;
 export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now()): FishQualityStudy {
+  study=resolveLegacySourceMemberships(study,signals,'library');
   const ids = new Set(study.samples.map(s => s.id)), added: QualitySample[] = [];
   for (const source of signals) {
     const id = qualityLibrarySampleId(source);
     if (ids.has(id)) continue;
     ids.add(id);
     const enteredAt = Number.isFinite(source.timeMs) && source.timeMs > 0 ? source.timeMs : null;
-    added.push({ id, source: structuredClone(source), groups: [], enteredAt, basis: enteredAt == null ? 'missing' : 'signal', importedAt: now, origin: 'library' });
+    added.push({ id, source: structuredClone(source), groups: [], enteredAt, basis: enteredAt == null ? 'missing' : 'signal', importedAt: now, origin: 'library',origins:['library'] });
   }
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
 }
@@ -268,12 +272,12 @@ export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] 
 function buildComparisonRows(study: FishQualityStudy): QualitySample[] {
   const rows = new Map<string, QualitySample>();
   for (const sample of study.samples) {
-    // 信号库的信号单独成行，即使与某条鱼同币同时也不合并。
-    const identity = `${sample.origin === 'library' ? 'lib|' : ''}${signalDedupKey(sample.source)}|${sample.enteredAt}`;
+    const identity = `${signalDedupKey(sample.source)}|${sample.enteredAt}`;
     const prior = rows.get(identity);
     const readings = Object.fromEntries(qualityMembers(sample.source).filter(f => sample.groups.includes(qualityGroupId(f))).map(f => [qualityGroupId(f), f]));
-    rows.set(identity, prior ? { ...prior, groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
-      : { ...sample, id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
+    const origins=[...new Set([...(prior?qualityOrigins(prior):[]),...qualityOrigins(sample)])];
+    rows.set(identity, prior ? { ...prior,...(!prior.groups.length&&sample.groups.length?{source:sample.source,basis:sample.basis}:{}),origin:origins.length===1?origins[0]:undefined,origins,groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
+      : { ...sample,origins,id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
   }
   return [...rows.values()];
 }
@@ -281,6 +285,19 @@ export function expandQualityRows(rows: readonly QualitySample[]): QualitySample
   return rows.flatMap(row => row.signalId ? [row] : (row.groups.length ? row.groups : [undefined]).map(detectorId => ({
     ...row, signalId: row.id, detectorId, id: `${row.id}/detector/${detectorId ?? 'none'}`, groups: detectorId ? [detectorId] : [],
   })));
+}
+/** Preserve existing library-only results/selection when adopting the shared row identity. */
+export function migrateQualitySourceRows(study:FishQualityStudy):FishQualityStudy{
+ const aliases=new Map<string,QualitySample>();
+ for(const row of qualityComparisonRows(study)){
+  const old=`row-${shortFishHash(`lib|${signalDedupKey(row.source)}|${row.enteredAt}`)}`;aliases.set(old,row);
+ }
+ let changed=false;const plans=new Map([...study.groups,...(study.sellPlans??[])].map(p=>[p.id,p]));
+ const results=study.results.map(r=>{const row=aliases.get(r.sampleId),plan=plans.get(r.groupId);if(!row||!plan)return r;changed=true;const priorKey=qualityResultKey({...row,id:r.sampleId,signalId:undefined,groups:[],readings:{}},plan,study.observeHours),detectorAddition=plan.addition?.enabled&&plan.addition.source==='detector'&&row.groups.length>0;return {...r,sampleId:row.id,key:r.key===priorKey&&!detectorAddition?qualityResultKey(row,plan,study.observeHours):r.key};});
+ const selectedRowIds=study.selectedRowIds?.map(id=>{const [base,...tail]=id.split('/detector/'),row=aliases.get(base);if(!row)return id;changed=true;return row.id+(tail.length?`/detector/${tail.join('/detector/')}`:'');});
+ if(!changed)return study;
+ const newest=new Map<string,QualityResult>();for(const r of results)if(!newest.has(r.key)||newest.get(r.key)!.evaluatedAt<=r.evaluatedAt)newest.set(r.key,r);
+ return {...study,results:[...newest.values()],selectedRowIds:[...new Set(selectedRowIds)]};
 }
 export const qualityDisplayRows = (study: FishQualityStudy) => expandQualityRows(qualityComparisonRows(study));
 export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {

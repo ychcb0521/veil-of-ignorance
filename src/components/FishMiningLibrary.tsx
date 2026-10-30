@@ -21,8 +21,8 @@ type FishMiningRow = FishMiningRecord & { ids: string[]; catchKeys: string[] };
 
 export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
   const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
-  const [library, setLibrary] = useState<FishMiningLibrary>(emptyMiningLibrary), [open, setOpen] = useState(false), [hold, setHold] = useState<ReadonlySet<string> | null>(null);
-  const reload = useCallback(() => { void loadMiningLibrary(account).then(setLibrary); setHold(holdKeys?.() ?? null); }, [account, holdKeys]);
+  const [library, setLibrary] = useState<FishMiningLibrary>(emptyMiningLibrary), [open, setOpen] = useState(false);
+  const reload = useCallback(() => { void loadMiningLibrary(account).then(setLibrary); }, [account]);
   // 打开时读；开着的时候挖到新的一档就刷新
   useEffect(() => {
     if (!open) return;
@@ -46,23 +46,22 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
     }
     return [...rows.values()].sort((a, b) => b.anchorMs - a.anchorMs || b.signal.timeMs - a.signal.timeMs || a.signal.symbol.localeCompare(b.signal.symbol));
   }, [library.records,evidence]);
-  const inHold = useCallback((r: FishMiningRow) => !hold || r.catchKeys.some(k => hold.has(k)) || hold.has(fishVisibleCatchKey(r.signal)), [hold]);
   const multipleRuns = library.runs.length > 1;
   const options = anchors.map(a => ({ id: a.id, error: a.error, label: `${short(a.anchorMs)} 这一档 · ${a.error ? `出错${a.attempts > 1 ? `（已试 ${a.attempts} 次）` : ''}` : `扫到 ${a.found} · 新增 ${a.added}`}${multipleRuns ? ` · ${runText(runs.get(a.runId)!)}` : ''}` }));
   const match = useCallback((r: FishMiningRow, needle: string, anchorId: string) => {
     if (anchorId && !r.ids.some(id => anchorOf.get(anchorId)?.has(id))) return false;
     return !needle || r.signal.symbol.toUpperCase().includes(needle) || evidence.get(r.id)!.conditions.some(c=>libraryConditionSearch(c).toUpperCase().includes(needle));
   }, [anchorOf,evidence]);
-  const errors = library.anchors.filter(a => a.error).length, deleted = hold ? items.filter(r => !inHold(r)).length : 0;
+  const errors = library.anchors.filter(a => a.error).length;
   const latestRun = [...library.runs].sort((a, b) => b.updatedAt - a.updatedAt)[0];
   return <FishLibraryDialog name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、具体指标或门槛…" onOpenChange={setOpen}
-    description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}${deleted ? ` · ${deleted} 条已从鱼舱删除` : ''}`}
-    info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库独立于鱼舱：在鱼舱里删掉的鱼，这里仍保留并标出「已从鱼舱删除」。相同档位、信号及完整算法条件的重复记录合并显示；不同门槛或公式版本分别保留。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
-    headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '鱼舱', '入库时间']}
+    description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}`}
+    info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。相同档位、信号及完整算法条件的重复记录合并显示；不同门槛或公式版本分别保留。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
+    headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '入库时间']}
     items={items} match={match} selection={bulk?{key:r=>r.id,selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),toggle:()=>{},select:ids=>setSelected(s=>new Set([...s,...ids])),clear:()=>setSelected(new Set()),remove:()=>{const picked=items.filter(r=>selected.has(r.id));bulk({kind:'mining',ids:picked.flatMap(r=>r.ids),targets:picked.map(r=>({source:r.signal,entry:r.anchorMs}))});}}:undefined}
     empty={{ none: '暂无挖掘记录。开始批量挖掘后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
     row={r => {
-      const held = inHold(r),saved=evidence.get(r.id)!;
+      const saved=evidence.get(r.id)!;
       return <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="mining-library-row">
         {bulk&&<td className={libraryCell}><input type="checkbox" aria-label={`选择挖掘记录 ${r.signal.symbol} ${r.id}`} checked={selected.has(r.id)} onChange={()=>setSelected(s=>{const n=new Set(s);if(n.has(r.id))n.delete(r.id);else n.add(r.id);return n;})}/></td>}
         <td className={`${libraryCell} font-mono`}><button type="button" className="hover:text-primary hover:underline disabled:cursor-default disabled:no-underline disabled:hover:text-inherit" disabled={!onJump || !!canJump && !canJump(r.signal)} onClick={() => onJump?.(r.signal)}>{r.signal.symbol}</button></td>
@@ -70,7 +69,6 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{short(r.anchorMs)}</td>
         <td className={`${libraryCell} min-w-[320px] max-w-[440px] align-top`}><p className="mb-1 text-[9px] text-muted-foreground">{saved.combination}</p><div className="space-y-1.5">{saved.conditions.map((c,i)=><FishLibraryCondition key={i} condition={c}/>)}</div>{saved.note&&<p className="mt-1 whitespace-normal text-[10px] text-muted-foreground">{saved.note}</p>}</td>
         <td className={`${libraryCell} min-w-[180px] align-top font-mono tabular-nums`}><p className="mb-1 font-sans text-[9px] text-muted-foreground">与左侧算法逐项对应</p><div className="space-y-1.5">{saved.conditions.map((c,i)=><div key={i} className="min-h-9"><p className="text-foreground">{c.metric} = {libraryReading(c.reading)}</p>{c.rawReading!==undefined&&c.reading===undefined?<p className="text-[9px] text-muted-foreground">原值 {libraryReading(c.rawReading)} · 显示倍率未记录</p>:<p className="text-[9px] text-muted-foreground">{c.snapshot.scale===1?'原值':`原值 × ${c.snapshot.scale??'未知'}`}</p>}</div>)}</div></td>
-        <td className={`${libraryCell} ${held ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'}`}>{held ? '在舱' : '已从鱼舱删除'}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`} title={date(r.firstSavedAt)}>{date(r.firstSavedAt).slice(5, 16)}</td>
       </tr>;
     }}/>;

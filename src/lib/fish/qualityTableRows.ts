@@ -1,5 +1,6 @@
 import { signalDedupKey } from '@/lib/signalLibrary';
 import type { QualitySample } from './quality';
+import {qualityOrigins} from './qualitySources';
 
 /** Display-only grouping. Preserve every entry, source and detector ID for execution and selection. */
 export interface QualityTableRow extends QualitySample { members?: QualitySample[] }
@@ -12,6 +13,7 @@ export function collapseQualityTableRows(rows: readonly QualitySample[]): Qualit
     if (previous) {
       previous.members!.push(row);
       previous.groups = [...new Set([...previous.groups, ...row.groups])];
+      previous.origins=[...new Set([...qualityOrigins(previous),...qualityOrigins(row)])];previous.origin=previous.origins.length===1?previous.origins[0]:undefined;
     } else grouped.set(key, { ...row, id: `merged:${key}`, detectorId: undefined, groups: [...row.groups], members: [row] });
   }
   return [...grouped.values()];

@@ -1,3 +1,4 @@
+import {mergeLegacySourceResolutions} from '@/lib/fish/qualitySources';
 import {mergeSourceDeletions} from '@/lib/fish/libraryDeletion';
 import {useCallback,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {Download,Upload,RefreshCw} from 'lucide-react';
@@ -31,7 +32,7 @@ export function FishLibraryDataManager({account,study,ready,children}:{account?:
  const preview=useMemo(()=>incoming.length?transferPreview(packages,incoming):null,[incoming,packages]);
  const summary=useMemo(()=>{const map=new Map<string,{label:string;n:number;win:number;loss:number;flat:number;sum:number}>();for(const r of rows){if(r.scope!=='monitor'||r.result?.status!=='closed'||!Number.isFinite(r.result.returnPct))continue;const p=r.result.returnPct!,s=map.get(r.settingKey)??{label:r.condition,n:0,win:0,loss:0,flat:0,sum:0};s.n++;s.sum+=p;if(p>0)s.win++;else if(p<0)s.loss++;else s.flat++;map.set(r.settingKey,s);}return [...map.entries()];},[rows]);
  const exportData=async()=>{setBusy('正在生成完整数据包…');setError('');try{const latest=await snapshot(scope);const selected=includeImports?mergeLibraryCollections(collection,{version:1,packages:[latest]}).packages:[latest],out:LibraryPackage[]=[];
-   const marks=mergeSourceDeletions(...selected.map(p=>p.libraries.deletedSources));for(const p of selected)if(scope==='all'||p.libraries[scope])out.push(await makeLibraryPackage(p.source.account,p.source.label,pruneTransferPayload(p.libraries,marks),scope,p.exportedAt));
+   for(const p of selected)if(scope==='all'||p.libraries[scope]){const marks=mergeSourceDeletions(...selected.filter(v=>v.source.account===p.source.account).map(v=>v.libraries.deletedSources));out.push(await makeLibraryPackage(p.source.account,p.source.label,pruneTransferPayload(p.libraries,marks,mergeLegacySourceResolutions(...selected.filter(v=>v.source.account===p.source.account).map(v=>v.libraries.resolvedLegacySources))),scope,p.exportedAt));}
    const text=stringifyLibraryFile({format:'veil-fish-quality-library-collection',version:1,packages:out});if(new TextEncoder().encode(text).length>LIBRARY_FILE_LIMIT)throw Error('完整包超过128MB，请选择单个库或仅当前账号后下载');
    download(`鱼质量-${LIBRARY_NAMES[scope]}-${formatUTC8(Date.now()).replace(/[- :]/g,'')}.json`,text);if(scope==='all')setCurrent(latest);setMessage(`已下载${out.length}个来源数据包；包含全部页及历史轮次。`);
   }catch(e){setError((e as Error).message);}finally{setBusy('');}};

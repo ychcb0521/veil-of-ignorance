@@ -365,8 +365,8 @@ export function TimeControl({
   };
 
   const handleDeleteSignal = useCallback(
-    (id: string) => setSignals(prev => prev.filter(s => s.id !== id)),
-    [],
+    (id: string) => {const source=signalsRef.current.find(s=>s.id===id);if(!source)return;void (async()=>{try{await fishQuality.deleteSources?.([{source,entry:null,origin:'library'}]);setSignals(prev=>prev.filter(s=>s.id!==id));}catch(e){toast.error((e as Error).message);}})();},
+    [fishQuality.deleteSources],
   );
   /**
    * 打分。写回 signals 之后由既有的 `useEffect(() => saveSignals(signals))` 落盘，

@@ -11,6 +11,7 @@ export interface QualityMonitorSetting {
 }
 export interface QualityMonitorRecord {
   id: string; settingId: string; source: TradeSignal; enteredAt: number | null; basis: QualitySample['basis'];
+  origin?:QualitySample['origin'];origins?:QualitySample['origins'];
   filterStatus: QualityFilterStatus; readings: QualityFilterReading[]; result?: QualityResult;
   firstSavedAt: number; updatedAt: number;
 }
@@ -70,7 +71,20 @@ export function compactQualityMonitorRounds(study: FishQualityStudy): FishQualit
   return { ...study, monitorLibrary: { ...library, rounds: library.rounds.map(r => encoded.get(r.id) ?? r) } };
 }
 export interface QualityMonitorLibrary {
+  /** Full, independently cloned tables saved before manual restarts. Never updated by a later run. */
+  archives?:QualityMonitorArchive[];
   version: 1; importedLegacy: boolean; settings: QualityMonitorSetting[]; records: QualityMonitorRecord[]; rounds: QualityMonitorRound[];
+}
+export type QualityMonitorArchiveStudy=Omit<FishQualityStudy,'monitorLibrary'|'filterLibrary'|'campaignRepair'>;
+export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart';sourceRoundId?:string;study:QualityMonitorArchiveStudy}
+/** Save the whole current table, including rows outside today's filters/selection. */
+export function archiveQualityMonitorStudy(study:FishQualityStudy,at=Date.now()):FishQualityStudy{
+  if(!study.results.length&&!study.campaignRuns?.length)return study;
+  const library=study.monitorLibrary??empty();
+  const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...table}=study;
+  const latest=library.rounds.filter(r=>!r.legacy).reduce<QualityMonitorRound|undefined>((last,r)=>!last||r.startedAt>=last.startedAt?r:last,undefined)??library.rounds.at(-1);
+  const archive:QualityMonitorArchive={id:`monitor-archive-${at}-${++sequence}-${Math.random().toString(36).slice(2,10)}`,version:1,createdAt:at,reason:'restart',sourceRoundId:latest?.id,study:structuredClone(table)};
+  return {...study,monitorLibrary:{...library,archives:[...(library.archives??[]),archive]}};
 }
 interface MonitorTask { id: string; setting: QualityMonitorSetting; sample: QualitySample; plan: QualityGroup; resultKey: string }
 export interface QualityMonitorCapture {
@@ -104,7 +118,7 @@ function recordFor(task: MonitorTask, readings: Map<string, QualityFilterReading
   const { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol } = sample.source;
   const frozenStudy = { buyFilters: plan.buyFilters, sellPlans: [setting.plan] } as FishQualityStudy;
   const picked = (setting.plan.buyFilters ?? []).flatMap(f => { const reading = readings.get(qualityFilterReadingKey(sample, f)); return reading ? [structuredClone(reading)] : []; });
-  return { id, settingId: setting.id, source: { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol }, enteredAt: sample.enteredAt, basis: sample.basis,
+  return { id, settingId: setting.id, source: { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol }, enteredAt: sample.enteredAt, basis: sample.basis,origin:sample.origin,origins:sample.origins,
     filterStatus: qualityFilterStatus(frozenStudy, sample, setting.plan, readings), readings: picked,
     result: result ? structuredClone(result) : prior?.result, firstSavedAt: prior?.firstSavedAt ?? at, updatedAt: at };
 }
@@ -169,5 +183,6 @@ export function preserveQualityMonitorLibrary(saved: FishQualityStudy | undefine
   const settings = new Map(a.settings.map(s => [s.id, s])); b.settings.forEach(s => settings.set(s.id, s));
   const records = new Map(a.records.map(r => [r.id, r])); for (const r of b.records) { const old = records.get(r.id); if (!old || old.updatedAt < r.updatedAt || old.updatedAt === r.updatedAt && (r.result || !old.result)) records.set(r.id, r); }
   const rounds = new Map(a.rounds.map(r => [r.id, r])); for (const r of b.rounds) { const old = rounds.get(r.id); if (!old || old.updatedAt < r.updatedAt || old.updatedAt === r.updatedAt && (r.state !== 'running' || old.state === 'running')) rounds.set(r.id, r); }
-  return { ...incoming, monitorLibrary: { version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()] } };
+  const archives=new Map((a.archives??[]).map(s=>[s.id,s]));for(const s of b.archives??[])if(!archives.has(s.id))archives.set(s.id,s);
+  return { ...incoming, monitorLibrary: { version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()],...(archives.size?{archives:[...archives.values()]}:{}) } };
 }

@@ -3,6 +3,7 @@ import {makeLibraryPackage,parseLibraryPackage,parseLibraryFile,aggregateLibrary
 import {STATE_DEF,definitionKey} from '@/lib/deepDig/features';
 beforeAll(()=>vi.stubGlobal('crypto',webcrypto));afterAll(()=>vi.unstubAllGlobals());
 import {payload} from './libraryTransfer.fixture';
+import {deletionKey} from '../libraryDeletion';
 describe('fish-quality three-library packages',()=>{
  it('roundtrips all records, delta rounds, exact formulas, zero readings, mirror fields and counterfactual data',async()=>{
   const data=payload(),before=structuredClone(data),p=await makeLibraryPackage('account-a','电脑A',data),restored=await parseLibraryPackage(JSON.stringify(p));expect(restored).toEqual(p);expect(restored.libraries).toEqual(before);expect(data).toEqual(before);expect(restored.libraries.filter!.records[0].readings[0]!.value).toBe(0);
@@ -19,6 +20,7 @@ describe('fish-quality three-library packages',()=>{
   for(const kind of ['exchange','entry']){const x=payload();if(kind==='exchange')x.monitor!.records[0].source.exchange='okx';else x.monitor!.records[0].enteredAt=1400000;expect(aggregateLibraryPackages([a,await makeLibraryPackage('b','B',x)]).filter(r=>r.scope==='monitor')).toHaveLength(2);}
  });
  it('preserves unrecorded legacy formulas but never merges them as proven-equivalent trials',async()=>{const x=payload();delete x.monitor!.settings[0].plan.snapshot.definitionKey;const a=await makeLibraryPackage('a','A',x),b=await makeLibraryPackage('b','B',x);expect(aggregateLibraryPackages([a,b]).filter(r=>r.scope==='monitor')).toHaveLength(2);});
+ it('keeps account B results when the same source signal is deleted only in account A',async()=>{const original=payload(),a=await makeLibraryPackage('a','A',original),b=await makeLibraryPackage('b','B',original),gone=payload();const r=gone.monitor!.records[0];gone.deletedSources={[deletionKey({source:r.source,entry:r.enteredAt})]:9999};const deletion=await makeLibraryPackage('a','A',gone);const rows=aggregateLibraryPackages([a,b,deletion]);expect(rows.find(r=>r.scope==='monitor')!.account).toEqual(['b']);});
  it('re-exports multiple imported source packages as one portable file without changing their origins',async()=>{const a=await makeLibraryPackage('a','A',payload()),b=await makeLibraryPackage('b','B',payload(200));const text=JSON.stringify({format:'veil-fish-quality-library-collection',version:1,packages:[a,b,a]});expect(await parseLibraryFile(text)).toEqual([a,b]);});
  it('rejects partial/foreign files, altered contents, dangling records and circular rounds before import',async()=>{
   await expect(parseLibraryPackage('{"format":"other"}')).rejects.toThrow();const p=await makeLibraryPackage('a','A',payload());const changed=structuredClone(p);changed.libraries.monitor!.records[0].result!.returnPct=999;await expect(parseLibraryPackage(JSON.stringify(changed))).rejects.toThrow('校验失败');

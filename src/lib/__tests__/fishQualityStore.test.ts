@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { newQualityStudy } from '@/lib/fish/quality';
 import {payload} from '@/lib/fish/__tests__/libraryTransfer.fixture';
 import {markSourceDeletions} from '@/lib/fish/libraryDeletion';
+import {monitorArchiveFixture,ARCHIVE_T} from '@/lib/fish/__tests__/monitorArchive.fixture';
+import {archiveQualityMonitorStudy} from '@/lib/fish/qualityMonitorLibrary';
 const disk = new Map<string, unknown>();
 let fail = false;
 beforeEach(() => {
@@ -15,6 +17,11 @@ beforeEach(() => {
   vi.stubGlobal('indexedDB', { open() { const req: any = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('reloads full independent restart snapshots after newer results, stale saves and remote merges',async()=>{
+ const store=await import('@/lib/fish/qualityStore'),s=archiveQualityMonitorStudy(monitorArchiveFixture(),ARCHIVE_T+4000000),frozen=structuredClone(s.monitorLibrary!.archives![0]);expect(await store.saveQualityStudy('archive',s)).toBe(true);
+ const newer={...s,results:s.results.map(r=>({...r,returnPct:-7}))};await store.saveQualityStudy('archive',newer);await store.saveQualityStudy('archive',{...newer,monitorLibrary:{...newer.monitorLibrary!,archives:[]}});await store.qualityAccountBlob.mergeRemote!('archive',{...newer,monitorLibrary:{...newer.monitorLibrary!,archives:[]}});
+ const restored=(await store.loadQualityStudy('archive')).study;expect(restored.monitorLibrary!.archives).toEqual([frozen]);expect(restored.results[0].returnPct).toBe(-7);expect(restored.monitorLibrary!.archives![0].study.results[0].returnPct).toBe(10);expect((await store.loadQualityStudy('other')).study.monitorLibrary?.archives).toBeUndefined();
+});
 it('retains deletion markers through stale saves and remote history merges while preserving current settings',async()=>{
  const store=await import('@/lib/fish/qualityStore'),p=payload(),old={...newQualityStudy(),observeHours:72,filterLibrary:p.filter,monitorLibrary:p.monitor},r=p.monitor!.records[0];
  await store.saveQualityStudy('a',old);await store.saveQualityStudy('a',markSourceDeletions(old,[{source:r.source,entry:r.enteredAt}],2000));await store.saveQualityStudy('a',old);

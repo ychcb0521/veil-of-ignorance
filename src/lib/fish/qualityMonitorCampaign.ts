@@ -26,7 +26,7 @@ export function qualityMonitorCampaignRun(record: QualityMonitorRecord, setting:
   const result=record.result!;
   return {
     sample: {id:result.sampleId,source:record.source,groups:setting.detectors.map(d=>d.id),enteredAt:record.enteredAt,
-      basis:record.basis,importedAt:record.firstSavedAt,...(record.basis==='signal'?{origin:'library' as const}:{})},
+      basis:record.basis,importedAt:record.firstSavedAt,origins:record.origins,...(record.origin?{origin:record.origin}:record.basis==='signal'&&!record.origins?.length?{origin:'library' as const}:{})},
     plan:setting.plan,detectors:setting.detectors,result,observeHours:setting.observeHours,firstEvaluatedAt:record.firstSavedAt,
   };
 }

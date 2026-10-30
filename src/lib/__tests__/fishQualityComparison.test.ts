@@ -73,7 +73,7 @@ it('exports one row per detector with a single detector column and shared sell r
   const sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
   expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(57);
   expect(sheet.columns[1].header).toBe('运行状态（过滤 / 监测）');
-  expect(sheet.rows[0][2]).toBe('鱼');
+  expect(sheet.rows[0][2]).toBe('鱼舱');
   // 每套方案：收益率、静态回撤、峰值涨幅、镜像涨幅及状态、持仓小时。
   expect(sheet.rows.map(r=>[...r.slice(8,11),...r.slice(32,35)])).toEqual([[10,4,12,-5,9,17],[10,4,12,-5,9,17]]);
   expect(sheet.columns.map(c => c.header).filter(h => h.endsWith('持仓小时'))).toHaveLength(2);
@@ -94,14 +94,15 @@ it('compiles and evaluates the real S and CDA raw series as sells independently 
 
 // 【用户要求】2026-10-26「在检查卖出算法时，需要将信号库中的信号也纳入进来（注意要与鱼舱里的鱼做区分）」
 const libSignal = (symbol: string, patch: Partial<TradeSignal> = {}): TradeSignal => ({ id: `lib-${symbol}`, symbol, timeMs: T - 30 * M, timeLabel: '', fallbackZone: '', ...patch });
-it('copies signal-library signals once at their signal time, keeps them apart from same-coin fish and leaves them out of capture-time migration', () => {
+it('copies signal-library signals once, merges identical fish entry times and leaves originals out of capture-time migration', () => {
   const base = study(), withLib = importQualityLibrary(base, [libSignal('AAAUSDT', { timeMs: T }), libSignal('ZZZUSDT')], T + 2 * M);
   expect(importQualityLibrary(withLib, [libSignal('AAAUSDT', { timeMs: T }), libSignal('ZZZUSDT')])).toBe(withLib);
   const lib = withLib.samples.filter(v => v.origin === 'library');
   expect(lib.map(v => [v.source.symbol, v.enteredAt, v.basis, v.groups])).toEqual([['AAAUSDT', T, 'signal', []], ['ZZZUSDT', T - 30 * M, 'signal', []]]);
-  // 与 AAAUSDT 那条鱼同币同时，仍各占一行
+  // 同币种、同信号时间与入场时刻合并；各来源原件仍独立。
   const rows = qualityComparisonRows(withLib);
-  expect(rows.filter(r => r.source.symbol === 'AAAUSDT').map(r => r.origin ?? 'fish').sort()).toEqual(['fish', 'library']);
+  expect(rows.filter(r => r.source.symbol === 'AAAUSDT')).toHaveLength(1);
+  expect(rows.find(r=>r.source.symbol==='AAAUSDT')!.origins).toEqual(['fish','library']);
   expect(qualityComparisonRows(base).map(r => r.id)).toEqual(rows.filter(r => r.origin !== 'library').map(r => r.id));
   expect(migrateQualityCaptureEntries(withLib).samples.filter(v => v.origin === 'library')).toEqual(lib);
   expect(importQualityLibrary({ ...base, tracking: false }, [libSignal('ZZZUSDT')]).samples).toHaveLength(base.samples.length + 1);

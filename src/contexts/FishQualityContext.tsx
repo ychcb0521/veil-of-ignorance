@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useFishQuality, type FishQualityState, type QualityRunner } from '@/hooks/useFishQuality';
 import { runPageFishQuality } from '@/hooks/useFish';
 import type { TradeSignal } from '@/lib/signalLibrary';
+import {loadMiningLibrary,MINING_LIBRARY_EVENT} from '@/lib/fish/miningLibraryStore';
 
 const EMPTY: readonly TradeSignal[] = [];
 const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[]) => void } | null>(null);
@@ -10,7 +11,9 @@ const FishQualityContext = createContext<{ state: FishQualityState; sources: (fi
 /** Owned by the authenticated app shell, outside the route boundary and collapsible panels. */
 export function FishQualityProvider({ owner, children, run = runPageFishQuality }: { owner?: string; children: ReactNode; run?: QualityRunner }) {
   const [input, setInput] = useState({ fish: EMPTY, library: EMPTY });
-  const state = useFishQuality(owner, input.fish, run, input.library);
+  const [mined,setMined]=useState<readonly TradeSignal[]>(EMPTY);
+  useEffect(()=>{let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(r=>({...r.signal,mined:{...r.signal.mined,anchorMs:r.anchorMs}} as TradeSignal)));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner]);
+  const state = useFishQuality(owner, input.fish, run, input.library,mined);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[]) => {
     setInput(prior => prior.fish === fish && prior.library === library ? prior : { fish, library });
   }, []);

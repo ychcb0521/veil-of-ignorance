@@ -119,6 +119,9 @@ it('imports signal-library signals as library rows, separately from fish, and ke
   h.rerender({ library: [] }); await flush();
   expect(h.result.current.study.samples).toHaveLength(2);
 });
+it('accepts mining-library signals directly without requiring a copy in the cabin',async()=>{
+ const run=vi.fn(async(_o:QualityRunOptions)=>{}),empty:TradeSignal[]=[],mined=[{...signal,id:'mining-only'}];const h=renderHook(()=>useFishQuality('a',empty,run,empty,mined));await flush();expect(h.result.current.study.samples).toHaveLength(1);expect(qualityComparisonRows(h.result.current.study)[0].origins).toEqual(['mined']);chooseAndStart(h);await flush();expect(run).toHaveBeenCalledTimes(1);h.unmount();
+});
 
 it('holds a history-only notification scope during a run and releases it immediately on cancel/unmount even if the runner is still pending', async () => {
   const resolvers: (() => void)[] = [];
@@ -262,7 +265,7 @@ it('archives an in-flight old rule after edits, then evaluates the new rule with
   expect(tasks).toHaveLength(2); expect(h.result.current.running).toBe(false);
 });
 
-it('restarts immediately with the latest selection and settings, rejects late old callbacks and drops pending follow-ups', async () => {
+it('archives before restarting with the latest selection and settings, rejects late old callbacks and drops pending follow-ups', async () => {
   const { makeQualityBuyFilter, makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const fish = [signal, { ...signal, id: 'b', symbol: 'BBBUSDT' }];
@@ -282,6 +285,7 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   const def = { ...STATE_DEF, formula: STATE_DEF.formula.replace('wb = 1 ', 'wb = 3 ') };
   localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([def]));
   act(() => { void h.result.current.restart(); });
+  expect(old.signal.aborted).toBe(true);await flush();
   expect(tasks).toHaveLength(2); expect(old.signal.aborted).toBe(true);
   const next = tasks[1];
   expect(next.mode).toBe('restart');
@@ -300,7 +304,7 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   releases.shift()!(); await flush(1000);
   expect(tasks.filter(t => t.task === 'monitor')).toHaveLength(2); expect(h.result.current.running).toBe(false);
   expect(tasks.filter(t => t.task === 'filter')).toHaveLength(0); expect(h.result.current.filterRunning).toBe(false);
-  act(() => { void h.result.current.restart(); }); expect(tasks).toHaveLength(3);
+  act(() => { void h.result.current.restart(); }); await flush();expect(tasks).toHaveLength(3);
   expect(tasks[2].mode).toBe('restart');
   const nextRow = qualityRunSamples(next.study)[0], nextPlan = next.study.sellPlans![0];
   act(() => next.onResult({ ...prior, key: qualityResultKey(nextRow, nextPlan, 12), sampleId: nextRow.id, returnPct: 999 }));

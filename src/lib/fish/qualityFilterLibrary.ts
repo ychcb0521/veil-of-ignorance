@@ -17,6 +17,7 @@ export interface QualityFilterSetting { id: string; signature: string; filters: 
 export interface QualityFilterRecord extends LibraryRecordBase {
   settingId: string; source: Pick<TradeSignal, 'id' | 'symbol' | 'timeMs' | 'timeLabel' | 'fallbackZone' | 'exchange' | 'market' | 'underlying' | 'binanceSymbol'>;
   enteredAt: number | null; basis: QualitySample['basis']; origin?: QualitySample['origin'];
+  origins?:QualitySample['origins'];
   /** 与条件组的 filters 一一对应；还没读数的为 null。 */
   readings: (QualityFilterReading | null)[]; status: QualityFilterStatus;
 }
@@ -52,7 +53,7 @@ function recordFor(task: FilterTask, readings: ReadonlyMap<string, QualityFilter
   const plan = { id: setting.id, buyFilters: setting.filters } as never;
   const picked = setting.filters.map(f => { const r = readings.get(qualityFilterReadingKey(sample, f)); return r ? structuredClone(r) : null; });
   return { id: task.id, settingId: setting.id, source: { id, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol },
-    enteredAt: sample.enteredAt, basis: sample.basis, ...(sample.origin ? { origin: sample.origin } : {}), readings: picked,
+    enteredAt: sample.enteredAt, basis: sample.basis, ...(sample.origin ? { origin: sample.origin } : {}),origins:sample.origins, readings: picked,
     status: qualityFilterStatus({ sellPlans: [plan] } as unknown as FishQualityStudy, sample, plan, new Map(readings)),
     firstSavedAt: prior?.firstSavedAt ?? at, updatedAt: at };
 }

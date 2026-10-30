@@ -25,7 +25,7 @@ const TICK_MS = 30_000;
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
   start: () => void; pause: () => void; setTarget: (target: number) => void;
-  /** 挖掘库按账号存；holdKeys = 鱼舱里现有挖掘鱼的键（不在其中的，挖掘库里标「已从鱼舱删除」）。 */
+  /** 挖掘库按账号独立保存。 */
   ruleChoices?: {featureId:string;label:string;statistics:{name:string;label:string}[]}[];
   configure?: (rules:FishMiningState['rules'])=>void;
   retry?: () => void; useCurrentScope?: () => void; resetConfiguration?: () => void;

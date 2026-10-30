@@ -1,4 +1,5 @@
 import { withQualityAdditionCampaign } from './qualityAdditionCampaign';
+import {qualitySourceLabel} from './qualitySources';
 import { qualityPeakPct } from './qualityPresentation';
 import type { TradeCampaign, TradeJournal, CampaignEvent } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -55,7 +56,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     strategy_template: 'main_only', title: `${sample.source.symbol} · ${label}`, opened_at: iso(entry), closed_at: closed ? iso(end) : null,
     initial_main_size_usdt: QUALITY_NOTIONAL, initial_leverage: 1, final_realized_pnl: pnl, final_r_multiple: null,
     peak_unrealized_pnl: mirror || r.peakPct == null ? null : QUALITY_NOTIONAL * r.peakPct / 100, peak_drawdown: null,
-    importance_weight: 0, notes: `${sample.origin === 'library' ? '信号库' : '鱼舱'} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n100 USDT · 1 倍模拟多单；未扣手续费、资金费与滑点。`,
+    importance_weight: 0, notes: `${qualitySourceLabel(sample)} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n100 USDT · 1 倍模拟多单；未扣手续费、资金费与滑点。`,
     actual_evolution: [opening, ...exits],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     comparison: { section, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),

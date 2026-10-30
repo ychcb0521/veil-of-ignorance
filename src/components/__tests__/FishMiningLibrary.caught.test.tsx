@@ -31,8 +31,9 @@ it('shows only the detectors that actually caught each signal, merges identical 
   const bySymbol = Object.fromEntries([first, second].map(cells => [cells[0], cells]));
   expect(bySymbol.AKEUSDT[3]).toContain('CBI-2·avg₂ · avg_CBI2_2');expect(bySymbol.AKEUSDT[3]).toContain('CBA·avg₂ · avg_CBA_2');expect(bySymbol.AKEUSDT[3]).not.toContain('avg_state_2');
   expect(bySymbol.DOGEUSDT[3]).toContain('S·avg₂ · avg_state_2');
-  expect(bySymbol.AKEUSDT[5]).toBe('在舱');
-  expect(bySymbol.DOGEUSDT[5]).toBe('已从鱼舱删除');
+  expect(screen.queryByRole('columnheader',{name:'鱼舱'})).not.toBeInTheDocument();
+  expect(screen.queryByText('已从鱼舱删除')).not.toBeInTheDocument();
+  expect(first).toHaveLength(6);expect(second).toHaveLength(6);
   expect(screen.getByText(/2 条信号/)).toBeInTheDocument();
   // 按命中算法搜：只搜得到真正命中的
   fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: 'S·avg' } });

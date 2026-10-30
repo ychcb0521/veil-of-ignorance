@@ -14,14 +14,16 @@ import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from 
 import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/qualityVeto';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
 import { beginQualityFilterRound, finishQualityFilterRound, recoverQualityFilterRounds } from '@/lib/fish/qualityFilterLibrary';
-import { adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds } from '@/lib/fish/qualityMonitorLibrary';
+import { archiveQualityMonitorStudy, adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds } from '@/lib/fish/qualityMonitorLibrary';
+import {migrateQualitySourceRows} from '@/lib/fish/quality';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
 const NO_SIGNALS: readonly TradeSignal[] = [];
-export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS) {
+export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS) {
   const definitions = useFeatureDefinitions();
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
+  const [archiving,setArchiving]=useState(false),archiveLock=useRef(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [filterRunning, setFilterRunning] = useState(false), [filterProgress, setFilterProgress] = useState<QualityProgress | null>(null), [filterError, setFilterError] = useState('');
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
@@ -63,6 +65,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, []);
   useEffect(() => {
     let active = true, loaded = false; const epoch = ++generation.current;
+    archiveLock.current=false;setArchiving(false);
     readyRef.current = false; rerun.current = false; selectionApproved.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
     setFilterRunning(false); setFilterProgress(null); setFilterError(''); filterController.current = null;
     current.current = newQualityStudy(); setStudy(current.current);
@@ -70,7 +73,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (!active || epoch !== generation.current) return;
       const archived = recoverQualityFilterRounds(recoverQualityMonitorRounds(adoptQualityMonitorHistory(archiveQualityStudy(ensureQualitySellCombo(enableQualityComparison(migrateQualityCaptureEntries(value.study)))))));
       // 【用户要求】2026-10-26 盘面保持干净：卖出方案静默同步当前账号公式，不再显示同步提示
-      const migrated = separateQualityFilters(syncQualitySellDefinitions(archived));
+      const migrated = migrateQualitySourceRows(separateQualityFilters(syncQualitySellDefinitions(archived)));
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
@@ -86,6 +89,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [definitions, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, change]);
+  useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s,mined,Date.now(),'mined')); }, [mined, ready, change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
@@ -96,6 +100,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }); }, 400);
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
+    if(archiveLock.current&&mode!=='restart')return;
     if (!readyRef.current || !qualityRunSamples(scoped(current.current)).length || automatic && !selectionApproved.current && !mode) return;
     if (current.current.sellPlans && !current.current.sellPlans.length) return;
     if (!automatic) selectionApproved.current = true;
@@ -115,15 +120,17 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const readingKeys = new Set([...frozenSamples.values()].flatMap(row => [...frozenGroups.values()].flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(row, f)))));
     const begun = beginQualityMonitorRound(current.current, frozen, Date.now(), mode === 'restart'), capture = begun.capture;
     change(() => begun.study);
-    const savedOwner = account.current; let finalized = false;
-    const finish = async (state: 'complete' | 'paused' | 'failed', render = true, reason?: string) => {
-      if (finalized) return; finalized = true;
+    const savedOwner = account.current; let finalized = false,finishTask:Promise<void>|undefined;
+    const finish = (state: 'complete' | 'paused' | 'failed', render = true, reason?: string) => {
+      if(finishTask)return finishTask;finalized=true;
+      finishTask=(async()=>{
       if (monitorFinalizer.current === finish) monitorFinalizer.current = null;
       if (epoch !== generation.current || account.current !== savedOwner) return;
       const next = preserveSourceDeletions(current.current,finishQualityMonitorRound(current.current, capture, state, Date.now(), reason));
       current.current = next; if (render && readyRef.current) setStudy(next);
       let ok = false; try { ok = await saveQualityStudy(savedOwner, next); } catch { /* retain in memory and retry with the existing save loop */ }
       if (!ok && epoch === generation.current && readyRef.current) setWarning('监测库未能保存到本机；请保留此页面，系统会继续重试。');
+      })();return finishTask;
     };
     monitorFinalizer.current = finish;
     const savePartial = () => { void finish('paused'); };
@@ -210,11 +217,22 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const cancelFilter = useCallback(() => { filterRevision.current++; filterController.current?.abort(); filterController.current = null; setFilterRunning(false); }, []);
   const cancel = useCallback(() => { intentRevision.current++; rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
   const restart = useCallback(async () => {
-    if (!readyRef.current || !qualityRunSamples(scoped(current.current)).length) return;
-    intentRevision.current++; rerun.current = false;
-    controller.current?.abort(); controller.current = null;
-    await start(false, 'restart');
-  }, [start]);
+    if(!readyRef.current||archiveLock.current)return;
+    archiveLock.current=true;setArchiving(true);setError('');const savedOwner=account.current,epoch=generation.current;
+    try{
+      intentRevision.current++;rerun.current=false;selectionApproved.current=false;
+      const finalize=monitorFinalizer.current;controller.current?.abort();await finalize?.('paused');controller.current=null;
+      if(account.current!==savedOwner||generation.current!==epoch)return;
+      const archived=archiveQualityMonitorStudy(current.current);
+      if(archived!==current.current){
+        if(!await saveQualityStudy(savedOwner,archived))throw Error('监测结果归档失败，未开始重算；原结果仍保留，请重试');
+        if(account.current!==savedOwner||generation.current!==epoch)return;
+        change(s=>({...s,monitorLibrary:archived.monitorLibrary}));
+      }
+      if(account.current===savedOwner&&generation.current===epoch){setArchiving(false);void start(false,'restart');}
+    }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'归档失败，未开始重算');}
+    finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
+  }, [start,change]);
   // 挖到的鱼自动导入和勾选；只有已经主动开始监测，才把新鱼接到监测任务中。
   useEffect(() => {
     if (!ready || !readyRef.current) return;
@@ -290,7 +308,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'>>;

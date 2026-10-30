@@ -1,4 +1,5 @@
 import { qualityEntryValues } from './qualityEntry';
+import {qualitySourceLabel} from './qualitySources';
 import { sellErrorExportValues } from './qualitySellError';
 import { qualityDetectorLabel } from './qualityDetectorLabel';
 import { POST_EXIT_HOURS,postExitExportValues } from './qualityPostExit';
@@ -31,7 +32,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
     (() => { const status = runStatuses.get(row.signalId ?? row.id)!; return `过滤：${qualityRunStatusText(status.filter)}；监测：${qualityRunStatusText(status.monitor)}`; })(),
-    row.origin === 'library' ? '信号库' : '鱼',
+    qualitySourceLabel(row),
     formatUTC8(row.source.timeMs), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null, qualityDetectorReading(row).value,
     ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
@@ -54,7 +55,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const definition = qualityDefinition(run.plan.snapshot);
-    return [run.sample.source.symbol, run.sample.origin === 'library' ? '信号库' : '鱼', formatUTC8(run.sample.source.timeMs),
+    return [run.sample.source.symbol, qualitySourceLabel(run.sample), formatUTC8(run.sample.source.timeMs),
       run.detectors.map(d => `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}`).join('；') || '—',
       run.plan.label, run.plan.rule?.metric ?? run.plan.metric, run.plan.rule?.direction ?? '', run.plan.rule?.threshold ?? null,
       r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设卖出',
