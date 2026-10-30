@@ -1,3 +1,4 @@
+import {QualityCampaignCardTitle} from '@/components/journal/QualityCampaignCardTitle';
 import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -1932,12 +1933,7 @@ const CampaignCard = memo(function CampaignCard({
           {/* overflow-hidden 配合「操作时间」的 -ml-px：它换到行首时那条分隔线正好落在容器外被裁掉，不会顶着一条孤线。 */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
             {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
-            <h2
-              data-sort-highlight={litAttr('alpha')}
-              className={`mr-0.5 text-[13px] font-semibold leading-5 text-foreground ${byLevel('alpha', 'underline decoration-[#F0B90B]/70 decoration-2 underline-offset-[5px]', 'underline decoration-[#F0B90B]/35 decoration-2 underline-offset-[5px]', '')}`}
-            >
-              {campaign.title}
-            </h2>
+            <QualityCampaignCardTitle campaign={campaign} highlight={litAttr('alpha')} className={`mr-0.5 text-[13px] font-semibold leading-5 text-foreground ${byLevel('alpha', 'underline decoration-[#F0B90B]/70 decoration-2 underline-offset-[5px]', 'underline decoration-[#F0B90B]/35 decoration-2 underline-offset-[5px]', '')}`}/>
             <span className={`${CARD_CHIP} text-[10px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
               {campaign.direction === 'main_short' ? '主空' : '主多'}
             </span>

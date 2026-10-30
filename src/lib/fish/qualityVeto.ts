@@ -3,25 +3,30 @@ import type { FishSnapshot } from './algorithm';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export type QualityOperator = '<' | '>' | '<=' | '>=';
 export interface QualityHoldingVeto {
-  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator';
+  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator' | 'addition-geometric-profit';
   direction: QualityOperator; threshold: number; enabled: boolean;
   metric?: string; snapshot?: FishSnapshot;
+  geometricMultiple?:number;
 }
 export const holdingPriceLabels = { 'static-drawdown': '持仓过程静态最大回撤', 'dynamic-drawdown': '持仓过程动态最大回撤', 'drop-1m': '1分钟内跌幅', 'drop-5m': '5分钟内跌幅' } as const;
 export const isHoldingPriceChoice = (choice: string): choice is keyof typeof holdingPriceLabels => Object.prototype.hasOwnProperty.call(holdingPriceLabels, choice);
 export const minuteDropWindow = (kind: QualityHoldingVeto['kind']) => kind === 'drop-1m' ? 1 : kind === 'drop-5m' ? 5 : 0;
-export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support'};
+export const ADDITION_PROFIT_KIND='addition-geometric-profit' as const;
+export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
+export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'>&{kind:string})=>v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
+export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number}};
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
-  if (![...Object.keys(holdingPriceLabels),'indicator'].includes(v.kind))throw new Error('未知的持仓否决指标');
+  if (![...Object.keys(holdingPriceLabels),'indicator',ADDITION_PROFIT_KIND].includes(v.kind))throw new Error('未知的持仓否决指标');
   if (!Number.isFinite(v.threshold) || !['<','>','<=','>='].includes(v.direction)) throw new Error('一票否决条件须设置有效方向和有限数字阈值');
-  if (v.kind !== 'indicator' && (!(v.threshold > 0 && v.threshold <= 100) || v.direction !== '>=')) throw new Error('回撤或跌幅阈值须大于 0 且不超过 100%，达到（≥）即触发');
+  if (v.kind !== 'indicator' && v.kind!==ADDITION_PROFIT_KIND && (!(v.threshold > 0 && v.threshold <= 100) || v.direction !== '>=')) throw new Error('回撤或跌幅阈值须大于 0 且不超过 100%，达到（≥）即触发');
+  if(v.kind===ADDITION_PROFIT_KIND&&(!(v.threshold>=0)||!Number.isFinite(v.geometricMultiple??100)||!((v.geometricMultiple??100)>0)||v.direction!=='>='))throw new Error('加仓止盈须设置大于 0 的几何仓位倍数及不小于 0 的涨幅百分比');
   if (v.kind === 'indicator' && (!v.snapshot || !v.metric)) throw new Error('一票否决指标缺少公式快照');
 }
 /** No conditions keeps old experiment keys byte-for-byte compatible. IDs/order do not change the outcome. */
 export function holdingVetoIdentity(vetoes: readonly QualityHoldingVeto[] = []): unknown[] {
-  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 export interface QualityHoldingPath { entry: number; peak: number; minimum: number; dynamic: number }
 /** OHLC cannot tell high/low order within a minute: use prior peak/open→low, and high→close, whose order is known. */

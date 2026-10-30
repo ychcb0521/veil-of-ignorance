@@ -1,3 +1,5 @@
+import {positionGeometricMultiple} from '@/lib/campaignGeometricMetrics';
+import {makeQualityHoldingVeto} from '@/lib/fish/qualityFilters';
 import {evaluateCampaignAddSizing} from '@/lib/campaignAddSizingCheck';
 import {describe,it,expect} from 'vitest';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
@@ -189,4 +191,31 @@ it('applies each round’s own ATR entry and support distances to sizing, frozen
 it('allows a wider K offset when banked mirror profit covers the old-position loss, still sizing at exact balance',async()=>{
  const g=group();g.addition={...g.addition!,entryBufferAtr:1,supportOffsetAtr:2,maxRounds:1};
  const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3);expect(r.additionFill).toMatchObject({price:102,quantity:.375,sizing:{support:98,previousSupport:100,mirrorUsed:2.5,requiredBufferAtr:1,supportOffsetAtr:2,coverageGap:0}});
+});
+
+const geometricProfit=(multiple=100,gain=5)=>makeQualityHoldingVeto('addition-geometric-profit','>=',gain,true,undefined,multiple);
+it('sells all lots after geometric position reaches the default 100× and price touches 5% above the latest equilibrium K, even at the addition cap',async()=>{
+ const g=group();g.addition!.maxRounds=4;g.holdingVetoes=[geometricProfit()];
+ const path=loader(m=>{const p=[100,110,120,130,140,143][m]??143;return bar(T+m*M,p,1,p-.1,m===0?106:m===5?144:p+1);});
+ const r=await run(g,path,8);expect(r).toMatchObject({status:'closed',endTime:T+5*M,endPrice:expect.closeTo(143.85),remainingQuantity:0,exitSnapshot:{cause:{kind:'addition-geometric-profit',geometricMultiple:100,threshold:5,additionBasis:{equilibriumPrice:137,targetPrice:expect.closeTo(143.85)}}}});expect(r.additionFills).toHaveLength(4);
+ const data=campaign(g,r),basis=r.exitSnapshot!.cause!.additionBasis!;expect(basis.geometricMultiple).toBeGreaterThan(100);expect(basis.geometricMultiple).toBeCloseTo(positionGeometricMultiple(r.additionFills!.map(a=>a.quantity/a.sizing!.coinsBefore),.5)!);expect(data.campaign.comparison!.sellEvidence!.holdingVetoes![0]).toMatchObject({geometricMultiple:100});expect(computeCampaignRealizedPnl(data.campaign,data.legs,data.tradeRecords,{}).total).toBeCloseTo(r.pnl!);expect(r.reason).toContain('卖出全部余仓与加仓');expect(await run(g,path,8,await run(g,path,5))).toEqual(r);
+});
+it.each([[1000,5],[100,50]])('does not sell when only one part of the joint condition is satisfied (position=%s, gain=%s)',async(multiple,gain)=>{
+ const g=group();g.addition!.maxRounds=4;g.holdingVetoes=[geometricProfit(multiple,gain)];const r=await run(g,loader(m=>{const p=[100,110,120,130,140,143][m]??143;return bar(T+m*M,p,1,p-.1,m===0?106:p+1);}),8);expect(r.status).toBe('open');expect(r.additionFills).toHaveLength(4);
+});
+it('uses latest K rather than weighted average, and cannot activate before a real addition',async()=>{
+ const g=group();g.addition!.maxRounds=1;g.holdingVetoes=[geometricProfit(2,5)];
+ const path=loader(m=>m===0?bar(T,100,1,99,106):m===1?bar(T+M,110,1,109,111):bar(T+m*M,112.2,1,112.1,112.4));
+ const r=await run(g,path,4);expect(r).toMatchObject({status:'closed',endTime:T+2*M,endPrice:expect.closeTo(112.35),exitSnapshot:{cause:{additionBasis:{geometricMultiple:2.5,equilibriumPrice:107}}}});
+ const disabled=await run({...g,addition:{...g.addition!,enabled:false}},path,4);expect(disabled.status).toBe('open');expect(disabled.additionFill).toBeUndefined();
+});
+it.each([false,true])('keeps protective-stop priority when intraminute order is unknown, while respecting a known profit at the open (open=%s)',async(open)=>{
+ const g=group();g.addition!.maxRounds=1;g.holdingVetoes=[geometricProfit(2,5)];
+ const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):m===1?bar(T+M,110,1,109,111):bar(T+m*M,open?114:111,1,106,115)),4);
+ expect(r).toMatchObject({status:'closed',endTime:T+2*M,endPrice:open?114:107,exitSnapshot:{atOpen:open,cause:{kind:open?'addition-geometric-profit':'addition-support'}}});
+});
+it('evaluates multiple addition-profit rules independently and preserves the earliest rule and resumed fills',async()=>{
+ const g=group();g.addition!.maxRounds=2;g.holdingVetoes=[geometricProfit(1000,0),geometricProfit(3,5)];
+ const path=loader(m=>{const p=[100,110,120,130,200][m]??200;return bar(T+m*M,p,1,p-.1,m===0?106:p+1);});const r=await run(g,path,6);
+ expect(r).toMatchObject({status:'closed',endTime:T+3*M,endPrice:130,exitSnapshot:{atOpen:true,cause:{kind:'addition-geometric-profit',geometricMultiple:3,threshold:5}}});expect(r.additionFills).toHaveLength(2);expect(await run(g,path,6,await run(g,path,3))).toEqual(r);
 });

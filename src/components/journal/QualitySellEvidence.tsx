@@ -1,3 +1,4 @@
+import {holdingVetoLabel} from '@/lib/fish/qualityVeto';
 import {qualityAdditionFills} from '@/lib/fish/qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
 import { chartFeatureDef } from '@/lib/featureSource';
@@ -10,6 +11,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
   if(evidence.triggerCause?.kind==='mirror-take-profit' && evidence.mirrorFill) return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing">
     <b className="font-medium">镜像止盈 · 全部卖出</b><p>涨幅 ≥ {evidence.mirrorFill.gainPct}% · 价格 {evidence.mirrorFill.price.toPrecision(9)} · {formatUTC8(evidence.mirrorFill.at)}</p>
     <p className="text-muted-foreground">{evidence.mirrorFill.atOpen?'开盘已超过门槛，按开盘价成交。':'分钟内触及止盈限价，按止盈价模拟成交；分钟内的具体秒数不可确定。'}</p></aside>;
+  if(evidence.triggerCause?.kind==='addition-geometric-profit'){const c=evidence.triggerCause,b=c.additionBasis;return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-addition-profit-evidence"><b>加仓止盈 · 全部余仓与加仓卖出</b><p>{holdingVetoLabel(c)}</p>{b&&<p>实际几何仓位 {b.geometricMultiple.toPrecision(8)}× · 均衡价 K {b.equilibriumPrice.toPrecision(8)} · 目标价 {b.targetPrice.toPrecision(8)}</p>}<p>{evidence.triggerAtOpen?'开盘已达标，按开盘价成交。':'盘中触及目标价成交；同分钟同时触及保护止损且先后不明时，优先止损。'}</p></aside>;}
   if(evidence.triggerCause?.kind==='addition-support') return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing"><b className="font-medium">加仓支撑线 K · 止损卖出剩余持仓</b><p>K＝{evidence.triggerCause.threshold.toPrecision(9)} · {formatUTC8(evidence.executedAt??evidence.confirmedAt)}</p><p className="text-muted-foreground">{evidence.triggerAtOpen?'开盘跳空越过 K，按开盘价成交。':'分钟内触及 K，按支撑价成交；同分钟先后不明时优先止损。'}</p></aside>;
   const shortDrop = evidence.triggerCause?.kind === 'drop-1m' || evidence.triggerCause?.kind === 'drop-5m';
   if (shortDrop) return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing">
@@ -61,7 +63,7 @@ function SellEvidenceBody({ evidence, repair }: { evidence: NonNullable<TradeCam
     {repair && repair.status !== 'verified' && <p role="alert" className="text-destructive">{repair.status === 'pending' ? '此战役正在等待纠错，原结果暂不计入比较统计。' : `此战役纠错未通过：${repair.error}。原记录保留，暂不计入比较统计。`}</p>}
     {differs && <p role="status" className="text-amber-700 dark:text-amber-400">本战役公式与当前账号公式不同。下方通用指标图使用当前账号设置，不能用其读数核对这份历史结果；请回鱼质量重新运行，生成当前公式的比较结果。</p>}
     {evidence.mirrorTakeProfit?.enabled && <div className="rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-mirror-evidence"><b className="font-medium">镜像止盈：涨幅 ≥ {evidence.mirrorTakeProfit.gainPct}% · 卖出初始币数 {evidence.mirrorTakeProfit.sellPct}%</b><p className="mt-1 text-muted-foreground">{evidence.mirrorFill?`已成交：${formatUTC8(evidence.mirrorFill.at)} · 价格 ${evidence.mirrorFill.price.toPrecision(9)} · ${evidence.mirrorFill.atOpen?'开盘价':'止盈限价'}；每笔持仓仅执行一次。`:'截至本次估值尚未触发。'}收益合并已兑现盈亏与剩余币数估值。</p></div>}
-    {!!evidence.holdingVetoes?.length && <details><summary className="cursor-pointer text-muted-foreground">查看持仓一票否决条件</summary><ul className="mt-1 space-y-1">{evidence.holdingVetoes.map(v=><li key={v.id}>{v.label} {v.direction} {v.threshold}{v.kind==='indicator'?'':'%'}{v.formula&&<pre className="whitespace-pre-wrap rounded bg-muted/40 p-2">{v.formula}</pre>}</li>)}</ul></details>}
+    {!!evidence.holdingVetoes?.length && <details><summary className="cursor-pointer text-muted-foreground">查看持仓一票否决条件</summary><ul className="mt-1 space-y-1">{evidence.holdingVetoes.map(v=><li key={v.id}>{holdingVetoLabel(v)}{v.formula&&<pre className="whitespace-pre-wrap rounded bg-muted/40 p-2">{v.formula}</pre>}</li>)}</ul></details>}
     <details><summary className="cursor-pointer text-muted-foreground">查看本次实际卖出公式</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-[11px]">{evidence.formula}</pre></details>
   </section>;
 }

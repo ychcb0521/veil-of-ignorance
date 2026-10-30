@@ -5,7 +5,7 @@ import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researc
 import { shortFishHash } from './algorithm';
 import type { QualityBuyFilter } from './quality';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
-import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels } from './qualityVeto';
+import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL } from './qualityVeto';
 export interface QualityFilterChoice { key: string; featureId: string; metric: string; label: string; group: string }
 function build(definitions: readonly DeepDigFeatureDef[]) {
   const choices: QualityFilterChoice[] = [], defs = new Map<string,DeepDigFeatureDef>();
@@ -33,18 +33,18 @@ export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', th
     snapshot:{featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:'5m',scale:1,unit:'',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0} };
 }
 export const qualityFilterChoiceKey = (f: QualityBuyFilter) => `${f.snapshot.featureId}:${f.metric}`;
-export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs()):QualityHoldingVeto {
-  const risk=isHoldingPriceChoice(choiceKey);
-  const filter=risk?undefined:makeQualityBuyFilter(choiceKey,direction==='<'||direction==='<='?'<':'>',threshold,enabled,definitions);
-  const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,direction,threshold]))}`,label:risk?holdingPriceLabels[choiceKey]:filter!.label,
-    kind:risk?choiceKey:'indicator',direction,threshold,enabled,metric:filter?.metric,snapshot:filter?.snapshot};
+export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {
+  const risk=isHoldingPriceChoice(choiceKey),addition=choiceKey===ADDITION_PROFIT_KIND;
+  const filter=risk||addition?undefined:makeQualityBuyFilter(choiceKey,direction==='<'||direction==='<='?'<':'>',threshold,enabled,definitions);
+  const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,direction,threshold,...(addition?[geometricMultiple]:[])]))}`,label:addition?ADDITION_PROFIT_LABEL:risk?holdingPriceLabels[choiceKey]:filter!.label,
+    kind:addition?ADDITION_PROFIT_KIND:risk?choiceKey:'indicator',direction,threshold,enabled,metric:filter?.metric,snapshot:filter?.snapshot,...(addition?{geometricMultiple}: {})};
   validateHoldingVeto(v);return v;
 }
 
-export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean};
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>saved.length?saved.map(v=>({choice:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled})):
+export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;geometricMultiple?:string};
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>saved.length?saved.map(v=>({choice:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
   [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}];
 export function parseHoldingVetoDraft(draft:HoldingVetoDraft[]):QualityHoldingVeto[] {
   if(draft.some(d=>(d.enabled||d.threshold.trim())&&(!d.threshold.trim()||!Number.isFinite(Number(d.threshold)))))throw new Error('请为启用的否决条件填写有限数字阈值');
-  return [...new Map(draft.filter(d=>d.enabled||d.threshold.trim()).map(d=>{const v=makeQualityHoldingVeto(d.choice,d.direction,Number(d.threshold),d.enabled);return [v.id,v];})).values()];
+  return [...new Map(draft.filter(d=>d.enabled||d.threshold.trim()).map(d=>{const v=makeQualityHoldingVeto(d.choice,d.direction,Number(d.threshold),d.enabled,undefined,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);return [v.id,v];})).values()];
 }

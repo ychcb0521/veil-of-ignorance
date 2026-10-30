@@ -1,3 +1,4 @@
+import {holdingVetoLabel} from './qualityVeto';
 import { qualityEntryValues } from './qualityEntry';
 import {qualitySourceLabel} from './qualitySources';
 import { sellErrorExportValues } from './qualitySellError';
@@ -66,7 +67,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
       r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula,
       run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
-      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualitySalePriceChangePct(r),qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label,qualityDetectorLabel(run.plan,r).label];
+      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${holdingVetoLabel(v)}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualitySalePriceChangePct(r),qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label,qualityDetectorLabel(run.plan,r).label];
   }) });
   const addHeaders=['加仓条件','加仓时间','加仓金额 USDT','加仓成交价','加仓数量','加仓触发读数','加仓门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON','加仓轮数','加仓明细 JSON','逐轮加仓配置 JSON'];
   const values=(run: typeof runs[number])=>{const adds=qualityAdditionFills(run.result),a=adds[0];return [additionLabel(run.plan.addition),a?formatUTC8(a.at):null,adds.length?adds.reduce((n,a)=>n+a.notional,0):null,a?.price??null,adds.length?adds.reduce((n,a)=>n+a.quantity,0):null,a?.reading??null,a?.threshold??null,run.result.totalInvested??100,run.result.averageEntryPrice??run.result.entryPrice??null,a?.definitionKey??run.plan.addition?.condition?.snapshot.definitionKey??null,adds.length,adds.length?JSON.stringify(adds):null,run.plan.addition?.rounds?JSON.stringify({maxRounds:run.plan.addition.maxRounds,rounds:run.plan.addition.rounds}):null];};

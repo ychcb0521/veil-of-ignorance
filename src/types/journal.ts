@@ -1,3 +1,4 @@
+import type {QualityExitCause,QualityHoldingVeto} from '@/lib/fish/qualityVeto';
 import type { QualityAdditionRule, QualityAdditionFill } from '@/lib/fish/qualityAddition';
 /**
  * 错题集（Trade Journal）相关类型定义
@@ -390,7 +391,7 @@ export interface CampaignDeviationNote {
 export interface TradeCampaign {
   /** Local paper-comparison metadata; never written to personal campaign tables. */
   comparison?: {
-    section: 'sell' | 'detect'; runKey: string; sellKey: string; sellLabel: string;
+    section: 'sell' | 'detect'; runKey: string; sellKey: string; planLabel?:string; sellLabel: string;
     detectors: { id: string; label: string }[]; valuedAt: number;
     repair?: { batchId: string; status: 'pending' | 'verified' | 'failed'; checkedAt?: number; error?: string; beforeReturnPct?: number; beforeEndTime?: number };
     /** 探测信号类别：命中的探测算法组合（如「CBI-2·avg₂ + CBA·avg₂」），用于分类观察与统计。 */
@@ -409,8 +410,8 @@ export interface TradeCampaign {
       mirrorTakeProfit?: {enabled:boolean;gainPct:number;sellPct:number};
       addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; additionFills?: QualityAdditionFill[]; totalInvested?: number; averageEntryPrice?: number;
       mirrorFill?: {at:number;price:number;fraction:number;gainPct:number;atOpen:boolean};
-      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator'|'mirror-take-profit'|'addition-support';direction:'<'|'>'|'<='|'>=';threshold:number };
-      holdingVetoes?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number;formula?:string }[];
+      triggerCause?: QualityExitCause;
+      holdingVetoes?: (Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>&{formula?:string})[];
     };
   };
   id: string;

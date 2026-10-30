@@ -1,3 +1,4 @@
+import {holdingVetoLabel} from './qualityVeto';
 import { additionLabel, qualityAdditionFills, qualityAdditionConditions, additionEvidenceHeaders, additionEvidenceValues } from './qualityAddition';
 import { buildXlsx, type XlsxCell, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -10,7 +11,7 @@ import { monitorCampaignUnavailable, qualityMonitorCampaignPath } from './qualit
 import { mirrorFillGainPct } from './qualityMirror';
 
 export const monitorBuying = (s: QualityMonitorSetting) => s.plan.buyFilters?.length ? s.plan.buyFilters.map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') + (s.filtersKnown ? '' : '（历史判断读数未完整记录）') : s.filtersKnown ? '无买前条件' : '历史条件未记录';
-export const monitorVetoes = (s: QualityMonitorSetting) => activeHoldingVetoes(s.plan.holdingVetoes).map(v => `${v.label} ${v.direction} ${v.threshold}${v.kind === 'indicator' ? '' : '%'}`).join(' 或 ') || '无';
+export const monitorVetoes = (s: QualityMonitorSetting) => activeHoldingVetoes(s.plan.holdingVetoes).map(v => holdingVetoLabel(v)).join(' 或 ') || '无';
 export const monitorDetectorKey = (g: QualityGroup) => JSON.stringify([g.snapshot.featureId, g.metric, g.snapshot.definitionKey, g.snapshot.interval, g.snapshot.scale, g.snapshot.H, g.snapshot.direction, g.snapshot.threshold]);
 export const monitorDetectorLabel = (g: QualityGroup) => `${g.label} ${g.snapshot.direction ?? '>'} ${g.snapshot.threshold}`;
 export const monitorDetectors = (s: QualityMonitorSetting) => !s.detectorsKnown ? '历史算法未记录' : s.detectors.map(monitorDetectorLabel).join('；') || '无探测算法';
