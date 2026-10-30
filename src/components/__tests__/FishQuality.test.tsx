@@ -649,7 +649,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '12');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '14');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(0);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -787,7 +787,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('未触发');
  // 只有开了镜像止盈的方案才有这一列
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(1);
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 6 + 1));
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 7 + 1));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);

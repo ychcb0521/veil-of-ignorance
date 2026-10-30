@@ -1,0 +1,23 @@
+import { ChevronDown } from 'lucide-react';
+import type { QualityGroup, QualityResult, QualitySample } from '@/lib/fish/quality';
+import { POST_EXIT_HOURS, qualityPostExitKey, type QualityPostExitReading } from '@/lib/fish/qualityPostExit';
+import { qualitySellError, type QualitySellError } from '@/lib/fish/qualitySellError';
+import { formatUTC8 } from '@/lib/timeFormat';
+export type SellErrorSortKey=`sell-error:${number|'count'}:${string}`;
+export interface SellErrorEntry {row:QualitySample;result?:QualityResult;skipped?:boolean}
+const color=(tag:QualitySellError)=>tag.code==='false-exit'?'text-destructive':tag.code==='not-met'?'text-foreground/80':tag.code==='error'?'text-destructive':'text-muted-foreground';
+export function SellErrorHeaders({plan,expanded,toggle,sort,ascending,onSort}:{plan:QualityGroup;expanded:boolean;toggle:()=>void;sort:string;ascending:boolean;onSort:(key:SellErrorSortKey)=>void}){
+ const control=<button type="button" className="inline-flex items-center gap-1 text-primary hover:underline" aria-label={`${expanded?'收起':'展开'}${plan.label}卖出误报`} aria-expanded={expanded} onClick={toggle}>{expanded?'收起':'展开'}<ChevronDown className={`h-3 w-3 ${expanded?'rotate-180':''}`}/></button>;
+ if(!expanded){const key:SellErrorSortKey=`sell-error:count:${plan.id}`;return <th className="min-w-[155px] border-l border-border/40 px-2 py-1.5 font-medium" data-testid="quality-sell-error-folded" data-sell-plan={plan.id} aria-sort={sort===key?ascending?'ascending':'descending':'none'} title="仅评估卖出算法本身触发的最终离场；五个反事实窗口分别判断峰值涨幅 > 2 × 静态最大回撤2。"><span className="inline-flex items-center gap-2"><button type="button" className="hover:text-foreground" aria-label={`按${plan.label}卖出误报窗口数排序`} onClick={()=>onSort(key)}>卖出误报{sort===key?ascending?' ↑':' ↓':''}</button>{control}</span><span className="mt-0.5 block text-[9px] font-normal text-muted-foreground/60">5个窗口 · 峰值 &gt; 2×回撤2</span></th>;}
+ return <>{POST_EXIT_HOURS.map((h,i)=>{const key:SellErrorSortKey=`sell-error:${h}:${plan.id}`;return <th key={h} className={`min-w-[145px] px-2 py-1.5 font-medium ${i===0?'border-l border-border/40':''}`} data-testid="quality-sell-error-header" data-sell-plan={plan.id} data-hours={h} aria-sort={sort===key?ascending?'ascending':'descending':'none'} title={`卖后${h}h独立判定，峰值涨幅 > 2 × 静态最大回撤2；两者均以最终卖出价为基准。`}><span className="inline-flex items-center gap-2"><button type="button" className="hover:text-foreground" aria-label={`按${plan.label}卖后${h}h卖出误报排序`} onClick={()=>onSort(key)}>{h}h 卖出误报{sort===key?ascending?' ↑':' ↓':''}</button>{i===0&&control}</span></th>;})}</>;
+}
+export function SellErrorCells({plan,entries,expanded,readings,onExpand,now=Date.now()}:{plan:QualityGroup;entries:SellErrorEntry[];expanded:boolean;readings:ReadonlyMap<string,QualityPostExitReading>;onExpand:()=>void;now?:number}){
+ // Detector display rows can refer to one exit. Label each actual entry only once.
+ const unique=[...new Map(entries.map(e=>[e.row.signalId??e.row.id,e])).values()];
+ const values=unique.map(e=>{const key=qualityPostExitKey(e.row.source,e.result,plan),reading=key?readings.get(key):undefined;return {...e,tags:POST_EXIT_HOURS.map(h=>qualitySellError(e.row.source,plan,e.result,reading,h,e.skipped,now))};});
+ if(!expanded){const tags=values.flatMap(e=>e.tags),done=tags.filter(t=>t.value!=null).length,wrong=tags.filter(t=>t.value===1).length;
+  const text=values.length>1?`${values.length} 次买入 · 展开`:done?`误报 ${wrong}/${done} · 展开`:tags[0]?.label??'待卖出';
+  return <td className="border-l border-t border-border/40 px-2 py-1.5" data-testid="quality-sell-error-summary" data-sell-plan={plan.id}><button type="button" className={`text-left hover:underline ${wrong?'text-destructive':'text-primary'}`} onClick={onExpand} title={values.map(e=>`${e.result?.endTime?formatUTC8(e.result.endTime):'尚无卖出'}：${e.tags.map((t,i)=>`${POST_EXIT_HOURS[i]}h ${t.label}`).join('；')}`).join('\n')}>{text}{done>0&&<span className="mt-0.5 block text-[9px] text-muted-foreground">已判 {done}/{tags.length} 个窗口</span>}</button></td>;
+ }
+ return <>{POST_EXIT_HOURS.map((h,i)=><td key={h} className={`border-t border-border/40 px-2 py-1.5 ${i===0?'border-l':''}`} data-testid="quality-sell-error-value" data-sell-plan={plan.id} data-hours={h}><div className="space-y-1.5">{values.map(e=><div key={e.row.signalId??e.row.id} className="whitespace-nowrap" title={e.tags[i].detail} data-testid="quality-sell-error-item" data-label={e.tags[i].code}><span className={`font-medium ${color(e.tags[i])}`}>{e.tags[i].label}</span>{values.length>1&&<span className="ml-2 text-[9px] text-muted-foreground/70">买入 {e.row.enteredAt?formatUTC8(e.row.enteredAt):'未知'}</span>}</div>)}</div></td>)}</>;
+}
