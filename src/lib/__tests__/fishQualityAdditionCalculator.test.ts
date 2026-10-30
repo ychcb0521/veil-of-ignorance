@@ -148,7 +148,7 @@ it('exports frozen conjunctive readings, current-average gain and banked-profit 
  const study={...importQualityLibrary(newQualityStudy(T),[sample.source]),sellPlans:[g]},row=qualityComparisonRows(study)[0];study.selectedRowIds=[row.id];const r=await evaluateQualitySample(row,g,0,T+5*M,loader(m=>bar(T+m*M,100+m*10,1,99+m*10,m===0?106:101+m*10)),new AbortController().signal);study.results=[r];
  const begun=beginQualityMonitorRound(study,study,T),saved=captureQualityMonitorResult(begun.study,begun.capture,r,T+5*M),lib=saved.monitorLibrary!;
  const sheets=[...buildQualitySheets(study,[row]),...buildMonitorSheets(lib.records,new Map(lib.settings.map(s=>[s.id,s])))];
- for(const sheet of sheets){expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);if(!['加仓明细','加仓记录'].includes(sheet.name))continue;const headers=sheet.columns.map(c=>c.header),values=sheet.rows[0];expect(JSON.parse(values[headers.indexOf('同时满足的指标 JSON')] as string)).toHaveLength(2);expect(values[headers.indexOf('涨幅门槛 %')]).toBe(5);expect(values[headers.indexOf('涨幅基准均价')]).toBe(100);expect(values[headers.indexOf('本轮可用落袋利润 USDT')]).toBe(2.5);expect(values[headers.indexOf('落袋利润贡献币数')]).toBeGreaterThan(0);}
+ for(const sheet of sheets){expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);if(!['加仓明细','加仓记录'].includes(sheet.name))continue;const headers=sheet.columns.map(c=>c.header),values=sheet.rows[0];expect(JSON.parse(values[headers.indexOf('同时满足的指标 JSON')] as string)).toHaveLength(2);expect(values[headers.indexOf('涨幅门槛 %')]).toBe(5);expect(values[headers.indexOf('涨幅基准均价')]).toBe(100);expect(values[headers.indexOf('本轮可用落袋利润 USDT')]).toBe(2.5);expect(values[headers.indexOf('落袋利润贡献币数')]).toBeGreaterThan(0);expect(values[headers.indexOf('K回撤ATR倍数')]).toBe(1.5);expect(values[headers.indexOf('最低ATR距离')]).toBe(2);}
 });
 it.each([[103.999,false],[104,true],[104.001,true]] as const)('requires actual price T=%s to be at least two ATR above dynamic S (allowed=%s)',async(price,allowed)=>{
  const r=await run(group(),loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,price,0,price-.1)),3);expect(!!r.additionFill).toBe(allowed);
@@ -166,4 +166,27 @@ it('uses independent round conditions in order, respects the cap after resume, a
  const r=await run(g,path,8);expect(r.additionFills!.map(a=>a.at)).toEqual([T+2*M,T+6*M]);expect(r.additionFills![0].priceGate?.thresholdPct).toBe(5);expect(r.additionFills![1]).toMatchObject({threshold:1.5,label:'第二次门槛',priceGate:{thresholdPct:10}});expect(await run(g,path,8,await run(g,path,4))).toEqual(r);
  const stopped=await run(g,loader(m=>m<7?([100,110,114,118,125,132,140].map((p,i)=>bar(T+i*M,p,i===0||i===1?1:i===3||i>=5?2:0,p-1,i===0?106:p+1))[m]):bar(T+m*M,135,5,134)),9);expect(stopped).toMatchObject({status:'closed',endTime:T+7*M,endPrice:135,remainingQuantity:0});expect(stopped.additionFills).toHaveLength(2);
  const changed={...g,addition:{...g.addition!,rounds:[g.addition!.rounds![0],{...g.addition!.rounds![1],minGainPct:20}]}};expect((await run(changed,path,8)).key).not.toBe(r.key);
+});
+
+it.each([[105.999,false],[106,true],[106.001,true]] as const)('uses configured root ATR distances at the exact T boundary (%s, allowed=%s)',async(price,allowed)=>{
+ const g=group();g.addition={...g.addition!,entryBufferAtr:3,supportOffsetAtr:2};
+ const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,price,0,price-.1)),3);expect(!!r.additionFill).toBe(allowed);
+ if(allowed){const a=r.additionFill!,z=a.sizing!;expect(z).toMatchObject({requiredBufferAtr:3,supportOffsetAtr:2,atr:2,support:expect.closeTo(price-4)});expect(a.quantity).toBeCloseTo((.5*(z.support-100)+2.5)/4);}
+});
+it('applies each round’s own ATR entry and support distances to sizing, frozen evidence, resume and whole-position stops',async()=>{
+ const g=group(),round={source:'custom' as const,stricterPct:10,condition:g.addition!.condition};
+ g.addition={...g.addition!,maxRounds:2,rounds:[{...round,entryBufferAtr:4,supportOffsetAtr:1},{...round,entryBufferAtr:3,supportOffsetAtr:2}]};
+ const path=loader(m=>{const p=[100,107.9,108,110,112,114][m]??113;return bar(T+m*M,p,1,m>=6?107:p-.1,m===0?106:p+.1);});
+ const r=await run(g,path,6),[first,second]=r.additionFills!;expect(r.additionFills!.map(a=>a.at)).toEqual([T+2*M,T+4*M]);
+ expect(first).toMatchObject({quantity:2.75,sizing:{previousSupport:100,support:106,requiredBufferAtr:4,supportOffsetAtr:1,mirrorUsed:2.5}});
+ expect(second).toMatchObject({quantity:1.625,sizing:{previousSupport:106,support:108,requiredBufferAtr:3,supportOffsetAtr:2,mirrorUsed:0}});
+ for(const a of r.additionFills!){const z=a.sizing!;expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(a.quantity*(a.price-z.support));expect(z.coverageGap).toBeCloseTo(0);}
+ expect(await run(g,path,6,await run(g,path,3))).toEqual(r);
+ const data=campaign(g,r);expect(data.campaign.comparison!.sellEvidence!.additionFills).toEqual(r.additionFills);expect(data.legs.filter(l=>l.quality_addition_fill).map(l=>l.quality_addition_fill!.sizing!.supportOffsetAtr)).toEqual([1,2]);for(const v of evaluateCampaignAddSizing(data).values())expect(v.status).toBe('ok');
+ const stopped=await run(g,path,8);expect(stopped).toMatchObject({status:'closed',endTime:T+6*M,endPrice:108,remainingQuantity:0});expect(stopped.additionFills).toHaveLength(2);expect(await run(g,path,8,r)).toEqual(stopped);
+ const changed={...g,addition:{...g.addition!,rounds:[g.addition!.rounds![0],{...g.addition!.rounds![1],entryBufferAtr:5}]}};expect((await run(changed,path,6)).key).not.toBe(r.key);
+});
+it('allows a wider K offset when banked mirror profit covers the old-position loss, still sizing at exact balance',async()=>{
+ const g=group();g.addition={...g.addition!,entryBufferAtr:1,supportOffsetAtr:2,maxRounds:1};
+ const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3);expect(r.additionFill).toMatchObject({price:102,quantity:.375,sizing:{support:98,previousSupport:100,mirrorUsed:2.5,requiredBufferAtr:1,supportOffsetAtr:2,coverageGap:0}});
 });

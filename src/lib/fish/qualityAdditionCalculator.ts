@@ -3,15 +3,16 @@ import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCov
 import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,type AdditionCandidate} from './qualityAdditionScan';
-import type {QualityAdditionFill} from './qualityAddition';
+import {qualityAdditionAtrSettings,type QualityAdditionFill,type QualityAdditionRoundRule} from './qualityAddition';
 import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
-const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,MULTIPLE=1.5,WARM=PERIOD*20+1;
+const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean}
-interface Options {
- candidates:AdditionCandidate[];required?:AdditionCandidate[];roundRules?:{candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number}[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
+type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>;
+interface Options extends AtrSettings {
+ candidates:AdditionCandidate[];required?:AdditionCandidate[];roundRules?:({candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number}&AtrSettings)[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -61,9 +62,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(!hit)return {fills,stop};
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
-  const K=hit.price-MULTIPLE*atr!,S=support??o.entryPrice;after=hit.at;
+  const {entryBufferAtr,supportOffsetAtr}=qualityAdditionAtrSettings(round);
+  const K=hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
   // This entry rule is independent of the indicator and average-price gain gates.
-  const buffer=hit.price-S,minimum=2*atr!;
+  const buffer=hit.price-S,minimum=entryBufferAtr*atr!;
   if(buffer+8*Number.EPSILON*Math.max(hit.price,S,minimum)<minimum||!(K>0))continue;
   const mirror=o.mirror&&(o.mirror.at<hit.at||o.mirror.at===hit.at&&o.mirror.atOpen)?o.mirror:undefined;
   const sold=mirror?o.notional/o.entryPrice*mirror.fraction:0;
@@ -75,7 +77,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
   if(sized.error||!(sized.addCoins>0))continue;
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
-  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,requiredBufferAtr:2,coverageGap:sized.coverageGap}});
+  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,requiredBufferAtr:entryBufferAtr,supportOffsetAtr,coverageGap:sized.coverageGap}});
  }
  return {fills,stop:findStop(fills.at(-1)?.sizing?.support,Math.max(o.since,fills.at(-1)?.at??o.since))};
 }

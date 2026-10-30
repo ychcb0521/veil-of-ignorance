@@ -1,20 +1,20 @@
 import { useMemo, useState } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { defaultQualityAddition, qualityAdditionConditions, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
+import { defaultQualityAddition, qualityAdditionAtrSettings, qualityAdditionConditions, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
 import { qualityFilterChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 interface ConditionDraft {choice:string;direction:'<'|'>';threshold:string}
-interface RoundDraft extends ConditionDraft {source:'detector'|'custom';stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string}
+interface RoundDraft extends ConditionDraft {source:'detector'|'custom';stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;entryBufferAtr:string;supportOffsetAtr:string}
 export interface AdditionDraft extends RoundDraft {enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[]}
 const conditionDraft=(f?:ReturnType<typeof qualityAdditionConditions>[number]):ConditionDraft=>({choice:f?f.snapshot.featureId+':'+f.metric:'',direction:f?.direction??'>',threshold:f?String(f.threshold):''});
-const roundDraft=(rule:QualityAdditionRoundRule):RoundDraft=>{const conditions=qualityAdditionConditions(rule);return {source:rule.source,stricterPct:String(rule.stricterPct),...conditionDraft(conditions[0]),extraConditions:conditions.slice(1).map(conditionDraft),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5)};};
-const copyRound=(d:RoundDraft):RoundDraft=>({source:d.source,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct});
+const roundDraft=(rule:QualityAdditionRoundRule):RoundDraft=>{const conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);return {source:rule.source,stricterPct:String(rule.stricterPct),...conditionDraft(conditions[0]),extraConditions:conditions.slice(1).map(conditionDraft),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),entryBufferAtr:String(atr.entryBufferAtr),supportOffsetAtr:String(atr.supportOffsetAtr)};};
+const copyRound=(d:RoundDraft):RoundDraft=>({source:d.source,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,entryBufferAtr:d.entryBufferAtr,supportOffsetAtr:d.supportOffsetAtr});
 export function additionDraft(rule=defaultQualityAddition()):AdditionDraft {
  const count=rule.maxRounds??(rule.repeat===false?1:3),first=roundDraft(rule.rounds?.[0]??rule);
  return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule))};
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
- const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN};
+ const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,entryBufferAtr:d.entryBufferAtr.trim()?Number(d.entryBufferAtr):NaN,supportOffsetAtr:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
  if(d.source==='custom'){
   const conditions=[d,...d.extraConditions].flatMap(row=>{try{return [makeQualityBuyFilter(row.choice,row.direction,row.threshold.trim()?Number(row.threshold):NaN,true,defs)];}catch(error){if(enabled)throw error;return [];}});
   rule.condition=conditions[0];if(conditions.length>1)rule.conditions=conditions;
@@ -58,9 +58,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft}:{draft:AdditionDr
    <label className="inline-flex items-center gap-1.5 text-[11px]"><input type="checkbox" aria-label="启用加仓涨幅门槛" disabled={!d.enabled} checked={d.gainEnabled} onChange={e=>patch({gainEnabled:e.target.checked})}/>涨幅门槛</label>
    {d.gainEnabled&&<><div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground"><span>相对当前持仓均价</span><span>上涨 ≥</span><input aria-label="加仓涨幅门槛" type="number" min="0" step="any" disabled={!d.enabled} className={field+' w-16'} value={d.minGainPct} onChange={e=>patch({minGainPct:e.target.value})}/>%</div><p className="text-[10px] text-muted-foreground">按指标确认时已收盘的价格判断；每次加仓后更新实际持仓均价；涨幅与指标同时达标才加仓。</p></>}
   </div>
-  <div className="space-y-1 text-[11px]"><p><span className="text-muted-foreground">加仓数量</span> · 按平衡公式自动计算</p><p className="font-mono text-[10px] text-muted-foreground">T ≥ S＋2×ATR · K＝T−1.5×ATR</p><p className="text-[10px] text-muted-foreground">ATR 为加仓时已收盘的 5 分钟 ATR(14)。动态成本线 S 首轮取买入价，之后取上轮 K。</p></div>
+  <div className="space-y-2 text-[11px]"><p><span className="text-muted-foreground">加仓数量</span> · 按平衡公式自动计算</p>
+   <div className="grid gap-2 sm:grid-cols-2">
+    <label className="flex items-center gap-1.5 rounded border border-border/60 px-2 py-2 font-mono"><span className="shrink-0">T ≥ S＋</span><input aria-label="T高于S的ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.entryBufferAtr} onChange={e=>patch({entryBufferAtr:e.target.value})} className={field+' w-16'}/><span className="shrink-0">× ATR</span></label>
+    <label className="flex items-center gap-1.5 rounded border border-border/60 px-2 py-2 font-mono"><span className="shrink-0">K＝T−</span><input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={field+' w-16'}/><span className="shrink-0">× ATR</span></label>
+   </div><p className="text-[10px] text-muted-foreground">两个倍数仅用于第 {index+1} 次加仓；T 高于 S 的倍数 ≥ 0，K 回撤倍数 &gt; 0。</p><p className="text-[10px] text-muted-foreground">ATR 为加仓时已收盘的 5 分钟 ATR(14)。动态成本线 S 首轮取买入价，之后取上轮 K。</p></div>
   {d.quantityMode==='calculator'&&<div className="space-y-2 text-[10px] text-muted-foreground"><p className="font-medium text-foreground/80">首轮把半仓镜像已落袋利润一并计入加仓数量；用过的利润后续不再重复使用。</p></div>}
-  <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">计算与执行说明</summary><div className="mt-2 space-y-2">{d.quantityMode==='calculator'&&<p className="mt-2 leading-relaxed">首次加仓须在半仓镜像（卖出初始币数 50%）实际成交之后，最早从下一分钟起检查条件；未启用半仓镜像或尚未成交时不加仓。首轮计算基准 Q 为镜像后的剩余币数，后续按当时剩余总币数计算。首轮成本线 S 为首次买入价；加仓后 S 更新为本轮 K。实际加仓价 T 必须至少高于动态成本线 S 两个 ATR，未满足时不加仓，S 和止损线均不改变。K 是本次平衡线：Q×(K−S)＋本轮可用落袋利润 P＝新增币数×(T−K)，由此唯一确定币数；已用利润不重复使用。K 同时作为实际止损线：触线卖出剩余持仓，跳空按开盘价；同分钟先后不明时优先止损。落袋利润先补足退回 K 时的旧仓亏损，剩余部分再除以 T−K，折算为新增币数。</p>}
+  <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">计算与执行说明</summary><div className="mt-2 space-y-2">{d.quantityMode==='calculator'&&<p className="mt-2 leading-relaxed">首次加仓须在半仓镜像（卖出初始币数 50%）实际成交之后，最早从下一分钟起检查条件；未启用半仓镜像或尚未成交时不加仓。首轮计算基准 Q 为镜像后的剩余币数，后续按当时剩余总币数计算。首轮成本线 S 为首次买入价；加仓后 S 更新为本轮 K。实际加仓价 T 高于动态成本线 S 的距离必须达到本轮设置的 ATR 倍数，K 按本轮回撤倍数计算；未满足时不加仓，S 和止损线均不改变。K 是本次平衡线：Q×(K−S)＋本轮可用落袋利润 P＝新增币数×(T−K)，由此唯一确定币数；已用利润不重复使用。K 同时作为实际止损线：触线卖出剩余持仓，跳空按开盘价；同分钟先后不明时优先止损。落袋利润先补足退回 K 时的旧仓亏损，剩余部分再除以 T−K，折算为新增币数。</p>}
   <p className="text-[10px] leading-relaxed text-muted-foreground">首次加仓必须在半仓镜像成交之后。只用新确认的原周期收盘读数，达标后按下一分钟开盘价模拟加仓；不继承开仓前的命中状态，公式预热历史保留。续算不会重复加仓，同一开盘时点卖出与加仓同时触发时优先卖出。信号库没有原探测算法时，请选择自选指标；自定义公式可先在 Deep Dig 中新增。</p>
   <p className="text-[10px] leading-relaxed text-muted-foreground">加仓币数按所选方式确定，成交金额 = 加仓币数 × 加仓成交价。加仓后按各次成交数量和价格计算成本，收益率 = 总盈亏 ÷ 累计投入。止盈、否决和分段切换仍以首次买入价为基准；部分镜像止盈只卖初始币数，100% 则卖出当时全部持仓。保存后点击「开始监测」生效，旧轮次保留。</p>
   </div></details>

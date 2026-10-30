@@ -853,8 +853,9 @@ it('removes the selected monitor target when every draft is deleted and creates 
 it('saves renamed algorithms and edited addition conditions together from the upper save button',()=>{
  const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
  fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'7.5'}});
+ fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'2'}});
  fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'改名并保留加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
- expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5}});
+ expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5,entryBufferAtr:3.25,supportOffsetAtr:2,rounds:[{entryBufferAtr:3.25,supportOffsetAtr:2},{entryBufferAtr:2,supportOffsetAtr:1.5},{entryBufferAtr:2,supportOffsetAtr:1.5}]}});expect(s.start).not.toHaveBeenCalled();
 });
 
 it('names the combination table and keeps bottom and horizontal scroll stable when the browser would clamp temporarily shortened rows',()=>{

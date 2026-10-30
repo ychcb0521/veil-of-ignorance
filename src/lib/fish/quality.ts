@@ -504,11 +504,11 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
           if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
         const required=condition.source==='custom'?candidates.splice(1):undefined;
-        return {candidates,required,minGainPct:condition.minGainPct};};
+        return {candidates,required,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr};};
         const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);

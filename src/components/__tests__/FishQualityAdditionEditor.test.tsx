@@ -45,3 +45,27 @@ it('saves independent source, thresholds and gain gates for each selected additi
  fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('加仓条件来源')).toHaveValue('detector');expect(screen.getByLabelText('加仓门槛提高幅度')).toHaveValue(12);expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(5);fireEvent.click(screen.getByRole('button',{name:'验证保存'}));
  const rule=JSON.parse(document.querySelector('output')!.textContent!);expect(rule).toMatchObject({maxRounds:2,rounds:[{source:'detector',stricterPct:12,minGainPct:5},{source:'custom',condition:{threshold:.9},minGainPct:10}]});expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);expect(()=>parseAdditionDraft({...additionDraft(rule),maxRounds:'1.5'},BUILTIN_FEATURES)).toThrow('整数');
 });
+
+it('edits both formula multipliers independently per round and restores them after saving or resizing the list',()=>{
+ render(<Editor/>);expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(2);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);expect(screen.getByLabelText('K回撤ATR倍数')).toBeDisabled();
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'2'}});
+ fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'1.75'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(2);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);
+ fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'4'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'2.5'}});
+ fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'1'}});fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'4'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(4);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(2.5);
+ fireEvent.click(screen.getByRole('tab',{name:'第 4 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.75);
+ fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.75);
+ fireEvent.click(screen.getByRole('button',{name:'验证保存'}));const rule=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(rule.rounds).toMatchObject([{entryBufferAtr:3.25,supportOffsetAtr:1.75},{entryBufferAtr:4,supportOffsetAtr:2.5},{entryBufferAtr:2,supportOffsetAtr:1.5},{entryBufferAtr:3.25,supportOffsetAtr:1.75}]);expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+});
+it('rejects missing, negative or non-finite formula distances, and a zero support offset',()=>{
+ const draft={...additionDraft(),enabled:true};
+ for(const value of ['', '-1','Infinity','NaN']){
+  expect(()=>parseAdditionDraft({...draft,entryBufferAtr:value},BUILTIN_FEATURES)).toThrow('T 高于 S');
+  expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:value},BUILTIN_FEATURES)).toThrow('K 回撤');
+ }
+ expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:'0'},BUILTIN_FEATURES)).toThrow('K 回撤');
+ expect(()=>parseAdditionDraft({...draft,otherRounds:[{...draft.otherRounds[0],supportOffsetAtr:'0'},draft.otherRounds[1]]},BUILTIN_FEATURES)).toThrow('第 2 次加仓');
+ expect(()=>parseAdditionDraft({...draft,entryBufferAtr:'0',supportOffsetAtr:'.5'},BUILTIN_FEATURES)).not.toThrow();
+});

@@ -3,7 +3,7 @@ import {findQualityAdditionTrigger,type AdditionCandidate} from '@/lib/fish/qual
 import {compileFishProgram} from '@/lib/fish/algorithm';
 import type {FishReconstructionLoader} from '@/lib/fish/reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
-import {additionIdentity,defaultQualityAddition,validateQualityAddition} from '@/lib/fish/qualityAddition';
+import {additionIdentity,additionLabel,defaultQualityAddition,validateQualityAddition} from '@/lib/fish/qualityAddition';
 import {makeQualityBuyFilter} from '@/lib/fish/qualityFilters';
 const M=60000,T=Date.UTC(2026,9,29);
 const candidate=(id:string,interval:'1m'|'5m',threshold:number):AdditionCandidate=>({plan:compileFishProgram({id,name:id,short:id,definition:'',formula:'raw = C',scale:1,unit:'',positive:'1',control:'0',interval},{statistic:'raw',direction:'>',threshold,constraints:[]}),scale:1,threshold,direction:'>',metric:'raw',label:id,featureId:id});
@@ -26,4 +26,17 @@ it('versions all conditions and gain gates while retaining old single-condition 
  expect(additionIdentity(rule)).toEqual(additionIdentity({...rule,conditions:[first]}));expect(additionIdentity(rule)).not.toEqual(additionIdentity({...rule,conditions:[first,second]}));expect(additionIdentity(rule)).not.toEqual(additionIdentity({...rule,minGainPct:5}));
  expect(additionIdentity({...rule,minGainPct:5})).not.toEqual(additionIdentity({...rule,minGainPct:6}));
  for(const minGainPct of [-1,NaN,Infinity])expect(()=>validateQualityAddition({...rule,minGainPct})).toThrow('涨幅门槛');expect(()=>validateQualityAddition({...rule,minGainPct:0})).not.toThrow();
+});
+
+it('keeps default ATR identities stable but versions either multiplier independently in every round',()=>{
+ const rule={...defaultQualityAddition(),enabled:true};
+ expect(additionIdentity(rule)).toEqual(additionIdentity({...rule,entryBufferAtr:2,supportOffsetAtr:1.5}));
+ for(const patch of [{entryBufferAtr:3},{supportOffsetAtr:2}])expect(additionIdentity({...rule,...patch})).not.toEqual(additionIdentity(rule));
+ const round={source:rule.source,stricterPct:rule.stricterPct},multi={...rule,maxRounds:2,rounds:[round,round]};
+ expect(additionIdentity(multi)).toEqual(additionIdentity({...multi,rounds:[{...round,entryBufferAtr:2,supportOffsetAtr:1.5},round]}));
+ for(let i=0;i<2;i++)for(const patch of [{entryBufferAtr:3},{supportOffsetAtr:2}]){
+  const changed={...multi,rounds:multi.rounds.map((r,j)=>j===i?{...r,...patch}:r)};expect(additionIdentity(changed)).not.toEqual(additionIdentity(multi));
+ }
+ expect(additionLabel({...rule,entryBufferAtr:3,supportOffsetAtr:2})).toContain('T≥S+3ATR · K=T−2ATR');
+ expect(additionLabel({...multi,rounds:[round,{...round,supportOffsetAtr:2}]})).toContain('逐轮 ATR 倍数独立设置');
 });
