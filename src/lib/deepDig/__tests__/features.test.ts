@@ -1,3 +1,4 @@
+import { SELLER_RETENTION_SPECS } from '@/lib/sellerRetention';
 import { describe, expect, it } from 'vitest';
 import {
   campaignSample, checkDefinition, classifyCampaign, classifySample, compileGroups, DEFAULT_CONTROL, DEFAULT_POSITIVE, definitionKey, DRIFT_SPEED_DEF, mergeFeatureDefs, newFeatureTemplate, previewGroups, removedBuiltins,
@@ -137,12 +138,12 @@ describe('【用户要求】Deep dig 分组标准：按用户写的条件划分�
     const b = newFeatureTemplate(1000);
     const merged = mergeFeatureDefs([a, { ...DRIFT_SPEED_DEF, name: '改过的名字', builtin: undefined }, b]);
     // 【用户要求】BSS 是第二个内置特征值
-    expect(merged.map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id, 'bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', b.id, a.id]);
+    expect(merged.map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id, 'bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', ...SELLER_RETENTION_SPECS.map(s=>s.id), b.id, a.id]);
     expect(merged[0]).toMatchObject({ name: '改过的名字', builtin: true });
     expect(checkDefinition(a)).toEqual({ formula: null, groups: null, scale: null });
     // 内置项删掉 = 隐藏，可恢复
     const hidden = [{ ...DRIFT_SPEED_DEF, builtin: undefined, removed: true }];
-    expect(mergeFeatureDefs(hidden).map(d => d.id)).toEqual(['bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear']);
+    expect(mergeFeatureDefs(hidden).map(d => d.id)).toEqual(['bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', ...SELLER_RETENTION_SPECS.map(s=>s.id)]);
     expect(removedBuiltins(hidden).map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id]);
   });
 });

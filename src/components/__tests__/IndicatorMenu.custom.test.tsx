@@ -1,3 +1,4 @@
+import { SELLER_RETENTION_SPECS } from '@/lib/sellerRetention';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -10,7 +11,7 @@ const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR'];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)!.nameZh;
 
 describe('自制区的十个特征值', () => {
@@ -35,7 +36,8 @@ describe('自制区的十个特征值', () => {
       for (const id of group.ids) expect(within(section).getByText(name(id))).toBeInTheDocument();
     }
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: 'DSS' } });
-    expect(screen.getAllByRole('region')).toHaveLength(1);
+    expect(screen.getAllByRole('region')).toHaveLength(2);
+    expect(screen.getByRole('region',{name:'卖方成果保留（独立副本）'})).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '与过去24 小时相比' })).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: '买方状态恶化' } });
     expect(screen.getByText('DSS')).toBeInTheDocument();

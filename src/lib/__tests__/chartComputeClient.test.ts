@@ -40,3 +40,9 @@ it('cancels the watchdog on completion and when the chart unsubscribes', async()
  c.requestChartComputation('X',request(bars,'a'));reply(fake.messages[0],1000,2000,[1,2]);vi.advanceTimersByTime(20000);expect(c.isChartComputationEnabled(bars)).toBe(true);
  c.requestChartComputation('X',request(bars,'b'));unsubscribe();expect(vi.getTimerCount()).toBe(0);
 });
+
+it('seller retention workers receive no forming price or turnover and preserve closed history',async()=>{
+ const c=await import('../chartComputeClient'),bars=data().map(b=>({...b,cba2Closed:true}));bars[1].cba2Closed=false;
+ const r={...request(bars,'retained'),def:{...request(bars,'retained').def,retentionSourceId:'cdi2'}};c.requestChartComputation('retained',r);
+ const packet=new Float64Array(fake.messages[0].packet);expect(packet[4]).toBe(1);for(const index of [14,15,16,17])expect(Number.isNaN(packet[index])).toBe(true);
+});

@@ -35,7 +35,7 @@ function manual(data: ResearchBar[], t: number, minutes: number) {
 
 describe('CDA 买方阻力', () => {
   it('追加独立特征值，可编辑与隐藏；CBA 原定义及窗口、参数和显示尺度保留', () => {
-    expect(BUILTIN_FEATURES.at(-1)).toBe(CDA_DEF);
+    expect(BUILTIN_FEATURES.find(d=>d.id==='cda')).toBe(CDA_DEF);
     expect(CDA_DEF).toMatchObject({ name: '买方阻力', short: 'CDA', scale: 1, unit: '' });
     expect(checkDefinition(CDA_DEF)).toEqual({ formula: null, groups: null, scale: null });
     for (const params of [{}, { interval: '15m' as const, avgHours: 48, halfLifeHours: 12 }]) expect(featureWindowMs({ ...CDA_DEF, ...params })).toBe(featureWindowMs({ ...CBA_DEF, ...params }));

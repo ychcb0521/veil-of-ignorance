@@ -1,3 +1,4 @@
+import { SELLER_RETENTION_SPECS, retentionFormula, type SellerRetentionSpec } from '@/lib/sellerRetention';
 import { ctbaFormula, CTBA_DESCRIPTION, CTBA_12H_DEFAULTS } from '@/lib/ctba';
 import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
 import { MBI2_Z0, MBI2_TOOLTIP, mbi2HoursOf, mbi2NOf, mbi2Z0Of, mbi2BandOf, mbi2ConfirmOf, validateMbi2Params, type Mbi2Params } from '@/lib/mbi2';
@@ -70,11 +71,14 @@ export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
   chartCore?: string;
   /** Independent closed-bar research/display window; computation additionally loads formula prehistory. */
   researchWindowHours?: number;
+  retentionSourceId?: string;
+  retentionPrefix?: string;
+  retentionVersion?: 1;
 }
 
 /** Deep dig 目录与渔共用的账号定义键。 */
 export const FEATURES_KEY = 'deep_dig_features_v1';
-export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear', 'mbi2-bear':'MBI2_bear', 'ctba_12h-bear':'CTBA_12H_bear' };
+export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear', 'mbi2-bear':'MBI2_bear', 'ctba_12h-bear':'CTBA_12H_bear', ...Object.fromEntries(SELLER_RETENTION_SPECS.map(s=>[s.id,s.core])) };
 // Retired built-ins must not return as saved custom definitions. Historical results remain stored.
 export const isRetiredFeature = (id: string) => id === 'drift-speed-down-z' || id === 'seller-push';
 export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id);
@@ -102,6 +106,7 @@ export function sellerNegativeFormula(formula: string, core: string): string {
 }
 
 export function upgradeSellerSign<T extends { id: string; formula: string; sellerSignVersion?: 1 }>(def: T): T {
+  if(SELLER_RETENTION_SPECS.some(s=>s.id===def.id)&&def.formula.includes('# seller-retention-v1'))return def.sellerSignVersion===1?def:{...def,sellerSignVersion:1};
   if (['mbi-bear','ctba-bear'].includes(def.id) && /\bseller_response\s*\(/.test(def.formula)) return def.sellerSignVersion === 1 ? def : { ...def, sellerSignVersion: 1 };
   if (!isSellerFeature(def.id) || def.sellerSignVersion === 1) return def;
   try { return { ...def, formula: sellerNegativeFormula(def.formula, SELLER_FEATURE_CORES[def.id]), sellerSignVersion: 1 }; }
@@ -127,7 +132,7 @@ export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id ===
 export const featureUsesMbi2 = (d:{id?:string;formula?:string}) => d.id==='mbi2'||/\bmbiz2\s*\(/.test((d.formula??'').replace(/(#|\/\/).*$/gm,''));
 export const featureUsesMbiFamily = (d:{id?:string;formula?:string}) => featureUsesMbi(d)||featureUsesMbi2(d);
 export function featureParams(d:ParamDef):Record<string,number> {
-  const original={hl:halfLifeOf(d),半衰期:halfLifeOf(d),avgh:avgHoursOf(d),平均时长:avgHoursOf(d),MBI_N:mbiNOf(d),MBI_Z0:mbiZ0Of(d)};
+  const original={BAR_MINUTES:intervalMs(intervalOf(d))/60000,hl:halfLifeOf(d),半衰期:halfLifeOf(d),avgh:avgHoursOf(d),平均时长:avgHoursOf(d),MBI_N:mbiNOf(d),MBI_Z0:mbiZ0Of(d)};
   if(!featureUsesMbi2(d))return original;
   const minutes=intervalMs(intervalOf(d))/60000;
   return {...original,MBI2_T_HOURS:mbi2HoursOf(d,minutes),MBI2_N:mbi2NOf(d,minutes),MBI2_Z0:mbi2Z0Of(d),MBI2_BAND:mbi2BandOf(d),MBI2_CONFIRM:mbi2ConfirmOf(d)};
@@ -151,7 +156,10 @@ export function featureWindowMs(d: ParamDef): number {
       if (featureUsesMbi(d)) mbiWarmupMs = programHistoryBars(program, params, barMs / 60_000, true) * barMs;
     } catch { /* 编辑中的不完整公式由公式校验提示 */ }
   }
-  if(featureUsesMbi2(d)) return 48*H+5*mbi2NOf(d,intervalMs(intervalOf(d))/60000)*intervalMs(intervalOf(d));
+  if(featureUsesMbi2(d)) {
+    const originalWindow=48*H+5*mbi2NOf(d,intervalMs(intervalOf(d))/60000)*intervalMs(intervalOf(d));
+    return d.formula?.includes('# seller-retention-v1') ? Math.max(formulaHistory,originalWindow) : originalWindow;
+  }
   const window = Math.max(featureTemplateId(d) === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
   if(featureTemplateId(d)==='ctba') return (d.researchWindowHours ?? 48)*H+formulaHistory;
   return Math.max(formulaHistory, featureUsesMbi(d) ? 48 * H + Math.max(mbiWarmupMs, 5 * mbiNOf(d) * intervalMs(intervalOf(d))) : window);
@@ -162,6 +170,7 @@ export const barsPerAvg = (d: ParamDef) => Math.max(1, Math.round((avgHoursOf(d)
 
 /** 公式里可用的参数（一个数）：上面点选 / 填写的值。 */
 export const PARAM_VARIABLES: readonly { name: string; alias: string; label: string }[] = [
+  {name:'BAR_MINUTES',alias:'BAR_MINUTES',label:'当前计算周期的分钟数（自动读取，不手填）'},
   { name: 'hl', alias: '半衰期', label: '半衰期（小时，上面选的；也可写「半衰期」）' },
   { name: 'avgh', alias: '平均时长', label: '平均时长（小时，上面选的；也可写「平均时长」），配 avg(x, avgh) 用' },
   { name:'MBI2_N',alias:'MBI2_N',label:'MBI2 按小时和周期派生的根数（不手填）' },
@@ -885,7 +894,23 @@ export function upgradeBearResponse(d: DeepDigFeatureDef): DeepDigFeatureDef {
   } catch { return d; }
 }
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF];
+/** Copy before augmenting. No source lookup occurs during evaluation. */
+export function createSellerRetentionCopy(source:DeepDigFeatureDef,spec:SellerRetentionSpec):DeepDigFeatureDef {
+ const copy=copyFeatureDefinition(source,[source],Date.UTC(2026,9,30,3));
+ const program=compileFeatureFormula(source.formula).program,declared=new Set(program.statements.map(s=>s.name));
+ const last=program.statements.at(-1)!;
+ const render=(n:typeof last.expr):string=>n.k==='num'?String(n.v):n.k==='var'?n.name:n.k==='un'?`(${n.op} ${render(n.a)})`:n.k==='bin'?`(${render(n.a)} ${n.op} ${render(n.b)})`:`${n.name}(${n.args.map(render).join(',')})`;
+ const base=declared.has(source.chartCore??spec.sourceCore)?(source.chartCore??spec.sourceCore):last.name??render(last.expr);
+ const built=retentionFormula(copy.formula,base,spec.core,spec.bound,source.researchWindowHours??48);
+ const names=new Set(compileFeatureFormula(built.formula).program.statements.flatMap(s=>s.name?[s.name]:[]));
+ const formula=appendResearchAverages(built.formula,names,{core:spec.core,avg:'avg_'+spec.core,avg2:'avg_'+spec.core+'_2'})+'\n'+spec.core+' = '+spec.core;
+ return {...copy,id:spec.id,name:source.name+'｜成交保留增强',short:source.short+'·保留',builtin:true,chartCore:spec.core,sellerSignVersion:1,retentionSourceId:source.id,retentionPrefix:built.prefix,retentionVersion:1,formula,
+  definition:source.definition+'\n独立副本 v1：原算法完整保留，新增成交支持加权的历史价格位移重估。失守未收复为负，收复后回升；主动成交失衡及单位失衡下行冲击作为权重代理，不代表完整订单簿OFI或因果冲击。以过去avgh小时波动率标准化，成交基线和波动率只用上一根及以前；缺失/缺根/预热不足不补零。新增分量在最终压缩前按gain合成（默认0.5，gain=0恢复原读数）；原窗口和参数不缩短，新窗口默认'+(source.researchWindowHours??48)+'小时。固定零中心，原始/均值序列与存储版本独立，阈值需另行验证。'};
+}
+const retentionSources=[CDI2_DEF,SELLER_CONTROL_DEF,DSS_DEF,MBI_BEAR_DEF,CTBA_BEAR_DEF,MBI2_BEAR_DEF,CTBA_12H_BEAR_DEF];
+export const SELLER_RETENTION_FEATURES=SELLER_RETENTION_SPECS.map(s=>createSellerRetentionCopy(retentionSources.find(d=>d.id===s.sourceId)!,s));
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -918,14 +943,26 @@ export function copyFeatureDefinition(source: DeepDigFeatureDef, existing: reado
     chartTemplate: featureTemplateId(source), createdAt: now };
 }
 
+/** Freeze each effective account source once; repeated loads never rebase an existing copy. */
+export function ensureSellerRetentionCopies(saved:readonly DeepDigFeatureDef[]):DeepDigFeatureDef[] {
+ let next=saved as DeepDigFeatureDef[];
+ for(const spec of SELLER_RETENTION_SPECS){
+  if(next.some(d=>d.id===spec.id))continue;
+  const source=next.find(d=>d.id===spec.sourceId)??BUILTIN_FEATURES.find(d=>d.id===spec.sourceId)!;
+  const effective=upgradeSellerSign(upgradeBearResponse(upgradeBssFormula(upgradeFormula(upgradeGroupVars(source)))));
+  try{const copy=createSellerRetentionCopy(effective,spec);next=[...next,copy];}catch{const copy=copyFeatureDefinition(effective,[effective],Date.UTC(2026,9,30,3));next=[...next,{...copy,id:spec.id,builtin:true,chartCore:spec.core,sellerSignVersion:1,retentionSourceId:effective.id,retentionVersion:1,name:effective.name+'｜成交保留增强',short:effective.short+'·保留',definition:'原账号公式待修正；保留原文，修正后再配置增强分量。',formula:effective.formula+'\n# 原公式无效，不能用内置默认公式冒充本副本结果'}];}
+ }
+ return next;
+}
+
 /** Always retain all saved parameters, even when the formula still equals a builtin. */
 export function saveFeatureDefinition(saved: readonly DeepDigFeatureDef[], next: DeepDigFeatureDef): DeepDigFeatureDef[] {
-  return [...saved.filter(d => d.id !== next.id), { ...next, builtin: undefined }];
+  return [...ensureSellerRetentionCopies(saved).filter(d => d.id !== next.id), { ...next, builtin: undefined }];
 }
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  saved = saved.filter(d => !isRetiredFeature(d.id)).map(restoreFeatureVisibility);
+  saved = ensureSellerRetentionCopies(saved.filter(d => !isRetiredFeature(d.id)).map(restoreFeatureVisibility));
   const byId = new Map(saved.map(d => [d.id, upgradeSellerSign(upgradeBearResponse(upgradeBssFormula(upgradeFormula(upgradeGroupVars(d)))))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));

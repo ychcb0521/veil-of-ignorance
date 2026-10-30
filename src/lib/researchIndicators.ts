@@ -1,3 +1,4 @@
+import { SELLER_RETENTION_SPECS, retentionComponents } from '@/lib/sellerRetention';
 import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
 import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { CTBA_DEFAULTS, CTBA_ABSOLUTE_BOUND } from '@/lib/ctba';
@@ -27,6 +28,7 @@ export const RESEARCH_INDICATORS = [
   { id:'CTBA_12H',featureId:'ctba_12h',core:'CTBA',short:'CTBA-12H',name:'CTBA-12H｜趋势买方优势（12小时）',period:144,parameter:'窗口根数',parameterUnit:'根',neutral:0,neutralLabel:'0｜综合均衡基准',min:-CTBA_ABSOLUTE_BOUND,max:CTBA_ABSOLUTE_BOUND,avgRange:[-CTBA_ABSOLUTE_BOUND,CTBA_ABSOLUTE_BOUND],components:['T','M','F'],seller:false },
   { id:'MBI2_BEAR',featureId:'mbi2-bear',core:'MBI2_bear',short:'MBI2·卖方',name:'MBI2 卖方趋势（可调版）',period:25*5/60,parameter:'日历时长',parameterUnit:'h',neutral:0,min:-1,max:1,avgRange:[-1,1],components:['MBI2_bear_state','MBI2_bear_lead_h','MBI2_bear_confirm_h'],seller:true },
   { id:'CTBA_12H_BEAR',featureId:'ctba_12h-bear',core:'CTBA_12H_bear',short:'CTBA-12H·卖方',name:'CTBA-12H 卖方趋势（12小时）',period:144,parameter:'窗口根数',parameterUnit:'根',neutral:0,neutralLabel:'0｜综合均衡基准',min:-100,max:100,avgRange:[-100,100],components:['T','M','F'],seller:true },
+  ...SELLER_RETENTION_SPECS.map(s=>({id:s.chartId,featureId:s.id,core:s.core,short:s.label+'·保留',name:s.label+'｜成交保留增强',period:6,parameter:'原算法参数',parameterUnit:['mbi-bear','ctba-bear','ctba_12h-bear'].includes(s.sourceId)?'根':'h',neutral:0,min:-s.bound,max:s.bound,avgRange:[-s.bound,s.bound] as const,seller:true,components:retentionComponents()})),
 ] as const;
 export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
@@ -58,7 +60,7 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
     min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
-    ...('avgRange' in (template ?? {}) ? { avgRange: (template as ResearchIndicator).avgRange } : {}), templateId: template?.id, ...('neutralLabel' in (template ?? {})?{neutralLabel:(template as ResearchIndicator).neutralLabel}:{}), ...('components' in (template ?? {})?{components:(template as ResearchIndicator).components}:{}), ...('parameterUnit' in (template ?? {})?{parameterUnit:(template as ResearchIndicator).parameterUnit}:{}) };
+    ...('avgRange' in (template ?? {}) ? { avgRange: (template as ResearchIndicator).avgRange } : {}), templateId: template?.id, ...('neutralLabel' in (template ?? {})?{neutralLabel:(template as ResearchIndicator).neutralLabel}:{}), ...('components' in (template ?? {})?{components:(template as ResearchIndicator).components}:{}), ...('parameterUnit' in (template ?? {})?{parameterUnit:(template as ResearchIndicator).parameterUnit}:{}), ...(def.retentionSourceId?{components:retentionComponents(def.retentionPrefix),parameter:'原算法参数',neutral:0,avgNeutral:0}: {}) };
 }
 const accountRegistryCache = new WeakMap<readonly DeepDigFeatureDef[], ResearchIndicator[]>();
 export function accountResearchIndicators(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): ResearchIndicator[] {
@@ -284,6 +286,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const empty = () => ({ core: data.map(() => null as number | null), avg: data.map(() => null as number | null), avg2: data.map(() => null as number | null) });
   const def = accountFeatureDef(item.featureId);
   if (!def) return empty();
+  if(def.retentionSourceId)item={...item,components:retentionComponents(def.retentionPrefix)};
   let formula: string, usesBtc: boolean;
   try {
     ({ formula, usesBtc } = formulaPlan(item, def.formula));

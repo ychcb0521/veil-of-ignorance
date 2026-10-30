@@ -63,7 +63,7 @@ describe('DSP b 修正版：卖方主动推动与卖方控制力', () => {
     expect(ids.slice(i - 1, i + 2)).toEqual(['cdi2', 'seller-control', 'dss']);
     expect(ids).not.toContain('seller-push');
     expect(ids).not.toContain('drift-speed-down-z');
-    expect(ids.at(-1)).toBe('cda');
+    expect(ids).toContain('cda');
     for (const [def, core] of [[SELLER_CONTROL_DEF, 'bc']] as const) {
       expect(checkDefinition(def)).toEqual({ formula: null, groups: null, scale: null });
       expect(def).toMatchObject({ sellerSignVersion: 1, builtin: true, scale: 100, unit: '%σ/根' });

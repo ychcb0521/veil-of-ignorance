@@ -1,3 +1,4 @@
+import { intervalMs } from '@/lib/deepRsa/marketData';
 import type { KLineData } from 'klinecharts';
 import type { CompiledFeature, DeepDigFeatureDef } from './deepDig/features';
 import type { ChartFeatureSeries } from './featureSource';
@@ -87,6 +88,7 @@ function pump() {
     const number = (v: unknown) => typeof v === 'number' ? v : NaN;
     values[at] = number(b.timestamp); values[at+1] = number(b.open); values[at+2] = number(b.high); values[at+3] = number(b.low); values[at+4] = number(b.close);
     values[at+5] = number(b.volume); values[at+6] = number(b.turnover); values[at+7] = number(b.takerBuyTurnover); values[at+8] = number(r.refs?.[i]);
+    if(r.def.retentionSourceId && (b.cba2Closed===false || b.timestamp+intervalMs(r.params.interval??'5m')>Date.now())){values[at+4]=values[at+5]=values[at+6]=values[at+7]=NaN;}
   }
   try {
     startWorker(); active = channel; activeTimes = r.data.map(bar => bar.timestamp);

@@ -167,7 +167,7 @@ export function chartFeatureHistoryBars(featureId: string, period: number, formu
   const def = chartFeatureDef(featureId);
   if (!def) return 0;
   const usesMbi = featureUsesMbi(def), usesMbi2=featureUsesMbi2(def);
-  if(usesMbi2)return Math.ceil(48*60/barMinutes)+5*mbi2NOf({...def,MBI2_T_HOURS:period},barMinutes);
+  if(usesMbi2&&!def.retentionSourceId)return Math.ceil(48*60/barMinutes)+5*mbi2NOf({...def,MBI2_T_HOURS:period},barMinutes);
   const binding = CHART_PARAM[featureTemplateId(def) ?? featureId];
   const constant = binding && 'constant' in binding ? binding.constant : null;
   const program = compileFor(formula, constant, constant ? period : null).compiled.program;
@@ -176,10 +176,10 @@ export function chartFeatureHistoryBars(featureId: string, period: number, formu
   const key = `${featureId}|${period}|${hl}|${avgh}|${formula}|${barMinutes}`;
   const cached = historyBarsCache.get(key);
   if (cached != null) return cached;
-  const params = { ...featureParams(def), hl, avgh, 半衰期: hl, 平均时长: avgh, ...(usesMbi ? { MBI_N: period } : {}) };
+  const params = { ...featureParams(def), BAR_MINUTES:barMinutes, hl, avgh, 半衰期: hl, 平均时长: avgh, ...(usesMbi ? { MBI_N: period } : {}) };
   const bars = usesMbi
     ? Math.max(programHistoryBars(program, params, barMinutes) + 1, Math.ceil(48 * 60 / barMinutes) + Math.max(5 * period, programHistoryBars(program, params, barMinutes, true)))
-    : programHistoryBars(program, params, 5) + Math.ceil(32 * hl * 12) + 2;
+    : programHistoryBars(program, params, def.retentionSourceId?barMinutes:5) + Math.ceil(32 * hl * (def.retentionSourceId?60/barMinutes:12)) + 2;
   if (historyBarsCache.size >= 128) historyBarsCache.clear();
   historyBarsCache.set(key, bars);
   return bars;
@@ -192,6 +192,7 @@ export interface ChartFeatureSeries {
   vars: Map<string, (number | null)[]>;
 }
 
+function inferResearchMinutes(data:KLineData[]){let step=Infinity;for(let i=1;i<Math.min(data.length,65);i++){const d=data[i].timestamp-data[i-1].timestamp;if(d>0)step=Math.min(step,d);}return Number.isFinite(step)?step/60000:5;}
 const chartBarBuffers = new WeakMap<FormulaEvaluationCache, ResearchBar[]>();
 const evaluationCaches = new WeakMap<KLineData[], Map<string, FormulaEvaluationCache>>();
 const seriesCache = new WeakMap<KLineData[], Map<string, { key: string; result: ChartFeatureSeries }>>();
@@ -230,15 +231,16 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   if(usesMbi2)Object.assign(params,{id:def.id,formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===mbi2Minutes*60000)??def.interval??'5m',
     MBI2_T_HOURS:has?p:mbi2HoursOf(def,mbi2Minutes),MBI2_Z0:def.MBI2_Z0,MBI2_BAND:mbi2BandOf(def),MBI2_CONFIRM:mbi2ConfirmOf(def)});
+  if(def.retentionSourceId){const minutes=inferResearchMinutes(dataList);Object.assign(params,{interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m'});}
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
   const mbi2Key=usesMbi2?`|${JSON.stringify(params)}`:'';
-  const mbiKey = usesMbi ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : mbi2Key;
+  const mbiKey = (usesMbi ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : mbi2Key)+(def.retentionSourceId?`|retention:${params.interval}`:'');
   const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}${mbiKey}`;
   const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
   // MBI is a cheap linear recurrence; evaluate here so the existing replay
   // closed-candle flag can exclude forming prices before calculation.
-  if (!(usesMbi || usesMbi2 || templateId === 'ctba') && options.variables && isChartComputationEnabled(dataList)) {
+  if ((def.retentionSourceId || !(usesMbi || usesMbi2 || templateId === 'ctba')) && options.variables && isChartComputationEnabled(dataList)) {
     try {
       const plan = compileFor(formula, constant, constant && has ? p : null);
       return requestChartComputation(context, { data:dataList, refs:refClose, signature:key, compiled:plan.compiled, params, delta:options.delta,
@@ -264,11 +266,11 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
       const d = dataList[i];
       const b = bars[i] ?? (bars[i] = {} as ResearchBar);
       b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low;
-      b.close = (usesMbi || usesMbi2 || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
+      b.close = (def.retentionSourceId || usesMbi || usesMbi2 || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
       b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
       b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
-      if (templateId === 'ctba' && !Number.isFinite(b.close)) {
+      if ((def.retentionSourceId || templateId === 'ctba') && !Number.isFinite(b.close)) {
         // Components must also hide forming VWAP/flow, not only the final score.
         b.volume = NaN; b.quoteVolume = null; b.takerBuyQuoteVolume = null;
       }

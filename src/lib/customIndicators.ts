@@ -1,3 +1,4 @@
+import { RETENTION_COMPONENT_LABELS } from '@/lib/sellerRetention';
 import { accountResearchIndicators, researchDefaultPeriod, type ResearchIndicator } from '@/lib/researchIndicators';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
@@ -1478,6 +1479,8 @@ export function registerCustomIndicators() {
           return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);
         },
         createTooltipDataSource: ({ indicator, defaultStyles, crosshair }) => {
+          const retentionDef=chartFeatureDef(item.featureId);
+          if(retentionDef?.retentionSourceId){const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;const prefix=retentionDef.retentionPrefix??'sr';const keys=['base','retention_z','price_z','support','flow','impact','anomaly_z'];const fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':v.toFixed(5);return {name:retentionDef.short,calcParamsText:`(${indicator.calcParams[0]}) · 独立参数v1`,icons:defaultStyles.tooltip.icons,values:[{title:'增强读数: ',value:fmt(row?.value)},...keys.map((key,i)=>({title:RETENTION_COMPONENT_LABELS[i]+': ',value:fmt(row?.[prefix+'_'+key])}))]};}
           if(item.id==='MBI2'||item.id==='MBI2_BEAR'){
             const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
             const fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':v.toFixed(4);
@@ -1507,8 +1510,8 @@ export function registerCustomIndicators() {
         calc: (dataList, indicator) => {
           const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
           const rows = indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
-          return ('components' in item) ? rows.map((row, i) => ({ ...row,
-            ...Object.fromEntries(item.components.map(name => [name, values.components?.[name]?.[i] ?? undefined])),
+          return values.components ? rows.map((row, i) => ({ ...row,
+            ...Object.fromEntries(Object.entries(values.components).map(([name,series]) => [name, series[i] ?? undefined])),
           })) : rows;
         },
       });
