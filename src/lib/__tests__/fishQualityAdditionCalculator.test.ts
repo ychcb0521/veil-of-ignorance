@@ -160,3 +160,10 @@ it('uses the previous K as dynamic S, skips too-close hits without changing it, 
  for(const a of r.additionFills!){const z=a.sizing!;expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(a.quantity*(a.price-z.support));expect((z.coinsBefore*z.previousSupport+a.quantity*a.price-z.mirrorUsed)/(z.coinsBefore+a.quantity)).toBeCloseTo(z.support);expect(z.coverageGap).toBeCloseTo(0);}
  for(const v of evaluateCampaignAddSizing(campaign(group(),r)).values())expect(v.status).toBe('ok');expect(await run(group(),path,5,await run(group(),path,2))).toEqual(r);
 });
+it('uses independent round conditions in order, respects the cap after resume, and keeps the final K stop armed',async()=>{
+ const g=group(),first=g.addition!.condition!,second={...first,threshold:1.5,label:'第二次门槛'};g.addition={...g.addition!,maxRounds:2,rounds:[{source:'custom',stricterPct:10,condition:first,minGainPct:5},{source:'custom',stricterPct:10,condition:second,minGainPct:10}]};
+ const path=loader(m=>{const p=[100,110,114,118,125,132,140,150][m]??150;return bar(T+m*M,p,m===0||m===1?1:m===3||m>=5?2:0,p-1,m===0?106:p+1);});
+ const r=await run(g,path,8);expect(r.additionFills!.map(a=>a.at)).toEqual([T+2*M,T+6*M]);expect(r.additionFills![0].priceGate?.thresholdPct).toBe(5);expect(r.additionFills![1]).toMatchObject({threshold:1.5,label:'第二次门槛',priceGate:{thresholdPct:10}});expect(await run(g,path,8,await run(g,path,4))).toEqual(r);
+ const stopped=await run(g,loader(m=>m<7?([100,110,114,118,125,132,140].map((p,i)=>bar(T+i*M,p,i===0||i===1?1:i===3||i>=5?2:0,p-1,i===0?106:p+1))[m]):bar(T+m*M,135,5,134)),9);expect(stopped).toMatchObject({status:'closed',endTime:T+7*M,endPrice:135,remainingQuantity:0});expect(stopped.additionFills).toHaveLength(2);
+ const changed={...g,addition:{...g.addition!,rounds:[g.addition!.rounds![0],{...g.addition!.rounds![1],minGainPct:20}]}};expect((await run(changed,path,8)).key).not.toBe(r.key);
+});

@@ -11,7 +11,7 @@ import type {ResearchBar} from '@/lib/deepRsa/window';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,MULTIPLE=1.5,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean}
 interface Options {
- candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
+ candidates:AdditionCandidate[];required?:AdditionCandidate[];roundRules?:{candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number}[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -49,14 +49,15 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  while(after<o.end){
   if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
   const support=fills.at(-1)?.sizing?.support,stop=findStop(support,Math.max(o.since,fills.at(-1)?.at??o.since));
-  if(!o.repeat&&fills.length)return {fills,stop};
+  if(fills.length>=(o.maxRounds??(o.repeat?Infinity:1)))return {fills,stop};
+  const round=o.roundRules?.[fills.length]??o;
   const scanEnd=stop?Math.min(o.end,stop.at+(stop.atOpen?0:MINUTE)):o.end;
   if(scanEnd<=after)return {fills,stop};
   const soldBefore=o.notional/o.entryPrice*halfMirror.fraction;
   const coinsBefore=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-soldBefore;
   const realAverageBefore=(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror.fraction)/coinsBefore;
   const basis='real-average' as const,referencePrice=realAverageBefore;
-  const hit=await findQualityAdditionTrigger({...o,after,end:scanEnd,priceAt,...(o.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:o.minGainPct,basis}}:{})});
+  const hit=await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:scanEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
   if(!hit)return {fills,stop};
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');

@@ -466,8 +466,9 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   const peak = headers.findIndex(h => h.startsWith('峰值涨幅'));
   expect(headers[peak + 1]).toMatch(/^卖出涨跌幅/);
   expect(headers[peak + 2]).toMatch(/^半仓镜像/);
-  expect(headers[peak + 3]).toMatch(/^探测标签/);
-  expect(headers[peak + 4]).toMatch(/^持仓时间/);
+  expect(headers[peak + 3]).toMatch(/^加仓次数/);
+  expect(headers[peak + 4]).toMatch(/^探测标签/);
+  expect(headers[peak + 5]).toMatch(/^持仓时间/);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
@@ -650,7 +651,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '20');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '22');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -789,7 +790,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  // 未启用镜像的方案也保留独立状态列，不能挤入探测标签。
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 10));
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 11));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
@@ -865,4 +866,20 @@ it('names the combination table and keeps bottom and horizontal scroll stable wh
   for(const top of [7000,18000,350*66]){box.scrollTop=top;box.scrollLeft=1600;fireEvent.scroll(box);expect(box.scrollTop).toBe(top);expect(box.scrollLeft).toBe(1600);}
   expect(screen.getByText('STABLE349USDT')).toBeInTheDocument();s.study={...s.study,results:[...s.study.results]};view.rerender(<FishQuality state={s}/>);expect(box.scrollTop).toBe(350*66);expect(box.scrollLeft).toBe(1600);
  }finally{height.mockRestore();viewport.mockRestore();}
+});
+
+it('shows actual addition counts per plan, distinguishes unknown states, sorts counts and exports the same values',async()=>{
+ const s=state(),p=s.study.sellPlans![0];p.addition={enabled:true,source:'detector',stricterPct:10,quantityMode:'calculator',repeat:true};
+ s.study={...importQualityLibrary(newQualityStudy(T),['NONE','ONE','MULTI','PENDING','ERROR'].map((symbol,i)=>({id:symbol,symbol:symbol+'USDT',timeMs:T-i*60000,timeLabel:'',fallbackZone:''}))),sellPlans:[p]};
+ const rows=qualityComparisonRows(s.study),fill={at:T+60000,price:110,quantity:1,notional:110,reading:1,threshold:.8,direction:'>' as const,metric:'raw',label:'条件',scanFrom:T,barOpenTime:T};
+ s.study.results=rows.filter(r=>r.source.symbol!=='PENDINGUSDT').map(r=>({key:qualityResultKey(r,p,0),sampleId:r.id,groupId:p.id,evaluatedAt:T+60000,status:r.source.symbol==='ERRORUSDT'?'error' as const:'open' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,...(r.source.symbol==='ONEUSDT'?{additionFill:fill}:r.source.symbol==='MULTIUSDT'?{additionFill:fill,additionFills:[fill,{...fill,at:T+120000},{...fill,at:T+180000}]}:{})}));
+ render(<FishQuality state={s}/>);const cellFor=(symbol:string)=>within(screen.getAllByTestId('quality-fish-row').find(r=>within(r).queryByText(symbol,{exact:true}))!).getByTestId('quality-addition-count');
+ expect(cellFor('NONEUSDT')).toHaveTextContent('未加仓');expect(cellFor('ONEUSDT')).toHaveTextContent('已加仓 1 次');expect(cellFor('MULTIUSDT')).toHaveTextContent('已加仓 3 次');expect(cellFor('PENDINGUSDT')).toHaveTextContent('待评估');expect(cellFor('ERRORUSDT')).toHaveTextContent('缺数据');
+ fireEvent.click(screen.getByRole('button',{name:`按${p.label}加仓次数排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('MULTIUSDT');fireEvent.click(screen.getByRole('button',{name:`按${p.label}加仓次数排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('NONEUSDT');
+ const {buildQualitySheets}=await import('@/lib/fish/qualityExport'),sheets=buildQualitySheets(s.study,rows),sheet=sheets[0],idx=sheet.columns.findIndex(c=>c.header===`${p.label} · 加仓次数`);expect(sheet.rows.find(r=>r[0]==='MULTIUSDT')![idx]).toBe(3);expect(sheet.rows.find(r=>r[0]==='PENDINGUSDT')![idx]).toBeNull();for(const out of sheets)expect(out.rows.every(r=>r.length===out.columns.length)).toBe(true);
+});
+it('shows a range of addition counts for merged buys and separates them after expansion',()=>{
+ const s=state(),first=s.study.samples[0],p=s.study.sellPlans![0];p.addition={enabled:true,source:'detector',stricterPct:10,quantityMode:'calculator',repeat:true};s.study.samples=[first,{...first,id:'count-later',enteredAt:first.enteredAt!+60000,groups:[s.study.groups[1].id],source:{...first.source,fish:s.study.samples[1].source.fish}}];s.study.sellPlans=[p];
+ const fill={at:T+60000,price:110,quantity:1,notional:110,reading:1,threshold:.8,direction:'>' as const,metric:'raw',label:'条件',scanFrom:T,barOpenTime:T};s.study.results=qualityComparisonRows(s.study).map((r,i)=>({key:qualityResultKey(r,p,0),sampleId:r.id,groupId:p.id,evaluatedAt:T,status:'open',entryTime:r.enteredAt,entryPrice:100,endTime:T+120000,endPrice:110,additionFills:Array.from({length:i?3:1},(_,j)=>({...fill,at:T+(j+1)*60000}))}));
+ render(<FishQuality state={s}/>);expect(screen.getByTestId('quality-addition-count')).toHaveTextContent('已加仓 1～3 次');fireEvent.click(within(screen.getByTestId('quality-addition-count')).getByRole('button'));expect(screen.getAllByTestId('quality-addition-count').map(c=>c.textContent).sort()).toEqual(['已加仓 1 次','已加仓 3 次']);
 });

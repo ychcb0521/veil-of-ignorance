@@ -122,7 +122,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(mark.textContent).toBe('✓');
     expect(mark.className).toContain('text-muted-foreground/30');
     expect(mark.className).not.toContain('#F6465D');
-    expect(mark.getAttribute('title')).toBeNull();
+    expect(mark).toHaveAttribute('title','点击查看加仓计算过程');fireEvent.click(mark);expect(screen.getByTestId('add-sizing-detail-dialog')).toBeInTheDocument();expect(screen.getByTestId('add-sizing-detail-dialog')).toHaveTextContent('⑤ 可加仓 Q₂');
     expect(screen.queryByTestId('add-sizing-check-fail-add1')).toBeNull();
   });
 
@@ -175,9 +175,9 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(detail.textContent).not.toContain('多加仓位占比');
   });
 
-  it('合规与无法判断的记号同样带 role="img"', () => {
+  it('合规记号是可点击按钮，无法判断保留说明图标', () => {
     const { unmount } = renderList(nearLimitNotional());
-    expect(screen.getByRole('img', { name: /加仓校验：仓位合规/ })).toBe(screen.getByTestId('add-sizing-check-ok-add1'));
+    expect(screen.getByRole('button', { name: /加仓校验：仓位合规/ })).toBe(screen.getByTestId('add-sizing-check-ok-add1'));
     unmount();
     renderList(22_057_330, []);
     expect(screen.getByRole('img', { name: /加仓校验：无法判断/ })).toBe(screen.getByTestId('add-sizing-check-unknown-add1'));

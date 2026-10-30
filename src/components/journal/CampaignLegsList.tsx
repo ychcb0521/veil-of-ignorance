@@ -1,3 +1,4 @@
+import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import { LegExecutionWearDialog } from '@/components/journal/LegExecutionWearDialog';
 import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear, type LegExecutionWear } from '@/lib/campaignExecutionWear';
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
@@ -494,6 +495,7 @@ function AddSizingDetailDialog({
   const under = verdict.status === 'ok' && !!verdict.underAdded;
   const tone = under
     ? { text: 'text-[#1E88E5]', border: 'border-[#1E88E5]/30', bg: 'bg-[#1E88E5]/[0.07]', rule: 'border-[#1E88E5]/20' }
+    : verdict.status==='ok'?{text:'text-[#0B9B66]',border:'border-[#0B9B66]/30',bg:'bg-[#0B9B66]/[0.07]',rule:'border-[#0B9B66]/20'}
     : { text: 'text-[#F6465D]', border: 'border-[#F6465D]/30', bg: 'bg-[#F6465D]/[0.07]', rule: 'border-[#F6465D]/20' };
   const actualCoins = verdict.x2Coins;
   const actualNotional = actualCoins != null && verdict.s2 != null ? actualCoins * verdict.s2 : null;
@@ -670,13 +672,15 @@ export function CampaignLegsList({
   onToggleHighlight,
   onHideReverseHedgeOrder,
   onDetach,
-  initialExpectedMaxLoss = null,
+  initialExpectedMaxLoss:providedInitialExpectedMaxLoss = null,
   campaignDirection = null,
   executionMethodsByLeg,
   unfilledOrderIds,
   executionWear = null,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
+  const initialExpectedMaxLoss=qualityCampaignStaticRisk(campaign)?.loss??providedInitialExpectedMaxLoss;
+  const deltaLabel=campaignLegDeltaLabel(campaign),deltaHint=campaign?.comparison?'本腿实际净盈亏 ÷ 初始预期最大亏损 L₀；各腿 Δb 之和等于整场盈亏比 b。静态止损百分比按初始本金计算，后续加仓不扩大分母。':'本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分';
   const [wearDetailLegId, setWearDetailLegId] = useState<string | null>(null);
   /** L_磨损换算成 R 的分母：计算时用的 L₀，缺失时退回表头 ΔR 用的那个。 */
   const wearL0 = executionWear?.initialExpectedMaxLoss ?? (initialExpectedMaxLoss != null && initialExpectedMaxLoss > 0 ? initialExpectedMaxLoss : null);
@@ -878,7 +882,7 @@ export function CampaignLegsList({
             <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.header} ${FROZEN_SHADOW_BOTTOM.flush} ${HEADER_FILL}`}>角色</div>
             <div>时间</div>
             <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
-            <div className="text-right font-semibold tracking-wide text-foreground/85" title="本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分">ΔR</div>
+            <div className="text-right font-semibold tracking-wide text-foreground/85" title={deltaHint}>{deltaLabel}</div>
             <div className="text-right" title="上行开仓价、下行平仓价，与左边时间列的开 / 平两行对齐">开 / 平价</div>
             <div className="text-center" title="上行开仓、下行平仓；平仓方式对应当前显示的最后一笔平仓。手动操作以琥珀色提示关注，委托/止盈止损触发及强平显示自动。主力开仓按业务约定记为手动，其他无可靠依据的记录显示未记录。">操作方式</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
@@ -1054,7 +1058,7 @@ export function CampaignLegsList({
                       <div className="flex justify-end">
                         <span
                           data-testid={`leg-delta-b-${leg.id}`}
-                          title="本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分"
+                          title={deltaHint}
                           className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[14px] font-semibold leading-tight tabular-nums ${deltaTone(delta)}`}
                         >
                           {formatDeltaB(delta)}
@@ -1144,7 +1148,7 @@ export function CampaignLegsList({
                   {(() => {
                     /**
                      * 合规是常态，对号几乎隐形；过大则直接写出 Plan B 的币量上限与 U 名义仓位。
-                     * 红叉整格是按钮，不靠 hover；点击才打开完整计算过程。
+                     * 可判断的结果整格都是按钮；包括对号，点击打开完整计算过程。
                      */
                     const verdict = addSizingMap.get(leg.id);
                     if (!verdict) return <div />;
@@ -1166,14 +1170,16 @@ export function CampaignLegsList({
                     }
                     if (verdict.status === 'ok') {
                       return (
-                        <div
+                        <button
+                          type="button"
                           data-testid={`add-sizing-check-ok-${leg.id}`}
-                          role="img"
-                          aria-label={label}
-                          className="text-center text-[10px] leading-snug text-muted-foreground/30"
+                          aria-label={label+'。点击查看加仓计算过程'}
+                          title="点击查看加仓计算过程"
+                          onClick={() => setAddSizingDetailLegId(leg.id)}
+                          className="w-full rounded px-0.5 py-1 text-center text-[10px] leading-snug text-muted-foreground/30 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                         >
                           ✓
-                        </div>
+                        </button>
                       );
                     }
                     if (verdict.status === 'fail') {
@@ -1534,7 +1540,7 @@ export function CampaignLegsList({
         onClose={() => setWearDetailLegId(null)}
       />
     )}
-    {selectedAddSizingLeg && (selectedAddSizingVerdict?.status === 'fail' || selectedAddSizingVerdict?.underAdded) && (
+    {selectedAddSizingLeg && (selectedAddSizingVerdict?.status === 'fail' || selectedAddSizingVerdict?.status === 'ok') && (
       <AddSizingDetailDialog
         leg={selectedAddSizingLeg}
         verdict={selectedAddSizingVerdict}

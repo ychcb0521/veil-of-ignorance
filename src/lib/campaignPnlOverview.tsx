@@ -398,7 +398,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <p>已实现净盈亏与本场结算同源，包含各次交易的结算结果。L₀ 使用交易开始时的最大预期亏损；盈利为正，亏损保留负号。没有加仓的战役同样计算，缺少有效初始风险时显示「—」。</p>
         <div className="text-[10px] font-medium text-foreground/85">方法二</div>
         <p className="font-mono">{hasExecutionWear ? PAYOFF_RATIO_WEAR_FORMULA : PAYOFF_RATIO_HEDGE_WEAR_FORMULA}</p>
-        <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-hedge-wear-worked">{wearR == null
+        <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-hedge-wear-worked">{wearR == null || !(initialExpectedMaxLoss>0) || !Number.isFinite(initialExpectedMaxLoss)
           ? (hasExecutionWear ? '本场：L_磨损 算不出（或缺少 L₀），不计磨损。' : '本场：没有中途对冲空单已实现盈亏（或缺少 L₀），不计磨损。')
           : <>{hasExecutionWear
             ? <>L_磨损 = {wearPartsText ? `${wearPartsText} = ` : ''}{formatExecutionWearUsd(wearUsd)} U；÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {wearR.toFixed(4)}</>
@@ -587,7 +587,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
               <p>{EXECUTION_WEAR_COMPONENT_RULES[part]}</p>
             </div>
           ))}
-          {hasExecutionWear && wearUsd != null && <p className="font-mono text-foreground" data-testid="execution-wear-worked">本场：L_磨损 =（中途对冲 {formatExecutionWearUsd(wearParts?.hedge ?? 0)} ＋ 最终对冲磨损 {formatExecutionWearUsd(wearOther ?? 0)}）U ÷ L₀ {initialExpectedMaxLoss.toFixed(2)} U = {formatExecutionWearUsd(wearUsd)} ÷ {initialExpectedMaxLoss.toFixed(2)} ≈ {formatExecutionWearR(wearR)}</p>}
+          {hasExecutionWear && wearUsd != null && initialExpectedMaxLoss>0 && Number.isFinite(initialExpectedMaxLoss) && <p className="font-mono text-foreground" data-testid="execution-wear-worked">本场：L_磨损 =（中途对冲 {formatExecutionWearUsd(wearParts?.hedge ?? 0)} ＋ 最终对冲磨损 {formatExecutionWearUsd(wearOther ?? 0)}）U ÷ L₀ {initialExpectedMaxLoss.toFixed(2)} U = {formatExecutionWearUsd(wearUsd)} ÷ {initialExpectedMaxLoss.toFixed(2)} ≈ {formatExecutionWearR(wearR)}</p>}
           <p>与盈亏比同一单位（金额 ÷ L₀）。读数写总的 L_磨损，括号里是两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）；任一部分为 0 时括号不写。</p>
           <p>{EXECUTION_WEAR_RULE}Legs 表「磨损」列逐腿列出，合计行等于 L_磨损。</p>
         </>

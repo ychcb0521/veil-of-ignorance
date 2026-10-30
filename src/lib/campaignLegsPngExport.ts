@@ -1,3 +1,4 @@
+import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
@@ -849,7 +850,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       })(),
       (() => {
         const pnl = legPnlMap.get(leg.id)?.pnl ?? null;
-        const delta = legDeltaB(pnl, input.initialExpectedMaxLoss ?? null);
+        const delta = legDeltaB(pnl, qualityCampaignStaticRisk(input.campaign)?.loss ?? input.initialExpectedMaxLoss ?? null);
         if (delta == null) return [{ text: '—', color: '#848E9C' }];
         // ΔR 是主角：导出图里也用最大字号把它顶出来
         return [{
@@ -963,7 +964,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     }));
     if (phases.length === 0) return [mainRow];
     const phaseRows = phases.map(phase => {
-      const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
+      const delta = legDeltaB(phase.pnl, qualityCampaignStaticRisk(input.campaign)?.loss ?? input.initialExpectedMaxLoss ?? null);
       const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
       const phaseCells: CampaignLegsExportCellLine[][] = [
           [{
@@ -1015,7 +1016,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   // 合计行：与页面 legs-total-row 同源——Σ盈亏按构造恒等于盈亏概览的已实现 P&L，
   // 手续费按成交记录去重。页面上有、导出图上没有，就是图不完整。
   const totalPnl = settlement.total ?? null;
-  const totalDeltaB = legDeltaB(totalPnl, input.initialExpectedMaxLoss ?? null);
+  const totalDeltaB = legDeltaB(totalPnl, qualityCampaignStaticRisk(input.campaign)?.loss ?? input.initialExpectedMaxLoss ?? null);
   const feeTotals = sumTradeRecordFees(input.legs.flatMap(leg => {
     const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     return rec ? [rec] : [];
@@ -1215,6 +1216,7 @@ function drawLegsTable(
   rows: CampaignLegsExportRow[],
   startY: number,
   shareSide: LegPositionSide,
+  deltaLabel:string='ΔR',
 ) {
   let y = startY;
   let x = MARGIN_X;
@@ -1223,7 +1225,7 @@ function drawLegsTable(
   ctx.font = '700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   ctx.fillStyle = '#64748B';
   COLUMNS.forEach((column, index) => {
-    const title = index === SHARE_COLUMN_INDEX ? LEG_POSITION_SHARE_COLUMN_TITLES[shareSide] : column.title;
+    const title = index === SHARE_COLUMN_INDEX ? LEG_POSITION_SHARE_COLUMN_TITLES[shareSide] : column.title==='ΔR'?deltaLabel:column.title;
     const titleX = index === EXECUTION_METHOD_COLUMN_INDEX ? x + (column.width - ctx.measureText(title).width) / 2 : x + 10;
     ctx.fillText(title, titleX, y + 24, column.width - 20);
     x += column.width;
@@ -1291,7 +1293,7 @@ export function buildCampaignLegsListCanvas(input: ExportInput, options: LegsCan
     ctx.fillText(`编号 ${displayCode} · 共 ${input.legs.length} legs`, MARGIN_X, 76, TABLE_WIDTH - 260);
   }
 
-  drawLegsTable(ctx, rows, headerHeight, campaignLegsShareSide(input));
+  drawLegsTable(ctx, rows, headerHeight, campaignLegsShareSide(input),campaignLegDeltaLabel(input.campaign));
 
   if (includeHeader) {
     ctx.font = '500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';

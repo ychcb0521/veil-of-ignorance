@@ -4,12 +4,17 @@ export interface QualityAdditionRule {
   enabled: boolean; source: 'detector' | 'custom'; stricterPct: number;
   quantityMode?: 'calculator' | 'entry' | 'fixed'; quantity?: number;
   repeat?:boolean;
+  maxRounds?:number;
+  rounds?:QualityAdditionRoundRule[];
   /** Custom indicators are conjunctive; condition remains the legacy first indicator. */
   conditions?: QualityBuyFilter[];
   minGainPct?:number;
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
+export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'stricterPct'|'condition'|'conditions'|'minGainPct'>;
+export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
+export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
   at: number; price: number; notional: number; quantity: number; scanFrom: number;
   reading: number; threshold: number; direction: '<' | '>'; metric: string; label: string;
@@ -21,7 +26,7 @@ export interface QualityAdditionFill {
 export interface QualityAdditionObservation {
   at:number;barOpenTime:number;reading:number;threshold:number;direction:'<'|'>';metric:string;label:string;featureId?:string;definitionKey?:string;
 }
-export function qualityAdditionConditions(rule?:QualityAdditionRule):QualityBuyFilter[]{
+export function qualityAdditionConditions(rule?:Pick<QualityAdditionRule,'conditions'|'condition'>):QualityBuyFilter[]{
   return (rule?.conditions?.length?rule.conditions:rule?.condition?[rule.condition]:[]).filter(f=>f.enabled!==false);
 }
 const conditionIdentity=(f:QualityBuyFilter)=>[f.metric,f.direction,f.threshold,f.snapshot.definitionKey,f.snapshot.interval];
@@ -30,7 +35,8 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   rule.source === 'detector' ? rule.stricterPct : qualityAdditionConditions(rule)[0] && conditionIdentity(qualityAdditionConditions(rule)[0]),
   rule.quantityMode??rule.amountMode,...(rule.quantityMode==='calculator'?[rule.repeat!==false]:[]),rule.quantityMode?(rule.quantityMode==='fixed'?rule.quantity:null):(rule.amountMode==='fixed'?rule.amountUsdt:null),
   ...(rule.source==='custom'&&qualityAdditionConditions(rule).length>1?[['all-indicators-v1',...qualityAdditionConditions(rule).slice(1).map(conditionIdentity)]]:[]),
-  ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,'real-average']]:[])];
+  ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,'real-average']]:[]),
+  ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,r.source==='detector'?r.stricterPct:qualityAdditionConditions(r).map(conditionIdentity),r.minGainPct??null])??null]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if (!['detector','custom'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
@@ -39,6 +45,8 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (rule.source === 'detector' && (!(rule.stricterPct > 0) || !Number.isFinite(rule.stricterPct))) throw new Error('加仓门槛提高幅度须为大于 0 的有限数字');
   if (rule.source === 'custom' && (!qualityAdditionConditions(rule).length || qualityAdditionConditions(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))) throw new Error('请选择加仓指标并填写有限数字门槛');
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
+  if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
+  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
 }
 export function stricterAdditionThreshold(threshold: number, direction: '<' | '>', pct: number): number {
   // Zero has no percentage scale: use one raw unit as its reference, and show this convention in the editor.
@@ -46,7 +54,7 @@ export function stricterAdditionThreshold(threshold: number, direction: '<' | '>
   if (!Number.isFinite(next) || !(direction === '>' ? next > threshold : next < threshold)) throw new Error('加仓门槛提高幅度超出有效精度或范围');
   return Number(next.toPrecision(15));
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.minGainPct!=null?` 且 相对当前持仓均价上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · T≥S+2ATR · K=T−1.5ATR · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.minGainPct!=null?` 且 相对当前持仓均价上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · T≥S+2ATR · K=T−1.5ATR · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],

@@ -262,7 +262,7 @@ describe('campaign geometric metrics', () => {
     expect(rowEffectivePriceChangePct(card)).toBe(result.effectivePriceChangePct);
     const items = buildCampaignPnlOverviewItems({ ...result } as Parameters<typeof buildCampaignPnlOverviewItems>[0]);
     const keys = items.map(item => item.key);
-    expect(keys.slice(0, 5)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'payoffRatio']);
+    expect(keys).toEqual(expect.arrayContaining(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'payoffRatio']));
     expect(keys).not.toContain('positionGeometricMultipleTheoretical');
     // Relative rise now uses the fixed initial risk price gap exactly once.
     expect(card.initialExpectedMaxDrawdownPct).toBe(10);

@@ -398,6 +398,8 @@ export interface TradeCampaign {
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     sellEvidence?: {
+      /** Actual frozen final-sale reason; independent of the configured condition list. */
+      exitReason?:string;
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';
       direction?: '<' | '>'; threshold?: number; reading?: number; confirmedAt?: number;

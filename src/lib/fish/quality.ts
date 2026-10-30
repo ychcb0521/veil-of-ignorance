@@ -1,5 +1,5 @@
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
-import { additionIdentity, qualityAdditionConditions, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import { additionIdentity, qualityAdditionConditions, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -486,26 +486,29 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       if(config.quantityMode&&mirrorFill?.fraction!==.5){
         additionNote=group.mirrorTakeProfit?.enabled&&group.mirrorTakeProfit.sellPct===50?'等待半仓镜像实际成交后再加仓':'首次加仓须先完成卖出 50% 初始币数的半仓镜像';
       }else{
+        const buildAdditionCandidates=(condition:QualityAdditionRoundRule)=>{
         const candidates: AdditionCandidate[]=[];
         const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
           const base=qualityMetricPlan(snapshot,metric);
           const plan=compileFishProgram(base.plan.def,{...base.plan.settings,direction,constraints:constraints.filter(text=>text!==FISH_STATE_HOLD_TEXT).map((text,i)=>({id:'add-'+i,text,enabled:true}))});
           candidates.push({plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
         };
-        if(config.source==='custom') {
-          for(const f of qualityAdditionConditions(config))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
+        if(condition.source==='custom') {
+          for(const f of qualityAdditionConditions(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
         } else {
           const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
           for(const f of detectors) {
             const direction=f.direction??'>';
-            addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,config.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints);
+            addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,condition.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints);
           }
           if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
-        const required=config.source==='custom'?candidates.splice(1):undefined;
+        const required=condition.source==='custom'?candidates.splice(1):undefined;
+        return {candidates,required,minGainPct:condition.minGainPct};};
+        const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,minGainPct:config.minGainPct,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);

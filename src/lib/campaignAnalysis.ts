@@ -1,3 +1,4 @@
+import {qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { isQualityCampaignId } from '@/lib/campaignSections';
 import {
@@ -1097,6 +1098,8 @@ export function resolveMainRiskAnchors(
   tradeRecords: TradeRecord[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
 ): CampaignRiskAnchors {
+  const paperRisk=qualityCampaignStaticRisk(campaign);
+  if(paperRisk)return {anchors:[{mainLegId:legs.find(l=>l.leg_role==='main_open')?.id??legs[0]?.id??'',entryPrice:paperRisk.entry,stopPrice:paperRisk.stop,exposureNotional:paperRisk.notional,drawdownFraction:paperRisk.percent/100,expectedMaxLoss:paperRisk.loss}],expectedMaxLoss:paperRisk.loss,anchoredExposureNotional:paperRisk.notional,unanchoredExposureNotional:0,fullExposureNotional:paperRisk.notional};
   const mainLegs = legs
     .filter(leg => leg.leg_role === 'main_open')
     .sort((a, b) => toMs(a.pre_simulated_time) - toMs(b.pre_simulated_time));

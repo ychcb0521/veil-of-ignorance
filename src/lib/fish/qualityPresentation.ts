@@ -1,3 +1,4 @@
+import {qualityAdditionFills} from './qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
 /** Presentation of frozen monitor results; never infer a fill from a price peak. */
 import type { QualityGroup, QualityResult } from './quality';
@@ -35,4 +36,14 @@ export const qualityHalfMirror = (plan:QualityGroup,result?:QualityResult)=>half
 export function campaignHalfMirror(campaign:Pick<TradeCampaign,'comparison'>):HalfMirrorSummary|undefined {
  const evidence=campaign.comparison?.sellEvidence,metrics=campaign.comparison?.holdingMetrics;
  return evidence?halfMirrorSummary(evidence.mirrorTakeProfit,metrics?{status:metrics.status,returnPct:metrics.returnPct??undefined,entryPrice:metrics.entryPrice,initialNotional:metrics.initialNotional,mirrorRealizedPnl:metrics.mirrorRealizedPnl,remainingPnl:metrics.remainingPnl,mirrorFill:evidence.mirrorFill}:undefined):undefined;
+}
+
+/** Count only saved executions; absent/error evaluations never become measured zero. */
+export function qualityAdditionSummary(plan:QualityGroup,result?:QualityResult){
+ const fills=qualityAdditionFills(result??{}),count=fills.length;
+ if(count)return {count,text:`已加仓 ${count} 次`,detail:`累计加仓 ${count} 次，${fills.reduce((n,a)=>n+a.quantity,0).toPrecision(8)} 枚；实际持仓均价 ${result?.averageEntryPrice?.toPrecision(8)??'—'}`};
+ if(!plan.addition?.enabled)return {count:null,text:'未启用',detail:'本轮未启用条件加仓'};
+ if(result?.status==='error')return {count:null,text:'缺数据',detail:result.reason??'加仓评估缺数据'};
+ if(!result||!['open','closed'].includes(result.status))return {count:null,text:'待评估',detail:'尚无有效持仓评估结果'};
+ return {count:0,text:'未加仓',detail:result.additionNote??'截至本次卖出或估值没有加仓成交'};
 }
