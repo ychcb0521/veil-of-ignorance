@@ -27,5 +27,5 @@ it('retains a configured custom condition when the module is disabled',()=>{
 
 it('persists calculator defaults and the chosen number of rounds with no cash input',()=>{
  const d={...additionDraft(),enabled:true};expect(parseAdditionDraft(d,BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:true});expect(parseAdditionDraft({...d,repeat:false},BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:false});
- render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('K 同时作为实际止损线');
+ render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('首轮计算基准 Q 为镜像后的剩余币数');expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('最早从下一分钟起检查条件');
 });

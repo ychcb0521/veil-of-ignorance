@@ -1,3 +1,4 @@
+import {qualityMirrorCampaignFixture} from '@/test/fixtures/qualityMirrorCampaign';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -292,24 +293,18 @@ function ListLocationProbe() {
 }
 
 describe('JournalCampaignDetailPage metrics', () => {
-  it('puts the mirror execution on the candle board, distinguishes actual gain from ROI and labels the remaining exit', async () => {
-    const base = detailsById.winner;
-    const at = Date.parse('2026-01-01T00:20:00Z');
-    const comparison: NonNullable<TradeCampaign['comparison']> = {
-      section:'sell', runKey:'test',sellKey:'test',sellLabel:'test',detectors:[],valuedAt:Date.parse(base.campaign.closed_at!),
-      holdingMetrics:{status:'closed',peakPct:20,returnPct:7.5,entryPrice:100,initialNotional:100},
-      sellEvidence:{formula:'state=C',definitionKey:'frozen',featureId:'state',metric:'state',version:'frozen',interval:'5m',halfLifeHours:6,avgHours:24,source:'historical',
-        direction:'<',threshold:.5,mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},mirrorFill:{at,price:105,fraction:.5,gainPct:5,atOpen:false}},
-    };
-    vi.mocked(getCampaignFullData).mockResolvedValue({...base,campaign:{...base.campaign,comparison},legs:[{...base.legs[0],post_exit_price_snapshot:110}]});
+  it('puts mirror execution on the candle board and labels the joint final sale of all remaining lots', async () => {
+    const data=qualityMirrorCampaignFixture();
+    vi.mocked(getCampaignFullData).mockResolvedValue({...detailsById.winner,...data});
     render(<MemoryRouter initialEntries={['/journal/campaigns/winner']}><Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage/>}/></Routes></MemoryRouter>);
     const board=await screen.findByTestId('quality-mirror-board');
     expect(board.closest('[data-testid="campaign-chart-frame"]')).not.toBeNull();
     expect(within(board).getByTestId('mirror-actual-gain')).toHaveTextContent('+5.00%');
-    expect(within(board).getByTestId('mirror-total-roi')).toHaveTextContent('+7.50%');
+    expect(within(board).getByTestId('mirror-total-roi')).toHaveTextContent('+10.16%');
     const labels=replayAnnotationSnapshots.at(-1)!.markerLabels;
     expect(labels).toContain('半仓止盈 · 卖出 50% · 涨幅 +5.00%');
-    expect(labels).toContain('余仓 50% · 卖出');expect(labels).not.toContain('M 全平');
+    expect(labels.filter(label=>label==='余仓＋加仓 · 全部卖出')).toHaveLength(1);
+    expect(labels).not.toContain('余仓 50% · 卖出');expect(labels).not.toContain('M 全平');
   });
   it('晚恢复保护单时同批只重建一次本地事实，风险恢复且不丢盘面倍率/未保存总结', async () => {
     const initial = { ...detailsById.winner, legs: [detailsById.winner.legs[0]] };

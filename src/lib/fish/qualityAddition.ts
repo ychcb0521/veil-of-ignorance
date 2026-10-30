@@ -14,7 +14,7 @@ export interface QualityAdditionFill {
   sizing?: {support:number;previousSupport:number;atr:number;atrAt:number;coinsBefore:number;realAverageBefore:number;baseCoins:number;mirrorCoins:number;mirrorUsed:number};
 }
 export const defaultQualityAddition = (): QualityAdditionRule => ({ enabled: false, source: 'detector', stricterPct: 10, quantityMode: 'calculator', quantity: 1, repeat:true });
-export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule?.enabled ? [] : [rule.quantityMode==='calculator'?'holding-add-atr14ema5m-1.5-support-stop-v1':rule.quantityMode?'holding-add-once-quantity-v1':'holding-add-once-v1',rule.source,
+export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule?.enabled ? [] : [rule.quantityMode==='calculator'?'holding-add-after-half-atr14ema5m-1.5-support-stop-v2':rule.quantityMode?'holding-add-once-after-half-quantity-v2':'holding-add-once-v1',rule.source,
   rule.source === 'detector' ? rule.stricterPct : rule.condition && [rule.condition.metric,rule.condition.direction,rule.condition.threshold,rule.condition.snapshot.definitionKey,rule.condition.snapshot.interval],
   rule.quantityMode??rule.amountMode,...(rule.quantityMode==='calculator'?[rule.repeat!==false]:[]),rule.quantityMode?(rule.quantityMode==='fixed'?rule.quantity:null):(rule.amountMode==='fixed'?rule.amountUsdt:null)];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
@@ -31,7 +31,7 @@ export function stricterAdditionThreshold(threshold: number, direction: '<' | '>
   if (!Number.isFinite(next) || !(direction === '>' ? next > threshold : next < threshold)) throw new Error('加仓门槛提高幅度超出有效精度或范围');
   return Number(next.toPrecision(15));
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : `${rule.condition?.label} ${rule.condition?.direction} ${rule.condition?.threshold}`} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`加仓计算器 · 5m ATR(14) × 1.5 · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与初始币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : `${rule.condition?.label} ${rule.condition?.direction} ${rule.condition?.threshold}`} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓定量 · 5m ATR(14) × 1.5 · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],

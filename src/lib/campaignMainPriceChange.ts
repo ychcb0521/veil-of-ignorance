@@ -1,3 +1,4 @@
+import {isQualityCampaignId} from '@/lib/campaignSections';
 import { resolveCampaignEquityPathLegFacts, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { MIN_VISIBLE_PHASE_DURATION_MS } from '@/lib/campaignLegPhases';
@@ -318,16 +319,17 @@ export function campaignPriceChangeLegInputs(
   corrections: LegExitPriceCorrections = {},
   localOrders: CampaignLocalOrderFacts = {},
 ): PriceChangeLegInput[] {
+  const mirrorOnly=isQualityCampaignId(campaign.id)&&campaign.comparison?.sellEvidence?.mirrorFill?.fraction===1&&!legs.some(leg=>leg.leg_role==='main_open');
   const lookup = buildTradeRecordLookup(tradeRecords);
   const facts = resolveCampaignEquityPathLegFacts(campaign, legs, tradeRecords, localOrders);
   return legs
-    .filter(leg => isPriceChangeRole(leg.leg_role) && !facts.unfilledLegIds.has(leg.id))
+    .filter(leg => (isPriceChangeRole(leg.leg_role)||mirrorOnly&&leg.leg_role==='mirror_tp') && !facts.unfilledLegIds.has(leg.id))
     .map(leg => {
       const record = leg.trade_record_id ? lookup.get(leg.trade_record_id) ?? null : null;
       const execution = resolveLegExecution(leg, record, corrections);
       return {
         id: leg.id,
-        role: leg.leg_role,
+        role: mirrorOnly&&leg.leg_role==='mirror_tp'?'main_open':leg.leg_role,
         side: leg.direction === 'short' ? 'short' : 'long',
         entryPrice: execution.entryPrice,
         exitPrice: execution.exitPrice,

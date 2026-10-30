@@ -1,6 +1,6 @@
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
-import { qualityMirrorChartArtifacts, mirrorPercentText } from '@/lib/fish/qualityMirrorBoard';
-import { QualityMirrorBoard } from '@/components/journal/QualityMirrorBoard';
+import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
+import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
 import { isQualityCampaignId } from '@/lib/campaignSections';
 import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
@@ -32,7 +32,7 @@ import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
-import { QualitySellEvidence, QualitySellTiming } from '@/components/journal/QualitySellEvidence';
+import { QualitySellEvidence } from '@/components/journal/QualitySellEvidence';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { CampaignReviewSummary } from '@/components/journal/CampaignReviewSummary';
 import { CampaignDetailSelfRating } from '@/components/journal/CampaignDetailSelfRating';
@@ -518,8 +518,10 @@ function buildChartArtifacts(
     });
   }
 
+  const paperMirror=!!campaign.comparison?.sellEvidence?.mirrorFill;
   let rollingIndex = 1;
   for (const leg of legs) {
+    if(paperMirror&&leg.leg_role==='mirror_tp')continue;
     const record = leg.trade_record_id ? tradeRecordLookup.get(leg.trade_record_id) ?? null : null;
     const resolved = resolveLegExecution(leg, record, legExitPriceCorrections);
     const openTime = resolved.openTime ?? new Date(campaign.opened_at).getTime();
@@ -565,7 +567,7 @@ function buildChartArtifacts(
       labelColor: legLabelColor,
       alwaysVisible: isPrimaryMainStart,
     });
-    if (closeTime != null) {
+    if (closeTime != null && !paperMirror) {
       verticalLines.push({
         time: closeTime,
         color: legDirColor,
@@ -596,7 +598,7 @@ function buildChartArtifacts(
       });
     }
 
-    if (closeTime != null) {
+    if (closeTime != null && !paperMirror) {
       if (leg.leg_role === 'mirror_tp') {
         const reductionPct = formatReductionPct(
           computeMirrorTpReductionPct(campaign, leg, legs, tradeRecords),
@@ -616,7 +618,7 @@ function buildChartArtifacts(
           price: exitPrice,
           shape: 'square',
           color: '#2B80FF',
-          label: mirrorFill ? `余仓 ${mirrorPercentText(1 - mirrorFill.fraction)}% · 卖出` : 'M 全平',
+          label: 'M 全平',
         });
       }
     }
@@ -624,6 +626,10 @@ function buildChartArtifacts(
     eventMap.get(leg.id);
   }
 
+  if(paperMirror){
+    if(!legs.some(leg=>leg.leg_role==='main_open')){const price=campaign.comparison?.holdingMetrics?.entryPrice;if(price)markers.push({time:Date.parse(campaign.opened_at),price,shape:'triangle-up',color:'#0ECB81',label:'主力开始'});}
+    const sale=qualityFinalSale(campaign,tradeRecords);if(sale){markers.push({time:sale.at,price:sale.price,shape:'square',color:'#2B80FF',label:sale.label});verticalLines.push({time:sale.at,color:LEG_LONG_LINE_COLOR,width:LEG_VERTICAL_LINE_WIDTH,z:3,dashed:true,label:'全部卖出',labelColor:LEG_LONG_LABEL_COLOR});}
+  }
   const mirror = qualityMirrorChartArtifacts(campaign);
   markers.push(...mirror.markers);
   timeBoundPriceLines.push(...mirror.timeBoundPriceLines);
@@ -854,10 +860,11 @@ const BATCH_CHART_SURFACE = { width: 1440, height: 480 } as const;
  * 需要 K 线盘面时，先等原生 K 线（蜡烛、视窗、标注）真正画完再截；交易所没有这段 K 线时不截图，改在图里画说明。
  */
 function CampaignBatchBoardRenderer({
-  input, chartRef, ready, chartRequired, chartOmitted, peakFallback, sampleNote, chartInterval, error, children, onComplete, onError,
+  input, chartRef, chartExtraHeight=0, ready, chartRequired, chartOmitted, peakFallback, sampleNote, chartInterval, error, children, onComplete, onError,
 }: {
   input: CampaignBoardExportInput;
   chartRef: RefObject<HTMLDivElement>;
+  chartExtraHeight?:number;
   ready: boolean;
   chartRequired: boolean;
   /** 勾了 K 线盘面、但这段时间交易所没有 K 线时的说明；有值时盘面位置改画这段文字。 */
@@ -913,9 +920,9 @@ function CampaignBatchBoardRenderer({
   // 否则深色主题的网格线、坐标轴字色画在浅色看板上，网格又黑又粗、标注发灰。
   return (
     <div aria-hidden="true" data-testid="campaign-batch-export-surface" className="light bg-background"
-      style={{ position: 'fixed', left: -20000, top: 0, ...BATCH_CHART_SURFACE, pointerEvents: 'none' }}>
+      style={{ position: 'fixed', left: -20000, top: 0, ...BATCH_CHART_SURFACE, height:BATCH_CHART_SURFACE.height+chartExtraHeight, pointerEvents: 'none' }}>
       {chartRequired && (
-        <div ref={chartRef} data-testid="campaign-batch-chart-frame" style={BATCH_CHART_SURFACE}>
+        <div ref={chartRef} data-testid="campaign-batch-chart-frame" style={{...BATCH_CHART_SURFACE,height:BATCH_CHART_SURFACE.height+chartExtraHeight}}>
           <ThemeOverride theme="light">{children(onReady)}</ThemeOverride>
         </div>
       )}
@@ -1031,7 +1038,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     stickyRef: pageHeaderRef,
     panelRef: batchExport ? detachedChartPanelRef : campaignChartPanelRef,
     targetRef: campaignChartExportRef,
-    minHeight: CAMPAIGN_CHART_MIN_HEIGHT + mirrorBoardHeight,
+    minHeight: CAMPAIGN_CHART_MIN_HEIGHT,
   });
   const [isOwner, setIsOwner] = useState(true);
   /** 「这场战役在回收站里」提示上的「恢复」正在写。 */
@@ -2696,6 +2703,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       // 两句都以「。」收尾，直接相接（全角句号后不再加空格）
       input={buildBoardExportInput([peakFallback, sampleNote].filter(Boolean).join('') || undefined)}
       chartRef={campaignChartExportRef}
+      chartExtraHeight={mirrorBoardHeight}
       ready={!batchFailureRef.current && (!overviewSelected || !klinesLoading) && (!chartSelected || !chartKlinesLoading)
         && !campaignPerformanceLoading && !campaignEmotionDiaryLoading
         && batchMetricsOwnerReady === campaign.user_id && batchDiaryReady === `${id}:${campaignOperationDate}`}
@@ -2707,7 +2715,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       error={batchKlinesError ? `K 线加载失败：${batchKlinesError}` : null}
       onComplete={batchExport.onComplete}
       onError={reportBatchError}
-    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <div className="flex h-full flex-col"><QualityMirrorBoard campaign={campaign}/><div className="min-h-0 flex-1"><ReplayKlineChart
+    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <QualityCampaignChartFrame campaign={campaign} chartHeight={BATCH_CHART_SURFACE.height} onSummaryHeight={setMirrorBoardHeight}><ReplayKlineChart
       key={`${campaign.id}:${displayInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
       klines={chartKlines}
       currentTime={chartCurrentTime}
@@ -2724,7 +2732,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       timezone={LOCAL_TIME_ZONE}
       onRenderReady={onReady}
       onRenderError={reportBatchError}
-    /></div></div> : null}</CampaignBatchBoardRenderer>;
+    /></QualityCampaignChartFrame> : null}</CampaignBatchBoardRenderer>;
   }
 
   return (
@@ -2750,7 +2758,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                 >
                   {campaignDisplayCode}
                 </span>
-                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary" data-testid="comparison-campaign-badge">卖出与探测 · {campaign.comparison.sellLabel}</span>}
+                <span>{campaign.symbol}</span>{campaign.comparison && <span title={campaign.comparison.sellLabel} className="max-w-[min(32rem,60vw)] truncate rounded border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary" data-testid="comparison-campaign-badge">持仓监测 · {campaign.comparison.sellLabel}</span>}
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>
@@ -2934,7 +2942,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
         <section className="space-y-3">
           <div ref={campaignChartPanelRef} className="bg-card border border-border rounded p-2">
-            {campaign.comparison && <QualitySellTiming evidence={campaign.comparison.sellEvidence} />}
+
             {/* 窄屏上一排放不下时折行、工具栏跟着长高：倍数档换成 2.1x / 3.1x 之后 390 宽正好多出 2px，不折行就顶出页面、压在盘面底下 */}
             <div className="min-h-9 px-2 py-1 flex flex-wrap items-center gap-x-2 gap-y-1">
               <div className="flex flex-wrap items-center gap-1" role="group" aria-label="盘面 K 线周期">
@@ -3038,14 +3046,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               )}
               <div className="flex-1" />
             </div>
-            <div
-              ref={campaignChartExportRef}
-              data-testid="campaign-chart-frame"
-              className="flex flex-col border border-border rounded overflow-hidden"
-              style={{ height: campaignChartFitHeight ?? 480 }}
-            >
-              <QualityMirrorBoard campaign={campaign} onHeightChange={setMirrorBoardHeight}/>
-              <div className="min-h-0 flex-1">
+            <QualityCampaignChartFrame campaign={campaign} chartHeight={campaignChartFitHeight??480} chartRef={campaignChartExportRef}>
               {chartKlinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
               ) : chartKlinesError ? (
@@ -3075,8 +3076,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                   timezone={LOCAL_TIME_ZONE}
                 />
               )}
-              </div>
-            </div>
+            </QualityCampaignChartFrame>
             {/* 盘面与计算各拉一份时，计算那份失败盘面上看不出来：单独说一句，读数按已实现盈亏兜底 */}
             {!displaySharesComputeKlines && klinesError && (
               <div data-testid="campaign-compute-klines-error" className="mt-2 px-1 flex flex-wrap items-center gap-2 text-[11px] text-[#F6465D]">

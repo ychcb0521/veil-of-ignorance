@@ -452,7 +452,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     state.setSelectedRows([...ids]);
   };
   const columnWidths=[160,144,152,80,80,128,144,112,...filterColumns.map(()=>176),...plans.flatMap(p=>[entryExpanded.includes(p.id)?224:128,224,128,128,128,128,128,128,...Array(sellErrorOpen.has(p.id)?5:1).fill(128),...Array(postExitOpen.has(p.id)?10:1).fill(128)]),40];
-  const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,sellErrorExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey);
+  const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,sellErrorExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
   const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
@@ -480,15 +480,22 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     return stop;
   }, [back]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
-    const el = tableRef.current; if (!el) return;
+    const el=tableRef.current;if(!el)return;
+    if(pendingTableScroll.current){const saved=pendingTableScroll.current;pendingTableScroll.current=undefined;el.scrollTop=saved.top;el.scrollLeft=saved.left;}
+    const top=el.scrollTop,left=el.scrollLeft,header=el.querySelector('thead')?.getBoundingClientRect().height??0;
     const rendered=[...el.querySelectorAll<HTMLElement>('tbody tr[data-testid="quality-fish-row"]')];
-    for(const row of rendered)row.style.height=`${ROW_PX}px`;
     const changed=priorRowLayout.current!==rowLayoutKey;priorRowLayout.current=rowLayoutKey;
+    // Reset natural heights only for an explicit column expansion/collapse. Doing
+    // this on every scroll briefly shrinks the document and clamps its scrollTop.
+    if(changed)for(const row of rendered)row.style.height=`${ROW_PX}px`;
     const measured=Math.max(changed?ROW_PX:rowPx,...rendered.map(row=>Math.ceil(row.offsetHeight)));
     for(const row of rendered)row.style.height=`${measured}px`;
-    if (measured !== rowPx) setRowPx(measured);
-    if (el.clientHeight > 0 && el.clientHeight !== viewPx) setViewPx(el.clientHeight);
-  }, [open, rows, rowPx, viewPx, scrollTop, labelExpanded, sellErrorExpanded, postExitExpanded, entryExpanded, rowLayoutKey]);
+    if(measured!==rowPx){
+      const nextTop=top<=header?top:header+(top-header)/rowPx*measured;
+      pendingTableScroll.current={top:nextTop,left};setRowPx(measured);setScrollTop(nextTop);
+    }else if(changed){el.scrollTop=top;el.scrollLeft=left;}
+    if(el.clientHeight>0&&el.clientHeight!==viewPx)setViewPx(el.clientHeight);
+  },[open,rows,rowPx,viewPx,Math.floor(scrollTop/rowPx),rowLayoutKey,study.results,study.entryReadings]);
   const first = Math.max(0, Math.min(rows.length - 1, Math.floor(scrollTop / rowPx) - OVERSCAN));
   const last = Math.min(rows.length, Math.max(first + 1, Math.ceil((scrollTop + viewPx) / rowPx) + OVERSCAN));
   const visible = rows.slice(first, last), padTop = first * rowPx, padBottom = (rows.length - last) * rowPx;
@@ -567,7 +574,8 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
       {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}
       {/* 表格到达上下边界后，滚轮自然交给「渔」面板，避免只能移到表格外才能继续滚动。 */}
-      {rows.length ? <div ref={tableRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)} className="max-h-[28rem] overflow-auto overscroll-x-contain overscroll-y-auto rounded-lg border border-border/60 [overflow-anchor:none]" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0),minWidth:'100%'}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
+      <h4 className="text-xs font-medium text-foreground" data-testid="quality-combination-title">组合表</h4>
+      {rows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className="max-h-[28rem] overflow-auto overscroll-x-contain overscroll-y-auto rounded-lg border border-border/60 [overflow-anchor:none]" aria-label="组合表" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0),minWidth:'100%'}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground">
           <tr className="bg-muted/35" data-testid="quality-algorithm-categories">
             <th colSpan={8} className="px-2 py-1.5 text-[9px] font-normal text-muted-foreground/70">入场信息</th>

@@ -1,3 +1,4 @@
+import {withQualityMirrorLegs} from './qualityMirrorLegs';
 import { withQualityAdditionCampaign } from './qualityAdditionCampaign';
 import {qualitySourceLabel} from './qualitySources';
 import { qualityPeakPct } from './qualityPresentation';
@@ -94,7 +95,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];
   const data: QualityCampaignData = { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
-  return r.additionFill ? withQualityAdditionCampaign(data, run) : data;
+  return withQualityMirrorLegs(r.additionFill ? withQualityAdditionCampaign(data, run) : data);
 }
 /** 各卖出方案的买入过滤，一行写完：「状态 S 原始值：状态 S 原始值 > 0.7；CDA 原始值：不过滤」。都没开过滤时为空。 */
 export function qualityBuyFilterSummary(study: FishQualityStudy): string {

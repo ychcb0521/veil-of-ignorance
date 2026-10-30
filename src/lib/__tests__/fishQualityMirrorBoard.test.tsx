@@ -57,9 +57,9 @@ describe('mirror campaign board and consistent accounting', () => {
   it.each([true,false])('preserves every partial/final event exactly once, without copying settlement PnL onto opening (open=%s)', open => {
     const {campaign,legs,tradeRecords}=fixture({open});
     const events=buildCampaignEventStream(campaign,legs,tradeRecords);
-    expect(events.map(e=>e.event_type)).toEqual(open?['main_opened','main_partial_closed']:['main_opened','main_partial_closed','main_fully_closed','campaign_closed']);
+    expect(events.map(e=>e.event_type)).toEqual(open?['main_opened','mirror_tp_placed','mirror_tp_triggered']:['main_opened','mirror_tp_placed','mirror_tp_triggered','main_fully_closed','campaign_closed']);
     expect(events[0].price).toBe(100);expect(events[0].realized_pnl).toBeUndefined();
-    expect(events[1]).toMatchObject({price:105,size_usdt:50,realized_pnl:expect.closeTo(2.5)});
+    expect(events.find(e=>e.event_type==='mirror_tp_triggered')).toMatchObject({price:105,size_usdt:50,realized_pnl:expect.closeTo(2.5)});
     for (const event of events.filter(e=>e.event_type.endsWith('_closed') && e.trade_record_id)) expect(tradeRecords.some(r=>r.id===event.trade_record_id)).toBe(true);
     expect(events.filter(e=>e.realized_pnl!=null).reduce((s,e)=>s+e.realized_pnl!,0)).toBeCloseTo(open?2.5:7.5);
   });
@@ -89,6 +89,7 @@ describe('mirror campaign board and consistent accounting', () => {
     expect(computeCampaignRealizedPnl(full.campaign,full.legs,full.tradeRecords).total).toBeCloseTo(board.totalPnl!);
     expect(annotations.markers).toHaveLength(1);expect(annotations.markers[0]).toMatchObject({time:T+M,price:105,label:expect.stringContaining(`卖出 ${fraction*100}%`)});
     expect(annotations.timeBoundPriceLines[0].endTime).toBe(T+M);
+    expect(campaignPriceChange(full.campaign,full.legs,full.tradeRecords).pct).toBeCloseTo(fraction===1?5:-10);
   });
   it('includes the visible mirror strip in PNG capture instead of capturing only native candle canvases', () => {
     const full=fixture(), view=render(<div><QualityMirrorBoard campaign={full.campaign}/></div>);
@@ -109,6 +110,13 @@ it('shows every addition round and describes the K stop as a price with correct 
  const fill={at:T+M,price:110,notional:220,quantity:2,scanFrom:T,reading:1,threshold:.5,direction:'>' as const,metric:'raw',label:'触发',barOpenTime:T,sizing:{support:107,previousSupport:100,atr:2,atrAt:T,coinsBefore:1,realAverageBefore:100,baseCoins:2,mirrorCoins:0,mirrorUsed:0}};
  e.addition={...defaultQualityAddition(),enabled:true};e.additionFill=fill;e.additionFills=[fill,{...fill,at:T+2*M,sizing:{...fill.sizing,support:117,previousSupport:107}}];e.totalInvested=540;e.averageEntryPrice=108;
  e.triggerCause={id:'addition-support',label:'加仓支撑线 K',kind:'addition-support',direction:'<=',threshold:117};e.reading=117;e.confirmedAt=T+3*M;e.executedAt=T+3*M;e.triggerAtOpen=true;
- render(<><QualitySellEvidence evidence={e}/><QualitySellTiming evidence={e}/></>);
+ render(<QualitySellEvidence evidence={e}/>);
  expect(screen.getByTestId('quality-addition-evidence')).toHaveTextContent('已成交 2 轮');expect(screen.getByTestId('quality-addition-evidence')).toHaveTextContent('成本线 S 107');expect(screen.getByTestId('quality-sell-timing')).toHaveTextContent('开盘跳空越过 K，按开盘价成交');expect(screen.getByTestId('quality-sell-evidence')).not.toHaveTextContent('117%');cleanup();
+});
+
+it.each([true,false])('lists half mirror separately while preserving initial coins, invested cash and per-leg settlement (open=%s)',open=>{
+ const data=fixture({open}),main=data.legs.find(l=>l.leg_role==='main_open')!,mirror=data.legs.find(l=>l.leg_role==='mirror_tp')!;
+ expect(data.legs).toHaveLength(2);expect(main.pre_position_size).toBe(50);expect(mirror.pre_position_size).toBe(50);expect(mirror.post_simulated_close_time).toBe(new Date(T+M).toISOString());expect(mirror.post_exit_price_snapshot).toBe(105);
+ const totals=computeCampaignRealizedPnl(data.campaign,data.legs,data.tradeRecords);expect(totals.byLeg.get(mirror.id)).toBeCloseTo(2.5);if(open)expect(totals.byLeg.get(main.id)).toBeNull();else expect(totals.byLeg.get(main.id)).toBeCloseTo(5);expect(totals.total).toBeCloseTo(open?2.5:7.5);
+ expect(data.legs.reduce((n,l)=>n+l.pre_position_size!,0)).toBe(100);expect(new Set([...totals.recordsByLeg.values()].flat().map(r=>r.id)).size).toBe(data.tradeRecords.length);
 });

@@ -1,3 +1,4 @@
+import type {TradeRecord} from '@/types/trading';
 import {qualityAdditionFills} from './qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
 import type { ChartMarker, TimeBoundPriceLine, VerticalLine } from '@/components/journal/ReplayCandleChart';
@@ -33,7 +34,7 @@ export function qualityMirrorBoard(campaign: TradeCampaign) {
   const status = fill ? '已成交' : campaignHalfMirror(campaign)?.label ?? '待评估';
   return { title, status, fill, rule: evidence.mirrorTakeProfit, entryPrice, initialNotional, totalInvested, addition, additions, gainPct, mirrorPnl, remainingPnl, totalPnl, returnPct, quantity,
     soldFraction, remainingFraction, closed: !!campaign.closed_at, valuedAt: campaign.comparison?.valuedAt,
-    remainingText: fill ? campaign.closed_at ? soldFraction === 1 ? '全部币数已止盈' : `余仓 ${mirrorPercentText(addition && totalQuantity ? (totalQuantity - (quantity ?? 0)) / totalQuantity : 1 - soldFraction)}% 已按原卖出条件卖出` : `余仓 ${mirrorPercentText(remainingFraction)}% 继续按原卖出条件运行` : campaign.closed_at ? '未触发镜像止盈，按原卖出条件结束' : '尚未触发，原仓位继续运行' };
+    remainingText: fill ? campaign.closed_at ? soldFraction === 1 ? '全部币数已止盈' : addition?`原始余仓＋全部加仓共 ${+((totalQuantity??0)-(quantity??0)).toPrecision(8)} 币已全部卖出`:`余仓 ${mirrorPercentText(1-soldFraction)}% 已按原卖出条件卖出` : `余仓 ${mirrorPercentText(remainingFraction)}% 继续按原卖出条件运行` : campaign.closed_at ? '未触发镜像止盈，按原卖出条件结束' : '尚未触发，原仓位继续运行' };
 }
 
 export function qualityMirrorChartArtifacts(campaign: TradeCampaign): { markers: ChartMarker[]; timeBoundPriceLines: TimeBoundPriceLine[]; verticalLines: VerticalLine[] } {
@@ -54,4 +55,13 @@ export function qualityMirrorChartArtifacts(campaign: TradeCampaign): { markers:
     verticalLines.push({time: fill.at, color: MIRROR_BOARD_COLOR, labelColor: MIRROR_BOARD_COLOR, width: 1.4, z: 6, dashed: true});
   }
   return { markers, timeBoundPriceLines, verticalLines };
+}
+
+/** One final sale marker aggregates every remaining acquisition lot. */
+export function qualityFinalSale(campaign:TradeCampaign,records:readonly TradeRecord[]){
+ if(!campaign.comparison||!campaign.closed_at)return;
+ const at=Date.parse(campaign.closed_at),closes=records.filter(r=>r.action==='CLOSE'&&r.closeTime===at&&r.exit_reason_text!=='镜像止盈');
+ if(!closes.length)return;
+ const quantity=closes.reduce((n,r)=>n+r.quantity,0),price=closes.reduce((n,r)=>n+r.quantity*r.exitPrice,0)/quantity;
+ return {at,price,quantity,label:qualityAdditionFills(campaign.comparison.sellEvidence??{}).length?'余仓＋加仓 · 全部卖出':'余仓 · 全部卖出'};
 }

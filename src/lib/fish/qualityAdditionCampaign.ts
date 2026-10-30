@@ -19,7 +19,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
    const add=adds[index-1];
    const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price} · S=${add.sizing.previousSupport} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}`:''}`;
    const leg:TradeJournal={...data.legs[0],id:lot.id,trade_record_id:positionId,leg_role:lot.role,leg_sequence:index+1,
-     pre_simulated_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
+     quality_addition_fill:add,pre_simulated_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
      pre_account_equity_usdt:summary.totalInvested,post_realized_pnl:closed?lot.quantity*r.endPrice!-lot.notional:null};
    let realized=0;
    const opening:CampaignEvent={...data.campaign.actual_evolution[0],id:lot.id+'-entry',timestamp:iso(lot.at),event_type:'main_opened',journal_id:lot.id,leg_role:lot.role,leg_sequence:index+1,

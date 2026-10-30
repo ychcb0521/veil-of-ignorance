@@ -32,8 +32,10 @@ function atrReader(o:Options){
  };
 }
 export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop}>{
+ // A realized half mirror is mandatory. Its own minute cannot establish an ordered addition.
+ const halfMirror=o.mirror;if(halfMirror?.fraction!==.5)return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
- let after=Math.max(o.entry,o.since-MINUTE,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o);
+ let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o);
  const bars=o.prices.filter(b=>b.openTime<o.end);let size=1;while(size<bars.length)size*=2;
  const lowTree=new Float64Array(size*2).fill(Infinity);bars.forEach((b,i)=>{if(!(b.open>0)||!(b.low>0)||!Number.isFinite(b.open)||!Number.isFinite(b.low))throw Error('加仓止损行情读数无效');lowTree[size+i]=b.low;});for(let i=size-1;i>0;i--)lowTree[i]=Math.min(lowTree[i*2],lowTree[i*2+1]);
  const findStop=(support:number|undefined,from:number):SupportStop|undefined=>{

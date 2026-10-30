@@ -482,32 +482,37 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     let finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
     let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined;
     if(group.addition?.enabled && (!additionFill||group.addition.quantityMode==='calculator')) {
-      const config=group.addition, candidates: AdditionCandidate[]=[];
-      const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
-        const base=qualityMetricPlan(snapshot,metric);
-        const plan=compileFishProgram(base.plan.def,{...base.plan.settings,direction,constraints:constraints.filter(text=>text!==FISH_STATE_HOLD_TEXT).map((text,i)=>({id:'add-'+i,text,enabled:true}))});
-        candidates.push({plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
-      };
-      if(config.source==='custom') {
-        const f=config.condition!; addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
-      } else {
-        const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
-        for(const f of detectors) {
-          const direction=f.direction??'>';
-          addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,config.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints);
+      const config=group.addition;
+      if(config.quantityMode&&mirrorFill?.fraction!==.5){
+        additionNote=group.mirrorTakeProfit?.enabled&&group.mirrorTakeProfit.sellPct===50?'等待半仓镜像实际成交后再加仓':'首次加仓须先完成卖出 50% 初始币数的半仓镜像';
+      }else{
+        const candidates: AdditionCandidate[]=[];
+        const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
+          const base=qualityMetricPlan(snapshot,metric);
+          const plan=compileFishProgram(base.plan.def,{...base.plan.settings,direction,constraints:constraints.filter(text=>text!==FISH_STATE_HOLD_TEXT).map((text,i)=>({id:'add-'+i,text,enabled:true}))});
+          candidates.push({plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
+        };
+        if(config.source==='custom') {
+          const f=config.condition!; addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
+        } else {
+          const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
+          for(const f of detectors) {
+            const direction=f.direction??'>';
+            addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,config.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints);
+          }
+          if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
-        if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
+        const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
+        if(config.quantityMode==='calculator'){
+          const calculated=await findCalculatorAdditions({candidates,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
+            ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
+          additionFills=calculated.fills;additionFill=additionFills[0];
+          if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
+            trigger={at:stop.at,reading:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support}};
+            if(mirrorFill&&(mirrorFill.at>stop.at||mirrorFill.at===stop.at&&(stop.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
+          }
+        }else{additionFill=await findQualityAddition({candidates,row,entry,end:additionEnd,...(config.quantityMode?{after:mirrorFill!.at,quantity:config.quantityMode==='entry'?QUALITY_NOTIONAL/entryPrice*(1-mirrorFill!.fraction):config.quantity}:{notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
       }
-      const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
-      if(config.quantityMode==='calculator'){
-        const calculated=await findCalculatorAdditions({candidates,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
-          ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
-        additionFills=calculated.fills;additionFill=additionFills[0];
-        if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
-          trigger={at:stop.at,reading:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support}};
-          if(mirrorFill&&(mirrorFill.at>stop.at||mirrorFill.at===stop.at&&(stop.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
-        }
-      }else{additionFill=await findQualityAddition({candidates,row,entry,end:additionEnd,...(config.quantityMode?{quantity:config.quantityMode==='entry'?QUALITY_NOTIONAL/entryPrice:config.quantity}:{notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
     }
     const held = prices.filter(b => b.openTime < finalTime);
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));

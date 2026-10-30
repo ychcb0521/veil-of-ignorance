@@ -1,3 +1,4 @@
+import {isQualityCampaignId} from '@/lib/campaignSections';
 /**
  * Legs 表「加仓校验」列：每一笔加仓的仓位大小是否合规。
  *
@@ -21,9 +22,10 @@
  * 新加仓的风险只算价格距离，不额外估算未来手续费。
  *
  * K 从哪来：腿上不存加仓的止损价（pre_planned_stop_loss 已弃用），
- * 只能读加仓那一刻挂着的反向委托——对冲 @ K 就是那张反向单的挂单价。
+ * 亲自交易读加仓那一刻挂着的反向委托——对冲 @ K 就是那张反向单的挂单价。
  * 反向委托列表与 Legs 表收到的是**同一份**（盘面上隐藏掉的不算），
  * 页面与导出 PNG 各自调用本函数、喂同样的输入，两处读数不可能打架。
+ * 持仓监测另有已冻结的实际 ATR 支撑线 K；用它作为同一校验的止损依据，不虚构反向委托。
  *
  * **旧仓与落袋一律按成交记录逐刀读，不看腿的「平仓时刻」。**
  * 同向成交在引擎里合并成一个仓位，止盈那一刀按成交占比拆到主力、镜像各一条记录；
@@ -408,13 +410,17 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     }
     const x2Coins = add.pre_position_size / s2;
     // 反向委托列表目前只收空单，主空战役读不到 K，自然落到 no_stop_line
-    const s1 = resolveStopLine(orders, d > 0 ? 'SHORT' : 'LONG', t, s2, d);
+    const paper=isQualityCampaignId(add.campaign_id??undefined),fill=paper?add.quality_addition_fill:undefined;
+    const support=fill?.sizing?.support;
+    const frozenSupport=fill&&fill.at===t&&fill.price===s2&&positive(support)?support:null;
+    const s1 = frozenSupport ?? resolveStopLine(orders, d > 0 ? 'SHORT' : 'LONG', t, s2, d);
     if (s1 == null) {
       result.set(add.id, unknown('no_stop_line', { s2, x2Coins }));
       continue;
     }
 
-    const addOperationTime = realTime(execution.record?.openedRealAt) ?? journalOpenOperationTime(add);
+    // Paper trades share one evaluation clock; their frozen simulation times order the actual fills.
+    const addOperationTime = paper?null:realTime(execution.record?.openedRealAt) ?? journalOpenOperationTime(add);
     const sameSide = [...ledgers.values()].filter(ledger => ledger.leg.id !== add.id
       && ledger.leg.direction === add.direction
       // 别次回放可以撞上同一模拟时刻；真实还没开出的腿不能贡献旧仓或落袋。

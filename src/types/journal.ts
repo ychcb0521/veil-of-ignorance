@@ -884,6 +884,8 @@ export interface TradeJournal {
    */
   pre_timeline_id?: string | null;
   pre_entry_price: number | null;
+  /** Frozen paper-monitoring fill, including the actual ATR support active at acquisition. */
+  quality_addition_fill?: QualityAdditionFill;
   /** @deprecated v2 snapshot no longer records stop-loss in this field. */
   pre_planned_stop_loss: number | null;
   /** Opportunity-quality input captured at entry: expected payoff ratio b (e.g. 5 = 5:1). */

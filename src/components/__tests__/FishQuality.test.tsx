@@ -855,3 +855,14 @@ it('saves renamed algorithms and edited addition conditions together from the up
  fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'改名并保留加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'fixed',quantity:75}});
 });
+
+it('names the combination table and keeps bottom and horizontal scroll stable when the browser would clamp temporarily shortened rows',()=>{
+ const s=state();s.study=importQualityLibrary(s.study,Array.from({length:350},(_,i)=>({id:`stable-${i}`,symbol:`STABLE${String(i).padStart(3,'0')}USDT`,timeMs:T-(i+1)*60000,timeLabel:'',fallbackZone:''})));
+ let clamp=false;
+ const height=vi.spyOn(HTMLElement.prototype,'offsetHeight','get').mockImplementation(function(){if(!this.matches('[data-testid="quality-fish-row"]'))return 0;if(clamp&&this.style.height==='33px'){const box=document.querySelector<HTMLElement>('[data-testid="quality-fish-table"]');if(box){box.scrollTop=Math.min(box.scrollTop,200);box.scrollLeft=0;}}return 66;});
+ const viewport=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(){return this.matches('[data-testid="quality-fish-table"]')?448:0;});
+ try{const view=render(<FishQuality state={s}/>),box=screen.getByTestId('quality-fish-table');expect(screen.getByTestId('quality-combination-title')).toHaveTextContent('组合表');clamp=true;
+  for(const top of [7000,18000,350*66]){box.scrollTop=top;box.scrollLeft=1600;fireEvent.scroll(box);expect(box.scrollTop).toBe(top);expect(box.scrollLeft).toBe(1600);}
+  expect(screen.getByText('STABLE349USDT')).toBeInTheDocument();s.study={...s.study,results:[...s.study.results]};view.rerender(<FishQuality state={s}/>);expect(box.scrollTop).toBe(350*66);expect(box.scrollLeft).toBe(1600);
+ }finally{height.mockRestore();viewport.mockRestore();}
+});

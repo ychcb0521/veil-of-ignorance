@@ -67,7 +67,7 @@ describe('conditional additions',()=>{
   const r=await run(g,path);expect(r.status).toBe('closed');expect(r.additionFill).toBeDefined();
   expect(r.totalInvested).toBe(200);expect(r.pnl).toBeCloseTo(before?-27.5:-15);expect(r.returnPct).toBeCloseTo((before?-27.5:-15)/2);
   const campaign=buildQualityCampaignData('owner',{sample:row,plan:g,result:r,detectors:[],observeHours:0,firstEvaluatedAt:T},'sell');
-  expect(campaign.legs.map(l=>l.leg_role)).toEqual(['main_open','main_add_1']);
+  expect(campaign.legs.map(l=>l.leg_role)).toEqual(['main_open','mirror_tp','main_add_1']);
   expect(campaign.tradeRecords.reduce((sum,t)=>sum+t.pnl,0)).toBeCloseTo(r.pnl!);
   expect(computeCampaignRealizedPnl(campaign.campaign,campaign.legs,campaign.tradeRecords,{}).total).toBeCloseTo(r.pnl!);
   expect(campaign.campaign.comparison!.sellEvidence!.additionFill).toEqual(r.additionFill);
@@ -121,19 +121,26 @@ it('values an addition-only holding without requiring a sell algorithm',async()=
  expect(r).toMatchObject({status:'open',totalInvested:200,additionFill:{at:T+M,price:120},returnPct:expect.closeTo(10)});
 });
 
-it.each([['entry',1],['fixed',.5]] as const)('sizes %s additions in coins and derives the actual cash invested at the fill price',async(quantityMode,quantity)=>{
- const g=group(),plan={...g,addition:{...g.addition!,quantityMode,quantity}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,90));
- const result=await run(plan,path),cost=100+quantity*120,pnl=(1+quantity)*90-cost;
- expect(result.additionFill).toMatchObject({price:120,quantity,notional:quantity*120});expect(result.totalInvested).toBe(cost);expect(result.averageEntryPrice).toBeCloseTo(cost/(1+quantity));expect(result.pnl).toBeCloseTo(pnl);expect(result.returnPct).toBeCloseTo(pnl/cost*100);
+it.each([['entry',.5],['fixed',.5]] as const)('sizes %s additions after the half mirror and values only the remaining holding',async(quantityMode,quantity)=>{
+ const g=group(),plan={...g,mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{...g.addition!,quantityMode,quantity}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101,106):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,90));
+ const result=await run(plan,path),cost=100+quantity*120,remainingCost=50+quantity*120,pnl=2.5+(.5+quantity)*90-remainingCost;
+ expect(result.additionFill).toMatchObject({price:120,quantity,notional:quantity*120});expect(result.totalInvested).toBe(cost);expect(result.averageEntryPrice).toBeCloseTo(remainingCost/(.5+quantity));expect(result.pnl).toBeCloseTo(pnl);expect(result.returnPct).toBeCloseTo(pnl/cost*100);
  expect(await run(plan,path,5,await run(plan,path,3))).toEqual(result);
 });
-it('keeps historical cash-sized trials separate from new coin-sized trials and rejects invalid quantities',async()=>{
- const g=group(),plan={...g,addition:{...g.addition!,quantityMode:'entry' as const,quantity:1}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,90));
- expect(qualityResultKey(row,g,0)).not.toBe(qualityResultKey(row,plan,0));const old=await run(g,path);expect(old.additionFill!.notional).toBe(100);expect((await run(plan,path,5,old)).additionFill).toMatchObject({quantity:1,notional:120});expect(old.additionFill!.quantity).toBeCloseTo(100/120);
+it('invalidates earlier coin-sized cached trials while retaining frozen legacy cash fills and rejecting invalid quantities',async()=>{
+ const g=group(),plan={...g,mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{...g.addition!,quantityMode:'entry' as const,quantity:1}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101,106):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,90));
+ expect(qualityResultKey(row,g,0)).not.toBe(qualityResultKey(row,plan,0));const old=await run(g,path);expect(old.additionFill!.notional).toBe(100);expect((await run(plan,path,5,old)).additionFill).toMatchObject({quantity:.5,notional:60});expect(old.additionFill!.quantity).toBeCloseTo(100/120);
+ expect(additionIdentity(plan.addition)[0]).toBe('holding-add-once-after-half-quantity-v2');
  for(const quantity of [0,-1,NaN,Infinity])expect(()=>validateQualityAddition({...plan.addition,quantityMode:'fixed',quantity})).toThrow('加仓数量');expect(()=>validateQualityAddition({...plan.addition,quantityMode:'fixed',quantity:.25})).not.toThrow();
 });
-it('sells the whole coin-sized holding at a full mirror and keeps campaign PnL aligned with actual invested cash',async()=>{
- const g={...group(),addition:{...group().addition!,quantityMode:'fixed' as const,quantity:.5},mirrorTakeProfit:{enabled:true,gainPct:25,sellPct:100}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,130));
- const result=await run(g,path);expect(result).toMatchObject({status:'closed',totalInvested:160,additionFill:{price:120,quantity:.5,notional:60},endPrice:130,pnl:35,remainingQuantity:0});expect(result.returnPct).toBeCloseTo(35/160*100);
- const campaign=buildQualityCampaignData('owner',{sample:row,plan:g,detectors:[],result,observeHours:0,firstEvaluatedAt:result.evaluatedAt},'sell');expect(computeCampaignRealizedPnl(campaign.campaign,campaign.legs,campaign.tradeRecords,{}).total).toBeCloseTo(35);
+it.each(['entry','fixed'] as const)('requires a realized half mirror even for %s coin sizing',async quantityMode=>{
+ const plan={...group(),addition:{...group().addition!,quantityMode,quantity:.5}},path=load(at=>at<T?bar(at):at===T?bar(at,100,110):bar(at,120));
+ for(const mirrorTakeProfit of [undefined,{enabled:true,gainPct:50,sellPct:50},{enabled:true,gainPct:5,sellPct:25},{enabled:true,gainPct:5,sellPct:100}]){
+  const result=await run({...plan,mirrorTakeProfit},path);expect(result.additionFill).toBeUndefined();expect(result.additionNote).toContain('半仓镜像');
+ }
+});
+it('defers a coin-sized addition past the half-mirror opening minute and freezes campaign PnL correctly',async()=>{
+ const g={...group(),addition:{...group().addition!,quantityMode:'entry' as const,quantity:1},mirrorTakeProfit:{enabled:true,gainPct:15,sellPct:50}},path=load(at=>at<T?bar(at):at===T?bar(at,100,110):at===T+M?bar(at,120):bar(at,130));
+ const result=await run(g,path);expect(result).toMatchObject({status:'open',additionFill:{at:T+2*M,price:130,quantity:.5,notional:65},mirrorFill:{at:T+M,price:120},totalInvested:165,pnl:25});
+ const campaign=buildQualityCampaignData('owner',{sample:row,plan:g,detectors:[],result,observeHours:0,firstEvaluatedAt:result.evaluatedAt},'sell');expect(campaign.legs).toHaveLength(3);expect(qualityMirrorBoard(campaign.campaign)?.quantity).toBe(.5);
 });

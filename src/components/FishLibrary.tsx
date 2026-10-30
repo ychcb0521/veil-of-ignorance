@@ -128,7 +128,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     </button>
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}
     </span>
-    {p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel：列表信息、具体指标和捕获阈值，不受当前筛选影响" disabled={!p.signals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
+    {open && p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel：列表信息、具体指标和捕获阈值，不受当前筛选影响" disabled={!p.signals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
     </div>
     {open && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
