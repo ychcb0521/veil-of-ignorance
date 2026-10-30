@@ -83,6 +83,8 @@ export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
 /** Deep dig 目录与渔共用的账号定义键。 */
 export const FEATURES_KEY = 'deep_dig_features_v1';
 const ORIGINAL_SELLER_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear', 'mbi2-bear':'MBI2_bear', 'ctba_12h-bear':'CTBA_12H_bear', ...Object.fromEntries(SELLER_RETENTION_SPECS.map(s=>[s.id,s.core])) };
+// S is included by request in the recent-focus group; its 0–1 scale is not a negative seller score.
+const FOCUS_SOURCE_CORES:Readonly<Record<string,string>>={...ORIGINAL_SELLER_CORES,state:'state'};
 export const SELLER_FEATURE_CORES:Readonly<Record<string,string>>={...ORIGINAL_SELLER_CORES,...Object.fromEntries(Object.entries(ORIGINAL_SELLER_CORES).map(([id,core])=>[id+'-v2',core]))};
 // Retired built-ins must not return as saved custom definitions. Historical results remain stored.
 export const isRetiredFeature = (id: string) => id === 'drift-speed-down-z' || id === 'seller-push';
@@ -934,10 +936,11 @@ export function createSellerFocusCopy(source:DeepDigFeatureDef,id=source.id+'-v2
   const markers=[...new Set(copy.formula.match(/# seller-[\w-]+/g)??[])];
   const formula=[...markers,'# seller-focus-v2：原窗口不变；最近2小时相对更早数据3倍权重',prefix+'_h = 2',prefix+'_weight = 3',
     ...program.statements.map(s=>(s.name?s.name+' = ':'')+render(s.expr))].join('\n');
-  return {...copy,id,name:source.name+'｜版本2',short:source.short+'·版本2',chartCore:source.chartCore??ORIGINAL_SELLER_CORES[source.id]??program.statements.at(-1)?.name??undefined,sellerSignVersion:1,focusSourceId:source.id,focusVersion:2,focusPrefix:prefix,formula,
-    definition:source.definition+'\n版本2：独立复制创建时的账号公式和参数，保留原窗口、周期、半衰期及预热；历史聚合核中最近2小时的相对权重为更早数据的3倍。可在本副本公式顶部修改 '+prefix+'_h 和 '+prefix+'_weight；权重1恢复复制时原计算。重加权均值、波动尺度、递推/成交核；极值与时间滞后保持原义，不直接放大最终分数。零仍为均衡，卖方仍为负值。原阈值不自动沿用。'};
+  const state=source.id==='state';
+  return {...copy,id,name:source.name+'｜版本2',short:state?'状态 S·版本2':source.short+'·版本2',chartCore:source.chartCore??FOCUS_SOURCE_CORES[source.id]??program.statements.at(-1)?.name??undefined,sellerSignVersion:1,focusSourceId:source.id,focusVersion:2,focusPrefix:prefix,formula,
+    definition:source.definition+'\n版本2：独立复制创建时的账号公式和参数，保留原窗口、周期、半衰期及预热；历史聚合核中最近2小时的相对权重为更早数据的3倍。可在本副本公式顶部修改 '+prefix+'_h 和 '+prefix+'_weight；权重1恢复复制时原计算。重加权均值、波动尺度、递推/成交核；极值与时间滞后保持原义，不直接放大最终分数。'+(state?'状态S保持0–1刻度，0.5为均衡，越低越偏卖方；图表沿用原S的0.6参考线。':'零仍为均衡，卖方仍为负值。')+'原阈值不自动沿用。'};
 }
-export const SELLER_FOCUS_FEATURES=Object.keys(ORIGINAL_SELLER_CORES).map(id=>({...createSellerFocusCopy(ORIGINAL_BUILTIN_FEATURES.find(d=>d.id===id)!),builtin:true}));
+export const SELLER_FOCUS_FEATURES=Object.keys(FOCUS_SOURCE_CORES).map(id=>({...createSellerFocusCopy(ORIGINAL_BUILTIN_FEATURES.find(d=>d.id===id)!,id+'-v2',id==='state'?Date.parse('2026-10-30T06:26:11Z'):SELLER_FOCUS_CREATED_AT),builtin:true}));
 export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES,...SELLER_FOCUS_FEATURES];
 
 /** 新增特征值的模板。 */
@@ -988,9 +991,9 @@ export function ensureFeatureCopies(saved:readonly DeepDigFeatureDef[]):DeepDigF
   let next=ensureSellerRetentionCopies(saved);
   const byId=new Map(next.map(d=>[d.id,d]));
   const sources=[...ORIGINAL_BUILTIN_FEATURES.map(d=>byId.get(d.id)??d),...next.filter(d=>!ORIGINAL_BUILTIN_FEATURES.some(b=>b.id===d.id))]
-    .filter(d=>!d.focusVersion&&!d.focusSourceId&&(Object.hasOwn(ORIGINAL_SELLER_CORES,d.id)||Object.values(ORIGINAL_SELLER_CORES).includes(d.chartCore??'')||Object.hasOwn(ORIGINAL_SELLER_CORES,featureTemplateId(d)??'')));
+    .filter(d=>!d.focusVersion&&!d.focusSourceId&&(d.id==='state'||Object.hasOwn(ORIGINAL_SELLER_CORES,d.id)||Object.values(ORIGINAL_SELLER_CORES).includes(d.chartCore??'')||Object.hasOwn(ORIGINAL_SELLER_CORES,featureTemplateId(d)??'')));
   for(const source of sources){
-    const id=Object.hasOwn(ORIGINAL_SELLER_CORES,source.id)?source.id+'-v2':'seller-focus-v2--'+source.id;
+    const id=Object.hasOwn(FOCUS_SOURCE_CORES,source.id)?source.id+'-v2':'seller-focus-v2--'+source.id;
     if(next.some(d=>d.id===id||d.focusSourceId===source.id))continue;
     const effective=upgradeSellerSign(upgradeBearResponse(upgradeBssFormula(upgradeFormula(upgradeGroupVars(source)))));
     let copy:DeepDigFeatureDef;

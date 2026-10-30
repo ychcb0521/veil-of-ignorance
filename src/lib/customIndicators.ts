@@ -338,6 +338,7 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
     if (registeredAccountIndicators.has(item.id)) continue;
     for (const level of [0, 1, 2]) {
       const label = level === 0 ? item.short : 'avg_' + item.core + (level === 2 ? '_2' : '');
+      const color=(v:number|undefined)=>item.templateId!=='STATE'?vColor(v):v==null?'#F0B90B':level===0&&v>=.5&&v<=.6?'#FFD600':v>item.neutral?'#0ECB81':v===item.neutral?'#F0B90B':'#F6465D';
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label, calcParams: [researchDefaultPeriod(item), 0, 0], precision: 8,
         ...(item.min < item.max ? { minValue: item.min, maxValue: item.max } : {}),
@@ -349,10 +350,10 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
           const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
           const keys=['value',...(level===0?item.components??[]:[])],format=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':Number(v.toPrecision(7)).toString();
           return {name:def.short,calcParamsText:focus+' · 版本2 · '+item.parameter+' '+indicator.calcParams[0]+(item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h')),icons:defaultStyles.tooltip.icons,
-            values:keys.map(key=>({title:(key==='value'?label:key)+': ',value:{text:format(row?.[key]),color:vColor(row?.[key])}}))};
+            values:keys.map(key=>({title:(key==='value'?label:key)+': ',value:{text:format(row?.[key]),color:color(row?.[key])}}))};
         },
         figures: [{ key: 'value', title: label + ': ', type: 'line', styles: data => ({
-          color: vColor((data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value), size: 1.5,
+          color: color((data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value), size: 1.5,
         }) }],
         calc: (data, indicator) => {
           const values = researchChartSeries(data, item, indicator.calcParams[0]);

@@ -7,7 +7,7 @@ export const CUSTOM_INDICATOR_GROUPS = [
   { key: 'history', featureIds: ['bss', 'dss'], title: '与过去24 小时相比', ids: ['BSS', 'DSS'], note: '0：相对历史与主动性的综合中性点。', detail: '动量与相对量分量以过去 24 小时为基线标准化，并叠加主动买卖分量；0 不等于各分量都与过去完全相同。' },
   { key: 'advantage', featureIds: ['cba', 'cda'], title: '是否保住单边优势', ids: ['CBA', 'CDA'], note: '0：净保留的单边优势为零。' },
   {key:'seller-retention',featureIds:SELLER_RETENTION_SPECS.map(s=>s.id),ids:SELLER_RETENTION_SPECS.map(s=>s.chartId),title:'卖方成果保留（独立副本）',note:'0：综合均衡参考；负值表示卖方倾向。原算法与新增位移分量共同决定。'},
-  {key:'seller-focus-v2',featureIds:SELLER_FOCUS_FEATURES.map(d=>d.id),ids:SELLER_FOCUS_FEATURES.map(d=>'FEATURE_'+d.id),title:'空方特征 · 版本2（近2小时加权）',note:'保留原窗口，最近2小时的相对权重为更早数据的3倍；独立公式，可分别研究与选择。'},
+  {key:'seller-focus-v2',featureIds:SELLER_FOCUS_FEATURES.map(d=>d.id),ids:SELLER_FOCUS_FEATURES.map(d=>'FEATURE_'+d.id),title:'空方特征 · 版本2（近2小时加权）',note:'保留原窗口，最近2小时的相对权重为更早数据的3倍；独立公式，可分别研究与选择。状态S保持0–1刻度。'},
 ] as const;
 
 export function groupDeepDigFeatures(defs: readonly DeepDigFeatureDef[]) {

@@ -1,6 +1,6 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import {createFormulaEvaluationCache,evaluateProgram,parseFormula,programHistoryBars} from '../formula';
-import {BUILTIN_FEATURES,SELLER_FOCUS_FEATURES,SELLER_FEATURE_CORES,FEATURES_KEY,createSellerFocusCopy,ensureFeatureCopies,mergeFeatureDefs,saveFeatureDefinition,definitionKey,checkDefinition,compileFeatureFormula,evaluateOnBars,featureWindowMs,CDI2_DEF,CDA_DEF} from '../features';
+import {BUILTIN_FEATURES,SELLER_FOCUS_FEATURES,SELLER_FEATURE_CORES,FEATURES_KEY,createSellerFocusCopy,ensureFeatureCopies,mergeFeatureDefs,saveFeatureDefinition,definitionKey,checkDefinition,compileFeatureFormula,evaluateOnBars,featureWindowMs,CDI2_DEF,CDA_DEF,STATE_DEF} from '../features';
 import {compileFishProgram,evaluateFishProgram,fishStatistics} from '@/lib/fish/algorithm';
 import {readFishPreference} from '@/lib/fish/preferences';
 import {accountResearchIndicators,researchIndicatorForFeature,researchChartSeries} from '@/lib/researchIndicators';
@@ -13,7 +13,7 @@ const S=(v:number[])=>Float64Array.from(v);
 const calc=(src:string,x=S([1,2,3,4,5]),minutes=60)=>evaluateProgram(parseFormula(src,new Set(['x'])),{x},{barMinutes:minutes}) as Float64Array;
 function bars(count=1100):ResearchBar[]{let c=100;return Array.from({length:count},(_,i)=>{const open=c;c*=Math.exp(.001*Math.sin(i*.8)-(i>800?.0003:0));const q=10000*(1+.2*Math.sin(i/11));return {openTime:i*300000,open,close:c,high:Math.max(open,c)*1.001,low:Math.min(open,c)*.999,volume:q/c,quoteVolume:q,takerBuyQuoteVolume:q*(.5+.2*Math.sin(i/20)),takerBuyVolume:null,refClose:20000*Math.exp(.00003*i)};});}
 const run=(d:typeof CDI2_DEF,data:ResearchBar[],cache?:ReturnType<typeof createFormulaEvaluationCache>)=>evaluateOnBars(data,compileFeatureFormula(d.formula),d,cache);
-const value=(d:typeof CDI2_DEF,data:ResearchBar[])=>{const out=run(d,data),v=out.vars.get(d.chartCore??SELLER_FEATURE_CORES[d.id]);return typeof v==='number'?Array(data.length).fill(v):Array.from(v??[]);};
+const value=(d:typeof CDI2_DEF,data:ResearchBar[])=>{const out=run(d,data),v=out.vars.get(d.chartCore??(d.id==='state'?'state':SELLER_FEATURE_CORES[d.id]));return typeof v==='number'?Array(data.length).fill(v):Array.from(v??[]);};
 afterEach(()=>{localStorage.clear();clearPersistedStateMemoryForTests();});
 describe('relative recent temporal kernels',()=>{
  it('uses exactly 3:1 observation weights and reliability-weighted sample variance',()=>{
@@ -62,8 +62,20 @@ describe('relative recent temporal kernels',()=>{
  });
 });
 describe('independent seller versions 2',()=>{
- it('creates all 15, including CDA; freezes account formulas once, retains hidden copies and original configs',()=>{
-  expect(SELLER_FOCUS_FEATURES).toHaveLength(15);expect(SELLER_FOCUS_FEATURES.some(d=>d.focusSourceId==='cda')).toBe(true);
+ it('adds S once without negating its scale, changing S/S2 or rebasing the existing 15 account copies',()=>{
+  const existing=ensureFeatureCopies([]).filter(d=>d.id!=='state-v2'),before=structuredClone(existing),original=structuredClone(STATE_DEF);
+  const source={...STATE_DEF,formula:'state = avg(C, avgh)',halfLifeHours:9,avgHours:7},saved=ensureFeatureCopies([...existing,source]),copy=saved.find(d=>d.id==='state-v2')!;
+  expect(copy).toMatchObject({focusSourceId:'state',focusVersion:2,chartCore:'state',short:'状态 S·版本2',halfLifeHours:9,avgHours:7});
+  expect(copy.formula).toContain('avg(C, avgh, focus2_h, focus2_weight)');expect(copy.definition).toContain('0.5为均衡');expect(copy.definition).not.toContain('卖方仍为负值');
+  const data=bars(100).map(b=>({...b,close:.5}));expect(value(copy,data).at(-1)).toBe(.5);
+  expect(saved.filter(d=>d.id!=='state-v2'&&d.id!=='state')).toEqual(before);expect(saved.some(d=>d.id==='state2-v2')).toBe(false);expect(ensureFeatureCopies(saved)).toBe(saved);
+  expect(saveFeatureDefinition(saved,{...source,formula:'state = 0.1'}).find(d=>d.id==='state-v2')).toEqual(copy);
+  expect(saveFeatureDefinition(saved,{...copy,formula:'state = 0.9'}).find(d=>d.id==='state')).toEqual(source);expect(STATE_DEF).toEqual(original);
+  const actual=SELLER_FOCUS_FEATURES.find(d=>d.id==='state-v2')!,values=value(actual,bars()).filter(Number.isFinite);expect(values.length).toBeGreaterThan(100);expect(values.every(v=>v>=0&&v<=1)).toBe(true);
+  expect(researchIndicatorForFeature(actual)).toMatchObject({neutral:.6,avgNeutral:.6,min:0,max:1,avgRange:[0,1],templateId:'STATE',seller:false});
+ });
+ it('creates all 16, including CDA and S; freezes account formulas once, retains hidden copies and original configs',()=>{
+  expect(SELLER_FOCUS_FEATURES).toHaveLength(16);expect(SELLER_FOCUS_FEATURES.some(d=>d.focusSourceId==='cda')).toBe(true);
   const source={...CDA_DEF,name:'账号CDA',formula:'CDA = avg(ln(C), avgh)',halfLifeHours:9,avgHours:17},before=structuredClone(source);
   const saved=ensureFeatureCopies([source]),copy=saved.find(d=>d.id==='cda-v2')!;
   expect(copy).toMatchObject({name:'账号CDA｜版本2',halfLifeHours:9,avgHours:17,focusSourceId:'cda',focusVersion:2});expect(copy.formula).toContain('avg(ln(C), avgh, focus2_h, focus2_weight)');
@@ -80,9 +92,9 @@ describe('independent seller versions 2',()=>{
   const original=BUILTIN_FEATURES.find(s=>s.id===d.focusSourceId)!,data=bars(),off={...d,formula:d.formula.replace(d.focusPrefix+'_weight = 3',d.focusPrefix+'_weight = 1')};
   const raw=value(original,data),same=value(off,data),focused=value(d,data);expect(same).toEqual(raw);expect(focused.some(Number.isFinite)).toBe(true);expect(focused).not.toEqual(raw);
   expect(value(d,data.slice(0,1000))).toEqual(focused.slice(0,1000));expect(definitionKey(d)).not.toBe(definitionKey(original));
-  expect(checkDefinition(d).formula).toBeNull();expect(featureWindowMs(d)).toBe(featureWindowMs(original));expect(readFishPreference(d.id)).toMatchObject({direction:'<',threshold:''});
+  expect(checkDefinition(d).formula).toBeNull();expect(featureWindowMs(d)).toBe(featureWindowMs(original));expect(readFishPreference(d.id)).toMatchObject({direction:d.focusSourceId==='state'?'>':'<',threshold:''});
   const constants=(def:typeof d)=>run(def,[]).vars,old=constants(original),updated=constants(d);for(const [name,v] of old)if(typeof v==='number')expect(updated.get(name)).toBe(v);
- });
+ },20000);
  it('keeps zero neutral, missing CTBA inputs missing, and original T range/window untouched',()=>{
   const d=SELLER_FOCUS_FEATURES.find(d=>d.id==='ctba_12h-bear-v2')!,data=bars().map(b=>({...b,open:100,close:100,high:100,low:100,volume:100,quoteVolume:10000,takerBuyQuoteVolume:5000}));
   expect(value(d,data).at(-1)).toBe(0);const out=run(d,data).vars;for(const [key,v] of Object.entries({N:144,f:8,s:24,m:48,lambda:Math.LN2/24}))expect(out.get(key)).toBe(v);
@@ -97,12 +109,12 @@ describe('independent seller versions 2',()=>{
  },20000);
  it.each(SELLER_FOCUS_FEATURES)('$id is selectable with own names in chart, fishing, mining and sell monitoring',d=>{
   localStorage.setItem('sim_anon_'+FEATURES_KEY,JSON.stringify([d]));const defs=accountFeatureDefs(),item=researchIndicatorForFeature(d),data=bars().map(b=>({...b,refClose:null}));
-  expect(item).toMatchObject({id:'FEATURE_'+d.id,featureId:d.id,seller:true,name:d.name,short:d.short});expect(accountResearchIndicators(defs).filter(i=>i.featureId===d.id)).toHaveLength(1);
+  expect(item).toMatchObject({id:'FEATURE_'+d.id,featureId:d.id,seller:d.focusSourceId!=='state',name:d.name,short:d.short});expect(accountResearchIndicators(defs).filter(i=>i.featureId===d.id)).toHaveLength(1);
   expect(groupDeepDigFeatures(defs).find(g=>g.key==='seller-focus-v2')!.items.some(x=>x.id===d.id)).toBe(true);
   const stats=fishStatistics(d).map(x=>x.name);expect(stats).toContain(d.chartCore!);
   const plan=compileFishProgram(d,{statistic:d.chartCore!,direction:'<',threshold:0,constraints:[]});expect(plan.unavailable).toBeFalsy();
   const actual=evaluateFishProgram(data,plan).average.at(-1),expected=value(d,data).at(-1)!;expect(actual).toBeCloseTo(expected,8);
   const candles=data.map(b=>({timestamp:b.openTime,open:b.open,high:b.high,low:b.low,close:b.close,volume:b.volume!,turnover:b.quoteVolume!,takerBuyTurnover:b.takerBuyQuoteVolume!,cba2Closed:true}));
   const chart=researchChartSeries(candles,item,item.period,{fetchReference:false});expect(chart.core.at(-1)).toBeCloseTo(expected*d.scale,8);
- });
+ },20000);
 });

@@ -15,6 +15,16 @@ const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'STATE', 'S
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
+  it('状态S版本2只出现在近2小时加权分组，独立添加并保留0–1范围及原S颜色',()=>{
+    const changed=vi.fn();render(<IndicatorMenu open indicators={[]} onClose={()=>{}} onIndicatorsChange={changed}/>);
+    const group=screen.getByRole('region',{name:'空方特征 · 版本2（近2小时加权）'});
+    expect(screen.getAllByText('状态 S·版本2')).toHaveLength(1);fireEvent.click(within(group).getByText('状态 S·版本2'));
+    expect(changed.mock.lastCall![0].at(-1)).toMatchObject({type:'FEATURE_state-v2',period:24,enabled:true});
+    const reg=registered.get(CUSTOM_INDICATOR_MAP['FEATURE_state-v2']);expect(reg).toMatchObject({minValue:0,maxValue:1});
+    for(const [value,color] of [[.2,'#F6465D'],[.55,'#FFD600'],[.8,'#0ECB81']] as const)expect(reg.figures[0].styles({current:{indicatorData:{value}}}).color).toBe(color);
+    const tooltip=reg.createTooltipDataSource({indicator:{result:[{value:.2}],calcParams:[24]},crosshair:{dataIndex:0},defaultStyles:{tooltip:{icons:[]}}});
+    expect(tooltip.calcParamsText).toContain('近2h ×3');expect(tooltip.values[0].value.color).toBe('#F6465D');
+  });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
     expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(ids);
     const changed = vi.fn();
