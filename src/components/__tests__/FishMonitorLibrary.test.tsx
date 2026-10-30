@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishMonitorLibrary } from '@/components/FishMonitorLibrary';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
@@ -28,19 +28,24 @@ it('keeps its entry compact, searches frozen outcomes and browses each saved rou
   render(<FishMonitorLibrary study={study}/>);
   expect(screen.queryByRole('dialog')).toBeNull(); fireEvent.click(screen.getByRole('button', { name: '打开监测库' }));
   const dialog = screen.getByRole('dialog', { name: '监测库' });
-  expect(within(dialog).getByText('4 条记录 · 2 轮监测')).toBeInTheDocument(); expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(4);
+  expect(within(dialog).getByText(/4 条记录 · 2 轮监测/)).toBeInTheDocument(); expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(4);
   fireEvent.change(screen.getByLabelText('搜索监测库'), { target: { value: 'AAA' } }); expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(2);
   fireEvent.change(screen.getByLabelText('监测库轮次'), { target: { value: study.monitorLibrary!.rounds[0].id } }); expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: '查看 AAAUSDT 状态 S 原始值 < 0.5 监测条件' }));
   const detail = screen.getByTestId('monitor-library-details'); expect(detail).toHaveTextContent('状态 S 原始值 < 0.5'); expect(detail).toHaveTextContent('买前过滤：状态 S 原始值 > 0.7');
   expect(detail).not.toHaveTextContent('< 0.1'); expect(within(detail).getByText('公式快照')).toBeInTheDocument();
 });
-it('retains every record through paging, opens its source chart and labels an empty library', () => {
+it('scrolls beyond the former page boundary, opens its source chart and labels an empty library', async () => {
   const study = archived(), prototype = study.monitorLibrary!.records[0];
   study.monitorLibrary!.records = Array.from({ length: 61 }, (_, i) => ({ ...prototype, id: `row-${i}`, source: { ...prototype.source, id: String(i), symbol: `COIN${i}USDT` } }));
   const jump = vi.fn(); const view = render(<FishMonitorLibrary study={study} onJump={jump}/>);
-  fireEvent.click(screen.getByRole('button', { name: '打开监测库' })); expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(50);
-  fireEvent.click(screen.getByRole('button', { name: '下一页' })); expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(11); expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '打开监测库' }));
+  const table = screen.getByTestId('monitor-library-table');
+  expect(table.querySelector('table')).toHaveAttribute('aria-rowcount', '62');
+  expect(screen.getAllByTestId('monitor-library-row').length).toBeLessThan(50);
+  expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
+  fireEvent.scroll(table, { target: { scrollTop: 50 * 72 } });
+  await waitFor(() => expect(table.querySelector('tr[aria-rowindex="52"]')).toBeInTheDocument());
   fireEvent.click(within(screen.getAllByTestId('monitor-library-row')[0]).getByRole('button', { name: /^COIN/ })); expect(jump).toHaveBeenCalledOnce(); expect(screen.queryByRole('dialog')).toBeNull();
   view.unmount(); render(<FishMonitorLibrary study={newQualityStudy(T)}/>); fireEvent.click(screen.getByRole('button', { name: '打开监测库' })); expect(screen.getByText(/暂无监测记录/)).toBeInTheDocument();
 });
@@ -50,17 +55,20 @@ it('does not present returns as bought outcomes when frozen buy conditions faile
   const row = screen.getByTestId('monitor-library-row'); expect(row).toHaveTextContent('未买入'); expect(row).not.toHaveTextContent('+10.00%');
 });
 
-it('filters exact monitoring algorithms, resets paging, and sorts every data header before paging', () => {
+it('filters exact monitoring algorithms, resets scroll, and sorts the full dataset', async () => {
   const study = archived();
   const prototypes = study.monitorLibrary!.records;
   study.monitorLibrary!.records = Array.from({ length: 61 }, (_, i) => ({ ...prototypes[i % prototypes.length], id: `row-${i}`, source: { ...prototypes[0].source, symbol: `COIN${i}USDT` }, result: { ...prototypes[0].result!, returnPct: i } }));
   render(<FishMonitorLibrary study={study}/>); fireEvent.click(screen.getByRole('button', { name: '打开监测库' }));
-  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  const table = screen.getByTestId('monitor-library-table');
+  fireEvent.scroll(table, { target: { scrollTop: 50 * 72 } });
+  await waitFor(() => expect(table.querySelector('tr[aria-rowindex="52"]')).toBeInTheDocument());
   const select = screen.getByLabelText('监测库的监测算法');
   const exact = within(select).getAllByRole('option').find(o => o.textContent?.includes('< 0.4')) as HTMLOptionElement;
   fireEvent.change(select, { target: { value: exact.value } });
   expect(screen.getAllByTestId('monitor-library-row').length).toBeLessThan(50);
-  expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+  expect(table.scrollTop).toBe(0);
+  expect(screen.queryByRole('button', { name: '上一页' })).toBeNull();
   for (const r of screen.getAllByTestId('monitor-library-row')) expect(r).toHaveTextContent('< 0.4');
   fireEvent.change(select, { target: { value: '' } });
   fireEvent.click(screen.getByRole('button', { name: '监测库按收益率排序' }));
@@ -114,7 +122,7 @@ it('backfills all existing resonance beyond the screenshot and automatically inc
 });
 
 
-it('links every frozen trade, including other pages and focused signals, to its own campaign without requiring chart support',async()=>{
+it('links every frozen trade, including offscreen records and focused signals, to its own campaign without requiring chart support',async()=>{
  const {qualityMonitorCampaignPath}=await import('@/lib/fish/qualityMonitorCampaign');
  const study=archived();
  const opened=vi.fn();render(<FishMonitorLibrary study={study} canJump={()=>false} onOpenCampaign={opened}/>);

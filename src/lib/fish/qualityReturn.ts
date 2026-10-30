@@ -14,6 +14,7 @@ export interface QualityReturnUi {
   phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;
   postExitExpanded?: string[];
+  entryExpanded?: string[];
   labelExpanded?: string[];
   sellErrorExpanded?: string[];
   runStage?: 'filter' | 'monitor';

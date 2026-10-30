@@ -1,5 +1,5 @@
-import {newQualityStudy,qualityComparisonRows,qualityResultKey,qualityFilterReadingKey,type FishQualityStudy,type QualitySample,type QualityGroup} from './quality';
-import {qualityMonitorRoundRecordIds,type QualityMonitorRound} from './qualityMonitorLibrary';
+import {newQualityStudy,qualityDisplayRows,qualityComparisonRows,qualityResultKey,qualityFilterReadingKey,type FishQualityStudy,type QualitySample,type QualityGroup} from './quality';
+import {archiveQualityMonitorStudy,qualityMonitorRoundRecordIds,type QualityMonitorRound} from './qualityMonitorLibrary';
 import {librarySignalIdentity} from './libraryRounds';
 import {shortFishHash} from './algorithm';
 import {qualityOrigins} from './qualitySources';
@@ -24,4 +24,21 @@ export function monitorRoundStudy(study:FishQualityStudy,round:QualityMonitorRou
   for(const [i,f] of (plan.buyFilters??[]).entries()){const reading=r.readings[i];if(reading)out.filterReadings!.push({...structuredClone(reading),key:qualityFilterReadingKey(row,f)});}
  }
  return out;
+}
+
+/** A working copy owns its nested fields; the prior active table is archived before replacement. */
+export function copyMonitorStudy(current:FishQualityStudy,snapshot:FishQualityStudy,at=Date.now(),sourceRoundId?:string):FishQualityStudy{
+ let source=current;
+ if(sourceRoundId&&current.monitorLibrary&&!current.monitorLibrary.archives?.some(a=>a.sourceRoundId===sourceRoundId)){
+  const round=current.monitorLibrary.rounds.find(r=>r.id===sourceRoundId);
+  if(round){const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...frozen}=structuredClone(snapshot);source={...current,monitorLibrary:{...current.monitorLibrary,archives:[...(current.monitorLibrary.archives??[]),{id:`monitor-round-snapshot-${round.id}`,version:1,createdAt:round.startedAt,reason:'copy-source',sourceRoundId:round.id,study:frozen}]}};}
+ }
+ const saved=archiveQualityMonitorStudy(source,at,'copy'),copy=structuredClone(snapshot);
+ const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...table}=copy;
+ const next={...table,monitorLibrary:saved.monitorLibrary,filterLibrary:saved.filterLibrary,campaignRuns:[...(saved.campaignRuns??[]),...(copy.campaignRuns??[]).filter(r=>!saved.campaignRuns?.some(old=>old.result.key===r.result.key))]};
+ return {...next,selectedRowIds:qualityDisplayRows(next).map(row=>row.id)};
+}
+export function editMonitorDirectory(study:FishQualityStudy,id:string,hidden:boolean,at=Date.now()):FishQualityStudy{
+ const library=study.monitorLibrary;if(!library||!library.archives?.some(a=>a.id===id)&&!library.rounds.some(r=>r.id===id))return study;
+ return {...study,monitorLibrary:{...library,directoryEdits:{...library.directoryEdits,[id]:{hidden,at:Math.max(at,(library.directoryEdits?.[id]?.at??0)+1)}}}};
 }

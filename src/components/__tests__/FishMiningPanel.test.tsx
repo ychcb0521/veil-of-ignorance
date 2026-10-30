@@ -29,7 +29,8 @@ it('explains the plan, starts mining and edits the target', () => {
   expect(screen.queryByText('0 / 1000')).toBeNull();
   expect(screen.queryByRole('status')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '开始挖掘' })); expect(m.start).toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('挖掘目标条数'), { target: { value: '2000' } }); fireEvent.blur(screen.getByLabelText('挖掘目标条数'));
+  expect(screen.queryByLabelText('挖掘目标条数')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
+  fireEvent.change(screen.getByLabelText('挖掘目标条数'), { target: { value: '2000' } });fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
   expect(m.setTarget).toHaveBeenCalledWith(2000);
   fireEvent.click(screen.getByRole('button', { name: '挖掘说明与进度' }));
   expect(screen.getByRole('dialog', { name: '挖掘说明与进度' })).toBeVisible();
@@ -75,7 +76,7 @@ it('summarises detect categories, sorts any column and filters by clicking a cat
 it('shows the cause, retry time and actions directly, and exposes configuration recovery without resetting progress',()=>{
  const retry=vi.fn(),scope=vi.fn(),m=api({retry,useCurrentScope:scope},{enabled:true,anchorsDone:93,mined:220,rules:currentDefaultRules(),lastError:'请求超时',lastErrorAt:Date.now()-1000,retryAt:Date.now()+120000,retryCount:2,errorKind:'transient'});
  const h=render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
- expect(screen.getByRole('status')).toHaveTextContent('请求超时');expect(screen.getByRole('status')).toHaveTextContent('220/1000');expect(screen.getByRole('status')).toHaveTextContent('连续失败 2 次');
+ expect(screen.getByRole('status')).toHaveAccessibleName(expect.stringContaining('请求超时'));expect(screen.getByRole('status')).toHaveTextContent('220/1000');expect(screen.getByRole('status')).not.toHaveTextContent('连续失败 2 次');fireEvent.click(screen.getByRole('button',{name:'挖掘说明与进度'}));expect(screen.getByRole('dialog',{name:'挖掘说明与进度'})).toHaveTextContent('连续失败 2 次');fireEvent.click(screen.getByRole('button',{name:'挖掘说明与进度'}));
  fireEvent.click(screen.getByRole('button',{name:'立即重试'}));expect(retry).toHaveBeenCalledOnce();
  h.rerender(<FishMiningPanel mining={{...m,state:{...m.state,errorKind:'configuration',retryAt:null,lastError:'算法不存在'}} as never} sellFixed campaignHref="#"/>);
  expect(screen.getByRole('status')).toHaveTextContent('配置需处理');expect(screen.getByRole('status')).not.toHaveTextContent('秒后');

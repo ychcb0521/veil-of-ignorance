@@ -73,17 +73,18 @@ export function compactQualityMonitorRounds(study: FishQualityStudy): FishQualit
 export interface QualityMonitorLibrary {
   /** Full, independently cloned tables saved before manual restarts. Never updated by a later run. */
   archives?:QualityMonitorArchive[];
+  directoryEdits?:Record<string,{hidden:boolean;at:number}>;
   version: 1; importedLegacy: boolean; settings: QualityMonitorSetting[]; records: QualityMonitorRecord[]; rounds: QualityMonitorRound[];
 }
 export type QualityMonitorArchiveStudy=Omit<FishQualityStudy,'monitorLibrary'|'filterLibrary'|'campaignRepair'>;
-export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart';sourceRoundId?:string;study:QualityMonitorArchiveStudy}
+export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart'|'copy'|'copy-source';sourceRoundId?:string;study:QualityMonitorArchiveStudy}
 /** Save the whole current table, including rows outside today's filters/selection. */
-export function archiveQualityMonitorStudy(study:FishQualityStudy,at=Date.now()):FishQualityStudy{
-  if(!study.results.length&&!study.campaignRuns?.length)return study;
+export function archiveQualityMonitorStudy(study:FishQualityStudy,at=Date.now(),reason:QualityMonitorArchive['reason']='restart'):FishQualityStudy{
+  if(reason==='restart'&&!study.results.length&&!study.campaignRuns?.length)return study;
   const library=study.monitorLibrary??empty();
   const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...table}=study;
   const latest=library.rounds.filter(r=>!r.legacy).reduce<QualityMonitorRound|undefined>((last,r)=>!last||r.startedAt>=last.startedAt?r:last,undefined)??library.rounds.at(-1);
-  const archive:QualityMonitorArchive={id:`monitor-archive-${at}-${++sequence}-${Math.random().toString(36).slice(2,10)}`,version:1,createdAt:at,reason:'restart',sourceRoundId:latest?.id,study:structuredClone(table)};
+  const archive:QualityMonitorArchive={id:`monitor-archive-${at}-${++sequence}-${Math.random().toString(36).slice(2,10)}`,version:1,createdAt:at,reason,sourceRoundId:latest?.id,study:structuredClone(table)};
   return {...study,monitorLibrary:{...library,archives:[...(library.archives??[]),archive]}};
 }
 interface MonitorTask { id: string; setting: QualityMonitorSetting; sample: QualitySample; plan: QualityGroup; resultKey: string }
@@ -184,5 +185,6 @@ export function preserveQualityMonitorLibrary(saved: FishQualityStudy | undefine
   const records = new Map(a.records.map(r => [r.id, r])); for (const r of b.records) { const old = records.get(r.id); if (!old || old.updatedAt < r.updatedAt || old.updatedAt === r.updatedAt && (r.result || !old.result)) records.set(r.id, r); }
   const rounds = new Map(a.rounds.map(r => [r.id, r])); for (const r of b.rounds) { const old = rounds.get(r.id); if (!old || old.updatedAt < r.updatedAt || old.updatedAt === r.updatedAt && (r.state !== 'running' || old.state === 'running')) rounds.set(r.id, r); }
   const archives=new Map((a.archives??[]).map(s=>[s.id,s]));for(const s of b.archives??[])if(!archives.has(s.id))archives.set(s.id,s);
-  return { ...incoming, monitorLibrary: { version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()],...(archives.size?{archives:[...archives.values()]}:{}) } };
+  const directoryEdits={...(a.directoryEdits??{})};for(const [id,edit]of Object.entries(b.directoryEdits??{})){const old=directoryEdits[id];if(!old||edit.at>old.at||edit.at===old.at&&edit.hidden)directoryEdits[id]=edit;}
+  return { ...incoming, monitorLibrary: { ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()],...(archives.size?{archives:[...archives.values()]}:{}) } };
 }

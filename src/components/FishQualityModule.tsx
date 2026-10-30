@@ -30,7 +30,7 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
   titleTestId?: string;
 }) {
   const [open, setOpen] = useState(true), contentId = useId();
-  return <section aria-label={`${title}模块`} data-testid={testId} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-2.5 first:pt-1 last:border-b-0 last:pb-1">
+  return <section aria-label={`${title}模块`} data-testid={testId} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-1.5 last:border-b-0">
     <div className="flex h-7 w-28 shrink-0 items-center gap-0.5">
       <h4 className="min-w-0">
         <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)} className={fishSubHeading}><Icon aria-hidden className="h-3 w-3 text-muted-foreground"/><span data-testid={titleTestId}>{title}</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button>
@@ -38,8 +38,7 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
       <div className="flex min-w-0 items-center text-[10px] text-muted-foreground">{summary}</div>
     </div>
     <div id={contentId} hidden={!open} className="min-w-0 flex-1 basis-52">
-      <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-1.5 text-[11px]">{children}</div>
-      {status && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pb-1 pt-1 text-[10.5px] text-muted-foreground">{status}</div>}
+      <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-1.5 text-[11px]">{children}{status&&<div className="ml-1 inline-flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-muted-foreground">{status}</div>}</div>
       {progress}
     </div>
   </section>;

@@ -22,3 +22,15 @@ it('never installs an old account archive or starts its calculation after an acc
  storage.load.mockImplementation(async(owner)=>({study:owner==='a'?monitorArchiveFixture():newQualityStudy()}));const runner=vi.fn(async(_o:QualityRunOptions)=>{}),h=renderHook(({owner})=>useFishQuality(owner,[],runner),{initialProps:{owner:'a'}});await flush();let release!:(ok:boolean)=>void;storage.save.mockImplementation(async(_owner,s)=>s.monitorLibrary?.archives?.length?new Promise<boolean>(r=>{release=r;}):true);
  act(()=>{void h.result.current.restart();});await flush();h.rerender({owner:'b'});await flush();await act(async()=>{release(true);});await flush();expect(h.result.current.account).toBe('b');expect(h.result.current.study.monitorLibrary?.archives??[]).toEqual([]);expect(runner).not.toHaveBeenCalled();expect(h.result.current.archiving).toBe(false);
 });
+
+it('persists the prior table and copied study before replacing the live view, without starting a run',async()=>{
+ const runner=vi.fn(async(_o:QualityRunOptions)=>{}),h=renderHook(()=>useFishQuality('a',[],runner));await flush();const snapshot=monitorArchiveFixture();snapshot.results=snapshot.results.map(r=>({...r,returnPct:77}));let release!:(ok:boolean)=>void;
+ storage.save.mockImplementation(async(_owner,s)=>s.results[0]?.returnPct===77?new Promise<boolean>(r=>{release=r;}):true);
+ act(()=>{void h.result.current.restoreMonitorStudy(snapshot);});await flush();expect(h.result.current.archiving).toBe(true);expect(h.result.current.study.results[0].returnPct).not.toBe(77);
+ await act(async()=>release(true));await flush();expect(h.result.current.study.results[0].returnPct).toBe(77);expect(h.result.current.study.selectedRowIds).toEqual(qualityDisplayRows(h.result.current.study).map(row=>row.id));expect(h.result.current.study.monitorLibrary!.archives!.at(-1)!.reason).toBe('copy');expect(runner).not.toHaveBeenCalled();expect(h.result.current.archiving).toBe(false);
+});
+it('retains the active table if copying fails and never installs a previous account copy after switching',async()=>{
+ storage.load.mockImplementation(async owner=>({study:owner==='a'?monitorArchiveFixture():newQualityStudy()}));const runner=vi.fn(async(_o:QualityRunOptions)=>{}),h=renderHook(({owner})=>useFishQuality(owner,[],runner),{initialProps:{owner:'a'}});await flush();const before=structuredClone(h.result.current.study.results),snapshot=monitorArchiveFixture();snapshot.results[0].returnPct=77;storage.save.mockResolvedValue(false);
+ await act(async()=>{expect(await h.result.current.restoreMonitorStudy(snapshot)).toBe(false);});expect(h.result.current.study.results).toEqual(before);expect(h.result.current.error).toContain('副本未保存');
+ let release!:(ok:boolean)=>void;storage.save.mockImplementation(async()=>new Promise<boolean>(r=>{release=r;}));act(()=>{void h.result.current.restoreMonitorStudy(snapshot);});await flush();h.rerender({owner:'b'});await flush();await act(async()=>release(true));await flush();expect(h.result.current.study.results).toEqual([]);expect(h.result.current.account).toBe('b');expect(runner).not.toHaveBeenCalled();
+});

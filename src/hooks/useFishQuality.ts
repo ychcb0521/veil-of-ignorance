@@ -1,3 +1,5 @@
+import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
+import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
 import {preserveSourceDeletions,markSourceDeletions,type DeleteTarget} from '@/lib/fish/libraryDeletion';
 import { useQualityPostExit } from './useQualityPostExit';
 import { useQualityEntryReadings } from './useQualityEntryReadings';
@@ -233,6 +235,30 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'归档失败，未开始重算');}
     finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
   }, [start,change]);
+  const setMonitorEntryHidden=useCallback(async(id:string,hidden:boolean)=>{
+    if(!readyRef.current||archiveLock.current)return false;
+    const savedOwner=account.current,epoch=generation.current,next=editMonitorDirectory(current.current,id,hidden);
+    if(next===current.current)return false;
+    try{if(!await saveQualityStudy(savedOwner,next))throw Error('目录修改未保存，请重试');
+      if(account.current!==savedOwner||generation.current!==epoch)return false;
+      change(s=>preserveQualityMonitorLibrary(next,s));return true;
+    }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'目录修改失败');return false;}
+  },[change]);
+  const restoreMonitorStudy=useCallback(async(snapshot:FishQualityStudy,sourceRoundId?:string)=>{
+    if(!readyRef.current||archiveLock.current)return false;
+    archiveLock.current=true;setArchiving(true);setError('');const savedOwner=account.current,epoch=generation.current;
+    try{
+      cancel();cancelFilter();entry.cancel();postExit.cancel();
+      const finalize=monitorFinalizer.current;await finalize?.('paused');
+      if(account.current!==savedOwner||generation.current!==epoch)return false;
+      controller.current=null;setRunning(false);setProgress(null);setFilterProgress(null);setFilterError('');
+      const next=copyMonitorStudy(current.current,snapshot,Date.now(),sourceRoundId);
+      if(!await saveQualityStudy(savedOwner,next))throw Error('副本未保存，当前总表仍保留，请重试');
+      if(account.current!==savedOwner||generation.current!==epoch)return false;
+      change(s=>({...preserveQualityMonitorLibrary(s,next),filterLibrary:s.filterLibrary}));return true;
+    }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'复制归档失败');return false;}
+    finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
+  },[cancel,cancelFilter,entry.cancel,postExit.cancel,change]);
   // 挖到的鱼自动导入和勾选；只有已经主动开始监测，才把新鱼接到监测任务中。
   useEffect(() => {
     if (!ready || !readyRef.current) return;
@@ -308,7 +334,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'restoreMonitorStudy'|'setMonitorEntryHidden'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'restoreMonitorStudy'|'setMonitorEntryHidden'>>;

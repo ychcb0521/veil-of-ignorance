@@ -131,5 +131,5 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     void task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {});
     return task.then(() => undefined);
   },
-  weight: study => study ? Object.keys(study.deletedSources??{}).length + (study.monitorLibrary?.archives?.length??0) + (study.postExitReadings?.length ?? 0) + study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
+  weight: study => study ? Object.keys(study.deletedSources??{}).length + Object.keys(study.monitorLibrary?.directoryEdits??{}).length + (study.monitorLibrary?.archives?.length??0) + (study.postExitReadings?.length ?? 0) + study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
 };
