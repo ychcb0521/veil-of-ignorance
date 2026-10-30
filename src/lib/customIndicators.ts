@@ -19,7 +19,7 @@ import { MBI_N } from '@/lib/mbi';
 import { mbi2StateLabel } from '@/lib/mbi2';
 import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin, ctbaChartParameterText } from '@/lib/featureSource';
 import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
-import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
+import { BUILTIN_FEATURES,compileFeatureFormula,evaluateOnBars } from '@/lib/deepDig/features';
 import { researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
@@ -341,14 +341,23 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label, calcParams: [researchDefaultPeriod(item), 0, 0], precision: 8,
         ...(item.min < item.max ? { minValue: item.min, maxValue: item.max } : {}),
-        draw: zeroLine(ORANGE_DASH_LINE, item.neutral),
-        createTooltipDataSource: ({ defaultStyles }) => ({ name: chartFeatureDef(item.featureId)?.short ?? label, calcParamsText: '', icons: defaultStyles.tooltip.icons, values: undefined as never }),
+        draw: zeroLine(ORANGE_DASH_LINE, item.neutral,item.neutralLabel),
+        createTooltipDataSource: ({ defaultStyles,indicator,crosshair }) => {
+          const def=chartFeatureDef(item.featureId);
+          if(!def?.focusVersion)return {name:def?.short??label,calcParamsText:'',icons:defaultStyles.tooltip.icons,values:undefined as never};
+          let focus='加权参数待修正';try{const vars=evaluateOnBars([],compileFeatureFormula(def.formula),def).vars;focus=`近${vars.get((def.focusPrefix??'focus2')+'_h')}h ×${vars.get((def.focusPrefix??'focus2')+'_weight')}`;}catch{/* Invalid account formulas remain visible. */}
+          const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
+          const keys=['value',...(level===0?item.components??[]:[])],format=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':Number(v.toPrecision(7)).toString();
+          return {name:def.short,calcParamsText:focus+' · 版本2 · '+item.parameter+' '+indicator.calcParams[0]+(item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h')),icons:defaultStyles.tooltip.icons,
+            values:keys.map(key=>({title:(key==='value'?label:key)+': ',value:{text:format(row?.[key]),color:vColor(row?.[key])}}))};
+        },
         figures: [{ key: 'value', title: label + ': ', type: 'line', styles: data => ({
           color: vColor((data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value), size: 1.5,
         }) }],
         calc: (data, indicator) => {
           const values = researchChartSeries(data, item, indicator.calcParams[0]);
-          return indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
+          const rows=indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
+          return values.components?rows.map((row,i)=>({...row,...Object.fromEntries(Object.entries(values.components).map(([name,series])=>[name,series[i]??undefined]))})):rows;
         },
       });
     }

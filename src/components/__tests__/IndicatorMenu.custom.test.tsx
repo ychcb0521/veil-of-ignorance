@@ -5,14 +5,14 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
-import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries } from '@/lib/researchIndicators';
+import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
 const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
-const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)!.nameZh;
+const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
@@ -36,7 +36,8 @@ describe('自制区的十个特征值', () => {
       for (const id of group.ids) expect(within(section).getByText(name(id))).toBeInTheDocument();
     }
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: 'DSS' } });
-    expect(screen.getAllByRole('region')).toHaveLength(2);
+    expect(screen.getAllByRole('region')).toHaveLength(3);
+    expect(screen.getByRole('region',{name:'空方特征 · 版本2（近2小时加权）'})).toBeInTheDocument();
     expect(screen.getByRole('region',{name:'卖方成果保留（独立副本）'})).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '与过去24 小时相比' })).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: '买方状态恶化' } });

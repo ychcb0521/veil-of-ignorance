@@ -2,8 +2,8 @@ import {expect,it} from 'vitest';
 import {BUILTIN_FEATURES,MBI_DEF,CTBA_12H_DEF,newFeatureTemplate,copyFeatureDefinition,saveFeatureDefinition,mergeFeatureDefs,definitionKey} from '../features';
 import {BUILTIN_FEATURE_CREATION,featureCreation} from '../featureCreation';
 it('covers all current builtins using auditable first-registration history, never deterministic copy-ID dates',()=>{
- expect(Object.keys(BUILTIN_FEATURE_CREATION).sort()).toEqual(BUILTIN_FEATURES.map(d=>d.id).sort());
- for(const d of BUILTIN_FEATURES){const before=JSON.stringify(d),info=featureCreation(d)!;expect(info.source).toBe('version-history');expect(Number.isFinite(info.at)).toBe(true);expect(info.commit).toMatch(/^[a-f\d]{8}$/);expect(JSON.stringify(d)).toBe(before);}
+ expect(Object.keys(BUILTIN_FEATURE_CREATION).sort()).toEqual(BUILTIN_FEATURES.filter(d=>!d.focusVersion).map(d=>d.id).sort());
+ for(const d of BUILTIN_FEATURES){const before=JSON.stringify(d),info=featureCreation(d)!;expect(info.source).toBe(d.focusVersion?'recorded':'version-history');expect(Number.isFinite(info.at)).toBe(true);if(d.focusVersion)expect(info.at).toBe(d.createdAt);else expect(info.commit).toMatch(/^[a-f\d]{8}$/);expect(JSON.stringify(d)).toBe(before);}
  expect(featureCreation(CTBA_12H_DEF)).toMatchObject({at:Date.parse('2026-10-29T21:36:15+08:00'),commit:'318b1494'});
  expect(featureCreation(CTBA_12H_DEF)!.at).not.toBe(CTBA_12H_DEF.createdAt);
  const renamed={...MBI_DEF,createdAt:Date.now(),name:'账号改名'};expect(featureCreation(renamed)).toEqual(featureCreation(MBI_DEF));

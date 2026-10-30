@@ -1,3 +1,4 @@
+import {focusEma,focusRolling,focusWsum,type RecentFocus} from './recentFocusMath';
 /** Covel-inspired extension, not a formula from the book. All periods are bars. */
 export const CTBA_DEFAULTS = { N:576, f:12, s:48, m:48, lambda:Math.LN2/144, epsilon:1e-12, alpha:.35, beta:.40, gamma:.25 } as const;
 /** Independent 12h configuration; the original CTBA defaults are retained verbatim. */
@@ -13,13 +14,14 @@ export function validateCtba(p: CtbaParams) {
 }
 export interface CtbaInput { C:ArrayLike<number>; H:ArrayLike<number>; L:ArrayLike<number>; E:ArrayLike<number>; B:ArrayLike<number>; S:ArrayLike<number>; time:ArrayLike<number> }
 /** Closed ascending 5m bars supplied by the shared window pipeline. No price filling. */
-export function computeCtbaSeries(b:CtbaInput, p:CtbaParams={...CTBA_DEFAULTS}) {
+export function computeCtbaSeries(b:CtbaInput, p:CtbaParams={...CTBA_DEFAULTS}, focus?:RecentFocus) {
   validateCtba(p);
   const size=b.C.length, blank=()=>new Float64Array(size).fill(NaN);
   const T=blank(),M=blank(),F=blank(),CTBA=blank(),noTrade=blank(),complete=new Float64Array(size);
   const rho=Math.exp(-p.lambda), tail=rho**p.N, af=2/(p.f+1),as=2/(p.s+1);
   let ef=NaN,es=NaN,emaCount=0,weightedB=0,weightedS=0,missing=0;
   const buys=blank(),sells=blank(),returns=blank();
+  const focused=focus&&focus.weight>1, logE=focused?blank():null,fast=focused?blank():null,slow=focused?blank():null,resets=focused?new Uint8Array(size):null;
   for(let t=0;t<size;t++){
     const amountOk=Number.isFinite(b.B[t])&&b.B[t]>=0&&Number.isFinite(b.S[t])&&b.S[t]>=0;
     buys[t]=amountOk?b.B[t]:NaN;sells[t]=amountOk?b.S[t]:NaN;
@@ -29,13 +31,14 @@ export function computeCtbaSeries(b:CtbaInput, p:CtbaParams={...CTBA_DEFAULTS}) 
     weightedS=(amountOk?sells[t]:0)+rho*weightedS;
     if(t>=p.N){weightedB-=tail*(Number.isFinite(buys[t-p.N])?buys[t-p.N]:0);weightedS-=tail*(Number.isFinite(sells[t-p.N])?sells[t-p.N]:0);}
     const gap=t>0&&b.time[t]-b.time[t-1]!==300000;
-    if(gap){ef=es=NaN;emaCount=0;}
+    if(gap){ef=es=NaN;emaCount=0;if(resets)resets[t]=1;}
     const e=b.E[t], prior=t>0?b.E[t-1]:NaN;
     if(e>0&&Number.isFinite(e)){
       // Equivalent EMA recurrence; a constant log price must not accumulate a fast/slow rounding spread.
       const x=Math.log(e);ef=Number.isFinite(ef)?ef+af*(x-ef):x;es=Number.isFinite(es)?es+as*(x-es):x;emaCount++;
       if(!gap&&prior>0&&Number.isFinite(prior))returns[t]=Math.log(e/prior);
-    }else{ef=es=NaN;emaCount=0;}
+    }else{ef=es=NaN;emaCount=0;if(resets)resets[t]=1;}
+    if(logE&&fast&&slow){logE[t]=e>0&&Number.isFinite(e)?Math.log(e):NaN;fast[t]=ef;slow[t]=es;}
     if(t>=p.N-1 && missing===0 && b.time[t]-b.time[t-p.N+1]===(p.N-1)*300000){
       // Explicit count/sum avoids subtractive residue falsely labelling an empty window.
       let total=0;for(let j=t-p.N+1;j<=t;j++)total+=buys[j]+sells[j];
@@ -53,6 +56,17 @@ export function computeCtbaSeries(b:CtbaInput, p:CtbaParams={...CTBA_DEFAULTS}) 
         M[t]=(ef-es)/(Math.sqrt(sq/(p.m-1))+p.epsilon);}
     }
     if([T[t],M[t],F[t]].every(Number.isFinite)){complete[t]=1;CTBA[t]=100*Math.tanh(p.alpha*Math.tanh(T[t])+p.beta*Math.tanh(M[t])+p.gamma*F[t]);}
+  }
+  if(focused&&logE&&fast&&slow&&resets){
+    const ef2=focusEma(logE,fast,1-af,focus,false,resets),es2=focusEma(logE,slow,1-as,focus,false,resets);
+    const sd=focusRolling(returns,p.m,focus,'sd'),wb=focusWsum(buys,rho,p.N,focus),ws=focusWsum(sells,rho,p.N,focus);
+    for(let t=0;t<size;t++){
+      // Original completeness/gap/preheat masks remain authoritative. Range extrema are unchanged by positive weights.
+      if(Number.isFinite(M[t]))M[t]=(ef2[t]-es2[t])/(sd[t]+p.epsilon);
+      if(Number.isFinite(F[t]))F[t]=noTrade[t]===1?0:(wb[t]-ws[t])/(wb[t]+ws[t]+p.epsilon);
+      CTBA[t]=[T[t],M[t],F[t]].every(Number.isFinite)?100*Math.tanh(p.alpha*Math.tanh(T[t])+p.beta*Math.tanh(M[t])+p.gamma*F[t]):NaN;
+      complete[t]=Number.isFinite(CTBA[t])?1:0;
+    }
   }
   return {T,M,F,CTBA,noTrade,complete};
 }

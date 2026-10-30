@@ -78,7 +78,7 @@ function convergenceHistory(program: Program,params: Record<string,number>,minut
     else if(n.name==='prev')extra=arg(1,1);
     else if(n.name==='ago')extra=hours(1);
     else if(n.name==='beta')extra=hours(2)-1;
-    else if(n.name==='retain')extra=hours(4,48)-1;
+    else if(n.name==='retain')extra=(n.args.length===6?Math.max(1,Math.ceil(48*60/minutes)):hours(4,48))-1;
     else if(n.name==='ema')extra=32*hours(1);
     else if(n.name==='atr'){const size=arg(3);extra=size+(size===1?0:Math.ceil(32*-Math.LN2/Math.log1p(-1/size)));}
     else if(n.name==='ctba')extra=Math.max(arg(7),5*arg(9),arg(10))+1;

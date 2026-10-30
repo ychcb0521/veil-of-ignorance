@@ -337,7 +337,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     }),
     ...researchItems.filter(item => item.id.startsWith('FEATURE_')).map(item => ({
       id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay: false, defaultPeriod: researchDefaultPeriod(item),
-      color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit: item.templateId === 'MBI' || item.templateId === 'CTBA' ? '根' : 'h',
+      color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit:item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h'),
       description: definitions.find(def => def.id === item.featureId)?.definition,
     })),
   ], [definitions, researchItems]);
@@ -395,7 +395,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
   const oscillators = filtered.filter(i => !i.isOverlay);
   const customGroups = categoryFilter === 'custom' ? [
     ...CUSTOM_INDICATOR_GROUPS.map(group => ({ ...group, items: group.ids.flatMap(id => oscillators.filter(item => item.id === id)) })),
-    { key: 'account', title: '自定义与副本', note: '独立保存的特征值，公式和参数与 Deep Dig 同步。', items: oscillators.filter(item => item.id.startsWith('FEATURE_')) },
+    { key: 'account', title: '自定义与副本', note: '独立保存的特征值，公式和参数与 Deep Dig 同步。', items: oscillators.filter(item => item.id.startsWith('FEATURE_')&&!CUSTOM_INDICATOR_GROUPS.some(group=>(group.ids as readonly string[]).includes(item.id))) },
   ].filter(group => group.items.length > 0) : null;
   const categories = ['custom', 'trend', 'momentum', 'volatility', 'volume', 'other'];
   const supportedCount = availableCatalog.filter(i => isSupported(i.id)).length;

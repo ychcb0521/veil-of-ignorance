@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { accountFeatureDefs } from '@/lib/featureSource';
-import { FEATURES_KEY, ensureSellerRetentionCopies } from '@/lib/deepDig/features';
+import { FEATURES_KEY, ensureFeatureCopies } from '@/lib/deepDig/features';
 import { getUserPrefix, getUserId } from '@/lib/userStoragePrefix';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { readPersistedStateRaw, writePersistedStateRaw, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
@@ -16,6 +16,6 @@ export function useFeatureDefinitions() {
     return () => { unsubscribe(); window.removeEventListener('storage', storage); window.removeEventListener('focus', refresh); };
   }, [key]);
   const definitions=useSyncExternalStore(subscribe, accountFeatureDefs, accountFeatureDefs);
-  useEffect(()=>{let saved;try{saved=JSON.parse(readPersistedStateRaw(key)??'[]');}catch{return;}if(!Array.isArray(saved))return;const next=ensureSellerRetentionCopies(saved);if(next===saved)return;writePersistedStateRaw(key,JSON.stringify(next));const owner=getUserId();if(owner)queueSimStatePush(owner,FEATURES_KEY,next);},[key,definitions]);
+  useEffect(()=>{let saved;try{saved=JSON.parse(readPersistedStateRaw(key)??'[]');}catch{return;}if(!Array.isArray(saved))return;const next=ensureFeatureCopies(saved);if(next===saved)return;writePersistedStateRaw(key,JSON.stringify(next));const owner=getUserId();if(owner)queueSimStatePush(owner,FEATURES_KEY,next);},[key,definitions]);
   return definitions;
 }

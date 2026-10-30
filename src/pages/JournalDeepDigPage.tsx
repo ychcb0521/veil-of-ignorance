@@ -27,7 +27,7 @@ import { defaultFeatureCommands } from '@/lib/deepDig/commands';
 import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
 import { loadSignals, type TradeSignal } from '@/lib/signalLibrary';
-import { FEATURES_KEY, ensureSellerRetentionCopies, mergeFeatureDefs, newFeatureTemplate, copyFeatureDefinition, saveFeatureDefinition, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { FEATURES_KEY, ensureFeatureCopies, mergeFeatureDefs, newFeatureTemplate, copyFeatureDefinition, saveFeatureDefinition, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildCampaignGroupReport, type CampaignGroupReport } from '@/lib/deepRsa/report';
 
 const SCROLL_KEY_PREFIX = 'journal-deep-dig-scroll:';
@@ -78,7 +78,7 @@ export default function JournalDeepDigPage() {
   const excludedOf = (id: string) => (Array.isArray(excludedMap?.[id]) ? excludedMap[id] : []);
   const [commandsMap, setCommandsMap] = usePersistedState<Record<string, string>>(COMMANDS_KEY, {});
   const defs = useMemo(() => mergeFeatureDefs(Array.isArray(savedDefs) ? savedDefs : []), [savedDefs]);
-  useEffect(()=>{setSavedDefs(prev=>ensureSellerRetentionCopies(Array.isArray(prev)?prev:[]));},[setSavedDefs]);
+  useEffect(()=>{setSavedDefs(prev=>ensureFeatureCopies(Array.isArray(prev)?prev:[]));},[setSavedDefs]);
   const def = slug ? defs.find(d => d.id === slug) : undefined;
 
   /**

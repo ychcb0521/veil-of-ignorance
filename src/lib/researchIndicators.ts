@@ -56,7 +56,7 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
     if (!program.statements.some(s => s.name === core)) core = featureCoreName(program) ?? core;
   } catch { /* Invalid formulas remain editable, with empty charts. */ }
-  return { id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: def.short === builtin?.short ? template?.short ?? def.short : def.short, name: def.name === builtin?.name ? template?.name ?? def.name : def.name,
+  return { id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
     period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
     min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
@@ -69,7 +69,7 @@ export function accountResearchIndicators(definitions: readonly DeepDigFeatureDe
   const items: ResearchIndicator[] = [...CUSTOM_RESEARCH_INDICATORS.map(item => {
     const def = definitions.find(d => d.id === item.featureId);
     return def ? researchIndicatorForFeature(def) : item;
-  }), ...definitions.filter(def => !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature)];
+  }), ...definitions.filter(def => def.focusVersion || !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature)];
   accountRegistryCache.set(definitions, items);
   return items;
 }

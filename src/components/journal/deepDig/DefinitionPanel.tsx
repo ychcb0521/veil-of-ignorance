@@ -53,7 +53,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
         </button>
       </div>
       {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.definition}</p>}
-      <div className="grid max-w-[720px] grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11.5px]">
+      <div className="grid max-w-[720px] grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
         <FormulaEditor def={def} onSave={onSave} />
         <span className="pt-1 text-muted-foreground">参数</span>

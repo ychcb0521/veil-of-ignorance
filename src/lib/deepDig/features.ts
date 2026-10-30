@@ -4,6 +4,7 @@ import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
 import { MBI2_Z0, MBI2_TOOLTIP, mbi2HoursOf, mbi2NOf, mbi2Z0Of, mbi2BandOf, mbi2ConfirmOf, validateMbi2Params, type Mbi2Params } from '@/lib/mbi2';
 import { MBI_N, MBI_Z0, MBI_TOOLTIP, mbiNOf, mbiZ0Of, validateMbiParams, type MbiParams } from '@/lib/mbi';
 import { appendResearchAverages } from '@/lib/researchAverageFormula';
+import {FOCUS_BASE_ARITIES} from '@/lib/recentFocusMath';
 export { MBI_N, MBI_Z0 };
 /**
  * Deep dig 的特征值定义：名称、定义、公式、显示单位、分组标准——都可以由用户改，运行时照这里算。
@@ -74,14 +75,18 @@ export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
   retentionSourceId?: string;
   retentionPrefix?: string;
   retentionVersion?: 1;
+  focusSourceId?: string;
+  focusVersion?: 2;
+  focusPrefix?: string;
 }
 
 /** Deep dig 目录与渔共用的账号定义键。 */
 export const FEATURES_KEY = 'deep_dig_features_v1';
-export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear', 'mbi2-bear':'MBI2_bear', 'ctba_12h-bear':'CTBA_12H_bear', ...Object.fromEntries(SELLER_RETENTION_SPECS.map(s=>[s.id,s.core])) };
+const ORIGINAL_SELLER_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear', 'mbi2-bear':'MBI2_bear', 'ctba_12h-bear':'CTBA_12H_bear', ...Object.fromEntries(SELLER_RETENTION_SPECS.map(s=>[s.id,s.core])) };
+export const SELLER_FEATURE_CORES:Readonly<Record<string,string>>={...ORIGINAL_SELLER_CORES,...Object.fromEntries(Object.entries(ORIGINAL_SELLER_CORES).map(([id,core])=>[id+'-v2',core]))};
 // Retired built-ins must not return as saved custom definitions. Historical results remain stored.
 export const isRetiredFeature = (id: string) => id === 'drift-speed-down-z' || id === 'seller-push';
-export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id);
+export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id)||id.startsWith('seller-focus-v2--');
 const SELLER_SIGN_MARK = '# seller-negative-v1';
 export const BEAR_RESPONSE_MARK = '# seller-response-v2';
 
@@ -910,7 +915,30 @@ export function createSellerRetentionCopy(source:DeepDigFeatureDef,spec:SellerRe
 const retentionSources=[CDI2_DEF,SELLER_CONTROL_DEF,DSS_DEF,MBI_BEAR_DEF,CTBA_BEAR_DEF,MBI2_BEAR_DEF,CTBA_12H_BEAR_DEF];
 export const SELLER_RETENTION_FEATURES=SELLER_RETENTION_SPECS.map(s=>createSellerRetentionCopy(retentionSources.find(d=>d.id===s.sourceId)!,s));
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES];
+const ORIGINAL_BUILTIN_FEATURES:readonly DeepDigFeatureDef[]=[DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES];
+export const SELLER_FOCUS_CREATED_AT=Date.parse('2026-10-30T06:03:46Z');
+/** Clone first, then transform only the copy's temporal operators. Never refer back at evaluation time. */
+export function createSellerFocusCopy(source:DeepDigFeatureDef,id=source.id+'-v2',now=SELLER_FOCUS_CREATED_AT):DeepDigFeatureDef {
+  const copy=copyFeatureDefinition(source,[source],now);
+  let prefix='focus2';while(new RegExp('\\b'+prefix+'(?:_|\\b)').test(copy.formula))prefix+='_';
+  const program=compileFeatureFormula(copy.formula).program;
+  const render=(n:Program['statements'][number]['expr']):string=>{
+    if(n.k==='num')return String(n.v);if(n.k==='var')return n.name;
+    if(n.k==='un')return `(${n.op} ${render(n.a)})`;
+    if(n.k==='bin')return `(${render(n.a)} ${n.op} ${render(n.b)})`;
+    const args=n.args.map(render),original=FOCUS_BASE_ARITIES[n.name];
+    if(original?.includes(args.length))args.push(prefix+'_h',prefix+'_weight');
+    return n.name+'('+args.join(', ')+')';
+  };
+  // Keep existing semantic markers: history planning also recognizes the retention marker.
+  const markers=[...new Set(copy.formula.match(/# seller-[\w-]+/g)??[])];
+  const formula=[...markers,'# seller-focus-v2：原窗口不变；最近2小时相对更早数据3倍权重',prefix+'_h = 2',prefix+'_weight = 3',
+    ...program.statements.map(s=>(s.name?s.name+' = ':'')+render(s.expr))].join('\n');
+  return {...copy,id,name:source.name+'｜版本2',short:source.short+'·版本2',chartCore:source.chartCore??ORIGINAL_SELLER_CORES[source.id]??program.statements.at(-1)?.name??undefined,sellerSignVersion:1,focusSourceId:source.id,focusVersion:2,focusPrefix:prefix,formula,
+    definition:source.definition+'\n版本2：独立复制创建时的账号公式和参数，保留原窗口、周期、半衰期及预热；历史聚合核中最近2小时的相对权重为更早数据的3倍。可在本副本公式顶部修改 '+prefix+'_h 和 '+prefix+'_weight；权重1恢复复制时原计算。重加权均值、波动尺度、递推/成交核；极值与时间滞后保持原义，不直接放大最终分数。零仍为均衡，卖方仍为负值。原阈值不自动沿用。'};
+}
+export const SELLER_FOCUS_FEATURES=Object.keys(ORIGINAL_SELLER_CORES).map(id=>({...createSellerFocusCopy(ORIGINAL_BUILTIN_FEATURES.find(d=>d.id===id)!),builtin:true}));
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES,...SELLER_FOCUS_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -955,20 +983,39 @@ export function ensureSellerRetentionCopies(saved:readonly DeepDigFeatureDef[]):
  return next;
 }
 
+/** Idempotent account migration; existing copies (including hidden ones) are never regenerated. */
+export function ensureFeatureCopies(saved:readonly DeepDigFeatureDef[]):DeepDigFeatureDef[] {
+  let next=ensureSellerRetentionCopies(saved);
+  const byId=new Map(next.map(d=>[d.id,d]));
+  const sources=[...ORIGINAL_BUILTIN_FEATURES.map(d=>byId.get(d.id)??d),...next.filter(d=>!ORIGINAL_BUILTIN_FEATURES.some(b=>b.id===d.id))]
+    .filter(d=>!d.focusVersion&&!d.focusSourceId&&(Object.hasOwn(ORIGINAL_SELLER_CORES,d.id)||Object.values(ORIGINAL_SELLER_CORES).includes(d.chartCore??'')||Object.hasOwn(ORIGINAL_SELLER_CORES,featureTemplateId(d)??'')));
+  for(const source of sources){
+    const id=Object.hasOwn(ORIGINAL_SELLER_CORES,source.id)?source.id+'-v2':'seller-focus-v2--'+source.id;
+    if(next.some(d=>d.id===id||d.focusSourceId===source.id))continue;
+    const effective=upgradeSellerSign(upgradeBearResponse(upgradeBssFormula(upgradeFormula(upgradeGroupVars(source)))));
+    let copy:DeepDigFeatureDef;
+    try{copy=createSellerFocusCopy(effective,id,Date.now());}catch{
+      copy={...copyFeatureDefinition(effective,[effective],SELLER_FOCUS_CREATED_AT),id,name:effective.name+'｜版本2',short:effective.short+'·版本2',focusSourceId:source.id,focusVersion:2,sellerSignVersion:1,formula:effective.formula+'\n# 原公式无效，版本2无法加权；保留原文供修正，不冒用内置默认结果'};
+    }
+    next=[...next,copy];
+  }
+  return next;
+}
+
 /** Always retain all saved parameters, even when the formula still equals a builtin. */
 export function saveFeatureDefinition(saved: readonly DeepDigFeatureDef[], next: DeepDigFeatureDef): DeepDigFeatureDef[] {
   const previous=saved.find(d=>d.id===next.id),createdAt=previous?.createdAt;
   // Creation is immutable: editing a definition must not lose or replace its original timestamp.
   const creation=typeof createdAt==='number'&&Number.isFinite(createdAt)&&createdAt>0&&createdAt<=8.64e15-8*3600000?{createdAt}:{};
-  return [...ensureSellerRetentionCopies(saved).filter(d => d.id !== next.id), { ...next, ...creation, builtin: undefined }];
+  return [...ensureFeatureCopies(saved).filter(d => d.id !== next.id), { ...next, ...creation, builtin: undefined }];
 }
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  saved = ensureSellerRetentionCopies(saved.filter(d => !isRetiredFeature(d.id)).map(restoreFeatureVisibility));
+  saved = ensureFeatureCopies(saved.filter(d => !isRetiredFeature(d.id)).map(restoreFeatureVisibility));
   const byId = new Map(saved.map(d => [d.id, upgradeSellerSign(upgradeBearResponse(upgradeBssFormula(upgradeFormula(upgradeGroupVars(d)))))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
-  const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(d=>upgradeGroupVars(d.focusVersion?{...d,builtin:true}:d)).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   // 历史内置名称随系统更新，用户自定义的名称保持原样。
   const legacyNames = new Set([
     ['多空博弈均衡点', '漂移速度'].join(''),
@@ -1012,7 +1059,7 @@ function restoreFeatureVisibility(def: DeepDigFeatureDef): DeepDigFeatureDef {
 }
 export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
   const removed = new Set(saved.map(restoreFeatureVisibility).filter(d => d.removed).map(d => d.id));
-  return BUILTIN_FEATURES.filter(b => removed.has(b.id));
+  return [...BUILTIN_FEATURES.filter(b => removed.has(b.id)),...saved.filter(d=>d.focusVersion===2&&d.removed&&!BUILTIN_FEATURES.some(b=>b.id===d.id)).map(d=>({...d,builtin:true}))];
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */

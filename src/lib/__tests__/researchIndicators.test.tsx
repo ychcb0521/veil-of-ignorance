@@ -4,7 +4,7 @@ import type { KLineData } from 'klinecharts';
 const mock = vi.hoisted(() => ({ refs: [] as number[], version: 0, request: vi.fn(), registered: new Map<string, any>() }));
 vi.mock('klinecharts', () => ({ registerIndicator: (d: any) => mock.registered.set(d.name, d) }));
 vi.mock('@/lib/btcReference', () => ({ btcClosesAt: (times: number[]) => times.map((_, i) => mock.refs[i] ?? null), requestBtcReference: mock.request, btcReferenceVersion: () => mock.version }));
-import { RESEARCH_INDICATORS, researchKcName, researchChartSeries, researchDefaultPeriod } from '@/lib/researchIndicators';
+import { RESEARCH_INDICATORS, researchKcName, researchChartSeries, researchDefaultPeriod,researchIndicatorForFeature } from '@/lib/researchIndicators';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators } from '@/lib/customIndicators';
 import { BUILTIN_FEATURES, FEATURES_KEY, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
 import { IndicatorMenu } from '@/components/IndicatorMenu';
@@ -29,10 +29,10 @@ const accountFormula = (formula: string, x: string) => `${formula}\navg_${x} = a
 beforeEach(() => { localStorage.clear(); mock.request.mockClear(); mock.version = 0; });
 registerCustomIndicators();
 describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
-  it.each(RESEARCH_INDICATORS)('$id 三条序列逐根等于账号的 Deep dig 公式，原值不被末尾加权结果替代，显示倍数只乘一次', item => {
-    const k = klines(); const def = BUILTIN_FEATURES.find(d => d.id === item.featureId)!;
+  it.each(RESEARCH_INDICATORS)('$id 三条序列逐根等于账号的 Deep dig 公式，原值不被末尾加权结果替代，显示倍数只乘一次', template => {
+    const k = klines(); const def = BUILTIN_FEATURES.find(d => d.id === template.featureId)!;const item=researchIndicatorForFeature(def);
     const formula = accountFormula(def.formula, item.core); saved([{ ...def, formula }]);
-    const expected = evaluateOnBars(researchBars(k), compileFeatureFormula(formula),['MBI2','MBI2_BEAR'].includes(item.id)?def:undefined);
+    const expected = evaluateOnBars(researchBars(k), compileFeatureFormula(formula),def);
     const actual = researchChartSeries(k, item, item.period, { fetchReference: false });
     for (const [series, name] of [[actual.core, item.core], [actual.avg, `avg_${item.core}`], [actual.avg2, `avg_${item.core}_2`]] as const) {
       for (let i = 0; i < k.length; i++) {
@@ -44,7 +44,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
       const reg = mock.registered.get(researchKcName(item.id, level));
       expect(reg.figures).toHaveLength(1);
       const out = reg.calc(k, { calcParams: indicatorCalcParams(reg.name, { period: item.period }) });
-      expect(out.at(-1).value).toBe((level === 0 ? actual.core : level === 1 ? actual.avg : actual.avg2).at(-1));
+      expect(out.at(-1).value??null).toBe((level === 0 ? actual.core : level === 1 ? actual.avg : actual.avg2).at(-1));
     }
   });
 
@@ -57,7 +57,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const item of RESEARCH_INDICATORS) {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));
-        if (['MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H','MBI2_BEAR','CTBA_12H_BEAR'].includes(item.id)) {
+        if (['MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H','MBI2_BEAR','CTBA_12H_BEAR'].includes(item.id)||item.id.endsWith('_RETAIN')) {
           expect(reg.minValue).toBe(item.min); expect(reg.maxValue).toBe(item.max);
         } else { expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined(); }
         expect(reg.precision).toBeGreaterThanOrEqual(8);
@@ -98,7 +98,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
 
   it('添加时沿用已保存的基线、半衰期及公式常数', () => {
     saved(BUILTIN_FEATURES.map(def => ({ ...def, halfLifeHours: 3.5, avgHours: 18.5, ...(def.id === 'dss' ? { formula: 'n = 2.5\nDSS = n' } : {}) })));
-    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576, 25*5/60, 144, 25*5/60, 144]);
+    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576, 25*5/60, 144, 25*5/60, 144,18.5,3.5,1,25,576,25*5/60,144]);
   });
 
   it('仅用到 CB 的定义请求本周期 BTC；BTC 版本进入原值和两个均值参数，并使三条序列重算', () => {

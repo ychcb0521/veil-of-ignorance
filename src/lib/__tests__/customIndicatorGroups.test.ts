@@ -5,7 +5,7 @@ const def=(id:string,removed=false)=>({id,name:id,removed} as DeepDigFeatureDef)
 it('directory uses exactly the custom indicator group membership and order, keeping original objects',()=>{
  const ids=['cbi2','cdi2','drift-speed','drift-speed-z','seller-control','state','state2','bss','dss','cba','cda'];
  const input=ids.map(id=>def(id)).reverse(),before=[...input],groups=groupDeepDigFeatures(input);
- expect(groups.map(g=>g.title)).toEqual(CUSTOM_INDICATOR_GROUPS.filter(g=>g.key!=='seller-retention').map(g=>g.title));
+ expect(groups.map(g=>g.title)).toEqual(CUSTOM_INDICATOR_GROUPS.filter(g=>!['seller-retention','seller-focus-v2'].includes(g.key)).map(g=>g.title));
  expect(groups.map(g=>g.items.map(d=>d.id))).toEqual([ids.slice(0,7),ids.slice(7,9),ids.slice(9)]);
  expect(groups.flatMap(g=>g.items).every(d=>input.includes(d))).toBe(true);expect(input).toEqual(before);
 });

@@ -16,6 +16,7 @@ import { computeCtbaSeries, type CtbaParams } from '@/lib/ctba';
 import { computeMbi } from '@/lib/mbi';
 import { computeMbi2Core, mbi2States } from '@/lib/mbi2';
 import { sellerResponse } from '@/lib/sellerResponse';
+import {FOCUS_BASE_ARITIES,recentFocus,focusEma,focusRolling,focusRetain,focusWsum,focusRobust,focusBeta,focusMbiZ,focusAtr} from '@/lib/recentFocusMath';
 
 export type Value = number | Float64Array;
 
@@ -24,6 +25,7 @@ export interface FunctionSpec {
   /** 参数个数的下限 / 上限。 */
   min: number;
   max: number;
+  counts?: readonly number[];
   /** 界面帮助里的写法与说明。 */
   usage: string;
   help: string;
@@ -32,7 +34,7 @@ export interface FunctionSpec {
 /** 默认 5m K 线：ema 的半衰期按小时给，按 K 线周期换算成每根的衰减（evaluateProgram 的 barMinutes）。 */
 export const FORMULA_BAR_MINUTES = 5;
 
-export const FUNCTIONS: readonly FunctionSpec[] = [
+const ORIGINAL_FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'ln', min: 1, max: 1, usage: 'ln(x)', help: '自然对数（也可写 log）' },
   { name: 'log', min: 1, max: 1, usage: 'log(x)', help: '同 ln' },
   { name: 'exp', min: 1, max: 1, usage: 'exp(x)', help: 'e 的 x 次方' },
@@ -74,6 +76,11 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'if', min: 3, max: 3, usage: 'if(条件, a, b)', help: '条件成立取 a，否则取 b' },
   { name: 'has', min: 1, max: 1, usage: 'has(x)', help: 'x 不是空 → 1，否则 0' },
 ];
+export const FUNCTIONS:readonly FunctionSpec[]=ORIGINAL_FUNCTIONS.map(f=>{
+  const original=FOCUS_BASE_ARITIES[f.name];if(!original)return f;
+  const counts=[...original,...original.map(n=>n+2)];
+  return {...f,max:Math.max(...counts),counts,help:f.help+'；可追加 focus_h, focus_weight：保留原窗口，最近 focus_h 小时的相对权重乘 focus_weight（≥1）；权重1精确恢复原计算。'};
+});
 const FN = new Map(FUNCTIONS.map(f => [f.name, f]));
 
 // ===================== 词法 =====================
@@ -175,7 +182,7 @@ export function programHistoryBars(program: Program, params: Record<string, numb
     else if (n.name === 'atr') extra = arg(3);
     else if (n.name === 'ctba') extra = Math.max(arg(7), 5*arg(9),arg(10)) + 1;
     else if (n.name === 'mbiz' || n.name === 'mbiz2') extra = 5 * arg(1);
-    else if (n.name === 'retain') extra = barsForHours(arg(4, 48), barMinutes) - 1;
+    else if (n.name === 'retain') extra = barsForHours(n.args.length===6?48:arg(4, 48), barMinutes) - 1;
     if (mbiWarmupOnly && !['mbiz','mbiz2'].includes(n.name)) extra = 0;
     return inherited + (Number.isFinite(extra) ? Math.max(0, extra) : 0);
   };
@@ -294,7 +301,7 @@ export function parseFormula(src: string, known: ReadonlySet<string>): Program {
     else if (n.k === 'call') {
       const spec = FN.get(n.name);
       if (!spec) throw new FormulaError(`没有「${n.name}」这个函数`, n.line);
-      if (n.args.length < spec.min || n.args.length > spec.max) throw new FormulaError(`${spec.usage} 的参数个数不对`, n.line);
+      if (n.args.length < spec.min || n.args.length > spec.max || spec.counts && !spec.counts.includes(n.args.length)) throw new FormulaError(`${spec.usage} 的参数个数不对`, n.line);
       n.args.forEach(check);
     }
   };
@@ -660,6 +667,31 @@ function binary(op: string, a: Value, b: Value, resume?: SeriesResume): Value {
 }
 
 function call(name: string, args: Value[], line: number, barMinutes: number, resume?: SeriesResume): Value {
+  const arities=FOCUS_BASE_ARITIES[name];
+  if(arities?.some(n=>n+2===args.length)){
+    const baseArgs=args.slice(0,-2),h=scalarArg(args.at(-2)!,name,'最近加权小时',line),weight=scalarArg(args.at(-1)!,name,'最近相对权重',line);
+    let f;try{f=recentFocus(h,weight,barMinutes);}catch(error){throw new FormulaError((error as Error).message,line);}
+    // Never seed the original recurrence from a previously focused output.
+    const base=call(name,baseArgs,line,barMinutes);
+    if(weight===1||!isSeries(base))return base;
+    const [a,b,c]=baseArgs,scalar=(i:number)=>scalarArg(baseArgs[i],name,'参数',line);
+    const len=base.length,series=(v:Value)=>isSeries(v)?v:new Float64Array(len).fill(v);
+    if(name==='ctba'){
+      if(barMinutes!==5||!baseArgs.slice(0,7).every(isSeries))return base;
+      const [N,fast,slow,m,lambda,epsilon,alpha,beta,gamma,part]=baseArgs.slice(7).map(v=>scalarArg(v,name,'参数',line));
+      const out=computeCtbaSeries({C:series(a),H:series(b),L:series(c),E:series(baseArgs[3]),B:series(baseArgs[4]),S:series(baseArgs[5]),time:series(baseArgs[6])},{N,f:fast,s:slow,m,lambda,epsilon,alpha,beta,gamma},f);
+      return [out.T,out.M,out.F,out.CTBA,out.noTrade,out.complete][part];
+    }
+    if(name==='mbiz'||name==='mbiz2')return focusMbiZ(series(a),scalar(1),f,name==='mbiz2');
+    if(name==='ema')return focusEma(series(a),base,2**(-barMinutes/(scalar(1)*60)),f,baseArgs.length===3);
+    if(name==='retain')return focusRetain(series(a),series(b),series(c),2**(-barMinutes/(scalar(3)*60)),barsForHours(baseArgs.length===5?scalar(4):48,barMinutes),f);
+    if(name==='wsum')return focusWsum(series(a),2**(-1/scalar(1)),scalar(2),f);
+    if(name==='atr')return focusAtr(series(a),series(b),series(c),scalar(3),base,f);
+    if(name==='beta')return focusBeta(series(a),series(b),barsForHours(scalar(2),barMinutes),f);
+    const n=name==='sma'||name==='sum'||name==='msum'?scalar(1):barsForHours(scalar(1),barMinutes);
+    if(name==='median'||name==='mad'||name==='rscale')return focusRobust(series(a),n,f,name);
+    return focusRolling(series(a),n,f,(name==='msum'?'rsum':name) as 'avg'|'sd'|'zscore'|'rsum'|'sma'|'sum');
+  }
   const [x, y, z] = args;
   switch (name) {
     case 'ln': case 'log': return map1(x, v => clean(Math.log(v)), resume);
