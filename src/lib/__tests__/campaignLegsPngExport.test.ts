@@ -899,7 +899,7 @@ describe('【用户要求】导出图也带开平操作方式，历史实际成�
     const rows = buildCampaignLegsExportRows({ ...input(), legs: [
       { id: 'main', leg_role: 'main_open' } as TradeJournal,
       { id: 'reentry', leg_role: 'reentry_main' } as TradeJournal,
-      { id: 'add', leg_role: 'main_add_1' } as TradeJournal,
+      { ...input().legs[0], id: 'add', leg_role: 'main_add_1' } as TradeJournal,
     ] });
     expect(rows.filter(row => row.kind === 'leg').map(row => row.cells[EXECUTION_METHOD_COL][0].text))
       .toEqual(['手动（开）', '手动（开）', '未记录（开）']);

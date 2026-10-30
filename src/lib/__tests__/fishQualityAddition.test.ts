@@ -13,7 +13,7 @@ const M=60000,T=Date.UTC(2026,9,29);
 const def={id:'test-add',name:'价格',short:'价格',definition:'',formula:'raw = C',scale:1,unit:'',positive:'1',control:'0',interval:'1m' as const};
 const snapshot={featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),statistic:'raw',interval:'1m',scale:1,threshold:100,direction:'>' as const,average:100,cbi2:100,startAverage:100,previousAverage:99,cutoffMs:T};
 const row:QualitySample={id:'a',enteredAt:T,basis:'capture',importedAt:T,groups:[],source:{id:'a',symbol:'TESTUSDT',timeMs:T,timeLabel:'',fallbackZone:'',fish:snapshot}};
-function group():QualityGroup {return {id:'g',label:'卖出',metric:'raw',snapshot,execution:'intrabar-1m',rule:{metric:'raw',direction:'<',threshold:0},addition:{...defaultQualityAddition(),enabled:true,source:'custom',condition:{id:'add',label:'价格',metric:'raw',direction:'>',threshold:105,enabled:true,snapshot}}};}
+function group():QualityGroup {return {id:'g',label:'卖出',metric:'raw',snapshot,execution:'intrabar-1m',rule:{metric:'raw',direction:'<',threshold:0},addition:{...defaultQualityAddition(),quantityMode:undefined,quantity:undefined,amountMode:'entry',amountUsdt:100,enabled:true,source:'custom',condition:{id:'add',label:'价格',metric:'raw',direction:'>',threshold:105,enabled:true,snapshot}}};}
 const bar=(at:number,open=100,close=open,high=Math.max(open,close),low=Math.min(open,close)):ResearchBar=>({openTime:at,open,high,low,close,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50});
 const load=(path:(at:number)=>ResearchBar):FishReconstructionLoader=>async(_row,from,to,p)=>Array.from({length:(to-from)/p.step},(_,i)=>{
  const at=from+i*p.step;if(p.step===M)return path(at);
@@ -44,14 +44,14 @@ describe('conditional additions',()=>{
   expect((await run(g,load(at=>at<T?bar(at,150):bar(at,100)))).additionFill).toBeUndefined();
  });
  it('replays original detector constraints with a strictly stronger threshold',async()=>{
-  const g={...group(),addition:{...defaultQualityAddition(),enabled:true}},s={...row,source:{...row.source,fish:{...snapshot,constraints:['X > 115']}}};
+  const g={...group(),addition:{...group().addition!,source:'detector' as const}},s={...row,source:{...row.source,fish:{...snapshot,constraints:['X > 115']}}};
   const path=load(at=>at===T?bar(at,100,111):at===T+M?bar(at,111,116):at>=T+2*M?bar(at,120):bar(at));
   const r=await run(g,path,5,undefined,s);expect(r.additionFill).toMatchObject({at:T+2*M,threshold:110,reading:116});
   const missing={...s,source:{...s.source,fish:undefined}};expect(await run(g,path,5,undefined,missing)).toMatchObject({status:'open',additionNote:expect.stringContaining('没有原探测算法')});
  });
  it('resets the original S duration gate at entry instead of inheriting a pre-entry qualified run',async()=>{
   const state={...def,id:'state',formula:'state = C / 100'},f={...snapshot,featureId:'state',statistic:'state',definitionKey:definitionKey(state),threshold:.6,constraints:[FISH_STATE_HOLD_TEXT]};
-  const s={...row,source:{...row.source,fish:f}},g={...group(),addition:{...defaultQualityAddition(),enabled:true}};
+  const s={...row,source:{...row.source,fish:f}},g={...group(),addition:{...group().addition!,source:'detector' as const}};
   const path=load(at=>bar(at));
   expect((await run(g,path,180,undefined,s)).additionFill).toBeUndefined();
   expect((await run(g,path,185,undefined,s)).additionFill?.at).toBe(T+181*M);
@@ -119,4 +119,21 @@ it('values an addition-only holding without requiring a sell algorithm',async()=
  const g={...group(),rule:undefined};
  const r=await run(g,load(at=>at===T?bar(at,100,110):at>=T+M?bar(at,120):bar(at)));
  expect(r).toMatchObject({status:'open',totalInvested:200,additionFill:{at:T+M,price:120},returnPct:expect.closeTo(10)});
+});
+
+it.each([['entry',1],['fixed',.5]] as const)('sizes %s additions in coins and derives the actual cash invested at the fill price',async(quantityMode,quantity)=>{
+ const g=group(),plan={...g,addition:{...g.addition!,quantityMode,quantity}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,90));
+ const result=await run(plan,path),cost=100+quantity*120,pnl=(1+quantity)*90-cost;
+ expect(result.additionFill).toMatchObject({price:120,quantity,notional:quantity*120});expect(result.totalInvested).toBe(cost);expect(result.averageEntryPrice).toBeCloseTo(cost/(1+quantity));expect(result.pnl).toBeCloseTo(pnl);expect(result.returnPct).toBeCloseTo(pnl/cost*100);
+ expect(await run(plan,path,5,await run(plan,path,3))).toEqual(result);
+});
+it('keeps historical cash-sized trials separate from new coin-sized trials and rejects invalid quantities',async()=>{
+ const g=group(),plan={...g,addition:{...g.addition!,quantityMode:'entry' as const,quantity:1}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,90));
+ expect(qualityResultKey(row,g,0)).not.toBe(qualityResultKey(row,plan,0));const old=await run(g,path);expect(old.additionFill!.notional).toBe(100);expect((await run(plan,path,5,old)).additionFill).toMatchObject({quantity:1,notional:120});expect(old.additionFill!.quantity).toBeCloseTo(100/120);
+ for(const quantity of [0,-1,NaN,Infinity])expect(()=>validateQualityAddition({...plan.addition,quantityMode:'fixed',quantity})).toThrow('加仓数量');expect(()=>validateQualityAddition({...plan.addition,quantityMode:'fixed',quantity:.25})).not.toThrow();
+});
+it('sells the whole coin-sized holding at a full mirror and keeps campaign PnL aligned with actual invested cash',async()=>{
+ const g={...group(),addition:{...group().addition!,quantityMode:'fixed' as const,quantity:.5},mirrorTakeProfit:{enabled:true,gainPct:25,sellPct:100}},path=load(at=>at<T?bar(at):at===T?bar(at,100,101):at===T+M?bar(at,101,111):at===T+2*M?bar(at,120):bar(at,130));
+ const result=await run(g,path);expect(result).toMatchObject({status:'closed',totalInvested:160,additionFill:{price:120,quantity:.5,notional:60},endPrice:130,pnl:35,remainingQuantity:0});expect(result.returnPct).toBeCloseTo(35/160*100);
+ const campaign=buildQualityCampaignData('owner',{sample:row,plan:g,detectors:[],result,observeHours:0,firstEvaluatedAt:result.evaluatedAt},'sell');expect(computeCampaignRealizedPnl(campaign.campaign,campaign.legs,campaign.tradeRecords,{}).total).toBeCloseTo(35);
 });

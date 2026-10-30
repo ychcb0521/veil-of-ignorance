@@ -1,3 +1,4 @@
+import {chartAtr} from '@/lib/atr';
 import { RETENTION_COMPONENT_LABELS } from '@/lib/sellerRetention';
 import { accountResearchIndicators, researchDefaultPeriod, type ResearchIndicator } from '@/lib/researchIndicators';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -1181,16 +1182,7 @@ export function registerCustomIndicators() {
     figures: [{ key: 'atr', title: 'ATR: ', type: 'line' }],
     calc: (dataList, indicator) => {
       const period = indicator.calcParams[0] ?? 14;
-      const trs: number[] = [];
-      for (let i = 0; i < dataList.length; i++) {
-        if (i === 0) { trs.push(dataList[i].high - dataList[i].low); continue; }
-        trs.push(Math.max(
-          dataList[i].high - dataList[i].low,
-          Math.abs(dataList[i].high - dataList[i - 1].close),
-          Math.abs(dataList[i].low - dataList[i - 1].close)
-        ));
-      }
-      const atrVals = ema(trs, period);
+      const atrVals = chartAtr(dataList,period);
       return dataList.map((_, i) => ({ atr: atrVals[i] }));
     },
   });

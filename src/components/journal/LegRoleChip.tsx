@@ -96,10 +96,10 @@ interface Props {
 
 export function LegRoleChip({ role, short = false, className, ordinal, status = null, title }: Props) {
   const suffix = ordinal != null && ordinal > 0 ? String(ordinal) : '';
-  const tone = role ? TONES[role] : NEUTRAL;
+  const tone = role ? TONES[role] ?? (role.startsWith('main_add_') ? GREEN : NEUTRAL) : NEUTRAL;
   const label = !role
     ? UNCLASSIFIED_LABEL
-    : short ? `${SHORT_LABELS[role]}${suffix}` : `${LABELS[role]}${suffix ? ` ${suffix}` : ''}`;
+    : short ? `${SHORT_LABELS[role] ?? (role.startsWith('main_add_') ? 'A'+role.slice(9) : role)}${suffix}` : `${LABELS[role] ?? (role.startsWith('main_add_') ? '加仓'+role.slice(9) : role)}${suffix ? ` ${suffix}` : ''}`;
   return (
     <span
       data-role-chip={role ?? 'none'}

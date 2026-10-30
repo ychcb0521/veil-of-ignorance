@@ -99,7 +99,7 @@ it('persists a selected common sell plan, invalidates changed thresholds, and ac
   await flush(); chooseAndStart(h); await flush(1100);
   const plan = h.result.current.study.sellPlans![0];
   act(() => h.result.current.setRule(plan.id, { metric: 'state', direction: '<', threshold: .45 }));
-  await flush(1100);
+  await flush(1100);expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
   const latest = tasks.at(-1)!, row = qualityComparisonRows(latest.study)[0], applied = latest.study.sellPlans![0];
   act(() => latest.onResult({ key: qualityResultKey(row, applied, 0), sampleId: row.id, groupId: applied.id, evaluatedAt: T, status: 'closed', returnPct: 12 }));
   expect(h.result.current.study.results).toHaveLength(1);
@@ -159,12 +159,12 @@ it('freezes old trials before applying holding vetoes, reruns selected rows and 
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
  const tasks:QualityRunOptions[]=[];const h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));
  await flush();chooseAndStart(h);await flush();
- const id=h.result.current.study.sellPlans![0].id;act(()=>h.result.current.setRule(id,{metric:'state',direction:'<',threshold:.5}));await flush(600);
+ const id=h.result.current.study.sellPlans![0].id;act(()=>h.result.current.setRule(id,{metric:'state',direction:'<',threshold:.5}));await flush(600);act(()=>{void h.result.current.start();});await flush();
  const old=tasks.at(-1)!,row=qualityComparisonRows(old.study)[0],plan=old.study.sellPlans![0];
  const result={key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,pnl:10};
  act(()=>old.onResult(result));expect(h.result.current.study.campaignRuns).toHaveLength(1);
  const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
- act(()=>(() => { h.result.current.setFilters([]); h.result.current.setHoldingVetoes(id, [veto]); })());await flush(600);
+ act(()=>(() => { h.result.current.setFilters([]); h.result.current.setHoldingVetoes(id, [veto]); })());await flush(600);expect(tasks).toHaveLength(2);act(()=>{void h.result.current.start();});await flush();
  // 持仓否决仍只归这一套卖出方案；买前过滤不参与。
  expect(tasks.at(-1)!.study.sellPlans!.filter(p=>!p.combo).map(p=>p.holdingVetoes?.[0]?.threshold)).toEqual([10,undefined]);
  expect(h.result.current.study.campaignRuns![0].plan.holdingVetoes).toBeUndefined();
@@ -185,7 +185,7 @@ it('saves filters without running either task, runs only after Start Filter, and
  act(()=>h.result.current.setFilters([{...f,threshold:.8}]));await flush(600);
  expect(tasks).toHaveLength(1);expect(h.result.current.study.sellPlans).toEqual(plans);
  const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
- act(()=>h.result.current.setHoldingVetoes(plans![0].id,[veto]));await flush(600);
+ act(()=>h.result.current.setHoldingVetoes(plans![0].id,[veto]));await flush(600);expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
  expect(tasks.at(-1)!.task).toBe('monitor');
  expect(h.result.current.study.buyFilters).toEqual([{...f,threshold:.8}]);
  expect(h.result.current.study.sellPlans![0].buyFilters).toBeUndefined();
@@ -244,25 +244,18 @@ it('finishes the frozen selection after rows change, preserving results of desel
   expect(h.result.current.running).toBe(false); expect(tasks).toHaveLength(1);
 });
 
-it('archives an in-flight old rule after edits, then evaluates the new rule without interrupting the old batch', async () => {
-  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
-  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
-  await flush();
-  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
-  const id = h.result.current.study.sellPlans![0].id;
-  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
-  const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans![0];
-  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .4 })); await flush(600);
-  expect(old.signal.aborted).toBe(false); expect(tasks).toHaveLength(1);
-  const result = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: id, evaluatedAt: T, status: 'closed' as const, entryTime: T, entryPrice: 100, endTime: T + 60000, endPrice: 110, returnPct: 10, pnl: 10 };
-  act(() => old.onResult(result));
-  expect(h.result.current.study.results).toHaveLength(0);
-  expect(h.result.current.study.campaignRuns![0].plan.rule?.threshold).toBe(.5);
-  releases.shift()!(); await flush();
-  expect(tasks).toHaveLength(2); expect(tasks[1].study.sellPlans![0].rule?.threshold).toBe(.4);
-  expect(h.result.current.study.campaignRuns![0].result).toEqual(result);
-  act(() => h.result.current.cancel()); releases.shift()!(); await flush(61_000);
-  expect(tasks).toHaveLength(2); expect(h.result.current.running).toBe(false);
+it('pauses an old rule on save, preserves its completed work and waits for a manual start', async () => {
+  const tasks:QualityRunOptions[]=[],releases:(()=>void)[]=[];
+  const h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);await new Promise<void>(resolve=>releases.push(resolve));}));
+  await flush();act(()=>h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r=>r.id)));
+  const id=h.result.current.study.sellPlans![0].id;act(()=>h.result.current.setRule(id,{metric:'state',direction:'<',threshold:.5}));await flush(600);expect(tasks).toHaveLength(0);
+  act(()=>{void h.result.current.start();});await flush();const old=tasks[0],row=qualityRunSamples(old.study)[0],plan=old.study.sellPlans![0];
+  const result={key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:id,evaluatedAt:T,status:'closed' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,pnl:10};act(()=>old.onResult(result));
+  act(()=>h.result.current.setRule(id,{metric:'state',direction:'<',threshold:.4}));await flush(61000);
+  expect(old.signal.aborted).toBe(true);expect(tasks).toHaveLength(1);expect(h.result.current.running).toBe(false);expect(h.result.current.study.campaignRuns![0].plan.rule?.threshold).toBe(.5);expect(h.result.current.study.monitorLibrary!.rounds[0].state).toBe('paused');
+  act(()=>old.onResult({...result,returnPct:999}));expect(h.result.current.study.results.some(r=>r.returnPct===999)).toBe(false);
+  act(()=>{void h.result.current.start();});await flush();expect(tasks).toHaveLength(2);expect(tasks[1].study.sellPlans![0].rule?.threshold).toBe(.4);
+  releases.shift()!();await flush();expect(h.result.current.running).toBe(true);act(()=>h.result.current.cancel());releases.shift()!();await flush();
 });
 
 it('archives before restarting with the latest selection and settings, rejects late old callbacks and drops pending follow-ups', async () => {
@@ -273,7 +266,7 @@ it('archives before restarting with the latest selection and settings, rejects l
   await flush();
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   const id = h.result.current.study.sellPlans![0].id;
-  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);act(()=>{void h.result.current.start();});await flush();
   const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans![0];
   const prior = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: id, evaluatedAt: T, status: 'closed' as const, complete: true, entryTime: T, entryPrice: 100, endTime: T + 60000, endPrice: 110, returnPct: 10, pnl: 10 };
   act(() => { old.onResult(prior); old.onProgress({ done: 1, total: 4, current: 'AAAUSDT' }); });
@@ -321,17 +314,18 @@ it('pause invalidates a pending settings run instead of restarting after the del
   expect(tasks).toHaveLength(0);
 });
 // 【用户要求】2026-10-26「动态最大回撤这里改了数值之后为啥不起作用」：后台正在跑时改否决条件，立刻按新阈值重新开始
-it('restarts at once with the new holding vetoes when they change during a running batch', async () => {
+it('saves changed holding vetoes, pauses the old batch and restarts only on manual Start', async () => {
   const { makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
   await flush();
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   const id = h.result.current.study.sellPlans![0].id;
-  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);act(()=>{void h.result.current.start();});await flush();
   expect(tasks).toHaveLength(1);
   act(() => (() => { h.result.current.setFilters([]); h.result.current.setHoldingVetoes(id, [makeQualityHoldingVeto('dynamic-drawdown', '>=', 10)]); })()); await flush(600);
   expect(tasks[0].signal.aborted).toBe(true);
+  expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
   expect(tasks).toHaveLength(2);
   expect(tasks[1].study.sellPlans!.find(p => p.id === id)!.holdingVetoes?.[0]).toMatchObject({ kind: 'dynamic-drawdown', threshold: 10 });
   act(() => h.result.current.cancel()); releases.forEach(r => r()); await flush();
@@ -414,7 +408,7 @@ it('saves every completed monitoring round immediately, reuses identical records
   const count = h.result.current.study.monitorLibrary!.records.length;
   act(() => { void h.result.current.start(); }); releases.shift()!(); await flush();
   expect(h.result.current.study.monitorLibrary!.rounds).toHaveLength(2); expect(h.result.current.study.monitorLibrary!.records).toHaveLength(count);
-  act(() => h.result.current.setRule(plan.id, { metric: plan.metric, direction: '<', threshold: .42 })); await flush(600);
+  act(() => h.result.current.setRule(plan.id, { metric: plan.metric, direction: '<', threshold: .42 })); await flush(600);expect(tasks).toHaveLength(2);act(()=>{void h.result.current.start();});await flush();
   releases.shift()!(); await flush();
   expect(h.result.current.study.monitorLibrary!.rounds).toHaveLength(3);
   expect(h.result.current.study.monitorLibrary!.records.length).toBeGreaterThan(count);
@@ -528,7 +522,7 @@ it('archives previous results and applies mirror and vetoes in one selected moni
  const id=h.result.current.study.sellPlans![0].id;
  const beforeFilters=structuredClone(h.result.current.study.buyFilters),other=structuredClone(h.result.current.study.sellPlans![1]);
  const mirror={enabled:true,gainPct:8,sellPct:25};
- act(()=>h.result.current.setHoldingVetoes(id,[],mirror));await flush(600);
+ act(()=>h.result.current.setHoldingVetoes(id,[],mirror));await flush(600);expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
  expect(tasks.at(-1)!.task).toBe('monitor');expect(tasks.at(-1)!.study.sellPlans![0].mirrorTakeProfit).toEqual(mirror);
  expect(h.result.current.study.sellPlans![1]).toEqual(other);expect(h.result.current.study.buyFilters).toEqual(beforeFilters);
  const count=tasks.length;act(()=>h.result.current.setHoldingVetoes(id,[],mirror));await flush(600);expect(tasks).toHaveLength(count);
@@ -547,7 +541,7 @@ it('adds and edits dynamic sell plans, aborts obsolete batches and preserves rem
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   const added = makeQualitySellPlan('mbi-bear:MBI_bear', '<', -.5, BUILTIN_FEATURES, undefined, 'my-bear');
   act(() => h.result.current.setSellPlans([...h.result.current.study.sellPlans!, added]));
-  await flush(600);
+  await flush(600);expect(tasks).toHaveLength(0);act(()=>{void h.result.current.start();});await flush();
   expect(tasks).toHaveLength(1);
   const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans!.find(p => p.id === 'my-bear')!;
   expect(plan).toMatchObject({ rule: { threshold: -.5 }, snapshot: { featureId: 'mbi-bear' } });
@@ -556,7 +550,7 @@ it('adds and edits dynamic sell plans, aborts obsolete batches and preserves rem
   const edited = makeQualitySellPlan('ctba-bear:CTBA_bear', '<', -20, BUILTIN_FEATURES, added);
   act(() => h.result.current.setSellPlans([...h.result.current.study.sellPlans!.filter(p => p.id !== added.id), edited]));
   expect(old.signal.aborted).toBe(true);
-  await flush(600);
+  await flush(600);expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
   expect(tasks[1].study.sellPlans!.find(p => p.id === added.id)).toMatchObject({ metric: 'CTBA_bear', rule: { threshold: -20 } });
   expect(h.result.current.study.campaignRuns!.some(run => run.result.returnPct === -1)).toBe(true);
   act(() => old.onResult({ ...prior, returnPct: 999 }));
@@ -577,11 +571,22 @@ it('saves per-plan addition settings, immediately rejects obsolete monitoring re
  const tasks:QualityRunOptions[]=[];
  const h=renderHook(()=>useFishQuality('a',[signal],async task=>{tasks.push(task);await new Promise<void>(resolve=>task.signal.addEventListener('abort',()=>resolve()));}));
  await flush();chooseAndStart(h);await flush();const old=tasks[0],plan=old.study.sellPlans![0],row=qualityRunSamples(old.study)[0];
- const addition={...defaultQualityAddition(),enabled:true,amountMode:'fixed' as const,amountUsdt:75};
- act(()=>h.result.current.setHoldingVetoes(plan.id,[],undefined,addition));expect(old.signal.aborted).toBe(true);await flush(600);
+ const addition={...defaultQualityAddition(),enabled:true,quantityMode:'fixed' as const,quantity:75};
+ act(()=>h.result.current.setHoldingVetoes(plan.id,[],undefined,addition));expect(old.signal.aborted).toBe(true);await flush(600);expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
  expect(tasks[1].study.sellPlans![0].addition).toEqual(addition);expect(tasks[1].study.sellPlans![1].addition).toBeUndefined();
  act(()=>old.onResult({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',complete:true,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:999,pnl:899,returnPct:899}));
  expect(h.result.current.study.results.some(r=>r.returnPct===899)).toBe(false);
  const saved=structuredClone(h.result.current.study);act(()=>h.result.current.cancel());h.unmount();storage.load.mockResolvedValue({study:saved});
  const restored=renderHook(()=>useFishQuality('a',[signal],vi.fn(async()=>{})));await flush();expect(restored.result.current.study.sellPlans![0].addition).toEqual(addition);restored.unmount();
+});
+
+it('saves all seller parameters durably without running, then starts once with the complete final configuration',async()=>{
+ const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');const tasks:QualityRunOptions[]=[],h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));await flush();
+ act(()=>h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r=>r.id)));const id=h.result.current.study.sellPlans![0].id;
+ act(()=>h.result.current.setRule(id,{metric:'state',direction:'<',threshold:.42}));await flush(600);expect(tasks).toHaveLength(0);
+ const combo=h.result.current.study.sellPlans!.find(p=>p.combo)!;act(()=>h.result.current.setCombo(combo.id,{metric:combo.metric,direction:'<',threshold:1},{...combo.combo!,switchPct:8}));await flush(600);expect(tasks).toHaveLength(0);
+ const veto=makeQualityHoldingVeto('static-drawdown','>=',7);act(()=>h.result.current.setHoldingVetoes(id,[veto],{enabled:true,gainPct:6,sellPct:50}));await flush(600);expect(tasks).toHaveLength(0);
+ act(()=>h.result.current.setSellPlans(h.result.current.study.sellPlans!.map(p=>({...p,label:p.label+' 已调整'}))));act(()=>h.result.current.setObserveHours(12));await flush(61000);expect(tasks).toHaveLength(0);
+ expect(storage.save).toHaveBeenLastCalledWith('a',expect.objectContaining({observeHours:12,sellPlans:expect.arrayContaining([expect.objectContaining({id,rule:{metric:'state',direction:'<',threshold:.42},holdingVetoes:[veto]})])}));
+ act(()=>{void h.result.current.start();});await flush();expect(tasks).toHaveLength(1);expect(tasks[0].study.observeHours).toBe(12);expect(tasks[0].study.sellPlans!.find(p=>p.id===id)).toMatchObject({rule:{threshold:.42},holdingVetoes:[veto],mirrorTakeProfit:{gainPct:6,sellPct:50}});expect(tasks[0].study.sellPlans!.find(p=>p.id===combo.id)!.combo!.switchPct).toBe(8);
 });

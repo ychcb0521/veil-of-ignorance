@@ -107,7 +107,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (current.current.sellPlans && !current.current.sellPlans.length) return;
     if (!automatic) selectionApproved.current = true;
     if (controller.current) {
-      // Settings can queue a follow-up; periodic ticks never prolong an active batch.
+      // A manual start can queue one follow-up; periodic ticks never prolong an active batch.
       if (!automatic || mode || controller.current.signal.aborted) rerun.current = rerun.current === 'refresh' ? 'refresh' : mode ?? 'refresh';
       return;
     }
@@ -218,6 +218,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [acceptReading, change]);
   const cancelFilter = useCallback(() => { filterRevision.current++; filterController.current?.abort(); filterController.current = null; setFilterRunning(false); }, []);
   const cancel = useCallback(() => { intentRevision.current++; rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
+  /** Parameter saves pause the obsolete batch; only an explicit Start approves another run. */
+  const pauseForSettings = useCallback(() => {
+    cancel(); controller.current=null; setRunning(false); setProgress(null);
+  },[cancel]);
   const restart = useCallback(async () => {
     if(!readyRef.current||archiveLock.current)return;
     archiveLock.current=true;setArchiving(true);setError('');const savedOwner=account.current,epoch=generation.current;
@@ -279,18 +283,22 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return () => clearInterval(timer);
   }, [ready, warning, owner]);
   const setRule = useCallback((id: string, rule?: QualityExitRule) => {
-    change(s => ({ ...s, groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? { ...g, rule } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
-    defer(() => void start());
-  }, [change, start, defer]);
-  /** 组合卖出：前段门槛、分水岭与后段门槛一起改，改完重算（旧结果按编号自动区分，存档保留）。 */
+    const plan=current.current.sellPlans?.find(p=>p.id===id)??current.current.groups.find(p=>p.id===id);
+    if(!plan||JSON.stringify(plan.rule)===JSON.stringify(rule))return;
+    pauseForSettings();
+    change(s => ({ ...archiveQualityStudy(s), groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? { ...g, rule } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
+  }, [change,pauseForSettings]);
+  /** Save the full segmented rule together; monitoring starts from the explicit button. */
   const setCombo = useCallback((id: string, rule: QualityExitRule, combo: QualitySellCombo) => {
-    change(s => ({ ...s, sellPlans: s.sellPlans?.map(g => g.id === id && g.combo ? { ...g, rule, combo } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
-    defer(() => void start());
-  }, [change, start, defer]);
+    const plan=current.current.sellPlans?.find(p=>p.id===id&&p.combo);
+    if(!plan||JSON.stringify([plan.rule,plan.combo])===JSON.stringify([rule,combo]))return;
+    pauseForSettings();
+    change(s => ({ ...archiveQualityStudy(s), sellPlans: s.sellPlans?.map(g => g.id === id && g.combo ? { ...g, rule, combo } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
+  }, [change,pauseForSettings]);
   const setObserveHours = useCallback((hours: number) => {
-    change(s => ({ ...s, observeHours: hours }));
-    defer(() => { if (controller.current) rerun.current = 'refresh'; else void start(true); });
-  }, [change, start, defer]);
+    if(current.current.observeHours===hours)return;
+    pauseForSettings();change(s => ({ ...archiveQualityStudy(s), observeHours: hours }));
+  }, [change,pauseForSettings]);
   const selectSell = useCallback((id: string) => change(s => markQualityDetection(s, id)), [change]);
   const setSelectedRows = useCallback((ids: string[]) => {
     selectionApproved.current = false; rerun.current = false;
@@ -302,29 +310,26 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     cancelFilter(); setFilterProgress(null); setFilterError('');
     change(s => ({...s,buyFilters:structuredClone(filters)}));
   }, [change,cancelFilter]);
-  /** 只改某套卖出方案的持仓一票否决：买入条件和过滤读数不动；变了就立刻按新设置重算卖出（正在跑的旧批次直接作废）。 */
+  /** Save this plan’s holding settings without starting or restarting monitoring. */
   const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[], mirror?: QualityMirrorTakeProfit, addition?: QualityAdditionRule) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
     validateQualityMirror(mirror); validateQualityAddition(addition);
     const additionChanged = JSON.stringify(additionIdentity(addition ?? plan?.addition)) !== JSON.stringify(additionIdentity(plan?.addition));
     if (!plan || !additionChanged && JSON.stringify([holdingVetoIdentity(plan.holdingVetoes),mirrorIdentity(plan.mirrorTakeProfit)]) === JSON.stringify([holdingVetoIdentity(vetoes),mirrorIdentity(mirror ?? plan.mirrorTakeProfit)])) return;
-    if (additionChanged) { intentRevision.current++; rerun.current = false; controller.current?.abort(); controller.current = null; }
+    pauseForSettings();
     change(s => {
       const saved = materializePlanBuyFilters(archiveQualityStudy(s));
       return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes), ...(mirror ? {mirrorTakeProfit:structuredClone(mirror)} : {}), ...(addition ? {addition:structuredClone(addition)} : {}) } : p) };
     });
-    defer(() => { if (additionChanged) void start(false, 'restart'); else if (controller.current) void restart(); else void start(); });
-  }, [change, start, restart, defer]);
+  }, [change,pauseForSettings]);
   const setSellPlans = useCallback((plans: import('@/lib/fish/quality').QualityGroup[]) => {
     if (!readyRef.current) return;
     // Validate first, then finalize the old round before replacing its active configuration.
     const checked = replaceQualitySellPlans(current.current, plans);
     if (checked === current.current) return;
-    intentRevision.current++; rerun.current = false;
-    controller.current?.abort(); controller.current = null;
+    pauseForSettings();
     change(s => replaceQualitySellPlans(s, plans));
-    defer(() => void start(false, 'restart'));
-  }, [change, defer, start]);
+  }, [change,pauseForSettings]);
   const deleteSources=useCallback(async(targets:readonly DeleteTarget[])=>{
     if(!readyRef.current)throw Error('鱼质量尚未加载完成');const savedOwner=account.current;
     selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;controller.current?.abort();filterController.current?.abort();

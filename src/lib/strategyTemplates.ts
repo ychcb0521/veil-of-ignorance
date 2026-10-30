@@ -74,7 +74,7 @@ export function usesDualHedgeSop(template: StrategyTemplate): boolean {
   return template === 'main_dual_hedge_mirror_tp' || template === 'rolling';
 }
 
-export const LEG_ROLE_LABELS: Record<LegRole, string> = {
+export const LEG_ROLE_LABELS: Record<LegRole, string> = new Proxy({
   main_open: '主力开仓',
   main_add_1: '加仓1',
   main_add_2: '加仓2',
@@ -89,7 +89,7 @@ export const LEG_ROLE_LABELS: Record<LegRole, string> = {
   reentry_main: '重新入场主力',
   reentry_hedge: '重新入场对冲',
   standalone: '独立单',
-};
+} as Record<LegRole,string>, { get(target,key) { return target[key as LegRole] ?? (typeof key==='string' && /^main_add_\d+$/.test(key) ? '加仓'+key.slice(9) : undefined); } });
 
 export function getAssignableLegRoles(template: StrategyTemplate): LegRole[] {
   if (template === 'main_only') {

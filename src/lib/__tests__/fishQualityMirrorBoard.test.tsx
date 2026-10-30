@@ -1,3 +1,5 @@
+import {QualitySellEvidence,QualitySellTiming} from '@/components/journal/QualitySellEvidence';
+import {defaultQualityAddition} from '@/lib/fish/qualityAddition';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { buildQualityCampaignData } from '@/lib/fish/qualityCampaigns';
@@ -100,4 +102,13 @@ describe('mirror campaign board and consistent accounting', () => {
       expect(text).toContain('半仓止盈');expect(text).toContain('+5.00%');expect(text).toContain('+7.50%');expect(text.replace(/\s/g,'')).toContain('余仓50%');
     } finally {range.mockRestore();cleanup();}
   });
+});
+
+it('shows every addition round and describes the K stop as a price with correct execution timing',()=>{
+ const {campaign}=fixture(),e=campaign.comparison!.sellEvidence!;
+ const fill={at:T+M,price:110,notional:220,quantity:2,scanFrom:T,reading:1,threshold:.5,direction:'>' as const,metric:'raw',label:'触发',barOpenTime:T,sizing:{support:107,previousSupport:100,atr:2,atrAt:T,coinsBefore:1,realAverageBefore:100,baseCoins:2,mirrorCoins:0,mirrorUsed:0}};
+ e.addition={...defaultQualityAddition(),enabled:true};e.additionFill=fill;e.additionFills=[fill,{...fill,at:T+2*M,sizing:{...fill.sizing,support:117,previousSupport:107}}];e.totalInvested=540;e.averageEntryPrice=108;
+ e.triggerCause={id:'addition-support',label:'加仓支撑线 K',kind:'addition-support',direction:'<=',threshold:117};e.reading=117;e.confirmedAt=T+3*M;e.executedAt=T+3*M;e.triggerAtOpen=true;
+ render(<><QualitySellEvidence evidence={e}/><QualitySellTiming evidence={e}/></>);
+ expect(screen.getByTestId('quality-addition-evidence')).toHaveTextContent('已成交 2 轮');expect(screen.getByTestId('quality-addition-evidence')).toHaveTextContent('成本线 S 107');expect(screen.getByTestId('quality-sell-timing')).toHaveTextContent('开盘跳空越过 K，按开盘价成交');expect(screen.getByTestId('quality-sell-evidence')).not.toHaveTextContent('117%');cleanup();
 });

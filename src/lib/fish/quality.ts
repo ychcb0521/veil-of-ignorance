@@ -1,4 +1,5 @@
-import { additionIdentity, additionPosition, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import {findCalculatorAdditions} from './qualityAdditionCalculator';
+import { additionIdentity, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -76,7 +77,7 @@ export interface QualityResult {
   /** First and only mirror sale, as a fraction of original coin quantity. */
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
-  additionFill?: QualityAdditionFill; additionNote?: string; totalInvested?: number;
+  additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string; totalInvested?: number;
   averageEntryPrice?: number; remainingQuantity?: number; remainingCost?: number;
   exitReading?: number;
   pendingExit?: QualityTrigger;
@@ -474,18 +475,13 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     if (!prices || prices.length !== (priceEnd - since) / QUALITY_MINUTE) prices = await load(row, since, priceEnd, pp, signal);
     validateFishBars(prices, priceEnd, (priceEnd - since) / QUALITY_MINUTE, QUALITY_MINUTE);
     const entryPrice = prior?.entryPrice ?? prices[0].open;
-    const exitBar = trigger ? prices.find(b => b.openTime === trigger.at) : undefined;
-    const closed = !!exitBar, finalTime = closed ? exitBar!.openTime : end;
+    let exitBar = trigger ? prices.find(b => b.openTime === trigger.at) : undefined;
+    let closed = !!exitBar, finalTime = closed ? exitBar!.openTime : end;
     // 回撤止损盘中触及：按止损价成交；其余按卖出分钟的开盘价
-    const stopFill = closed && trigger?.fillPrice != null ? trigger.fillPrice : undefined;
-    const finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
-    const held = prices.filter(b => b.openTime < finalTime);
-    const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
-    const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
-    const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
-    const breakdown = mirrorPnlBreakdown(QUALITY_NOTIONAL, entryPrice, finalPrice, mirrorFill);
-    let additionFill=prior?.additionFill, additionNote: string | undefined;
-    if(group.addition?.enabled && !additionFill) {
+    let stopFill = closed && trigger?.fillPrice != null ? trigger.fillPrice : undefined;
+    let finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
+    let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined;
+    if(group.addition?.enabled && (!additionFill||group.addition.quantityMode==='calculator')) {
       const config=group.addition, candidates: AdditionCandidate[]=[];
       const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
         const base=qualityMetricPlan(snapshot,metric);
@@ -502,9 +498,23 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
         }
         if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
       }
-      additionFill=await findQualityAddition({candidates,row,entry,end:closed && trigger?.fillPrice != null && !trigger.atOpen ? finalTime + QUALITY_MINUTE : finalTime,notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt,load,signal});
+      const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
+      if(config.quantityMode==='calculator'){
+        const calculated=await findCalculatorAdditions({candidates,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
+          ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
+        additionFills=calculated.fills;additionFill=additionFills[0];
+        if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
+          trigger={at:stop.at,reading:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support}};
+          if(mirrorFill&&(mirrorFill.at>stop.at||mirrorFill.at===stop.at&&(stop.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
+        }
+      }else{additionFill=await findQualityAddition({candidates,row,entry,end:additionEnd,...(config.quantityMode?{quantity:config.quantityMode==='entry'?QUALITY_NOTIONAL/entryPrice:config.quantity}:{notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
     }
-    const position=additionFill?additionPosition(QUALITY_NOTIONAL,entryPrice,finalPrice,closed,additionFill,mirrorFill):undefined;
+    const held = prices.filter(b => b.openTime < finalTime);
+    const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
+    const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
+    const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
+    const breakdown = mirrorPnlBreakdown(QUALITY_NOTIONAL, entryPrice, finalPrice, mirrorFill);
+    const position=additionFills.length?additionPosition(QUALITY_NOTIONAL,entryPrice,finalPrice,closed,additionFills,mirrorFill):undefined;
     const returnPct = position?.returnPct ?? breakdown.returnPct;
     let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
@@ -528,7 +538,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
-      ...(additionFill && position ? {additionFill,totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
+      ...(additionFill && position ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
         initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
       ...(additionNote?{additionNote}:{}),
@@ -538,7 +548,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
       exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen,...(trigger.stage ? { stage: trigger.stage } : {})} : undefined,
-      reason: closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && !trigger?.cause && trigger?.stage && group.combo ? (trigger.stage === 'after'
+      reason: closed&&trigger?.cause?.kind==='addition-support'?`加仓支撑线 K 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按支撑价卖出'}`:closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && !trigger?.cause && trigger?.stage && group.combo ? (trigger.stage === 'after'
         ? `组合卖出：涨幅已达 ${group.combo.switchPct}%，按 ${group.combo.after.label} ${group.combo.after.rule.direction} ${group.combo.after.rule.threshold} 盘中复原达标，下一分钟开盘卖出`
         : `组合卖出：涨幅未达 ${group.combo.switchPct}%，按 ${group.combo.beforeLabel} ${group.rule!.direction} ${group.rule!.threshold} 盘中复原达标，下一分钟开盘卖出`)
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };

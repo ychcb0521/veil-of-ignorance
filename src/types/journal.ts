@@ -317,6 +317,7 @@ export type LegRole =
   | 'main_add_4'
   | 'main_add_5'
   | 'main_add_6'
+  | `main_add_${number}`
   | 'hedge_initial_a'
   | 'hedge_initial_b'
   | 'hedge_rolling'
@@ -404,9 +405,9 @@ export interface TradeCampaign {
       executedAt?: number;
       triggerAtOpen?:boolean;
       mirrorTakeProfit?: {enabled:boolean;gainPct:number;sellPct:number};
-      addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; totalInvested?: number; averageEntryPrice?: number;
+      addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; additionFills?: QualityAdditionFill[]; totalInvested?: number; averageEntryPrice?: number;
       mirrorFill?: {at:number;price:number;fraction:number;gainPct:number;atOpen:boolean};
-      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator'|'mirror-take-profit';direction:'<'|'>'|'<='|'>=';threshold:number };
+      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator'|'mirror-take-profit'|'addition-support';direction:'<'|'>'|'<='|'>=';threshold:number };
       holdingVetoes?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number;formula?:string }[];
     };
   };

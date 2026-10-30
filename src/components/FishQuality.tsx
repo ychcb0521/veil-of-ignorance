@@ -12,13 +12,13 @@ import { POST_EXIT_HOURS, qualityPostExitKey, postExitValue } from '@/lib/fish/q
 import { FishQualityManual } from '@/components/FishQualityManual';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { qualityDetectorReading } from '@/lib/fish/qualityDetectorReading';
-import { defaultQualityAddition } from '@/lib/fish/qualityAddition';
+import { defaultQualityAddition, qualityAdditionFills } from '@/lib/fish/qualityAddition';
 import { FishQualityAdditionEditor, additionDraft, parseAdditionDraft } from '@/components/FishQualityAdditionEditor';
 import { FishQualitySellPlansEditor } from './FishQualitySellPlansEditor';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { qualitySalePriceChangePct, qualityPeakPct, qualityHalfMirror } from '@/lib/fish/qualityPresentation';
 import { FishQualityMirrorEditor, mirrorDraft, parseMirrorDraft } from '@/components/FishQualityMirrorEditor';
-import { defaultQualityMirror, mirrorIdentity, validateQualityMirror } from '@/lib/fish/qualityMirror';
+import { defaultQualityMirror, validateQualityMirror } from '@/lib/fish/qualityMirror';
 import { qualityRunStatusMap, qualityRowRunStatus, qualityRunStatusText, qualityRunStatusDetail, qualitySelectRunState, type QualityRunStage, type QualityRunStateFilter } from '@/lib/fish/qualityRunStatus';
 import { FishQualityStatistics, QualityStatisticsButton, type QualityStatisticsRequest } from '@/components/FishQualityStatistics';
 import { qualityVariables, qualityVariableKey } from '@/lib/fish/qualityVariables';
@@ -96,9 +96,9 @@ function SellEditor({ plan, state }: { plan: QualityGroup; state: FishQualitySta
     <div className="flex items-center gap-1.5">
       <select aria-label={`${plan.label}卖出方向`} className={field} value={direction} onChange={e => setDirection(e.target.value as '<' | '>')}><option value="<">&lt;</option><option value=">">&gt;</option></select>
       <input aria-label={`${plan.label}卖出门槛`} type="number" step="any" value={threshold} onChange={e => setThreshold(e.target.value)} className={`${field} w-24`}/>
-      <button type="button" disabled={!state.ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用并重算</button>
+      <button type="button" disabled={!state.ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存参数</button>
     </div>
-    <p className="text-[10.5px] leading-relaxed text-muted-foreground">以上数值供比较，未预选为最优。{plan.execution === 'intrabar-1m' ? '逐分钟复原原周期指标，首次达标后按紧接的分钟开盘价卖出；历史精度为 1 分钟。' : '首次满足条件的收盘后，按下一分钟开盘价卖出。'}</p>
+    <p className="text-[10.5px] leading-relaxed text-muted-foreground">保存后点击「开始监测」运行。以上数值供比较，未预选为最优。{plan.execution === 'intrabar-1m' ? '逐分钟复原原周期指标，首次达标后按紧接的分钟开盘价卖出；历史精度为 1 分钟。' : '首次满足条件的收盘后，按下一分钟开盘价卖出。'}</p>
     {hasQualityExit(plan) && <div className="flex flex-wrap gap-2 text-[11px]"><button type="button" className="text-primary hover:underline" onClick={() => state.selectSell(plan.id)}>固定此方案，比较探测算法</button>{plan.rule && <button type="button" className="text-muted-foreground hover:underline" onClick={() => state.setRule(plan.id, undefined)}>清除门槛</button>}</div>}
     <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">公式与参数</summary><pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2">{definition.formula}</pre><p className="mt-1">{plan.snapshot.interval} 原周期 · hl {definition.halfLifeHours} 小时 · avgh {definition.avgHours} 小时 · 原值倍率 1</p><p className="mt-1">每次运行前读取当前账号定义，运行结果保存当次公式快照。</p></details>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
@@ -106,7 +106,7 @@ function SellEditor({ plan, state }: { plan: QualityGroup; state: FishQualitySta
 }
 /**
  * 【用户要求】2026-10-27「卖出算法组合1」：前段 CDA、价格涨幅超过分水岭（默认 5.1%）后改用状态 S。
- * 三个数一起改、一起重算；买入过滤与持仓否决在各自模块的条件设置里，与其他方案一样按这套方案单独设。
+ * 三个数一并保存，点击「开始监测」后运行；买入过滤与持仓否决在各自模块的条件设置里，与其他方案一样按这套方案单独设。
  */
 function ComboSellEditor({ plan, state }: { plan: QualityGroup; state: FishQualityState }) {
   const combo = plan.combo!, after = combo.after;
@@ -138,8 +138,8 @@ function ComboSellEditor({ plan, state }: { plan: QualityGroup; state: FishQuali
       <input aria-label="组合卖出分水岭" type="number" step="any" min="0" value={pct} onChange={e => setPct(e.target.value)} className={`${field} w-16`}/><span>%</span>
     </div>
     {row(`后段 · ${after.label}`, later, setLater, after.snapshot, '过了分水岭之后')}
-    <div className="flex justify-end"><button type="button" disabled={!state.ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用并重算</button></div>
-    <p className="text-[10.5px] leading-relaxed text-muted-foreground">以买入价为基准，持仓中盘中最高价首次达到分水岭的那一分钟收盘起改用后段条件；之前只看前段。都是逐分钟复原原周期指标，首次达标后按紧接的分钟开盘价卖出。持仓否决两段全程有效。</p>
+    <div className="flex justify-end"><button type="button" disabled={!state.ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存参数</button></div>
+    <p className="text-[10.5px] leading-relaxed text-muted-foreground">保存后点击「开始监测」运行。以买入价为基准，持仓中盘中最高价首次达到分水岭的那一分钟收盘起改用后段条件；之前只看前段。都是逐分钟复原原周期指标，首次达标后按紧接的分钟开盘价卖出。持仓否决两段全程有效。</p>
     {hasQualityExit(plan) && <div className="text-[11px]"><button type="button" className="text-primary hover:underline" onClick={() => state.selectSell(plan.id)}>固定此方案，比较探测算法</button></div>}
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
@@ -189,14 +189,12 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
   ready: boolean; plan: QualityGroup; draft: MonitorDraft; setDraft: (draft: MonitorDraft) => void;
   save: () => void; error: string; allDirty: boolean; count: number;
 }) {
-  const mirrorChanged = JSON.stringify(mirrorIdentity(parseMirrorDraft(draft.mirror))) !== JSON.stringify(mirrorIdentity(plan.mirrorTakeProfit));
-  const changed = JSON.stringify(draft) !== JSON.stringify(monitorDraftOf(plan)) || mirrorChanged;
   return <div className="space-y-3" data-testid="quality-monitor-editor" data-plan-id={plan.id}>
-    <div className="space-y-0.5"><p className="text-xs font-medium">持仓监测 · {plan.label}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">买入之后何时加仓或提前卖出。加仓、镜像止盈与持仓否决分别保存在对应方案中；切换方案保留本次填写，保存时一起应用并重算。</p></div>
+    <div className="space-y-0.5"><p className="text-xs font-medium">持仓监测 · {plan.label}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">买入之后何时加仓或提前卖出。加仓、镜像止盈与持仓否决分别保存在对应方案中；切换方案保留本次填写，保存时一起保存参数。</p></div>
     <FishQualityAdditionEditor draft={draft.addition} setDraft={addition => setDraft({...draft,addition})}/>
     <FishQualityMirrorEditor draft={draft.mirror} setDraft={mirror => setDraft({...draft,mirror})} additionEnabled={draft.addition.enabled}/>
     <FishQualityHoldingVetoEditor draft={draft.vetoes} setDraft={vetoes => setDraft({...draft,vetoes})}/>
-    <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案并重算` : `应用到「${plan.label}」${changed ? '并重算' : ''}`}</button></div>
+    <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案` : `保存到「${plan.label}」`}</button></div>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
 }
@@ -235,7 +233,8 @@ const QualityArchiveContext=createContext(false);
 function ResultCell({ result, onClick, section, onOpenCampaign }: { result?: QualityResult; onClick: () => void; section: 'sell' | 'detect'; onOpenCampaign?: () => void }) {
   const archiveView=useContext(QualityArchiveContext);
   const router = useInRouterContext(), className = 'flex w-full items-center justify-between gap-2 text-left hover:underline';
-  const content = <>{result?.additionFill && <span className="shrink-0 text-[9px] text-primary" title={`已加仓 ${result.additionFill.notional} USDT · ${date(result.additionFill.at)} · 均价 ${result.averageEntryPrice?.toPrecision(7)}`}>已加仓</span>}<span className={`font-mono tabular-nums ${signed(result?.returnPct)}`}>{pct(result?.returnPct)}</span><span className={`text-[9px] ${result?.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>{result?.status === 'open' && result.mirrorFill ? `余仓 ${+((result.remainingFraction ?? 1)*100).toPrecision(8)}%` : resultText(result)}</span></>;
+  const additions=qualityAdditionFills(result??{});
+  const content = <>{additions.length>0 && <span className="shrink-0 text-[9px] text-primary" title={`共加仓 ${additions.reduce((n,a)=>n+a.quantity,0).toPrecision(7)} 枚 · 均价 ${result?.averageEntryPrice?.toPrecision(7)}`}>已加仓 {additions.length} 次</span>}<span className={`font-mono tabular-nums ${signed(result?.returnPct)}`}>{pct(result?.returnPct)}</span><span className={`text-[9px] ${result?.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>{result?.status === 'open' && result.mirrorFill ? `余仓 ${+((result.remainingFraction ?? 1)*100).toPrecision(8)}%` : resultText(result)}</span></>;
   if (!archiveView && result && hasQualityCampaign(result)) {
     const href = qualityCampaignPath(result.key, section);
     return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title="打开该标的的交易战役">{content}</Link> : <a href={href} className={className} title="打开该标的的交易战役">{content}</a>;
@@ -267,7 +266,7 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
       ['状态', (r?: QualityResult) => `${resultText(r)}${r?.reason ? ` · ${r.reason}` : ''}`],
       ['买入时间', (r?: QualityResult) => date(r?.entryTime)], ['买入价', (r?: QualityResult) => r?.entryPrice?.toPrecision(7) ?? '—'],
       ['卖出 / 估值时间', (r?: QualityResult) => date(r?.endTime)], ['卖出 / 估值价', (r?: QualityResult) => r?.endPrice?.toPrecision(7) ?? '—'],
-      ['加仓', (r?: QualityResult) => r?.additionFill ? `${date(r.additionFill.at)} · ${r.additionFill.notional} USDT · 价格 ${r.additionFill.price.toPrecision(7)} · ${r.additionFill.label} ${r.additionFill.direction} ${r.additionFill.threshold}` : r?.additionNote ?? '未触发'],
+      ['加仓', (r?: QualityResult) => qualityAdditionFills(r??{}).length ? qualityAdditionFills(r??{}).map((a,i)=>`第${i+1}轮 ${date(a.at)} · ${a.quantity.toPrecision(7)} 枚 · T ${a.price.toPrecision(7)}${a.sizing?` · S ${a.sizing.previousSupport.toPrecision(7)} · K ${a.sizing.support.toPrecision(7)} · ATR ${a.sizing.atr.toPrecision(7)}`:''}`).join('；') : r?.additionNote ?? '未触发'],
       ['累计投入 / 持仓均价', (r?: QualityResult) => r?.additionFill ? `${r.totalInvested} USDT · ${r.averageEntryPrice?.toPrecision(8)}` : '—'],
       ['镜像止盈', (r?: QualityResult) => r?.mirrorFill ? `${date(r.mirrorFill.at)} · 价格 ${r.mirrorFill.price.toPrecision(7)} · 卖出初始币数 ${+(r.mirrorFill.fraction*100).toPrecision(8)}%` : '未触发'],
       ['余仓 / 已兑现', (r?: QualityResult) => r?.mirrorFill ? `${+((r.remainingFraction ?? 0)*100).toPrecision(8)}% / ${r.realizedPnl?.toFixed(2)} USDT` : '—'],
@@ -524,7 +523,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       </div>
       <div className="flex flex-wrap items-center gap-1">{!archiveView&&<FishLibraryDataButton/>}<button type="button" className={button} disabled={!rows.length} onClick={exportRows} aria-label="导出鱼质量数据"><Download className="h-3 w-3"/>导出数据</button></div>
     </div>
-    <FishQualityManual open={manualOpen} onOpenChange={setManualOpen}><><p>点「开始过滤」独立计算买入条件：在捕捞过程右侧查看各指标读数和是否满足条件。读数取买入时刻之前最后一根已收盘 K 线；修改门槛复用已有读数。</p><p>设置卖出算法后，可比较同一批信号的收益，再固定一套卖出规则，比较各探测算法。</p><p>批量挖掘、买前过滤和持仓监测可同时独立运行，各自暂停。点「开始监测」后在后台运行：按开始时的勾选和参数计算，切换选项或页面不会中断；已算完且条件没变的结果直接沿用，只补算缺的和改过的；要全部重算，点「开始监测」右侧的 ▾ 选「从头重新计算」（先将全部现有运行结果独立归档到监测库，保存完成后再重算；时间目录内按当时条件展示，同条件重复重算也各自保留）。改了买入过滤会复用已有结果，改了持仓否决会立刻按新设置重新开始，其他参数改动在本批完成后补算。</p><p>信号库、鱼舱、挖掘库独立并行，均可进入过滤与监测；同标的、同信号时间和入场时间的记录合并显示，保留全部来源。删除一个来源不影响另两个库；有其他来源的下游结果继续保留。信号库本身不产生探测归属，按信号时间买入。</p><p>历史鱼按捕捞时刻入场（不用信号时间：那是事后才知道会持续下去的起点），实时新鱼按实际发现时点入场；随后首根 1 分钟 K 线开盘价近似买入。已有历史样本按此口径重新评估，卖出规则保留。</p><p>收益未扣手续费、资金费和滑点。未卖出持仓单独标记；缺数据不计为零收益。探测分组可以重叠，组间盈亏不相加。</p><p>同一标的、同一信号时间默认合并一行；打开「探测值」或「探测算法」表头的展开开关后，每个算法与当次保存的探测值各占一行；探测值位于评分之后。不同买入记录的结果显示范围；合并行勾选覆盖全部明细，展开后可单独勾选。</p><p>原捕获记录与旧版规则保留；本次两套卖出试验独立计算，公式冻结，均使用原始值。</p></></FishQualityManual>
+    <FishQualityManual open={manualOpen} onOpenChange={setManualOpen}><><p>点「开始过滤」独立计算买入条件：在捕捞过程右侧查看各指标读数和是否满足条件。读数取买入时刻之前最后一根已收盘 K 线；修改门槛复用已有读数。</p><p>设置卖出算法后，可比较同一批信号的收益，再固定一套卖出规则，比较各探测算法。</p><p>批量挖掘、买前过滤和持仓监测可同时独立运行，各自暂停。点「开始监测」后在后台运行：按开始时的勾选和参数计算，切换选项或页面不会中断；已算完且条件没变的结果直接沿用，只补算缺的和改过的；要全部重算，点「开始监测」右侧的 ▾ 选「从头重新计算」（先将全部现有运行结果独立归档到监测库，保存完成后再重算；时间目录内按当时条件展示，同条件重复重算也各自保留）。改了买入过滤会复用已有结果，修改卖出参数只保存设置并暂停旧参数任务；全部调整完成后，点击「开始监测」按最新参数运行。</p><p>信号库、鱼舱、挖掘库独立并行，均可进入过滤与监测；同标的、同信号时间和入场时间的记录合并显示，保留全部来源。删除一个来源不影响另两个库；有其他来源的下游结果继续保留。信号库本身不产生探测归属，按信号时间买入。</p><p>历史鱼按捕捞时刻入场（不用信号时间：那是事后才知道会持续下去的起点），实时新鱼按实际发现时点入场；随后首根 1 分钟 K 线开盘价近似买入。已有历史样本按此口径重新评估，卖出规则保留。</p><p>收益未扣手续费、资金费和滑点。未卖出持仓单独标记；缺数据不计为零收益。探测分组可以重叠，组间盈亏不相加。</p><p>同一标的、同一信号时间默认合并一行；打开「探测值」或「探测算法」表头的展开开关后，每个算法与当次保存的探测值各占一行；探测值位于评分之后。不同买入记录的结果显示范围；合并行勾选覆盖全部明细，展开后可单独勾选。</p><p>原捕获记录与旧版规则保留；本次两套卖出试验独立计算，公式冻结，均使用原始值。</p></></FishQualityManual>
     {open && <div id={contentId} className="mt-2 space-y-2">
       {!archiveView&&<div className={fishRail} aria-label="鱼质量工作模块" data-testid="quality-modules">
         {mining && <FishMiningPanel mining={mining} onJump={onJump} canJump={canJump} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}

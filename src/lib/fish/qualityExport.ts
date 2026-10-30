@@ -4,7 +4,7 @@ import { sellErrorExportValues } from './qualitySellError';
 import { qualityDetectorLabel } from './qualityDetectorLabel';
 import { POST_EXIT_HOURS,postExitExportValues } from './qualityPostExit';
 import { qualityDetectorReading } from './qualityDetectorReading';
-import { additionLabel } from './qualityAddition';
+import { additionLabel, qualityAdditionFills } from './qualityAddition';
 import { qualitySalePriceChangePct, qualityPeakPct, qualityHalfMirror } from './qualityPresentation';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from './qualityFilterColumns';
 import { activeHoldingVetoes } from './qualityVeto';
@@ -68,10 +68,11 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
       r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualitySalePriceChangePct(r),qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label,qualityDetectorLabel(run.plan,r).label];
   }) });
-  const addHeaders=['加仓条件','加仓时间','加仓金额 USDT','加仓成交价','加仓数量','加仓触发读数','加仓门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON'];
-  const values=(run: typeof runs[number])=>{const a=run.result.additionFill;return [additionLabel(run.plan.addition),a?formatUTC8(a.at):null,a?.notional??null,a?.price??null,a?.quantity??null,a?.reading??null,a?.threshold??null,run.result.totalInvested??100,run.result.averageEntryPrice??run.result.entryPrice??null,a?.definitionKey??run.plan.addition?.condition?.snapshot.definitionKey??null];};
+  const addHeaders=['加仓条件','加仓时间','加仓金额 USDT','加仓成交价','加仓数量','加仓触发读数','加仓门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON','加仓轮数','加仓明细 JSON'];
+  const values=(run: typeof runs[number])=>{const adds=qualityAdditionFills(run.result),a=adds[0];return [additionLabel(run.plan.addition),a?formatUTC8(a.at):null,adds.length?adds.reduce((n,a)=>n+a.notional,0):null,a?.price??null,adds.length?adds.reduce((n,a)=>n+a.quantity,0):null,a?.reading??null,a?.threshold??null,run.result.totalInvested??100,run.result.averageEntryPrice??run.result.entryPrice??null,a?.definitionKey??run.plan.addition?.condition?.snapshot.definitionKey??null,adds.length,adds.length?JSON.stringify(adds):null];};
   const outputIndex=sheets.findIndex(s=>s.name==='运行结果'),output=sheets[outputIndex];
   sheets[outputIndex]={...output,columns:[...output.columns,...addHeaders.map(header=>({header,width:28})),...POST_EXIT_HOURS.map(h=>({header:`卖后${h}h 卖出误报`,width:32})),...POST_EXIT_HOURS.flatMap(h=>['峰值涨幅','静态最大回撤2'].map(metric=>({header:`卖后${h}h ${metric} %（卖出价基准）`,width:34})))],rows:output.rows.map((row,i)=>[...row,...values(runs[i]),...sellErrorExportValues(runs[i].sample.source,runs[i].result,runs[i].plan,study.postExitReadings),...postExitExportValues(runs[i].sample.source,runs[i].result,runs[i].plan,study.postExitReadings)])};
+  if(runs.some(run=>qualityAdditionFills(run.result).length))sheets.push({name:'加仓明细',columns:['标的','试验编号','加仓轮次','加仓时间','加仓币数','成交价 T','成交金额 USDT','成本线 S','新支撑线 K','5分钟 ATR(14)','ATR已收盘时间','已用镜像利润 USDT'].map(header=>({header,width:28})),rows:runs.flatMap(run=>qualityAdditionFills(run.result).map((a,i)=>[run.sample.source.symbol,run.result.key,i+1,formatUTC8(a.at),a.quantity,a.price,a.notional,a.sizing?.previousSupport??null,a.sizing?.support??null,a.sizing?.atr??null,a.sizing?formatUTC8(a.sizing.atrAt):null,a.sizing?.mirrorUsed??null]))});
   if (study.campaignRepair) {
     const byKey = new Map(allRuns.map(run => [run.result.key,run]));
     sheets.push({name:'纠错记录',columns:['标的','原试验编号','状态','纠正后试验编号','核验时间','原卖出时间','原收益率 %','纠正后卖出时间','纠正后收益率 %','未通过原因','原实际公式','纠正后实际公式','原卖出时机','纠正后卖出时机'].map(header => ({header,width:header.includes('公式')?60:25})),
