@@ -20,7 +20,7 @@ export function retentionFormula(source:string,baseExpression:string,core:string
   source,`${n('base')} = ${baseExpression}`,
   '# 以下参数仅属于本副本。gain=0时逐根返回原算法；窗口不缩短，增强在最终压缩前进行',
   `${n('version')} = 1`,`${n('gain')} = 0.5`,`${n('window_h')} = ${windowHours}`,`${n('eta')} = 0.5`,`${n('alpha')} = 1`,`${n('impact_weight')} = 0.25`,`${n('flow_floor')} = 0.05`,`${n('sigma_floor')} = 0.000001`,`${n('epsilon')} = 0.000000000001`,
-  `${n('window_n')} = ${n('window_h')} * 60 / ${n('minutes')}`,`${n('baseline_n')} = avgh * 60 / ${n('minutes')}`,
+  `${n('window_n')} = bars(${n('window_h')})`,`${n('baseline_n')} = bars(avgh)`,
   `${n('parameters')} = if(${n('gain')} >= 0 and ${n('eta')} >= 0 and ${n('eta')} <= 1 and ${n('alpha')} >= 0 and ${n('impact_weight')} >= 0 and ${n('flow_floor')} > 0 and ${n('sigma_floor')} > 0 and ${n('epsilon')} > 0, 1, 0/0)`,
   `${n('valid')} = if(has(${n('parameters')}) and ${n('q')} > 0 and ${n('b')} >= 0 and ${n('s')} >= 0 and ${n('e')} > 0 and ${n('c')} > 0 and ${n('time')} - prev(${n('time')}) == ${n('minutes')} * 60000, 1, 0/0)`,
   `${n('r')} = if(has(${n('valid')}), ln(${n('e')} / prev(${n('e')})), 0/0)`,

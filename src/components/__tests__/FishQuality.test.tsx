@@ -461,10 +461,11 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   expect(held('BBBUSDT')).toEqual(['30 分钟', '30 分钟']);
   expect(held('CCCUSDT')).toEqual(['30.0 小时', '30.0 小时']);
   expect(within(row('BBBUSDT')).queryByText('未买入')).toBeNull();
-  // 列顺序：峰值涨幅 → （开了镜像止盈才有的半仓镜像）→ 持仓时间；这里没开镜像，不出「未启用」整列
+  // 列顺序：峰值涨幅 → （开了镜像止盈才有的半仓镜像）→ 探测标签 → 持仓时间
   const headers = screen.getAllByRole('columnheader').map(h => h.textContent ?? '');
   const peak = headers.findIndex(h => h.startsWith('峰值涨幅'));
-  expect(headers[peak + 1]).toMatch(/^持仓时间/);
+  expect(headers[peak + 1]).toMatch(/^探测标签/);
+  expect(headers[peak + 2]).toMatch(/^持仓时间/);
   expect(headers.some(h=>h.startsWith('半仓镜像'))).toBe(false);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
@@ -648,7 +649,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '10');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '12');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(0);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -786,7 +787,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('未触发');
  // 只有开了镜像止盈的方案才有这一列
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(1);
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 5 + 1));
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 6 + 1));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);

@@ -80,4 +80,8 @@ describe('independent seller retained-outcome copies',()=>{
   for(const [name,value] of [['gain','-1'],['eta','2'],['alpha','-1'],['impact_weight','-1'],['flow_floor','0'],['sigma_floor','0']] as const){const altered={...d,formula:d.formula.replace(new RegExp('sr_'+name+' = [^\\n]+'),'sr_'+name+' = '+value)};expect(Number.isNaN(series(run(altered,data),spec.core).at(-1)!)).toBe(true);}
  });
 
+ it('uses existing hour-to-bar rounding for fractional account baselines and independent retention windows',()=>{
+  const d={...fixture(),avgHours:.13,formula:fixture().formula.replace('sr_window_h = 2','sr_window_h = 2.13')},out=run(d,bars(240));expect(series(out,spec.core).some(Number.isFinite)).toBe(true);expect(out.vars.get('sr_baseline_n')).toBe(2);expect(out.vars.get('sr_window_n')).toBe(26);
+ });
+
 });

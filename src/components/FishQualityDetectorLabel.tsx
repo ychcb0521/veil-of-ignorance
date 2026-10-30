@@ -1,0 +1,14 @@
+import { ChevronDown } from 'lucide-react';
+import type { FishQualityStudy,QualityGroup,QualityResult,QualitySample } from '@/lib/fish/quality';
+import { qualityDetectorLabel } from '@/lib/fish/qualityDetectorLabel';
+const color=(code:string)=>code==='hit'?'text-emerald-600 dark:text-emerald-400':code==='severe-false'?'text-destructive':code==='mild-false'?'text-primary':'text-muted-foreground';
+export function DetectorLabelHeader({plan,expanded,toggle,sort,ascending,onSort}:{plan:QualityGroup;expanded:boolean;toggle:()=>void;sort:string;ascending:boolean;onSort:()=>void}){
+ return <th className="min-w-[150px] px-2 py-1.5 font-medium" data-testid="quality-detector-label-header" data-sell-plan={plan.id} aria-sort={sort===`label:${plan.id}`?ascending?'ascending':'descending':'none'} title="按本卖出方案的实际镜像成交和最终整笔盈亏，分别给每次探测打标签；不是探测算法总体误报率。"><span className="inline-flex items-center gap-2"><button type="button" className="hover:text-foreground" aria-label={`按${plan.label}探测标签排序`} onClick={onSort}>探测标签{sort===`label:${plan.id}`?ascending?' ↑':' ↓':''}</button><button type="button" className="inline-flex items-center gap-1 text-primary hover:underline" aria-label={`${expanded?'收起':'展开'}${plan.label}探测标签`} aria-expanded={expanded} onClick={toggle}>{expanded?'收起':'展开'}<ChevronDown className={`h-3 w-3 ${expanded?'rotate-180':''}`}/></button></span></th>;
+}
+export interface DetectorLabelEntry {row:QualitySample;result?:QualityResult;skipped?:boolean}
+export function DetectorLabelCell({plan,entries,study,expanded,onExpand}:{plan:QualityGroup;entries:DetectorLabelEntry[];study:FishQualityStudy;expanded:boolean;onExpand:()=>void}){
+ const unique=[...new Map(entries.map(e=>[[e.row.signalId??e.row.id,e.row.detectorId??'',e.row.enteredAt??''].join('|'),e])).values()];
+ const tagged=unique.map(e=>{const group=study.groups.find(g=>g.id===e.row.detectorId);return {...e,tag:qualityDetectorLabel(plan,e.result,e.skipped),detector:group?`${group.label} ${group.snapshot.direction??'>'} ${group.snapshot.threshold}`:e.row.detectorId?'探测算法':'信号库'};});
+ const counts=[...tagged.reduce((m,e)=>m.set(e.tag.label,(m.get(e.tag.label)??0)+1),new Map<string,number>())].map(([label,n])=>`${label} ${n}`).join('；');
+ return <td className="border-t border-border/40 px-2 py-1.5" data-testid="quality-detector-label-cell" data-sell-plan={plan.id}>{!expanded?<button type="button" className="text-primary hover:underline" title={counts||'暂无探测项'} onClick={onExpand}>{tagged.length} 项 · 展开</button>:<div className="space-y-1.5">{tagged.map(e=><div key={[e.row.signalId??e.row.id,e.row.detectorId??'',e.row.enteredAt??''].join('|')} className="flex items-center gap-2 whitespace-nowrap" title={e.tag.detail} data-testid="quality-detector-label-item" data-label={e.tag.code}><span className={`font-medium ${color(e.tag.code)}`}>{e.tag.label}</span><span className="text-[9px] text-muted-foreground/70">{e.detector}</span></div>)}</div>}</td>;
+}
