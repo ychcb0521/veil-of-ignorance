@@ -1,5 +1,5 @@
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
-import { additionIdentity, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import { additionIdentity, qualityAdditionConditions, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -493,7 +493,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
           candidates.push({plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
         };
         if(config.source==='custom') {
-          const f=config.condition!; addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
+          for(const f of qualityAdditionConditions(config))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
         } else {
           const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
           for(const f of detectors) {
@@ -502,16 +502,17 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
           }
           if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
+        const required=config.source==='custom'?candidates.splice(1):undefined;
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,minGainPct:config.minGainPct,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
             trigger={at:stop.at,reading:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support}};
             if(mirrorFill&&(mirrorFill.at>stop.at||mirrorFill.at===stop.at&&(stop.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
           }
-        }else{additionFill=await findQualityAddition({candidates,row,entry,end:additionEnd,...(config.quantityMode?{after:mirrorFill!.at,quantity:config.quantityMode==='entry'?QUALITY_NOTIONAL/entryPrice*(1-mirrorFill!.fraction):config.quantity}:{notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
+        }else{additionFill=await findQualityAddition({candidates,required,row,entry,end:additionEnd,...(config.minGainPct!=null?{priceGate:{referencePrice:entryPrice,thresholdPct:config.minGainPct,basis:'real-average'}}:{}),...(config.quantityMode?{after:mirrorFill!.at,quantity:config.quantityMode==='entry'?QUALITY_NOTIONAL/entryPrice*(1-mirrorFill!.fraction):config.quantity}:{notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
       }
     }
     const held = prices.filter(b => b.openTime < finalTime);

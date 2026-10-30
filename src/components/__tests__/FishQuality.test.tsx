@@ -822,22 +822,22 @@ it('keeps algorithm cards and monitoring tabs in the same live order, preserves 
  const addedId=screen.getByTestId('sell-plan-draft-3').getAttribute('data-plan-id');
  fireEvent.change(screen.getByLabelText('卖出算法 4 名称'),{target:{value:'新加仓方案'}});
  expect(tabs().find(t=>t.getAttribute('aria-selected')==='true')).toHaveAttribute('data-plan-id',addedId);
- fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓数量方式'),{target:{value:'fixed'}});fireEvent.change(screen.getByLabelText('加仓币数'),{target:{value:'75'}});
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'7.5'}});
  fireEvent.click(tabs().find(t=>t.getAttribute('data-plan-id')===second.id)!);
- fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓数量方式'),{target:{value:'fixed'}});fireEvent.change(screen.getByLabelText('加仓币数'),{target:{value:'125'}});
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'12.5'}});
  fireEvent.change(screen.getByLabelText('卖出算法 4 名称'),{target:{value:'改名后的加仓方案'}});
- expect(screen.getByLabelText('加仓币数')).toHaveValue(75);
+ expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(7.5);
  fireEvent.focus(screen.getByLabelText('删除卖出算法 1'));
  expect(screen.getByTestId('quality-monitor-editor')).toHaveAttribute('data-plan-id',addedId);
  fireEvent.click(screen.getByLabelText('删除卖出算法 1'));
  expect(tabs()).toHaveLength(3);expect(screen.getByTestId('monitor-plan-draft-count')).toHaveTextContent('3 套');
- expect(screen.getByTestId('quality-monitor-editor')).toHaveAttribute('data-plan-id',addedId);expect(screen.getByLabelText('加仓币数')).toHaveValue(75);
- fireEvent.click(tabs().find(t=>t.getAttribute('data-plan-id')===second.id)!);expect(screen.getByLabelText('加仓币数')).toHaveValue(125);
+ expect(screen.getByTestId('quality-monitor-editor')).toHaveAttribute('data-plan-id',addedId);expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(7.5);
+ fireEvent.click(tabs().find(t=>t.getAttribute('data-plan-id')===second.id)!);expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(12.5);
  fireEvent.click(screen.getByRole('button',{name:'保存全部 3 套方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0];
  expect(saved.map(p=>p.id)).toEqual([second.id,'same-variable-later',addedId]);
- expect(saved[0].addition).toMatchObject({enabled:true,quantityMode:'fixed',quantity:125});
- expect(saved[2]).toMatchObject({label:'改名后的加仓方案',addition:{enabled:true,quantityMode:'fixed',quantity:75}});
+ expect(saved[0].addition).toMatchObject({enabled:true,quantityMode:'calculator',minGainPct:12.5});
+ expect(saved[2]).toMatchObject({label:'改名后的加仓方案',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5}});
  expect(s.setHoldingVetoes).not.toHaveBeenCalled();expect(s.study).toEqual(before);
 });
 it('removes the selected monitor target when every draft is deleted and creates a fresh matching target when adding again',()=>{
@@ -851,9 +851,9 @@ it('removes the selected monitor target when every draft is deleted and creates 
 
 it('saves renamed algorithms and edited addition conditions together from the upper save button',()=>{
  const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
- fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓数量方式'),{target:{value:'fixed'}});fireEvent.change(screen.getByLabelText('加仓币数'),{target:{value:'75'}});
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'7.5'}});
  fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'改名并保留加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
- expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'fixed',quantity:75}});
+ expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5}});
 });
 
 it('names the combination table and keeps bottom and horizontal scroll stable when the browser would clamp temporarily shortened rows',()=>{

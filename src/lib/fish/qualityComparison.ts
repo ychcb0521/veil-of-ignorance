@@ -113,7 +113,9 @@ export function syncQualityThresholdDefinitions(study: FishQualityStudy, definit
     const buyFilters = filters(p.buyFilters), holdingVetoes = vetoes(p.holdingVetoes);
     const additionCondition = p.addition?.source === 'custom' && p.addition.condition;
     const additionSnapshot = additionCondition ? snapshot(additionCondition.snapshot, additionCondition.metric, true) : undefined;
-    const addition = additionCondition && additionSnapshot !== additionCondition.snapshot ? { ...p.addition!, condition: { ...additionCondition, snapshot: additionSnapshot! } } : p.addition;
+    let addition = additionCondition && additionSnapshot !== additionCondition.snapshot ? { ...p.addition!, condition: { ...additionCondition, snapshot: additionSnapshot! } } : p.addition;
+    if(p.addition?.source==='custom'&&p.addition.conditions?.length){const conditions=filters(p.addition.conditions);if(conditions!==p.addition.conditions)addition={...addition!,conditions,condition:conditions![0]};}
+    if(current&&addition&&addition.quantityMode!=='calculator'){changed=true;addition={...addition,quantityMode:'calculator',repeat:addition.repeat??true};}
     const after = p.combo ? snapshot(p.combo.after.snapshot, p.combo.after.metric) : undefined;
     if (addition === p.addition && own === p.snapshot && buyFilters === p.buyFilters && holdingVetoes === p.holdingVetoes && (!p.combo || after === p.combo.after.snapshot)) return p;
     return { ...p, snapshot: own, buyFilters, holdingVetoes, addition, ...(p.combo ? { combo: { ...p.combo, after: { ...p.combo.after, snapshot: after! } } } : {}) };

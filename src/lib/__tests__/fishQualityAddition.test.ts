@@ -144,3 +144,9 @@ it('defers a coin-sized addition past the half-mirror opening minute and freezes
  const result=await run(g,path);expect(result).toMatchObject({status:'open',additionFill:{at:T+2*M,price:130,quantity:.5,notional:65},mirrorFill:{at:T+M,price:120},totalInvested:165,pnl:25});
  const campaign=buildQualityCampaignData('owner',{sample:row,plan:g,detectors:[],result,observeHours:0,firstEvaluatedAt:result.evaluatedAt},'sell');expect(campaign.legs).toHaveLength(3);expect(qualityMirrorBoard(campaign.campaign)?.quantity).toBe(.5);
 });
+it('updates every current custom addition formula while freezing archived constraints and preserving their thresholds',async()=>{
+ const {syncQualitySellDefinitions}=await import('@/lib/fish/qualityComparison'),{makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters'),{BUILTIN_FEATURES,MBI_DEF}=await import('@/lib/deepDig/features'),{newQualityStudy}=await import('@/lib/fish/quality');
+ const conditions=[makeQualityBuyFilter('mbi:MBI','>',.8),makeQualityBuyFilter('mbi:MBI','<',1.5)],plan={...group(),addition:{...group().addition!,condition:conditions[0],conditions,minGainPct:5}},study={...newQualityStudy(),sellPlans:[plan]};
+ const next=syncQualitySellDefinitions(study,BUILTIN_FEATURES.map(d=>d.id==='mbi'?{...MBI_DEF,MBI_N:7}:d)),saved=next.sellPlans![0].addition!;
+ expect(saved.conditions!.map(f=>f.threshold)).toEqual([.8,1.5]);expect(saved.conditions!.every(f=>f.snapshot.definitionKey.includes('MBI_N=7'))).toBe(true);expect(saved.condition).toEqual(saved.conditions![0]);expect(saved.minGainPct).toBe(5);expect(conditions.every(f=>!f.snapshot.definitionKey.includes('MBI_N=7'))).toBe(true);
+});

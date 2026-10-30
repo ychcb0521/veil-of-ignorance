@@ -9,18 +9,18 @@ const price = (n: number | null) => n == null ? '—' : +n.toPrecision(9);
 const color = (n: number | null) => n == null || n === 0 ? '' : n > 0 ? 'text-[#0B9B66]' : 'text-[#F6465D]';
 
 /** Visible beside the candles and included in the same chart capture for PNG exports. */
-export function QualityMirrorBoard({campaign,onHeightChange}: {campaign: TradeCampaign;onHeightChange?: (height:number)=>void}) {
+export function QualityMirrorBoard({campaign,onHeightChange,onCompactHeightChange}: {campaign: TradeCampaign;onHeightChange?: (height:number)=>void;onCompactHeightChange?:(height:number)=>void}) {
   const board = qualityMirrorBoard(campaign);
   const ref=useRef<HTMLElement>(null), visible=!!board;
   useLayoutEffect(()=>{
     const element=ref.current;
-    if(!onHeightChange)return;
-    const measure=()=>onHeightChange(element?.getBoundingClientRect().height??0);
+    if(!onHeightChange&&!onCompactHeightChange)return;
+    const measure=()=>{onHeightChange?.(element?.getBoundingClientRect().height??0);const details=element?.querySelector('details'),summary=element?.querySelector('summary');onCompactHeightChange?.(element?Math.max(0,element.getBoundingClientRect().height-(details?.getBoundingClientRect().height??0))+(summary?.getBoundingClientRect().height??0):0);};
     measure();
     const observer=element && typeof ResizeObserver!=='undefined'?new ResizeObserver(measure):null;
     if(element)observer?.observe(element);
     return ()=>observer?.disconnect();
-  },[visible,onHeightChange]);
+  },[visible,onHeightChange,onCompactHeightChange]);
   if (!board) return null;
   const {fill} = board;
   return <section ref={ref} data-testid="quality-mirror-board" aria-label="镜像止盈成交与收益" className="shrink-0 border-b border-amber-500/20 bg-amber-500/[0.04] text-[11px]">

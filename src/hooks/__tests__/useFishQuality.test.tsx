@@ -571,7 +571,7 @@ it('saves per-plan addition settings, immediately rejects obsolete monitoring re
  const tasks:QualityRunOptions[]=[];
  const h=renderHook(()=>useFishQuality('a',[signal],async task=>{tasks.push(task);await new Promise<void>(resolve=>task.signal.addEventListener('abort',()=>resolve()));}));
  await flush();chooseAndStart(h);await flush();const old=tasks[0],plan=old.study.sellPlans![0],row=qualityRunSamples(old.study)[0];
- const addition={...defaultQualityAddition(),enabled:true,quantityMode:'fixed' as const,quantity:75};
+ const addition={...defaultQualityAddition(),enabled:true,minGainPct:5};
  act(()=>h.result.current.setHoldingVetoes(plan.id,[],undefined,addition));expect(old.signal.aborted).toBe(true);await flush(600);expect(tasks).toHaveLength(1);act(()=>{void h.result.current.start();});await flush();
  expect(tasks[1].study.sellPlans![0].addition).toEqual(addition);expect(tasks[1].study.sellPlans![1].addition).toBeUndefined();
  act(()=>old.onResult({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',complete:true,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:999,pnl:899,returnPct:899}));
