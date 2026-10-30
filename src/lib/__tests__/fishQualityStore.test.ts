@@ -70,3 +70,13 @@ it('persists monitor history across reloads, account sync writes and stale or re
   expect(await store.saveQualityStudy('monitor-owner', base)).toBe(true);
   expect((await store.loadQualityStudy('monitor-owner')).study.monitorLibrary?.rounds).toHaveLength(1);
 });
+
+it('preserves ready post-sale windows through stale-tab, fallback and cloud writes without changing trades',async()=>{
+ const store=await import('@/lib/fish/qualityStore'),base=newQualityStudy(100);
+ const reading={key:'post-exit-v1-test',evaluatedAt:300,exitTime:100,exitPrice:200,startMs:100,excludedExitMinute:false,windows:[{hours:.5 as const,status:'ready' as const,peakPct:2,drawdown2Pct:1}]};
+ await store.saveQualityStudy('post-owner',{...base,postExitReadings:[reading]});await store.saveQualityStudy('post-owner',base);
+ await store.qualityAccountBlob.write('post-owner',base);
+ expect((await store.loadQualityStudy('post-owner')).study.postExitReadings![0].windows[0]).toMatchObject({status:'ready',peakPct:2});
+ fail=true;await store.saveQualityStudy('post-owner',base);expect((await store.loadQualityStudy('post-owner')).study.postExitReadings).toHaveLength(1);
+ expect((await store.loadQualityStudy('other-post-owner')).study.postExitReadings).toBeUndefined();
+});

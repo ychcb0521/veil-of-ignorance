@@ -1,3 +1,4 @@
+import { useQualityPostExit } from './useQualityPostExit';
 import { additionIdentity, validateQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
 import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
 import { useFeatureDefinitions } from './useFeatureDefinitions';
@@ -42,6 +43,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
     const next = apply(current.current); if (next !== current.current) { current.current = next; setStudy(next); }
   }, []);
+  const postExit=useQualityPostExit(owner,ready && readyRef.current,study,run,change);
   const acceptReading = useCallback((reading: QualityFilterReading) => change(s => {
     const prior = s.filterReadings?.find(r => r.key === reading.key);
     if (reading.error && prior && !prior.error && Number.isFinite(prior.value)) return s;
@@ -271,6 +273,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => replaceQualitySellPlans(s, plans));
     defer(() => void start(false, 'restart'));
   }, [change, defer, start]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
-export type FishQualityState = ReturnType<typeof useFishQuality>;
+type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'> & Partial<Pick<CompleteFishQualityState,'postExit'>>;

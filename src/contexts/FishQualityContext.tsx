@@ -17,8 +17,9 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const location = useLocation();
   return <FishQualityContext.Provider value={{ state, sources }}>
     {children}
-    {(state.running || state.filterRunning) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
+    {(state.running || state.filterRunning || state.postExit?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.filterRunning && <div>过滤后台运行中 · {state.filterProgress?.done ?? 0}/{state.filterProgress?.total ?? 0}</div>}
+      {state.postExit?.running&&<div>卖后反事实补算中 · {state.postExit.progress?.done??0}/{state.postExit.progress?.total??0}</div>}
       {state.running && <div>收益后台更新中 · {state.progress?.done ?? 0}/{state.progress?.total ?? 0}</div>}
     </div>}
   </FishQualityContext.Provider>;

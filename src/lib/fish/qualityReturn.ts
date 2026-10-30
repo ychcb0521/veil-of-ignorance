@@ -13,6 +13,7 @@ export interface QualityReturnUi {
   /** 旧版本的分页（已合并为一个视图）。 */
   phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;
+  postExitExpanded?: string[];
   runStage?: 'filter' | 'monitor';
   runState?: '' | 'pending' | 'done';
   sort: string; ascending: boolean;

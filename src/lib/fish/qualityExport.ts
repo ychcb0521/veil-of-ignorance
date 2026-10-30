@@ -1,3 +1,4 @@
+import { POST_EXIT_HOURS,postExitExportValues } from './qualityPostExit';
 import { qualityDetectorReading } from './qualityDetectorReading';
 import { additionLabel } from './qualityAddition';
 import { qualityPeakPct, qualityHalfMirror } from './qualityPresentation';
@@ -22,7 +23,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 }, { header: '探测值', width: 20 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
     ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${hasQualityExit(p) ? qualityRuleText(p) : '未设置'}）收益率 %`, width: 34 },
-      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22}]),
+      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22},...POST_EXIT_HOURS.flatMap(h=>['峰值涨幅','静态最大回撤2'].map(metric=>({header:`${p.label} · 卖后${h}h ${metric} %（卖出价基准）`,width:34})))]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
@@ -32,10 +33,10 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
       // 这套方案开着买入过滤而这一行没买入：与界面一致写原因，不列它的卖出结果
-      if (f && f.state !== 'pass') return [f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断（买入过滤）' : '买入过滤缺数据', null, null, null, null, null];
-      if (filters.length && !hasQualityExit(p)) return ['待设卖出', null, null, null, null, null];
+      if (f && f.state !== 'pass') return [f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断（买入过滤）' : '买入过滤缺数据', null, null, null, null, null,...Array(10).fill(null)];
+      if (filters.length && !hasQualityExit(p)) return ['待设卖出', null, null, null, null, null,...Array(10).fill(null)];
       const held = r && (r.status === 'closed' || r.status === 'open') && Number.isFinite(r.heldHours) ? r.heldHours! : null;
-      return [r?.status === 'closed' ? r.returnPct ?? null : r?.status === 'open' ? `持有浮盈 ${r.returnPct?.toFixed(2) ?? '—'}%` : r?.status === 'error' ? '缺数据' : '待评估',qualityDrawdownPct(r,'static'),qualityPeakPct(r),qualityHalfMirror(p,r).value,qualityHalfMirror(p,r).label,held]; }),
+      return [r?.status === 'closed' ? r.returnPct ?? null : r?.status === 'open' ? `持有浮盈 ${r.returnPct?.toFixed(2) ?? '—'}%` : r?.status === 'error' ? '缺数据' : '待评估',qualityDrawdownPct(r,'static'),qualityPeakPct(r),qualityHalfMirror(p,r).value,qualityHalfMirror(p,r).label,held,...postExitExportValues(row.source,r,p,study.postExitReadings)]; }),
     row.detectorId && groups.has(row.detectorId) ? `${groups.get(row.detectorId)!.label} ${groups.get(row.detectorId)!.snapshot.direction ?? '>'} ${groups.get(row.detectorId)!.snapshot.threshold}` : '—', row.enteredAt ? formatUTC8(row.enteredAt) : null,
   ]) }];
   const signals = new Set(rows.map(row => row.signalId ?? row.id));
@@ -66,7 +67,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   const addHeaders=['加仓条件','加仓时间','加仓金额 USDT','加仓成交价','加仓数量','加仓触发读数','加仓门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON'];
   const values=(run: typeof runs[number])=>{const a=run.result.additionFill;return [additionLabel(run.plan.addition),a?formatUTC8(a.at):null,a?.notional??null,a?.price??null,a?.quantity??null,a?.reading??null,a?.threshold??null,run.result.totalInvested??100,run.result.averageEntryPrice??run.result.entryPrice??null,a?.definitionKey??run.plan.addition?.condition?.snapshot.definitionKey??null];};
   const outputIndex=sheets.findIndex(s=>s.name==='运行结果'),output=sheets[outputIndex];
-  sheets[outputIndex]={...output,columns:[...output.columns,...addHeaders.map(header=>({header,width:28}))],rows:output.rows.map((row,i)=>[...row,...values(runs[i])])};
+  sheets[outputIndex]={...output,columns:[...output.columns,...addHeaders.map(header=>({header,width:28})),...POST_EXIT_HOURS.flatMap(h=>['峰值涨幅','静态最大回撤2'].map(metric=>({header:`卖后${h}h ${metric} %（卖出价基准）`,width:34})))],rows:output.rows.map((row,i)=>[...row,...values(runs[i]),...postExitExportValues(runs[i].sample.source,runs[i].result,runs[i].plan,study.postExitReadings)])};
   if (study.campaignRepair) {
     const byKey = new Map(allRuns.map(run => [run.result.key,run]));
     sheets.push({name:'纠错记录',columns:['标的','原试验编号','状态','纠正后试验编号','核验时间','原卖出时间','原收益率 %','纠正后卖出时间','纠正后收益率 %','未通过原因','原实际公式','纠正后实际公式','原卖出时机','纠正后卖出时机'].map(header => ({header,width:header.includes('公式')?60:25})),
