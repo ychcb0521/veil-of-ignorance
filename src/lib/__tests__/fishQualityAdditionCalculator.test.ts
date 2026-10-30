@@ -1,3 +1,4 @@
+import {findCalculatorAdditions} from '@/lib/fish/qualityAdditionCalculator';
 import {positionGeometricMultiple} from '@/lib/campaignGeometricMetrics';
 import {makeQualityHoldingVeto} from '@/lib/fish/qualityFilters';
 import {evaluateCampaignAddSizing} from '@/lib/campaignAddSizingCheck';
@@ -218,4 +219,9 @@ it('evaluates multiple addition-profit rules independently and preserves the ear
  const g=group();g.addition!.maxRounds=2;g.holdingVetoes=[geometricProfit(1000,0),geometricProfit(3,5)];
  const path=loader(m=>{const p=[100,110,120,130,200][m]??200;return bar(T+m*M,p,1,p-.1,m===0?106:p+1);});const r=await run(g,path,6);
  expect(r).toMatchObject({status:'closed',endTime:T+3*M,endPrice:130,exitSnapshot:{atOpen:true,cause:{kind:'addition-geometric-profit',geometricMultiple:3,threshold:5}}});expect(r.additionFills).toHaveLength(2);expect(await run(g,path,6,await run(g,path,3))).toEqual(r);
+});
+
+it('rejects invalid minute highs instead of treating a missing high as a profit-target touch',async()=>{
+ const mirror=(await run(group(),loader(rising),2)).mirrorFill!;
+ for(const high of [NaN,Infinity,90])await expect(findCalculatorAdditions({candidates:[],row:sample.source,entry:T,entryPrice:100,notional:100,end:T+2*M,since:T,prices:[rising(0),{...rising(1),high}],previous:[],mirror,repeat:true,load:loader(rising),signal:new AbortController().signal})).rejects.toThrow('加仓行情读数无效');
 });
