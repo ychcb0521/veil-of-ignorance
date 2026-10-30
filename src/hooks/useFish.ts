@@ -257,10 +257,11 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     recordFishDeletion(gone, ownerRef.current ?? null);
     commit(signalsRef.current.filter(s => s.id !== id));
   }, [commit]);
+  const removeMany=useCallback((ids:readonly string[])=>{const selected=new Set(ids),gone=signalsRef.current.filter(s=>selected.has(s.id));if(!gone.length)return;recordFishDeletion(gone,ownerRef.current??null);commit(signalsRef.current.filter(s=>!selected.has(s.id)));},[commit]);
   /** 查单个币（不入库）：与捕捞同一套取数与判定。 */
   const diagnose = useCallback((options: Parameters<FishScanner['diagnose']>[0]) => {
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, mine, stopMining, estimate, diagnose, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, busy };
+  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, mine, stopMining, estimate, diagnose, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
 }

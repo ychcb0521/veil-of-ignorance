@@ -40,9 +40,32 @@ it('cancels the watchdog on completion and when the chart unsubscribes', async()
  c.requestChartComputation('X',request(bars,'a'));reply(fake.messages[0],1000,2000,[1,2]);vi.advanceTimersByTime(20000);expect(c.isChartComputationEnabled(bars)).toBe(true);
  c.requestChartComputation('X',request(bars,'b'));unsubscribe();expect(vi.getTimerCount()).toBe(0);
 });
+it('allows a full warmup to finish in the background without switching to a blocking replay at 15 seconds',async()=>{
+ const c=await import('../chartComputeClient'),bars=Array.from({length:4000},(_,i)=>({...data()[0],timestamp:1000+i*300000})),unsubscribe=c.subscribeChartComputation(vi.fn());
+ c.enableChartComputation(bars);c.requestChartComputation('large',request(bars,'initial'));vi.advanceTimersByTime(15001);expect(c.isChartComputationEnabled(bars)).toBe(true);expect(fake.worker.terminate).not.toHaveBeenCalled();
+ reply(fake.messages[0],bars[0].timestamp,bars.at(-1)!.timestamp,bars.map(()=>1));expect(c.requestChartComputation('large',request(bars,'initial'))?.core).toHaveLength(4000);unsubscribe();
+});
+it('keeps completed curves after worker-state eviction and sends the full history on their next mutation',async()=>{
+ const c=await import('../chartComputeClient'),bars=data(),changes:[number,number][]=[[1,0]];
+ const r=(v:number)=>({...request(bars,String(v)),delta:{revision:v,referenceVersion:0,changes}});
+ c.requestChartComputation('a',r(1));const first=fake.messages[0];reply(first,1000,2000,[1,2]);c.requestChartComputation('b',r(1));const second=fake.messages[1];fake.worker.onmessage({data:{id:second.id,evicted:[first.id],first:1000,last:2000,vars:{X:Float64Array.from([1,2])},packet:second.packet}});
+ expect(c.requestChartComputation('a',r(1))?.core).toEqual([1,2]);changes.push([2,1]);bars[1].close=3;c.requestChartComputation('a',r(2));expect(fake.messages.at(-1).from).toBe(0);
+});
 
 it('seller retention workers receive no forming price or turnover and preserve closed history',async()=>{
  const c=await import('../chartComputeClient'),bars=data().map(b=>({...b,cba2Closed:true}));bars[1].cba2Closed=false;
  const r={...request(bars,'retained'),def:{...request(bars,'retained').def,retentionSourceId:'cdi2'}};c.requestChartComputation('retained',r);
  const packet=new Float64Array(fake.messages[0].packet);expect(packet[4]).toBe(1);for(const index of [14,15,16,17])expect(Number.isNaN(packet[index])).toBe(true);
+});
+it('background MBI and CTBA retain the same forming-bar masks as synchronous charts',async()=>{
+ const c=await import('../chartComputeClient');
+ for(const family of ['mbi','ctba']){
+  const bars=data().map((b,i)=>({...b,cba2Closed:i===0}));
+  const def={...request(bars,family).def,id:family,chartTemplate:family,formula:family==='mbi'?'X=mbiz(C,25)':'X=C'};
+  c.requestChartComputation(family,{...request(bars,family),def});const job=fake.messages.at(-1),packet=new Float64Array(job.packet);
+  expect(packet[4]).toBe(1);expect(Number.isNaN(packet[14])).toBe(true);
+  if(family==='ctba')for(const index of [15,16,17])expect(Number.isNaN(packet[index])).toBe(true);
+  else expect(packet[16]).toBe(20);
+  reply(job,1000,2000,[1,NaN]);
+ }
 });

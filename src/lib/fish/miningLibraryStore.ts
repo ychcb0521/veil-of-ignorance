@@ -3,6 +3,7 @@
  * 写入按账号串行：读 → 合并 → 写在同一个事务里，另一个标签页的写入不会被覆盖。
  */
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import {pruneMiningDeletions,mergeSourceDeletions} from './libraryDeletion';
 import { emptyMiningLibrary, mergeMiningLibraries, normalizeMiningLibrary, type FishMiningLibrary } from './miningLibrary';
 
 export const MINING_LIBRARY_EVENT = 'fish-mining-library-saved';
@@ -39,7 +40,8 @@ async function transform(key: string, apply: (library: FishMiningLibrary) => Fis
       const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), read = store.get(key);
       read.onsuccess = () => {
         try {
-          const before = read.result == null ? emptyMiningLibrary() : normalizeMiningLibrary(read.result), after = apply(before);
+          const before = read.result == null ? emptyMiningLibrary() : normalizeMiningLibrary(read.result), applied=apply(before);
+          const after=applied===before?before:pruneMiningDeletions({...applied,deletedRecords:mergeSourceDeletions(before.deletedRecords,applied.deletedRecords)});
           if (after !== before) { store.put(after, key); changed = true; }
         } catch (error) { tx.abort(); reject(error); }
       };
@@ -67,6 +69,10 @@ export async function loadMiningLibrary(owner: string | null | undefined): Promi
   await queues.get(key);
   try { return await readRaw(key) ?? emptyMiningLibrary(); } catch { return emptyMiningLibrary(); }
 }
+/** Full downloads must report storage failure instead of quietly exporting an empty library. */
+export async function loadMiningLibraryForTransfer(owner?:string):Promise<FishMiningLibrary>{
+ await syncAccountBlobOnLoad(miningLibraryAccountBlob,owner);await queues.get(keyOf(owner));return await readRaw(keyOf(owner))??emptyMiningLibrary();
+}
 /** 改挖掘库：排队、在事务里合并写入；成功后通知界面并安排上传。失败不抛（挖掘本身不受影响）。 */
 export function updateMiningLibrary(owner: string | null | undefined, apply: (library: FishMiningLibrary) => FishMiningLibrary): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(false);
@@ -81,11 +87,12 @@ export function updateMiningLibrary(owner: string | null | undefined, apply: (li
 
 export const miningLibraryAccountBlob: AccountBlobAdapter<FishMiningLibrary> = {
   name: 'fish-mining-library',
+  async mergeRemote(owner,value){await miningLibraryAccountBlob.write(owner,value);},
   async read(owner) { const key = keyOf(owner); await queues.get(key); try { return await readRaw(key); } catch { return undefined; } },
   write(owner, library) {
     const key = keyOf(owner);
     // 取回云端那份时与本机合并（本机可能有还没上传的档）；只增不减
     return enqueue(key, async () => { await transform(key, local => library ? mergeMiningLibraries(local, normalizeMiningLibrary(library)) : local); announce(owner); });
   },
-  weight: library => library ? library.records.length + library.anchors.length : 0,
+  weight: library => library ? Object.keys(library.deletedRecords??{}).length + library.records.length + library.anchors.length : 0,
 };

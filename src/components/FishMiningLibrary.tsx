@@ -1,3 +1,4 @@
+import {useFishBulkDelete} from './FishBulkDeletion';
 import { miningLibraryConditions, libraryConditionSearch } from '@/lib/fish/libraryConditions';
 import { FishLibraryCondition, libraryReading } from '@/components/FishLibraryConditions';
 /** 挖掘库：批量挖掘每一档的扫描与挖到的信号（数据见 lib/fish/miningLibrary，存 IndexedDB 并随账号同步）。 */
@@ -19,6 +20,7 @@ type FishMiningRow = FishMiningRecord & { ids: string[]; catchKeys: string[] };
 
 
 export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
+  const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
   const [library, setLibrary] = useState<FishMiningLibrary>(emptyMiningLibrary), [open, setOpen] = useState(false), [hold, setHold] = useState<ReadonlySet<string> | null>(null);
   const reload = useCallback(() => { void loadMiningLibrary(account).then(setLibrary); setHold(holdKeys?.() ?? null); }, [account, holdKeys]);
   // 打开时读；开着的时候挖到新的一档就刷新
@@ -57,11 +59,12 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
     description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}${deleted ? ` · ${deleted} 条已从鱼舱删除` : ''}`}
     info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库独立于鱼舱：在鱼舱里删掉的鱼，这里仍保留并标出「已从鱼舱删除」。相同档位、信号及完整算法条件的重复记录合并显示；不同门槛或公式版本分别保留。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
     headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '鱼舱', '入库时间']}
-    items={items} match={match}
+    items={items} match={match} selection={bulk?{key:r=>r.id,selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),toggle:()=>{},select:ids=>setSelected(s=>new Set([...s,...ids])),clear:()=>setSelected(new Set()),remove:()=>{const picked=items.filter(r=>selected.has(r.id));bulk({kind:'mining',ids:picked.flatMap(r=>r.ids),targets:picked.map(r=>({source:r.signal,entry:r.anchorMs}))});}}:undefined}
     empty={{ none: '暂无挖掘记录。开始批量挖掘后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
     row={r => {
       const held = inHold(r),saved=evidence.get(r.id)!;
       return <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="mining-library-row">
+        {bulk&&<td className={libraryCell}><input type="checkbox" aria-label={`选择挖掘记录 ${r.signal.symbol} ${r.id}`} checked={selected.has(r.id)} onChange={()=>setSelected(s=>{const n=new Set(s);if(n.has(r.id))n.delete(r.id);else n.add(r.id);return n;})}/></td>}
         <td className={`${libraryCell} font-mono`}><button type="button" className="hover:text-primary hover:underline disabled:cursor-default disabled:no-underline disabled:hover:text-inherit" disabled={!onJump || !!canJump && !canJump(r.signal)} onClick={() => onJump?.(r.signal)}>{r.signal.symbol}</button></td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.signal.timeMs)}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{short(r.anchorMs)}</td>

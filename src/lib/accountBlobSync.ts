@@ -33,6 +33,8 @@ export interface AccountBlobAdapter<T = unknown> {
   read(owner: string): Promise<T | undefined>;
   /** 用云端那份覆盖本机；undefined = 清空本机。须排进该存储自己的写队列。 */
   write(owner: string, value: T | undefined): Promise<void>;
+  /** Libraries opt into merging remote history/deletion marks while retaining local settings. */
+  mergeRemote?(owner:string,value:T|undefined):Promise<void>;
   /** 内容多少：0 = 空白。只在两边都没有同步记录时用来比较。 */
   weight(value: T | undefined): number;
 }
@@ -244,9 +246,14 @@ function runPush(adapter: AccountBlobAdapter<any>, owner: string, settled = fals
 async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: boolean): Promise<boolean> {
   if (!(await signedInAs(owner))) return false;
   const meta = await readMeta(adapter.name, owner);
-  const value = await adapter.read(owner);
-  const savedAt = meta?.savedAt || Date.now();
+  let value = await adapter.read(owner);
+  let savedAt = meta?.savedAt || Date.now();
   const head = await fetchHead(adapter.name, owner);
+  if(head&&head.rev!==meta?.rev&&adapter.mergeRemote&&(meta?.rev||settled)){
+    const cloud=await fetchValue(adapter.name,owner,head);if(!cloud.ok)return false;
+    await adapter.mergeRemote(owner,cloud.value);value=await adapter.read(owner);
+    savedAt=Math.max(savedAt,head.savedAt+1);
+  }
   if (head) {
     // 云端那一版来自别的设备且更晚保存：不盖它，下次打开时按规则取舍。
     if (head.rev !== meta?.rev && head.savedAt > savedAt) return false;
@@ -323,6 +330,7 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
     if (!cloud.ok) return 'failed';
     takeCloud = adapter.weight(cloud.value) > localWeight;
   }
+  if(adapter.mergeRemote){cloud??=await fetchValue(adapter.name,owner,head);if(!cloud.ok)return 'failed';if(!begin())return 'skipped';await adapter.mergeRemote(owner,cloud.value);schedulePush(adapter,owner,0,true);return 'adopted';}
   if (!takeCloud) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
   cloud ??= await fetchValue(adapter.name, owner, head);
   if (!cloud.ok) return 'failed';

@@ -5,12 +5,16 @@ export interface ChartComputeJob { id:number; length:number; from?:number; packe
 const contexts = new Map<number, { compiled:CompiledFeature; cache:ReturnType<typeof createFormulaEvaluationCache>; bars:ResearchBar[] }>();
 self.onmessage = ({ data: job }: MessageEvent<ChartComputeJob>) => {
   try {
+    const evicted:number[]=[];
     let context = contexts.get(job.id);
     if (!context) {
       if (!job.compiled) throw Error('Indicator program missing');
       context = { compiled:job.compiled, cache:createFormulaEvaluationCache(), bars:[] }; contexts.set(job.id, context);
-      if (contexts.size > 64) contexts.delete(contexts.keys().next().value!);
+      // Keep completed display arrays on the client, rather than retaining the
+      // full expression graph of every selected formula in worker memory.
+      if (contexts.size > 8) {const id=contexts.keys().next().value!;contexts.delete(id);evicted.push(id);}
     }
+    contexts.delete(job.id);contexts.set(job.id,context);
     const values = new Float64Array(job.packet), bars = context.bars; bars.length = job.length;
     for (let i=job.from ?? 0;i<job.length;i++) {
       const at=(i-(job.from ?? 0))*10, b=bars[i] ?? (bars[i]={} as ResearchBar);
@@ -19,6 +23,6 @@ self.onmessage = ({ data: job }: MessageEvent<ChartComputeJob>) => {
     }
     const output = evaluateOnBars(bars, context.compiled, job.params, context.cache), vars:Record<string,Float64Array> = {};
     for (const name of job.variables) { const v=output.vars.get(name); if(v!=null) vars[name]=typeof v==='number'?new Float64Array(job.length).fill(v):v.slice(); }
-    self.postMessage({id:job.id,first:bars[0]?.openTime,last:bars.at(-1)?.openTime,vars,packet:job.packet}, { transfer:[job.packet,...Object.values(vars).map(a=>a.buffer as ArrayBuffer)] });
+    self.postMessage({id:job.id,evicted,first:bars[0]?.openTime,last:bars.at(-1)?.openTime,vars,packet:job.packet}, { transfer:[job.packet,...Object.values(vars).map(a=>a.buffer as ArrayBuffer)] });
   } catch (error) { self.postMessage({id:job.id,error:String(error),packet:job.packet},{transfer:[job.packet]}); }
 };

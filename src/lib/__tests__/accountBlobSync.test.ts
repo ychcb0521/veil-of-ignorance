@@ -217,3 +217,9 @@ describe('accountBlobSync', () => {
     for (let i = 0; i < localStorage.length; i += 1) expect(localStorage.key(i)).not.toContain('idb:');
   });
 });
+
+it('library adapters merge remote deletion/history metadata before a newer local save can replace it',async()=>{
+ vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(1000);const a=await device({items:[1]});await a.reopen();const b=await device();await b.reopen();
+ (b.adapter as import('../accountBlobSync').AccountBlobAdapter<Value>).mergeRemote=async(_owner,value)=>{b.local.value={items:[...new Set([...(b.local.value?.items??[]),...(value?.items??[])])]};};
+ vi.setSystemTime(2000);await a.save({items:[1,2]});vi.setSystemTime(3000);await b.save({items:[1,3]});expect(b.local.value?.items).toEqual([1,3,2]);const c=await device();await c.reopen();expect(c.local.value?.items).toEqual([1,3,2]);
+});

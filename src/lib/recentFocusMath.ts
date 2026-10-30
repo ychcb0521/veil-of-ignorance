@@ -3,6 +3,8 @@ import {computeMbi} from './mbi';
 import {computeMbi2Core} from './mbi2';
 export const FOCUS_BASE_ARITIES:Readonly<Record<string,readonly number[]>>={avg:[2],sd:[2],zscore:[2],ema:[2,3],retain:[4,5],wsum:[3],rsum:[2],median:[2],mad:[2],rscale:[2],sma:[2],sum:[2],msum:[2],atr:[4],beta:[3],mbiz:[2],mbiz2:[2],ctba:[17]};
 export interface RecentFocus {bars:number;weight:number}
+export interface FocusResume {from:number;previous:Float64Array}
+const focusOutput=(size:number,resume?:FocusResume)=>{const out=new Float64Array(size).fill(NaN);if(resume)out.set(resume.previous.subarray(0,Math.min(resume.from,size)));return out;};
 export function recentFocus(hours:number,weight:number,minutes:number):RecentFocus {
  if(!(hours>0)||!Number.isFinite(hours)||!(weight>=1)||!Number.isFinite(weight)||!(minutes>0))throw Error('最近加权时长须为正数，权重须为大于等于1的有限数');
  const bars=Math.max(1,Math.round(hours*60/minutes));if(!Number.isSafeInteger(bars)||bars>100000)throw Error('最近加权时长超出有效根数');return {bars,weight};
@@ -40,16 +42,16 @@ export function focusEma(x:Float64Array,base:Float64Array,rho:number,f:RecentFoc
   out[t]=base[t]+(Math.abs(delta)<=roundoff?0:(f.weight-1)*delta/(1+(f.weight-1)*Math.max(0,recentMass)));
  }return out;
 }
-export function focusRetain(k:Float64Array,p:Float64Array,e:Float64Array,rho:number,n:number,f:RecentFocus):Float64Array {
- const out=new Float64Array(p.length).fill(NaN);
- for(let t=0;t<p.length;t++){if(!(p[t]>0))continue;let sum=0,weights=0;const logP=Math.log(p[t]);
+export function focusRetain(k:Float64Array,p:Float64Array,e:Float64Array,rho:number,n:number,f:RecentFocus,resume?:FocusResume):Float64Array {
+ const out=focusOutput(p.length,resume);
+ for(let t=resume?.from??0;t<p.length;t++){if(!(p[t]>0))continue;let sum=0,weights=0;const logP=Math.log(p[t]);
   for(let j=0;j<n&&j<=t;j++){const w=rho**j*(j<f.bars?f.weight:1);weights+=w;if(Number.isFinite(k[t-j])&&e[t-j]>0&&Number.isFinite(e[t-j]))sum+=w*k[t-j]*(logP-Math.log(e[t-j]))/(j+1);}
   out[t]=sum/weights;
  }return out;
 }
 /** Preserve original sum units: normalize relative weights back to original kernel mass. */
-export function focusWsum(x:Float64Array,rho:number,n:number,f:RecentFocus):Float64Array {
- const out=new Float64Array(x.length).fill(NaN);for(let t=0;t<x.length;t++){let sum=0,oldMass=0,mass=0,any=false;
+export function focusWsum(x:Float64Array,rho:number,n:number,f:RecentFocus,resume?:FocusResume):Float64Array {
+ const out=focusOutput(x.length,resume);for(let t=resume?.from??0;t<x.length;t++){let sum=0,oldMass=0,mass=0,any=false;
   for(let j=0;j<n&&j<=t;j++){const old=rho**j,w=old*(j<f.bars?f.weight:1);oldMass+=old;mass+=w;if(Number.isFinite(x[t-j])){sum+=w*x[t-j];any=true;}}
   if(any)out[t]=sum*oldMass/mass;
  }return out;
@@ -58,16 +60,16 @@ function weightedMedian(values:{x:number;w:number}[]):number {
  values.sort((a,b)=>a.x-b.x);const total=values.reduce((n,v)=>n+v.w,0);let sum=0;
  for(let i=0;i<values.length;i++){sum+=values[i].w;if(Math.abs(sum-total/2)<=Number.EPSILON*16*total&&i+1<values.length)return (values[i].x+values[i+1].x)/2;if(sum>total/2)return values[i].x;}return values.at(-1)?.x??NaN;
 }
-export function focusRobust(x:Float64Array,n:number,f:RecentFocus,kind:'median'|'mad'|'rscale'):Float64Array {
- const out=new Float64Array(x.length).fill(NaN);for(let t=0;t<x.length;t++){
+export function focusRobust(x:Float64Array,n:number,f:RecentFocus,kind:'median'|'mad'|'rscale',resume?:FocusResume):Float64Array {
+ const out=focusOutput(x.length,resume);for(let t=resume?.from??0;t<x.length;t++){
   const values:{x:number;w:number}[]=[];for(let j=0;j<n&&j<=t;j++)if(Number.isFinite(x[t-j]))values.push({x:x[t-j],w:j<f.bars?f.weight:1});if(!values.length)continue;
   const median=weightedMedian([...values]);if(kind==='median'){out[t]=median;continue;}
   const deviations=values.map(v=>({x:Math.abs(v.x-median),w:v.w})),mad=weightedMedian([...deviations]);
   out[t]=kind==='mad'?mad:mad>0?1.4826*mad:1.2533*deviations.reduce((s,v)=>s+v.x*v.w,0)/deviations.reduce((s,v)=>s+v.w,0);
  }return out;
 }
-export function focusBeta(y:Float64Array,x:Float64Array,n:number,f:RecentFocus):Float64Array {
- const out=new Float64Array(y.length).fill(NaN);for(let t=0;t<y.length;t++){let sx=0,sy=0,sxy=0,sxx=0,w=0,count=0;
+export function focusBeta(y:Float64Array,x:Float64Array,n:number,f:RecentFocus,resume?:FocusResume):Float64Array {
+ const out=focusOutput(y.length,resume);for(let t=resume?.from??0;t<y.length;t++){let sx=0,sy=0,sxy=0,sxx=0,w=0,count=0;
   for(let j=0;j<n&&j<=t;j++)if(Number.isFinite(x[t-j])&&Number.isFinite(y[t-j])){const a=j<f.bars?f.weight:1;w+=a;count++;sx+=a*x[t-j];sy+=a*y[t-j];sxy+=a*x[t-j]*y[t-j];sxx+=a*x[t-j]**2;}
   const den=w*sxx-sx*sx;if(count>=2&&den>1e-18*Math.max(1,w*sxx))out[t]=(w*sxy-sx*sy)/den;
  }return out;

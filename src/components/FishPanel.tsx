@@ -39,6 +39,8 @@ import type { FishQualityState } from '@/hooks/useFishQuality';
 import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSuggestion,suggestedFishThreshold,mayFillFishThreshold,fishSuggestionTitle,type FishSuggestion,type FishSuggestionOptions,type FishSuggestionProgress} from '@/lib/fish/suggestions';
 
 export interface FishPanelProps {
+  /** TimeControl fills the remaining viewport when 渔 is expanded. */
+  fillHeight?:boolean;
   quality?: FishQualityState;
   /** 比较探测的持续挖掘（TimeControl 里调度）。 */
   mining?: import('@/hooks/useFishMining').FishMiningApi;
@@ -246,7 +248,7 @@ export function FishPanel(p: FishPanelProps) {
   // 【用户要求】2026-10-19「渔界面内的内容可以上下滑动，要切换自如」：面板自己限高、内部滚动；顶栏（时间 / 捕捞 / 状态）滚动时贴顶。
   // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
   // 顶栏一行操作（时间 · 主按钮 · 淡色工具），下面一行状态，底边一根细线兼作进度条；算法是一张对齐的表，合并方式用分段按钮。
-  return <section className="mt-2 max-h-[65dvh] min-w-0 overflow-y-auto overscroll-y-contain rounded-xl border border-border/60 bg-background" aria-label="渔" data-testid="fish-panel">
+  return <section className={`mt-2 ${p.fillHeight?'min-h-0 flex-1':'max-h-[65dvh]'} min-w-0 overflow-y-auto overscroll-y-contain rounded-xl border border-border/60 bg-background`} aria-label="渔" data-testid="fish-panel">
     <section aria-labelledby="fish-catching-title" data-testid="fish-catching">
       <div className="flex items-center px-4 pb-1 pt-3">
         <div className="flex items-center gap-0.5 pr-1.5"><button id="fish-catching-title" type="button" aria-expanded={open.catching} aria-controls="fish-catching-content" onClick={()=>setOpen({catching:!open.catching})} className={fishSectionHeading}><Play aria-hidden className="h-3 w-3 text-muted-foreground"/><span>捕捞</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.catching?'rotate-180':''}`}/></button><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" title="捕捞说明" className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[min(75dvh,var(--radix-popover-content-available-height))] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2.5 p-3.5 text-[11px] leading-relaxed" aria-label="捕捞说明">

@@ -1,8 +1,10 @@
+import {FishBulkDeletionProvider} from './FishBulkDeletion';
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishAutoScan } from '@/hooks/useFishAutoScan';
 import { useFishMining } from '@/hooks/useFishMining';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
+import {useFishViewportHeight} from '@/hooks/useFishViewportHeight';
 import { readFishAuto } from '@/lib/fish/autoScan';
 import { SignalTurnoverButton } from './SignalTurnover';
 import {
@@ -96,6 +98,7 @@ export function TimeControl({
   // 【用户要求】2026-10-26 打开「渔」时不弹「刚平了一笔 — 要现在做平仓评价吗？」，只记进消息列表
   useEffect(() => fishOpen ? beginCloseReviewQuiet() : undefined, [fishOpen]);
   const fishHostRef = useRef<HTMLDivElement>(null);
+  const fishHeight=useFishViewportHeight(fishOpen,fishHostRef);
   const fishReturnPosition = useRef<{panelTop:number;ancestors:{node:HTMLElement;top:number;left:number}[]}|null>(null);
   const rememberFishPosition = useCallback(()=>{
     const panel=fishHostRef.current?.querySelector<HTMLElement>('[data-testid="fish-panel"]');
@@ -579,8 +582,8 @@ export function TimeControl({
         )}
       </div>
 
-      <div ref={fishHostRef}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishPanel quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
-        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></ModuleErrorBoundary>}</div>
+      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (

@@ -1,6 +1,6 @@
 import { intervalMs } from '@/lib/deepRsa/marketData';
 import type { KLineData } from 'klinecharts';
-import type { CompiledFeature, DeepDigFeatureDef } from './deepDig/features';
+import {featureUsesMbiFamily,featureTemplateId,type CompiledFeature,type DeepDigFeatureDef} from './deepDig/features';
 import type { ChartFeatureSeries } from './featureSource';
 import type { ChartComputeJob } from './chartCompute.worker';
 const enabled = new WeakSet<KLineData[]>(), firstBars = new WeakSet<object>();
@@ -44,6 +44,7 @@ function startWorker() {
   worker = new Worker(new URL('./chartCompute.worker.ts', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data }) => {
     clearWatchdog();
+    for(const id of data.evicted??[]){const old=channels.get(id);if(old)old.sent=undefined;}
     packet = data.packet;
     const channel = channels.get(data.id);
     if (channel && !data.error) {
@@ -88,13 +89,16 @@ function pump() {
     const number = (v: unknown) => typeof v === 'number' ? v : NaN;
     values[at] = number(b.timestamp); values[at+1] = number(b.open); values[at+2] = number(b.high); values[at+3] = number(b.low); values[at+4] = number(b.close);
     values[at+5] = number(b.volume); values[at+6] = number(b.turnover); values[at+7] = number(b.takerBuyTurnover); values[at+8] = number(r.refs?.[i]);
-    if(r.def.retentionSourceId && (b.cba2Closed===false || b.timestamp+intervalMs(r.params.interval??'5m')>Date.now())){values[at+4]=values[at+5]=values[at+6]=values[at+7]=NaN;}
+    if((r.def.retentionSourceId||featureUsesMbiFamily(r.def)||featureTemplateId(r.def)==='ctba')&&(b.cba2Closed===false||b.timestamp+intervalMs(r.params.interval??'5m')>Date.now())){values[at+4]=NaN;if(r.def.retentionSourceId||featureTemplateId(r.def)==='ctba')values[at+5]=values[at+6]=values[at+7]=NaN;}
   }
   try {
     startWorker(); active = channel; activeTimes = r.data.map(bar => bar.timestamp);
     const job: ChartComputeJob = { id: channel.id, length:n, from, packet, params:r.params, variables:r.variables, compiled:r.compiled };
     worker!.postMessage(job, [packet]); packet = undefined; channel.initialized = true;
-    watchdog = setTimeout(fallback, 15_000);
+    // Initial warmup can contain thousands of bars and robust rolling kernels.
+    // Keep that work off the UI thread; a legitimate long job must not force a
+    // synchronous replay simply because it exceeds the small-update deadline.
+    watchdog = setTimeout(fallback, Math.max(15_000,Math.min(120_000,n*15)));
     channel.sent = r.delta ? {revision:r.delta.revision,referenceVersion:r.delta.referenceVersion,first:r.data[0]?.timestamp,length:n} : undefined;
   } catch { fallback(); }
 }

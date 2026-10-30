@@ -189,6 +189,7 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  selected?:boolean;onSelect?:(id:string)=>void;
   /** 「渔」的鱼：兜底区这一列换成「算法类型」（捕到它的算法）。 */
   algorithmTypes?: string[];
   /** 「渔」的鱼：这一列先放「捕捞过程」入口（点开看凭什么击中、为什么避开噪音）。 */
@@ -232,7 +233,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes, confirmDelete = false,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   // 【用户要求】2026-10-21「鱼那里的数据…不能轻易删除」：× 紧挨着跳转箭头，容易点错——鱼要再点一次「确认删除」
@@ -245,10 +246,11 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      data-testid="signal-library-row" className={`group ${algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
+      data-testid="signal-library-row" className={`relative group ${algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
+      {onSelect&&<input type="checkbox" aria-label={`选择鱼 ${symbol} ${timeLabel}`} checked={!!selected} onChange={()=>onSelect(id)} className="absolute left-2 top-1/2 z-10 h-3 w-3 -translate-y-1/2"/>}
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
@@ -259,7 +261,7 @@ function SignalLibraryRowImpl({
         {/* 勾号占一条固定的 12px 列，没勾时留空位而不是让标的左移——
             条件渲染会让带勾与不带勾的行首字母错开，勾号本身也没有固定的一列可扫。 */}
         <span
-          className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)] items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground"
+          className={`grid min-w-0 grid-cols-[12px_minmax(0,1fr)] items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground ${onSelect?'pl-4':''}`}
           title={traded ? `${timeLabel.slice(0, 10)} 当日交易过 ${symbol}` : undefined}
         >
           {traded
@@ -343,6 +345,7 @@ export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 
 export interface SignalScrollPosition { top: number; anchorId?: string; index?: number; offset?: number }
 interface Props {
+  selectedIds?:ReadonlySet<string>;onSelect?:(id:string)=>void;
   restoreScroll?: SignalScrollPosition;
   onScrollPositionChange?: (position: SignalScrollPosition) => void;
   matches?: ReadonlyMap<string, SignalReconstructionMatch>;
@@ -388,7 +391,7 @@ const sameView = (a: ListView, b: ListView) => (
 );
 
 function SignalLibraryListImpl({
-  rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
+  rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect,
   restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -600,7 +603,7 @@ function SignalLibraryListImpl({
         onJump={onJump}
         onDelete={onDelete}
         onRate={onRate}
-        onFocusRow={handleRowFocus}
+        onFocusRow={handleRowFocus} selected={selectedIds?.has(sig.id)} onSelect={onSelect}
         confirmDelete={confirmDelete}
       />,
     );

@@ -190,7 +190,10 @@ function chartInterval(data: KLineData[]) {
   return gaps[Math.floor(gaps.length/2)] ?? DSP_BASE_INTERVAL_MS;
 }
 const displaySeriesCache = new WeakMap<object, Map<string, DisplaySeries>>();
-const extendedData = new WeakMap<KLineData[], { history: KLineData[]; revision: number; generation?: number; data: KLineData[] }>();
+interface ExtendedChartData {history:KLineData[];revision:number;generation?:number;data:KLineData[]}
+// Different indicators can require different warmup histories on the same chart.
+// Retain each combined array so one pane cannot evict another pane's worker result.
+const extendedData = new WeakMap<KLineData[],Map<KLineData[],ExtendedChartData>>();
 const EMPTY_HISTORY: KLineData[] = [];
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
 function formulaPlan(item: ResearchIndicator, source: string) {
@@ -239,8 +242,9 @@ export function inheritForwardResearchChartData(previous: KLineData[], next: KLi
   if (history) displayHistories.set(next, history);
   const cached = extendedData.get(previous);
   if (cached) {
-    resetChartComputationAlignment(cached.data);
-    extendedData.set(next, { ...cached, revision: -1, generation: undefined });
+    const inherited=new Map<KLineData[],ExtendedChartData>();
+    for(const [history,entry] of cached){resetChartComputationAlignment(entry.data);inherited.set(history,{...entry,revision:-1,generation:undefined});}
+    extendedData.set(next,inherited);
   }
 }
 function continueDisplay(data: KLineData[], key: string, result: DisplaySeries): DisplaySeries {
@@ -248,10 +252,10 @@ function continueDisplay(data: KLineData[], key: string, result: DisplaySeries):
   if (result.pending && previous) {
     const indices = data.map(bar => previous.times.get(bar.timestamp));
     const aligned = (name: 'core' | 'avg' | 'avg2') => indices.map(i => i == null ? null : previous.result[name][i] ?? null);
-    return { core: aligned('core'), avg: aligned('avg'), avg2: aligned('avg2'), pending: true };
+    return { core: aligned('core'), avg: aligned('avg'), avg2: aligned('avg2'), ...(previous.result.components?{components:Object.fromEntries(Object.entries(previous.result.components).map(([name,values])=>[name,indices.map(i=>i==null?null:values[i]??null)]))}:{}), pending: true };
   }
   if (!result.pending) {
-    if (history.snapshots.size >= 32 && !history.snapshots.has(key)) history.snapshots.delete(history.snapshots.keys().next().value!);
+    if (history.snapshots.size >= 256 && !history.snapshots.has(key)) history.snapshots.delete(history.snapshots.keys().next().value!);
     history.snapshots.set(key, { times: new Map(data.map((bar, i) => [bar.timestamp, i])), result });
   }
   return result;
@@ -278,7 +282,7 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   if (current?.generation === generation) return current.result;
   const result = finish(calculateChartSeries(data, item, period, options));
   if (!cache) { cache = new Map(); liveSeriesCache.set(data, cache); }
-  if (cache.size >= 32) cache.clear();
+  if (cache.size >= 256) cache.delete(cache.keys().next().value!);
   cache.set(versionKey, { generation, result });
   return result;
 }
@@ -304,7 +308,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbiFamily(def) ? step / 60000 : 5), step,featureUsesMbi2(def)||item.featureId==='ctba_12h-bear'?item.featureId:undefined) : EMPTY_HISTORY;
     const history = fetched.length ? fetched : EMPTY_HISTORY;
     if (history.length || background) {
-      const revision = dataRevision(data), cached = extendedData.get(data);
+      const revision = dataRevision(data), entries=extendedData.get(data)??new Map<KLineData[],ExtendedChartData>(),cached=entries.get(history);
       if (cached?.history === history && cached.revision === revision) data = cached.data;
       else {
         const sameHistory = cached?.history === history;
@@ -317,7 +321,9 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
         combined.length = history.length + data.length;
         for (let i = 0; i < data.length; i++) combined[history.length + i] = data[i];
         invalidateResearchChartData(combined, changedFrom);
-        extendedData.set(data, { history, revision, generation, data: combined });
+        entries.set(history,{history,revision,generation,data:combined});
+        if(entries.size>64)entries.delete(entries.keys().next().value!);
+        extendedData.set(data,entries);
         data = combined;
       }
     }

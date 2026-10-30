@@ -1,3 +1,4 @@
+import {pruneMiningDeletions,mergeSourceDeletions} from './libraryDeletion';
 /**
  * 挖掘库：批量挖掘每一档的扫描记录与挖到的信号，独立于鱼舱保存（在鱼舱里删掉鱼，挖掘库里仍在，并标出「已从鱼舱删除」）。
  * 【用户要求】2026-10-27「批量挖掘、买前过滤、持仓监测的逻辑和运行是独立的，因此需要有各自的数据库」。
@@ -26,13 +27,13 @@ export interface FishMiningAnchor {
   error?: string; attempts: number;
 }
 export interface FishMiningRecord extends LibraryRecordBase { runId: string; anchorMs: number; catchKey: string; signal: TradeSignal }
-export interface FishMiningLibrary { version: 1; runs: FishMiningRun[]; anchors: FishMiningAnchor[]; records: FishMiningRecord[]; adoptedHold?: boolean }
+export interface FishMiningLibrary { deletedRecords?:Record<string,number>; version: 1; runs: FishMiningRun[]; anchors: FishMiningAnchor[]; records: FishMiningRecord[]; adoptedHold?: boolean }
 
 export const emptyMiningLibrary = (): FishMiningLibrary => ({ version: 1, runs: [], anchors: [], records: [] });
 export function normalizeMiningLibrary(x: unknown): FishMiningLibrary {
   const v = x as Partial<FishMiningLibrary> | null;
   if (!v || v.version !== 1 || !Array.isArray(v.runs) || !Array.isArray(v.anchors) || !Array.isArray(v.records)) return emptyMiningLibrary();
-  return { version: 1, runs: v.runs, anchors: v.anchors, records: v.records, ...(v.adoptedHold ? { adoptedHold: true } : {}) };
+  return pruneMiningDeletions({ version: 1, runs: v.runs, anchors: v.anchors, records: v.records, deletedRecords:v.deletedRecords, ...(v.adoptedHold ? { adoptedHold: true } : {}) });
 }
 
 /** 去掉逐点曲线（trace）与「新鱼」标记：库里只留判断所需的读数快照。 */
@@ -119,5 +120,5 @@ export function mergeMiningLibraries(a: FishMiningLibrary, b: FishMiningLibrary)
     const picked = !old.error && x.error ? old : !x.error && old.error ? x : newer;
     anchors.set(x.id, { ...picked, recordIds: [...new Set([...old.recordIds, ...x.recordIds])], attempts: Math.max(old.attempts, x.attempts) });
   }
-  return { version: 1, runs: [...runs.values()], anchors: [...anchors.values()], records: mergeLibraryRecords(a.records, b.records), ...(a.adoptedHold || b.adoptedHold ? { adoptedHold: true } : {}) };
+  return pruneMiningDeletions({ version: 1, runs: [...runs.values()], anchors: [...anchors.values()], records: mergeLibraryRecords(a.records, b.records),deletedRecords:mergeSourceDeletions(a.deletedRecords,b.deletedRecords), ...(a.adoptedHold || b.adoptedHold ? { adoptedHold: true } : {}) });
 }

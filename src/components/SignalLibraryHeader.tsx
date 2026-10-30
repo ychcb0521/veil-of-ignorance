@@ -8,7 +8,8 @@ export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax
 export const SIGNAL_LIBRARY_FISH_GRID = 'grid grid-cols-[148px_128px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Shared column widths and sort controls for the main library and 鱼. */
-export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, algorithmSort }: {
+export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, algorithmSort, selection }: {
+  selection?:{checked:boolean;toggle:()=>void};
   /** 「渔」的鱼：兜底区换成可排序的「算法类型」。 */
   algorithmSort?: { active: boolean; onClick: () => void };
   showMatch?: boolean;
@@ -17,8 +18,9 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
   sortKey: SignalSortKey | undefined; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
 }) {
   return <div data-testid="signal-library-header" className={`${algorithmSort ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
-    <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
-      <span aria-hidden />
+    <span className={`relative grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1 ${selection?'pl-4':''}`}>
+      {selection&&<input type="checkbox" className="absolute left-0 h-3 w-3" aria-label="全选当前筛选的鱼" checked={selection.checked} onChange={selection.toggle}/>}
+      <span aria-hidden/>
       <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => onSort('symbol')} />
     </span>
     <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => onSort('time')} />

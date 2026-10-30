@@ -238,9 +238,8 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   const mbiKey = (usesMbi ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : mbi2Key)+(def.retentionSourceId?`|retention:${params.interval}`:'');
   const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}${mbiKey}`;
   const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
-  // MBI is a cheap linear recurrence; evaluate here so the existing replay
-  // closed-candle flag can exclude forming prices before calculation.
-  if ((def.retentionSourceId || !(usesMbi || usesMbi2 || templateId === 'ctba')) && options.variables && isChartComputationEnabled(dataList)) {
+  // Live formula calculations share the worker; its packet preserves the same closed-candle masks.
+  if (options.variables && isChartComputationEnabled(dataList)) {
     try {
       const plan = compileFor(formula, constant, constant && has ? p : null);
       return requestChartComputation(context, { data:dataList, refs:refClose, signature:key, compiled:plan.compiled, params, delta:options.delta,

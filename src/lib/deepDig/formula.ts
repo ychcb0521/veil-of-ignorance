@@ -12,11 +12,11 @@
  *   - 算不出来（除以 0、ln 负数、序列开头没有前一根……）记为「空」：空参与运算结果还是空，nz() 可以把空换成 0。
  */
 
-import { computeCtbaSeries, type CtbaParams } from '@/lib/ctba';
+import { computeCtbaSeries } from '@/lib/ctba';
 import { computeMbi } from '@/lib/mbi';
 import { computeMbi2Core, mbi2States } from '@/lib/mbi2';
 import { sellerResponse } from '@/lib/sellerResponse';
-import {FOCUS_BASE_ARITIES,recentFocus,focusEma,focusRolling,focusRetain,focusWsum,focusRobust,focusBeta,focusMbiZ,focusAtr} from '@/lib/recentFocusMath';
+import {FOCUS_BASE_ARITIES,recentFocus,focusEma,focusRolling,focusRetain,focusWsum,focusRobust,focusBeta,focusMbiZ,focusAtr,type RecentFocus} from '@/lib/recentFocusMath';
 
 export type Value = number | Float64Array;
 
@@ -666,30 +666,41 @@ function binary(op: string, a: Value, b: Value, resume?: SeriesResume): Value {
   }
 }
 
-function call(name: string, args: Value[], line: number, barMinutes: number, resume?: SeriesResume): Value {
+interface CallMemo {ctba:{key:Value[];out:ReturnType<typeof computeCtbaSeries>}[]}
+function memoCtba(args:Value[],focus:RecentFocus|undefined,memo?:CallMemo){
+  const key=[...args.slice(0,16),focus?.bars??0,focus?.weight??1];
+  const prior=memo?.ctba.find(entry=>entry.key.every((v,i)=>Object.is(v,key[i])));if(prior)return prior.out;
+  const [N,f,s,m,lambda,epsilon,alpha,beta,gamma]=args.slice(7,16) as number[];
+  const out=computeCtbaSeries({C:args[0] as Float64Array,H:args[1] as Float64Array,L:args[2] as Float64Array,E:args[3] as Float64Array,B:args[4] as Float64Array,S:args[5] as Float64Array,time:args[6] as Float64Array},{N,f,s,m,lambda,epsilon,alpha,beta,gamma},focus);
+  memo?.ctba.push({key,out});return out;
+}
+function call(name: string, args: Value[], line: number, barMinutes: number, resume?: SeriesResume,memo?:CallMemo): Value {
   const arities=FOCUS_BASE_ARITIES[name];
   if(arities?.some(n=>n+2===args.length)){
     const baseArgs=args.slice(0,-2),h=scalarArg(args.at(-2)!,name,'最近加权小时',line),weight=scalarArg(args.at(-1)!,name,'最近相对权重',line);
     let f;try{f=recentFocus(h,weight,barMinutes);}catch(error){throw new FormulaError((error as Error).message,line);}
-    // Never seed the original recurrence from a previously focused output.
-    const base=call(name,baseArgs,line,barMinutes);
+    // Keep the original kernel's recurrence separately: a focused EMA is never its seed.
+    const priorBase=resume?.states?.get('__focus_base');
+    const baseResume=resume?{...resume,from:priorBase?Math.min(resume.from,priorBase.length):0,previous:priorBase??new Float64Array(0)}:undefined;
+    const base=call(name,baseArgs,line,barMinutes,baseResume,memo);
+    if(isSeries(base))resume?.states?.set('__focus_base',base);
     if(weight===1||!isSeries(base))return base;
     const [a,b,c]=baseArgs,scalar=(i:number)=>scalarArg(baseArgs[i],name,'参数',line);
     const len=base.length,series=(v:Value)=>isSeries(v)?v:new Float64Array(len).fill(v);
     if(name==='ctba'){
       if(barMinutes!==5||!baseArgs.slice(0,7).every(isSeries))return base;
-      const [N,fast,slow,m,lambda,epsilon,alpha,beta,gamma,part]=baseArgs.slice(7).map(v=>scalarArg(v,name,'参数',line));
-      const out=computeCtbaSeries({C:series(a),H:series(b),L:series(c),E:series(baseArgs[3]),B:series(baseArgs[4]),S:series(baseArgs[5]),time:series(baseArgs[6])},{N,f:fast,s:slow,m,lambda,epsilon,alpha,beta,gamma},f);
+      const part=scalarArg(baseArgs[16],name,'参数',line);
+      const out=memoCtba(baseArgs,f,memo);
       return [out.T,out.M,out.F,out.CTBA,out.noTrade,out.complete][part];
     }
     if(name==='mbiz'||name==='mbiz2')return focusMbiZ(series(a),scalar(1),f,name==='mbiz2');
     if(name==='ema')return focusEma(series(a),base,2**(-barMinutes/(scalar(1)*60)),f,baseArgs.length===3);
-    if(name==='retain')return focusRetain(series(a),series(b),series(c),2**(-barMinutes/(scalar(3)*60)),barsForHours(baseArgs.length===5?scalar(4):48,barMinutes),f);
-    if(name==='wsum')return focusWsum(series(a),2**(-1/scalar(1)),scalar(2),f);
+    if(name==='retain')return focusRetain(series(a),series(b),series(c),2**(-barMinutes/(scalar(3)*60)),barsForHours(baseArgs.length===5?scalar(4):48,barMinutes),f,resume);
+    if(name==='wsum')return focusWsum(series(a),2**(-1/scalar(1)),scalar(2),f,resume);
     if(name==='atr')return focusAtr(series(a),series(b),series(c),scalar(3),base,f);
-    if(name==='beta')return focusBeta(series(a),series(b),barsForHours(scalar(2),barMinutes),f);
+    if(name==='beta')return focusBeta(series(a),series(b),barsForHours(scalar(2),barMinutes),f,resume);
     const n=name==='sma'||name==='sum'||name==='msum'?scalar(1):barsForHours(scalar(1),barMinutes);
-    if(name==='median'||name==='mad'||name==='rscale')return focusRobust(series(a),n,f,name);
+    if(name==='median'||name==='mad'||name==='rscale')return focusRobust(series(a),n,f,name,resume);
     return focusRolling(series(a),n,f,(name==='msum'?'rsum':name) as 'avg'|'sd'|'zscore'|'rsum'|'sma'|'sum');
   }
   const [x, y, z] = args;
@@ -702,9 +713,8 @@ function call(name: string, args: Value[], line: number, barMinutes: number, res
       if (barMinutes !== 5) return isSeries(x)?new Float64Array(x.length).fill(NaN):NaN;
       if (!args.slice(0,7).every(isSeries)) return NaN;
       const values=args.slice(7).map(v=>scalarArg(v,'ctba','参数',line));
-      const [N,f,s,m,lambda,epsilon,alpha,beta,gamma,part]=values;
-      const p:CtbaParams={N,f,s,m,lambda,epsilon,alpha,beta,gamma};
-      const out=computeCtbaSeries({C:args[0] as Float64Array,H:args[1] as Float64Array,L:args[2] as Float64Array,E:args[3] as Float64Array,B:args[4] as Float64Array,S:args[5] as Float64Array,time:args[6] as Float64Array},p);
+      const part=values[9];
+      const out=memoCtba(args,undefined,memo);
       if(!Number.isInteger(part)||part<0||part>5)throw new FormulaError('CTBA 分量编号无效',line);
       return [out.T,out.M,out.F,out.CTBA,out.noTrade,out.complete][part];
     }
@@ -861,8 +871,8 @@ export interface FormulaEvaluationCache {
   states: WeakMap<Node, Map<string, Float64Array>>;
 }
 export const createFormulaEvaluationCache = (): FormulaEvaluationCache => ({ nodes: new WeakMap(), states: new WeakMap() });
-const resumableCalls = new Set(['median', 'mad', 'rscale', 'wsum', 'retain', 'highest', 'lowest', 'ln', 'log', 'exp', 'abs', 'tanh', 'sqrt', 'sign', 'max', 'min', 'nz', 'has', 'if', 'clip', 'ema', 'avg', 'sd', 'zscore', 'rsum', 'prev', 'ago']);
-function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number, reuse?: { from: number; cache: FormulaEvaluationCache }): Value {
+const resumableCalls = new Set(['median', 'mad', 'rscale', 'wsum', 'retain', 'highest', 'lowest', 'ln', 'log', 'exp', 'abs', 'tanh', 'sqrt', 'sign', 'max', 'min', 'nz', 'has', 'if', 'clip', 'ema', 'avg', 'sd', 'zscore', 'rsum', 'prev', 'ago','beta']);
+function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number, reuse?: { from: number; cache: FormulaEvaluationCache },memo?:CallMemo): Value {
   const previous = reuse?.cache.nodes.get(n);
   const resume = reuse && reuse.from > 0 && previous ? { from: reuse.from, previous } : undefined;
   const remember = (out: Value) => { if (reuse && isSeries(out)) reuse.cache.nodes.set(n, out); return out; };
@@ -874,12 +884,12 @@ function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number, reus
       return v;
     }
     case 'un': {
-      const a = evaluateNode(n.a, env, barMinutes, reuse);
+      const a = evaluateNode(n.a, env, barMinutes, reuse,memo);
       return remember(n.op === '-' ? map1(a, x => -x, resume) : map1(a, x => (Number.isNaN(x) ? Number.NaN : truthy(x) ? 0 : 1), resume));
     }
-    case 'bin': return remember(binary(n.op, evaluateNode(n.a, env, barMinutes, reuse), evaluateNode(n.b, env, barMinutes, reuse), resume));
+    case 'bin': return remember(binary(n.op, evaluateNode(n.a, env, barMinutes, reuse,memo), evaluateNode(n.b, env, barMinutes, reuse,memo), resume));
     case 'call': {
-      const args = n.args.map(a => evaluateNode(a, env, barMinutes, reuse));
+      const args = n.args.map(a => evaluateNode(a, env, barMinutes, reuse,memo));
       const priorCall = reuse?.cache.nodes.get(n);
       let callResume: SeriesResume | undefined;
       if (reuse && resumableCalls.has(n.name)) {
@@ -887,7 +897,7 @@ function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number, reus
         if (!states) { states = new Map(); reuse.cache.states.set(n, states); }
         callResume = { from: priorCall ? reuse.from : 0, previous: priorCall ?? new Float64Array(Math.max(0, lengthOf(...args))), states };
       }
-      const out = call(n.name, args, n.line, barMinutes, callResume);
+      const out = call(n.name, args, n.line, barMinutes, callResume,memo);
       if (reuse && isSeries(out) && resumableCalls.has(n.name)) reuse.cache.nodes.set(n, out);
       return out;
     }
@@ -931,9 +941,9 @@ export function evaluateProgramVars(program: Program, inputs: Readonly<Record<st
   const env = new Map<string, Value>(Object.entries(inputs));
   const vars = new Map<string, Value>();
   const barMinutes = options.barMinutes ?? FORMULA_BAR_MINUTES;
-  let last: Value = Number.NaN;
+  let last: Value = Number.NaN;const memo:CallMemo={ctba:[]};
   for (const s of program.statements) {
-    last = evaluateNode(s.expr, env, barMinutes, reuse);
+    last = evaluateNode(s.expr, env, barMinutes, reuse,memo);
     if (s.name) { env.set(s.name, last); vars.set(s.name, last); }
   }
   return { last, vars };

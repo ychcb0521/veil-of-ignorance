@@ -1,3 +1,4 @@
+import {preserveSourceDeletions,markSourceDeletions,type DeleteTarget} from '@/lib/fish/libraryDeletion';
 import { useQualityPostExit } from './useQualityPostExit';
 import { useQualityEntryReadings } from './useQualityEntryReadings';
 import { additionIdentity, validateQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
@@ -42,8 +43,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   // Updates to an old account must never appear in or save into the newly selected one.
   if (account.current !== owner) { void monitorFinalizer.current?.('paused', false); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
-    const next = apply(current.current); if (next !== current.current) { current.current = next; setStudy(next); }
+    const next = preserveSourceDeletions(current.current,apply(current.current)); if (next !== current.current) { current.current = next; setStudy(next); }
   }, []);
+  useEffect(()=>{
+    if(typeof BroadcastChannel==='undefined')return;const channel=new BroadcastChannel('veil-fish-quality-deletions');
+    channel.onmessage=({data})=>{if(data?.owner!==account.current||!data.deletedSources)return;selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;controller.current?.abort();filterController.current?.abort();change(s=>preserveSourceDeletions({...s,deletedSources:data.deletedSources,deletedReadings:data.deletedReadings},s));};
+    return()=>channel.close();
+  },[owner,change]);
   const postExit=useQualityPostExit(owner,ready && readyRef.current,study,run,change);
   const entry=useQualityEntryReadings(owner,ready && readyRef.current,study,run,change);
   const acceptReading = useCallback((reading: QualityFilterReading) => change(s => {
@@ -114,7 +120,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (finalized) return; finalized = true;
       if (monitorFinalizer.current === finish) monitorFinalizer.current = null;
       if (epoch !== generation.current || account.current !== savedOwner) return;
-      const next = finishQualityMonitorRound(current.current, capture, state, Date.now(), reason);
+      const next = preserveSourceDeletions(current.current,finishQualityMonitorRound(current.current, capture, state, Date.now(), reason));
       current.current = next; if (render && readyRef.current) setStudy(next);
       let ok = false; try { ok = await saveQualityStudy(savedOwner, next); } catch { /* retain in memory and retry with the existing save loop */ }
       if (!ok && epoch === generation.current && readyRef.current) setWarning('监测库未能保存到本机；请保留此页面，系统会继续重试。');
@@ -275,7 +281,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => replaceQualitySellPlans(s, plans));
     defer(() => void start(false, 'restart'));
   }, [change, defer, start]);
-  return { entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  const deleteSources=useCallback(async(targets:readonly DeleteTarget[])=>{
+    if(!readyRef.current)throw Error('鱼质量尚未加载完成');const savedOwner=account.current;
+    selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;controller.current?.abort();filterController.current?.abort();
+    await monitorFinalizer.current?.('paused',false);if(account.current!==savedOwner)throw Error('账号已切换，请重新选择');
+    const next=markSourceDeletions(current.current,targets);if(!await saveQualityStudy(savedOwner,next))throw Error('过滤库、监测库的删除未能保存，请重试');
+    if(account.current!==savedOwner)throw Error('账号已切换，原账号的关联删除已保存；请返回原账号继续删除来源记录');
+    change(()=>next);
+    if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
+  },[change]);
+  return { account:owner,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'>>;

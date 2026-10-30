@@ -2,7 +2,7 @@
 import type { KLineData } from 'klinecharts';
 import { fetchResearchKlines, RESEARCH_INTERVALS, intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 
-interface Entry { from: number; bars: KLineData[]; pending: boolean; retryAt: number }
+interface Entry { from: number; desiredFrom:number; bars: KLineData[]; pending: boolean; retryAt: number; views:Map<number,KLineData[]> }
 const entries = new Map<string, Entry>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -18,26 +18,37 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number, n
   const key = `${namespace?namespace+'|':''}${symbol}|${interval}|${to}`;
   let entry = entries.get(key);
   if (!entry) {
-    entry = { from: to, bars: [], pending: false, retryAt: 0 };
+    entry = { from: to, desiredFrom:from,bars: [], pending: false, retryAt: 0, views:new Map() };
     entries.set(key, entry);
     // Pending requests retain their own entry; evicted results cannot notify a different chart.
     if (entries.size > 24) entries.delete(entries.keys().next().value!);
   }
+  entry.desiredFrom=Math.min(entry.desiredFrom,from);
   if (entry.from > from && !entry.pending && Date.now() >= entry.retryAt) {
     const current = entry;
     current.pending = true;
-    fetchResearchKlines(symbol, from, to, undefined, undefined, interval).then(result => {
-      if (entries.get(key) !== current) return;
-      current.from = from;
-      current.bars = result.filter(b => b.openTime < to).map(b => ({ timestamp: b.openTime,
+    // Collect every selected indicator's demand in this render before fetching.
+    // Otherwise each larger window forces all formulas to restart once again.
+    queueMicrotask(async()=>{try{do{const target=current.desiredFrom;
+      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval);
+      if(entries.get(key)!==current)return;
+      current.from=target;
+      current.bars=result.filter(b => b.openTime < to).map(b => ({ timestamp: b.openTime,
         open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
         ...(b.quoteVolume != null ? { turnover: b.quoteVolume } : {}),
         ...(b.takerBuyQuoteVolume != null ? { takerBuyTurnover: b.takerBuyQuoteVolume } : {}),
       }));
+      current.views.clear();
+      }while(current.desiredFrom<current.from);
       current.pending = false;
       version++;
       for (const fn of listeners) fn();
-    }).catch(() => { current.pending = false; current.retryAt = Date.now() + 30_000; });
+    }catch{current.pending=false;current.retryAt=Date.now()+30_000;}});
   }
-  return namespace?entry.bars.filter(b=>b.timestamp>=from):entry.bars;
+  if(!namespace)return entry.bars;
+  // A stable slice is part of the worker channel identity. Re-filtering on every
+  // redraw discards completed results before a namespaced indicator can paint.
+  let view=entry.views.get(from);
+  if(!view){view=entry.bars.filter(b=>b.timestamp>=from);entry.views.set(from,view);}
+  return view;
 }

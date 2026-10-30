@@ -1,3 +1,5 @@
+import {useFishBulkDelete} from './FishBulkDeletion';
+import {fishDeleteTarget} from '@/lib/fish/libraryDeletion';
 import type {SignalScrollPosition} from './SignalLibraryList';
 import {fishCaughtBy} from '@/lib/fish/records';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
@@ -42,6 +44,9 @@ function readView(key?:string):FishView {
 }
 /** The catch stays inside 渔. Use the same table, columns, sorting and rating behavior as 信号库. */
 export const FishLibrary = memo(function FishLibrary(p: Props) {
+  const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
+  const toggleSelection=useCallback((id:string)=>setSelected(s=>{const n=new Set(s);if(n.has(id))n.delete(id);else n.add(id);return n;}),[]);
+  const requestDelete=(ids:string[])=>bulk?.({kind:'hold',ids,targets:p.signals.filter(s=>ids.includes(s.id)).map(fishDeleteTarget)});
   const title = p.title ?? '鱼舱';
   const testId = p.testId ?? 'fish-library';
   const [saved] = useState(()=>readView(p.rememberViewKey));
@@ -134,13 +139,14 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
         <span className="relative max-w-full shrink-0 sm:max-w-60"><select aria-label={`${title}的算法`} className={filterCls} value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法类型</option>{algorithms.map(name=><option key={name} value={name}>{name}</option>)}</select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" /></span>
         <label className="relative flex min-w-[8rem] flex-1 items-center"><Search aria-hidden className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground/60" /><input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="h-7 w-full rounded-md border border-transparent bg-muted/50 pl-6 pr-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 hover:bg-muted focus-visible:border-ring/60 focus-visible:bg-background" /></label>
 
+        {bulk&&<><button type="button" className="rounded border px-2 py-1 text-[11px]" onClick={()=>setSelected(s=>new Set([...s,...rows.map(r=>r.id)]))}>全选当前筛选（{rows.length}）</button><button type="button" className="rounded border px-2 py-1 text-[11px]" onClick={()=>setSelected(new Set())}>取消选择</button><button type="button" className="rounded border px-2 py-1 text-[11px] text-destructive disabled:opacity-40" disabled={!p.signals.some(s=>selected.has(s.id))} onClick={()=>requestDelete(p.signals.filter(s=>selected.has(s.id)).map(s=>s.id))}>删除所选（{p.signals.filter(s=>selected.has(s.id)).length}）</button></>}
       </div>
       <div ref={algorithmSizer} aria-hidden className="pointer-events-none invisible absolute h-0 overflow-hidden font-mono text-[10px] leading-4">
         {algorithmLabels.map(label => <span key={label} className="block w-max whitespace-nowrap">{label}</span>)}
       </div>
       {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(638px + var(--fish-algorithm-width))` } as CSSProperties}>
-        <SignalLibraryHeader sortKey={sortKey === 'algorithm' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={p.onDelete} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess confirmDelete />
+        <SignalLibraryHeader selection={bulk?{checked:!!rows.length&&rows.every(r=>selected.has(r.id)),toggle:()=>setSelected(s=>{const n=new Set(s),all=rows.every(r=>n.has(r.id));for(const r of rows)if(all)n.delete(r.id);else n.add(r.id);return n;})}:undefined} sortKey={sortKey === 'algorithm' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={bulk?id=>requestDelete([id]):p.onDelete} selectedIds={bulk?selected:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess confirmDelete={!bulk} />
       </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;

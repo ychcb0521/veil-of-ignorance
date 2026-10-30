@@ -1,3 +1,4 @@
+import {FishLibraryDataActions} from './FishLibraryTransferContext';
 import { focusSignalKey, qualityFocusSignals, focusSignalLabel } from '@/lib/fish/qualityFocusSignals';
 import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowRightCircle, ArrowUpRight, ChevronDown, Database, Download } from 'lucide-react';
@@ -68,7 +69,7 @@ export function FishMonitorLibrary({ study, onJump, canJump, onOpenCampaign }: {
     <DialogTrigger asChild><button type="button" className={action} aria-label="打开监测库"><Database aria-hidden className="h-3 w-3"/>监测库</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
-        <div className="flex flex-wrap items-center gap-1.5 pr-6"><DialogTitle className="text-sm">监测库</DialogTitle><FishQualityInfo label="监测库说明"><p>每轮冻结当时的算法、公式、门槛、买前过滤与持仓否决条件，随账号保存。</p><p>每条已形成的交易均可通过标的旁的「查看战役」打开，使用该记录的历史条件与结果；未买入或缺少成交数据的记录会说明原因。</p><p>导出包含当前筛选下所有页的记录；各表头可排序，缺失数值始终排在最后。历史条件按保存时的快照展示。</p><p>同标的、同信号时间、同买入时点且条件相同的记录合并，保留最新结果；每轮仍可单独查看。旧快照缺少的条件标为未记录。</p></FishQualityInfo><button type="button" className={`${action} ml-auto`} aria-label="导出监测库数据" title="下载当前筛选下全部记录（包括其他页），顺序与表格一致；附算法、公式和过滤读数" disabled={!records.length} onClick={download}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{records.length}</span></button></div>
+        <div className="flex flex-wrap items-center gap-1.5 pr-6"><DialogTitle className="text-sm">监测库</DialogTitle><FishLibraryDataActions scope="monitor"/><FishQualityInfo label="监测库说明"><p>每轮冻结当时的算法、公式、门槛、买前过滤与持仓否决条件，随账号保存。</p><p>每条已形成的交易均可通过标的旁的「查看战役」打开，使用该记录的历史条件与结果；未买入或缺少成交数据的记录会说明原因。</p><p>导出包含当前筛选下所有页的记录；各表头可排序，缺失数值始终排在最后。历史条件按保存时的快照展示。</p><p>同标的、同信号时间、同买入时点且条件相同的记录合并，保留最新结果；每轮仍可单独查看。旧快照缺少的条件标为未记录。</p></FishQualityInfo><button type="button" className={`${action} ml-auto`} aria-label="导出监测库数据" title="下载当前筛选下全部记录（包括其他页），顺序与表格一致；附算法、公式和过滤读数" disabled={!records.length} onClick={download}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{records.length}</span></button></div>
         <DialogDescription className="text-[11px]">{library?.records.length ?? 0} 条记录 · {roundNumbers.size} 轮监测{rounds.some(r => r.legacy) ? ' · 含历史快照' : ''}</DialogDescription>
       </DialogHeader>
       <div className="flex shrink-0 items-center gap-1 rounded-lg bg-muted/50 p-1" role="tablist" aria-label="监测库分区">

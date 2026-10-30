@@ -97,6 +97,8 @@ export interface QualityBuyFilter { id: string; label: string; metric: string; d
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
+  deletedReadings?: import('./libraryDeletion').SourceDeletions;
+  deletedSources?: import('./libraryDeletion').SourceDeletions;
   entryReadings?: import('./qualityEntry').QualityEntryReading[];
   postExitReadings?: import('./qualityPostExit').QualityPostExitReading[];
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;

@@ -13,6 +13,16 @@ it('keeps hidden warmup aligned and pads an uncomputed new candle with a gap',as
  expect(c.researchChartSeries(data,c.spec,24).core).toEqual([.4,.5]);data.push({...data[0],timestamp:1500000});c.invalidateResearchChartData(data);
  expect(c.researchChartSeries(data,c.spec,24).core).toEqual([.4,.5,null]);
 });
+it('mixed warmup histories do not discard a completed worker curve or spawn replacement channels every redraw',async()=>{
+ const c=await setup(),data=bars([900000,1200000]),historyA=fake.history,historyB=bars([-300000,0,300000,600000]);c.enableChartComputation(data);
+ c.researchChartSeries(data,c.spec,24);const first=fake.messages[0];
+ fake.history=historyB;c.researchChartSeries(data,c.spec,12);const totalBefore=fake.messages.length;
+ reply(first,0,1200000,[.1,.2,.3,.4,.5]);const second=fake.messages.at(-1);expect(fake.messages).toHaveLength(totalBefore+1);
+ fake.history=historyA;expect(c.researchChartSeries(data,c.spec,24).core).toEqual([.4,.5]);
+ fake.history=historyB;reply(second,-300000,1200000,[.05,.1,.2,.3,.44,.55]);expect(c.researchChartSeries(data,c.spec,12).core).toEqual([.44,.55]);
+ const count=fake.messages.length;for(let i=0;i<5;i++){fake.history=historyA;expect(c.researchChartSeries(data,c.spec,24).core).toEqual([.4,.5]);fake.history=historyB;expect(c.researchChartSeries(data,c.spec,12).core).toEqual([.44,.55]);}
+ expect(fake.messages).toHaveLength(count);
+});
 it('retains all known line values by timestamp when native prepend replaces the candle array',async()=>{
  const c=await setup(),data=bars([900000,1200000]);c.enableChartComputation(data);
  c.researchChartSeries(data,c.spec,24);reply(fake.messages[0],0,1200000,[.1,.2,.3,.4,.5]);expect(c.researchChartSeries(data,c.spec,24).avg2).toEqual([.4,.5]);

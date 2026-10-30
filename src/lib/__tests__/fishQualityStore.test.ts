@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { newQualityStudy } from '@/lib/fish/quality';
+import {payload} from '@/lib/fish/__tests__/libraryTransfer.fixture';
+import {markSourceDeletions} from '@/lib/fish/libraryDeletion';
 const disk = new Map<string, unknown>();
 let fail = false;
 beforeEach(() => {
@@ -13,6 +15,12 @@ beforeEach(() => {
   vi.stubGlobal('indexedDB', { open() { const req: any = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('retains deletion markers through stale saves and remote history merges while preserving current settings',async()=>{
+ const store=await import('@/lib/fish/qualityStore'),p=payload(),old={...newQualityStudy(),observeHours:72,filterLibrary:p.filter,monitorLibrary:p.monitor},r=p.monitor!.records[0];
+ await store.saveQualityStudy('a',old);await store.saveQualityStudy('a',markSourceDeletions(old,[{source:r.source,entry:r.enteredAt}],2000));await store.saveQualityStudy('a',old);
+ let s=(await store.loadQualityStudy('a')).study;expect(s.filterLibrary!.records).toEqual([]);expect(s.monitorLibrary!.records).toEqual([]);expect(s.monitorLibrary!.rounds[0].recordIds).toEqual([]);
+ await store.qualityAccountBlob.mergeRemote!('a',{...old,observeHours:1});s=(await store.loadQualityStudy('a')).study;expect(s.observeHours).toBe(72);expect(s.monitorLibrary!.records).toEqual([]);expect((await store.loadQualityStudy('b')).study.deletedSources).toBeUndefined();
+});
 it('persists independently of full localStorage, restores rules/results after reload, and isolates accounts', async () => {
   const store = await import('@/lib/fish/qualityStore');
   const study = newQualityStudy(); study.observeHours = 72; study.tracking = false;

@@ -19,6 +19,13 @@ beforeEach(() => {
   })));
 });
 describe('自制指标隐藏历史预热', () => {
+  it('namespaced history slices keep identity across redraws and change only after a real history update',async()=>{
+    const data=full.slice(-10).map(b=>({...b,researchSymbol:'AUSDT'}));
+    chartPrehistory(data,100,step,'mbi2');await vi.waitFor(()=>expect(chartPrehistory(data,100,step,'mbi2')).toHaveLength(100));
+    const first=chartPrehistory(data,100,step,'mbi2');expect(chartPrehistory(data,100,step,'mbi2')).toBe(first);
+    chartPrehistory(data,200,step,'mbi2');await vi.waitFor(()=>expect(chartPrehistory(data,200,step,'mbi2')).toHaveLength(200));
+    const second=chartPrehistory(data,100,step,'mbi2');expect(second).not.toBe(first);expect(second).toEqual(first);expect(chartPrehistory(data,100,step,'mbi2')).toBe(second);
+  });
   it.each(CUSTOM_RESEARCH_INDICATORS)('$id 左边第一根原值和两种均值与完整历史计算一致', async item => {
     const visible = full.slice(-240).map(b => ({ ...b, researchSymbol: 'TESTUSDT' }));
     const period = item.id === 'BSS' || item.id === 'DSS' ? 12 : item.period;
@@ -34,13 +41,13 @@ describe('自制指标隐藏历史预热', () => {
     }
     expect(visible).toHaveLength(240);
   });
-  it('多个指标共用取数，较长窗口会在短窗口完成后继续补齐', async () => {
+  it('同一轮多个指标共用取数，合并成最长的预热请求', async () => {
     const data = full.slice(-10).map(b => ({ ...b, researchSymbol: 'AUSDT' }));
     const stop = subscribeResearchHistory(() => { chartPrehistory(data, 200, step); });
     chartPrehistory(data, 100, step);
     await vi.waitFor(() => expect(chartPrehistory(data, 200, step)).toHaveLength(200));
     stop();
-    expect(fetchResearchKlines).toHaveBeenCalledTimes(2);
+    expect(fetchResearchKlines).toHaveBeenCalledTimes(1);
   });
   it('上市前无历史或取数失败时保留缺值，不补造曲线', async () => {
     vi.mocked(fetchResearchKlines).mockResolvedValue([]);
@@ -54,7 +61,7 @@ describe('自制指标隐藏历史预热', () => {
   it('标的隔离、请求去重，未标记的镜像/测试数据不请求历史', async () => {
     const data = full.slice(-10).map(b => ({ ...b, researchSymbol: 'AUSDT' }));
     chartPrehistory(data, 100, step); chartPrehistory(data, 100, step);
-    expect(fetchResearchKlines).toHaveBeenCalledTimes(1);
+    await vi.waitFor(()=>expect(fetchResearchKlines).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(chartPrehistory(data, 100, step)).toHaveLength(100));
     expect(chartPrehistory(data.map(b => ({ ...b, researchSymbol: 'BUSDT' })), 100, step)).toEqual([]);
     expect(chartPrehistory(full.slice(-10), 100, step)).toEqual([]);

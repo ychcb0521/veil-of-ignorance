@@ -10,3 +10,9 @@ it('worker results match full calculations across partial updates and new candle
  }
  vi.unstubAllGlobals();
 });
+it('bounds heavy formula state while leaving completed output intact',async()=>{
+ vi.resetModules();const messages:any[]=[],target={postMessage:(m:any)=>messages.push(m),onmessage:undefined as any};vi.stubGlobal('self',target);await import('../chartCompute.worker');
+ const compiled=compileFeatureFormula('X=C'),packet=()=>{const p=new Float64Array(10);p.set([0,1,2,1,1,10,100,50,100,0]);return p.buffer;};
+ for(let id=1;id<=9;id++)target.onmessage({data:{id,length:1,from:0,packet:packet(),compiled,params:{interval:'5m'},variables:['X']}});
+ expect(messages.at(-1).evicted).toEqual([1]);expect(messages[0].vars.X[0]).toBe(1);target.onmessage({data:{id:1,length:1,from:0,packet:packet(),compiled,params:{interval:'5m'},variables:['X']}});expect(messages.at(-1).error).toBeUndefined();expect(messages.at(-1).vars.X[0]).toBe(1);vi.unstubAllGlobals();
+});

@@ -1,3 +1,4 @@
+import {preserveSourceDeletions,applySourceDeletions} from './libraryDeletion';
 import { preserveQualityPostExit } from './qualityPostExit';
 import { preserveQualityEntry } from './qualityEntry';
 import { newQualityStudy, type FishQualityStudy } from './quality';
@@ -9,7 +10,7 @@ import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
 // 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
-const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming))));
+const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveSourceDeletions(saved,preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming)))));
 const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -50,7 +51,7 @@ async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQuality
       // A fallback can be newer if a previous durable write failed.
       if (valid(fallback)) return { study: preserveStudy(valid(stored) ? stored : undefined,fallback) };
       if (stored != null && !valid(stored)) throw new Error('invalid saved study');
-      return { study: valid(stored) ? stored : newQualityStudy() };
+      return { study: valid(stored) ? applySourceDeletions(stored) : newQualityStudy() };
     } finally { db.close(); }
   } catch {
     return { study: valid(fallback) ? fallback : newQualityStudy(), warning: '鱼质量的本机存储暂不可用；当前结果可能无法在刷新后恢复，请保留此页面。' };
@@ -91,6 +92,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
 /** 账号云端存档：本机那份原样上传；取回云端时排进同一条写队列，绝不和页面的保存交错。 */
 export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
   name: 'fish-quality',
+  async mergeRemote(owner,value){if(value&&!await saveQualityStudy(owner,value,{repairOnly:true}))throw Error('鱼质量跨设备合并未保存');},
   async read(owner) {
     const key = keyOf(owner);
     await writes.get(key);
@@ -129,5 +131,5 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     void task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {});
     return task.then(() => undefined);
   },
-  weight: study => study ? (study.postExitReadings?.length ?? 0) + study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
+  weight: study => study ? Object.keys(study.deletedSources??{}).length + (study.postExitReadings?.length ?? 0) + study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
 };
