@@ -57,7 +57,7 @@ export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, 
     return [exchange,{exchange,btc:()=>adapter.btc(),list:(signal:AbortSignal)=>universe??=adapter.list(signal),
       candles:(market,cut,signal,query)=>{
         const count=countFor(query.interval,query.count),key=`${market.instrument}|${query.interval}|${cut}`;
-        if(!candles.has(key))candles.set(key,adapter.candles(market,cut,signal,{...query,count,allowPartial:true,...(plans.some(p=>p.compiled.usesPrs6h||p.compiled.usesAti6h)?{marketEvidence:true}:{})}));
+        if(!candles.has(key))candles.set(key,adapter.candles(market,cut,signal,{...query,count,allowPartial:true,...(plans.some(p=>p.compiled.usesSbs5m||p.compiled.usesPrs6h||p.compiled.usesAti6h)?{marketEvidence:true}:{})}));
         return candles.get(key)!.then(b=>b.slice(-query.count));
       },
       taker:async(market,bars,signal,query)=>{

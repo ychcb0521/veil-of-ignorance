@@ -1,3 +1,4 @@
+import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
 import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
 import {ati6hDependencyOf} from '@/lib/deepDig/features';
@@ -19,6 +20,10 @@ import { mbiNOf } from '@/lib/mbi';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
+  {id:'SBS5M',featureId:SBS5M_ID,core:'SBS5M',short:'SBS-5M',name:'台阶箱体支撑',period:6,parameter:'有效期（定义配置）',parameterUnit:'h',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:SBS5M_FIELDS.filter(n=>n!=='SBS5M')},
+  {id:'SBS5M_QUALITY',featureId:'sbs_5m_quality',core:'SBS5M_support_quality',short:'SBS·证据',name:'台阶箱体支撑｜证据分',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:100,seller:false,marketEvidence:true,rawOnly:true},
+  {id:'SBS5M_DISTANCE',featureId:'sbs_5m_distance',core:'SBS5M_distance_to_support',short:'SBS·距离',name:'台阶箱体支撑｜标准化距离',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true},
+  {id:'SBS5M_STEP',featureId:'sbs_5m_step',core:'SBS5M_step_height_atr',short:'SBS·台阶',name:'台阶箱体支撑｜台阶幅度',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true},
   {id:'PRS6H',featureId:PRS6H_ID,core:'PRS6H',short:'PRS-6H',name:'日内顺势加仓证据',period:.5,parameter:'近期证据半衰期',parameterUnit:'h',neutral:0,neutralLabel:'0｜未满足本指标证据（非看空）',min:0,max:100,seller:false,marketEvidence:true,avgRange:[0,100],components:PRS6H_FIELDS.filter(n=>n!=='PRS6H')},
   {id:'ATI6H',featureId:'ati6h',core:'ATI6H',short:'ATI-6H',name:'ATI-6H｜加仓支持证据指数',period:1,parameter:'证据半衰期',parameterUnit:'h',neutral:0,neutralLabel:'0｜证据归零（非执行门槛）',min:0,max:1,seller:false,marketEvidence:true,avgRange:[0,1],components:['ATI6H_sA','ATI6H_sB','ATI6H_sC','ATI6H_sD','ATI6H_sE','ATI6H_sF','ATI6H_min','ATI6H_support_price','ATI6H_support_failure_price','ATI6H_breakout_price','ATI6H_nearest_resistance_price','ATI6H_structure_status_code']},
   { id: 'STATE', featureId: 'state', core: 'state', short: '状态 S', name: '多空状态 S（0–1）', period: 24, parameter: '基线时长', neutral: 0.6, avgNeutral: 0.6, min: 0, max: 1, avgRange: [0, 1], seller: false }, // 【用户要求】2026-10-22 橘色线（线上绿、线下红）：原始值与两条均值线都在 0.6
@@ -49,7 +54,7 @@ export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESE
 export interface ResearchIndicator {
   id: string; featureId: string; core: string; short: string; name: string; period: number; parameter: string;
   neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
-  rawOnly?:boolean; marketEvidence?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
+  priceOverlay?:boolean; rawOnly?:boolean; marketEvidence?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
@@ -61,7 +66,7 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
     if (!program.statements.some(s => s.name === core)) core = featureCoreName(program) ?? core;
   } catch { /* Invalid formulas remain editable, with empty charts. */ }
-  return { ...(['ati6h','prs6h'].includes(featureTemplateId(def)??'')?{marketEvidence:true}:{}), id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
+  return { ...(featureTemplateId(def)===SBS5M_ID?{rawOnly:true,priceOverlay:(def.SBS5M_dimension??'price')==='price'}:{}), ...(['ati6h','prs6h',SBS5M_ID].includes(featureTemplateId(def)??'')?{marketEvidence:true}:{}), id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
     period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
     min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
@@ -217,7 +222,7 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }

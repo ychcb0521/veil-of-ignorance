@@ -162,15 +162,16 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   const N=warm+546, constraintKey=constraintFingerprint(texts);
   return {usesTaker:inputs.has('B')||inputs.has('S')||(full.usesPrs6h&&frozen.PRS6H_config?.volumeMode==='flow')||(full.usesAti6h&&frozen.ATI6H_volume_mode!=='bar_direction_proxy'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,stateHold,stateHoldAlternatives,unavailable:!Number.isFinite(N)||N>FISH_MAX_HISTORY_BARS?`需要 ${N} 根历史（含平滑收敛预热），超过 ${FISH_MAX_HISTORY_BARS} 根上限，暂不可扫`:undefined};
 }
-export interface FishValues { PRS6H_details?:import('../prs6h').PrsRow[]; value: Float64Array; average: Float64Array; main: Float64Array; constraints: Float64Array[]; condition: Float64Array }
+export interface FishValues { SBS5M_details?:import('../sbs5m').SbsRow[]; PRS6H_details?:import('../prs6h').PrsRow[]; value: Float64Array; average: Float64Array; main: Float64Array; constraints: Float64Array[]; condition: Float64Array }
 export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgram): FishValues {
   const out=evaluateOnBars(bars,plan.compiled,plan.def),n=bars.length;
   const series=(name:string)=>{const x=out.vars.get(name)??NaN;return typeof x==='number'?new Float64Array(n).fill(x):x;};
   const value=series(plan.statisticName),average=series(plan.averageName),main=series(plan.mainName),constraints=plan.constraintNames.map(series);
   const condition=Float64Array.from(main,(m,i)=>plan.stateHold&&m===0&&Number.isFinite(average[i])?0:!Number.isFinite(m)||!Number.isFinite(average[i])||constraints.some(c=>!Number.isFinite(c[i]))?NaN:m!==0&&constraints.every(c=>c[i]!==0)?1:0);
-  return {value,average,main,constraints,condition,...(out.PRS6H_details?{PRS6H_details:out.PRS6H_details}:{})};
+  return {value,average,main,constraints,condition,...(out.SBS5M_details?{SBS5M_details:out.SBS5M_details}:{}),...(out.PRS6H_details?{PRS6H_details:out.PRS6H_details}:{})};
 }
 export interface FishSnapshot {
+  SBS5M_evidence?:import('../sbs5m').SbsRow;
   PRS6H_evidence?:import('../prs6h').PrsRow;
   lookbackHours?:number; lookbackAnchorMs?:number;
   stateHold?: { threshold: number; requiredHours: number; fromMs: number; verifiedHours: number; minimum: number };
@@ -207,7 +208,8 @@ export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:
   for(let i=first+1;i<=end;i++)if(r.condition[i-1]===0&&r.condition[i]===1)crossings++;
   const process={trace,runExtreme:round5(runExtreme),crossings,aboveBars:end-k+1};
   const prsEvidence=r.PRS6H_details?.find(row=>row.PRS6H_at===bars[end].openTime+plan.step);
-  const fish:FishSnapshot={...(prsEvidence?{PRS6H_evidence:prsEvidence}:{}),statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
+  const sbsEvidence=r.SBS5M_details?.find(row=>row.at===bars[end].openTime+plan.step);
+  const fish:FishSnapshot={...(sbsEvidence?{SBS5M_evidence:sbsEvidence}:{}),...(prsEvidence?{PRS6H_evidence:prsEvidence}:{}),statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
   if(plan.stateHold){
     const route=(plan.stateHoldAlternatives??[plan.stateHold]).find(route=>end>=route.samples-1&&r.average.subarray(end-route.samples+1,end+1).every(v=>Number.isFinite(v)&&v>route.threshold));
     if(route){const {threshold,hours,samples}=route,from=end-samples+1;

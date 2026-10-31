@@ -1,3 +1,5 @@
+import {sbsHistoryBars} from '@/lib/sbs5m';
+import {saveSbsCheckpoint} from '@/lib/sbs5mPersistence';
 import {savePrsCheckpoint} from '@/lib/prs6hPersistence';
 import {PRS6H_ID} from '@/lib/prs6h';
 import {ati6hDependencyOf} from '@/lib/deepDig/features';
@@ -107,6 +109,7 @@ export function hasSavedFeatureDefinition(id: string): boolean {
 }
 /** A scalar in the saved formula is authoritative until the chart is manually overridden. */
 export function chartFeaturePeriod(def: DeepDigFeatureDef, fallback = 6): number {
+  if(featureTemplateId(def)==='sbs_5m')return def.SBS5M_config?.active_box_max_age??6;
   if(featureTemplateId(def)==='prs6h'&&def.PRS6H_config?.evidenceHalfLifeMinutes)return def.PRS6H_config.evidenceHalfLifeMinutes/60;
   if(featureUsesMbi2(def))return mbi2HoursOf(def,intervalMs(def.interval??'5m')/60000);
   if (featureUsesMbi(def)) return mbiNOf(def);
@@ -171,6 +174,7 @@ const historyBarsCache = new Map<string, number>();
 export function chartFeatureHistoryBars(featureId: string, period: number, formula: string, barMinutes = 5): number {
   const def = chartFeatureDef(featureId);
   if (!def) return 0;
+  if(featureTemplateId(def)==='sbs_5m')return sbsHistoryBars(def.SBS5M_config); // Explicit 24h initialization, fixed5m only.
   if(['prs6h','ati6h'].includes(featureTemplateId(def)??'')){
     const warm=featureTemplateId(def)==='prs6h'?Math.ceil(24*60/barMinutes):Math.ceil((def.ATI6H_parameters?.WINDOW_HOURS??6)*60/barMinutes)+5*mbi2NOf(ati6hDependencyOf(def),barMinutes)+2;
     const rolling=programHistoryBars(compileFeatureFormula(formula).program,{...featureParams(def),BAR_MINUTES:barMinutes},barMinutes);
@@ -215,7 +219,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   if (!def) return null;
   const usesMbi = featureUsesMbi(def), usesMbi2=featureUsesMbi2(def), templateId = featureTemplateId(def);
   const formula = options.formula ?? def.formula;
-  if (templateId === 'ctba' && dataList.length > 1) {
+  if (['ctba','sbs_5m'].includes(templateId??'') && dataList.length > 1) {
     // A missing first candle must not classify an otherwise 5m series as 10m.
     let cadence = Infinity;
     for (let i = 1; i < Math.min(dataList.length, 64); i++) {
@@ -241,12 +245,13 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   if(usesMbi2)Object.assign(params,{id:def.id,formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===mbi2Minutes*60000)??def.interval??'5m',
     MBI2_T_HOURS:has?p:mbi2HoursOf(def,mbi2Minutes),MBI2_Z0:def.MBI2_Z0,MBI2_BAND:mbi2BandOf(def),MBI2_CONFIRM:mbi2ConfirmOf(def)});
+  if(templateId==='sbs_5m'){const symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'sbs_5m',formula:def.formula,interval:'5m',SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_symbol:symbol,SBS5M_tick_size:typeof dataList[0]?.PRS6H_tick_size==='number'?dataList[0].PRS6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
   if(templateId==='prs6h'){const minutes=inferResearchMinutes(dataList),symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'prs6h',formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m',PRS6H_config:{...def.PRS6H_config,...(has?{evidenceHalfLifeMinutes:p*60}:{})},PRS6H_symbol:symbol,PRS6H_tick_size:typeof dataList[0]?.PRS6H_tick_size==='number'?dataList[0].PRS6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
   if(templateId==='ati6h'){const minutes=inferResearchMinutes(dataList),symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'ati6h',formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m',ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:ati6hDependencyOf(def),ATI6H_tick_size:typeof dataList[0]?.ATI6H_tick_size==='number'?dataList[0].ATI6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
   if(def.retentionSourceId){const minutes=inferResearchMinutes(dataList);Object.assign(params,{interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m'});}
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
-  const mbi2Key=['ati6h','prs6h'].includes(templateId??'')?`|${JSON.stringify(params)}|${ati6hMarketVersion()}`:usesMbi2?`|${JSON.stringify(params)}`:'';
+  const mbi2Key=['ati6h','prs6h','sbs_5m'].includes(templateId??'')?`|${JSON.stringify(params)}|${ati6hMarketVersion()}`:usesMbi2?`|${JSON.stringify(params)}`:'';
   const mbiKey = (usesMbi ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : mbi2Key)+(def.retentionSourceId?`|retention:${params.interval}`:'');
   const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}${mbiKey}`;
   const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
@@ -277,19 +282,20 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
       const d = dataList[i];
       const b = bars[i] ?? (bars[i] = {} as ResearchBar);
       b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low;
-      b.close = (def.retentionSourceId || usesMbi || usesMbi2 || ['ati6h','prs6h'].includes(templateId??'') || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
+      b.close = (def.retentionSourceId || usesMbi || usesMbi2 || ['ati6h','prs6h','sbs_5m'].includes(templateId??'') || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
-      b.quoteVolume = ['ati6h','prs6h'].includes(templateId??'')&&typeof d.ATI6H_quoteVolume==='number'?d.ATI6H_quoteVolume:typeof d.turnover === 'number' ? d.turnover : null;
-      b.takerBuyQuoteVolume = ['ati6h','prs6h'].includes(templateId??'')&&typeof d.ATI6H_takerBuyQuoteVolume==='number'?d.ATI6H_takerBuyQuoteVolume:typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
+      b.quoteVolume = ['ati6h','prs6h','sbs_5m'].includes(templateId??'')&&typeof d.ATI6H_quoteVolume==='number'?d.ATI6H_quoteVolume:typeof d.turnover === 'number' ? d.turnover : null;
+      b.takerBuyQuoteVolume = ['ati6h','prs6h','sbs_5m'].includes(templateId??'')&&typeof d.ATI6H_takerBuyQuoteVolume==='number'?d.ATI6H_takerBuyQuoteVolume:typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
       if ((def.retentionSourceId || templateId === 'ctba') && !Number.isFinite(b.close)) {
         // Components must also hide forming VWAP/flow, not only the final score.
         b.volume = NaN; b.quoteVolume = null; b.takerBuyQuoteVolume = null;
       }
-      if(templateId==='prs6h')b.PRS6H_closed=d.cba2Closed!==false&&d.timestamp+intervalMs(params.interval)<=Date.now();
+      if(['prs6h','sbs_5m'].includes(templateId??''))b.PRS6H_closed=d.cba2Closed!==false&&d.timestamp+intervalMs(params.interval)<=Date.now();
       b.refClose = refClose?.[i] ?? null;
     }
     chartBarBuffers.set(cache, bars);
     out = evaluateOnBars(bars, compiled.compiled, params, cache);
+    if(out.SBS5M_checkpoint)void saveSbsCheckpoint(out.SBS5M_checkpoint);
     if(out.PRS6H_checkpoint)void savePrsCheckpoint(out.PRS6H_checkpoint);
   } catch { return null; }
   const toArr = (v: unknown): (number | null)[] => {

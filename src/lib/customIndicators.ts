@@ -1,3 +1,4 @@
+import {registerSbsPriceIndicator} from '@/lib/sbs5mChart';
 import {PRS6H_STATES} from '@/lib/prs6h';
 import {ATI6H_COMPONENTS,ATI6H_LABELS} from '@/lib/ati6h';
 import {chartAtr} from '@/lib/atr';
@@ -339,6 +340,7 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
     CUSTOM_INDICATOR_MAP[item.id] = researchKcName(item.id);
     INDICATOR_COMPANIONS[item.id] = (item.rawOnly?[]:[1, 2]).map(level => ({ key: item.id + '#AVG' + (level === 2 ? '2' : ''), kcName: researchKcName(item.id, level) }));
     if (registeredAccountIndicators.has(item.id)) continue;
+    if(item.priceOverlay){registerSbsPriceIndicator(item);registeredAccountIndicators.add(item.id);continue;}
     for (const level of (('rawOnly' in item&&item.rawOnly)?[0]:[0, 1, 2])) {
       const label = level === 0 ? item.short : 'avg_' + item.core + (level === 2 ? '_2' : '');
       const color=(v:number|undefined)=>item.templateId!=='STATE'?vColor(v):v==null?'#F0B90B':level===0&&v>=.5&&v<=.6?'#FFD600':v>item.neutral?'#0ECB81':v===item.neutral?'#F0B90B':'#F6465D';
@@ -1473,6 +1475,7 @@ export function registerCustomIndicators() {
 
   // One source of truth: the account's Deep dig formula, including both named averages.
   for (const item of RESEARCH_INDICATORS) {
+    if('priceOverlay' in item&&item.priceOverlay){registerSbsPriceIndicator(item);continue;}
     for (const level of (('rawOnly' in item&&item.rawOnly)?[0]:[0, 1, 2])) {
       const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
       // 均值线可单独设橘色线（avgNeutral）；没设就与原始值相同
@@ -1481,7 +1484,7 @@ export function registerCustomIndicators() {
         name: researchKcName(item.id, level), shortName: label,
         calcParams: 'marketEvidence' in item&&item.marketEvidence&&level>0?[item.period,AVG_DEFAULT_HOURS,0,0]:[item.period,0,0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
         // Fixed-range averages retain their reference bounds; other averages use visible values.
-        ...(level === 0 ? { minValue: item.min, maxValue: item.max } : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
+        ...(level === 0 ? (item.id.startsWith('SBS5M')&&item.min===item.max?{}:{ minValue: item.min, maxValue: item.max }) : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
         draw: args => {
           if (item.seller) A_ZERO_LINE(args);
           return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);

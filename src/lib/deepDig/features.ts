@@ -1,3 +1,4 @@
+import {computeSbs5m,sbsHistoryBars,sbsNumeric,sbsConfigHash,sbsParameters,SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS,type SbsConfig,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {computePrs6h,prsNumeric,prsParameters,PRS6H_ID,PRS6H_VERSION,PRS6H_FIELDS,type PrsConfig,type PrsRow,type PrsCheckpoint} from '@/lib/prs6h';
 import {readPersistedStateRaw} from '@/lib/persistedStateStorage';
 import {getUserPrefix} from '@/lib/userStoragePrefix';
@@ -30,6 +31,8 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program, type FormulaEvaluationCache } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
+  SBS5M_config?: Partial<SbsConfig>;
+  SBS5M_dimension?: 'price' | 'quality' | 'distance' | 'step';
   PRS6H_config?:PrsConfig;
   ATI6H_parameters?: AtiParameters;
   ATI6H_volume_mode?: AtiVolumeMode;
@@ -141,10 +144,10 @@ export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m',
 export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
 
 export const featureTemplateId = (d: { id?: string; chartTemplate?: string }) => d.chartTemplate ?? d.id;
-export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => ['cba-2', 'ctba'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
+export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => ['cba-2', 'ctba', 'sbs_5m'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint; SBS5M_symbol?:string; SBS5M_tick_size?:number|null; SBS5M_data_source?:string; SBS5M_data_version?:string; SBS5M_initialization_id?:string; SBS5M_checkpoint?:SbsCheckpoint };
 export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
 export const featureUsesMbi2 = (d:{id?:string;formula?:string}) => d.id==='mbi2'||/\bmbiz2\s*\(/.test((d.formula??'').replace(/(#|\/\/).*$/gm,''));
 export const featureUsesMbiFamily = (d:{id?:string;formula?:string}) => featureUsesMbi(d)||featureUsesMbi2(d);
@@ -162,6 +165,7 @@ export function featureParams(d:ParamDef):Record<string,number> {
  */
 export function featureWindowMs(d: ParamDef): number {
   const H = 3_600_000;
+  if(featureTemplateId(d)===SBS5M_ID)return sbsHistoryBars(d.SBS5M_config)*300000; // Explicit 24h initialization, not a claim of full-history equivalence.
   if(featureTemplateId(d)==='prs6h')return Math.max(24,(d.PRS6H_config?.trendHours??6)+(d.PRS6H_config?.referenceHours??6)+(d.PRS6H_config?.candidateMinutes??120)/60+(d.PRS6H_config?.scaleMinutes??120)/60)*H;
   if(featureTemplateId(d)==='ati6h') return (d.ATI6H_parameters?.WINDOW_HOURS??6)*H+(5*mbi2NOf(ati6hDependencyOf(d),intervalMs(intervalOf(d))/60000)+2)*intervalMs(intervalOf(d));
   let formulaHistory = 0;
@@ -947,7 +951,18 @@ export const PRS6H_DEF:DeepDigFeatureDef={id:PRS6H_ID,name:'日内顺势加仓�
  definition:'PRS-6H v1：多头日内加仓的市场证据，0–100分。固定平台与失效线→冻结后的独立测试→更高防守→连续两根突破确认；近期证据加权，T/S/D/B/V权重0.15/0.40/0.25/0.15/0.05，另受核心分项下限与硬条件否决。初始结构仅建立基准；同一结构最多一个市场就绪事件。0表示本指标证据未满足，不是看空。账户浮盈、余额、风险预算不进入分数，结构失效线不改真实止损；实际账户权限与执行检查沿用已有模块。所有默认值为研究初值，不是原书公式或已证实策略。显示6h，加载预热并顺序恢复结构。报价币成交额为默认模式，缺失不补零，不静默切换流量模式。',
  formula:'# PRS-6H v1 · 固定结构、因果测试与市场门控；研究初值\n'+PRS6H_FIELDS.filter(n=>n!=='PRS6H').map(n=>`${n} = PRS6H_raw_${n.slice(6)}`).join('\n')+'\nPRS6H = PRS6H_raw_value'};
 
-const ORIGINAL_BUILTIN_FEATURES:readonly DeepDigFeatureDef[]=[DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES, ATI6H_DEF, PRS6H_DEF];
+/** One structure engine, four separately selectable output units. Parameters are research starting values. */
+export const SBS5M_DEF:DeepDigFeatureDef={id:SBS5M_ID,name:'台阶箱体支撑',short:'SBS-5M',builtin:true,chartTemplate:SBS5M_ID,chartCore:'SBS5M',interval:'5m',researchWindowHours:6,halfLifeHours:.5,scale:1,unit:'价格',source:'campaigns',groupVars:2,positive:DEFAULT_POSITIVE,control:DEFAULT_CONTROL,SBS5M_dimension:'price',
+ definition:'SBS-5M v1 · 研究初值。5分钟已收盘K线形成横向箱体，冻结边界后由独立测试确认；父箱两根突破后，更高新箱通过测试才抬升。固定失效参考被触及或连续两根收于箱底下方即断线；确认后默认6小时过期，再次测试不续期。成交额默认报价币模式，缺口结束结构。主值有价格单位，禁止跨品种汇总；跨品种请选择证据分、标准化距离或台阶事件幅度。默认从加载窗口起点明确初始化，非任意6小时与完整历史等价。证据分不是胜率，不控制真实止损或加仓。',
+ formula:'# sbs-5m-v1 · fixed box, independent later test; raw price axis\n'+SBS5M_FIELDS.filter(n=>n!=='SBS5M').map(n=>`${n} = SBS5M_raw_${n.slice(6)}`).join('\n')+'\nSBS5M = SBS5M_raw_value'};
+export const SBS5M_DIMENSIONS:DeepDigFeatureDef[]=[
+ {id:'sbs_5m_quality',name:'台阶箱体支撑｜证据分',short:'SBS·证据',core:'SBS5M_support_quality',dimension:'quality',unit:'分'},
+ {id:'sbs_5m_distance',name:'台阶箱体支撑｜标准化距离',short:'SBS·距离',core:'SBS5M_distance_to_support',dimension:'distance',unit:'事前尺度'},
+ {id:'sbs_5m_step',name:'台阶箱体支撑｜台阶幅度',short:'SBS·台阶',core:'SBS5M_step_height_atr',dimension:'step',unit:'新冻结尺度'},
+].map(d=>({...SBS5M_DEF,id:d.id,name:d.name,short:d.short,chartCore:d.core,SBS5M_dimension:d.dimension as DeepDigFeatureDef['SBS5M_dimension'],unit:d.unit,
+ formula:'# sbs-5m-v1 · normalized dimension; no pooled absolute prices\n'+['SBS5M_support_quality','SBS5M_distance_to_support','SBS5M_step_height_atr','SBS5M_step_event_height'].filter(n=>n!==d.core).map(n=>`${n} = SBS5M_raw_${n.slice(6)}`).join('\n')+`\n${d.core} = SBS5M_raw_${d.core.slice(6)}`}));
+
+const ORIGINAL_BUILTIN_FEATURES:readonly DeepDigFeatureDef[]=[DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES, ATI6H_DEF, PRS6H_DEF, SBS5M_DEF, ...SBS5M_DIMENSIONS];
 export const SELLER_FOCUS_CREATED_AT=Date.parse('2026-10-30T06:03:46Z');
 /** Clone first, then transform only the copy's temporal operators. Never refer back at evaluation time. */
 export function createSellerFocusCopy(source:DeepDigFeatureDef,id=source.id+'-v2',now=SELLER_FOCUS_CREATED_AT):DeepDigFeatureDef {
@@ -1096,7 +1111,7 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
   const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
@@ -1109,6 +1124,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
   if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
   if(featureUsesMbi2(d)){const p=featureParams(d);key.push(`MBI2_T_HOURS=${p.MBI2_T_HOURS}`,`MBI2_Z0=${p.MBI2_Z0}`,`MBI2_BAND=${p.MBI2_BAND}`,`MBI2_CONFIRM=${p.MBI2_CONFIRM}`);}
+  if(featureTemplateId(d)===SBS5M_ID)key.push(SBS5M_VERSION,sbsConfigHash(d.SBS5M_config),'SBS5M_config='+JSON.stringify(sbsParameters(d.SBS5M_config)),'SBS5M_dimension='+(d.SBS5M_dimension??'price'),'init:window-start-v1');
   if(featureTemplateId(d)==='prs6h')key.push(PRS6H_VERSION,'PRS6H_config='+JSON.stringify(d.PRS6H_config??{}),d.PRS6H_config?.volumeMode??'quote');
   if(featureTemplateId(d)==='ati6h')key.push(ATI6H_VERSION,'ATI6H_parameters='+JSON.stringify(d.ATI6H_parameters??{}),'ATI6H_volume_mode='+(d.ATI6H_volume_mode??'taker'),'ATI6H_dependency='+JSON.stringify(ati6hDependencyOf(d)));
   if (d.chartTemplate) key.push("chart=" + d.chartTemplate);
@@ -1127,6 +1143,7 @@ export interface CompiledFeature {
   usesMbi2?: boolean;
   usesAti6h?: boolean;
   usesPrs6h?:boolean;
+  usesSbs5m?:boolean;
 }
 
 /** 公式里用到了哪些参数（界面上没用到的参数淡一点）；公式写错时返回 null。 */
@@ -1140,8 +1157,8 @@ export function formulaParamUse(formula: string): { hl: boolean; avgh: boolean }
 }
 
 export function compileFeatureFormula(formula: string): CompiledFeature {
-  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES, ...ATI6H_NUMERIC_FIELDS.map(n=>n==='ATI6H'?'ATI6H_raw_value':'ATI6H_raw_'+n.slice(6)),...PRS6H_FIELDS.map(n=>n==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+n.slice(6))]));
-  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }), usesMbi2: featureUsesMbi2({formula}), usesAti6h:[...program.inputs].some(n=>n.startsWith('ATI6H_raw_')),usesPrs6h:[...program.inputs].some(n=>n.startsWith('PRS6H_raw_')) };
+  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES, ...ATI6H_NUMERIC_FIELDS.map(n=>n==='ATI6H'?'ATI6H_raw_value':'ATI6H_raw_'+n.slice(6)),...SBS5M_FIELDS.map(n=>n==='SBS5M'?'SBS5M_raw_value':'SBS5M_raw_'+n.slice(6)),...PRS6H_FIELDS.map(n=>n==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+n.slice(6))]));
+  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }), usesMbi2: featureUsesMbi2({formula}), usesAti6h:[...program.inputs].some(n=>n.startsWith('ATI6H_raw_')),usesSbs5m:[...program.inputs].some(n=>n.startsWith('SBS5M_raw_')),usesPrs6h:[...program.inputs].some(n=>n.startsWith('PRS6H_raw_')) };
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
@@ -1164,8 +1181,8 @@ export function computeFeatureValues(
   const bars = window.bars;
   if (!bars.length) return none();
   // 这个周期的观察窗缺太多 K 线：不算（5m 观察窗在流水线里已按同一标准筛过）
-  if (!compiled.usesAti6h && !compiled.usesPrs6h && window.coverage < MIN_WINDOW_COVERAGE) return none();
-  if (compiled.usesAmounts && !compiled.usesAti6h && !compiled.usesPrs6h) {
+  if (!compiled.usesAti6h && !compiled.usesPrs6h && !compiled.usesSbs5m && window.coverage < MIN_WINDOW_COVERAGE) return none();
+  if (compiled.usesAmounts && !compiled.usesAti6h && !compiled.usesPrs6h && !compiled.usesSbs5m) {
     const withAmounts = bars.filter(b => b.quoteVolume != null && b.takerBuyQuoteVolume != null).length;
     if (withAmounts < MIN_AMOUNT_COVERAGE * bars.length) return none();
   }
@@ -1200,6 +1217,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
     input.E[i] = finite(b.quoteVolume != null && b.volume != null && b.volume > 0 ? b.quoteVolume / b.volume : null);
     input.CB[i] = finite(b.refClose);
   }
+  let SBS5M_details:SbsRow[]|undefined,SBS5M_checkpoint:SbsCheckpoint|undefined;
   let atiInputs:Record<string,Float64Array>={};
   let PRS6H_details:PrsRow[]|undefined,PRS6H_checkpoint:PrsCheckpoint|undefined;
   let ATI6H_details:AtiRow[]|undefined;
@@ -1222,11 +1240,21 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
     const byTime=new Map(result.rows.map(row=>[row.PRS6H_at,row]));
     atiInputs={...atiInputs,...Object.fromEntries(PRS6H_FIELDS.map(name=>[name==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+name.slice(6),Float64Array.from(bars,bar=>{const row=byTime.get(bar.openTime+step);return row?prsNumeric(row,name)??NaN:NaN;})]))};
   }
+  if(compiled.usesSbs5m){
+    if(intervalOf(params)!=='5m')throw Error('SBS-5M 只接受5分钟已收盘K线');
+    const first=bars[0],symbol=params.SBS5M_symbol??first?.PRS6H_symbol??'UNSPECIFIED';
+    const result=computeSbs5m(bars.map(bar=>({...nativeAmountBar(bar),SBS5M_tick_size:params.SBS5M_tick_size??bar.SBS5M_tick_size??bar.PRS6H_tick_size??bar.ATI6H_tick_size??null})),{
+      symbol,config:params.SBS5M_config,tickSize:params.SBS5M_tick_size,dataSource:params.SBS5M_data_source??first?.PRS6H_data_source??'binance-futures',dataVersion:params.SBS5M_data_version??'ohlcv-v1',
+      initializationId:params.SBS5M_initialization_id??`window-start:${first?.openTime??'empty'}:v1`,checkpoint:params.SBS5M_checkpoint});
+    SBS5M_details=result.rows;SBS5M_checkpoint=result.checkpoint;
+    const byTime=new Map(result.rows.map(row=>[row.at,row]));
+    atiInputs={...atiInputs,...Object.fromEntries(SBS5M_FIELDS.map(name=>[name==='SBS5M'?'SBS5M_raw_value':'SBS5M_raw_'+name.slice(6),Float64Array.from(bars,bar=>{const row=byTime.get(bar.openTime+300000);return row?sbsNumeric(row,name)??NaN:NaN;})]))};
+  }
   const evaluated = evaluateProgramVars(compiled.program, {
     ...atiInputs, ...input,
     ...featureParams(params),
   }, { barMinutes: intervalMs(intervalOf(params)) / 60_000, cache });
-  return {...evaluated, ...(ATI6H_details?{ATI6H_details,ATI6H_archive}: {}),...(PRS6H_details?{PRS6H_details,PRS6H_checkpoint}:{})};
+  return {...evaluated,...(SBS5M_details?{SBS5M_details,SBS5M_checkpoint}:{}), ...(ATI6H_details?{ATI6H_details,ATI6H_archive}: {}),...(PRS6H_details?{PRS6H_details,PRS6H_checkpoint}:{})};
 }
 
 /** 公式里可选作因变量的变量：起了名的每一个；最后一句没起名时再加一个「结果」。写错时为空。 */
@@ -1380,12 +1408,12 @@ export interface DefinitionCheck {
 }
 
 /** 保存前检查：公式、分组标准能否解析，显示倍率是不是正数。 */
-export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'interval' | 'chartTemplate' | 'PRS6H_config'> & {id?:string}): DefinitionCheck {
+export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'interval' | 'chartTemplate' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'> & {id?:string}): DefinitionCheck {
   const msg = (f: () => unknown) => {
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };
   return {
-    formula: msg(() => { const compiled = compileFeatureFormula(d.formula); if(featureTemplateId(d)==='prs6h')prsParameters(d.PRS6H_config); if (/\bctba\s*\(/.test(d.formula)) evaluateOnBars([],compiled,d); if (featureUsesMbi(d)) validateMbiParams(mbiNOf(d), mbiZ0Of(d)); if(featureUsesMbi2(d))validateMbi2Params(d,intervalMs(intervalOf(d))/60000); }),
+    formula: msg(() => { const compiled = compileFeatureFormula(d.formula); if(featureTemplateId(d)==='sbs_5m')sbsParameters(d.SBS5M_config); if(featureTemplateId(d)==='prs6h')prsParameters(d.PRS6H_config); if (/\bctba\s*\(/.test(d.formula)) evaluateOnBars([],compiled,d); if (featureUsesMbi(d)) validateMbiParams(mbiNOf(d), mbiZ0Of(d)); if(featureUsesMbi2(d))validateMbi2Params(d,intervalMs(intervalOf(d))/60000); }),
     groups: msg(() => compileGroups(d.positive, d.control, d.source ?? 'campaigns')),
     scale: Number.isFinite(d.scale) && d.scale > 0 ? null : '显示倍数要是正数',
   };

@@ -1,3 +1,4 @@
+import {SBS5M_DEFAULTS,SBS5M_PARAMETER_SPECS,sbsParameters} from '@/lib/sbs5m';
 import {prsParameters,PRS6H_DEFAULTS} from '@/lib/prs6h';
 import { mbi2HoursOf, mbi2NOf, mbi2BandOf, mbi2ConfirmOf, type Mbi2Params } from '@/lib/mbi2';
 import { featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
@@ -58,7 +59,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
         <span className="pt-1 text-muted-foreground">公式</span>
         <FormulaEditor def={def} onSave={onSave} />
         <span className="pt-1 text-muted-foreground">参数</span>
-        <KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />
+        {def.chartTemplate==='sbs_5m'?<span className="py-1 text-muted-foreground">固定5m已收盘 · 有效期 {def.SBS5M_config?.active_box_max_age??6} 小时 · 编辑定义可调整完整结构参数</span>:<KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />}
         <span className="pt-px text-muted-foreground">分组</span>
         <GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" />
         <span className="text-muted-foreground">显示</span>
@@ -71,6 +72,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
 function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, samples }: DefinitionPanelProps) {
   const [draft, setDraft] = useState<DeepDigFeatureDef>(def);
   const [prsText,setPrsText]=useState(()=>JSON.stringify(def.PRS6H_config??PRS6H_DEFAULTS,null,2)),[prsError,setPrsError]=useState('');
+  const [sbsText,setSbsText]=useState(()=>JSON.stringify(def.SBS5M_config??SBS5M_DEFAULTS,null,2)),[sbsError,setSbsError]=useState('');
   const [scaleText, setScaleText] = useState(String(def.scale));
   const [tried, setTried] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -83,7 +85,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
   const set = <K extends keyof DeepDigFeatureDef>(k: K, v: DeepDigFeatureDef[K]) => setDraft(d => ({ ...d, [k]: v }));
   const save = () => {
     setTried(true);
-    if (prsError || check.formula || check.groups || check.scale || !draft.name.trim()) return;
+    if (sbsError || prsError || check.formula || check.groups || check.scale || !draft.name.trim()) return;
     onSave({ ...draft, name: draft.name.trim(), short: draft.short.trim() || '特征值', scale, unit: draft.unit.trim(), groupVars: 2 });
     onEditingChange(false);
   };
@@ -126,8 +128,9 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
       </div>
       <div className="flex gap-2">
         <span className={label}>参数</span>
+        {draft.chartTemplate==='sbs_5m'&&<details className="min-w-0 flex-1 text-xs"><summary className="cursor-pointer">SBS-5M 参数（研究初值 · 固定5m）</summary><textarea aria-label="SBS5M 参数配置" value={sbsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setSbsText(e.target.value);try{const next=JSON.parse(e.target.value);sbsParameters(next);set('SBS5M_config',next);setSbsError('');}catch(error){setSbsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{sbsError&&<p role="alert" className={RED}>{sbsError}</p>}<p className="my-2 text-muted-foreground">volume_mode：quote（报价币成交额）或 base_times_close（基础币量×收盘价），不能逐根切换。有效期从 confirmed_at 计时。修改配置后需重新运行。</p><div className="max-h-56 overflow-auto rounded border border-border/50 p-2">{SBS5M_PARAMETER_SPECS.map(p=><p key={p.key} className="mb-2"><code>{p.key}</code> · {p.label} · {p.min}–{p.max} {p.unit}<br/><span className="text-muted-foreground">{p.description}</span></p>)}</div></details>}
         {draft.chartTemplate==='prs6h'&&<details className="mb-3 text-xs"><summary className="cursor-pointer">PRS-6H 参数（研究初值）</summary><textarea aria-label="PRS6H 参数配置" value={prsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setPrsText(e.target.value);try{const next=JSON.parse(e.target.value);prsParameters(next);set('PRS6H_config',next);setPrsError('');}catch(error){setPrsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{prsError&&<p role="alert" className={RED}>{prsError}</p>}<p className="text-muted-foreground">volumeMode 可选 quote / flow / base_close_proxy，默认 quote；模式、参数和状态检查点独立，改变参数后需重算。</p></details>}
-        <KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />
+        {draft.chartTemplate!=='sbs_5m'&&<KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />}
       </div>
       <div className="flex gap-2">
         <span className={label}>显示</span>
@@ -152,7 +155,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
         <button type="button" className={cn(BTN, 'border-foreground/30 font-medium')} onClick={save} data-testid="deep-dig-def-save">保存</button>
         <button type="button" className={BTN} onClick={() => onEditingChange(false)}>取消</button>
         {onReset && modifiedFromDefault && builtin && (
-          <button type="button" className={BTN} data-testid="deep-dig-def-reset" onClick={() => { setDraft({ ...builtin }); setScaleText(String(builtin.scale)); }}>
+          <button type="button" className={BTN} data-testid="deep-dig-def-reset" onClick={() => { setDraft({ ...builtin }); setScaleText(String(builtin.scale)); if(builtin.chartTemplate==='sbs_5m'){setSbsText(JSON.stringify(builtin.SBS5M_config??SBS5M_DEFAULTS,null,2));setSbsError('');} }}>
             <RotateCcw className="h-3 w-3" />填回默认
           </button>
         )}

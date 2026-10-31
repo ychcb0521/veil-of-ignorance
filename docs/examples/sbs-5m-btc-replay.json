@@ -1,0 +1,93 @@
+{
+  "source": "https://fapi.binance.com/fapi/v1/klines",
+  "symbol": "BTCUSDT",
+  "tick_size": 0.1,
+  "first_open": 1793145600000,
+  "last_close": 1793404800000,
+  "bars": 864,
+  "sha256": "ab9a5252a35b0d4df01abdc2114e117b2baee0e1e5e6b898952eaba16065249b",
+  "batch_stream_equal": true,
+  "checkpoint_resume_equal": true,
+  "states": {
+    "NO_STRUCTURE": 716,
+    "ACTIVE": 140,
+    "INVALID": 8
+  },
+  "events": {
+    "FROZEN": 34,
+    "EXPIRED": 10,
+    "TEST_STARTED": 19,
+    "TEST_SUCCEEDED": 10,
+    "BASELINE_CONFIRMED": 9,
+    "RETEST_STARTED": 6,
+    "RETEST_FAILED": 1,
+    "RETEST_SUCCEEDED": 4,
+    "INVALID": 19,
+    "TEST_FAILED": 2,
+    "BREAKOUT_CONFIRMED": 3,
+    "REPLACED": 1,
+    "STEP_CONFIRMED": 1
+  },
+  "evaluation": {
+    "method": "post-confirmation-v1",
+    "bars": 864,
+    "valid_bars": 864,
+    "active_bars": 140,
+    "coverage": 0.16203703703703703,
+    "no_structure": 716,
+    "invalid": 8,
+    "stale": 0,
+    "data_unavailable": 0,
+    "new_step_ratio": 0.1,
+    "confirmed_invalidation_ratio": 0.8,
+    "subsequent_retest_recovery_ratio": 0.8,
+    "missedRallies": [
+      {
+        "box_id": "sbs-box-08791f23e4ef388426fb4969445b0a5a",
+        "verified_bars": 20,
+        "max_close_rise_fraction": 0,
+        "formed_next_step": false
+      },
+      {
+        "box_id": "sbs-box-7b8f597b3fee6d58b3ae1981a31867fe",
+        "verified_bars": 14,
+        "max_close_rise_fraction": 0.011069154353928079,
+        "formed_next_step": true
+      },
+      {
+        "box_id": "sbs-box-acae60b2a9408ec11a23e7181c127b1f",
+        "verified_bars": 50,
+        "max_close_rise_fraction": 0.0050606879571746255,
+        "formed_next_step": false
+      }
+    ],
+    "horizon_summary": [
+      {
+        "minutes": 15,
+        "n": 10,
+        "invalidation_touch_ratio": 0.3,
+        "mean_max_under_support_atr": 0.2559704466981404
+      },
+      {
+        "minutes": 30,
+        "n": 10,
+        "invalidation_touch_ratio": 0.4,
+        "mean_max_under_support_atr": 0.3863713015884591
+      },
+      {
+        "minutes": 60,
+        "n": 10,
+        "invalidation_touch_ratio": 0.6,
+        "mean_max_under_support_atr": 0.9140983457223472
+      }
+    ],
+    "baseline_confirmed": 9,
+    "steps": 1,
+    "invalidations": 19,
+    "retests_succeeded": 4,
+    "retests_failed": 1,
+    "comparison_status": "未做匹配对照或调参；需要按确认距离、事前波动与趋势背景匹配，并按时间划分验证集。",
+    "missing_data": "未经收益或胜率验证。"
+  },
+  "note": "单一品种连续3日工程回放；未调参、未做距离/波动/趋势匹配对照，不证明预测有效性或收益。"
+}

@@ -11,7 +11,7 @@ const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
@@ -33,6 +33,13 @@ describe('自制区的十个特征值', () => {
     for(const [value,color] of [[.2,'#F6465D'],[.55,'#FFD600'],[.8,'#0ECB81']] as const)expect(reg.figures[0].styles({current:{indicatorData:{value}}}).color).toBe(color);
     const tooltip=reg.createTooltipDataSource({indicator:{result:[{value:.2}],calcParams:[24]},crosshair:{dataIndex:0},defaultStyles:{tooltip:{icons:[]}}});
     expect(tooltip.calcParamsText).toContain('近2h ×3');expect(tooltip.values[0].value.color).toBe('#F6465D');
+  });
+  it('SBS-5M 在结构组内添加价格主图，不生成价格均值或无效周期输入',()=>{
+    const changed=vi.fn();function Menu(){const [items,setItems]=useState<IndicatorConfig[]>([]);return <IndicatorMenu open indicators={items} onClose={()=>{}} onIndicatorsChange={next=>{setItems(next);changed(next);}}/>;}
+    render(<Menu/>);const group=screen.getByRole('region',{name:'台阶箱体支撑'});fireEvent.click(within(group).getByText('SBS-5M'));
+    expect(changed.mock.lastCall[0]).toMatchObject([{type:'SBS5M',enabled:true}]);expect(INDICATOR_CATALOG.find(i=>i.id==='SBS5M').isOverlay).toBe(true);
+    expect(visibleIndicatorCompanions(changed.mock.lastCall[0][0])).toEqual([]);expect(screen.queryByLabelText('SBS-5M 参数')).not.toBeInTheDocument();
+    expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
     expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(ids);
@@ -94,7 +101,7 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     function Menu() { const [items,setItems] = useState<IndicatorConfig[]>(initial); return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => {setItems(next);changed(next)}}/>; }
     render(<Menu />); fireEvent.click(screen.getByRole('button',{name:'自制区'}));
-    for(const id of ids){
+    for(const id of ids.filter(id=>!id.startsWith('SBS5M'))){
       const ind=initial.find(i=>i.type===id)!;
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG_CUSTOM'))).toBe(false);
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG2_CUSTOM'))).toBe(true);

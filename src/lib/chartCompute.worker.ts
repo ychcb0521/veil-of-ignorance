@@ -19,10 +19,10 @@ self.onmessage = ({ data: job }: MessageEvent<ChartComputeJob>) => {
     for (let i=job.from ?? 0;i<job.length;i++) {
       const at=(i-(job.from ?? 0))*10, b=bars[i] ?? (bars[i]={} as ResearchBar);
       b.openTime=values[at]; b.open=values[at+1]; b.high=values[at+2]; b.low=values[at+3]; b.close=values[at+4];
-      b.volume=values[at+5]; b.quoteVolume=values[at+6]; b.takerBuyQuoteVolume=values[at+7]; b.refClose=values[at+8]; b.takerBuyVolume=null;if(context.compiled.usesPrs6h)b.PRS6H_closed=values[at+9]===1;
+      b.volume=values[at+5]; b.quoteVolume=values[at+6]; b.takerBuyQuoteVolume=values[at+7]; b.refClose=values[at+8]; b.takerBuyVolume=null;if(context.compiled.usesPrs6h||context.compiled.usesSbs5m)b.PRS6H_closed=values[at+9]===1;
     }
     const output = evaluateOnBars(bars, context.compiled, job.params, context.cache), vars:Record<string,Float64Array> = {};
     for (const name of job.variables) { const v=output.vars.get(name); if(v!=null) vars[name]=typeof v==='number'?new Float64Array(job.length).fill(v):v.slice(); }
-    self.postMessage({id:job.id,evicted,first:bars[0]?.openTime,last:bars.at(-1)?.openTime,vars,...(output.PRS6H_checkpoint?{PRS6H_checkpoint:output.PRS6H_checkpoint}:{}),packet:job.packet}, { transfer:[job.packet,...Object.values(vars).map(a=>a.buffer as ArrayBuffer)] });
+    self.postMessage({id:job.id,evicted,first:bars[0]?.openTime,last:bars.at(-1)?.openTime,vars,...(output.SBS5M_checkpoint?{SBS5M_checkpoint:output.SBS5M_checkpoint}:{}),...(output.PRS6H_checkpoint?{PRS6H_checkpoint:output.PRS6H_checkpoint}:{}),packet:job.packet}, { transfer:[job.packet,...Object.values(vars).map(a=>a.buffer as ArrayBuffer)] });
   } catch (error) { self.postMessage({id:job.id,error:String(error),packet:job.packet},{transfer:[job.packet]}); }
 };

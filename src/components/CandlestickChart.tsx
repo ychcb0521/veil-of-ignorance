@@ -2202,7 +2202,7 @@ function CandlestickChartComponent({
       const rawVisible = !customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false;
       if (rawVisible && !COMPANION_ONLY.has(ind.type)) currentActive.add(ind.type);
 
-      const isOverlay = OVERLAY_INDICATOR_IDS.has(ind.type);
+      const isOverlay = OVERLAY_INDICATOR_IDS.has(ind.type)||accountResearchIndicators(featureDefinitions).some(item=>item.id===ind.type&&item.priceOverlay);
       // Determine the klinecharts indicator name: mapped, or fallback
       let kcName = KLINE_INDICATOR_MAP[ind.type];
       if (!kcName) {
@@ -2249,7 +2249,7 @@ function CandlestickChartComponent({
     for (const [type, paneId] of activeIndicatorPanes.current.entries()) {
       if (!currentActive.has(type)) {
         try {
-          const isOverlay = OVERLAY_INDICATOR_IDS.has(type);
+          const isOverlay = OVERLAY_INDICATOR_IDS.has(type)||accountResearchIndicators(featureDefinitions).some(item=>item.id===type&&item.priceOverlay);
           let kcName = COMPANION_KC_NAME[type] ?? KLINE_INDICATOR_MAP[type];
           if (!kcName) kcName = isOverlay ? "FALLBACK_OVERLAY" : "FALLBACK_OSCILLATOR";
           if (paneId) {
@@ -2277,8 +2277,9 @@ function CandlestickChartComponent({
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = '×';
-      button.title = `关闭 ${label} 副图，可从指标菜单恢复`;
-      button.setAttribute('aria-label', `关闭 ${label} 副图`);
+      const location=accountResearchIndicators(featureDefinitions).find(item=>item.id===pane.type)?.priceOverlay?'主图叠加':'副图';
+      button.title = `关闭 ${label} ${location}，可从指标菜单恢复`;
+      button.setAttribute('aria-label', `关闭 ${label} ${location}`);
       button.className = 'absolute right-2 top-1 z-20 flex h-5 w-5 items-center justify-center rounded text-sm text-muted-foreground hover:bg-accent hover:text-destructive';
       button.addEventListener('pointerdown', event => event.stopPropagation());
       button.addEventListener('mousedown', event => event.stopPropagation());
@@ -2546,7 +2547,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
+                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
