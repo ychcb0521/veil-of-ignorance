@@ -4,11 +4,11 @@
 
 ## 1. 发布身份与路由
 
-- [ ] 目标 GitHub 分支和完整提交 SHA 已记录。
-- [ ] Vercel Ready、Production、正式域名指向对应部署；版本戳符合预期。
-- [ ] 正式网址、JS/CSS 和懒加载模块可访问，无未解释的请求失败。
-- [ ] 刷新 /journal、/journal/campaigns、战役详情、Deep dig、情绪日记和 OAuth 授权路径正常。
-- [ ] Vercel 显式配置三项新 Supabase 变量，安装前目标检查通过；没有静默回连旧 Cloud。
+- [x] 目标 GitHub 分支和完整提交 SHA 已记录。
+- [x] Vercel Ready、Production、正式域名指向对应部署；版本戳符合预期。
+- [x] 正式网址、JS/CSS 和懒加载模块可访问，无未解释的请求失败。
+- [x] 刷新 /journal、/journal/campaigns、Deep dig、情绪日记和 OAuth 授权路径正常。
+- [x] Vercel 显式配置三项新 Supabase 变量，安装前目标检查通过；没有静默回连旧 Cloud。
 
 ## 2. 数据与权限
 
@@ -74,3 +74,5 @@ python3 scripts/compare_migration_inventory.py backups/source-inventory.json bac
 - 行情代理 7 项、MCP 发现/匿名/无效令牌 4 项、OAuth 发现通过。
 - Storage 恢复工具 4 项本地保护检查通过，无云写入。
 - 未勾选的真实登录、业务界面、导出和新记录验收仍需在正式站验证；不能以构建代替。
+
+正式部署 46383830：Ready / Production；8 个 SPA 路由 200，线上入口与本地 SHA-256 相同；16 张表匿名读取均 0 行。真实账号、业务与导出等待登录后验收。

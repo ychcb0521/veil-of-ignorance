@@ -2,6 +2,8 @@
 
 本文件记录 Vercel + 用户自有 Supabase 的流程。当前完成状态以 MIGRATION_STATUS.md 和最终验证结果为准；文件存在不代表已经上线。原 Lovable 及原数据库在新站验收前保持不删除、不重置、不擅自付费。
 
+当前正式地址：[https://veil-of-ignorance-ten.vercel.app/](https://veil-of-ignorance-ten.vercel.app/)。Vercel 已 Ready / Production，首次提交 46383830；生产分支为 `migrate-off-lovable`，不是 main。完整业务验收进度见 MIGRATION_STATUS.md。
+
 ## 1. 构建与版本基线
 
 - React + Vite SPA，构建命令 npm run build，输出 dist/。
@@ -52,6 +54,7 @@ MCP 已关闭 Lovable 使用统计，不需要把 LOVABLE_API_KEY 迁过去。�
 
 - Authentication → URL Configuration：Site URL 设置为新正式站地址；Redirect URLs 加入同一正式地址及确实使用的精确回调/预览地址。
 - 本机开发若使用该后端，按需加入 http://localhost:8080；不要为省事加入所有站点的宽泛通配。
+- 当前新项目自定义 SMTP 未启用，生产认证邮件尚未验收。[Supabase 默认 SMTP](https://supabase.com/docs/guides/auth/auth-smtp) 仅向组织团队邮箱发信；普通用户注册验证/找回密码必须配自有 SMTP。进入 Authentication → Emails → SMTP Settings，使用用户自己的服务端主机/端口/发信人/用户名/密码。密码仅填平台后台；不提交 Git、不配置为 VITE_，不通过关闭邮箱确认绕过。配置后只向用户本人执行经授权的测试邮件。
 - 复核 Email 登录、邮箱验证、邮件服务及模板。源项目账号的 UUID、确认状态、profile 初始化状态及业务 user_id 关联要保留。
 - MCP 使用 Supabase OAuth 2.1；授权页路径沿用 /.lovable/oauth/consent，虽含 lovable 字样，运行功能不依赖 Lovable。新项目需核对 OAuth server、客户端及重授权流程，发现文档中的 issuer 必须是新后端。
 - JWT/会话不跨项目沿用，迁移后需要重新登录；不能通过关闭邮箱确认或放宽 RLS 来绕过登录问题。

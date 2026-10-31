@@ -1,5 +1,6 @@
 # 无知之幕迁移审计 — 第 1 阶段
 
+阅读说明：第 1–12 节保留首阶段只读审计的历史记录；第 13 节记录后续经用户授权的实际迁移。当前状态以 MIGRATION_STATUS.md 为准。
 审计日期：2026-10-31（Asia/Shanghai）。审计基线：`0b3e1cf27f2e56bd1edf18eb80f3e54084bbc5b7`，线上版本 456。分支：`migrate-off-lovable`。
 
 本阶段目标是建立迁移清单、验证现有代码的本地构建，不迁移数据、不适配业务代码、不备份、不部署。报告未包含任何密钥、密码、连接串或用户记录内容。
@@ -563,3 +564,17 @@ Vercel 免费项目已创建；正式追踪分支已保存为 migrate-off-lovabl
 最终本地生产构建再次通过（32.89 秒），依赖声明和锁版本没有后续变更；既有大分块警告保留、不重构。Storage 恢复 4 项本地保护检查通过：有效文件、坏哈希、路径穿越、错误目标；没有网络或云写入。备份工具补记 Content-Type/缓存头，恢复工具沿用，避免文件展示属性改变。
 
 下一步由迁移分支的新提交触发 Vercel Production，尚需记录实际 Ready、commit、正式网址及登录/业务验收。此处不提前宣称上线完成。
+
+### 13.8 Vercel 首次正式部署与 HTTP 验收
+
+迁移提交 463838300df9888bb2984b6c5f9c91c16199ed66 已先 fetch 再推送，main 无同期新提交、未修改。Vercel 免费 Hobby 项目首次部署 9zqV4RuUSgZa3NeQeXV4re36V9s9 已 Ready / Production，域名 https://veil-of-ignorance-ten.vercel.app/ 已指向该部署。实际安装器 Bun 1.3.14 按现有锁冻结安装，前置目标检查通过；未升级应用依赖。
+
+8 个正式页面路径均 HTTP 200 并返回 SPA，包含 Deep RSA 兼容路径和 OAuth 授权页。线上入口 /assets/index-DTaqvCO_.js 的 SHA-256 为 51b14427137a017f9b966f78d8263278720acf589ca8b1fecfbd9fc01a393e0c，与最终本地构建完全一致；新 project-ref 存在，旧 Cloud ref 不存在。16 张业务表使用公开 key 的匿名 GET 均返回 200/0 行，RLS 未泄露用户记录。
+
+新站登录页已实际加载，正在等待用户用原应用账号登录；数据库密码不能替代应用登录密码。真实交易/复盘界面、浏览器本机数据、导出与新记录验收尚未写成通过。原站保持暂停以避免双写，原服务和备份继续保留。
+
+### 13.9 追加资源与邮件边界核对
+
+正式站 86 个 JavaScript/CSS 文件逐一下载并与最终本地构建 SHA-256 比对，全部一致。
+
+新 Supabase Authentication → Emails → SMTP Settings 的自定义 SMTP 为关闭状态。根据 [Supabase 官方 SMTP 文档](https://supabase.com/docs/guides/auth/auth-smtp)，默认服务只向项目组织团队邮箱发信；普通用户注册验证、找回密码邮件不能据此验收通过。已有账号的密码登录不依赖 SMTP。已询问用户是否有现有 SMTP 服务，密码/密钥只在平台填写；未创建新凭据、未注册发信服务、未付费、未关闭邮箱确认。此项仍待补齐，不能宣称所有功能彻底迁移验收完成。

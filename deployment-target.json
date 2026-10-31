@@ -1,5 +1,5 @@
 {
   "supabaseProjectId": "elynuzxnvjzypjgzkemc",
-  "status": "database-cutover-verified-awaiting-production",
+  "status": "production-ready-awaiting-authenticated-verification",
   "vercelProductionUrl": "https://veil-of-ignorance-ten.vercel.app"
 }
