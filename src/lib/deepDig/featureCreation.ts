@@ -24,6 +24,9 @@ export const BUILTIN_FEATURE_CREATION:Readonly<Record<string,{at:string;commit:s
  'mbi2-bear':{at:'2026-10-29T23:30:18+08:00',commit:'6e4953ea'},
  'ctba_12h-bear':{at:'2026-10-29T23:30:18+08:00',commit:'6e4953ea'},
  ...Object.fromEntries(['cdi2','seller-control','dss','mbi-bear','ctba-bear','mbi2-bear','ctba_12h-bear'].map(id=>[id+'-retain',{at:'2026-10-30T11:21:28+08:00',commit:'b4878b74'}])),
+ ...Object.fromEntries(['darvas_5m_lower','darvas_5m_distance_bps','darvas_5m_width_bps','darvas_5m_age_minutes'].map(id=>[id,{at:'2026-10-31T21:17:20+08:00',commit:'7e36e2e6'}])),
+ ...Object.fromEntries(['ati6h','prs_intraday_add_evidence_6h'].map(id=>[id,{at:'2026-10-31T11:54:55+08:00',commit:'a0e05624'}])),
+ ...Object.fromEntries(['sbs_5m','sbs_5m_quality','sbs_5m_distance','sbs_5m_step'].map(id=>[id,{at:'2026-10-31T20:02:45+08:00',commit:'f8d23109'}])),
 };
 export interface FeatureCreation {at:number;source:'recorded'|'version-history';commit?:string}
 export function featureCreation(def:Pick<DeepDigFeatureDef,'id'|'createdAt'>):FeatureCreation|null {
