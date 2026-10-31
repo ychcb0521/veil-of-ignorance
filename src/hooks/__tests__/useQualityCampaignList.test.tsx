@@ -38,3 +38,40 @@ it('clears the list on the first repair checkpoint and rebuilds on completion ra
   await act(async () => { saved('complete'); });
   expect(load).toHaveBeenCalledTimes(initial + 3);
 });
+
+
+it('coalesces focus/save bursts into one pending refresh and never holds concurrent full snapshots', async () => {
+  const load = vi.mocked(listQualityCampaignData);
+  let finish!: (value: any) => void;
+  load.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const h = renderHook(() => useQualityCampaignList('burst', 'quality'));
+  expect(load).toHaveBeenCalledTimes(1);
+  act(() => {
+    for (let i = 0; i < 100; i++) {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'burst' } }));
+    }
+  });
+  expect(load).toHaveBeenCalledTimes(1);
+  await act(async () => { finish({ rows: [], warning: '旧读数不应提交' }); });
+  await waitFor(() => expect(h.result.current.complete).toBe(true));
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(h.result.current.error).toBeNull();
+});
+
+it('deduplicates repair checkpoints even before the first async checkpoint has finished reading', async () => {
+  const load = vi.mocked(listQualityCampaignData);
+  const h = renderHook(() => useQualityCampaignList('repair', 'quality'));
+  await waitFor(() => expect(h.result.current.complete).toBe(true));
+  let finish!: (value: any) => void;
+  load.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const count = load.mock.calls.length;
+  const event = () => window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'repair', repair: { id: 'active-batch', state: 'running' } } }));
+  act(() => { for (let i = 0; i < 100; i++) event(); });
+  expect(load).toHaveBeenCalledTimes(count + 1);
+  await act(async () => { finish({ rows: [], repair: { id: 'active-batch', state: 'running' } }); });
+  expect(load).toHaveBeenCalledTimes(count + 1);
+  h.unmount();
+  act(() => window.dispatchEvent(new Event('focus')));
+  expect(load).toHaveBeenCalledTimes(count + 1);
+});

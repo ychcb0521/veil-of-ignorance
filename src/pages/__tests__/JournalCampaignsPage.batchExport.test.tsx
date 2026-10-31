@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as campaignSummary from '@/lib/campaignSummaryExport';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
@@ -83,6 +83,7 @@ function row(id: string, title: string, date: string, importance: number, ratio:
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   fixture.rows = [
     row('alpha', 'Alpha', '2026-01-15T01:00:00Z', 2, -200, -4),
     row('bravo', 'Bravo', '2026-02-15T01:00:00Z', 5, 300, 12),
@@ -97,6 +98,7 @@ beforeEach(() => {
   toastError.mockClear();
 });
 
+function ReturnFromDetail() { const nav = useNavigate(); return <><LocationProbe /><button onClick={() => nav(-1)}>返回战役列表</button></>; }
 function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location-probe">{location.pathname}{location.search}</div>;
@@ -104,7 +106,7 @@ function LocationProbe() {
 function pageTree(search: string) {
   return <MemoryRouter initialEntries={[`/journal/campaigns${search}`]}><Routes>
     <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><LocationProbe /></>} />
-    <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+    <Route path="/journal/campaigns/:id" element={<ReturnFromDetail />} />
   </Routes></MemoryRouter>;
 }
 function renderPage(search = '?sort=time&direction=desc&chart=importance') {
@@ -668,8 +670,46 @@ it('exports spreadsheet rows and risk aggregates from exactly the same selected 
     expect(summary.mock.calls[0][1].asymmetricSummary).toMatchObject({ sampleCount: 2, winCount: 2, lossCount: 0 });
     expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2 场，其中盈利 2 场，亏损 0 场/);
   } finally {
+    // The export revokes its blob URL after one second; retain the mocked browser API until that callback finishes.
+    await new Promise(resolve => window.setTimeout(resolve, 1050));
     view.unmount(); summary.mockRestore(); click.mockRestore();
     if (createDescriptor) Object.defineProperty(URL, 'createObjectURL', createDescriptor); else Reflect.deleteProperty(URL, 'createObjectURL');
     if (revokeDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeDescriptor); else Reflect.deleteProperty(URL, 'revokeObjectURL');
   }
 }, 15_000);
+
+
+it('keeps only 40 of 2011 campaign cards mounted while statistics, default-all and exports use the complete sample', async () => {
+  fixture.rows = Array.from({length:2011},(_,i)=>row(`large-${String(i).padStart(4,'0')}`,`Large ${i}`,new Date(Date.UTC(2026,0,1,0,i)).toISOString(),2,100,6));
+  renderPage('?sort=time&direction=desc');
+  expect(screen.getAllByTestId('campaign-card')).toHaveLength(40);
+  expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2011 场/);
+  const top = screen.getByRole('navigation',{name:'战役列表分页（上方）'});
+  expect(top).toHaveTextContent('1–40 / 2011');
+  selectMode(false);
+  expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('2011');
+  fireEvent.click(within(top).getByRole('button',{name:'下一页'}));
+  expect(top).toHaveTextContent('41–80 / 2011');
+  expect(screen.getAllByTestId('campaign-card')).toHaveLength(40);
+  expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2011 场/);
+  fireEvent.change(screen.getByRole('spinbutton',{name:'选择前几场'}),{target:{value:'3'}});
+  fireEvent.click(screen.getByRole('button',{name:'按当前排序选择'}));
+  expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 3 场/);
+  await openPreview();
+  expect(queueIds()).toEqual(['large-2010','large-2009','large-2008']);
+},30_000);
+
+it('restores the list page after returning from details and starts changed sorting on its first page', () => {
+  fixture.rows = Array.from({length:85},(_,i)=>row(`page-${i}`,`Page ${i}`,new Date(Date.UTC(2026,0,1,0,i)).toISOString(),2,100,6));
+  renderPage('?sort=time&direction=desc');
+  const top = () => screen.getByRole('navigation',{name:'战役列表分页（上方）'});
+  fireEvent.click(within(top()).getByRole('button',{name:'下一页'}));
+  expect(top()).toHaveTextContent('41–80 / 85');
+  const title = within(screen.getAllByTestId('campaign-card')[0]).getByRole('heading').textContent;
+  fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
+  fireEvent.click(screen.getByRole('button',{name:'返回战役列表'}));
+  expect(top()).toHaveTextContent('41–80 / 85');
+  expect(within(screen.getAllByTestId('campaign-card')[0]).getByRole('heading')).toHaveTextContent(title!);
+  fireEvent.click(screen.getByTestId('campaign-sort-time'));
+  expect(top()).toHaveTextContent('1–40 / 85');
+},20_000);

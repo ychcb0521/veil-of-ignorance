@@ -110,29 +110,30 @@ export function qualityCampaignDataFromStudy(owner: string, study: FishQualitySt
   // 卖出比较跟随各卖出方案自己的买入过滤：只列满足那套方案条件的交易，和鱼质量里的卖出对照一致
   const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const detection = (run: QualityCampaignRun) => !!run.detectionAt && run.detectors.length > 0;
+  const runs = archiveQualityStudy(study).campaignRuns ?? [];
   if (section === 'quality') {
     // 合并板块（卖出与探测）：卖出试验里买入的交易 + 固定卖出方案做探测的交易，同一场只列一次
     const sell = (run: QualityCampaignRun) => { const plan = study.sellPlans?.find(p => p.id === run.plan.id); return !activeBuyFilters(study, plan).length || qualityFilterStatus(study, run.sample, plan, readings).state === 'pass'; };
-    const rows = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (detection(run) || sell(run)))
+    const rows = runs.filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (detection(run) || sell(run)))
       .map(run => buildQualityCampaignData(owner, run, detection(run) ? 'detect' : 'sell'));
-    return includeMonitorCampaigns(owner,study,rows);
+    return includeMonitorCampaigns(owner,study,rows,runs);
   }
   const bought = (run: QualityCampaignRun) => {
     if (section !== 'sell') return true;
     const plan = study.sellPlans?.find(p => p.id === run.plan.id);
     return !activeBuyFilters(study, plan).length || qualityFilterStatus(study, run.sample, plan, readings).state === 'pass';
   };
-  const rows = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
+  const rows = runs.filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
     && bought(run))
     .map(run => buildQualityCampaignData(owner, run, section));
-  return section==='sell'?includeMonitorCampaigns(owner,study,rows):rows;
+  return section==='sell'?includeMonitorCampaigns(owner,study,rows,runs):rows;
 }
 
 /** Library-only history belongs in the campaign list too; do not duplicate the same archived trade. */
-function includeMonitorCampaigns(owner:string,study:FishQualityStudy,rows:QualityCampaignData[]):QualityCampaignData[] {
+function includeMonitorCampaigns(owner:string,study:FishQualityStudy,rows:QualityCampaignData[],runs:readonly QualityCampaignRun[]):QualityCampaignData[] {
   const identity=(run:QualityCampaignRun)=>JSON.stringify([run.result.key,run.sample.source.exchange??'binance',run.sample.source.market??'crypto',run.sample.source.symbol.toUpperCase(),run.result.entryTime,qualitySellKey(run.plan),run.plan.buyFilters??[],run.detectors.map(d=>[d.snapshot.featureId,d.metric,d.snapshot.definitionKey,d.snapshot.direction,d.snapshot.threshold])]);
   const keys=new Set(rows.map(r=>r.campaign.comparison?.runKey));
-  const seen=new Set((archiveQualityStudy(study).campaignRuns??[]).filter(r=>keys.has(r.result.key)).map(identity));
+  const seen=new Set(runs.filter(r=>keys.has(r.result.key)).map(identity));
   const settings=new Map(study.monitorLibrary?.settings.map(s=>[s.id,s])??[]),next=[...rows];
   for(const record of study.monitorLibrary?.records??[]) {
     const setting=settings.get(record.settingId),run=setting&&qualityMonitorCampaignRun(record,setting);

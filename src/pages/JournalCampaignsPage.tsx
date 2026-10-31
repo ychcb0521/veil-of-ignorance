@@ -1,3 +1,5 @@
+import { CampaignListPagination } from '@/components/journal/CampaignListPagination';
+import { useCampaignPagination } from '@/hooks/useCampaignPagination';
 import { CampaignSectionControls } from '@/components/journal/CampaignSectionControls';
 import {QualityCampaignCardTitle} from '@/components/journal/QualityCampaignCardTitle';
 import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
@@ -2988,11 +2990,27 @@ export default function JournalCampaignsPage() {
     if (sortGroupStats.reduce((sum, group) => sum + group.count, 0) !== sortedRows.length) return null;
     let offset = 0;
     return sortGroupStats.map((group, index) => {
-      const rows = sortedRows.slice(offset, offset + group.count);
+      const start = offset, rows = sortedRows.slice(offset, offset + group.count);
       offset += group.count;
-      return { id: `${index}:${JSON.stringify(group.key)}`, group, rows };
+      return { id: `${index}:${JSON.stringify(group.key)}`, index, start, end: offset, group, rows };
     });
   }, [sortGroupStats, sortedRows]);
+  const cardPagination = useCampaignPagination({ count: sortedRows.length, ready: campaignRowsComplete,
+    historyKey: `${userId}:${location.key}`,
+    scope: JSON.stringify([userId, section, binView, operationRange, sortChain, sellFilter, detectorFilter, categoryFilter]),
+  });
+  const pagedCardRows = useMemo(() => sortedRows.slice(cardPagination.start, cardPagination.end), [sortedRows, cardPagination.start, cardPagination.end]);
+  const pagedCardSections = useMemo(() => cardSections?.flatMap(group => {
+    const start = Math.max(group.start, cardPagination.start), end = Math.min(group.end, cardPagination.end);
+    return end > start ? [{ ...group, rows: sortedRows.slice(start, end) }] : [];
+  }), [cardSections, sortedRows, cardPagination.start, cardPagination.end]);
+  const cardListRef = useRef<HTMLDivElement>(null);
+  const changeCardPage = (page: number) => {
+    cardPagination.setPage(page);
+    window.requestAnimationFrame(() => cardListRef.current?.scrollIntoView?.({ block: 'start', behavior: 'auto' }));
+  };
+  const renderCardPagination = (placement: '上方' | '下方') => <CampaignListPagination {...cardPagination}
+    total={sortedRows.length} ready={campaignRowsComplete} placement={placement} onChange={changeCardPage}/>;
   /** 收起的分区：换了排序链就全部展开（组都变了）。 */
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => { setCollapsedSections(new Set()); }, [sortChainKeyForSections]);
@@ -4372,7 +4390,7 @@ export default function JournalCampaignsPage() {
         className={BATCH_BAR_BUTTON}
         onClick={() => setSelectedCampaignIds(new Set(sortedRows.map(row => row.campaign.id)))}
         aria-label={`全选列表（${sortedRows.length}）`}
-        title="选中列表里当前显示的全部战役（替换现有选择）"
+        title="选中当前完整列表的全部战役，包含其他页（替换现有选择）"
       >
         全选列表<span className="font-mono tabular-nums text-muted-foreground/60">{sortedRows.length}</span>
       </button>
@@ -6027,8 +6045,9 @@ export default function JournalCampaignsPage() {
           </div>
         ) : (
           // 列宽变量挂在列表容器上：每张卡的同名项读同一个宽度，上下对齐；宽度随时间段里的战役变（不随排序变），卡片本身不重画。
-          <div data-testid="campaign-card-list" style={cardMetricGridStyle}>
-            {cardSections ? cardSections.map(({ id, group, rows: sectionRows }, sectionIndex) => {
+          <div ref={cardListRef} data-testid="campaign-card-list" style={{ ...cardMetricGridStyle, scrollMarginTop: CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight + 8 }}>
+            {renderCardPagination('上方')}
+            {pagedCardSections ? pagedCardSections.map(({ id, index: sectionIndex, group, rows: sectionRows }) => {
               const collapsed = collapsedSections.has(id);
               const winRate = group.payoffCount > 0 ? `${Math.round((group.wins / group.payoffCount) * 100)}%` : '—';
               return (
@@ -6062,7 +6081,8 @@ export default function JournalCampaignsPage() {
                   {!collapsed && sectionRows.map(renderCampaignCard)}
                 </section>
               );
-            }) : sortedRows.map(renderCampaignCard)}
+            }) : pagedCardRows.map(renderCampaignCard)}
+            {renderCardPagination('下方')}
           </div>
         )}
         </div>
