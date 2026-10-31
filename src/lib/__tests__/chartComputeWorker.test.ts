@@ -16,3 +16,14 @@ it('bounds heavy formula state while leaving completed output intact',async()=>{
  for(let id=1;id<=9;id++)target.onmessage({data:{id,length:1,from:0,packet:packet(),compiled,params:{interval:'5m'},variables:['X']}});
  expect(messages.at(-1).evicted).toEqual([1]);expect(messages[0].vars.X[0]).toBe(1);target.onmessage({data:{id:1,length:1,from:0,packet:packet(),compiled,params:{interval:'5m'},variables:['X']}});expect(messages.at(-1).error).toBeUndefined();expect(messages.at(-1).vars.X[0]).toBe(1);vi.unstubAllGlobals();
 });
+
+it('PRS worker uses the shared causal engine, restores its seed and ignores a forming candle',async()=>{
+ vi.resetModules();const messages:any[]=[],target={postMessage:(m:any)=>messages.push(m),onmessage:undefined as any};vi.stubGlobal('self',target);await import('../chartCompute.worker');
+ const {prsPositive}=await import('../deepDig/__tests__/fixtures/prsBars'),{PRS6H_DEF}=await import('../deepDig/features'),{computePrs6h}=await import('../prs6h'),{bars}=prsPositive(),split=bars.length-3;
+ const seed=computePrs6h(bars.slice(0,split),{symbol:'TESTUSDT'}).checkpoint,tail=bars.slice(split),packet=new Float64Array(tail.length*10);
+ tail.forEach((b,i)=>packet.set([b.openTime,b.open,b.high,b.low,b.close,b.volume,b.quoteVolume!,b.takerBuyQuoteVolume!,NaN,i===tail.length-1?0:1],i*10));
+ const compiled=compileFeatureFormula(PRS6H_DEF.formula),params={...PRS6H_DEF,PRS6H_symbol:'TESTUSDT',PRS6H_tick_size:.01,PRS6H_checkpoint:seed};
+ target.onmessage({data:{id:900,length:tail.length,from:0,packet:packet.buffer,compiled,params,variables:['PRS6H','PRS6H_S']}});
+ const actual=messages.at(-1),expected=evaluateOnBars(tail.map((b,i)=>({...b,PRS6H_closed:i!==tail.length-1})),compiled,params);
+ expect(actual.error).toBeUndefined();expect(actual.vars.PRS6H).toEqual(expected.vars.get('PRS6H'));expect(actual.PRS6H_checkpoint.last_time).toBe(expected.PRS6H_checkpoint!.last_time);vi.unstubAllGlobals();
+});

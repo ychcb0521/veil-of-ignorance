@@ -151,7 +151,7 @@ beforeEach(() => {
   preflightMode.pending = false;
   listProps.calls.length = 0;
   localStorage.clear();
-  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:Date.now()});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(SIGNALS));
 });
 

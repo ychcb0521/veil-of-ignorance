@@ -17,7 +17,7 @@ it('默认四条规则全部勾选，开始捕捞使用截图的阈值、序列�
  expect(screen.queryByLabelText('启用算法 5',{selector:'input'})).toBeNull();
  expect([screen.getByLabelText('捕捞阈值'),...[2,3,4].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','8','0.04','8']);
  expect(screen.queryByRole('alert')).toBeNull();
- expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('结果');
+ expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('avg_CBA_2');
  expect((screen.getByLabelText('算法 2 特征值') as HTMLSelectElement).selectedOptions[0].label).toBe('CBA·avg₂');
  expect(screen.getByLabelText('算法 3 统计量')).toHaveValue('avg_CBI2');
  expect(screen.getByLabelText('算法 4 统计量')).toHaveValue('avg_CBA');
@@ -60,7 +60,7 @@ it('CBA·avg₂ 卡修改阈值后刷新仍保留，avg 卡不受影响',()=>{
  render(panel());
  fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'12'}});
  cleanup();render(panel());
- expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('结果');
+ expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('avg_CBA_2');
  expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(12);
  expect(screen.getByLabelText('算法 4 阈值')).toHaveValue(8);
 });

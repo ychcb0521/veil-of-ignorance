@@ -26,7 +26,7 @@ function control(jump = vi.fn(async () => ({ ok: true as const }))) {
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
   // 这些用例验证手动捕捞流程；自动默认值和调度另由 useFishAutoScan 测试覆盖。
-  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:Date.now()});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY,'[]');
   localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([SIGNAL]));
   // 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已填过 0.3 测捕捞流程
@@ -34,6 +34,20 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {
+  it('算法设置与每次打开恢复自动1h一起生效，临时间隔不影响保存的阈值',()=>{
+    saveFishAuto({mode:'manual',hours:64,lastRunAt:Date.now()});render(control());
+    const toggle=screen.getByRole('button',{name:/^渔/});fireEvent.click(toggle);
+    expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
+    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('1');
+    fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'0.123'}});
+    fireEvent.change(screen.getByLabelText('自动捕捞间隔'),{target:{value:'8'}});
+    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('8');
+    fireEvent.click(screen.getByRole('radio',{name:'手动'}));
+    fireEvent.click(toggle);fireEvent.click(toggle);
+    expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
+    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('1');
+    expect(screen.getByLabelText('捕捞阈值')).toHaveValue(.123);
+  },90000);
   it('插针过滤详情打开历史盘面，不把被过滤标的加入鱼或信号库', async () => {
     const openTime=Date.UTC(2026,9,29,2),wick={symbol:'WICKUSDT',exchange:'binance' as const,cutoffMs:openTime+600000,openTime,open:100,high:101,low:91,close:92,drop:9,atr:2,rule:{enabled:true,hours:48,atrMultiple:3},candles:[{openTime,open:100,high:101,low:91,close:92}]};
     mocks.scan.mockImplementation(async o=>{const p={...initialFishProgress(),status:'complete' as const,wickSkipped:1,wickDetails:[wick]};o.onProgress(p);return p;});
@@ -97,14 +111,15 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     await waitFor(() => expect(aborted).toBe(true));
     expect(within(screen.getByTestId('fish-catching')).getByRole('status')).toHaveTextContent('已取消');
   });
-  it('输入历史时间与阈值，收起重开仍保留；校验输入；同一信号换阈值再捕到合并成一条并保留原评分', async () => {
+  it('算法阈值保留，收起重开恢复当前时间；校验输入；同一信号换阈值再捕到合并成一条并保留原评分', async () => {
     render(control());
     const toggle = screen.getByRole('button',{name:/^渔/});
     fireEvent.click(toggle);
     fireEvent.change(screen.getByLabelText('捕捞时间（UTC+8）'), { target: { value: '2026-10-18 12:34:56' } });
     fireEvent.change(screen.getByLabelText('捕捞阈值'), { target: { value: '0.2' } });
     fireEvent.click(toggle); fireEvent.click(toggle);
-    expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveValue('2026-10-18 12:34:56');
+    expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('捕捞时间（UTC+8）'), { target: { value: '2026-10-18 12:34:56' } });
     expect(screen.getByLabelText('捕捞阈值')).toHaveValue(0.2);
     fireEvent.click(screen.getByRole('radio',{name:'4 星'}));
     mocks.scan.mockImplementation(async o => { o.onSignal({ ...SIGNAL, fish: { ...SIGNAL.fish, threshold: o.threshold, cutoffMs: o.anchorMs, average: 0.25 } }); const p = { ...initialFishProgress(), anchorMs: o.anchorMs, cutoffMs: o.anchorMs, threshold: o.threshold, status: 'complete' }; o.onProgress(p); return p; });
@@ -271,10 +286,11 @@ it('自动模式下打开时间框是「现在」（不恢复以前输过的）�
  fireEvent.click(screen.getByRole('radio',{name:'手动'}));expect(time().value).toBe('2026-10-18 12:34:56');
  fireEvent.click(screen.getByRole('radio',{name:'自动'}));await waitFor(()=>expect(time().value).toBe(''));
 });
-it('手动模式下打开照常恢复本次会话输过的时间',()=>{
+it('即使上次手动模式也恢复自动和现在',()=>{
  sessionStorage.setItem('veil.fish.time','2025-04-23 01:26:00');
  render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
- expect((screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement).value).toBe('2025-04-23 01:26:00');
+ expect((screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement).value).toBe('');
+ expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
 });
 
 it.each(['新鱼','鱼舱'])('从 %s 跳转到币种后返回，恢复外层位置、列表滚动与原排序',async(title)=>{

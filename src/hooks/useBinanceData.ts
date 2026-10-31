@@ -3,6 +3,8 @@ import { useState, useCallback, useRef } from "react";
 import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
 
 export interface KlineData {
+  /** Market-evidence-only raw quote amounts; never alter existing indicators’ normalized fields. */
+  ATI6H_quoteVolume?:number; ATI6H_takerBuyQuoteVolume?:number;
   /** CBA-2只读取已收盘K线；回放成形根显式标记false。 */
   cba2Closed?: boolean;
   time: number; // ms timestamp (open time)
@@ -22,18 +24,19 @@ export interface KlineData {
  * 图表的每一条喂数路径（整批 setData 的 toKLineData、回放逐根 updateData）都必须用它，
  * 否则逐根推进的 K 线没有金额，动态谢林点要等下一次整批刷新才算得出来（看上去「滞后出现」）。
  */
-export function chartAmountFields(d: Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume'>, progress = 1): { turnover?: number; takerBuyTurnover?: number } {
-  return d.quoteVolume != null && d.takerBuyQuoteVolume != null
-    ? { turnover: d.quoteVolume * progress, takerBuyTurnover: d.takerBuyQuoteVolume * progress }
-    : {};
+export function chartAmountFields(d: Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume' | 'ATI6H_quoteVolume' | 'ATI6H_takerBuyQuoteVolume'>, progress = 1): { turnover?: number; takerBuyTurnover?: number; ATI6H_quoteVolume?:number; ATI6H_takerBuyQuoteVolume?:number } {
+  const raw={...(d.ATI6H_quoteVolume!==undefined?{ATI6H_quoteVolume:d.ATI6H_quoteVolume*progress}:{}),...(d.ATI6H_takerBuyQuoteVolume!==undefined?{ATI6H_takerBuyQuoteVolume:d.ATI6H_takerBuyQuoteVolume*progress}:{})};
+  return {...(d.quoteVolume!=null&&d.takerBuyQuoteVolume!=null?{turnover:d.quoteVolume*progress,takerBuyTurnover:d.takerBuyQuoteVolume*progress}:{}),...raw};
 }
 
 /** 币安 K 线数组的两列金额（第 8 列成交额、第 11 列主动买入额）；缺失或非法就不带这两个字段。 */
-export function klineAmountFields(row: readonly unknown[]): Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume'> {
+export function klineAmountFields(row: readonly unknown[]): Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume' | 'ATI6H_quoteVolume' | 'ATI6H_takerBuyQuoteVolume'> {
   const q = Number(row[7]);
   const b = Number(row[10]);
-  if (!(Number.isFinite(q) && q >= 0 && Number.isFinite(b) && b >= 0 && row[7] != null && row[10] != null)) return {};
-  return { quoteVolume: q, takerBuyQuoteVolume: Math.min(b, q) };
+  const qOk=Number.isFinite(q)&&q>=0&&row[7]!=null&&String(row[7]).trim()!=='',bOk=Number.isFinite(b)&&b>=0&&row[10]!=null&&String(row[10]).trim()!=='';
+  // The default PRS quote mode does not depend on a taker column. Legacy fields keep their paired contract.
+  if(!qOk||!bOk)return qOk?{ATI6H_quoteVolume:q}:{};
+  return {quoteVolume:q,takerBuyQuoteVolume:Math.min(b,q),...(b>q?{ATI6H_quoteVolume:q,ATI6H_takerBuyQuoteVolume:b}:{})};
 }
 
 // Interval string → milliseconds

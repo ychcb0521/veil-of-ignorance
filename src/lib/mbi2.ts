@@ -40,10 +40,12 @@ export function computeMbi2Core(closes: ArrayLike<number>, n = 25, z0 = 1.25, op
   validateCore(n, z0);
   const z = new Float64Array(closes.length).fill(NaN);
   const mbi = new Float64Array(closes.length).fill(NaN);
+  // Read-only adapter: same-period single-log-return RMS, before the current update.
+  const sigmaBefore = new Float64Array(closes.length).fill(NaN);
   const alpha = 1 / n, kappa = 1 / Math.sqrt(alpha * (2 - alpha));
   const x = Float64Array.from(closes, c => c > 0 && Number.isFinite(c) ? Math.log(c) : NaN);
   const first = x.findIndex(Number.isFinite);
-  if (first < 0) return { z, mbi, kappa, initialVariance: null };
+  if (first < 0) return { z, mbi, sigmaBefore, kappa, initialVariance: null };
   let seed = 0, count = 0, seedEnd = first;
   for (let k = first + 1; k < x.length && count < n; k++) {
     if (Number.isFinite(x[k]) && Number.isFinite(x[k - 1])) {
@@ -52,7 +54,7 @@ export function computeMbi2Core(closes: ArrayLike<number>, n = 25, z0 = 1.25, op
       seedEnd = k;
     }
   }
-  if (count < n) return { z, mbi, kappa, initialVariance: null };
+  if (count < n) return { z, mbi, sigmaBefore, kappa, initialVariance: null };
   const initialVariance = seed / n;
   let M = x[first], S = initialVariance;
   const warmupEnd = Math.max(first + 5 * n, seedEnd + 1);
@@ -61,6 +63,7 @@ export function computeMbi2Core(closes: ArrayLike<number>, n = 25, z0 = 1.25, op
     const hasReturn = Number.isFinite(x[t - 1]);
     // Calculate with M(t-1), S(t-1), before either state is updated.
     if (hasReturn && (options.warmup === false || t >= warmupEnd)) {
+      sigmaBefore[t] = Math.sqrt(S);
       z[t] = S > 0 ? (x[t] - M) / (kappa * Math.sqrt(S)) : 0;
       mbi[t] = Math.tanh(z[t] / z0);
     }
@@ -70,7 +73,7 @@ export function computeMbi2Core(closes: ArrayLike<number>, n = 25, z0 = 1.25, op
       S = (1 - alpha) * S + alpha * r * r;
     }
   }
-  return { z, mbi, kappa, initialVariance };
+  return { z, mbi, sigmaBefore, kappa, initialVariance };
 }
 
 /** Strict hysteresis on closed bars; a data gap interrupts a run instead of inventing elapsed signals. */

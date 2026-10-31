@@ -21,6 +21,7 @@ const customAtrSettings=(rule:QualityAdditionRoundRule)=>{const a=qualityAdditio
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
+  prsEvidence?:import('../prs6h').PrsRow;
   at: number; price: number; notional: number; quantity: number; scanFrom: number;
   reading: number; threshold: number; direction: '<' | '>'; metric: string; label: string;
   featureId?: string; definitionKey?: string; barOpenTime: number;
@@ -29,6 +30,7 @@ export interface QualityAdditionFill {
   sizing?: {support:number;previousSupport:number;atr:number;atrAt:number;coinsBefore:number;realAverageBefore:number;baseCoins:number;mirrorCoins:number;mirrorUsed:number;mirrorAvailableBefore?:number;costBufferAtr?:number;requiredBufferAtr?:number;supportOffsetAtr?:number;coverageGap?:number};
 }
 export interface QualityAdditionObservation {
+  prsEvidence?:import('../prs6h').PrsRow;
   at:number;barOpenTime:number;reading:number;threshold:number;direction:'<'|'>';metric:string;label:string;featureId?:string;definitionKey?:string;
 }
 export function qualityAdditionConditions(rule?:Pick<QualityAdditionRule,'conditions'|'condition'>):QualityBuyFilter[]{

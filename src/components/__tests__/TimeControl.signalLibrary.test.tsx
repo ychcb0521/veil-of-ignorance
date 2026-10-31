@@ -53,7 +53,7 @@ const libraryRoot = () => screen.getByTestId('signal-library-panel');
 
 beforeEach(() => {
   localStorage.clear();
-  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:Date.now()});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(SIGNALS));
 });
 

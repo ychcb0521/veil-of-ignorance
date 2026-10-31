@@ -5,7 +5,6 @@ import { useFishAutoScan } from '@/hooks/useFishAutoScan';
 import { useFishMining } from '@/hooks/useFishMining';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {useFishViewportHeight} from '@/hooks/useFishViewportHeight';
-import { readFishAuto } from '@/lib/fish/autoScan';
 import { SignalTurnoverButton } from './SignalTurnover';
 import {
   Play, Pause, Square, Clock, BookmarkX,
@@ -112,9 +111,8 @@ export function TimeControl({
     const restore=()=>{const saved=fishReturnPosition.current,panel=fishHostRef.current?.querySelector<HTMLElement>('[data-testid="fish-panel"]');if(!saved||!panel)return;panel.scrollTop=saved.panelTop;for(const {node,top,left} of saved.ancestors)if(node.isConnected){node.scrollTop=top;node.scrollLeft=left;}};
     restore();const frame=requestAnimationFrame(restore);return()=>cancelAnimationFrame(frame);
   },[fishOpen]);
-  // 渔的捕捞时间记在这个标签页里（刷新不丢）：以前每次刷新都变回空 = 「现在」，换了截止时刻自己却看不出来
-  // 【用户要求】2026-10-21「自动捕捉模式时，时间默认为现在（除非是手动输入了）」：自动模式下打开不恢复以前输过的时间
-  const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { if (readFishAuto().mode !== 'auto') time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
+  // 每次重新打开恢复自动、1h、现在；本次打开期间可输入历史截止时间。
+  const [fishInputs, setFishInputsState] = useState({ time: '', threshold: '0.3' });
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
   // 新鱼邮件提醒：每轮捕捞结束把第一次捕到的鱼发到所填邮箱
@@ -131,6 +129,14 @@ export function TimeControl({
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;
   const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.start, busy: () => fish.busy() || reconstructionRunning.current });
+  const fishWasOpen = useRef(false);
+  useEffect(() => {
+    if (fishOpen && !fishWasOpen.current) {
+      fishAuto.resetDefaults();
+      if (fishInputsRef.current.time) setFishInputs({ ...fishInputsRef.current, time: '' });
+    }
+    fishWasOpen.current = fishOpen;
+  }, [fishOpen, fishAuto.resetDefaults, setFishInputs]);
   // 比较探测的持续挖掘：取数器空闲才挖，捕捞一开始就让路
   const fishDefs = useFishFeatures();
   const fishMining = useFishMining({ account: user?.id, selection: fishSelection, defs: fishDefs, mine: fish.mine, stop: fish.stopMining, busy: () => fish.busy() || reconstructionRunning.current, signalsRef: fish.signalsRef, commit: fish.commit });

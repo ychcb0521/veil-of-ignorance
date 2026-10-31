@@ -1,3 +1,4 @@
+import {prsParameters,PRS6H_DEFAULTS} from '@/lib/prs6h';
 import { mbi2HoursOf, mbi2NOf, mbi2BandOf, mbi2ConfirmOf, type Mbi2Params } from '@/lib/mbi2';
 import { featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
 /**
@@ -69,6 +70,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
 
 function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, samples }: DefinitionPanelProps) {
   const [draft, setDraft] = useState<DeepDigFeatureDef>(def);
+  const [prsText,setPrsText]=useState(()=>JSON.stringify(def.PRS6H_config??PRS6H_DEFAULTS,null,2)),[prsError,setPrsError]=useState('');
   const [scaleText, setScaleText] = useState(String(def.scale));
   const [tried, setTried] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -81,7 +83,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
   const set = <K extends keyof DeepDigFeatureDef>(k: K, v: DeepDigFeatureDef[K]) => setDraft(d => ({ ...d, [k]: v }));
   const save = () => {
     setTried(true);
-    if (check.formula || check.groups || check.scale || !draft.name.trim()) return;
+    if (prsError || check.formula || check.groups || check.scale || !draft.name.trim()) return;
     onSave({ ...draft, name: draft.name.trim(), short: draft.short.trim() || '特征值', scale, unit: draft.unit.trim(), groupVars: 2 });
     onEditingChange(false);
   };
@@ -124,6 +126,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
       </div>
       <div className="flex gap-2">
         <span className={label}>参数</span>
+        {draft.chartTemplate==='prs6h'&&<details className="mb-3 text-xs"><summary className="cursor-pointer">PRS-6H 参数（研究初值）</summary><textarea aria-label="PRS6H 参数配置" value={prsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setPrsText(e.target.value);try{const next=JSON.parse(e.target.value);prsParameters(next);set('PRS6H_config',next);setPrsError('');}catch(error){setPrsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{prsError&&<p role="alert" className={RED}>{prsError}</p>}<p className="text-muted-foreground">volumeMode 可选 quote / flow / base_close_proxy，默认 quote；模式、参数和状态检查点独立，改变参数后需重算。</p></details>}
         <KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />
       </div>
       <div className="flex gap-2">

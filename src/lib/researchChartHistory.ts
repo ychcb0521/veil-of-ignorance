@@ -30,11 +30,11 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number, n
     // Collect every selected indicator's demand in this render before fetching.
     // Otherwise each larger window forces all formulas to restart once again.
     queueMicrotask(async()=>{try{do{const target=current.desiredFrom;
-      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval);
+      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval,['ati6h','prs6h'].includes(namespace??''));
       if(entries.get(key)!==current)return;
       current.from=target;
       current.bars=result.filter(b => b.openTime < to).map(b => ({ timestamp: b.openTime,
-        open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
+        ...(['ati6h','prs6h'].includes(namespace??'')?{researchSymbol:symbol}:{}), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
         ...(b.quoteVolume != null ? { turnover: b.quoteVolume } : {}),
         ...(b.takerBuyQuoteVolume != null ? { takerBuyTurnover: b.takerBuyQuoteVolume } : {}),
       }));

@@ -89,10 +89,11 @@ export async function fetchResearchKlines(
   symbol: string, fromMs: number, toMs: number, fetchFn: FetchFn = fetch as unknown as FetchFn, signal?: AbortSignal,
   /** Deep dig 可选别的周期；默认 5m（Deep RSA 各步与 24h 客观结果都用 5m）。 */
   interval: ResearchInterval = '5m',
+  strictAmounts = false,
 ): Promise<ResearchBar[]> {
   const barMs = intervalMs(interval);
   const from = Math.floor(fromMs / barMs) * barMs;
-  const key = `${symbol}|${interval}|${from}|${toMs}`;
+  const key = `${symbol}|${interval}|${from}|${toMs}${strictAmounts?'|strict':''}`;
   const hit = klineCache.get(key);
   if (hit) return hit;
   const out: ResearchBar[] = [];
@@ -105,7 +106,9 @@ export async function fetchResearchKlines(
     if (raw.length === 0) break;
     let lastOpen = cursor;
     for (const row of raw) {
-      const bar = Array.isArray(row) ? parseBinanceKlineRow(row) : null;
+      const parsed = Array.isArray(row) ? parseBinanceKlineRow(row) : null;
+      const amount=(x:unknown)=>x==null||x===''?null:Number(x);
+      const bar = parsed&&strictAmounts ? {...parsed,quoteVolume:amount(row[7]),takerBuyQuoteVolume:amount(row[10])} : parsed;
       if (bar && bar.openTime >= from && bar.openTime < toMs) out.push(bar);
       const open = Array.isArray(row) ? Number(row[0]) : Number.NaN;
       if (Number.isFinite(open)) lastOpen = Math.max(lastOpen, open);

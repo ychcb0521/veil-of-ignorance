@@ -1,3 +1,4 @@
+import {ati6hTickSize} from '@/lib/ati6hMarketData';
 import { assertBinancePublicAllowed, noteBinanceRateLimit, publicRateLimitDeadline, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import {binanceStockMarket,bitgetStockMarket} from './stockMetadata';
 import {nativeFishInterval,fishBarLabel} from './periods';
@@ -77,7 +78,7 @@ function applySums(bars: readonly ResearchBar[], sums: Map<number,{buy:number;se
     return {...b,takerBuyQuoteVolume:x.buy,takerBuyVolume:x.buyBase};
   });
 }
-export interface FishBarQuery { /** Reconstruction drops out-of-window upstream rows before parsing. */ beforeCutoff?: boolean; allowPartial?: boolean; interval: ResearchInterval; count: number }
+export interface FishBarQuery { marketEvidence?:boolean; /** Reconstruction drops out-of-window upstream rows before parsing. */ beforeCutoff?: boolean; allowPartial?: boolean; interval: ResearchInterval; count: number }
 export interface FishDataAdapter {
   readonly exchange: FishExchange;
   list(signal: AbortSignal): Promise<FishMarket[]>;
@@ -100,7 +101,7 @@ export class FishAdapter implements FishDataAdapter {
     if (this.exchange==='binance') {
       const j:any=await this.request('exchangeInfo',1,signal);
       if (!Array.isArray(j.symbols)) throw new FishError('交易标的列表无效','failed');
-      markets=j.symbols.filter((s:any)=>binanceStockMarket(s)!==null&&s.quoteAsset==='USDT'&&s.status==='TRADING').map((s:any)=>({symbol:s.symbol,instrument:s.symbol,base:s.baseAsset??s.symbol.replace(/USDT$/,''),multiplier:1,...(binanceStockMarket(s)==='us_stock'?{market:'us_stock' as const,underlying:s.baseAsset}:{})}));
+      markets=j.symbols.filter((s:any)=>binanceStockMarket(s)!==null&&s.quoteAsset==='USDT'&&s.status==='TRADING').map((s:any)=>({symbol:s.symbol,instrument:s.symbol,base:s.baseAsset??s.symbol.replace(/USDT$/,''),multiplier:1,...(num(s.filters?.find((f:any)=>f.filterType==='PRICE_FILTER')?.tickSize)>0?{tickSize:num(s.filters.find((f:any)=>f.filterType==='PRICE_FILTER').tickSize)}:{}),...(binanceStockMarket(s)==='us_stock'?{market:'us_stock' as const,underlying:s.baseAsset}:{})}));
     } else if (this.exchange==='okx') {
       const j:any=await this.request('public/instruments?instType=SWAP',1,signal);
       if(j.code!=='0'||!Array.isArray(j.data)) throw new FishError('OKX合约列表无效','failed');
@@ -126,10 +127,12 @@ export class FishAdapter implements FishDataAdapter {
     if(!m) throw new FishError('BTC永续合约不存在','gap'); return m;
   }
   async candles(market: FishMarket, cut: number, signal: AbortSignal, query: FishBarQuery = {interval:'5m',count:FISH_BARS}): Promise<ResearchBar[]> {
-    const step=intervalMs(query.interval), cacheKey=`${market.instrument}|${query.interval}`;
+    const step=intervalMs(query.interval), cacheKey=`${market.instrument}|${query.interval}${query.marketEvidence?'|evidence':''}`;
+    const tick=query.marketEvidence?(market.tickSize??(this.exchange==='binance'?await ati6hTickSize(market.symbol,undefined,signal):null)):null;
+    const evidence=(bars:ResearchBar[])=>query.marketEvidence?bars.map(b=>({...b,PRS6H_tick_size:tick,ATI6H_tick_size:tick,PRS6H_symbol:market.symbol,PRS6H_data_source:this.exchange==='binance'?'binance-usdm':this.exchange})):bars;
     const from=cut-query.count*step,native=nativeFishInterval(this.exchange,query.interval);
     if(native!==query.interval){
-      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio,allowPartial:query.allowPartial,beforeCutoff:query.beforeCutoff});
+      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio,allowPartial:query.allowPartial,beforeCutoff:query.beforeCutoff,marketEvidence:query.marketEvidence});
       const prior=new Map((this.cache.get(cacheKey)??[]).map(b=>[b.openTime,b]));
       const grouped:ResearchBar[]=[];
       const groups:ResearchBar[][]=[];
@@ -140,7 +143,7 @@ export class FishAdapter implements FishDataAdapter {
       for(const group of groups){const first=group[0],last=group.at(-1)!;const previous=prior.get(first.openTime);
         grouped.push(previous??{openTime:first.openTime,open:first.open,close:last.close,high:Math.max(...group.map(b=>b.high)),low:Math.min(...group.map(b=>b.low)),volume:group.reduce((v,b)=>v+b.volume,0),quoteVolume:group.reduce((v,b)=>v+(b.quoteVolume??NaN),0),takerBuyVolume:null});
       }
-      if(!query.allowPartial)validateFishBars(grouped,cut,query.count,step);this.remember(cacheKey,grouped);return grouped;
+      if(!query.allowPartial)validateFishBars(grouped,cut,query.count,step);this.remember(cacheKey,grouped);return evidence(grouped);
     }
     const collected=(this.cache.get(cacheKey)??[]).filter(b=>b.openTime>=from&&b.openTime<cut);
     // 补齐窗口里所有缺的时间段，不只是头尾：缓存是多次扫描（不同截止时刻）拼起来的，
@@ -171,14 +174,14 @@ export class FishAdapter implements FishDataAdapter {
 
           const j=await this.request(path,this.exchange==='binance'?5:1,signal);
           if(!Array.isArray(j)) throw new FishError('K线响应无效','failed');
-          for(const r of j) { if(query.beforeCutoff){const time=this.exchange==='binance'?Number(r?.[0]):Number(r?.t)*1000;if(time<cursor||time>=end||time+step>cut)continue;} const b=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier); if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+step<=cut) collected.push(b); }
+          for(const r of j) { if(query.beforeCutoff){const time=this.exchange==='binance'?Number(r?.[0]):Number(r?.t)*1000;if(time<cursor||time>=end||time+step>cut)continue;} const parsed=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier);const b=parsed&&query.marketEvidence&&this.exchange==='binance'?{...parsed,ATI6H_quoteVolume:r[7]==null||String(r[7]).trim()===''?null:Number(r[7]),ATI6H_takerBuyQuoteVolume:r[10]==null||String(r[10]).trim()===''?null:Number(r[10])}:parsed; if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+step<=cut) collected.push(b); }
           cursor=end;
         }
       }
     }
     abort(signal); collected.sort((a,b)=>a.openTime-b.openTime);
     const unique=[...new Map(collected.map(b=>[b.openTime,b])).values()];
-    if(!query.allowPartial)validateFishBars(unique,cut,query.count,step); this.remember(cacheKey,unique); return unique;
+    if(!query.allowPartial)validateFishBars(unique,cut,query.count,step); this.remember(cacheKey,unique); return evidence(unique);
   }
   async taker(market:FishMarket,bars:ResearchBar[],signal:AbortSignal,query: FishBarQuery = {interval:'5m',count:FISH_BARS}):Promise<ResearchBar[]> {
     const step=intervalMs(query.interval);

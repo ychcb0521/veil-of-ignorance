@@ -232,7 +232,7 @@ export class FishScanner {
       }
       const exchange:FishExchange=row.exchange??'binance',adapter=this.adapters.get(exchange);
       if(!adapter)throw new FishError(`不支持的交易所 ${exchange}`,'skipped');
-      const query={interval:intervalOf(plan.def),count:plan.N};
+      const query={interval:intervalOf(plan.def),count:plan.N,...((plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{})};
       const retention=fishRetentionReason(exchange,cut,this.latestServerTime,plan.N,plan.step,plan.usesTaker,query.interval);
       if(retention)throw new FishError(`${EXCHANGE_NAMES[exchange]}：${retention}`,'skipped');
       const market=await sampleMarket(row,exchange,adapter,lists,signal);
@@ -327,7 +327,7 @@ export class FishScanner {
     const exchange = options.exchange ?? 'binance';
     const plan = fishProgramForLookback(compileFishProgram(options.feature ?? CBI2_DEF, options.algorithm ?? { direction: '>', threshold: FISH_THRESHOLD, constraints: [] }),options.lookbackHours,options.turnoverFloors);
     if (plan.unavailable) return { outcome: 'failed', lines: [plan.unavailable] };
-    const query = { interval: intervalOf(plan.def), count: plan.N }, adapter = this.adapters.get(exchange)!;
+    const query = { interval: intervalOf(plan.def), count: plan.N,...((plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{}) }, adapter = this.adapters.get(exchange)!;
     const clock = await this.requests.get('binance')!('time', 1, options.signal) as { serverTime?: number };
     if (!Number.isFinite(clock.serverTime)) return { outcome: 'failed', lines: ['币安服务器时间无效'] };
     if (options.anchorMs !== undefined && options.anchorMs > clock.serverTime!) return { outcome: 'failed', lines: ['捕捞时间不能晚于币安服务器当前时间'] };
@@ -501,7 +501,7 @@ export class FishScanner {
     let plan:FishProgram;
     try {plan=fishProgramForLookback(compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]}),options.lookbackHours,options.turnoverFloors);if(plan.unavailable)throw new Error(plan.unavailable);}
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
-    const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N};
+    const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N,...((plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{})};
     const cacheKey = JSON.stringify([anchorMs, definitionKey(plan.def), plan.algorithmKey, options.exchanges, options.includeDuplicates, options.includeUsStocks, options.downwardWick, options.turnoverFloors, options.lookbackHours]);
     const completed = options.checkpoint?.get(cacheKey) ?? new Map<string, FishMemberResult>();
     options.checkpoint?.set(cacheKey, completed);

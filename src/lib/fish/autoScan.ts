@@ -19,14 +19,18 @@ export function readFishAuto(): FishAutoState {
   try {
     const x = JSON.parse(readPersistedStateRaw(fishAutoKey()) ?? 'null');
     if (!x) return DEFAULT_FISH_AUTO;
-    const state: FishAutoState = { mode: x.defaultsVersion === 1 && x.mode === 'manual' ? 'manual' : 'auto', hours: (FISH_AUTO_INTERVALS as readonly number[]).includes(x.hours) ? x.hours : 1, lastRunAt: Number.isFinite(x.lastRunAt) ? x.lastRunAt : null };
-    // 旧版默认手动升级一次；此后用户选择手动仍然保留，间隔和上次捕捞时间不变。
-    if (x.defaultsVersion !== 1) saveFishAuto(state);
+    const state: FishAutoState = { mode: x.mode === 'manual' ? 'manual' : 'auto', hours: (FISH_AUTO_INTERVALS as readonly number[]).includes(x.hours) ? x.hours : 1, lastRunAt: Number.isFinite(x.lastRunAt) ? x.lastRunAt : null };
     return state;
   } catch { return DEFAULT_FISH_AUTO; }
 }
 export function saveFishAuto(state: FishAutoState): void {
   try { writePersistedStateRaw(fishAutoKey(), JSON.stringify({ ...state, defaultsVersion: 1 })); } catch { /* 记不住只是下次要重新设 */ }
+}
+/** Each new opening restores hourly automatic scanning. Manual overrides last only while open. */
+export function resetFishAuto(): FishAutoState {
+  const state = { ...DEFAULT_FISH_AUTO, lastRunAt: readFishAuto().lastRunAt };
+  saveFishAuto(state);
+  return state;
 }
 /** 下次自动捕捞的时刻：手动模式没有；自动模式从没捕过就是现在。 */
 export const fishAutoNextAt = (s: FishAutoState): number | null => s.mode !== 'auto' ? null : s.lastRunAt === null ? 0 : s.lastRunAt + s.hours * HOUR;

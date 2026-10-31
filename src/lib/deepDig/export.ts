@@ -15,11 +15,15 @@ export function deepDigCsv(data: DeepDigData): string {
   const columns = [...new Set(featureUsesMbi2(data.definition)?[...mbi2KeysOf(data.definition),...names]:names)];
   const params = featureUsesMbi2(data.definition)?['MBI2_T_HOURS','MBI2_N','MBI2_Z0','MBI2_BAND','MBI2_CONFIRM']:featureUsesMbi(data.definition) ? ['MBI_N', 'MBI_Z0'] : [];
   const values=featureUsesMbi2(data.definition)?featureParams(data.definition):data.definition;
-  const rows: unknown[][] = [['事件ID', '标的', '锚点UTC', '取样偏移小时', '分组', '结果原值', ...columns, '24h期末收益', '24h最大涨幅', '24h最大跌幅', ...params]];
+  const prsColumns=featureTemplateId(data.definition)==='prs6h'?['PRS6H_state','PRS6H_market_ready','PRS6H_config_hash','PRS6H_reasons','PRS6H_details','PRS6H_checkpoint']:[];
+  const atiColumns=featureTemplateId(data.definition)==='ati6h'?['ATI6H_shortboard','ATI6H_data_status','ATI6H_reason_codes','ATI6H_volume_mode','ATI6H_version','ATI6H_structure_id','ATI6H_structure_status','ATI6H_nearest_resistance_type','ATI6H_breakout_cross_now','ATI6H_parameters','ATI6H_details','ATI6H_archive','ATI6H_dependency']:[];
+  const rows: unknown[][] = [['事件ID', '标的', '锚点UTC', '取样偏移小时', '分组', '结果原值', ...columns, '24h期末收益', '24h最大涨幅', '24h最大跌幅', ...params,...prsColumns,...atiColumns]];
   for (const row of data.rows) rows.push([
     row.id, row.symbol, new Date(row.anchorMs).toISOString(), (data.sampleOffsetMs ?? 0) / 3600000, groupLabel(row.group, data.definition.source), row.v,
     ...columns.map(name => row.vars?.[name]), row.endRet, row.maxUp, row.maxDown,
     ...params.map(name => (values as Record<string,unknown>)[name]),
+    ...prsColumns.map(name=>{const value=name==='PRS6H_details'?row.PRS6H_details:name==='PRS6H_checkpoint'?row.PRS6H_checkpoint:row.PRS6H_details?.[name as keyof typeof row.PRS6H_details];return typeof value==='object'?JSON.stringify(value):value;}),
+    ...atiColumns.map(name=>{const value=name==='ATI6H_details'?row.ATI6H_details:name==='ATI6H_archive'?row.ATI6H_archive:name==='ATI6H_dependency'?data.definition.ATI6H_dependency:row.ATI6H_details?.[name];return typeof value==='object'?JSON.stringify(value):value;}),
   ]);
   return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
 }

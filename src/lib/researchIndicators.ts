@@ -1,3 +1,6 @@
+import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
+import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
+import {ati6hDependencyOf} from '@/lib/deepDig/features';
 import { SELLER_RETENTION_SPECS, retentionComponents } from '@/lib/sellerRetention';
 import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
 import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -16,6 +19,8 @@ import { mbiNOf } from '@/lib/mbi';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
+  {id:'PRS6H',featureId:PRS6H_ID,core:'PRS6H',short:'PRS-6H',name:'日内顺势加仓证据',period:.5,parameter:'近期证据半衰期',parameterUnit:'h',neutral:0,neutralLabel:'0｜未满足本指标证据（非看空）',min:0,max:100,seller:false,rawOnly:true,components:PRS6H_FIELDS.filter(n=>n!=='PRS6H')},
+  {id:'ATI6H',featureId:'ati6h',core:'ATI6H',short:'ATI-6H',name:'ATI-6H｜加仓支持证据指数',period:1,parameter:'证据半衰期',parameterUnit:'h',neutral:0,neutralLabel:'0｜证据归零（非执行门槛）',min:0,max:1,seller:false,rawOnly:true,components:['ATI6H_sA','ATI6H_sB','ATI6H_sC','ATI6H_sD','ATI6H_sE','ATI6H_sF','ATI6H_min','ATI6H_support_price','ATI6H_support_failure_price','ATI6H_breakout_price','ATI6H_nearest_resistance_price','ATI6H_structure_status_code']},
   { id: 'STATE', featureId: 'state', core: 'state', short: '状态 S', name: '多空状态 S（0–1）', period: 24, parameter: '基线时长', neutral: 0.6, avgNeutral: 0.6, min: 0, max: 1, avgRange: [0, 1], seller: false }, // 【用户要求】2026-10-22 橘色线（线上绿、线下红）：原始值与两条均值线都在 0.6
   { id: 'STATE2', featureId: 'state2', core: 'state2', short: '状态 S2', name: '多空状态 S2（0–1）', period: 24, parameter: '基线时长', neutral: 0.6, avgNeutral: 0.6, min: 0, max: 1, avgRange: [0, 1], seller: false },
   { id: 'CDI2', featureId: 'cdi2', core: 'CDI2', short: 'CDI2', name: '买方失控程度 CDI2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
@@ -44,7 +49,7 @@ export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESE
 export interface ResearchIndicator {
   id: string; featureId: string; core: string; short: string; name: string; period: number; parameter: string;
   neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
-  templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
+  rawOnly?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
@@ -56,7 +61,7 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
     if (!program.statements.some(s => s.name === core)) core = featureCoreName(program) ?? core;
   } catch { /* Invalid formulas remain editable, with empty charts. */ }
-  return { id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
+  return { ...(['ati6h','prs6h'].includes(featureTemplateId(def)??'')?{rawOnly:true}:{}), id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
     period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
     min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
@@ -142,7 +147,7 @@ export function invalidateResearchChartData(data: KLineData[], from = 0) {
   chartDataChanges.set(data, changes);
 }
 const chartDataCache = new WeakMap<KLineData[], { values: Float64Array; revision: number; generation?: number }>();
-const DATA_FIELDS = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'takerBuyTurnover', 'cba2Closed'] as const;
+const DATA_FIELDS = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'takerBuyTurnover', 'cba2Closed','ATI6H_quoteVolume','ATI6H_takerBuyQuoteVolume'] as const;
 /** Compare mutable candles without allocating thousands of row arrays each frame. */
 function dataRevision(data: KLineData[]): number {
   const generation = chartDataGenerations.get(data), cached = chartDataCache.get(data);
@@ -172,7 +177,7 @@ export function researchChartFormula(item: ResearchIndicator, formula: string): 
   const named = namedChartFormula(formula);
   const names = new Set(compileFeatureFormula(named).program.statements.map(s => s.name));
   const series = researchSeriesNames(item, named);
-  return appendResearchAverages(named, names, series);
+  return item.rawOnly?named:appendResearchAverages(named, names, series);
 }
 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
@@ -212,7 +217,7 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
@@ -272,7 +277,7 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   if (continuous) displayHistory(data);
   if (generation == null) return finish(calculateChartSeries(data, item, period, options));
   const mbiKey = def && featureUsesMbi(def) ? `|${def?.MBI_N}|${def?.MBI_Z0}` : def&&featureUsesMbi2(def)?`|${def.MBI2_T_HOURS}|${def.MBI2_BAND}|${def.MBI2_CONFIRM}` : '';
-  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}${mbiKey}`;
+  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}|${item.rawOnly?researchDefinitionVersion(item):''}${mbiKey}`;
   let cache = liveSeriesCache.get(data);
   // Raw and 24h companion panes read the same immutable display result during
   // one native update. Background completion must also invalidate this result.
@@ -287,6 +292,7 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   return result;
 }
 function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}): DisplaySeries {
+  if(item.rawOnly&&options.fetchReference!==false&&typeof data[0]?.researchSymbol==='string')requestAti6hTickSize(data[0].researchSymbol);
   const empty = () => ({ core: data.map(() => null as number | null), avg: data.map(() => null as number | null), avg2: data.map(() => null as number | null) });
   const def = accountFeatureDef(item.featureId);
   if (!def) return empty();
@@ -305,7 +311,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length) {
     const step = chartInterval(data);
-    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbiFamily(def) ? step / 60000 : 5), step,featureUsesMbi2(def)||item.featureId==='ctba_12h-bear'?item.featureId:undefined) : EMPTY_HISTORY;
+    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbiFamily(def)||item.rawOnly ? step / 60000 : 5), step,featureUsesMbi2(def)||item.rawOnly||item.featureId==='ctba_12h-bear'?item.featureId:undefined) : EMPTY_HISTORY;
     const history = fetched.length ? fetched : EMPTY_HISTORY;
     if (history.length || background) {
       const revision = dataRevision(data), entries=extendedData.get(data)??new Map<KLineData[],ExtendedChartData>(),cached=entries.get(history);
@@ -352,10 +358,10 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const mbiStep = (featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
+  const mbiStep = (item.rawOnly || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
   const scaled = (name: string, multiply = true) => Array.from({ length: visibleLength }, (_, i) => {
     // Live MBI never publishes a candle that has not closed yet.
-    if ((featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
+    if ((item.rawOnly || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
     const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * (multiply ? def.scale : 1);
   });
   const components=item.components?{components:Object.fromEntries(item.components.map(name=>[name,scaled(name,false)]))}:{};

@@ -26,6 +26,8 @@ export function formatSeriesOffset(ms: number): string {
 }
 
 export interface DeepDigSeries {
+  PRS6H_windows?:Record<string,{checkpoint?:import('@/lib/prs6h').PrsCheckpoint;rows:import('@/lib/prs6h').PrsRow[];prices:{time:number;close:number}[]}>;
+  ATI6H_windows?:Record<string,{rows:import('@/lib/ati6h').AtiRow[];prices:{time:number;close:number}[]}>;
   /** Independent CTBA closed-bar vectors (original 48h; explicit copies use their research window), in the same IndexedDB record. */
   anchorWindows?: Record<string,{startMs:number;stepMs:number;values:Record<string,Float64Array>}>;
   /** 每个曲线时点向前准备的公式预热历史长度。旧缓存没有。 */
@@ -71,7 +73,7 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM'> & { id?: string; formula?: string },
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config'> & { id?: string; formula?: string },
   names: readonly string[],
   offsets: readonly number[],
 ): Float32Array | Float64Array | null {
@@ -93,7 +95,7 @@ export function computeEventSeries(
   const closes = sel.map(b => b.openTime + barMs);
   const values = names.map(n => (n === RESULT_VAR && !out.vars.has(n) ? out.last : out.vars.get(n) ?? Number.NaN));
   // MBI storage remains double precision; preserve every existing feature's cache format.
-  const ArrayType = (compiled.usesMbi || compiled.usesMbi2 || featureTemplateId(def)==='ctba') ? Float64Array : Float32Array;
+  const ArrayType = (compiled.usesPrs6h || compiled.usesAti6h || compiled.usesMbi || compiled.usesMbi2 || featureTemplateId(def)==='ctba') ? Float64Array : Float32Array;
   const result = new ArrayType(names.length * offsets.length).fill(Number.NaN);
   offsets.forEach((tau, k) => {
     const t = anchorMs + tau;

@@ -242,12 +242,13 @@ export async function collectRunEvents(
      * Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。
      * 给了 featureKlines 时，传进来的是那个周期、那段长度的观察窗（取不到为 null）；否则是 5m、48h 的观察窗。
      */
-    extraFeatures?: (window: ObservationWindow | null, ctx: { id: string; anchorMs: number; bars: readonly ResearchBar[] | null }) => Row;
+    extraFeatures?: (window: ObservationWindow | null, ctx: { id: string; symbol:string; anchorMs: number; bars: readonly ResearchBar[] | null; outcomeBars:readonly ResearchBar[] }) => Row;
     /**
      * Deep dig 特征值用别的 K 线周期 / 观察窗长度：【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量」。
      * 另外再取一次这个周期的 K 线；24h 客观结果、波动率等仍按 5m 算（结果口径不随周期变）。
      */
-    featureKlines?: { interval: ResearchInterval; windowMs: number };
+    featureKlines?: { interval: ResearchInterval; windowMs: number; strictAmounts?:boolean };
+    prepareFeatureBars?: (symbol:string,bars:readonly ResearchBar[])=>Promise<readonly ResearchBar[]>;
     /**
      * Deep dig 的时间序列曲线：K 线往前多取 beforeMs、往后取到进场后 afterMs（ctx.bars 给全段）。观察窗与特征值不变。
      * 【用户要求】2026-10-17「描述统计那里能够画出各组的时间序列曲线（组内数据在时间序列上的平均）」。
@@ -296,7 +297,7 @@ export async function collectRunEvents(
     const window = extractWindow(bars, item.anchorMs);
     if (window.coverage < MIN_WINDOW_COVERAGE) return { kind: 'low' };
     const featureWindow: ObservationWindow | null = fk ? (featureBars ? extractWindow(featureBars, item.anchorMs, fk.windowMs, fkBarMs) : null) : window;
-    const extra = options.extraFeatures?.(featureWindow, { id: item.id, anchorMs: item.anchorMs, bars: featureBars }) ?? {};
+    const extra = options.extraFeatures?.(featureWindow, { id: item.id, symbol:item.symbol, anchorMs: item.anchorMs, bars: featureBars, outcomeBars:bars }) ?? {};
     const featuresByH: Record<number, Row> = {};
     if (volOnly != null) {
       // Deep dig：只用得到观察窗波动率（推断统计的「控制波动」），不算整套表征
@@ -330,7 +331,7 @@ export async function collectRunEvents(
     if (fk) {
       checkAbort(signal);
       featureBars = await fetchResearchKlines(
-        symbol, item.anchorMs - fk.windowMs - beforeFk, item.anchorMs + (range?.afterMs ?? 0), fetchFn, signal, fk.interval,
+        symbol, item.anchorMs - fk.windowMs - beforeFk, item.anchorMs + (range?.afterMs ?? 0), fetchFn, signal, fk.interval, fk.strictAmounts,
       ).catch(error => {
         if (error instanceof MarketDataError && error.kind === 'aborted') throw error;
         return null; // 这个周期取不到：特征值记缺失，24h 结果照算
@@ -358,6 +359,7 @@ export async function collectRunEvents(
         featureBars = bars;
       }
     }
+    if(featureBars&&options.prepareFeatureBars)featureBars=await options.prepareFeatureBars(symbol,featureBars);
     const out = computeItem(item, bars, featureBars);
     await breathe();
     return out;

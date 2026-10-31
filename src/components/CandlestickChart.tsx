@@ -1,3 +1,4 @@
+import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
 import { mbi2MinutesOf } from '@/lib/mbi2';
 import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
 import { registerAccountFeatureIndicators } from "@/lib/customIndicators";
@@ -2327,9 +2328,10 @@ function CandlestickChartComponent({
     };
     const btc = subscribeBtcReference(refresh);
     const history = subscribeResearchHistory(refresh);
+    const atiMetadata=subscribeAti6hMarketData(refresh);
     const calibration = subscribeAvgCalibration(refresh);
     const computation = chartApiRef && !analysisMode ? subscribeChartComputation(() => chartApiRef.current?.refreshIndicators?.()) : () => {};
-    return () => { btc(); history(); calibration(); computation(); };
+    return () => { btc(); history(); atiMetadata(); calibration(); computation(); };
   }, []);
 
   // ============================================================

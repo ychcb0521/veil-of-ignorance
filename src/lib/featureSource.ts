@@ -1,3 +1,7 @@
+import {savePrsCheckpoint} from '@/lib/prs6hPersistence';
+import {PRS6H_ID} from '@/lib/prs6h';
+import {ati6hDependencyOf} from '@/lib/deepDig/features';
+import {peekAti6hTickSize,ati6hMarketVersion} from '@/lib/ati6hMarketData';
 import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily } from '@/lib/deepDig/features';
 /**
  * 特征值的唯一来源：K 线图指标、渔、Deep dig 都读同一份定义（Deep dig 里账号保存的那份，没改过就是内置的）。
@@ -91,7 +95,7 @@ export const chartFeatureDef = (id: string): DeepDigFeatureDef | undefined => ac
  * 图上窗口按根计、基线按 5 分钟图计（所有周期一样），与原来的副图同一约定。
  */
 const CHART_PARAM: Record<string, { param: 'hl' | 'avgh' } | { constant: string }> = {
-  'drift-speed': { param: 'hl' }, 'drift-speed-z': { param: 'hl' }, cba: { param: 'hl' }, 'cba-2': { param: 'hl' },
+  prs6h:{param:'hl'}, ati6h:{param:'hl'}, 'drift-speed': { param: 'hl' }, 'drift-speed-z': { param: 'hl' }, cba: { param: 'hl' }, 'cba-2': { param: 'hl' },
   state: { param: 'avgh' }, state2: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
   ctba: { constant:'N' }, cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
 };
@@ -103,6 +107,7 @@ export function hasSavedFeatureDefinition(id: string): boolean {
 }
 /** A scalar in the saved formula is authoritative until the chart is manually overridden. */
 export function chartFeaturePeriod(def: DeepDigFeatureDef, fallback = 6): number {
+  if(featureTemplateId(def)==='prs6h'&&def.PRS6H_config?.evidenceHalfLifeMinutes)return def.PRS6H_config.evidenceHalfLifeMinutes/60;
   if(featureUsesMbi2(def))return mbi2HoursOf(def,intervalMs(def.interval??'5m')/60000);
   if (featureUsesMbi(def)) return mbiNOf(def);
   const binding = CHART_PARAM[featureTemplateId(def) ?? ''];
@@ -166,6 +171,8 @@ const historyBarsCache = new Map<string, number>();
 export function chartFeatureHistoryBars(featureId: string, period: number, formula: string, barMinutes = 5): number {
   const def = chartFeatureDef(featureId);
   if (!def) return 0;
+  if(featureTemplateId(def)==='prs6h')return Math.ceil(24*60/barMinutes);
+  if(featureTemplateId(def)==='ati6h')return Math.ceil((def.ATI6H_parameters?.WINDOW_HOURS??6)*60/barMinutes)+5*mbi2NOf(ati6hDependencyOf(def),barMinutes)+2;
   const usesMbi = featureUsesMbi(def), usesMbi2=featureUsesMbi2(def);
   if(usesMbi2&&!def.retentionSourceId)return Math.ceil(48*60/barMinutes)+5*mbi2NOf({...def,MBI2_T_HOURS:period},barMinutes);
   const binding = CHART_PARAM[featureTemplateId(def) ?? featureId];
@@ -231,10 +238,12 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   if(usesMbi2)Object.assign(params,{id:def.id,formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===mbi2Minutes*60000)??def.interval??'5m',
     MBI2_T_HOURS:has?p:mbi2HoursOf(def,mbi2Minutes),MBI2_Z0:def.MBI2_Z0,MBI2_BAND:mbi2BandOf(def),MBI2_CONFIRM:mbi2ConfirmOf(def)});
+  if(templateId==='prs6h'){const minutes=inferResearchMinutes(dataList),symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'prs6h',formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m',PRS6H_config:{...def.PRS6H_config,...(has?{evidenceHalfLifeMinutes:p*60}:{})},PRS6H_symbol:symbol,PRS6H_tick_size:typeof dataList[0]?.PRS6H_tick_size==='number'?dataList[0].PRS6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
+  if(templateId==='ati6h'){const minutes=inferResearchMinutes(dataList),symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'ati6h',formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m',ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:ati6hDependencyOf(def),ATI6H_tick_size:typeof dataList[0]?.ATI6H_tick_size==='number'?dataList[0].ATI6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
   if(def.retentionSourceId){const minutes=inferResearchMinutes(dataList);Object.assign(params,{interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m'});}
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
-  const mbi2Key=usesMbi2?`|${JSON.stringify(params)}`:'';
+  const mbi2Key=['ati6h','prs6h'].includes(templateId??'')?`|${JSON.stringify(params)}|${ati6hMarketVersion()}`:usesMbi2?`|${JSON.stringify(params)}`:'';
   const mbiKey = (usesMbi ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : mbi2Key)+(def.retentionSourceId?`|retention:${params.interval}`:'');
   const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}${mbiKey}`;
   const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
@@ -265,18 +274,20 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
       const d = dataList[i];
       const b = bars[i] ?? (bars[i] = {} as ResearchBar);
       b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low;
-      b.close = (def.retentionSourceId || usesMbi || usesMbi2 || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
+      b.close = (def.retentionSourceId || usesMbi || usesMbi2 || ['ati6h','prs6h'].includes(templateId??'') || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
-      b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
-      b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
+      b.quoteVolume = ['ati6h','prs6h'].includes(templateId??'')&&typeof d.ATI6H_quoteVolume==='number'?d.ATI6H_quoteVolume:typeof d.turnover === 'number' ? d.turnover : null;
+      b.takerBuyQuoteVolume = ['ati6h','prs6h'].includes(templateId??'')&&typeof d.ATI6H_takerBuyQuoteVolume==='number'?d.ATI6H_takerBuyQuoteVolume:typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
       if ((def.retentionSourceId || templateId === 'ctba') && !Number.isFinite(b.close)) {
         // Components must also hide forming VWAP/flow, not only the final score.
         b.volume = NaN; b.quoteVolume = null; b.takerBuyQuoteVolume = null;
       }
+      if(templateId==='prs6h')b.PRS6H_closed=d.cba2Closed!==false&&d.timestamp+intervalMs(params.interval)<=Date.now();
       b.refClose = refClose?.[i] ?? null;
     }
     chartBarBuffers.set(cache, bars);
     out = evaluateOnBars(bars, compiled.compiled, params, cache);
+    if(out.PRS6H_checkpoint)void savePrsCheckpoint(out.PRS6H_checkpoint);
   } catch { return null; }
   const toArr = (v: unknown): (number | null)[] => {
     if (typeof v === 'number') return bars.map(() => (Number.isFinite(v) ? v : null));

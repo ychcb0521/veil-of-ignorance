@@ -19,7 +19,7 @@ vi.mock('@/components/FishPanel', () => ({ FISH_DEFAULT_ALGORITHMS: ['cbi2'], Fi
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
 
 it('keeps the actual capture controller alive while the fish panel is recovered', async () => {
-  vi.spyOn(console, 'error').mockImplementation(() => {}); saveFishAuto({ mode: 'manual', hours: 1, lastRunAt: null });
+  vi.spyOn(console, 'error').mockImplementation(() => {}); saveFishAuto({ mode: 'manual', hours: 1, lastRunAt: Date.now() });
   let task!: { signal: AbortSignal; onProgress: (p: FishProgress) => void }, finish!: () => void;
   mocks.broken = false; mocks.scan.mockImplementation(async options => { task = options; await new Promise<void>(resolve => { finish = resolve; }); return initialFishProgress(); });
   render(<TimeControl status="paused" currentSimulatedTime={123} speed={1} onStart={() => {}} onPause={() => {}} onResume={() => {}} onStop={() => {}} onSetSpeed={() => {}}/>);

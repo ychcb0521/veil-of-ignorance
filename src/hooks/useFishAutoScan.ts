@@ -12,14 +12,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFishFeatures } from './useFishFeatures';
 import { loadFishCardsForScan, readFishCombination } from '@/lib/fish/cards';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
-import { fishAutoNextAt, readFishAuto, releaseFishAutoLease, saveFishAuto, takeFishAutoLease, type FishAutoMode, type FishAutoState } from '@/lib/fish/autoScan';
+import { fishAutoNextAt, readFishAuto, resetFishAuto, releaseFishAutoLease, saveFishAuto, takeFishAutoLease, type FishAutoMode, type FishAutoState } from '@/lib/fish/autoScan';
 import type { FishScanSettings } from '@/lib/fishScanner';
 
 const TICK_MS = 30_000, RETRY_MS = 5 * 60_000;
 const online = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 export interface FishAutoScan {
   mode: FishAutoMode; hours: number; nextAt: number | null; lastRunAt: number | null; error: string; online: boolean; waiting: boolean;
-  setMode: (mode: FishAutoMode) => void; setHours: (hours: number) => void; noteManualRun: () => void;
+  setMode: (mode: FishAutoMode) => void; setHours: (hours: number) => void; noteManualRun: () => void; resetDefaults: () => void;
 }
 export function useFishAutoScan(o: { account?: string; selection: FishScanSelection; start: (settings: FishScanSettings) => Promise<unknown> | void; busy: () => boolean }): FishAutoScan {
   const defs = useFishFeatures();
@@ -33,7 +33,8 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   const owner = useRef(`tab-${Math.random().toString(36).slice(2)}-${Date.now()}`);
   const runningRef = useRef(false), retryAt = useRef(0);
   const setState = useCallback((next: FishAutoState) => { stateRef.current = next; setStateRaw(next); saveFishAuto(next); }, []);
-  useEffect(() => { const s = readFishAuto(); stateRef.current = s; setStateRaw(s); setError(''); retryAt.current = 0; }, [o.account]);
+  const resetDefaults = useCallback(() => { const s = resetFishAuto(); stateRef.current = s; setStateRaw(s); setError(''); setWaiting(false); retryAt.current = 0; }, []);
+  useEffect(resetDefaults, [o.account, resetDefaults]);
 
   const tick = useCallback(async () => {
     const s = stateRef.current, now = Date.now();
@@ -45,8 +46,9 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
     if (latest.current.busy()) { setWaiting(true); return; }
     if (!takeFishAutoLease(owner.current, now)) { setWaiting(true); return; }
     // 另一个标签页刚捕过（租约交接期间）：以本机保存的最新时刻为准
-    const fresh = readFishAuto();
-    if (fresh.mode !== 'auto' || (fishAutoNextAt(fresh) ?? Infinity) > now) { stateRef.current = fresh; setStateRaw(fresh); releaseFishAutoLease(owner.current); return; }
+    const saved = readFishAuto();
+    const fresh = { ...s, lastRunAt: Math.max(s.lastRunAt ?? 0, saved.lastRunAt ?? 0) || null };
+    if ((fishAutoNextAt(fresh) ?? Infinity) > now) { stateRef.current = fresh; setStateRaw(fresh); releaseFishAutoLease(owner.current); return; }
     const cards = loadFishCardsForScan(defsRef.current.map(d => d.id));
     const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '', lookbackHours:readFishLookback() });
     if (built.error !== undefined) { setError(`自动捕捞没开始：${built.error}`); retryAt.current = now + RETRY_MS; releaseFishAutoLease(owner.current); return; }
@@ -73,5 +75,5 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   const setMode = useCallback((mode: FishAutoMode) => { retryAt.current = 0; setError(''); setState({ ...stateRef.current, mode, ...(mode === 'auto' && stateRef.current.mode !== 'auto' ? { lastRunAt: null } : {}) }); }, [setState]);
   const setHours = useCallback((hours: number) => setState({ ...stateRef.current, hours }), [setState]);
   const noteManualRun = useCallback(() => { if (stateRef.current.mode === 'auto') setState({ ...stateRef.current, lastRunAt: Date.now() }); }, [setState]);
-  return { mode: state.mode, hours: state.hours, nextAt: fishAutoNextAt(state), lastRunAt: state.lastRunAt, error, online: isOnline, waiting, setMode, setHours, noteManualRun };
+  return { mode: state.mode, hours: state.hours, nextAt: fishAutoNextAt(state), lastRunAt: state.lastRunAt, error, online: isOnline, waiting, setMode, setHours, noteManualRun, resetDefaults };
 }

@@ -50,7 +50,7 @@ const lastDialogProps = () => dialogProps.mock.calls[dialogProps.mock.calls.leng
 const openNoEntry = () => fireEvent.click(screen.getAllByTitle(/未下单但全程观察/)[0]);
 
 beforeEach(() => {
-  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:Date.now()});
   dialogProps.mockClear();
   getTimelineId.mockClear();
 });

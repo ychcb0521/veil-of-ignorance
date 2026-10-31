@@ -1,3 +1,5 @@
+import {PRS6H_STATES} from '@/lib/prs6h';
+import {ATI6H_COMPONENTS,ATI6H_LABELS} from '@/lib/ati6h';
 import {chartAtr} from '@/lib/atr';
 import { RETENTION_COMPONENT_LABELS } from '@/lib/sellerRetention';
 import { accountResearchIndicators, researchDefaultPeriod, type ResearchIndicator } from '@/lib/researchIndicators';
@@ -325,7 +327,7 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
   CBI2: [{ key: 'CBI2#AVG', kcName: 'CBI2_AVG_CUSTOM' }, { key: 'CBI2#AVG2', kcName: 'CBI2_AVG2_CUSTOM' }],
   CTBA: [{key:'CTBA#AVG',kcName:'CTBA_AVG_CUSTOM'},{key:'CTBA#AVG2',kcName:'CTBA_AVG2_CUSTOM'}],
   MBI: [{ key: 'MBI#AVG', kcName: 'MBI_AVG_CUSTOM' }, { key: 'MBI#AVG2', kcName: 'MBI_AVG2_CUSTOM' }],
-  ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, [
+  ...Object.fromEntries(RESEARCH_INDICATORS.filter(item=>!('rawOnly' in item&&item.rawOnly)).map(item => [item.id, [
     { key: `${item.id}#AVG`, kcName: researchKcName(item.id, 1) },
     { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
   ]])),
@@ -335,9 +337,9 @@ const registeredAccountIndicators = new Set<string>();
 export function registerAccountFeatureIndicators(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()) {
   for (const item of accountResearchIndicators(definitions).filter(item => item.id.startsWith('FEATURE_'))) {
     CUSTOM_INDICATOR_MAP[item.id] = researchKcName(item.id);
-    INDICATOR_COMPANIONS[item.id] = [1, 2].map(level => ({ key: item.id + '#AVG' + (level === 2 ? '2' : ''), kcName: researchKcName(item.id, level) }));
+    INDICATOR_COMPANIONS[item.id] = (item.rawOnly?[]:[1, 2]).map(level => ({ key: item.id + '#AVG' + (level === 2 ? '2' : ''), kcName: researchKcName(item.id, level) }));
     if (registeredAccountIndicators.has(item.id)) continue;
-    for (const level of [0, 1, 2]) {
+    for (const level of (('rawOnly' in item&&item.rawOnly)?[0]:[0, 1, 2])) {
       const label = level === 0 ? item.short : 'avg_' + item.core + (level === 2 ? '_2' : '');
       const color=(v:number|undefined)=>item.templateId!=='STATE'?vColor(v):v==null?'#F0B90B':level===0&&v>=.5&&v<=.6?'#FFD600':v>item.neutral?'#0ECB81':v===item.neutral?'#F0B90B':'#F6465D';
       registerIndicator({
@@ -1470,7 +1472,7 @@ export function registerCustomIndicators() {
 
   // One source of truth: the account's Deep dig formula, including both named averages.
   for (const item of RESEARCH_INDICATORS) {
-    for (const level of [0, 1, 2]) {
+    for (const level of (('rawOnly' in item&&item.rawOnly)?[0]:[0, 1, 2])) {
       const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
       // 均值线可单独设橘色线（avgNeutral）；没设就与原始值相同
       const line = level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
@@ -1484,6 +1486,22 @@ export function registerCustomIndicators() {
           return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);
         },
         createTooltipDataSource: ({ indicator, defaultStyles, crosshair }) => {
+          if(item.id==='PRS6H'){
+            const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined,fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':Number(v.toPrecision(7)).toString();
+            return {name:label,calcParamsText:`6h · ${PRS6H_STATES[row?.PRS6H_state_code??-1]??'DATA_UNAVAILABLE'} · 研究初值`,icons:defaultStyles.tooltip.icons,values:[{title:'证据分: ',value:fmt(row?.value)},{title:'原始证据: ',value:fmt(row?.PRS6H_evidence_raw)},...['T','S','D','B','V'].map(k=>({title:k+': ',value:fmt(row?.['PRS6H_'+k])})),{title:'市场就绪: ',value:row?.PRS6H_market_ready===1?'是':row?.PRS6H_market_ready===0?'否':'未知'},...[['PRS6H_support','固定支撑'],['PRS6H_platform_upper','平台上沿'],['PRS6H_invalidation','失效参考K']].map(([key,title])=>({title:title+': ',value:fmt(row?.[key])}))]};
+          }
+          if(item.id==='ATI6H'){
+            const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
+            const fmt=(n:number|undefined)=>n==null||!Number.isFinite(n)?'—':Number(n.toPrecision(7)).toString();
+            const weakest=ATI6H_COMPONENTS.find(k=>row?.['ATI6H_s'+k]===row?.ATI6H_min);
+            const status=({'1':'有效结构','0':'尚无结构','-1':'支撑已破位','-2':'结构过期','-3':'数据中断','-4':'等待新结构'} as Record<string,string>)[String(row?.ATI6H_structure_status_code)]??'数据不足';
+            return {name:label,calcParamsText:`6h · 证据半衰期 ${indicator.calcParams[0]}h · ${status}`,icons:defaultStyles.tooltip.icons,values:[
+              {title:'ATI-6H: ',value:fmt(row?.value)},
+              ...ATI6H_COMPONENTS.map(k=>({title:k+' '+ATI6H_LABELS[k]+': ',value:fmt(row?.['ATI6H_s'+k])})),
+              {title:'最弱项: ',value:weakest??'—'},
+              ...[['ATI6H_support_price','固定支撑'],['ATI6H_support_failure_price','失效参考价'],['ATI6H_breakout_price','固定突破线'],['ATI6H_nearest_resistance_price','最近阻力']].map(([key,title])=>({title:title+': ',value:fmt(row?.[key])})),
+            ]};
+          }
           const retentionDef=chartFeatureDef(item.featureId);
           if(retentionDef?.retentionSourceId){const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;const prefix=retentionDef.retentionPrefix??'sr';const keys=['base','retention_z','price_z','support','flow','impact','anomaly_z'];const fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':v.toFixed(5);return {name:retentionDef.short,calcParamsText:`(${indicator.calcParams[0]}) · 独立参数v1`,icons:defaultStyles.tooltip.icons,values:[{title:'增强读数: ',value:fmt(row?.value)},...keys.map((key,i)=>({title:RETENTION_COMPONENT_LABELS[i]+': ',value:fmt(row?.[prefix+'_'+key])}))]};}
           if(item.id==='MBI2'||item.id==='MBI2_BEAR'){

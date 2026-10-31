@@ -4,7 +4,7 @@ export const EXCHANGE_PRIORITY: readonly FishExchange[] = ['binance', 'okx', 'by
 export const EXCHANGE_NAMES: Record<FishExchange, string> = { binance: '币安', okx: 'OKX', bybit: 'Bybit', bitget: 'Bitget', gate: 'Gate', kucoin: 'KuCoin 合约', mexc: 'MEXC 合约' };
 export const AUDITED_EXCHANGES: readonly FishExchange[] = ['binance', 'okx', 'bitget', 'gate'];
 export const US_STOCK_EXCHANGES: readonly FishExchange[] = ['binance', 'bitget'];
-export interface FishMarket { symbol: string; instrument: string; base: string; multiplier: number; market?: 'us_stock'; underlying?: string; }
+export interface FishMarket { tickSize?:number; symbol: string; instrument: string; base: string; multiplier: number; market?: 'us_stock'; underlying?: string; }
 export const fishMarketKey = (m: FishMarket): string => m.market === 'us_stock' ? `us:${(m.underlying || m.base).toUpperCase()}` : `crypto:${fishBase(m.base)}`;
 /** Explicit denomination aliases; never strip arbitrary leading digits (1INCH is a coin). */
 export function fishBase(base: string): string {

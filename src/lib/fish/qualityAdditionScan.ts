@@ -15,9 +15,11 @@ interface ScanOptions {
 function observation(candidate:AdditionCandidate,bars:readonly ResearchBar[],values:ReturnType<typeof evaluateFishProgram>,i:number,entry:number):QualityAdditionObservation|undefined{
  const {plan}=candidate,at=bars[i].openTime+plan.step,first=Math.floor(entry/plan.step)*plan.step+plan.step,reading=values.average[i]*candidate.scale;
  if(!Number.isFinite(reading)||values.constraints.some(c=>!Number.isFinite(c[i])))throw Error('加仓探测存在缺失读数，不能越过缺口判断加仓');
+ const prsEvidence=values.PRS6H_details?.find(r=>r.PRS6H_at===at);
+ if(plan.compiled.usesPrs6h&&!prsEvidence?.PRS6H_event)return;
  if(!(candidate.direction==='>'?reading>candidate.threshold:reading<candidate.threshold)||values.constraints.some(c=>!c[i]))return;
  if(plan.stateHold&&!(plan.stateHoldAlternatives??[plan.stateHold]).some(route=>at>=first+(route.samples-1)*plan.step&&i>=route.samples-1&&values.average.subarray(i-route.samples+1,i+1).every(v=>Number.isFinite(v)&&v>route.threshold)))return;
- return {at,reading,threshold:candidate.threshold,direction:candidate.direction,metric:candidate.metric,label:candidate.label,featureId:candidate.featureId,definitionKey:candidate.definitionKey,barOpenTime:bars[i].openTime};
+ return {...(prsEvidence?{prsEvidence}:{}),at,reading,threshold:candidate.threshold,direction:candidate.direction,metric:candidate.metric,label:candidate.label,featureId:candidate.featureId,definitionKey:candidate.definitionKey,barOpenTime:bars[i].openTime};
 }
 /** At t use only the most recent fully closed bar, never the forming/future bar. */
 function constraintReader(candidate:AdditionCandidate,o:ScanOptions){

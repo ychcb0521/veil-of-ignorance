@@ -1,3 +1,8 @@
+import type {PrsRow,PrsCheckpoint} from '@/lib/prs6h';
+import {evaluatePrs6h} from '@/lib/prs6hEvaluation';
+import {savePrsCheckpoint} from '@/lib/prs6hPersistence';
+import type { AtiRow, AtiStructure } from '@/lib/ati6h';
+import { ati6hTickSize } from '@/lib/ati6hMarketData';
 import { scanMbi2, finishMbi2Evaluation, recommendMbi2Campaign, type Mbi2StudySample, type Mbi2Evaluation } from './mbi2Evaluation';
 import { extractWindow } from '@/lib/deepRsa/window';
 import { fetchResearchKlines, intervalMs } from '@/lib/deepRsa/marketData';
@@ -21,7 +26,7 @@ import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { WINDOW_MS } from '@/lib/deepRsa/grouping';
 import {
-  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, evaluateOnBars, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
+  ati6hDependencyOf, campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, evaluateOnBars, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 
@@ -37,9 +42,13 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config'>;
 
 export interface DeepDigRow {
+  PRS6H_details?:PrsRow;
+  PRS6H_checkpoint?:Omit<PrsCheckpoint,'points'|'active'|'references'|'obstacles'|'archive'|'event_ids'|'last_row'>;
+  ATI6H_details?:AtiRow;
+  ATI6H_archive?:AtiStructure[];
   reason?: string;
   id: string;
   symbol: string;
@@ -77,6 +86,7 @@ export interface DeepDigGroupStat {
  * 【用户要求】2026-10-16「描述统计和推断统计的运行要分开」：这一步要联网取 K 线（1–3 分钟）；推断统计只用这里的数据。
  */
 export interface DeepDigData {
+  PRS6H_evaluation?:ReturnType<typeof evaluatePrs6h>[];
   mbi2Evaluation?:Mbi2Evaluation;
   /** 当前推断输入的相对进场取样时点；未指定 = 进场。 */
   sampleOffsetMs?: number;
@@ -117,7 +127,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
+  return { ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -196,6 +206,13 @@ export async function collectDeepDigRun(
   options: CollectOptions = {},
 ): Promise<{ data: DeepDigData; series: DeepDigSeries }> {
   const startedAt = Date.now();
+  if(featureTemplateId(def)==='ati6h'&&!def.ATI6H_dependency)def={...def,ATI6H_dependency:ati6hDependencyOf(def)};
+  const prsDetails=new Map<string,{row:PrsRow;checkpoint:PrsCheckpoint}>();
+  const PRS6H_windows:NonNullable<DeepDigSeries['PRS6H_windows']>={};
+  const PRS6H_evaluation:ReturnType<typeof evaluatePrs6h>[]=[];
+  const prsTick=new Map<string,number|null>();
+  const atiDetails=new Map<string,{row:AtiRow;archive:AtiStructure[]}>();
+  const ATI6H_windows:NonNullable<DeepDigSeries['ATI6H_windows']>={};
   // 带上 id：CBA-2 的观察窗（48 + avgh + 1 小时）与周期按 id 特判，缺了 id 曲线会按普通 48 小时截取，进场前的点全缺
   const params = { ...def, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
   const range = seriesRangeOf(def);
@@ -217,7 +234,11 @@ export async function collectDeepDigRun(
     // 信号不合簇：每条信号（有时间、有评级）都单独是一个事件，跟有没有交易战役无关
     cluster: source !== 'signals',
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
-    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory } } : {}),
+    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory, ...(['ati6h','prs6h'].includes(featureTemplateId(def)??'')?{strictAmounts:true}:{}) } } : {}),
+    ...(['ati6h','prs6h'].includes(featureTemplateId(def)??'')?{prepareFeatureBars:async(symbol:string,bars:readonly import('@/lib/deepRsa/window').ResearchBar[])=>{
+      const tick=await ati6hTickSize(symbol,options.fetchFn,options.signal);
+      prsTick.set(symbol,tick);return bars.map(bar=>({...bar,ATI6H_tick_size:tick,PRS6H_tick_size:tick}));
+    }}:{}),
     seriesRange: range,
     // 【用户要求】公式用到 CB（同时段 BTCUSDT 收盘价，CBI-2 剔除 BTC 的动量）时另取 BTC 的 K 线
     ...(compiled.usesBtc ? { referenceSymbol: 'BTCUSDT' } : {}),
@@ -225,8 +246,24 @@ export async function collectDeepDigRun(
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
       const ownWindow=featureUsesMbi2(def)&&window?extractWindow(window.bars,ctx.anchorMs,featureWindowMs(def),intervalMs(intervalOf(def))):window;
-      const { value, vars } = computeFeatureValues(ownWindow, compiled, params);
+      const scopedParams=featureTemplateId(def)==='prs6h'?{...params,PRS6H_symbol:ctx.symbol}:params;
+      const inputWindow=featureTemplateId(def)==='prs6h'&&window&&ctx.bars?{...window,bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)}:ownWindow;
+      const { value, vars } = computeFeatureValues(inputWindow, compiled, scopedParams);
       if(mbi2Tuning&&ctx.bars)mbi2Samples.push({id:ctx.id,anchorMs:ctx.anchorMs,group:'other',bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)});
+      if(featureTemplateId(def)==='prs6h'&&inputWindow){
+        const out=evaluateOnBars(inputWindow.bars,compiled,scopedParams),row=out.PRS6H_details?.at(-1),checkpoint=out.PRS6H_checkpoint;
+        if(row&&checkpoint){prsDetails.set(ctx.id,{row,checkpoint});void savePrsCheckpoint(checkpoint);}
+        const begin=ctx.anchorMs-6*3600000;
+        PRS6H_windows[ctx.id]={checkpoint,rows:(out.PRS6H_details??[]).filter(r=>r.PRS6H_at>begin),prices:inputWindow.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))>begin).map(b=>({time:b.openTime+intervalMs(intervalOf(def)),close:b.close}))};
+        if(ctx.bars)PRS6H_evaluation.push(evaluatePrs6h(out.PRS6H_details??[],ctx.outcomeBars,5));
+      }
+      if(featureTemplateId(def)==='ati6h'&&window){
+        const out=evaluateOnBars(window.bars,compiled,params);
+        const row=out.ATI6H_details?.at(-1);
+        if(row)atiDetails.set(ctx.id,{row,archive:out.ATI6H_archive??[]});
+        const begin=ctx.anchorMs-(def.ATI6H_parameters?.WINDOW_HOURS??6)*3600000;
+        ATI6H_windows[ctx.id]={rows:(out.ATI6H_details??[]).filter(row=>row.ATI6H_at>begin),prices:window.bars.filter(bar=>bar.openTime+intervalMs(intervalOf(def))>begin).map(bar=>({time:bar.openTime+intervalMs(intervalOf(def)),close:bar.close}))};
+      }
       if(featureTemplateId(def)==='ctba' && window){
         const out=evaluateOnBars(window.bars,compiled,params);
         const windowHours=def.researchWindowHours ?? 48, slots=Math.round(windowHours*12);
@@ -240,19 +277,21 @@ export async function collectDeepDigRun(
         anchorWindows[ctx.id]={startMs,stepMs:300000,values};
       }
       if (ctx.bars) {
-        const s = computeEventSeries(ctx.bars, ctx.anchorMs, compiled, params, names, offsets);
+        const s = computeEventSeries(ctx.bars, ctx.anchorMs, compiled, scopedParams, names, offsets);
         if (s) byEvent[ctx.id] = s;
       }
       return { [DEEP_DIG_KEY]: value, ...Object.fromEntries(Object.entries(vars).map(([k, x]) => [VAR_PREFIX + k, x])) };
     },
   });
   const described = describeDeepDig(collected.events);
+  for(const row of described.rows){const prs=prsDetails.get(row.id);if(prs){row.PRS6H_details=prs.row;const {points,active,references,obstacles,archive,event_ids,last_row,...metadata}=prs.checkpoint;row.PRS6H_checkpoint=metadata;}const detail=atiDetails.get(row.id);if(detail){row.ATI6H_details=detail.row;row.ATI6H_archive=detail.archive;}}
   // Kept in Other for visibility/counts, but never enter the price-fetching event rows or inference.
   const unsupported=samples.filter(s=>s.unsupportedReason);
   described.rows.push(...unsupported.map(s=>({id:s.id,symbol:s.symbol,anchorMs:s.anchorMs??0,group:'other' as const,memberIds:[s.id],v:null,vol:null,vars:{},endRet:null,maxUp:null,maxDown:null,period:'discovery' as const,reason:s.unsupportedReason})));
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });
   const finishedAt = Date.now();
   const data: DeepDigData = {
+    ...(PRS6H_evaluation.length?{PRS6H_evaluation}:{}),
     definition: snapshotOf(def),
     codeVersion: CODE_VERSION,
     startedAt,
@@ -283,7 +322,7 @@ export async function collectDeepDigRun(
     }
     data.mbi2Evaluation=finishMbi2Evaluation(scans,recommendations,data.definition,minutes);
   }
-  return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(featureTemplateId(def)==='ctba'?{anchorWindows}:{}) } };
+  return { data, series: { PRS6H_windows, ATI6H_windows, finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(featureTemplateId(def)==='ctba'?{anchorWindows}:{}) } };
 }
 
 // ===================== 规律提取：按结果生成的默认文字 =====================

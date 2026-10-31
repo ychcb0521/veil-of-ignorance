@@ -25,21 +25,27 @@ it('默认自动、每 1 小时：立即捕第一次，未到下一次时间不�
  await flush(HOUR-60_000);expect(start).toHaveBeenCalledTimes(1);
  await flush(90_000);expect(start).toHaveBeenCalledTimes(2);
 });
-it('手动选择仍然保存，刷新后手动模式不自动捕',async()=>{
- saveFishAuto({mode:'manual',hours:2,lastRunAt:null});
- const {start,view}=hook();await flush(10*HOUR);
- expect(view.result.current.mode).toBe('manual');expect(view.result.current.hours).toBe(2);expect(start).not.toHaveBeenCalled();
+it('每次打开恢复自动 1h，保留上次扫描时间；本次手动修改持续生效',async()=>{
+ const lastRunAt=Date.now();saveFishAuto({mode:'manual',hours:64,lastRunAt});
+ const {start,view}=hook();await flush();
+ expect(view.result.current).toMatchObject({mode:'auto',hours:1,lastRunAt});expect(start).not.toHaveBeenCalled();
+ act(()=>{view.result.current.setHours(2);view.result.current.setMode('manual');});
+ await flush(3*HOUR);expect(view.result.current.mode).toBe('manual');expect(start).not.toHaveBeenCalled();
+ view.unmount();const reopened=hook();await flush();
+ expect(reopened.view.result.current).toMatchObject({mode:'auto',hours:1});expect(reopened.start).toHaveBeenCalledTimes(1);
+ await flush(HOUR);expect(reopened.start).toHaveBeenCalledTimes(2);
 });
-it('旧版手动设置升级到自动一次，保留间隔和上次时间；之后再选手动不会重置',()=>{
- const old={mode:'manual',hours:4,lastRunAt:Date.now()-HOUR};
- writePersistedStateRaw(fishAutoKey(),JSON.stringify(old));
- expect(readFishAuto()).toEqual({...old,mode:'auto'});
- saveFishAuto({...old,mode:'manual'});
- expect(readFishAuto()).toEqual(old);
+it('重新打开渔恢复每小时，实际扫描沿用临时间隔直到重新打开',async()=>{
+ const {view,start}=hook();await flush();
+ act(()=>view.result.current.setHours(2));await flush(HOUR);expect(start).toHaveBeenCalledTimes(1);
+ await flush(HOUR);expect(start).toHaveBeenCalledTimes(2);
+ act(()=>view.result.current.resetDefaults());expect(view.result.current.hours).toBe(1);
+ await flush(HOUR);expect(start).toHaveBeenCalledTimes(3);
 });
 it('切到自动立刻捕第一次（时间 = 现在，四条默认规则），之后每隔所选时长一次，没到点不捕',async()=>{
  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
- const {start,view}=hook();
+ const {start,view}=hook();await flush();start.mockClear();
+ act(()=>view.result.current.setMode('manual'));
  act(()=>{view.result.current.setHours(2);});act(()=>{view.result.current.setMode('auto');});await flush();
  expect(start).toHaveBeenCalledTimes(1);
  const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','cba','cbi2','cba']);expect(s.turnoverFloors).toHaveLength(3);expect(s.downwardWick).toEqual({enabled:true,hours:48,atrMultiple:3});

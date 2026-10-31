@@ -1,3 +1,5 @@
+import {Prs6hEvidenceView} from './Prs6hEvidenceView';
+import { Ati6hEvidenceView } from './Ati6hEvidenceView';
 import { Mbi2EvaluationView } from './Mbi2EvaluationView';
 import { mbi2KeysOf, MBI2_LABELS, MBI2_TOOLTIP, mbi2NOf, mbi2StateLabel } from '@/lib/mbi2';
 import { intervalMs } from '@/lib/deepRsa/marketData';
@@ -493,6 +495,8 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
           {def.researchWindowHours != null ? <>各组平均 · 入场前 {formatHoursText(def.researchWindowHours)} · {liveSeries?.offsets.length ?? Math.round(def.researchWindowHours*12)} 个已收盘{intervalOf(def)}时间点</> : <>各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）</>}
         </span>
       )} testId="deep-dig-series-block">
+        {featureTemplateId(def)==='prs6h'&&<Prs6hEvidenceView data={result} series={liveSeries}/>}
+        {featureTemplateId(def)==='ati6h'&&<Ati6hEvidenceView data={result} series={liveSeries}/>}
         <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />
       </Block>
 
