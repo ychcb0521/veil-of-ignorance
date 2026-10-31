@@ -20,8 +20,8 @@
  * 空白的本机数据永远不会盖掉云端已有内容（除非它是同步过之后用户自己清空的）。
  */
 import { supabase } from '@/integrations/supabase/client';
-import { serializeAccountBlob, deserializeAccountBlob } from './accountBlobCodec';
-export { serializeAccountBlob, deserializeAccountBlob } from './accountBlobCodec';
+import { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
+export { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
 
 export const ACCOUNT_BLOB_PREFIX = 'idb:';
 const CHUNK_CHARS = 900_000;
@@ -119,16 +119,6 @@ async function pipe(bytes: Uint8Array, stream: CompressionStream | Decompression
   void writer.write(bytes as unknown as BufferSource).catch(() => {}); void writer.close().catch(() => {});
   return new Uint8Array(await new Response(stream.readable).arrayBuffer());
 }
-/** 内容指纹（FNV-1a，两轮不同种子拼成 64 位），只用来判断「和上次传的是不是同一份」。 */
-export function fingerprintAccountBlob(json: string): string {
-  let a = 0x811c9dc5, b = 0x01000193 ^ json.length;
-  for (let i = 0; i < json.length; i += 1) {
-    const c = json.charCodeAt(i);
-    a = Math.imul(a ^ c, 0x01000193);
-    b = Math.imul(b ^ c, 0x5bd1e995);
-  }
-  return `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${json.length}`;
-}
 export async function encodeAccountBlob(value: unknown, serialized?: string): Promise<{ enc: Head['enc']; text: string; bytes: number }> {
   const json = serialized ?? serializeAccountBlob(value);
   if (typeof CompressionStream === 'function') {
@@ -138,6 +128,21 @@ export async function encodeAccountBlob(value: unknown, serialized?: string): Pr
     } catch { /* 压缩不可用时原样存 */ }
   }
   return { enc: 'json', text: json, bytes: json.length };
+}
+
+export interface PreparedAccountBlob {hash:string;encoded?:{enc:'gzip'|'json';text:string;bytes:number}}
+/** Serialization, hashing and packing stay off the UI thread, including unchanged saves. */
+export async function prepareAccountBlob(value:unknown,knownHash?:string):Promise<PreparedAccountBlob>{
+  if(typeof Worker==='function')return new Promise((resolve,reject)=>{
+    const worker=new Worker(new URL('./workers/accountBlobEncoder.worker.ts',import.meta.url),{type:'module'});
+    const finish=()=>{clearTimeout(timer);worker.terminate();};
+    const timer=setTimeout(()=>{finish();reject(new Error('账号研究档案编码超时'));},180_000);
+    worker.onmessage=event=>{finish();event.data.ok?resolve({hash:event.data.hash,encoded:event.data.encoded}):reject(new Error('账号研究档案编码失败'));};
+    worker.onerror=()=>{finish();reject(new Error('账号研究档案编码失败'));};
+    try{worker.postMessage({value,knownHash});}catch(error){finish();reject(error);}
+  });
+  const json=serializeAccountBlob(value),hash=fingerprintAccountBlob(json);
+  return {hash,...(hash===knownHash?{}:{encoded:await encodeAccountBlob(value,json)})};
 }
 export async function decodeAccountBlob(enc: Head['enc'], text: string): Promise<unknown> {
   if (typeof Worker === 'function' && text.length > 1_000_000) {
@@ -253,8 +258,8 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
     await writeMeta(adapter.name, owner, { savedAt, syncedAt: savedAt, parts: 0 });
     return true;
   }
-  const json = value === undefined ? undefined : serializeAccountBlob(value);
-  const hash = json === undefined ? 'deleted' : fingerprintAccountBlob(json);
+  const prepared=value===undefined?undefined:await prepareAccountBlob(value,head?.rev===meta?.rev?meta?.hash:undefined);
+  const hash=prepared?.hash??'deleted';
   if (head && meta?.rev && head.rev === meta.rev && meta.hash === hash) {
     // 云端仍是上次那一版、内容也一样：只记一笔已同步。
     const latest = await readMeta(adapter.name, owner);
@@ -267,7 +272,8 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   if (value === undefined) {
     nextHead = { v: 1, rev, parts: 0, savedAt, enc: 'json', bytes: 0, deleted: true };
   } else {
-    const encoded = await encodeAccountBlob(value, json);
+    const encoded=prepared?.encoded;
+    if(!encoded)throw new Error('账号研究档案编码未完成');
     parts = Math.max(1, Math.ceil(encoded.text.length / CHUNK_CHARS));
     for (let i = 0; i < parts; i += 1) {
       await upsertRow(owner, chunkKey(adapter.name, i), { rev, data: encoded.text.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
