@@ -4,6 +4,7 @@ import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,type AdditionCandidate} from './qualityAdditionScan';
 import {qualityAdditionAtrSettings,type QualityAdditionFill,type QualityAdditionRoundRule} from './qualityAddition';
+import {createStructureAdditionReader,structureAdditionK,type StructureAdditionRule} from './qualityAdditionStructure';
 import {ADDITION_PROFIT_KIND,activeHoldingVetoes,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
@@ -13,8 +14,9 @@ const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause}
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>;
 interface Options extends AtrSettings {
+ structure?:StructureAdditionRule;
  vetoes?:readonly QualityHoldingVeto[];pauseAfterAdditionCount?:number;
- candidates:AdditionCandidate[];required?:AdditionCandidate[];roundRules?:({candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number}&AtrSettings)[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
+ candidates:AdditionCandidate[];required?:AdditionCandidate[];roundRules?:({candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings)[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -38,7 +40,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  // A realized half mirror is mandatory. Its own minute cannot establish an ordered addition.
  const halfMirror=o.mirror;if(halfMirror?.fraction!==.5)return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
- let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o);
+ let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o);
  const bars=o.prices.filter(b=>b.openTime<o.end);let size=1;while(size<bars.length)size*=2;
  const highTree=new Float64Array(size*2).fill(-Infinity);
  const lowTree=new Float64Array(size*2).fill(Infinity);bars.forEach((b,i)=>{if(!(b.open>0)||!(b.low>0)||!Number.isFinite(b.open)||!Number.isFinite(b.low)||!Number.isFinite(b.high)||b.high<Math.max(b.open,b.low))throw Error('加仓行情读数无效');lowTree[size+i]=b.low;highTree[size+i]=b.high;});for(let i=size-1;i>0;i--){lowTree[i]=Math.min(lowTree[i*2],lowTree[i*2+1]);highTree[i]=Math.max(highTree[i*2],highTree[i*2+1]);}
@@ -80,12 +82,16 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const coinsBefore=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-soldBefore;
   const realAverageBefore=(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror.fraction)/coinsBefore;
   const basis='real-average' as const,referencePrice=realAverageBefore;
-  const hit=await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:scanEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
+  const hit=round.structure?await readStructure(round.structure,after,scanEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct}:undefined):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:scanEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
+  if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
   if(!hit)return {fills,stop};
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
   const {entryBufferAtr,supportOffsetAtr}=qualityAdditionAtrSettings(round);
-  const K=hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
+  const selected=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
+  const K=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
+  if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support))continue;
+  if(hit.structureEvidence&&selected)hit.structureEvidence={...hit.structureEvidence,...selected};
   // This entry rule is independent of the indicator and average-price gain gates.
   const buffer=hit.price-S,minimum=entryBufferAtr*atr!;
   if(buffer+8*Number.EPSILON*Math.max(hit.price,S,minimum)<minimum||!(K>0))continue;
@@ -99,7 +105,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
   if(sized.error||!(sized.addCoins>0))continue;
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
-  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,requiredBufferAtr:entryBufferAtr,supportOffsetAtr,coverageGap:sized.coverageGap}});
+  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,requiredBufferAtr:entryBufferAtr,...(hit.structureEvidence?{}:{supportOffsetAtr}),coverageGap:sized.coverageGap}});
   if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price}};
  }
  return {fills,stop:findPositionExit(fills.at(-1)?.sizing?.support,Math.max(o.since,fills.at(-1)?.at??o.since))};

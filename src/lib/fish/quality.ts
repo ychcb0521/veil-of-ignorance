@@ -542,7 +542,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         };
         if(condition.source==='custom') {
           for(const f of qualityAdditionConditions(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
-        } else {
+        } else if(condition.source==='detector') {
           const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
           for(const f of detectors) {
             const direction=f.direction??'>';
@@ -551,11 +551,11 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
         const required=condition.source==='custom'?candidates.splice(1):undefined;
-        return {candidates,required,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr};};
+        return {candidates,required,structure:condition.source==='structure'?condition.structure:undefined,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr};};
         const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];
           if(calculated.stageBoundary){sellStageBoundary=true;closed=false;finalTime=calculated.stageBoundary.at;finalPrice=calculated.stageBoundary.price;trigger=undefined;exitBar=undefined;stopFill=undefined;}

@@ -69,3 +69,20 @@ it('rejects missing, negative or non-finite formula distances, and a zero suppor
  expect(()=>parseAdditionDraft({...draft,otherRounds:[{...draft.otherRounds[0],supportOffsetAtr:'0'},draft.otherRounds[1]]},BUILTIN_FEATURES)).toThrow('第 2 次加仓');
  expect(()=>parseAdditionDraft({...draft,entryBufferAtr:'0',supportOffsetAtr:'.5'},BUILTIN_FEATURES)).not.toThrow();
 });
+
+it('offers native box timing and K redundancy with an independent saved choice for each round',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});
+ expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.5);expect(screen.queryByLabelText('K回撤ATR倍数')).not.toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.75'}});fireEvent.change(screen.getByLabelText('箱体冗余单位'),{target:{value:'percent'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体K基准'),{target:{value:'invalidation'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
+ fireEvent.click(screen.getByRole('button',{name:'验证保存'}));const saved=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved.rounds).toMatchObject([{source:'structure',structure:{algorithm:'dbl5',trigger:'raise',bufferUnit:'percent',buffer:.75}},{source:'structure',structure:{algorithm:'sbs5m',trigger:'retest',kBasis:'invalidation',bufferUnit:'atr',buffer:.25}},{source:'detector'}]);
+ expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+ fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.75);
+});
+it('does not reinterpret legacy ATR saves and rejects blank box redundancy',()=>{
+ const d=additionDraft();const old=parseAdditionDraft({...d,enabled:true},BUILTIN_FEATURES);expect(old.structure).toBeUndefined();
+ expect(()=>parseAdditionDraft({...d,enabled:true,source:'structure',structureBuffer:''},BUILTIN_FEATURES)).toThrow('冗余');
+ const saved=parseAdditionDraft({...d,enabled:true,source:'structure',structureBuffer:'0'},BUILTIN_FEATURES);expect(saved.structure?.buffer).toBe(0);
+ expect(parseAdditionDraft({...additionDraft(saved),enabled:false},BUILTIN_FEATURES).structure).toEqual(saved.structure);
+});

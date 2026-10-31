@@ -17,7 +17,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
    const fraction=mirror?(mirror.fraction===1?1:index===0?mirror.fraction:0):0;
    const mirrorQty=lot.quantity*fraction,remaining=lot.quantity-mirrorQty;
    const add=adds[index-1];
-   const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price} · S=${add.sizing.previousSupport} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}`:''}`;
+   const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price} · S=${add.sizing.previousSupport} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}${add.structureEvidence?` · ${add.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${add.structureEvidence.event} · 箱底 ${add.structureEvidence.supportPrice} · 冗余 ${add.structureEvidence.buffer}${add.structureEvidence.bufferUnit==='atr'?'ATR':'%'}`:''}`:''}`;
    const leg:TradeJournal={...data.legs[0],id:lot.id,trade_record_id:positionId,leg_role:lot.role,leg_sequence:index+1,
      quality_addition_fill:add,pre_simulated_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
      pre_account_equity_usdt:summary.totalInvested,post_realized_pnl:closed?lot.quantity*r.endPrice!-lot.notional:null};
