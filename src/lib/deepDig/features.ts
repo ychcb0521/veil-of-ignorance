@@ -1,3 +1,4 @@
+import {dbl5TickAt,DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {dbl5AsOf,computeDbl5,dbl5Numeric,dbl5ConfigHash,dbl5Parameters,DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5Config,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {computeSbs5m,sbsHistoryBars,sbsNumeric,sbsConfigHash,sbsParameters,SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS,type SbsConfig,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {computePrs6h,prsNumeric,prsParameters,PRS6H_ID,PRS6H_VERSION,PRS6H_FIELDS,type PrsConfig,type PrsRow,type PrsCheckpoint} from '@/lib/prs6h';
@@ -971,13 +972,13 @@ export const SBS5M_DIMENSIONS:DeepDigFeatureDef[]=[
 
 export const DBL5_DEF:DeepDigFeatureDef={id:DBL5_ID,name:'DBL-5｜达瓦斯箱体下轨',short:'DBL-5',builtin:true,chartTemplate:DBL5_ID,chartCore:'DBL5',interval:'5m',researchWindowHours:6,scale:1,unit:'价格',source:'campaigns',groupVars:2,positive:DEFAULT_POSITIVE,control:DEFAULT_CONTROL,DBL5_dimension:'price',
  definition:'已收盘5分钟达瓦斯箱体工程改编，默认n=3、几何证据窗口360分钟。局部新高后独立观察箱底；上下边界等待完成才发布并冻结。相邻所选箱体分为基准、完整上移、内部箱底抬高和同底新箱。最低价严格低于当前下轨即破坏，触及不破坏；到期从局部新高依赖的最早K线计时，缺口重置。确认箱底不等于后续回踩已验证。主值有价格单位，请选单品种研究；跨品种使用基点或年龄维度。参数尚未实证拟合，不涉及真实止损、仓位或执行。',
- formula:'# dbl-5-v1 · exact tick structure, available only after full confirmation\n'+DBL5_FIELDS.filter(n=>n!=='DBL5').map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+'\nDBL5 = DBL5_raw_value'};
+ formula:'# dbl-5-v2 · exact tick structure, available only after full confirmation\n'+DBL5_FIELDS.filter(n=>n!=='DBL5').map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+'\nDBL5 = DBL5_raw_value'};
 export const DBL5_DIMENSIONS:DeepDigFeatureDef[]=[
  {id:'darvas_5m_distance_bps',name:'DBL-5｜距下轨基点',short:'DBL·距离',core:'DBL5_distance_bps',dimension:'distance',unit:'bp'},
  {id:'darvas_5m_width_bps',name:'DBL-5｜箱宽基点',short:'DBL·箱宽',core:'DBL5_width_bps',dimension:'width',unit:'bp'},
  {id:'darvas_5m_age_minutes',name:'DBL-5｜确认年龄',short:'DBL·年龄',core:'DBL5_age_minutes',dimension:'age',unit:'分钟'},
 ].map(d=>({...DBL5_DEF,id:d.id,name:d.name,short:d.short,chartCore:d.core,DBL5_dimension:d.dimension as DeepDigFeatureDef['DBL5_dimension'],unit:d.unit,
- formula:'# dbl-5-v1 · derived units and boolean event flags, no absolute price pooling\n'+DBL5_FIELDS.filter(n=>n!=='DBL5'&&n!=='DBL5_upper'&&n!==d.core).map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+`\n${d.core} = DBL5_raw_${d.core.slice(5)}`}));
+ formula:'# dbl-5-v2 · derived units and boolean event flags, no absolute price pooling\n'+DBL5_FIELDS.filter(n=>n!=='DBL5'&&n!=='DBL5_upper'&&n!==d.core).map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+`\n${d.core} = DBL5_raw_${d.core.slice(5)}`}));
 
 const ORIGINAL_BUILTIN_FEATURES:readonly DeepDigFeatureDef[]=[DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES, ATI6H_DEF, PRS6H_DEF, SBS5M_DEF, ...SBS5M_DIMENSIONS, DBL5_DEF, ...DBL5_DIMENSIONS];
 export const SELLER_FOCUS_CREATED_AT=Date.parse('2026-10-30T06:03:46Z');
@@ -1141,7 +1142,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
   if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
   if(featureUsesMbi2(d)){const p=featureParams(d);key.push(`MBI2_T_HOURS=${p.MBI2_T_HOURS}`,`MBI2_Z0=${p.MBI2_Z0}`,`MBI2_BAND=${p.MBI2_BAND}`,`MBI2_CONFIRM=${p.MBI2_CONFIRM}`);}
-  if(featureTemplateId(d)===DBL5_ID)key.push(DBL5_VERSION,dbl5ConfigHash(d.DBL5_config),'DBL5_config='+JSON.stringify(dbl5Parameters(d.DBL5_config)),'DBL5_dimension='+(d.DBL5_dimension??'price'),'DBL5_research_symbol='+(d.DBL5_research_symbol??''),'DBL5_initialization_start='+(d.DBL5_initialization_start??''));
+  if(featureTemplateId(d)===DBL5_ID)key.push(DBL5_VERSION,DBL5_MARKET_RULE_VERSION,dbl5ConfigHash(d.DBL5_config),'DBL5_config='+JSON.stringify(dbl5Parameters(d.DBL5_config)),'DBL5_dimension='+(d.DBL5_dimension??'price'),'DBL5_research_symbol='+(d.DBL5_research_symbol??''),'DBL5_initialization_start='+(d.DBL5_initialization_start??''));
   if(featureTemplateId(d)===SBS5M_ID)key.push(SBS5M_VERSION,sbsConfigHash(d.SBS5M_config),'SBS5M_config='+JSON.stringify(sbsParameters(d.SBS5M_config)),'SBS5M_dimension='+(d.SBS5M_dimension??'price'),'init:window-start-v1','SBS5M_research_symbol='+(d.SBS5M_research_symbol??''));
   if(featureTemplateId(d)==='prs6h')key.push(PRS6H_VERSION,'PRS6H_config='+JSON.stringify(d.PRS6H_config??{}),d.PRS6H_config?.volumeMode??'quote');
   if(featureTemplateId(d)==='ati6h')key.push(ATI6H_VERSION,'ATI6H_parameters='+JSON.stringify(d.ATI6H_parameters??{}),'ATI6H_volume_mode='+(d.ATI6H_volume_mode??'taker'),'ATI6H_dependency='+JSON.stringify(ati6hDependencyOf(d)));
@@ -1275,8 +1276,11 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
   if(compiled.usesDbl5){
     if(intervalOf(params)!=='5m')throw Error('DBL-5 只接受5m已收盘数据');
     const first=bars[0],start=params.DBL5_initialization_start??params.DBL5_checkpoint?.initialization_start??first?.openTime;
-    const result=computeDbl5(bars.map(bar=>({...bar,DBL5_tick_size:bar.DBL5_tick_size??params.DBL5_tick_size??bar.PRS6H_tick_size??bar.ATI6H_tick_size??null})),{
-      symbol:params.DBL5_symbol??first?.PRS6H_symbol??'UNSPECIFIED',market:params.DBL5_market,config:params.DBL5_config,tickSize:params.DBL5_tick_size,dataSource:params.DBL5_data_source??first?.PRS6H_data_source??'binance-usdm',dataVersion:params.DBL5_data_version??'ohlc-v1',
+    const symbol=params.DBL5_symbol??first?.PRS6H_symbol??'UNSPECIFIED',source=params.DBL5_data_source??first?.PRS6H_data_source??'binance-usdm';
+    const prepared=bars.map(bar=>({...bar,DBL5_tick_size:dbl5TickAt(symbol,bar.openTime,bar.DBL5_tick_size??params.DBL5_tick_size??bar.PRS6H_tick_size??bar.ATI6H_tick_size??null,source)}));
+    const firstInput=prepared.find(b=>start===undefined||b.openTime>=start);
+    const result=computeDbl5(prepared,{
+      symbol,market:params.DBL5_market,config:params.DBL5_config,tickSize:params.DBL5_checkpoint?.tick_size??firstInput?.DBL5_tick_size??params.DBL5_tick_size,dataSource:source,dataVersion:params.DBL5_data_version??'ohlc-v1',
       initializationStart:start,initializationId:params.DBL5_initialization_id??`start:${start??'empty'}:v1`,checkpoint:params.DBL5_checkpoint});
     DBL5_details=result.rows;DBL5_checkpoint=result.checkpoint;const byTime=new Map(result.rows.map(r=>[r.at,r]));
     DBL5_inputs=Object.fromEntries([...DBL5_FIELDS,...DBL5_RENDER_FIELDS].map(name=>[name.startsWith('_')?name:name==='DBL5'?'DBL5_raw_value':'DBL5_raw_'+name.slice(5),Float64Array.from(bars,b=>{const row=byTime.get(b.openTime+300000);return row?dbl5Numeric(row,name)??NaN:NaN;})]));

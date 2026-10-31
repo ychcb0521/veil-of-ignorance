@@ -178,7 +178,7 @@ async function fetchKlinePage(url: string, signal?: AbortSignal): Promise<KlineD
             throw new ReplayKlineRequestError('K 线数据不完整', 'invalid-response', true);
           }
           const [time, open, high, low, close, volume] = values;
-          return { time, open, high, low, close, volume, ...klineAmountFields(row) };
+          return { time, open, high, low, close, volume, ...klineAmountFields(row),DBL5_prices:{open:String(row[1]),high:String(row[2]),low:String(row[3]),close:String(row[4])} };
         });
       })(),
     ]);

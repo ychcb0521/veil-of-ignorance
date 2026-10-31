@@ -1,7 +1,7 @@
 import type {ResearchBar} from './deepRsa/window';
 
 export const DBL5_ID='darvas_5m_lower';
-export const DBL5_VERSION='dbl-5-v1';
+export const DBL5_VERSION='dbl-5-v2';
 export const DBL5_STEP=300_000;
 export interface Dbl5Config {timeframe:'5m';n:number;window_minutes:number}
 export const DBL5_DEFAULTS:Readonly<Dbl5Config>=Object.freeze({timeframe:'5m',n:3,window_minutes:360});
@@ -127,6 +127,7 @@ export class Dbl5Engine {
       if(l>o||l>c||o>h||c>h||!Number.isFinite(dbl5TickPrice(h,rule)))throw Error('INVALID_OHLC');
       this.tick_size=rule;candle={at,open_ticks:String(o),high_ticks:String(h),low_ticks:String(l),close_ticks:String(c)};
     }catch(error){
+      if(error instanceof Error&&error.message==='TICK_RULE_CHANGED')this.tick_size=dbl5TickRule(tick!);
       const old=this.end(at,'DATA_INVALID');this.candidates=[];this.context=[];this.last_time=at;this.last_signature=signature;this.data_checksum=dbl5Hash([this.data_checksum,signature,'DATA_INVALID']);
       const reasons=[error instanceof Error?error.message:'INVALID_DATA'],event=this.event('DATA_INVALID',at,old,old?.episode_id??null,old?.episode_id??null,false,reasons);
       return this.publish(at,'DATA_INVALID',[event],[],old,old?.episode_id??null,false,false,false,reasons,null);
@@ -175,9 +176,11 @@ export class Dbl5Engine {
 }
 export function computeDbl5(bars:readonly Dbl5Bar[],options:Dbl5Options){const engine=new Dbl5Engine(options),rows=bars.flatMap(b=>{const row=engine.push(b);return row?[row]:[];});return {rows,checkpoint:engine.checkpoint(),events:engine.events,confirmed_boxes:engine.confirmed_boxes,ended:engine.ended};}
 export const DBL5_FIELDS=['DBL5','DBL5_upper','DBL5_available','DBL5_distance_bps','DBL5_width_bps','DBL5_age_minutes','DBL5_freshness','DBL5_event_baseline','DBL5_event_up_step','DBL5_event_nested_higher_floor','DBL5_event_same_floor','DBL5_event_support_broken','DBL5_event_support_expired','DBL5_event_data_gap'] as const;
-export const DBL5_RENDER_FIELDS=['_DBL5_episode','_DBL5_box','_DBL5_nested','_DBL5_baseline','_DBL5_up_step','_DBL5_same_floor'] as const;
+export const DBL5_RENDER_FIELDS=['_DBL5_episode','_DBL5_box','_DBL5_nested','_DBL5_baseline','_DBL5_up_step','_DBL5_same_floor','_DBL5_invalid','_DBL5_warmup'] as const;
 export function dbl5Numeric(row:Dbl5Row,name:string):number|null {
   if(name==='_DBL5_episode'||name==='_DBL5_box'){const id=name==='_DBL5_episode'?row.episode_id:row.box_id;return id?parseInt(dbl5Hash(id).slice(0,12),16):null;}
+  if(name==='_DBL5_invalid')return row.darvas_5m_status==='DATA_UNAVAILABLE'?1:0;
+  if(name==='_DBL5_warmup')return row.darvas_5m_status==='WARMUP'?1:0;
   if(name==='_DBL5_baseline')return row.formation_type==='BASELINE'?1:0;
   if(name==='_DBL5_up_step')return row.formation_type==='UP_STEP'?1:0;
   if(name==='_DBL5_same_floor')return row.formation_type==='SAME_FLOOR'?1:0;

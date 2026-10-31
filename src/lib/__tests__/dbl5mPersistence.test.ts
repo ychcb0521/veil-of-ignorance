@@ -26,3 +26,9 @@ it('draws at close instead of source open, uses backward crosshair lookup and br
  const pixels:number[]=[],ctx={save:vi.fn(),setLineDash:vi.fn(),restore:vi.fn(),beginPath:vi.fn(),moveTo:vi.fn(),lineTo:vi.fn(),stroke:vi.fn()};template.draw({ctx,indicator:{result},visibleRange:{from:0,to:3},xAxis:{convertToPixel:(i:number)=>{pixels.push(i);return i;}},yAxis:{convertToPixel:(i:number)=>i}});expect(Math.min(...pixels)).toBe(1);
  const atOpen=template.createTooltipDataSource({indicator:{result},crosshair:{dataIndex:1},defaultStyles:{tooltip:{icons:[]}}});expect(atOpen.values[0].value).toBe('100');expect(atOpen.calcParamsText).toContain('基准箱');
 });
+
+it('empty chart panes explain pending, invalid data and unconfirmed structure instead of staying silently blank',()=>{
+ const item=accountResearchIndicators().find(i=>i.id==='DBL5');registerDbl5Indicator(item);const template=registered.get('DBL5_CUSTOM');
+ for(const [row,label] of [[{_pending:1},'正在准备5m历史行情'],[{_DBL5_invalid:1},'历史价格精度不可验证'],[{},'暂无已确认箱体']] as const){const ctx={save:vi.fn(),restore:vi.fn(),setLineDash:vi.fn(),fillText:vi.fn()};template.draw({ctx,indicator:{result:[row]},visibleRange:{from:0,to:1},xAxis:{},yAxis:{}});expect(ctx.fillText.mock.calls[0][0]).toContain(label);}
+ registerDbl5Indicator(accountResearchIndicators().find(i=>i.id==='DBL5_DISTANCE'));expect(registered.get('DBL5_DISTANCE_CUSTOM').precision).toBe(2);
+});

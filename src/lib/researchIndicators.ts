@@ -1,3 +1,4 @@
+import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS} from '@/lib/dbl5m';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
@@ -225,7 +226,7 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})===DBL5_ID?[DBL5_VERSION,def?.DBL5_config,def?.DBL5_dimension,def?.DBL5_initialization_start,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})===DBL5_ID?[DBL5_VERSION,DBL5_MARKET_RULE_VERSION,def?.DBL5_config,def?.DBL5_dimension,def?.DBL5_initialization_start,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
