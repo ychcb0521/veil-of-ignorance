@@ -1,3 +1,6 @@
+import type {ResearchBar} from '@/lib/deepRsa/window';
+import {Dbl5Engine} from '@/lib/dbl5m';
+import {saveDbl5Checkpoint,loadDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import {saveSbsCheckpoint,loadSbsCheckpoint} from '@/lib/sbs5mPersistence';
 import {Sbs5mEngine} from '@/lib/sbs5m';
 import {savePrsCheckpoint,loadPrsCheckpoint} from '@/lib/prs6hPersistence';
@@ -30,7 +33,7 @@ interface Request {
   data: KLineData[]; refs?: (number | null)[]; signature: string;
   compiled: CompiledFeature; params: ChartComputeJob['params']; variables: string[]; core: string | null; def: DeepDigFeatureDef;
 }
-interface Channel { sbsSeed?:import('./sbs5m').SbsCheckpoint;sbsSeedFirst?:number; seed?:import('./prs6h').PrsCheckpoint;seedFirst?:number; id: number; request: Request; requested: string; initialized: boolean; result: ChartFeatureSeries | null; first: number; last: number; sent?: {revision:number; referenceVersion:number; first:number; length:number} }
+interface Channel { dblSeed?:import('./dbl5m').Dbl5Checkpoint;dblSeedFirst?:number; sbsSeed?:import('./sbs5m').SbsCheckpoint;sbsSeedFirst?:number; seed?:import('./prs6h').PrsCheckpoint;seedFirst?:number; id: number; request: Request; requested: string; initialized: boolean; result: ChartFeatureSeries | null; first: number; last: number; sent?: {revision:number; referenceVersion:number; first:number; length:number} }
 const perData = new WeakMap<KLineData[], Map<string, Channel>>(), channels = new Map<number, Channel>(), queued = new Set<Channel>();
 let worker: Worker | undefined, active: Channel | undefined, packet: ArrayBuffer | undefined;
 let activeTimes: number[] = [];
@@ -61,6 +64,7 @@ function startWorker() {
           const index = indices.get(bar.timestamp), value = index == null ? NaN : values[index];
           return Number.isFinite(value) ? value : null;
         }));
+        if(data.DBL5_checkpoint)void saveDbl5Checkpoint(data.DBL5_checkpoint);
         if(data.SBS5M_checkpoint)void saveSbsCheckpoint(data.SBS5M_checkpoint);
         if(data.PRS6H_checkpoint)void savePrsCheckpoint(data.PRS6H_checkpoint);
         channel.result = { def: channel.request.def, vars, core: vars.get(channel.request.core ?? '') ?? [] };
@@ -95,8 +99,8 @@ async function pump() {
     const number = (v: unknown) => typeof v === 'number' ? v : NaN;
     values[at] = number(b.timestamp); values[at+1] = number(b.open); values[at+2] = number(b.high); values[at+3] = number(b.low); values[at+4] = number(b.close);
     values[at+9]=b.cba2Closed===false||b.timestamp+intervalMs(r.params.interval??'5m')>Date.now()?0:1;
-    values[at+5] = number(b.volume); values[at+6] = number(['ati6h','prs6h','sbs_5m'].includes(featureTemplateId(r.def)??'')?(b.ATI6H_quoteVolume??b.turnover):b.turnover); values[at+7] = number(['ati6h','prs6h','sbs_5m'].includes(featureTemplateId(r.def)??'')?(b.ATI6H_takerBuyQuoteVolume??b.takerBuyTurnover):b.takerBuyTurnover); values[at+8] = number(r.refs?.[i]);
-    if((r.def.retentionSourceId||featureUsesMbiFamily(r.def)||['ctba','ati6h','prs6h','sbs_5m'].includes(featureTemplateId(r.def)??''))&&(b.cba2Closed===false||b.timestamp+intervalMs(r.params.interval??'5m')>Date.now())){values[at+4]=NaN;if(r.def.retentionSourceId||['ctba','ati6h','prs6h','sbs_5m'].includes(featureTemplateId(r.def)??''))values[at+5]=values[at+6]=values[at+7]=NaN;}
+    values[at+5] = number(b.volume); values[at+6] = number(['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??'')?(b.ATI6H_quoteVolume??b.turnover):b.turnover); values[at+7] = number(['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??'')?(b.ATI6H_takerBuyQuoteVolume??b.takerBuyTurnover):b.takerBuyTurnover); values[at+8] = number(r.refs?.[i]);
+    if((r.def.retentionSourceId||featureUsesMbiFamily(r.def)||['ctba','ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??''))&&(b.cba2Closed===false||b.timestamp+intervalMs(r.params.interval??'5m')>Date.now())){values[at+4]=NaN;if(r.def.retentionSourceId||['ctba','ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??''))values[at+5]=values[at+6]=values[at+7]=NaN;}
   }
   try {
     startWorker(); active = channel; activeTimes = r.data.map(bar => bar.timestamp);
@@ -112,7 +116,11 @@ async function pump() {
       }
       if(channel.sbsSeed)params={...params,SBS5M_checkpoint:channel.sbsSeed};
     }
-    const job: ChartComputeJob = { id: channel.id, length:n, from, packet, params, variables:r.variables, compiled:r.compiled };
+    if(r.compiled.usesDbl5){
+      if(channel.dblSeedFirst!==r.data[0]?.timestamp){const start=params.DBL5_initialization_start??r.data[0]?.timestamp,identity=new Dbl5Engine({symbol:params.DBL5_symbol??'UNSPECIFIED',market:params.DBL5_market,config:params.DBL5_config,tickSize:params.DBL5_tick_size,dataSource:params.DBL5_data_source??'binance-usdm',dataVersion:params.DBL5_data_version??'ohlc-v1',initializationStart:start,initializationId:params.DBL5_initialization_id??`start:${start??'empty'}:v1`}).checkpoint();channel.dblSeed=await loadDbl5Checkpoint(identity,r.data[0]?.timestamp??0)??undefined;channel.dblSeedFirst=r.data[0]?.timestamp;}
+      if(channel.dblSeed)params={...params,DBL5_checkpoint:channel.dblSeed};
+    }
+    const job: ChartComputeJob = { id: channel.id, length:n, from, packet, params, variables:r.variables, compiled:r.compiled,...(r.compiled.usesDbl5?{rawDblPrices:r.data.slice(from).map(b=>b.DBL5_prices as ResearchBar['DBL5_prices']??null)}:{}) };
     worker!.postMessage(job, [packet]); packet = undefined; channel.initialized = true;
     // Initial warmup can contain thousands of bars and robust rolling kernels.
     // Keep that work off the UI thread; a legitimate long job must not force a

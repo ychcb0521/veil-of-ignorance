@@ -1,3 +1,4 @@
+import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS} from '@/lib/dbl5m';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
 import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
@@ -10,7 +11,7 @@ import { CTBA_DEFAULTS, CTBA_ABSOLUTE_BOUND } from '@/lib/ctba';
 import type { KLineData } from 'klinecharts';
 import { chartFeatureDef as accountFeatureDef, chartFeatureSeries, chartFeatureHistoryBars } from '@/lib/featureSource';
 import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/features';
-import { chartPrehistory, researchHistoryVersion } from '@/lib/researchChartHistory';
+import { chartPrehistoryReady, chartPrehistory, researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btcReference';
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
 import { enableChartComputation, isChartComputationEnabled, chartComputationVersion, resetChartComputationAlignment } from './chartComputeClient';
@@ -20,6 +21,8 @@ import { mbiNOf } from '@/lib/mbi';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
+  {id:'DBL5',featureId:DBL5_ID,core:'DBL5',short:'DBL-5',name:'DBL-5｜达瓦斯箱体下轨',period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'),...DBL5_RENDER_FIELDS]},
+  ...[{id:'DBL5_DISTANCE',featureId:'darvas_5m_distance_bps',core:'DBL5_distance_bps',short:'DBL·距离',name:'DBL-5｜距下轨基点'},{id:'DBL5_WIDTH',featureId:'darvas_5m_width_bps',core:'DBL5_width_bps',short:'DBL·箱宽',name:'DBL-5｜箱宽基点'},{id:'DBL5_AGE',featureId:'darvas_5m_age_minutes',core:'DBL5_age_minutes',short:'DBL·年龄',name:'DBL-5｜确认年龄'}].map(d=>({...d,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'&&n!=='DBL5_upper'),...DBL5_RENDER_FIELDS]})),
   {id:'SBS5M',featureId:SBS5M_ID,core:'SBS5M',short:'SBS-5M',name:'台阶箱体支撑',period:6,parameter:'有效期（定义配置）',parameterUnit:'h',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:SBS5M_FIELDS.filter(n=>n!=='SBS5M')},
   {id:'SBS5M_QUALITY',featureId:'sbs_5m_quality',core:'SBS5M_support_quality',short:'SBS·证据',name:'台阶箱体支撑｜证据分',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:100,seller:false,marketEvidence:true,rawOnly:true},
   {id:'SBS5M_DISTANCE',featureId:'sbs_5m_distance',core:'SBS5M_distance_to_support',short:'SBS·距离',name:'台阶箱体支撑｜标准化距离',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true},
@@ -66,7 +69,7 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
     if (!program.statements.some(s => s.name === core)) core = featureCoreName(program) ?? core;
   } catch { /* Invalid formulas remain editable, with empty charts. */ }
-  return { ...(featureTemplateId(def)===SBS5M_ID?{rawOnly:true,priceOverlay:(def.SBS5M_dimension??'price')==='price'}:{}), ...(['ati6h','prs6h',SBS5M_ID].includes(featureTemplateId(def)??'')?{marketEvidence:true}:{}), id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
+  return { ...(featureTemplateId(def)===DBL5_ID?{rawOnly:true,priceOverlay:(def.DBL5_dimension??'price')==='price'}:{}), ...(featureTemplateId(def)===SBS5M_ID?{rawOnly:true,priceOverlay:(def.SBS5M_dimension??'price')==='price'}:{}), ...(['ati6h','prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')?{marketEvidence:true}:{}), id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: !def.focusVersion && def.short === builtin?.short ? template?.short ?? def.short : def.short, name: !def.focusVersion && def.name === builtin?.name ? template?.name ?? def.name : def.name,
     period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
     min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
@@ -222,7 +225,7 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})===DBL5_ID?[DBL5_VERSION,def?.DBL5_config,def?.DBL5_dimension,def?.DBL5_initialization_start,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
@@ -313,10 +316,16 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
       formula += `\n${helper} = avg(${core}, ${options.averageHours})`;
     }
   } catch { return empty(); }
+  if(featureTemplateId(def)===DBL5_ID&&chartInterval(data)!==300000)return empty();
   const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length) {
     const step = chartInterval(data);
-    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbiFamily(def)||item.marketEvidence ? step / 60000 : 5), step,item.marketEvidence?featureTemplateId(def):featureUsesMbi2(def)||item.featureId==='ctba_12h-bear'?item.featureId:undefined) : EMPTY_HISTORY;
+    const dblStart=featureTemplateId(def)===DBL5_ID?(def.DBL5_initialization_start??data[0]?.DBL5_initialization_start as number|undefined):undefined;
+    const wanted=dblStart===undefined?chartFeatureHistoryBars(item.featureId,period,formula,featureUsesMbiFamily(def)||item.marketEvidence?step/60000:5):Math.max(0,(data[0].timestamp-dblStart)/step);
+    const namespace=item.marketEvidence?featureTemplateId(def):featureUsesMbi2(def)||item.featureId==='ctba_12h-bear'?item.featureId:undefined;
+    const fetched = options.fetchReference !== false ? chartPrehistory(data,wanted,step,namespace) : EMPTY_HISTORY;
+    if(featureTemplateId(def)===DBL5_ID&&options.fetchReference!==false&&!chartPrehistoryReady(data,wanted,step,namespace))return {...empty(),pending:true};
+
     const history = fetched.length ? fetched : EMPTY_HISTORY;
     if (history.length || background) {
       const revision = dataRevision(data), entries=extendedData.get(data)??new Map<KLineData[],ExtendedChartData>(),cached=entries.get(history);

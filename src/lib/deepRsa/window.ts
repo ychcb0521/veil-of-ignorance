@@ -21,6 +21,7 @@ export interface ResearchBar {
   ATI6H_tick_size?:number|null;
   /** Strict native evidence amounts alongside the unchanged legacy normalized columns. */
   ATI6H_quoteVolume?:number|null; ATI6H_takerBuyQuoteVolume?:number|null;
+  DBL5_tick_size?:string|number|null; DBL5_closed?:boolean; DBL5_prices?:{open:string;high:string;low:string;close:string};
   SBS5M_tick_size?:number|null; SBS5M_closed?:boolean;
   PRS6H_tick_size?:number|null; PRS6H_closed?:boolean; PRS6H_symbol?:string; PRS6H_data_source?:string;
   openTime: number;
@@ -63,6 +64,7 @@ export function parseBinanceKlineRow(row: readonly unknown[]): ResearchBar | nul
   const amountsOk = Number.isFinite(qv) && qv >= 0 && Number.isFinite(tbq) && tbq >= 0 && tbq <= qv * (1 + 1e-9);
   return {
     ...bar,
+    DBL5_prices:{open:String(row[1]),high:String(row[2]),low:String(row[3]),close:String(row[4])},
     takerBuyVolume: Number.isFinite(tb) && tb >= 0 && tb <= bar.volume * (1 + 1e-9) ? tb : null,
     quoteVolume: amountsOk ? qv : null,
     takerBuyQuoteVolume: amountsOk ? Math.min(tbq, qv) : null,

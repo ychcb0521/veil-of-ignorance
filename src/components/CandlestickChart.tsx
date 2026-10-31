@@ -1,3 +1,4 @@
+import {Dbl5ChartTimeline} from '@/lib/dbl5ChartTimeline';
 import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
 import { mbi2MinutesOf } from '@/lib/mbi2';
 import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
@@ -319,6 +320,7 @@ interface Props {
 function toKLineData(d: KlineData): KLineData {
   return {
     timestamp: d.time,
+    ...(d.DBL5_prices?{DBL5_prices:d.DBL5_prices}:{}),
     cba2Closed: d.cba2Closed,
     open: d.open,
     high: d.high,
@@ -551,6 +553,7 @@ function CandlestickChartComponent({
   expectsAnalysisRenderRef.current = Boolean(analysisMode && onAnalysisRenderReady);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
+  const dbl5TimelineRef=useRef(new Dbl5ChartTimeline());
   const prevDataLenRef = useRef(0);
   const prevOldestRef = useRef<number>(0);
   const prevNewestRef = useRef<number>(0);
@@ -1344,7 +1347,10 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
-    const klineData = data.map(d => ({ ...toKLineData(d), ...(!displayTimestampTransform ? { researchSymbol: rawSymbol ?? symbol } : {}) }));
+    const dblTimeline=!displayTimestampTransform?dbl5TimelineRef.current.update(data,`${rawSymbol??symbol}|${mbi2ChartMinutes}`):null;
+    const explicitStart=data.find(d=>d.DBL5_initialization_start!==undefined)?.DBL5_initialization_start;
+    const klineData = data.map(d => ({ ...toKLineData(d), ...(!displayTimestampTransform ? { researchSymbol: rawSymbol ?? symbol,DBL5_initialization_start:explicitStart??dblTimeline?.initializationStart,DBL5_data_version:d.DBL5_data_version??dblTimeline?.dataVersion } : {}) }));
+
     const currentOldest = data[0].time;
     const lastCandle = klineData[klineData.length - 1];
     const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
@@ -1352,18 +1358,19 @@ function CandlestickChartComponent({
     // historical candles while retaining the same first/last candle. Hash every
     // timestamp so that replacement cannot be mistaken for a last-bar update,
     // without paying an O(n) string join on large historical snapshots.
-    const timeAxisSig = analysisMode ? propTimeAxisSignature : "";
-    const sameTimeAxis = !analysisMode || timeAxisSig === prevTimeAxisSigRef.current;
+    const dblEnabled=indicators.some(i=>i.enabled&&(i.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===i.type)?.templateId?.startsWith('DBL5')));
+    const timeAxisSig = (analysisMode ? propTimeAxisSignature : '')+(dblEnabled?`|dbl-revision:${dblTimeline?.revision??0}`:'');
+    const sameTimeAxis = (!analysisMode&&!dblEnabled) || timeAxisSig === prevTimeAxisSigRef.current;
 
     const wasPrepend =
       prevDataLenRef.current > 0 &&
       data.length > prevDataLenRef.current &&
       currentOldest < prevOldestRef.current &&
-      lastCandle.timestamp === prevNewestRef.current;
+      lastCandle.timestamp === prevNewestRef.current && (!dblEnabled||sameTimeAxis);
     const isSmallAppend =
       data.length > prevDataLenRef.current &&
       data.length - prevDataLenRef.current <= 2 &&
-      currentOldest === prevOldestRef.current;
+      currentOldest === prevOldestRef.current && (!dblEnabled||sameTimeAxis);
     const isSameBarUpdate =
       data.length === prevDataLenRef.current &&
       currentOldest === prevOldestRef.current &&
@@ -1384,7 +1391,7 @@ function CandlestickChartComponent({
     // restarts the worker channels and repeatedly clears all indicator curves.
     const forwardSnapshot = !!chartApiRef && !analysisMode
       && prevDataLenRef.current > 0 && data.length > prevDataLenRef.current
-      && currentOldest === prevOldestRef.current && lastCandle.timestamp >= prevNewestRef.current;
+      && currentOldest === prevOldestRef.current && lastCandle.timestamp >= prevNewestRef.current && (!dblEnabled||sameTimeAxis);
     const streamedSnapshot = forwardSnapshot && liveChartCoversSnapshot(klineData, chart.getDataList(), liveUpdateQueueRef.current);
     const needsFit = nativeEmpty || prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate && !streamedSnapshot);
     if (analysisMode) {
@@ -2547,7 +2554,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
+                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}

@@ -193,7 +193,7 @@ export function qualityDefinition(f: FishSnapshot): DeepDigFeatureDef {
     interval: (f.interval ?? extra.find(v => /^\d+[mhdwM]$/.test(v)) ?? '5m') as ResearchInterval,
     halfLifeHours: numeric('hl=', 6), avgHours: numeric('avgh=', 24),
     chartTemplate: extra.find(v => v.startsWith('chart='))?.slice(6),
-    ...Object.fromEntries(['ATI6H_parameters','ATI6H_volume_mode','ATI6H_dependency','SBS5M_config','SBS5M_dimension'].flatMap(k=>{const v=extra.find(v=>v.startsWith(k+'='));return v?[[k,['ATI6H_volume_mode','SBS5M_dimension'].includes(k)?v.slice(k.length+1):JSON.parse(v.slice(k.length+1))]]:[]})),
+    ...Object.fromEntries(['ATI6H_parameters','ATI6H_volume_mode','ATI6H_dependency','SBS5M_config','SBS5M_dimension','DBL5_config','DBL5_dimension','DBL5_initialization_start','DBL5_research_symbol'].flatMap(k=>{const v=extra.find(v=>v.startsWith(k+'='));return v&&(k!=='DBL5_initialization_start'||v.length>k.length+1)?[[k,['ATI6H_volume_mode','SBS5M_dimension','DBL5_dimension','DBL5_research_symbol'].includes(k)?v.slice(k.length+1):JSON.parse(v.slice(k.length+1))]]:[]})),
     ...(extra.some(v=>v.startsWith('PRS6H_config='))?{PRS6H_config:JSON.parse(extra.find(v=>v.startsWith('PRS6H_config='))!.slice('PRS6H_config='.length))}:{}),
     ...(/\bmbiz2\s*\(/.test(saved[0])?{MBI2_T_HOURS:numeric('MBI2_T_HOURS=',25*5/60),MBI2_Z0:numeric('MBI2_Z0=',1.25),MBI2_BAND:numeric('MBI2_BAND=',.2),MBI2_CONFIRM:numeric('MBI2_CONFIRM=',.8)}:{}),
     ...(f.featureId === 'mbi' || /\bmbiz\s*\(/.test(saved[0]) ? { MBI_N: numeric('MBI_N=', 25), MBI_Z0: numeric('MBI_Z0=', 1.25) } : {}),

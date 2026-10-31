@@ -1,3 +1,5 @@
+import {dbl5AsOf,DBL5_ID,dbl5FieldUnit,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
+import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import {SBS5M_ID,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {saveSbsCheckpoint} from '@/lib/sbs5mPersistence';
 import {evaluateSbs5m} from '@/lib/sbs5mEvaluation';
@@ -45,9 +47,11 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'>;
 
 export interface DeepDigRow {
+  DBL5_details?:Dbl5Row;
+  DBL5_checkpoint?:Dbl5Checkpoint;
   SBS5M_details?:SbsRow;
   SBS5M_checkpoint?:SbsCheckpoint;
   PRS6H_details?:PrsRow;
@@ -91,6 +95,7 @@ export interface DeepDigGroupStat {
  * 【用户要求】2026-10-16「描述统计和推断统计的运行要分开」：这一步要联网取 K 线（1–3 分钟）；推断统计只用这里的数据。
  */
 export interface DeepDigData {
+  DBL5_diagnostics?:Record<string,{available:number;missing:number;event_counts:Record<string,number>;initialization_start:number|null;data_checksum:string}>;
   SBS5M_evaluation?:ReturnType<typeof evaluateSbs5m>[];
   PRS6H_evaluation?:ReturnType<typeof evaluatePrs6h>[];
   mbi2Evaluation?:Mbi2Evaluation;
@@ -133,7 +138,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
+  return { ...(featureTemplateId(def)===DBL5_ID?{DBL5_config:def.DBL5_config,DBL5_dimension:def.DBL5_dimension,DBL5_research_symbol:def.DBL5_research_symbol,DBL5_initialization_start:def.DBL5_initialization_start}:{}), ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -189,7 +194,7 @@ export function viewForVariable(data: DeepDigData, name: string | null): DeepDig
     const x = r.vars?.[name];
     return { ...r, v: finite(x) ? x : null };
   });
-  return { ...data, rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finite))) };
+  return { ...data,...(featureTemplateId(data.definition)===DBL5_ID&&dbl5FieldUnit(name)?{definition:{...data.definition,unit:dbl5FieldUnit(name)!}}:{}), rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finite))) };
 }
 
 /** 旧数据没有波动率：推断统计的「控制波动」算不了，要先重跑描述统计。 */
@@ -213,6 +218,9 @@ export async function collectDeepDigRun(
 ): Promise<{ data: DeepDigData; series: DeepDigSeries }> {
   const startedAt = Date.now();
   if(featureTemplateId(def)==='ati6h'&&!def.ATI6H_dependency)def={...def,ATI6H_dependency:ati6hDependencyOf(def)};
+  const DBL5_windows:NonNullable<DeepDigSeries['DBL5_windows']>={};
+  const dblDetails=new Map<string,{row:Dbl5Row;checkpoint:Dbl5Checkpoint}>();
+  const DBL5_diagnostics:NonNullable<DeepDigData['DBL5_diagnostics']>={};
   const SBS5M_windows:NonNullable<DeepDigSeries['SBS5M_windows']>={};
   const sbsDetails=new Map<string,{row:SbsRow;checkpoint:SbsCheckpoint}>();
   const SBS5M_evaluation:ReturnType<typeof evaluateSbs5m>[]=[];
@@ -230,14 +238,20 @@ export async function collectDeepDigRun(
   const byEvent: DeepDigSeries['byEvent'] = {};
   const mbi2Tuning=featureUsesMbi2(def)&&def.chartCore!=='MBI2_bear';
   const mbi2Samples:Mbi2StudySample[]=[];
-  const scanHistory=mbi2Tuning?Math.max(featureWindowMs(def),48*3600000+5*mbi2NOf({MBI2_T_HOURS:48},intervalMs(intervalOf(def))/60000)*intervalMs(intervalOf(def))):featureWindowMs(def);
+  let scanHistory=mbi2Tuning?Math.max(featureWindowMs(def),48*3600000+5*mbi2NOf({MBI2_T_HOURS:48},intervalMs(intervalOf(def))/60000)*intervalMs(intervalOf(def))):featureWindowMs(def);
   const anchorWindows: NonNullable<DeepDigSeries['anchorWindows']> = {};
   const compiled = compileFeatureFormula(def.formula);
   const source = def.source ?? 'campaigns';
   const groups = compileGroups(def.positive, def.control, source);
   // 【用户要求】样本可以是交易战役，也可以是信号库的信号（时间点 = 那条信号的时间）
   const allSamples = source === 'signals' ? (options.signals ?? []).map(signalSample) : report.rows.map(campaignSample);
-  const samples=featureTemplateId(def)===SBS5M_ID&&def.SBS5M_research_symbol?allSamples.filter(s=>s.symbol===def.SBS5M_research_symbol):allSamples;
+  const researchSymbol=featureTemplateId(def)===DBL5_ID?def.DBL5_research_symbol:featureTemplateId(def)===SBS5M_ID?def.SBS5M_research_symbol:undefined;
+  const samples=researchSymbol?allSamples.filter(s=>s.symbol===researchSymbol):allSamples;
+  if(featureTemplateId(def)===DBL5_ID){
+    if(researchSymbol&&!samples.length)throw Error('DBL-5 所选标的没有样本，请重新选择。');
+    if(((def.DBL5_dimension??'price')==='price'||[...compiled.program.inputs].some(n=>/^DBL5_raw_(value|upper)$/.test(n)))&&new Set(samples.filter(s=>!s.excluded&&!s.unsupportedReason).map(s=>s.symbol)).size>1)throw Error('DBL-5 下轨价格只按单一品种研究；跨品种请选择距离、箱宽基点或确认年龄。');
+    if(def.DBL5_initialization_start!==undefined)scanHistory=samples.reduce((max,s)=>Math.max(max,(s.anchorMs??def.DBL5_initialization_start!)-def.DBL5_initialization_start!),scanHistory);
+  }
   if(featureTemplateId(def)===SBS5M_ID&&def.SBS5M_research_symbol&&!samples.length)throw Error('所选研究标的没有可用样本，请重新选择。');
   if(featureTemplateId(def)===SBS5M_ID&&((def.SBS5M_dimension??'price')==='price'||[...compiled.program.inputs].some(n=>/^SBS5M_raw_(value|support_price|box_top|invalidation_price|candidate_support_price|candidate_box_top|candidate_invalidation_price)$/.test(n)))&&new Set(samples.filter(s=>!s.unsupportedReason&&!s.excluded).map(s=>s.symbol)).size>1)throw Error('SBS-5M 支撑价有价格单位，不能混合统计不同品种。请选择单一品种，或选择 SBS·证据 / 距离 / 台阶。');
   const collected = await collectRunEvents(report, {
@@ -246,10 +260,10 @@ export async function collectDeepDigRun(
     // 信号不合簇：每条信号（有时间、有评级）都单独是一个事件，跟有没有交易战役无关
     cluster: source !== 'signals',
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
-    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory, ...(['ati6h','prs6h',SBS5M_ID].includes(featureTemplateId(def)??'')?{strictAmounts:true}:{}) } } : {}),
-    ...(['ati6h','prs6h',SBS5M_ID].includes(featureTemplateId(def)??'')?{prepareFeatureBars:async(symbol:string,bars:readonly import('@/lib/deepRsa/window').ResearchBar[])=>{
+    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS || featureTemplateId(def)===DBL5_ID ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory, ...(['ati6h','prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')?{strictAmounts:true}:{}) } } : {}),
+    ...(['ati6h','prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')?{prepareFeatureBars:async(symbol:string,bars:readonly import('@/lib/deepRsa/window').ResearchBar[])=>{
       const tick=await ati6hTickSize(symbol,options.fetchFn,options.signal);
-      prsTick.set(symbol,tick);return bars.map(bar=>({...bar,ATI6H_tick_size:tick,PRS6H_tick_size:tick}));
+      prsTick.set(symbol,tick);return bars.map(bar=>({...bar,ATI6H_tick_size:tick,PRS6H_tick_size:tick,DBL5_tick_size:tick}));
     }}:{}),
     seriesRange: range,
     // 【用户要求】公式用到 CB（同时段 BTCUSDT 收盘价，CBI-2 剔除 BTC 的动量）时另取 BTC 的 K 线
@@ -258,10 +272,18 @@ export async function collectDeepDigRun(
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
       const ownWindow=featureUsesMbi2(def)&&window?extractWindow(window.bars,ctx.anchorMs,featureWindowMs(def),intervalMs(intervalOf(def))):window;
-      const scopedParams=featureTemplateId(def)===SBS5M_ID?{...params,SBS5M_symbol:ctx.symbol,SBS5M_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)==='prs6h'?{...params,PRS6H_symbol:ctx.symbol}:params;
-      const inputWindow=['prs6h',SBS5M_ID].includes(featureTemplateId(def)??'')&&window&&ctx.bars?{...window,bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)}:ownWindow;
+      const scopedParams=featureTemplateId(def)===DBL5_ID?{...params,DBL5_symbol:ctx.symbol,DBL5_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)===SBS5M_ID?{...params,SBS5M_symbol:ctx.symbol,SBS5M_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)==='prs6h'?{...params,PRS6H_symbol:ctx.symbol}:params;
+      const inputWindow=['prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')&&window&&ctx.bars?{...window,bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)}:ownWindow;
       const { value, vars } = computeFeatureValues(inputWindow, compiled, scopedParams);
       if(mbi2Tuning&&ctx.bars)mbi2Samples.push({id:ctx.id,anchorMs:ctx.anchorMs,group:'other',bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)});
+      if(featureTemplateId(def)===DBL5_ID&&inputWindow){
+        const out=evaluateOnBars(inputWindow.bars,compiled,scopedParams),rows=out.DBL5_details??[],row=dbl5AsOf(rows,ctx.anchorMs),checkpoint=out.DBL5_checkpoint;
+        if(row&&checkpoint){dblDetails.set(ctx.id,{row,checkpoint});void saveDbl5Checkpoint(checkpoint);}
+        const begin=ctx.anchorMs-(def.researchWindowHours??6)*3600000;
+        DBL5_windows[ctx.id]={checkpoint,rows:rows.filter(r=>r.at>begin),prices:inputWindow.bars.filter(b=>b.openTime+300000>begin).map(b=>({time:b.openTime+300000,close:b.close}))};
+        const events=[...new Map(rows.flatMap(r=>r.events).map(e=>[e.id,e])).values()];
+        DBL5_diagnostics[ctx.id]={available:rows.filter(r=>r.darvas_5m_available).length,missing:rows.filter(r=>!r.darvas_5m_available).length,event_counts:Object.fromEntries([...new Set(events.map(e=>e.type))].map(t=>[t,events.filter(e=>e.type===t).length])),initialization_start:checkpoint?.initialization_start??null,data_checksum:checkpoint?.data_checksum??''};
+      }
       if(featureTemplateId(def)===SBS5M_ID&&inputWindow){
         const out=evaluateOnBars(inputWindow.bars,compiled,scopedParams),row=out.SBS5M_details?.at(-1),checkpoint=out.SBS5M_checkpoint;
         if(row&&checkpoint){sbsDetails.set(ctx.id,{row,checkpoint});void saveSbsCheckpoint(checkpoint);}
@@ -303,13 +325,14 @@ export async function collectDeepDigRun(
     },
   });
   const described = describeDeepDig(collected.events);
-  for(const row of described.rows){const sbs=sbsDetails.get(row.id);if(sbs){row.SBS5M_details=sbs.row;row.SBS5M_checkpoint=sbs.checkpoint;}const prs=prsDetails.get(row.id);if(prs){row.PRS6H_details=prs.row;const {points,active,references,obstacles,archive,event_ids,last_row,...metadata}=prs.checkpoint;row.PRS6H_checkpoint=metadata;}const detail=atiDetails.get(row.id);if(detail){row.ATI6H_details=detail.row;row.ATI6H_archive=detail.archive;}}
+  for(const row of described.rows){const dbl=dblDetails.get(row.id);if(dbl){row.DBL5_details=dbl.row;row.DBL5_checkpoint=dbl.checkpoint;}const sbs=sbsDetails.get(row.id);if(sbs){row.SBS5M_details=sbs.row;row.SBS5M_checkpoint=sbs.checkpoint;}const prs=prsDetails.get(row.id);if(prs){row.PRS6H_details=prs.row;const {points,active,references,obstacles,archive,event_ids,last_row,...metadata}=prs.checkpoint;row.PRS6H_checkpoint=metadata;}const detail=atiDetails.get(row.id);if(detail){row.ATI6H_details=detail.row;row.ATI6H_archive=detail.archive;}}
   // Kept in Other for visibility/counts, but never enter the price-fetching event rows or inference.
   const unsupported=samples.filter(s=>s.unsupportedReason);
   described.rows.push(...unsupported.map(s=>({id:s.id,symbol:s.symbol,anchorMs:s.anchorMs??0,group:'other' as const,memberIds:[s.id],v:null,vol:null,vars:{},endRet:null,maxUp:null,maxDown:null,period:'discovery' as const,reason:s.unsupportedReason})));
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });
   const finishedAt = Date.now();
   const data: DeepDigData = {
+    ...(featureTemplateId(def)===DBL5_ID?{DBL5_diagnostics}:{}),
     ...(SBS5M_evaluation.length?{SBS5M_evaluation}:{}),
     ...(PRS6H_evaluation.length?{PRS6H_evaluation}:{}),
     definition: snapshotOf(def),
@@ -342,12 +365,12 @@ export async function collectDeepDigRun(
     }
     data.mbi2Evaluation=finishMbi2Evaluation(scans,recommendations,data.definition,minutes);
   }
-  return { data, series: { SBS5M_windows, PRS6H_windows, ATI6H_windows, finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(featureTemplateId(def)==='ctba'?{anchorWindows}:{}) } };
+  return { data, series: { DBL5_windows, SBS5M_windows, PRS6H_windows, ATI6H_windows, finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(featureTemplateId(def)==='ctba'?{anchorWindows}:{}) } };
 }
 
 // ===================== 规律提取：按结果生成的默认文字 =====================
 
-export const fmtValue = (def: Pick<DefinitionSnapshot, 'scale'>, v: number | null | undefined, d = 2) => (finite(v) ? (v * def.scale).toFixed(d) : '—');
+export const fmtValue = (def: Pick<DefinitionSnapshot, 'scale'> & Partial<Pick<DefinitionSnapshot,'chartTemplate'>>, v: number | null | undefined, d = 2) => (finite(v) ? def.chartTemplate===DBL5_ID?Number((v*def.scale).toPrecision(12)).toString():(v * def.scale).toFixed(d) : '—');
 export const pText = (p: number | null | undefined) => (!finite(p) ? '—' : p < 0.001 ? '< 0.001' : p.toFixed(3));
 /** 「p = 0.012」或「p < 0.001」。 */
 const pEq = (p: number | null | undefined) => (finite(p) && p < 0.001 ? 'p < 0.001' : `p = ${pText(p)}`);

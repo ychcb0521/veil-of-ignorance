@@ -199,9 +199,9 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   { id:'CTBA',nameZh:'CTBA｜趋势买方优势',nameEn:'Covel Trend-Based Buyer Advantage',isOverlay:false,defaultPeriod:CTBA_DEFAULTS.N,color:'#0ECB81',category:'custom',periodUnit:'根',periodHint:'固定5m；N、f、s、m、λ、ε、α、β、γ 在 Deep Dig 公式开头集中配置',description:CTBA_DESCRIPTION },
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: 'rawOnly' in item&&item.rawOnly===true?`${item.short} · ${item.name}`:`${item.short} · avg_${item.core} · avg_${item.core}_2`,
-    fixedPeriod:item.id.startsWith('SBS5M'),rawOnly:'rawOnly' in item&&item.rawOnly===true,avgDefault:'rawOnly' in item&&item.rawOnly?undefined:'marketEvidence' in item?24:undefined,avgHint:'marketEvidence' in item?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined, isOverlay:'priceOverlay' in item&&item.priceOverlay===true, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
+    fixedPeriod:(item.id.startsWith('SBS5M')||item.id.startsWith('DBL5')),rawOnly:'rawOnly' in item&&item.rawOnly===true,avgDefault:'rawOnly' in item&&item.rawOnly?undefined:'marketEvidence' in item?24:undefined,avgHint:'marketEvidence' in item?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined, isOverlay:'priceOverlay' in item&&item.priceOverlay===true, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
     periodHint: 'marketEvidence' in item?'证据半衰期（小时）；原值、avg、avg₂独立副图，均值仅用于盘面展示。':`${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: 'parameterUnit' in item ? item.parameterUnit : ['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) ? '根' : 'h',
-    description:item.id.startsWith('SBS5M')?'仅5m已收盘；参数在 Deep Dig 定义中设置。主值为价格；证据分、距离与台阶幅度独立显示。':item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
+    description:(item.id.startsWith('SBS5M')||item.id.startsWith('DBL5'))?item.id.startsWith('DBL5')?'仅5m已收盘；确认后冻结上下轨，破坏、到期或缺口时断线。参数在Deep Dig定义中设置。':'仅5m已收盘；参数在 Deep Dig 定义中设置。主值为价格；证据分、距离与台阶幅度独立显示。':item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
   })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
@@ -338,7 +338,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
       return def ? { ...item, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: def.definition, detail: def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : item;
     }),
     ...researchItems.filter(item => item.id.startsWith('FEATURE_')).map(item => ({
-      id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay:item.priceOverlay??false, fixedPeriod:item.rawOnly&&item.featureId.startsWith('sbs_5m'), defaultPeriod: researchDefaultPeriod(item),
+      id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay:item.priceOverlay??false, fixedPeriod:item.rawOnly&&(item.featureId.startsWith('sbs_5m')||item.templateId?.startsWith('DBL5')), defaultPeriod: researchDefaultPeriod(item),
       rawOnly:item.rawOnly,avgDefault:item.rawOnly?undefined:item.marketEvidence?24:undefined,avgHint:item.marketEvidence?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined,color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit:item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h'),
       description: definitions.find(def => def.id === item.featureId)?.definition,
     })),

@@ -30,7 +30,7 @@ export function createFishReconstructionLoader(
     const exchange = row.exchange ?? 'binance';
     const adapter = adapters.get(exchange);
     if (!adapter) throw new FishError(`不支持的交易所 ${exchange}`, 'history');
-    const query = { interval: intervalOf(plan.def), count, beforeCutoff: true,...((plan.compiled.usesSbs5m||plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{}) };
+    const query = { interval: intervalOf(plan.def), count, beforeCutoff: true,...((plan.compiled.usesDbl5||plan.compiled.usesSbs5m||plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{}) };
     const retention = fishRetentionReason(exchange, cut, now, count, plan.step, plan.usesTaker, query.interval);
     if (retention) throw new FishError(`${EXCHANGE_NAMES[exchange]}：${retention}`, 'skipped');
     let market: FishMarket | undefined;

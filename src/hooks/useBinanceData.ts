@@ -3,6 +3,7 @@ import { useState, useCallback, useRef } from "react";
 import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
 
 export interface KlineData {
+  DBL5_prices?:{open:string;high:string;low:string;close:string};DBL5_initialization_start?:number;DBL5_data_version?:string;
   /** Market-evidence-only raw quote amounts; never alter existing indicators’ normalized fields. */
   ATI6H_quoteVolume?:number; ATI6H_takerBuyQuoteVolume?:number; ATI6H_tick_size?:number; PRS6H_tick_size?:number;
   /** CBA-2只读取已收盘K线；回放成形根显式标记false。 */
@@ -135,6 +136,7 @@ async function fetchBatch(
     close: parseFloat(k[4]),
     volume: parseFloat(k[5]),
     ...klineAmountFields(k),
+    DBL5_prices:{open:String(k[1]),high:String(k[2]),low:String(k[3]),close:String(k[4])},
   }));
 }
 

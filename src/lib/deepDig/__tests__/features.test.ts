@@ -139,12 +139,12 @@ describe('【用户要求】Deep dig 分组标准：按用户写的条件划分�
     const b = newFeatureTemplate(1000);
     const merged = mergeFeatureDefs([a, { ...DRIFT_SPEED_DEF, name: '改过的名字', builtin: undefined }, b]);
     // 【用户要求】BSS 是第二个内置特征值
-    expect(merged.map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id, 'bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', ...SELLER_RETENTION_SPECS.map(s=>s.id), ...SELLER_FOCUS_FEATURES.map(d=>d.id), b.id, a.id]);
+    expect(merged.map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id, 'bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', ...SELLER_RETENTION_SPECS.map(s=>s.id), 'ati6h', 'prs_intraday_add_evidence_6h', 'sbs_5m', 'sbs_5m_quality', 'sbs_5m_distance', 'sbs_5m_step', 'darvas_5m_lower', 'darvas_5m_distance_bps', 'darvas_5m_width_bps', 'darvas_5m_age_minutes', ...SELLER_FOCUS_FEATURES.map(d=>d.id), b.id, a.id]);
     expect(merged[0]).toMatchObject({ name: '改过的名字', builtin: true });
     expect(checkDefinition(a)).toEqual({ formula: null, groups: null, scale: null });
     // 内置项删掉 = 隐藏，可恢复
     const hidden = [{ ...DRIFT_SPEED_DEF, builtin: undefined, removed: true }];
-    expect(mergeFeatureDefs(hidden).map(d => d.id)).toEqual(['bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', ...SELLER_RETENTION_SPECS.map(s=>s.id), ...SELLER_FOCUS_FEATURES.map(d=>d.id)]);
+    expect(mergeFeatureDefs(hidden).map(d => d.id)).toEqual(['bss', 'cba', 'drift-speed-z', 'cbi', 'cba-2', 'cbi2', 'mbi', 'mbi2', 'ctba', 'ctba_12h', 'state', 'state2', 'cdi2', 'seller-control', 'dss', 'cda', 'mbi-bear', 'ctba-bear', 'mbi2-bear', 'ctba_12h-bear', ...SELLER_RETENTION_SPECS.map(s=>s.id), 'ati6h', 'prs_intraday_add_evidence_6h', 'sbs_5m', 'sbs_5m_quality', 'sbs_5m_distance', 'sbs_5m_step', 'darvas_5m_lower', 'darvas_5m_distance_bps', 'darvas_5m_width_bps', 'darvas_5m_age_minutes', ...SELLER_FOCUS_FEATURES.map(d=>d.id)]);
     expect(removedBuiltins(hidden).map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id]);
   });
 });

@@ -26,6 +26,7 @@ export function formatSeriesOffset(ms: number): string {
 }
 
 export interface DeepDigSeries {
+  DBL5_windows?:Record<string,{checkpoint?:import('@/lib/dbl5m').Dbl5Checkpoint;rows:import('@/lib/dbl5m').Dbl5Row[];prices:{time:number;close:number}[]}>;
   SBS5M_windows?:Record<string,{checkpoint?:import('@/lib/sbs5m').SbsCheckpoint;rows:import('@/lib/sbs5m').SbsRow[];prices:{time:number;close:number}[]}>;
   PRS6H_windows?:Record<string,{checkpoint?:import('@/lib/prs6h').PrsCheckpoint;rows:import('@/lib/prs6h').PrsRow[];prices:{time:number;close:number}[]}>;
   ATI6H_windows?:Record<string,{rows:import('@/lib/ati6h').AtiRow[];prices:{time:number;close:number}[]}>;
@@ -74,13 +75,14 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'> & { id?: string; formula?: string },
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'> & { id?: string; formula?: string },
   names: readonly string[],
   offsets: readonly number[],
 ): Float32Array | Float64Array | null {
   const barMs = intervalMs(intervalOf(def));
   const range = seriesRangeOf(def);
-  const start = anchorMs - featureWindowMs(def) - range.beforeMs;
+  const defaultStart = anchorMs - featureWindowMs(def) - range.beforeMs;
+  const start = compiled.usesDbl5 ? def.DBL5_initialization_start ?? bars[0]?.openTime ?? defaultStart : defaultStart;
   const end = anchorMs + range.afterMs;
   const seen = new Set<number>();
   const sel = bars
@@ -96,7 +98,7 @@ export function computeEventSeries(
   const closes = sel.map(b => b.openTime + barMs);
   const values = names.map(n => (n === RESULT_VAR && !out.vars.has(n) ? out.last : out.vars.get(n) ?? Number.NaN));
   // MBI storage remains double precision; preserve every existing feature's cache format.
-  const ArrayType = (compiled.usesSbs5m || compiled.usesPrs6h || compiled.usesAti6h || compiled.usesMbi || compiled.usesMbi2 || featureTemplateId(def)==='ctba') ? Float64Array : Float32Array;
+  const ArrayType = (compiled.usesDbl5 || compiled.usesSbs5m || compiled.usesPrs6h || compiled.usesAti6h || compiled.usesMbi || compiled.usesMbi2 || featureTemplateId(def)==='ctba') ? Float64Array : Float32Array;
   const result = new ArrayType(names.length * offsets.length).fill(Number.NaN);
   offsets.forEach((tau, k) => {
     const t = anchorMs + tau;
@@ -108,7 +110,7 @@ export function computeEventSeries(
       const mid = (lo + hi) >> 1;
       if (closes[mid] <= t) { j = mid; lo = mid + 1; } else hi = mid - 1;
     }
-    if (j < 0 || t - closes[j] >= Math.max(barMs, range.stepMs)) return;
+    if (j < 0 || t - closes[j] >= (compiled.usesDbl5?barMs:Math.max(barMs, range.stepMs))) return;
     values.forEach((v, n) => {
       const x = typeof v === 'number' ? v : v[j];
       result[n * offsets.length + k] = Number.isFinite(x) ? x : Number.NaN;

@@ -30,11 +30,11 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number, n
     // Collect every selected indicator's demand in this render before fetching.
     // Otherwise each larger window forces all formulas to restart once again.
     queueMicrotask(async()=>{try{do{const target=current.desiredFrom;
-      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval,['ati6h','prs6h','sbs_5m'].includes(namespace??''));
+      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval,['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(namespace??''));
       if(entries.get(key)!==current)return;
       current.from=target;
       current.bars=result.filter(b => b.openTime < to).map(b => ({ timestamp: b.openTime,
-        ...(['ati6h','prs6h','sbs_5m'].includes(namespace??'')?{researchSymbol:symbol}:{}), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
+        ...(['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(namespace??'')?{researchSymbol:symbol}:{}), ...(b.DBL5_prices?{DBL5_prices:b.DBL5_prices}:{}), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
         ...(b.quoteVolume != null ? { turnover: b.quoteVolume } : {}),
         ...(b.takerBuyQuoteVolume != null ? { takerBuyTurnover: b.takerBuyQuoteVolume } : {}),
       }));
@@ -51,4 +51,10 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number, n
   let view=entry.views.get(from);
   if(!view){view=entry.bars.filter(b=>b.timestamp>=from);entry.views.set(from,view);}
   return view;
+}
+
+/** An exact-state feature must wait for the complete requested prefix, not publish a provisional origin. */
+export function chartPrehistoryReady(data:KLineData[],bars:number,step:number,namespace?:string):boolean {
+ if(bars<=0)return true;const interval=RESEARCH_INTERVALS.find(i=>intervalMs(i)===step),to=data[0]?.timestamp,symbol=data[0]?.researchSymbol;
+ const entry=entries.get(`${namespace?namespace+'|':''}${symbol}|${interval}|${to}`);return !!entry&&!entry.pending&&entry.from<=Math.max(0,to-Math.ceil(bars)*step);
 }

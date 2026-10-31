@@ -1,3 +1,4 @@
+import {Dbl5EvidenceView} from './Dbl5EvidenceView';
 import {Sbs5mEvidenceView} from './Sbs5mEvidenceView';
 import {Prs6hEvidenceView} from './Prs6hEvidenceView';
 import { Ati6hEvidenceView } from './Ati6hEvidenceView';
@@ -496,6 +497,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
           {def.researchWindowHours != null ? <>各组平均 · 入场前 {formatHoursText(def.researchWindowHours)} · {liveSeries?.offsets.length ?? Math.round(def.researchWindowHours*12)} 个已收盘{intervalOf(def)}时间点</> : <>各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）</>}
         </span>
       )} testId="deep-dig-series-block">
+        {featureTemplateId(def)==='darvas_5m_lower'&&<Dbl5EvidenceView data={result} series={liveSeries}/>}
         {featureTemplateId(def)==='sbs_5m'&&<Sbs5mEvidenceView data={result} series={liveSeries}/>}
         {featureTemplateId(def)==='prs6h'&&<Prs6hEvidenceView data={result} series={liveSeries}/>}
         {featureTemplateId(def)==='ati6h'&&<Ati6hEvidenceView data={result} series={liveSeries}/>}
