@@ -20,6 +20,8 @@
  * 空白的本机数据永远不会盖掉云端已有内容（除非它是同步过之后用户自己清空的）。
  */
 import { supabase } from '@/integrations/supabase/client';
+import { serializeAccountBlob, deserializeAccountBlob } from './accountBlobCodec';
+export { serializeAccountBlob, deserializeAccountBlob } from './accountBlobCodec';
 
 export const ACCOUNT_BLOB_PREFIX = 'idb:';
 const CHUNK_CHARS = 900_000;
@@ -34,7 +36,7 @@ export interface AccountBlobAdapter<T = unknown> {
   /** 用云端那份覆盖本机；undefined = 清空本机。须排进该存储自己的写队列。 */
   write(owner: string, value: T | undefined): Promise<void>;
   /** Libraries opt into merging remote history/deletion marks while retaining local settings. */
-  mergeRemote?(owner:string,value:T|undefined):Promise<void>;
+  mergeRemote?(owner:string,value:T|undefined,context?:{preferRemote:boolean}):Promise<void>;
   /** 内容多少：0 = 空白。只在两边都没有同步记录时用来比较。 */
   weight(value: T | undefined): number;
 }
@@ -42,7 +44,7 @@ export interface AccountBlobAdapter<T = unknown> {
 interface Head { v: 1; rev: string; parts: number; savedAt: number; enc: 'gzip' | 'json'; bytes: number; deleted?: boolean }
 /** hash = 与云端一致的那一版内容的指纹：内容没变的保存（关页、切走时的补存）不再重传几 MB。 */
 interface Meta { savedAt: number; syncedAt: number; rev?: string; parts?: number; hash?: string }
-export type AccountBlobSyncStatus = 'adopted' | 'pushed' | 'unchanged' | 'skipped' | 'failed';
+export type AccountBlobSyncStatus = 'adopted' | 'pushed' | 'unchanged' | 'skipped' | 'failed' | 'timed_out';
 
 const headKey = (name: string) => `${ACCOUNT_BLOB_PREFIX}${name}`;
 const chunkKey = (name: string, index: number) => `${ACCOUNT_BLOB_PREFIX}${name}#${index}`;
@@ -101,28 +103,6 @@ export const readReplacedAccountBlob = (name: string, owner: string) =>
   getRecord<{ replacedAt: number; value: unknown }>(`replaced:${idOf(name, owner)}`);
 
 // ───────────── 编码：保住 JSON 表达不了的值（Map / Set / Date / NaN / ±Infinity） ─────────────
-const TAG = '__veilType';
-function replacer(this: unknown, key: string, value: unknown): unknown {
-  const raw = (this as Record<string, unknown>)[key];
-  if (raw instanceof Map) return { [TAG]: 'Map', v: [...raw] };
-  if (raw instanceof Set) return { [TAG]: 'Set', v: [...raw] };
-  if (raw instanceof Date) return { [TAG]: 'Date', v: raw.getTime() };
-  if (typeof raw === 'number' && !Number.isFinite(raw)) return { [TAG]: 'Num', v: String(raw) };
-  return value;
-}
-function reviver(_key: string, value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const tagged = value as { [TAG]?: unknown; v?: unknown };
-  switch (tagged[TAG]) {
-    case 'Map': return new Map(tagged.v as [unknown, unknown][]);
-    case 'Set': return new Set(tagged.v as unknown[]);
-    case 'Date': return new Date(tagged.v as number);
-    case 'Num': return Number(tagged.v);
-    default: return value;
-  }
-}
-export const serializeAccountBlob = (value: unknown) => JSON.stringify(value, replacer);
-export const deserializeAccountBlob = (text: string): unknown => JSON.parse(text, reviver);
 
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -160,6 +140,16 @@ export async function encodeAccountBlob(value: unknown, serialized?: string): Pr
   return { enc: 'json', text: json, bytes: json.length };
 }
 export async function decodeAccountBlob(enc: Head['enc'], text: string): Promise<unknown> {
+  if (typeof Worker === 'function' && text.length > 1_000_000) {
+    return new Promise((resolve,reject) => {
+      const worker = new Worker(new URL('./workers/accountBlobDecoder.worker.ts', import.meta.url), {type:'module'});
+      const finish = () => { clearTimeout(timer); worker.terminate(); };
+      const timer = setTimeout(() => { finish(); reject(new Error('账号研究档案解码超时')); },120_000);
+      worker.onmessage = event => { finish(); event.data.ok ? resolve(event.data.value) : reject(new Error('账号研究档案解码失败')); };
+      worker.onerror = () => { finish(); reject(new Error('账号研究档案解码失败')); };
+      worker.postMessage({enc,text});
+    });
+  }
   if (enc === 'json') return deserializeAccountBlob(text);
   const bytes = await pipe(fromBase64(text), new DecompressionStream('gzip'));
   return deserializeAccountBlob(new TextDecoder().decode(bytes));
@@ -251,7 +241,7 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   const head = await fetchHead(adapter.name, owner);
   if(head&&head.rev!==meta?.rev&&adapter.mergeRemote&&(meta?.rev||settled)){
     const cloud=await fetchValue(adapter.name,owner,head);if(!cloud.ok)return false;
-    await adapter.mergeRemote(owner,cloud.value);value=await adapter.read(owner);
+    await adapter.mergeRemote(owner,cloud.value,{preferRemote:head.savedAt>=savedAt});value=await adapter.read(owner);
     savedAt=Math.max(savedAt,head.savedAt+1);
   }
   if (head) {
@@ -330,7 +320,18 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
     if (!cloud.ok) return 'failed';
     takeCloud = adapter.weight(cloud.value) > localWeight;
   }
-  if(adapter.mergeRemote){cloud??=await fetchValue(adapter.name,owner,head);if(!cloud.ok)return 'failed';if(!begin())return 'skipped';await adapter.mergeRemote(owner,cloud.value);schedulePush(adapter,owner,0,true);return 'adopted';}
+  if(adapter.mergeRemote){
+    cloud??=await fetchValue(adapter.name,owner,head);
+    if(!cloud.ok)return 'failed';
+    if(!begin())return 'skipped';
+    await adapter.mergeRemote(owner,cloud.value,{preferRemote:takeCloud});
+    // The merged copy includes this head. Mark it dirty against that exact revision;
+    // the queued push must not download and merge the same large archive again.
+    const latest=await readMeta(adapter.name,owner);
+    await writeMeta(adapter.name,owner,{rev:head.rev,parts:head.parts,savedAt:Math.max(Date.now(),latest?.savedAt??0,head.savedAt+1),syncedAt:head.savedAt});
+    schedulePush(adapter,owner,0,true);
+    return 'adopted';
+  }
   if (!takeCloud) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
   cloud ??= await fetchValue(adapter.name, owner, head);
   if (!cloud.ok) return 'failed';
@@ -344,8 +345,8 @@ const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { st
  * 本机存储读取前调用：每页每个账号对一次账，最多等 6 秒；
  * 超时就先用本机那份（之后的对账不再改本机数据，下次打开再来）。
  */
-export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: string | null | undefined, timeoutMs = LOAD_TIMEOUT_MS): Promise<void> {
-  if (!owner) return Promise.resolve();
+export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: string | null | undefined, timeoutMs = LOAD_TIMEOUT_MS): Promise<AccountBlobSyncStatus> {
+  if (!owner) return Promise.resolve('skipped');
   adapters.set(adapter.name, adapter);
   const id = idOf(adapter.name, owner);
   let entry = loads.get(id);
@@ -361,8 +362,8 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
   }
   const { task, gate } = entry;
   // 正在把云端那份写进本机时不能放行（否则页面读到旧的、之后又拿旧的盖回去）；其余情况超时即先用本机。
-  const timer = new Promise<void>(resolve => setTimeout(() => { if (gate.state !== 'adopting') { gate.state = 'closed'; resolve(); } }, timeoutMs));
-  return Promise.race([task.then(() => undefined), timer]);
+  const timer = new Promise<AccountBlobSyncStatus>(resolve => setTimeout(() => { if (gate.state !== 'adopting') { gate.state = 'closed'; resolve('timed_out'); } }, timeoutMs));
+  return Promise.race([task, timer]);
 }
 
 /** 本机存储每次保存成功后调用：记下「改过未上传」，几秒后上传（连续保存只传最后一版）。 */

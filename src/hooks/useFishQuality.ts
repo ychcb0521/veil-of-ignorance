@@ -79,6 +79,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
+    }).catch(cause => {
+      if (!active || epoch !== generation.current) return;
+      setError(cause instanceof Error ? cause.message : '账号研究暂未恢复，请重试。');
+      setWarning('账号原数据仍保留，恢复完成前不会保存空白研究。');
     });
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };
     window.addEventListener('pagehide', flush);

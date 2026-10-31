@@ -2406,6 +2406,7 @@ export default function JournalCampaignsPage() {
   const changeComparisonFilter = (key: string, value: string) => { const params = new URLSearchParams(location.search); params.set(key, value); nav({ pathname: location.pathname, search: params.toString() }); };
 
   const loading = !campaignRowsComplete && !campaignLoadError && rows.length === 0;
+  const accountRecoveryPending=comparing&&sourceRows.length===0&&(!campaignRowsComplete||!!campaignLoadError);
   const campaignLoadProgress = { loaded, total };
   const [busyCampaignId, setBusyCampaignIdState] = useState<string | null>(null);
   // 回调只从 ref 读「正在忙的那一场」：不把它列进依赖，点一次自评不会换掉 237 张卡片的回调引用
@@ -4720,7 +4721,7 @@ export default function JournalCampaignsPage() {
           <div role="status" className="mb-2 flex items-center gap-3 rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
             <span>
               {campaignLoadError
-                ? `${campaignRowsComplete ? '更新失败，保留上次结果。' : '战役读取失败。'}${campaignLoadError}`
+                ? `${campaignRowsComplete && sourceRows.length>0 ? '更新失败，保留上次结果。' : '战役读取失败。'}${campaignLoadError}`
                 : `${failedCount} 场战役未能更新，统计可能不完整；已有结果已保留。`}
             </span>
             <button type="button" onClick={retryCampaignLoad} disabled={refreshing} className="shrink-0 underline disabled:opacity-50">
@@ -4740,10 +4741,10 @@ export default function JournalCampaignsPage() {
             >
             {/* 【用户要求】排序行左对齐：按钮依次排开、间距均匀，两条短分隔线分出「操作时间 · 镜像止盈 ┆ 与封面指标同序的七项 ┆ 其余」三组。
                 左右内边距与封面相同（CAMPAIGN_COLUMNS_FRAME / INSET），行首与封面左缘对齐。 */}
-            <div
-              data-testid="campaign-sort-controls"
-              className={`relative !pr-20 order-2 flex min-h-10 flex-wrap items-center gap-x-0.5 gap-y-0.5 border-t border-border/60 py-1.5 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
-            >
+            <div data-testid="campaign-list-toolbar" className={`order-2 flex min-w-0 items-center gap-1 border-t border-border/60 py-1.5 ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}>
+            <div data-testid="campaign-sort-controls"
+              className="flex min-h-7 min-w-0 flex-1 flex-nowrap items-center gap-x-0.5 overflow-x-auto whitespace-nowrap text-[10px] text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+
               {renderSortRow(SORT_OPTIONS.map(option => {
                 /** 这一项在排序链上的第几级（0 = 第一级，-1 = 不在链上）。 */
                 const level = sortChain.findIndex(item => item.mode === option.value);
@@ -5170,6 +5171,9 @@ export default function JournalCampaignsPage() {
                 </Popover>,
               );
               }))}
+            </div>
+            <div data-testid="campaign-list-toolbar-actions" className="flex shrink-0 items-center gap-1 border-l border-border/40 pl-1">
+              {renderCardPagination('上方')}
               {/* 【用户要求】不常用的指标折在这里：很小、很淡的「›」，点开排序行与封面多出这几项，「‹」收起 */}
               <button
                 type="button"
@@ -5180,7 +5184,7 @@ export default function JournalCampaignsPage() {
                 aria-expanded={showMinorMetrics}
                 title={`${showMinorMetrics ? '收起' : '展开'}不常用指标：${MINOR_METRICS_NAMES}`}
                 onClick={toggleMinorMetrics}
-                className={`${MINOR_TOGGLE_CLASS} absolute right-10 top-1.5 z-10 h-7 w-6 bg-background`}
+                className={`${MINOR_TOGGLE_CLASS} h-7 w-6 shrink-0`}
               >
                 {showMinorMetrics ? '‹' : '›'}
               </button>
@@ -5241,6 +5245,7 @@ export default function JournalCampaignsPage() {
               </button>
                 </PopoverContent>
               </Popover>
+            </div>
             </div>
             {sortChain.length > 1 && renderSortChainBar()}
             {selectionMode && !narrowViewport && renderBatchSelectionBar(false)}
@@ -5385,13 +5390,13 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-valid-count"
-                  aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}，点击查看最大预期亏损计算说明`}
+                  aria-label={accountRecoveryPending?'账号持仓监测记录尚在恢复，统计暂不可用':`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}，点击查看最大预期亏损计算说明`}
                   title="点击查看有效战役与最大预期亏损说明"
                   onClick={event => toggleFormulaPopover(event, 'validCampaigns')}
                   className={`${STAT_TRIGGER} border-transparent`}
                 >
                   <span className={STAT_LABEL}>有效战役</span>{' '}
-                  <span className={`${STAT_VALUE} text-foreground/90`}>{validCampaignCount}</span>
+                  <span className={`${STAT_VALUE} text-foreground/90`}>{accountRecoveryPending?'—':validCampaignCount}</span>
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-96 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
@@ -5998,14 +6003,19 @@ export default function JournalCampaignsPage() {
         ) : null}
 
         {loading ? (
-          <div className="border border-border rounded p-10 text-center text-[12px] text-muted-foreground">加载中…</div>
+          <div className="border border-border rounded p-10 text-center text-[12px] text-muted-foreground">{comparing ? '正在恢复账号中的持仓监测记录…' : '加载中…'}</div>
         ) : sortedRows.length === 0 ? (
           <div className="border border-border rounded p-10 text-center space-y-2">
             <div className="mx-auto w-10 h-10 rounded-full bg-accent flex items-center justify-center">
               <Layers className="w-5 h-5 text-muted-foreground" />
             </div>
             {/* 空列表有三种原因，不能都说成「尚无战役」：时间段筛空了、当前排序口径筛空了、真的一场都没有。 */}
-            {!isAllRange(operationRange) && scopedRows.length === 0 ? (
+            {campaignLoadError ? (
+              <>
+                <div className="text-[13px] font-medium">{comparing ? '持仓监测记录尚未恢复' : '战役记录尚未读取'}</div>
+                <div className="text-[12px] text-muted-foreground">原数据仍保留，请使用上方的重试入口重新读取。</div>
+              </>
+            ) : !isAllRange(operationRange) && scopedRows.length === 0 ? (
               <>
                 <div className="text-[13px] font-medium" data-testid="campaign-empty-range">
                   {describeOperationRange(operationRange)} 内没有战役
@@ -6046,7 +6056,6 @@ export default function JournalCampaignsPage() {
         ) : (
           // 列宽变量挂在列表容器上：每张卡的同名项读同一个宽度，上下对齐；宽度随时间段里的战役变（不随排序变），卡片本身不重画。
           <div ref={cardListRef} data-testid="campaign-card-list" style={{ ...cardMetricGridStyle, scrollMarginTop: CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight + 8 }}>
-            {renderCardPagination('上方')}
             {pagedCardSections ? pagedCardSections.map(({ id, index: sectionIndex, group, rows: sectionRows }) => {
               const collapsed = collapsedSections.has(id);
               const winRate = group.payoffCount > 0 ? `${Math.round((group.wins / group.payoffCount) * 100)}%` : '—';
@@ -6170,7 +6179,7 @@ export default function JournalCampaignsPage() {
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto px-5 py-2">
             {deletedLoading ? (
-              <div className="py-12 text-center text-[12px] text-muted-foreground">加载中…</div>
+              <div className="py-12 text-center text-[12px] text-muted-foreground">{comparing ? '正在恢复账号中的持仓监测记录…' : '加载中…'}</div>
             ) : deletedCampaigns.length === 0 ? (
               <div className="py-12 text-center">
                 <ArchiveRestore className="mx-auto h-5 w-5 text-muted-foreground/45" />

@@ -20,7 +20,7 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
         const data = await listQualityCampaignData(owner, 'quality');
         if (active && epoch === generation) observedRepair = data.repair;
         if (active && epoch === generation) setSnapshot({ owner, section, rows: data.rows.map(row => ({ ...buildCampaignCardData(row), peakPriceChangePct: row.campaign.peak_unrealized_pnl })), complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel });
-      } catch (error) { if (active && epoch === generation) setSnapshot({ owner, section, rows: [], complete: true, error: error instanceof Error ? error.message : String(error), selectedSellKey: undefined, buyFilterLabel: '' }); }
+      } catch (error) { if (active && epoch === generation) setSnapshot(previous => ({ ...(previous.owner === owner && previous.section === section ? previous : { owner, section, rows: [], selectedSellKey: undefined, buyFilterLabel: '' }), complete: true, error: error instanceof Error ? error.message : String(error) })); }
       finally {
         inFlight = false;
         if (active && queued) { queued = false; void load(); }

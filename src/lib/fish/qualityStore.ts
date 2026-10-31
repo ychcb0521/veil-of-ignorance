@@ -36,7 +36,8 @@ export async function loadQualityStudy(owner?: string): Promise<{ study: FishQua
 }
 async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   // 【用户要求】2026-10-27 鱼质量研究跟账号走：先和云端对一次账（换电脑登录也能看到），再读本机。
-  await syncAccountBlobOnLoad(qualityAccountBlob, owner);
+  const syncStatus=await syncAccountBlobOnLoad(qualityAccountBlob, owner,180_000);
+  const recoveryError=syncStatus==='timed_out'?'账号研究恢复超时，原数据仍保留，请重试。':syncStatus==='failed'?'账号研究恢复失败，原数据仍保留，请重试。':undefined;
   // A detail link can open immediately after the evaluator unmounts and flushes.
   await writes.get(keyOf(owner));
   let fallback: unknown;
@@ -49,19 +50,39 @@ async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQuality
         req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
       });
       // A fallback can be newer if a previous durable write failed.
-      if (valid(fallback)) return { study: preserveStudy(valid(stored) ? stored : undefined,fallback) };
       if (stored != null && !valid(stored)) throw new Error('invalid saved study');
-      return { study: valid(stored) ? applySourceDeletions(stored) : newQualityStudy() };
+      const study=valid(fallback)?preserveStudy(valid(stored)?stored:undefined,fallback):valid(stored)?applySourceDeletions(stored):newQualityStudy();
+      if(recoveryError&&qualityAccountBlob.weight(study)===0)throw new Error(recoveryError);
+      return {study,warning:recoveryError};
     } finally { db.close(); }
   } catch {
+    if(recoveryError&&(!valid(fallback)||qualityAccountBlob.weight(fallback)===0))throw new Error(recoveryError);
     return { study: valid(fallback) ? fallback : newQualityStudy(), warning: '鱼质量的本机存储暂不可用；当前结果可能无法在刷新后恢复，请保留此页面。' };
   }
 }
+export function mergeRemoteQualityStudy(local: FishQualityStudy | undefined, remote: FishQualityStudy, preferRemote = false): FishQualityStudy {
+  if (!local) return remote;
+  const base=preferRemote?remote:local,other=preferRemote?local:remote;
+  const byId = <T,>(left: readonly T[], right: readonly T[], key: (v:T)=>string) => [...new Map([...left,...right].map(v=>[key(v),v])).values()];
+  const byTime = <T,>(left: readonly T[], right: readonly T[], key:(v:T)=>string, at:(v:T)=>number) => {
+    const map=new Map(left.map(v=>[key(v),v]));
+    for(const v of right){const old=map.get(key(v));if(!old||at(v)>=at(old))map.set(key(v),v);}
+    return [...map.values()];
+  };
+  const runs=new Map((other.campaignRuns??[]).map(r=>[r.result.key,r]));
+  for(const r of base.campaignRuns??[]){const old=runs.get(r.result.key);if(!old||r.result.evaluatedAt>=old.result.evaluatedAt)runs.set(r.result.key,r);}
+  return preserveStudy(other,{...other,...base,
+    groups:byId(other.groups,base.groups,g=>g.id),samples:byId(other.samples,base.samples,r=>r.id),
+    sellPlans:byId(other.sellPlans??[],base.sellPlans??[],g=>g.id),
+    results:byTime(other.results,base.results,r=>r.key,r=>r.evaluatedAt),campaignRuns:[...runs.values()],
+    filterReadings:byTime(other.filterReadings??[],base.filterReadings??[],r=>r.key,r=>r.at??0),
+  });
+}
 // Serialize writes per account. A slow earlier write must never overwrite a later result/rule edit.
 const writes = new Map<string, Promise<boolean>>();
-export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly: boolean }): Promise<boolean> {
+export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly?: boolean; remote?: {preferRemote:boolean} }): Promise<boolean> {
   const key = keyOf(owner), copy = structuredClone(study);
-  const merge = (previous: unknown) => options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy);
+  const merge = (previous: unknown) => options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy);
   const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
     let durablePrevious: FishQualityStudy | undefined;
     try {
@@ -92,7 +113,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
 /** 账号云端存档：本机那份原样上传；取回云端时排进同一条写队列，绝不和页面的保存交错。 */
 export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
   name: 'fish-quality',
-  async mergeRemote(owner,value){if(value&&!await saveQualityStudy(owner,value,{repairOnly:true}))throw Error('鱼质量跨设备合并未保存');},
+  async mergeRemote(owner,value,context){if(value&&!await saveQualityStudy(owner,value,{remote:{preferRemote:context?.preferRemote??false}}))throw Error('鱼质量跨设备合并未保存');},
   async read(owner) {
     const key = keyOf(owner);
     await writes.get(key);

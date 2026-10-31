@@ -590,3 +590,10 @@ it('saves all seller parameters durably without running, then starts once with t
  expect(storage.save).toHaveBeenLastCalledWith('a',expect.objectContaining({observeHours:12,sellPlans:expect.arrayContaining([expect.objectContaining({id,rule:{metric:'state',direction:'<',threshold:.42},holdingVetoes:[veto]})])}));
  act(()=>{void h.result.current.start();});await flush();expect(tasks).toHaveLength(1);expect(tasks[0].study.observeHours).toBe(12);expect(tasks[0].study.sellPlans!.find(p=>p.id===id)).toMatchObject({rule:{threshold:.42},holdingVetoes:[veto],mirrorTakeProfit:{gainPct:6,sellPct:50}});expect(tasks[0].study.sellPlans!.find(p=>p.id===combo.id)!.combo!.switchPct).toBe(8);
 });
+
+it('keeps failed account restoration unready and never persists an empty replacement',async()=>{
+ storage.load.mockRejectedValueOnce(new Error('账号研究恢复超时，原数据仍保留，请重试。'));
+ const h=renderHook(()=>useFishQuality('a',[signal],vi.fn(async()=>{})));await flush(1000);
+ expect(h.result.current.ready).toBe(false);expect(h.result.current.error).toContain('原数据仍保留');
+ act(()=>window.dispatchEvent(new Event('pagehide')));h.unmount();expect(storage.save).not.toHaveBeenCalled();
+});

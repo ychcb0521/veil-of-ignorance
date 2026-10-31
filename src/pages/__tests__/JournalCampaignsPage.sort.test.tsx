@@ -448,6 +448,21 @@ function DetailReturn() {
 }
 
 describe('JournalCampaignsPage sorting', () => {
+  it('keeps sort labels, secondary actions and unchanged statistics together in the campaign toolbar', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    await waitFor(()=>expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    const toolbar=screen.getByTestId('campaign-list-toolbar'),sort=screen.getByTestId('campaign-sort-controls');
+    const actions=screen.getByTestId('campaign-list-toolbar-actions'),toggle=screen.getByTestId('campaign-minor-metrics-toggle');
+    expect(toolbar).toContainElement(sort);expect(toolbar).toContainElement(actions);
+    expect(sort).toHaveClass('flex-nowrap','overflow-x-auto');expect(sort).toContainElement(screen.getByTestId('campaign-sort-alpha'));
+    expect(actions).toContainElement(toggle);expect(actions).toContainElement(screen.getByTestId('campaign-actions-toggle'));
+    expect(sort).not.toContainElement(screen.getByTestId('campaign-actions-toggle'));
+    const before=screen.getByTestId('campaign-valid-count').textContent;
+    fireEvent.click(toggle);fireEvent.click(toggle);fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);expect(screen.getByTestId('campaign-valid-count').textContent).toBe(before);
+    fireEvent.click(screen.getByTestId('campaign-actions-toggle'));expect(screen.getByTestId('campaign-batch-select-toggle')).toBeVisible();
+  });
+
   it('三列概览对应排序顺序：操作时间在最前且默认选中，新增金额指标可排序和查看散点图', async () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
     await screen.findAllByTestId('campaign-card');
@@ -863,7 +878,8 @@ describe('JournalCampaignsPage sorting', () => {
     const expandedStyle = screen.getByTestId('campaign-card-list').getAttribute('style');
     expect(expandedStyle).not.toBe(collapsedStyle);
     // 多次切换后仍能收起，入口固定在角落，不随新增指标移动。
-    expect(toggle).toHaveClass('absolute', 'right-10');
+    expect(screen.getByTestId('campaign-list-toolbar-actions')).toContainElement(toggle);
+    expect(toggle).not.toHaveClass('absolute');
     for (let i = 0; i < 3; i++) {
       fireEvent.click(toggle);
       expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -984,14 +1000,17 @@ describe('JournalCampaignsPage sorting', () => {
     const sortRow = screen.getByTestId('campaign-sort-controls');
     // 「排序方式这里不美观。这里还是用左对齐吧」：不再读封面的列模板，按钮依次排开、间距均匀
     expect([...sortRow.classList].some(cls => cls.startsWith('xl:grid'))).toBe(false);
-    expect(sortRow).toHaveClass('flex', 'flex-wrap', 'gap-x-0.5', 'min-h-10', 'py-1.5');
+    expect(sortRow).toHaveClass('flex', 'flex-nowrap', 'overflow-x-auto', 'whitespace-nowrap');
+    const toolbar=screen.getByTestId('campaign-list-toolbar');
+    expect(toolbar).toContainElement(sortRow);
     // 行首与封面左缘对齐：同一套内边距 + 一条透明 1px 边框抵掉卡片外框
-    expect(sortRow).toHaveClass('px-4', 'sm:px-5', 'border-x', 'border-transparent');
+    expect(toolbar).toHaveClass('px-4', 'sm:px-5', 'border-x', 'border-transparent');
     // 子节点：标签，然后按钮与分隔线按次序排开，没有按列分组的外壳；
     // 最末两个是「导出 Excel」与「批量下载」——不是排序项，「导出 Excel」带 ml-auto，两个一起贴在这一行最右端
     const children = [...sortRow.children];
     expect(children[0]).toHaveTextContent('排序方式');
-    const actions = children.at(-1)!;
+    const actions = screen.getByTestId('campaign-actions-toggle');
+    expect(screen.getByTestId('campaign-list-toolbar-actions')).toContainElement(actions);
     expect(actions).toHaveAttribute('data-testid', 'campaign-actions-toggle');
     expect(actions).toHaveClass('ml-auto');
     expect(actions).toHaveAccessibleName('选择与导出');
@@ -999,13 +1018,13 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
     // 每个排序项外面包着一层（data-sort-item，放悬停才出现的「+」与多级时的级数角标，不占尺寸），分隔线仍是直接的子节点
     // 【用户要求】倒数第二个是不常用指标的展开符号（很小、很淡的「›」）
-    expect(children.at(-2)).toHaveAttribute('data-testid', 'campaign-minor-metrics-toggle');
-    const sequence = children.slice(1, -2).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
-    for (const item of children.slice(1, -2).filter(node => node.hasAttribute('data-sort-item'))) {
+    expect(screen.getByTestId('campaign-list-toolbar-actions')).toContainElement(screen.getByTestId('campaign-minor-metrics-toggle'));
+    const sequence = children.slice(1).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    for (const item of children.slice(1).filter(node => node.hasAttribute('data-sort-item'))) {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy', 'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
+    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy', 'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
