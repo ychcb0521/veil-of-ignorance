@@ -2,7 +2,7 @@ import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
 import {FishQualitySellStagesEditor,type SellStageDraft} from './FishQualitySellStagesEditor';
 import {validateQualitySellStages} from '@/lib/fish/qualitySellStages';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Copy, Plus, X } from 'lucide-react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
 import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
@@ -22,8 +22,9 @@ const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, l
   afterDirection: plan.combo?.after.rule.direction ?? '<', afterThreshold: plan.combo ? String(plan.combo.after.rule.threshold) : '', switchPct: String(plan.combo?.switchPct ?? 5.1) });
 
 export interface SellPlansDraftView { plans: QualityGroup[]; dirty: boolean; algorithmsDirty: boolean; error: string; save: (after?: (plans: QualityGroup[]) => QualityGroup[]) => boolean }
-export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan }: {
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan }: {
   plans: readonly QualityGroup[]; ready: boolean; onSave: (plans: QualityGroup[]) => void;
+  onCopyPlan?: (source: QualityGroup, copy: QualityGroup) => void;
   onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderHolding?: (view: SellPlansDraftView) => ReactNode;
 }) {
   const definitions = useFeatureDefinitions();
@@ -41,6 +42,19 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const stageFields=(d:Draft)=>JSON.stringify([d.stagesEnabled,...(d.stagesEnabled?d.stages:[])]);
   const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.switchPct]:[])]);
   const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || choices.find(c=>c.key===d.choice)?.label || base?.label || '新卖出算法';
+  const duplicate = (source: Draft, index: number) => {
+    const base = structuredClone(baseOf(source)!);
+    const rootLabel = labelOf(source, base).replace(/（副本(?: \d+)?）$/, '').trim() || '卖出算法';
+    const labels = new Set(drafts.map(d => labelOf(d, baseOf(d))));
+    let label = `${rootLabel}（副本）`, suffix = 2;
+    while (labels.has(label)) label = `${rootLabel}（副本 ${suffix++}）`;
+    const copyBase = {...base, id: newQualitySellPlanId(), label};
+    // Keep raw, possibly incomplete inputs editable; validation still belongs to Save.
+    const copy: Draft = {...structuredClone(source), id: copyBase.id, label, original: copyBase};
+    onCopyPlan?.({...base, id: source.id}, copyBase);
+    change([...drafts.slice(0, index + 1), copy, ...drafts.slice(index + 1)]);
+    onSelectPlan?.(copy.id);
+  };
   const apply = (after?: (plans: QualityGroup[]) => QualityGroup[]) => {
     try {
       const next = drafts.map(d => {
@@ -92,6 +106,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     {drafts.map((d, i) => <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
       <div className="flex items-center gap-1.5"><span className="text-[10px] tabular-nums text-muted-foreground">{i + 1}.</span><input aria-label={'卖出算法 ' + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
         <select aria-label={'卖出算法 ' + (i + 1) + ' 类型'} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>
+        <button type="button" disabled={!ready} aria-label={'复制卖出算法 ' + (i + 1)} title="复制整套方案：含当前填写的组合算法、加仓、镜像止盈和一票条件" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" aria-label={'删除卖出算法 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></div>
       <div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
         {select(d.choice, '卖出算法 ' + (i + 1) + ' 指标', choice => patch(d.id, { choice }))}

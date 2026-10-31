@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  summarizeGeometricExpectancy,
+  summarizeGeometricExpectancy, computeGeometricPnlEstimate,
   compactUnitRiseBinValue, compactUsdBinValue, computeGeometricGrowth, formatCompactUnitRise, formatCompactUsd, formatGeometricGrowth,
 } from '@/lib/campaignUnitProfit';
 
@@ -88,5 +88,29 @@ describe('【用户要求】统计概览的几何期望：单场几何期望逐�
     const many = summarizeGeometricExpectancy(Array.from({ length: 2000 }, () => 3));
     expect(many.mean).toBeCloseTo(3, 9);
     expect(many.product).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+
+describe('几何 P&L：倍数乘有效涨幅先得到收益率，再按首仓名义本金换算', () => {
+  it('uses Q × E rather than treating a return percentage as USDT', () => {
+    expect(computeGeometricPnlEstimate(10, 100, 10, 3)).toEqual({ initialNotional: 1000, returnPct: 30, pnl: 300 });
+    expect(computeGeometricPnlEstimate(10, 100, 1, 3)).toEqual({ initialNotional: 100, returnPct: 30, pnl: 30 });
+  });
+  it('agrees algebraically with W = (Q × ΔP) × m at full precision, including losses and zero', () => {
+    for (const delta of [0, -10, 0.000123456789]) {
+      const result = computeGeometricPnlEstimate(delta, 0.123456789, 789.123456, 3.14159265)!;
+      expect(result.pnl).toBe((789.123456 * delta) * 3.14159265);
+      expect(result.initialNotional * result.returnPct / 100).toBeCloseTo(result.pnl, 10);
+    }
+    expect(computeGeometricPnlEstimate(10, 100, 10, 0)?.pnl).toBe(0);
+  });
+  it.each([
+    [null, 100, 10, 3], [10, 0, 10, 3], [10, -1, 10, 3], [10, NaN, 10, 3],
+    [10, 100, null, 3], [10, 100, 0, 3], [10, 100, 10, null], [10, 100, 10, -1],
+    [Infinity, 100, 10, 3], [10, 100, Infinity, 3], [10, 100, 10, Infinity],
+    [1e308, 1e308, 1e308, 3],
+  ])('does not invent an amount with missing or invalid evidence (%s, %s, %s, %s)', (delta, entry, coins, multiple) => {
+    expect(computeGeometricPnlEstimate(delta, entry, coins, multiple)).toBeNull();
   });
 });

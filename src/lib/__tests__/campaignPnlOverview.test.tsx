@@ -15,9 +15,9 @@ import {
  * 【用户要求】主力首仓涨跌幅 +20% → 首仓涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 ΔP","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤","静态最大回撤"];
+const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","开仓价的有效涨幅","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤","静态最大回撤"];
 
-const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","executionWear","geometricExpectancy","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","peakPriceChange","unrealizedPriceChangePct","dynamicMaxDrawdownPct","staticMaxDrawdownPct"];
+const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","executionWear","geometricExpectancy","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","arithmeticExpectancy","entryEffectiveRisePct","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","peakPriceChange","unrealizedPriceChangePct","dynamicMaxDrawdownPct","staticMaxDrawdownPct"];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
   return {
@@ -209,25 +209,25 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('1.00 倍');
   });
 
-  it('【用户要求】单位涨幅 ΔP = F − Kₘ、单位利润 U = Q × ΔP、仓位利润 W = U × 几何仓位：读数、颜色与本场代入', () => {
+  it('normalizes delta-P by the initial entry price while retaining unit-profit and position-profit calculations', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 2.5,
       unitRise: 50, unitProfit: 500, positionProfit: 1000, positionProfitTheoretical: 1250,
-      geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0, addRatios: [1], finalExitPrice: 150, lastSupport: 100 },
+      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 200, earlyReductionFraction: 0, addRatios: [1], finalExitPrice: 150, lastSupport: 100 },
     }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
-    expect(byKey.unitRise.value).toBe('50.0000');
+    expect(byKey.unitRise).toBeUndefined();
+    expect(byKey.entryEffectiveRisePct.value).toBe('+25.00%');
+    expect(render(<>{byKey.entryEffectiveRisePct.help}</>).container).toHaveTextContent('50.0000 ÷ 200.0000 × 100% = +25.00%');
     expect(byKey.unitProfit.value).toBe('500.00');
     expect(byKey.positionProfit.value).toBe('1,000.00（1,250.00）');
-    expect(byKey.unitRise.valueClassName).toBe('text-[#0ECB81]');
-    expect(render(<>{byKey.unitRise.help}</>).container).toHaveTextContent('ΔP = 150.0000 − 100.0000 ≈ 50.0000');
     expect(render(<>{byKey.unitProfit.help}</>).container).toHaveTextContent('U = 10 币 × 50.0000 ≈ 500.00 USDT');
     const w = render(<>{byKey.positionProfit.help}</>).container;
     expect(w).toHaveTextContent('W = 500.00 × 2.0000 ≈ 1,000.00 USDT');
     expect(w).toHaveTextContent('W（理论）= 500.00 × 2.5000 ≈ 1,250.00 USDT');
     const loss = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ unitRise: -0.00012346, unitProfit: -12.3, positionProfit: null }))
       .map(item => [item.key, item]));
-    expect(loss.unitRise.value).toBe('-0.0001235');
+    expect(loss.unitRise).toBeUndefined();
     expect(loss.unitProfit.valueClassName).toBe('text-[#F6465D]');
     expect(loss.positionProfit.value).toBe('—');
   });
@@ -243,7 +243,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(container.textContent).not.toContain('按币量加权');
   });
 
-  it('输出 14 项（新增多方总名义仓位）：键、标签、值、着色、分栏', () => {
+  it('输出 22 项（单位涨幅改按首次开仓价归一）：键、标签、值、着色、分栏', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
@@ -360,7 +360,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 });
 
 describe('CampaignPnlOverviewPanel', () => {
-  it('渲染 14 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
+  it('渲染各项「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
     const { container } = render(
       <CampaignPnlOverviewPanel title="盈亏概览" items={items} />,
@@ -592,4 +592,36 @@ it('shows the actual half-mirror result after peak gain and shares its value wit
  const index=items.findIndex(i=>i.key==='peakPriceChange');expect(items[index+1]).toMatchObject({key:'halfMirror',label:'半仓镜像',value:'+5.00% · 已卖 50%',column:2});
  const info=render(<>{items[index+1].help}</>).container;expect(info).toHaveTextContent('总盈亏 = 镜像止盈已兑现盈亏 + 余仓盈亏');
  expect(buildCampaignPnlOverviewItems(winnerMetrics()).some(i=>i.key==='halfMirror')).toBe(false);
+});
+
+it.each([[10,100,'+10.00%'],[-10,100,'-10.00%'],[0,100,'0.00%'],[.0001,.001,'+10.00%'],[null,100,'—'],[Infinity,100,'—'],[10,0,'—'],[10,-1,'—'],[10,NaN,'—'],[10,Infinity,'—']])('effective entry gain uses delta %s / initial entry %s once', (delta,entry,value)=>{
+ const items=buildCampaignPnlOverviewItems(winnerMetrics({unitRise:delta,geometricMetricBasis:{initialCoins:10,initialEntryPrice:entry,earlyReductionFraction:0,addRatios:[1],finalExitPrice:150,lastSupport:100}}));expect(items.find(i=>i.key==='entryEffectiveRisePct')?.value).toBe(value);
+});
+
+
+describe('已实现 P&L 的第二种几何算法', () => {
+  it('shows normalized return and an amount on the initial notional while preserving actual settlement', () => {
+    const item = buildCampaignPnlOverviewItems(winnerMetrics({
+      realizedPnl: 315, unitRise: 10, positionGeometricMultiple: 3,
+      initialMainExposureNotional: 9999, mainSideNotional: { side: 'long', total: 88888 },
+      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 100, earlyReductionFraction: 0.5, addRatios: [5], finalExitPrice: 150, lastSupport: 140 },
+    })).find(value => value.key === 'realizedPnl')!;
+    expect(item.value).toBe('315.00 USDT');
+    const help = render(<>{item.help}</>).container;
+    const worked = help.querySelector('[data-testid="geometric-pnl-worked"]')!;
+    expect(worked).toHaveTextContent('首仓名义本金 = 10 币 × 100 = 1,000.00 USDT');
+    expect(worked).toHaveTextContent('几何收益率 = 3 × +10.00% = +30.00%');
+    expect(worked).toHaveTextContent('P&L（几何算法）= 1,000.00 × +30.00% = 300.00 USDT');
+    expect(help).toHaveTextContent('实际已实现金额以方法一为准');
+  });
+  it('shows no invented geometric zero when evidence is missing, and retains a genuine negative estimate', () => {
+    const getItem = (values: Partial<CampaignPnlOverviewMetrics>) => buildCampaignPnlOverviewItems(winnerMetrics(values)).find(item => item.key === 'realizedPnl')!;
+    const missing = render(<>{getItem({ unitRise: 10, positionGeometricMultiple: 3 }).help}</>).container;
+    expect(missing.querySelector('[data-testid="geometric-pnl-worked"]')).toBeNull();
+    expect(missing.querySelector('[data-testid="geometric-pnl-help"]')).toHaveTextContent('本场：—');
+    const loss = render(<>{getItem({ unitRise: -10, positionGeometricMultiple: 3,
+      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 100, earlyReductionFraction: 0, addRatios: [2], finalExitPrice: 90, lastSupport: 100 },
+    }).help}</>).container;
+    expect(loss.querySelector('[data-testid="geometric-pnl-worked"]')).toHaveTextContent('-300.00 USDT');
+  });
 });

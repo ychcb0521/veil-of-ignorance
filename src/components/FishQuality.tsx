@@ -215,7 +215,7 @@ function HoldingMonitorSettings({state,activeId,onSelect,done}:{state:FishQualit
     if(!changed(p))return p;
     try { return {...p,...parseMonitorDraft(forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
   });
-  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} onSave={state.setSellPlans} onSelectPlan={onSelect} extraDirty={extraDirty} prepare={merge} renderHolding={view=>{
+  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} onSave={state.setSellPlans} onSelectPlan={onSelect} onCopyPlan={(source,copy)=>setDrafts(current=>({...current,[copy.id]:{base:monitorBaseKey(copy),draft:structuredClone(forPlan(source))}}))} extraDirty={extraDirty} prepare={merge} renderHolding={view=>{
     const active=view.plans.find(p=>p.id===activeId)??view.plans[0];
     return <>
       <p className="mb-2 text-[10.5px] text-muted-foreground" data-testid="monitor-plan-draft-count">监测方案 {view.plans.length} 套 · 与上方按编号一一对应{view.dirty?' · 有待保存设置':''}</p>

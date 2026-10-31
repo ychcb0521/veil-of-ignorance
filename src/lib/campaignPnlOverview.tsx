@@ -29,7 +29,8 @@ import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
 import {
   computeGeometricGrowth, formatGeometricGrowth, formatGeometricGrowthMethods, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
   formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
-  UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
+  UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, computeEntryEffectiveRisePct, ENTRY_EFFECTIVE_RISE_FORMULA,
+  computeGeometricPnlEstimate, GEOMETRIC_PNL_RETURN_FORMULA, GEOMETRIC_PNL_FORMULA,
 } from '@/lib/campaignUnitProfit';
 
 /** Actual factors, kept together when wrapping; full-precision product, rounded display only. */
@@ -111,6 +112,7 @@ export type CampaignPnlOverviewItemKey =
   | 'effectivePriceChangePct'
   | 'effectivePriceChangeMultiple'
   | 'magicB'
+  | 'entryEffectiveRisePct'
   | 'unitRise'
   | 'unitProfit'
   | 'positionProfit'
@@ -139,7 +141,7 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
  * 页面、反事实与 PNG 导出都使用这份清单。
  * 【用户要求】几何期望放在盈亏比后面（原「几何增长」与「几何期望」合并，统一叫几何期望、按三种算法）；
- * 【用户要求】L_磨损放在盈亏比后面；单位涨幅 ΔP、单位利润 U、仓位利润 W 放在算术期望后面。三列 8 / 8 / 5 项。
+ * 【用户要求】L_磨损放在盈亏比后面；单位利润 U、仓位利润 W 放在算术期望后面；原单位涨幅位置改为「开仓价的有效涨幅」（ΔP ÷ 首次开仓价 × 100%）。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -153,7 +155,7 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
 ];
 
 /**
- * 第二列：初始亏损预算、实际结算、仓位与期望，接单位涨幅 / 单位利润 / 仓位利润。
+ * 第二列：初始亏损预算、实际结算、仓位与期望，接开仓价的有效涨幅 / 单位利润 / 仓位利润。
  * 杠杆倍数与 DSI/USI 贡献已经按用户要求迁到「战役元数据」。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
@@ -162,7 +164,7 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'positionAmplification',
   'addEfficiency',
   'arithmeticExpectancy',
-  'unitRise',
+  'entryEffectiveRisePct',
   'unitProfit',
   'positionProfit',
 ];
@@ -364,6 +366,10 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     ? computeAddEfficiency(payoff, mainPriceEfficiency)
     : null;
   const pnlDrift = pnlSettlement?.drift ?? null;
+  const geometricPnl = computeGeometricPnlEstimate(metrics.unitRise, metrics.geometricMetricBasis?.initialEntryPrice,
+    metrics.geometricMetricBasis?.initialCoins, metrics.positionGeometricMultiple);
+  const geometricEntryRise = computeEntryEffectiveRisePct(metrics.unitRise, metrics.geometricMetricBasis?.initialEntryPrice);
+  const precise = (value: number) => Number(value.toPrecision(12)).toString();
   const theoreticalAddEfficiency = addEfficiency != null ? computeAddEfficiency(theoreticalB, mainPriceEfficiency) : null;
   const bText = (b: number) => formatCampaignPayoffRatio(b * 100);
   const methodTitle = (text: string) => <div className="text-[10px] font-medium text-foreground/85">{text}</div>;
@@ -420,6 +426,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: pnlColor(realizedPnl),
       help: (
         <>
+          <p className="font-medium text-foreground/85">方法一 · 成交结算</p>
           <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
           <p>
@@ -435,6 +442,18 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
             </span>
             。一个仓位分几刀平掉时，每一刀都计入；资金费不并入任何腿。
           </p>
+          <div className="space-y-1.5 border-t border-border/60 pt-2" data-testid="geometric-pnl-help">
+            <p className="font-medium text-foreground/85">方法二 · 几何算法</p>
+            <p className="font-mono">{GEOMETRIC_PNL_RETURN_FORMULA}</p>
+            <p className="font-mono">{GEOMETRIC_PNL_FORMULA}</p>
+            <p>几何仓位是倍数，乘有效涨幅得到相对首仓的收益率；换算 USDT 时，首仓名义本金取初始主力与镜像合计币数 Q × 初次开仓价 E，不取累计加仓投入或杠杆保证金。</p>
+            {geometricPnl != null && geometricEntryRise != null ? <div className="space-y-1 rounded bg-muted/60 p-2 font-mono tabular-nums break-words text-foreground" data-testid="geometric-pnl-worked">
+              <div>首仓名义本金 = {precise(metrics.geometricMetricBasis!.initialCoins!)} 币 × {precise(metrics.geometricMetricBasis!.initialEntryPrice!)} = {formatUnitUsd(geometricPnl.initialNotional)} USDT</div>
+              <div>几何收益率 = {precise(metrics.positionGeometricMultiple!)} × {formatLegPriceChangePct(geometricEntryRise)} = {formatLegPriceChangePct(geometricPnl.returnPct)}</div>
+              <div>P&amp;L（几何算法）= {formatUnitUsd(geometricPnl.initialNotional)} × {formatLegPriceChangePct(geometricPnl.returnPct)} = {formatUnitUsd(geometricPnl.pnl)} USDT</div>
+            </div> : <p>本场：—（缺少有效的 ΔP、初次开仓价、首仓币数或几何仓位）</p>}
+            <p>按完整精度计算，代入值仅作四舍五入展示。该金额与「仓位利润 W」同口径；手续费、对冲或未按平衡公式成交等因素会使它与成交结算值不同，实际已实现金额以方法一为准。</p>
+          </div>
           {pnlDrift != null && (
             <p className="text-[#F0B90B]">
               落库缓存为 {pnlSettlement?.stored?.toFixed(2)} USDT，与现算值相差 {pnlDrift.toFixed(2)} USDT。
@@ -840,8 +859,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   {
     // 【用户要求】单位涨幅 ΔP、单位利润 U、仓位利润 W：说明里给公式与本场代入
     const basis = metrics.geometricMetricBasis;
-    const F = basis?.finalExitPrice ?? null;
-    const Km = basis?.lastSupport ?? null;
+    const E = basis?.initialEntryPrice ?? null;
     const Q = basis?.initialCoins ?? null;
     const G = metrics.unitRise ?? null;
     const U = metrics.unitProfit ?? null;
@@ -857,14 +875,16 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
       </div>
     );
+    const entryRise = computeEntryEffectiveRisePct(G, E);
+    const displayedEntryRise = entryRise == null ? null : Number(entryRise.toFixed(2));
     built.push({
-      key: 'unitRise', label: '单位涨幅 ΔP', value: formatUnitRise(G),
-      color: pnlExportColor(G), valueClassName: pnlColor(G),
-      help: <><p className="font-mono">{UNIT_RISE_FORMULA}</p><p>{UNIT_RISE_RULE}</p>
-        {G != null && F != null && Km != null
-          ? worked(<div>ΔP = {formatUnitRise(F)} − {formatUnitRise(Km)} ≈ {formatUnitRise(G)}</div>)
-          : <p>本场：—</p>}
-        <p>{UNIT_METRICS_MISSING_RULE}</p><p>{PRICE_CHANGE_EXIT_RULE_TEXT}</p></>,
+      key: 'entryEffectiveRisePct', label: '开仓价的有效涨幅', value: formatLegPriceChangePct(entryRise),
+      color: pnlExportColor(displayedEntryRise), valueClassName: pnlColor(displayedEntryRise),
+      help: <><p className="font-mono">{ENTRY_EFFECTIVE_RISE_FORMULA}</p><p>ΔP = F − Kₘ，与原单位涨幅使用同一份离场价和末次加仓支撑线。分母取初始开仓价；初始主力与镜像同批开仓时按币量加权，与几何计算的首次开仓价一致。</p>
+        {entryRise != null && G != null && E != null
+          ? worked(<div>本场：{formatUnitRise(G)} ÷ {formatUnitRise(E)} × 100% = {formatLegPriceChangePct(entryRise)}</div>)
+          : <p>本场：—（缺少有效的 ΔP 或首次开仓价）</p>}
+        <p>读数以百分比显示。首次开仓价不使用后续加仓价或加仓后的持仓均价；缺少依据或开仓价不大于零时显示「—」。</p></>,
     });
     built.push({
       key: 'unitProfit', label: '单位利润 U', value: formatUnitUsd(U),

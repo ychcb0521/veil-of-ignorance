@@ -84,3 +84,9 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(campaignSummaryColumns(options).map(column => column.header)).toEqual(headers);
   });
 });
+
+it('exports effective entry gain as a percentage of the initial price, without using later add prices',()=>{
+ const columns=campaignSummaryColumns(options),col=columns.find(c=>c.header==='开仓价的有效涨幅（%）')!;expect(col).toBeDefined();
+ const row=makeSortRow({id:'entry-rise',title:'test',pnl:10,adds:1,mpc:5});row.unitRise=25;row.legs[0].pre_position_size=1000;row.legs[1].pre_entry_price=200;row.legs[1].pre_position_size=1000;
+ expect(col.value(row,0)).toBe(25);
+});

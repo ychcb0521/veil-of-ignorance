@@ -21,6 +21,35 @@ export const POSITION_PROFIT_METHOD_TWO = '方法二（读数括号内）：W = 
 export const POSITION_PROFIT_RULE = '方法一（读数括号外）用几何仓位，方法二（读数括号内）用几何仓位（理论）；排序、分档与散点图按方法一。单位 USDT。';
 export const UNIT_METRICS_MISSING_RULE = '与相对涨幅同口径：只算主多、有实际加仓且主力已平仓的战役；缺少 F、Kₘ、Q 或几何仓位时显示「—」。ΔP 是价格差，不同标的之间不可直接比较大小；U、W 是 USDT，可以跨标的比较。';
 
+export const ENTRY_EFFECTIVE_RISE_FORMULA = '开仓价的有效涨幅 = ΔP ÷ 首次开仓价 × 100%';
+/** Normalize the price difference once; the return value is percentage points, e.g. 25 means 25%. */
+export function computeEntryEffectiveRisePct(delta: number | null | undefined, entry: number | null | undefined): number | null {
+  if (delta == null || entry == null || !Number.isFinite(delta) || !Number.isFinite(entry) || entry <= 0) return null;
+  const value = delta / entry * 100;
+  return Number.isFinite(value) ? value : null;
+}
+
+export const GEOMETRIC_PNL_RETURN_FORMULA = '几何收益率 = 几何仓位 × 开仓价的有效涨幅';
+export const GEOMETRIC_PNL_FORMULA = 'P&L（几何算法）= 首仓名义本金 × 几何收益率';
+
+/** The position multiple is dimensionless; convert its return to USDT using the initial Q × E, never later invested capital. */
+export function computeGeometricPnlEstimate(
+  delta: number | null | undefined,
+  entry: number | null | undefined,
+  initialCoins: number | null | undefined,
+  positionMultiple: number | null | undefined,
+): { initialNotional: number; returnPct: number; pnl: number } | null {
+  const entryRise = computeEntryEffectiveRisePct(delta, entry);
+  if (entryRise == null || initialCoins == null || positionMultiple == null
+    || !Number.isFinite(initialCoins) || initialCoins <= 0
+    || !Number.isFinite(positionMultiple) || positionMultiple < 0) return null;
+  const initialNotional = initialCoins * entry!;
+  const returnPct = positionMultiple * entryRise;
+  // Algebraically (Q × E) × m × (ΔP ÷ E); keep the same operation order as W = (Q × ΔP) × m.
+  const pnl = (initialCoins * delta!) * positionMultiple;
+  return [initialNotional, returnPct, pnl].every(Number.isFinite) ? { initialNotional, returnPct, pnl } : null;
+}
+
 function withThousands(text: string): string {
   const [int, frac] = text.split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');

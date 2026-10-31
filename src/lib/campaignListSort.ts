@@ -1,4 +1,4 @@
-import { computeGeometricGrowth, geometricGrowthBinValue, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
+import { computeEntryEffectiveRisePct, computeGeometricGrowth, geometricGrowthBinValue, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
 import { compactExecutionWearR } from '@/lib/campaignExecutionWear';
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
@@ -269,6 +269,10 @@ export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'cam
 export function rowUnitRise(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'unitRise'>): number | null {
   return row.unitRise !== undefined ? row.unitRise : rowGeometricMetrics(row).unitRise ?? null;
 }
+export function rowEntryEffectiveRisePct(row: Parameters<typeof rowUnitRise>[0]): number | null {
+  return computeEntryEffectiveRisePct(rowUnitRise(row), rowGeometricMetrics(row).geometricMetricBasis.initialEntryPrice);
+}
+
 /** U（单位利润）= Q × ΔP。 */
 /**
  * L_磨损（R，与盈亏比同一单位：÷ L₀）及其两部分：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。

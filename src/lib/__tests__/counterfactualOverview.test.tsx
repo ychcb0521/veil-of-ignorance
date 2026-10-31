@@ -124,7 +124,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const { items, byKey } = itemsByKey(metrics);
     expect(items).toHaveLength(22);
     // 反事实没有 Kₘ：单位涨幅、单位利润、仓位利润同神奇的 b 显示「—」并附说明
-    for (const key of ['unitRise', 'unitProfit', 'positionProfit'] as const) {
+    for (const key of ['entryEffectiveRisePct', 'unitProfit', 'positionProfit'] as const) {
       expect(byKey[key].value).toBe('—');
       expect(metrics.extraNotes?.[key]).toContainEqual({ warning: expect.stringContaining('显示「—」') });
     }
