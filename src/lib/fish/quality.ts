@@ -1,3 +1,5 @@
+import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
+import {orderedSellStages,qualitySellStagesIdentity,qualityStagePlan,validateQualitySellStages,qualitySellStagesLabel,type QualitySellStage,type QualitySellStageActivation} from './qualitySellStages';
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
 import { additionIdentity, qualityAdditionConditions, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
@@ -45,6 +47,8 @@ export interface QualityGroup {
    * 持仓中最高价首次比买入价高出 switchPct% 的那一分钟收盘起，改按 after（状态 S）判断。持仓否决两段都有效。
    */
   combo?: QualitySellCombo;
+  sellStages?:QualitySellStage[];
+  vetoStages?:QualityVetoStage[];vetoStageMode?:'overlay'|'replace';vetoPeakBasis?:'holding'|'stage';
 }
 export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
 /** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
@@ -52,8 +56,8 @@ export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo 
   g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold] : null;
 /** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
 export function qualityRuleText(g: QualityGroup): string {
-  if (g.combo && g.rule) return `${g.combo.beforeLabel} ${g.rule.direction} ${g.rule.threshold} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${g.combo.after.rule.direction} ${g.combo.after.rule.threshold}`;
-  return g.rule ? `${g.rule.direction} ${g.rule.threshold}` : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
+  const base = g.combo && g.rule ? `${g.combo.beforeLabel} ${g.rule.direction} ${g.rule.threshold} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${g.combo.after.rule.direction} ${g.combo.after.rule.threshold}` : g.rule ? `${g.rule.direction} ${g.rule.threshold}` : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
+  const stages=qualitySellStagesLabel(g);return stages?`${base} · ${stages}`:base;
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
 // An addition-only plan still needs a valued holding path, even without an exit threshold.
@@ -79,6 +83,8 @@ export interface QualityResult {
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
   additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string; totalInvested?: number;
   averageEntryPrice?: number; remainingQuantity?: number; remainingCost?: number;
+  activeVetoStage?:QualityVetoStageActivation;vetoStageSwitches?:QualityVetoStageActivation[];vetoPath?:import('./qualityVeto').QualityHoldingPath;
+  activeSellStage?:QualitySellStageActivation; sellStageSwitches?:QualitySellStageActivation[];
   exitReading?: number;
   pendingExit?: QualityTrigger;
   exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean; stage?: 'before' | 'after' };
@@ -249,6 +255,8 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
+  const vetoStages=qualityVetoStagesIdentity(g);if(vetoStages)identity.push(vetoStages);
+  const sellStages=qualitySellStagesIdentity(g);if(sellStages)identity.push(sellStages);
   const combo = qualityComboIdentity(g); if (combo) identity.push(combo);
   // v3：回撤止损改为盘中触及按止损价成交（2026-10-26），旧结果需要重算
   const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
@@ -401,7 +409,43 @@ export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFil
 const pricePlan = () => compileFishProgram({ id: 'quality-price', short: '价格', name: '价格', definition: '', formula: 'C', scale: 1, unit: '', positive: '1', control: '0', interval: '1m' }, { statistic: '结果', direction: '>', threshold: 0, constraints: [] });
 const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
-export async function evaluateQualitySample(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult): Promise<QualityResult> {
+/** Replay each selected seller only until the next actual addition boundary. */
+export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult):Promise<QualityResult>{
+ if(!group.sellStages?.length&&!group.vetoStages?.length)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous);
+ const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
+ try{
+  validateQualitySellStages(group);validateQualityVetoStages(group);
+  const stages=orderedSellStages(group),vetoStages=orderedVetoStages(group),boundaries=[...new Set([...stages,...vetoStages].map(s=>s.afterAdditions))].sort((a,b)=>a-b),trackVetoPath=!!vetoStages.length,entry=sample.enteredAt==null?NaN:Math.ceil(sample.enteredAt/QUALITY_MINUTE)*QUALITY_MINUTE,end=Math.min(Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE,observeHours===0?Infinity:entry+Math.ceil(observeHours*60)*QUALITY_MINUTE);
+  let state=previous?.key===key&&previous.status==='open'&&previous.entryPrice!>0&&previous.endTime!>=entry&&previous.endTime!<=end?previous:undefined;
+  const switches=[...(state?.sellStageSwitches??[])],vetoSwitches=[...(state?.vetoStageSwitches??[])];
+  for(let i=0;i<=boundaries.length;i++){
+   const count=qualityAdditionFills(state??{}).length,selected=stages.filter(s=>s.afterAdditions<=count).at(-1),selectedVeto=vetoStages.filter(s=>s.afterAdditions<=count).at(-1),nextCount=boundaries.find(n=>n>count),phase={...qualityStagePlan(group,selected),holdingVetoes:stagedHoldingVetoes(group,count)};
+   const prior=state?{...state,key:qualityResultKey(sample,phase,observeHours)}:undefined;
+   let replay=await evaluateQualityPhase(sample,phase,observeHours,now,load,signal,prior,{pauseAfterAdditionCount:nextCount,trackVetoPath});
+   // A discarded seller's later data cannot invalidate an earlier successful switch.
+   if(replay.status==='error'&&nextCount!=null&&phase.addition?.enabled&&phase.addition.quantityMode==='calculator'){
+    const probePlan={...phase,rule:undefined,combo:undefined,holdingVetoes:[]};
+    const probePrior=state?{...state,key:qualityResultKey(sample,probePlan,observeHours),pendingExit:undefined,exitSnapshot:undefined}:undefined;
+    const probe=await evaluateQualityPhase(sample,probePlan,observeHours,now,load,signal,probePrior,{pauseAfterAdditionCount:nextCount,trackVetoPath});
+    if(probe.sellStageBoundary)replay=await evaluateQualityPhase(sample,phase,observeHours,Math.min(now,probe.endTime!+QUALITY_MINUTE),load,signal,prior,{pauseAfterAdditionCount:nextCount,ordinaryUntil:probe.endTime,conditionsUntil:probe.endTime,trackVetoPath});
+   }
+   const {sellStageBoundary,...result}=replay;
+   if(sellStageBoundary&&nextCount!=null){
+    const seller=stages.find(s=>s.afterAdditions===nextCount),veto=vetoStages.find(s=>s.afterAdditions===nextCount);
+    if(seller)switches.push({...seller,at:result.endTime!});
+    if(veto)vetoSwitches.push({...veto,at:result.endTime!,mode:group.vetoStageMode??'overlay',peakBasis:group.vetoPeakBasis??'stage'});
+    state={...result,key,...(veto?{vetoPath:beginVetoStagePath(group,result)}:{}),...(switches.length?{activeSellStage:switches.at(-1),sellStageSwitches:switches}:{}),...(vetoSwitches.length?{activeVetoStage:vetoSwitches.at(-1),vetoStageSwitches:vetoSwitches}:{})};continue;
+   }
+   const active=selected?switches.filter(s=>s.afterAdditions===selected.afterAdditions).at(-1)??{...selected,at:qualityAdditionFills(result)[selected.afterAdditions-1]?.at??result.entryTime!}:undefined;
+   const activeVeto=selectedVeto?vetoSwitches.filter(s=>s.afterAdditions===selectedVeto.afterAdditions).at(-1):undefined;
+   const reason=result.status==='closed'&&!result.exitSnapshot?.cause&&active?`第 ${active.afterAdditions} 次加仓后，按 ${active.label} ${active.rule.direction} ${active.rule.threshold} 卖出；${result.reason}`:result.reason;
+   return {...result,key,evaluatedAt:now,reason:result.status==='closed'&&activeVeto&&result.exitSnapshot?.cause&&!['addition-support','mirror-take-profit'].includes(result.exitSnapshot.cause.kind)?`第 ${activeVeto.afterAdditions} 次加仓后一票条件：${reason}`:reason,...(activeVeto?{activeVetoStage:activeVeto,vetoStageSwitches:vetoSwitches}:{}),...(active?{activeSellStage:active}:{}),...(switches.length?{sellStageSwitches:switches}:{})};
+  }
+  throw Error('卖出算法阶段切换未完成');
+ }catch(error){abort(signal);return {...base,status:'error',reason:error instanceof Error?error.message:'卖出阶段计算失败'};}
+}
+async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
+  const {pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath}=runtime;
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
   if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少有效买入时间，不能可靠还原买入时点' };
   if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
@@ -439,11 +483,11 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
           const initial=prior?.entryPrice ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
           if(initial)validateFishBars(initial,entry+QUALITY_MINUTE,1,QUALITY_MINUTE);
           const entryPrice=prior?.entryPrice??initial![0].open;
-          holding={entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
+          holding=trackVetoPath&&prior?.vetoPath?{...prior.vetoPath}:{entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
         if (combo) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (rule) {
@@ -480,6 +524,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     // 回撤止损盘中触及：按止损价成交；其余按卖出分钟的开盘价
     let stopFill = closed && trigger?.fillPrice != null ? trigger.fillPrice : undefined;
     let finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
+    let sellStageBoundary=false;
     let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined;
     if(group.addition?.enabled && (!additionFill||group.addition.quantityMode==='calculator')) {
       const config=group.addition;
@@ -508,9 +553,10 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
         const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];
+          if(calculated.stageBoundary){sellStageBoundary=true;closed=false;finalTime=calculated.stageBoundary.at;finalPrice=calculated.stageBoundary.price;trigger=undefined;exitBar=undefined;stopFill=undefined;}
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
             trigger={at:stop.at,reading:stop.cause?(stop.price/stop.support-1)*100:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:stop.cause??{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support}};
             if(mirrorFill&&(mirrorFill.at>stop.at||mirrorFill.at===stop.at&&(stop.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
@@ -544,8 +590,10 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       const top=Math.max(path.peak,finalPrice,fillPeak);
       vetoDynamic=Math.max(path.dynamic,0,(top-finalPrice)/top*100);
     }
+    let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
+    if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(vetoPath?{vetoPath}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(additionFill && position ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
         initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
@@ -553,7 +601,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       ...(additionNote?{additionNote}:{}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
-      heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
+      heldHours: (finalTime - entry) / 3_600_000, complete: !sellStageBoundary&&(closed || end >= limit && !trigger),
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
       exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen,...(trigger.stage ? { stage: trigger.stage } : {})} : undefined,

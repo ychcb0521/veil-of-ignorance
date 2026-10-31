@@ -1,3 +1,4 @@
+import {effectiveQualitySellPlan} from './qualitySellStages';
 import {holdingVetoLabel} from './qualityVeto';
 import { additionLabel, qualityAdditionFills, qualityAdditionConditions, additionEvidenceHeaders, additionEvidenceValues } from './qualityAddition';
 import { buildXlsx, type XlsxCell, type XlsxSheet } from '@/lib/xlsxWorkbook';
@@ -42,7 +43,7 @@ export function monitorValue(r: QualityMonitorRecord, s: QualityMonitorSetting, 
     case 'entered': return finite(r.enteredAt);
     case 'algorithm': return qualityVersionedRuleLabel(s.plan);
     case 'buying': return monitorBuying(s);
-    case 'vetoes': return monitorVetoes(s);
+    case 'vetoes': return result?activeHoldingVetoes(effectiveQualitySellPlan(s.plan,result).holdingVetoes).map(holdingVetoLabel).join(' 或 ')||'无':monitorVetoes(s);
     case 'status': return monitorStatus(r, s);
     case 'return': return finite(valued?.returnPct);
     case 'static': return qualityDrawdownPct(result, 'static');
@@ -82,12 +83,16 @@ export function buildMonitorSheets(records: readonly QualityMonitorRecord[], set
   }) }, { name: '算法与公式', columns: ['配置编号', '监测算法', '买前过滤', '持仓否决', '探测算法', '观察小时（0=持续至卖出）', '本金 USDT', '杠杆', '类型', '算法', '公式', '原始快照 JSON'].map(header => ({ header, width: header.includes('公式') || header.includes('JSON') ? 80 : 35 })),
     rows: used.flatMap(s => {
       const snapshots = [{ type: '监测', label: qualityRuleLabel(s.plan), snapshot: s.plan.snapshot },
+        ...(s.plan.sellStages??[]).map(stage=>({type:'次数切换卖出',label:`第 ${stage.afterAdditions} 次加仓后 · ${stage.label} ${stage.rule.direction} ${stage.rule.threshold}`,snapshot:stage.snapshot})),
+        ...(s.plan.vetoStages??[]).flatMap(stage=>stage.conditions.filter(v=>v.snapshot).map(v=>({type:'次数切换一票条件',label:`第 ${stage.afterAdditions} 次加仓后 · ${holdingVetoLabel(v)}`,snapshot:v.snapshot!}))),
         ...(s.plan.buyFilters ?? []).map(f => ({ type: '买前过滤', label: `${f.label} ${f.direction} ${f.threshold}`, snapshot: f.snapshot })),
         ...activeHoldingVetoes(s.plan.holdingVetoes).filter(v => v.snapshot).map(v => ({ type: '持仓否决', label: `${v.label} ${v.direction} ${v.threshold}`, snapshot: v.snapshot! })),
         ...(s.plan.addition?.enabled && (s.plan.addition.source==='custom'||s.plan.addition.rounds?.some(r=>r.source==='custom')) ? (s.plan.addition.rounds??[s.plan.addition]).flatMap((round,i)=>round.source==='custom'?qualityAdditionConditions(round).map(f=>({type:'加仓',label:`第 ${i+1} 次 · ${f.label}`,snapshot:f.snapshot})):[]) : []),
         ...s.detectors.map(g => ({ type: '探测', label: monitorDetectorLabel(g), snapshot: g.snapshot }))];
       return snapshots.map(g => [s.id, qualityVersionedRuleLabel(s.plan), monitorBuying(s), monitorVetoes(s), monitorDetectors(s), s.observeHours, s.notional, s.leverage, g.type, g.label, formula(g.snapshot), JSON.stringify(g.snapshot)]);
     }) }];
+  if(used.some(s=>s.plan.sellStages?.length))output.push({name:'卖出次数切换',columns:['标的','配置编号','加仓次数','切换指标','方向','门槛','实际切换时间','当前生效','公式快照 JSON'].map(header=>({header,width:header.includes('JSON')?80:26})),rows:rows.flatMap(record=>{const setting=settings.get(record.settingId)!,result=monitorResult(record,setting);return (setting.plan.sellStages??[]).map(stage=>{const activated=result?.sellStageSwitches?.find(a=>a.afterAdditions===stage.afterAdditions);return [record.source.symbol,setting.id,stage.afterAdditions,stage.label,stage.rule.direction,stage.rule.threshold,date(activated?.at),result?.activeSellStage?.afterAdditions===stage.afterAdditions?'是':'否',JSON.stringify(stage.snapshot)];});})});
+  if(used.some(s=>s.plan.vetoStages?.length))output.push({name:'一票次数切换',columns:['标的','配置编号','加仓次数','条件范围','峰值口径','阶段条件','实际切换时间','当前生效','条件快照 JSON'].map(header=>({header,width:header.includes('JSON')?100:32})),rows:rows.flatMap(record=>{const setting=settings.get(record.settingId)!,result=monitorResult(record,setting);return (setting.plan.vetoStages??[]).map(stage=>{const a=result?.vetoStageSwitches?.find(v=>v.afterAdditions===stage.afterAdditions);return [record.source.symbol,setting.id,stage.afterAdditions,setting.plan.vetoStageMode==='replace'?'完整条件':'替换同类条件',(setting.plan.vetoPeakBasis??'stage')==='stage'?'阶段峰值':'持仓峰值',stage.conditions.map(v=>holdingVetoLabel(v)+(v.enabled?'':'（停用）')).join('；'),date(a?.at),result?.activeVetoStage?.afterAdditions===stage.afterAdditions?'是':'否',JSON.stringify(stage.conditions)];});})});
   output.push({name:'加仓记录',columns:['标的','配置编号','加仓条件','加仓时间','金额 USDT','成交价','数量','触发读数','触发门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON','加仓轮次','成本线 S','新支撑线 K','5分钟 ATR(14)','ATR已收盘时间','已用镜像利润 USDT',...additionEvidenceHeaders,'逐轮加仓配置 JSON','加仓前余仓 Q'].map(header=>({header,width:28})),
     rows:rows.flatMap(record=>{const setting=settings.get(record.settingId)!,r=monitorResult(record,setting),adds=qualityAdditionFills(r??{});return (adds.length?adds:[undefined]).map((a,i)=>[record.source.symbol,record.settingId,additionLabel(setting.plan.addition),a?formatUTC8(a.at):null,a?.notional??null,a?.price??null,a?.quantity??null,a?.reading??null,a?.threshold??null,r?.totalInvested??100,r?.averageEntryPrice??r?.entryPrice??null,a?.definitionKey??setting.plan.addition?.condition?.snapshot.definitionKey??null,a?i+1:null,a?.sizing?.previousSupport??null,a?.sizing?.support??null,a?.sizing?.atr??null,date(a?.sizing?.atrAt),a?.sizing?.mirrorUsed??null,...additionEvidenceValues(a),setting.plan.addition?.rounds?JSON.stringify({maxRounds:setting.plan.addition.maxRounds,rounds:setting.plan.addition.rounds}):null,a?.sizing?.coinsBefore??null]);})});
   return output;

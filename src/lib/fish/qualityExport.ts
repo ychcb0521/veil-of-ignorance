@@ -1,3 +1,4 @@
+import {effectiveQualitySellPlan} from './qualitySellStages';
 import {holdingVetoLabel} from './qualityVeto';
 import { qualityEntryValues } from './qualityEntry';
 import {qualitySourceLabel} from './qualitySources';
@@ -55,20 +56,22 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],['卖出涨跌幅 %',28],['半仓镜像实际涨幅 %',24],['半仓镜像状态',24],['探测标签',24],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
-    const definition = qualityDefinition(run.plan.snapshot);
+    const effective=effectiveQualitySellPlan(run.plan,r),definition = qualityDefinition(effective.snapshot);
     return [run.sample.source.symbol, qualitySourceLabel(run.sample), formatUTC8(run.sample.source.timeMs),
       run.detectors.map(d => `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}`).join('；') || '—',
-      run.plan.label, run.plan.rule?.metric ?? run.plan.metric, run.plan.rule?.direction ?? '', run.plan.rule?.threshold ?? null,
+      run.plan.label, effective.rule?.metric ?? effective.metric, effective.rule?.direction ?? '', effective.rule?.threshold ?? null,
       r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设卖出',
       r.entryTime ? formatUTC8(r.entryTime) : null, r.entryPrice ?? null, r.endTime ? formatUTC8(r.endTime) : null, r.endPrice ?? null,
       qualityEntryValues(rows.find(row=>(row.signalId??row.id)===run.sample.id)?.source??run.sample.source,r,run.plan,study.entryReadings),r.returnPct ?? null, r.pnl ?? null, r.peakPct ?? null, r.adversePct ?? null, r.drawdownPct ?? null, r.uncapturedPct ?? null,
       r.heldHours ?? null, run.observeHours, 100, 1, `${r.key} · ${qualityRuleLabel(run.plan)}`,
-      qualityFormulaVersion(run.plan), run.plan.definitionSource === 'account' ? '运行时账号公式' : '历史公式快照',
-      run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
+      qualityFormulaVersion(effective), effective.definitionSource === 'account' ? '运行时账号公式' : '历史公式快照',
+      effective.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
       r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula,
-      run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
-      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${holdingVetoLabel(v)}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualitySalePriceChangePct(r),qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label,qualityDetectorLabel(run.plan,r).label];
+      effective.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
+      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(effective.holdingVetoes).map(v=>`${holdingVetoLabel(v)}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualitySalePriceChangePct(r),qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label,qualityDetectorLabel(run.plan,r).label];
   }) });
+  if(runs.some(run=>run.plan.sellStages?.length))sheets.push({name:'卖出次数切换',columns:['标的','试验编号','加仓次数','切换指标','方向','门槛','实际切换时间','当前生效','公式快照 JSON'].map(header=>({header,width:header.includes('JSON')?80:26})),rows:runs.flatMap(run=>(run.plan.sellStages??[]).map(stage=>{const activated=run.result.sellStageSwitches?.find(a=>a.afterAdditions===stage.afterAdditions);return [run.sample.source.symbol,run.result.key,stage.afterAdditions,stage.label,stage.rule.direction,stage.rule.threshold,activated?formatUTC8(activated.at):null,run.result.activeSellStage?.afterAdditions===stage.afterAdditions?'是':'否',JSON.stringify(stage.snapshot)];}))});
+  if(runs.some(run=>run.plan.vetoStages?.length))sheets.push({name:'一票次数切换',columns:['标的','试验编号','加仓次数','条件范围','峰值口径','阶段条件','实际切换时间','当前生效','条件快照 JSON'].map(header=>({header,width:header.includes('JSON')?100:32})),rows:runs.flatMap(run=>(run.plan.vetoStages??[]).map(stage=>{const a=run.result.vetoStageSwitches?.find(v=>v.afterAdditions===stage.afterAdditions);return [run.sample.source.symbol,run.result.key,stage.afterAdditions,run.plan.vetoStageMode==='replace'?'完整条件':'替换同类条件',(run.plan.vetoPeakBasis??'stage')==='stage'?'阶段峰值':'持仓峰值',stage.conditions.map(v=>holdingVetoLabel(v)+(v.enabled?'':'（停用）')).join('；'),a?formatUTC8(a.at):null,run.result.activeVetoStage?.afterAdditions===stage.afterAdditions?'是':'否',JSON.stringify(stage.conditions)];}))});
   const addHeaders=['加仓条件','加仓时间','加仓金额 USDT','加仓成交价','加仓数量','加仓触发读数','加仓门槛','累计投入 USDT','持仓均价','加仓公式快照 JSON','加仓轮数','加仓明细 JSON','逐轮加仓配置 JSON'];
   const values=(run: typeof runs[number])=>{const adds=qualityAdditionFills(run.result),a=adds[0];return [additionLabel(run.plan.addition),a?formatUTC8(a.at):null,adds.length?adds.reduce((n,a)=>n+a.notional,0):null,a?.price??null,adds.length?adds.reduce((n,a)=>n+a.quantity,0):null,a?.reading??null,a?.threshold??null,run.result.totalInvested??100,run.result.averageEntryPrice??run.result.entryPrice??null,a?.definitionKey??run.plan.addition?.condition?.snapshot.definitionKey??null,adds.length,adds.length?JSON.stringify(adds):null,run.plan.addition?.rounds?JSON.stringify({maxRounds:run.plan.addition.maxRounds,rounds:run.plan.addition.rounds}):null];};
   const outputIndex=sheets.findIndex(s=>s.name==='运行结果'),output=sheets[outputIndex];

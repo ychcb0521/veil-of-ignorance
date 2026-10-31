@@ -1,3 +1,4 @@
+import {effectiveQualitySellPlan} from './qualitySellStages';
 import {withQualityMirrorLegs} from './qualityMirrorLegs';
 import { withQualityAdditionCampaign } from './qualityAdditionCampaign';
 import {qualitySourceLabel} from './qualitySources';
@@ -33,7 +34,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
   const legId = `${id}-main`, recordId = r.mirrorFill?.fraction === 1 ? `${id}-mirror-close` : `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
   const detectorLabels = run.detectors.map(d => ({ id: d.id, label: `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}` }));
-  const definition = qualityDefinition(plan.snapshot);
+  const effective=effectiveQualitySellPlan(plan,r),definition = qualityDefinition(effective.snapshot);
   const opening: CampaignEvent = {
     id: `${id}-entry`, timestamp: iso(entry), event_type: 'main_opened', leg_role: 'main_open', journal_id: legId,
     trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, pending_order_id: null, price, size_usdt: QUALITY_NOTIONAL,
@@ -62,16 +63,17 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     comparison: { section, planLabel:plan.label, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
       holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??QUALITY_NOTIONAL,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
-      sellEvidence: { exitReason:closed?r.reason:undefined, formula: definition.formula, definitionKey: plan.snapshot.definitionKey!, featureId: plan.snapshot.featureId!,
-        metric: plan.rule?.metric ?? plan.metric, version: qualityFormulaVersion(plan), interval: plan.snapshot.interval ?? '5m',
-        halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: plan.definitionSource === 'account' ? 'account' : 'historical',
-        direction: plan.rule?.direction, threshold: plan.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
+      sellEvidence: { exitReason:closed?r.reason:undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
+        ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: definition.formula, definitionKey: effective.snapshot.definitionKey!, featureId: effective.snapshot.featureId!,
+        metric: effective.rule?.metric ?? effective.metric, version: qualityFormulaVersion(effective), interval: effective.snapshot.interval ?? '5m',
+        halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: effective.definitionSource === 'account' ? 'account' : 'historical',
+        direction: effective.rule?.direction, threshold: effective.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
         confirmedAt: closed ? r.endTime : r.pendingExit?.at,
-        execution: plan.execution,barOpenAt:r.exitSnapshot?.barOpenTime,
+        execution: effective.execution,barOpenAt:r.exitSnapshot?.barOpenTime,
         executedAt:closed ? r.endTime : undefined,
         previousAt:r.exitSnapshot?.previous?.at,previousReading:r.exitSnapshot?.previous?.reading,
         mirrorTakeProfit:plan.mirrorTakeProfit,mirrorFill:r.mirrorFill,addition:plan.addition,additionFill:r.additionFill,additionFills:r.additionFills,totalInvested:r.totalInvested,averageEntryPrice:r.averageEntryPrice,
-        triggerCause:r.exitSnapshot?.cause??r.pendingExit?.cause,triggerAtOpen:r.exitSnapshot?.atOpen,holdingVetoes:activeHoldingVetoes(plan.holdingVetoes).map(v=>({id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,...(v.kind==='addition-geometric-profit'?{geometricMultiple:v.geometricMultiple??100}:{}),formula:v.snapshot?qualityDefinition(v.snapshot).formula:undefined})),
+        triggerCause:r.exitSnapshot?.cause??r.pendingExit?.cause,triggerAtOpen:r.exitSnapshot?.atOpen,holdingVetoes:activeHoldingVetoes(effective.holdingVetoes).map(v=>({id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,...(v.kind==='addition-geometric-profit'?{geometricMultiple:v.geometricMultiple??100}:{}),formula:v.snapshot?qualityDefinition(v.snapshot).formula:undefined})),
       },
       repair: run.repair,
     },

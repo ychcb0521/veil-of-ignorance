@@ -1,3 +1,5 @@
+import type {QualityVetoStageActivation} from '@/lib/fish/qualityVetoStages';
+import type {QualitySellStageActivation} from '@/lib/fish/qualitySellStages';
 import type {QualityExitCause,QualityHoldingVeto} from '@/lib/fish/qualityVeto';
 import type { QualityAdditionRule, QualityAdditionFill } from '@/lib/fish/qualityAddition';
 /**
@@ -401,6 +403,10 @@ export interface TradeCampaign {
     sellEvidence?: {
       /** Actual frozen final-sale reason; independent of the configured condition list. */
       exitReason?:string;
+      activeSellStage?:QualitySellStageActivation;sellStageSwitches?:QualitySellStageActivation[];
+      activeVetoStage?:QualityVetoStageActivation;vetoStageSwitches?:QualityVetoStageActivation[];
+      /** Frozen initial static risk; null means no initial static stop. */
+      initialStaticStopPct?:number|null;
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';
       direction?: '<' | '>'; threshold?: number; reading?: number; confirmedAt?: number;

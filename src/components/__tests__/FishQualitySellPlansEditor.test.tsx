@@ -70,3 +70,15 @@ it('preserves untouched execution timing and frozen formulas when saving holding
  fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'只改名称和加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
  const next:QualityGroup[]=save.mock.calls[0][0];expect(next[0].execution).toBeUndefined();expect(next[0].definitionSource).toBeUndefined();expect(next[0].snapshot).toEqual(before[0].snapshot);expect(next[0].label).toBe('只改名称和加仓');expect(next[1]).toEqual(before[1]);expect(plans).toEqual(before);
 });
+it('saves independent sixth and seventh addition sellers on one plan and restores their frozen settings',()=>{
+ const plans=initial().slice(0,2),save=vi.fn(),view=render(<FishQualitySellPlansEditor plans={plans} ready onSave={save}/>);
+ fireEvent.click(screen.getByLabelText('卖出算法 1 启用次数切换'));expect(screen.getByLabelText('卖出算法 1 切换 1 加仓次数')).toHaveValue(6);expect(screen.getByLabelText('卖出算法 1 切换 2 加仓次数')).toHaveValue(7);
+ expect(screen.getByLabelText('卖出算法 1 切换 1 指标 特征值')).toHaveValue('cda');expect(screen.getByLabelText('卖出算法 1 切换 2 指标 特征值')).toHaveValue('mbi');
+ fireEvent.change(screen.getByLabelText('卖出算法 1 切换 1 门槛'),{target:{value:'.5'}});fireEvent.change(screen.getByLabelText('卖出算法 1 切换 2 方向'),{target:{value:'>'}});fireEvent.change(screen.getByLabelText('卖出算法 1 切换 2 门槛'),{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+ const saved:QualityGroup[]=save.mock.calls[0][0];expect(saved[0]).toMatchObject({id:plans[0].id,sellStages:[{afterAdditions:6,snapshot:{featureId:'cda'},rule:{direction:'<',threshold:.5}},{afterAdditions:7,snapshot:{featureId:'mbi'},rule:{direction:'>',threshold:2}}]});expect(saved[1]).toEqual(plans[1]);expect(plans[0].sellStages).toBeUndefined();
+ view.unmount();render(<FishQualitySellPlansEditor plans={saved} ready onSave={save}/>);expect(screen.getByLabelText('卖出算法 1 切换 2 方向')).toHaveValue('>');expect(screen.getByLabelText('卖出算法 1 切换 2 门槛')).toHaveValue(2);
+});
+it('rejects missing thresholds and duplicate switch counts without saving',()=>{
+ const save=vi.fn();render(<FishQualitySellPlansEditor plans={initial().slice(0,1)} ready onSave={save}/>);fireEvent.click(screen.getByLabelText('卖出算法 1 启用次数切换'));fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));expect(save).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('有限数字');
+ fireEvent.change(screen.getByLabelText('卖出算法 1 切换 1 门槛'),{target:{value:'.5'}});fireEvent.change(screen.getByLabelText('卖出算法 1 切换 2 门槛'),{target:{value:'.5'}});fireEvent.change(screen.getByLabelText('卖出算法 1 切换 2 加仓次数'),{target:{value:'6'}});fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));expect(save).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('同一次');
+});

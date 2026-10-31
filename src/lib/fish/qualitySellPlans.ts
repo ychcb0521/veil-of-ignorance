@@ -1,3 +1,5 @@
+import {validateQualityVetoStages} from './qualityVetoStages';
+import {validateQualitySellStages} from './qualitySellStages';
 import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from './qualityFilters';
 import { archiveQualityStudy } from './qualityCampaignArchive';
@@ -22,6 +24,7 @@ export function replaceQualitySellPlans(study: FishQualityStudy, plans: readonly
   for (const plan of plans) {
     if (!plan.id || ids.has(plan.id)) throw new Error('卖出算法编号重复');
     ids.add(plan.id);
+    validateQualitySellStages(plan);validateQualityVetoStages(plan);
     if (!plan.label.trim()) throw new Error('请填写卖出算法名称');
     if (plan.rule && (!Number.isFinite(plan.rule.threshold) || !['<', '>'].includes(plan.rule.direction))) throw new Error('卖出门槛必须是有限数字');
     if (plan.combo && (!(plan.combo.switchPct > 0) || !Number.isFinite(plan.combo.switchPct) || !Number.isFinite(plan.combo.after.rule.threshold))) throw new Error('分段切换涨幅须大于 0，后段门槛须为有限数字');

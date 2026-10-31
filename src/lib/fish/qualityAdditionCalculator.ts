@@ -13,7 +13,7 @@ const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause}
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>;
 interface Options extends AtrSettings {
- vetoes?:readonly QualityHoldingVeto[];
+ vetoes?:readonly QualityHoldingVeto[];pauseAfterAdditionCount?:number;
  candidates:AdditionCandidate[];required?:AdditionCandidate[];roundRules?:({candidates:AdditionCandidate[];required?:AdditionCandidate[];minGainPct?:number}&AtrSettings)[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
@@ -34,7 +34,7 @@ function atrReader(o:Options){
   return values.get(cut);
  };
 }
-export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop}>{
+export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number}}>{
  // A realized half mirror is mandatory. Its own minute cannot establish an ordered addition.
  const halfMirror=o.mirror;if(halfMirror?.fraction!==.5)return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
@@ -100,6 +100,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(sized.error||!(sized.addCoins>0))continue;
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
   fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,requiredBufferAtr:entryBufferAtr,supportOffsetAtr,coverageGap:sized.coverageGap}});
+  if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price}};
  }
  return {fills,stop:findPositionExit(fills.at(-1)?.sizing?.support,Math.max(o.since,fills.at(-1)?.at??o.since))};
 }

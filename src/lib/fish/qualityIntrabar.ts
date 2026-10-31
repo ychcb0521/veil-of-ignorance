@@ -58,6 +58,10 @@ export async function findQualityIntrabarExit(o: {
   ruleStage?: 'before' | 'after'; switchPct?: number;
   /** Mirror reductions cannot change a legacy rule's original confirmation clock. */
   ruleCloseOnly?: boolean;
+  ordinaryUntil?:number;
+  conditionsUntil?:number;
+  /** Ordinary gain-based seller keeps the full holding peak when veto peaks reset. */
+  sellerPeak?:number;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill }> {
   const {signal}=o;
   // Check all conditions on the SAME chronological observations. Never search one
@@ -72,13 +76,13 @@ export async function findQualityIntrabarExit(o: {
     validateFishBars(history,start,c.plan.warm,c.plan.step);
     streams.push({...c,start,history,cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
   }
-  let holding=o.holding, mirrorFill=o.mirrorFill;
+  let holding=o.holding, mirrorFill=o.mirrorFill,sellerPeak=o.sellerPeak??holding?.peak??0;
   if(o.switchPct!=null&&!holding) throw new Error('组合卖出缺少买入价和持仓路径');
   /**
    * 是否已过分水岭：持仓中（含当前这一分钟）最高价比买入价高出 switchPct%。
    * 在每分钟收盘时判断，所以分水岭那一分钟的收盘起就按后段条件；续算时由已记下的最大涨幅还原。
    */
-  const switched=()=>o.switchPct!=null&&!!holding&&holding.peak>=holding.entry*(1+o.switchPct/100)*(1-1e-12);
+  const switched=()=>o.switchPct!=null&&!!holding&&Math.max(sellerPeak,holding.peak)>=holding.entry*(1+o.switchPct/100)*(1-1e-12);
   const enabled = activeHoldingVetoes(o.vetoes);
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
   const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
@@ -112,6 +116,8 @@ export async function findQualityIntrabarExit(o: {
     let error:string|undefined;
     const after=switched();
     for(const s of streams) {
+      if(o.conditionsUntil!=null&&at>o.conditionsUntil)continue;
+      if(!s.cause&&o.ordinaryUntil!=null&&at>o.ordinaryUntil)continue;
       if(s.stage==='before'&&after||s.stage==='after'&&!after)continue;
       if(s.closeOnly && (at<=o.entry || at%s.plan.step!==0))continue;
       const bars=s.partial?[...s.history,s.partial]:s.history;
@@ -172,7 +178,7 @@ export async function findQualityIntrabarExit(o: {
       const mirrorTrigger=mirrorAt(minute,false);
       if(mirrorTrigger) {prices.push(minute);return {trigger:mirrorTrigger,prices,mirrorFill};}
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
-      if(minute.openTime>=o.since) {prices.push(minute);if(holding)holding=advanceQualityHolding(holding,minute);}
+      if(minute.openTime>=o.since) {prices.push(minute);if(holding){holding=advanceQualityHolding(holding,minute);sellerPeak=Math.max(sellerPeak,minute.high);}}
       if(drops.length&&minute.openTime>=o.entry) {dropMinutes.push(minute);while(dropMinutes.length>maxDropWindow)dropMinutes.shift();}
       const at=minute.openTime+MINUTE,trigger=check(at);
       if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices,mirrorFill};}

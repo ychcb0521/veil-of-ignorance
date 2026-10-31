@@ -118,8 +118,12 @@ export function syncQualityThresholdDefinitions(study: FishQualityStudy, definit
     if(addition?.rounds){const rounds=addition.rounds.map(r=>{const cs=filters(r.conditions),first=r.condition,ss=first?snapshot(first.snapshot,first.metric,true):undefined;return cs!==r.conditions||first&&ss!==first.snapshot?{...r,conditions:cs,condition:cs?.[0]??(first?{...first,snapshot:ss!}:undefined)}:r;});if(rounds.some((r,i)=>r!==addition!.rounds![i]))addition={...addition,rounds};}
     if(current&&addition&&addition.quantityMode!=='calculator'){changed=true;addition={...addition,quantityMode:'calculator',repeat:addition.repeat??true};}
     const after = p.combo ? snapshot(p.combo.after.snapshot, p.combo.after.metric) : undefined;
-    if (addition === p.addition && own === p.snapshot && buyFilters === p.buyFilters && holdingVetoes === p.holdingVetoes && (!p.combo || after === p.combo.after.snapshot)) return p;
-    return { ...p, snapshot: own, buyFilters, holdingVetoes, addition, ...(p.combo ? { combo: { ...p.combo, after: { ...p.combo.after, snapshot: after! } } } : {}) };
+    const vetoStages=p.vetoStages?.map(stage=>{const conditions=vetoes(stage.conditions);return conditions===stage.conditions?stage:{...stage,conditions:conditions!};});
+    const vetoStagesChanged=!!vetoStages?.some((stage,i)=>stage!==p.vetoStages![i]);
+    const sellStages=p.sellStages?.map(stage=>{const next=snapshot(stage.snapshot,stage.metric);return next===stage.snapshot?stage:{...stage,snapshot:next};});
+    const stagesChanged=!!sellStages?.some((stage,i)=>stage!==p.sellStages![i]);
+    if (!vetoStagesChanged && !stagesChanged && addition === p.addition && own === p.snapshot && buyFilters === p.buyFilters && holdingVetoes === p.holdingVetoes && (!p.combo || after === p.combo.after.snapshot)) return p;
+    return { ...p, snapshot: own, buyFilters, holdingVetoes, addition,...(stagesChanged?{sellStages}:{}),...(vetoStagesChanged?{vetoStages}:{}), ...(p.combo ? { combo: { ...p.combo, after: { ...p.combo.after, snapshot: after! } } } : {}) };
   };
   const buyFilters = filters(study.buyFilters);
   const sellPlans = study.sellPlans?.map(p => plan(p, true));

@@ -1,3 +1,5 @@
+import {FishQualityVetoStagesEditor,type VetoStagesDraft} from './FishQualityVetoStagesEditor';
+import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
 import {FishLibraryDataManager} from './FishLibraryDataManager';
 import {FishLibraryDataButton} from './FishLibraryTransferContext';
 import {qualityOrigins,qualitySourceLabel} from '@/lib/fish/qualitySources';
@@ -178,12 +180,15 @@ function BuyFilterEditor({ state, done }: { state: FishQualityState; done: () =>
  * 【用户要求】2026-10-27「持仓监测中也需要一个条件设置」「持仓一票否决卖出其实隶属于持仓监测」：
  * 这套卖出方案的持仓一票否决在这里设（观察时长已于 0d3dc61c 从界面移除，不放回来）。
  */
-type MonitorDraft = { addition: ReturnType<typeof additionDraft>; mirror: ReturnType<typeof mirrorDraft>; vetoes: ReturnType<typeof holdingVetoDraft> };
-const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ addition: additionDraft(plan.addition ?? defaultQualityAddition()), mirror: mirrorDraft(plan.mirrorTakeProfit ?? defaultQualityMirror()), vetoes: holdingVetoDraft(plan.holdingVetoes) });
-const monitorBaseKey = (plan: QualityGroup) => JSON.stringify([plan.holdingVetoes,plan.mirrorTakeProfit,plan.addition]);
+type MonitorDraft = { addition: ReturnType<typeof additionDraft>; mirror: ReturnType<typeof mirrorDraft>; vetoes: ReturnType<typeof holdingVetoDraft>;vetoStages:VetoStagesDraft };
+const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ addition: additionDraft(plan.addition ?? defaultQualityAddition()), mirror: mirrorDraft(plan.mirrorTakeProfit ?? defaultQualityMirror()), vetoes: holdingVetoDraft(plan.holdingVetoes),vetoStages:{enabled:!!plan.vetoStages?.length,mode:plan.vetoStageMode??'overlay',peakBasis:plan.vetoPeakBasis??'stage',stages:(plan.vetoStages??[]).map(s=>({afterAdditions:String(s.afterAdditions),conditions:holdingVetoDraft(s.conditions)}))} });
+const monitorBaseKey = (plan: QualityGroup) => JSON.stringify([plan.holdingVetoes,plan.mirrorTakeProfit,plan.addition,plan.vetoStages,plan.vetoStageMode,plan.vetoPeakBasis]);
 function parseMonitorDraft(draft: MonitorDraft, definitions: Parameters<typeof parseAdditionDraft>[1]) {
   const holdingVetoes = parseHoldingVetoDraft(draft.vetoes), mirrorTakeProfit = parseMirrorDraft(draft.mirror), addition = parseAdditionDraft(draft.addition,definitions);
-  validateQualityMirror(mirrorTakeProfit); return { holdingVetoes, mirrorTakeProfit, addition };
+  const vetoStages=draft.vetoStages.enabled?draft.vetoStages.stages.map(s=>({afterAdditions:s.afterAdditions.trim()?Number(s.afterAdditions):NaN,conditions:parseHoldingVetoDraft(s.conditions)})).sort((a,b)=>a.afterAdditions-b.afterAdditions):undefined;
+  if(draft.vetoStages.enabled&&!vetoStages?.length)throw Error('请添加至少一个一票条件切换阶段');
+  const staged={vetoStages,vetoStageMode:draft.vetoStages.mode,vetoPeakBasis:draft.vetoStages.peakBasis};validateQualityVetoStages({...staged,addition});
+  validateQualityMirror(mirrorTakeProfit); return { holdingVetoes, mirrorTakeProfit, addition,...staged };
 }
 function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDirty, count }: {
   ready: boolean; plan: QualityGroup; draft: MonitorDraft; setDraft: (draft: MonitorDraft) => void;
@@ -194,6 +199,7 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
     <FishQualityAdditionEditor draft={draft.addition} setDraft={addition => setDraft({...draft,addition})}/>
     <FishQualityMirrorEditor draft={draft.mirror} setDraft={mirror => setDraft({...draft,mirror})} additionEnabled={draft.addition.enabled}/>
     <FishQualityHoldingVetoEditor draft={draft.vetoes} setDraft={vetoes => setDraft({...draft,vetoes})}/>
+    <FishQualityVetoStagesEditor draft={draft.vetoStages} setDraft={vetoStages=>setDraft({...draft,vetoStages})}/>
     <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案` : `保存到「${plan.label}」`}</button></div>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
@@ -214,7 +220,7 @@ function HoldingMonitorSettings({state,activeId,onSelect,done}:{state:FishQualit
     return <>
       <p className="mb-2 text-[10.5px] text-muted-foreground" data-testid="monitor-plan-draft-count">监测方案 {view.plans.length} 套 · 与上方按编号一一对应{view.dirty?' · 有待保存设置':''}</p>
       {view.plans.length>0&&<div role="tablist" aria-label="选择要设置持仓监测的卖出方案" className="mb-3 flex flex-wrap gap-1 rounded-md bg-muted/60 p-1 text-[10.5px]">{view.plans.map((p,i)=>{
-        const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0);
+        const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
         return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>onSelect(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{p.label}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
       {active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
@@ -234,10 +240,11 @@ function ResultCell({ result, onClick, section, onOpenCampaign }: { result?: Qua
   const archiveView=useContext(QualityArchiveContext);
   const router = useInRouterContext(), className = 'flex w-full items-center justify-between gap-2 text-left hover:underline';
   const additions=qualityAdditionFills(result??{});
+  const stageTitle=result?.activeSellStage?`第 ${result.activeSellStage.afterAdditions} 次加仓后：${result.activeSellStage.label} ${result.activeSellStage.rule.direction} ${result.activeSellStage.rule.threshold}`:'';
   const content = <>{additions.length>0 && <span className="shrink-0 text-[9px] text-primary" title={`共加仓 ${additions.reduce((n,a)=>n+a.quantity,0).toPrecision(7)} 枚 · 均价 ${result?.averageEntryPrice?.toPrecision(7)}`}>已加仓 {additions.length} 次</span>}<span className={`font-mono tabular-nums ${signed(result?.returnPct)}`}>{pct(result?.returnPct)}</span><span className={`text-[9px] ${result?.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>{result?.status === 'open' && result.mirrorFill ? `余仓 ${+((result.remainingFraction ?? 1)*100).toPrecision(8)}%` : resultText(result)}</span></>;
   if (!archiveView && result && hasQualityCampaign(result)) {
     const href = qualityCampaignPath(result.key, section);
-    return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title="打开该标的的交易战役">{content}</Link> : <a href={href} className={className} title="打开该标的的交易战役">{content}</a>;
+    return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title={stageTitle?`${stageTitle} · 打开交易战役`:'打开该标的的交易战役'}>{content}</Link> : <a href={href} className={className} title={stageTitle?`${stageTitle} · 打开交易战役`:'打开该标的的交易战役'}>{content}</a>;
   }
   return <button type="button" className={className} onClick={onClick} title={result?.reason ?? '点开查看买卖价格与收益指标'}>{content}</button>;
 }
@@ -271,6 +278,9 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
     <DialogHeader><DialogTitle className="text-sm">{row?.source.symbol} · 卖出对比</DialogTitle><DialogDescription className="text-xs">信号 {date(row?.source.timeMs)} · 买入 {date(row?.enteredAt)} · 每方案独立模拟 100 USDT / 1 倍</DialogDescription></DialogHeader>
     {row && <div className="overflow-x-auto"><table className="w-full whitespace-nowrap text-left text-[11px]"><thead className="bg-muted/40 text-muted-foreground"><tr><th className={cell}>指标</th>{study.sellPlans?.map(p => <th key={p.id} className={`${cell} font-medium`}>{p.label} {ruleText(p)}</th>)}</tr></thead><tbody>{[
       ['状态', (r?: QualityResult) => `${resultText(r)}${r?.reason ? ` · ${r.reason}` : ''}`],
+      ['当前一票阶段', (r?:QualityResult)=>r?.activeVetoStage?`第 ${r.activeVetoStage.afterAdditions} 次加仓后`:'原一票条件'],
+      ['当前卖出算法', (r?:QualityResult)=>r?.activeSellStage?`第 ${r.activeSellStage.afterAdditions} 次加仓后 · ${r.activeSellStage.label} ${r.activeSellStage.rule.direction} ${r.activeSellStage.rule.threshold}`:'原卖出算法'],
+      ['卖出切换记录', (r?:QualityResult)=>r?.sellStageSwitches?.map(stage=>`第 ${stage.afterAdditions} 次 · ${date(stage.at)} · ${stage.label}`).join('；')??'未切换'],
       ['买入时间', (r?: QualityResult) => date(r?.entryTime)], ['买入价', (r?: QualityResult) => r?.entryPrice?.toPrecision(7) ?? '—'],
       ['卖出 / 估值时间', (r?: QualityResult) => date(r?.endTime)], ['卖出 / 估值价', (r?: QualityResult) => r?.endPrice?.toPrecision(7) ?? '—'],
       ['加仓', (r?: QualityResult) => qualityAdditionFills(r??{}).length ? qualityAdditionFills(r??{}).map((a,i)=>`第${i+1}轮 ${date(a.at)} · ${a.quantity.toPrecision(7)} 枚 · T ${a.price.toPrecision(7)}${a.sizing?` · S ${a.sizing.previousSupport.toPrecision(7)} · K ${a.sizing.support.toPrecision(7)} · ATR ${a.sizing.atr.toPrecision(7)}`:''}`).join('；') : r?.additionNote ?? '未触发'],
@@ -372,7 +382,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   /** 这一行在这套方案下没买入（不满足 / 待判断 / 缺数据）时给出原因；买入了或没开过滤时为 undefined。 */
   const skippedBy = (plan: QualityGroup, row: QualitySample) => { const f = filterStatus.get(plan.id)?.get(row.signalId ?? row.id); return f && f.state !== 'pass' ? f : undefined; };
   const [monitorPlanId, setMonitorPlanId] = useState<string | null>(null);
-  const filterCount = activeStandaloneBuyFilters(study).length, vetoCount = (study.sellPlans ?? []).reduce((n, p) => n + activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0) + (p.addition?.enabled ? 1 : 0), 0);
+  const filterCount = activeStandaloneBuyFilters(study).length, vetoCount = (study.sellPlans ?? []).reduce((n, p) => n + activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0) + (p.addition?.enabled ? 1 : 0)+(p.vetoStages?.length??0), 0);
   const plansForSort = study.sellPlans;
   const runStatuses = useMemo(() => qualityRunStatusMap(study, batch), [batch, study.results, study.filterReadings, study.sellPlans, study.buyFilters, study.observeHours, study.selectedSellId, study.independentFilters]); // eslint-disable-line react-hooks/exhaustive-deps
   const runScopeRows = useMemo(() => narrowed.filter(r => !month || signalMonthKey(r.source.timeMs) === month), [narrowed, month]);
@@ -562,7 +572,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
             <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !!state.archiving || !selectedCount || !plans.length} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" disabled={!!state.archiving} onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">先将当前全部结果独立归档到监测库，再按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。归档按时间排列，后续重算不会覆盖本次快照</span></button></PopoverContent></Popover>
           </div>
-          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} w-[5.5rem] shrink-0 whitespace-nowrap justify-center ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条否决${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} w-[5.5rem] shrink-0 whitespace-nowrap justify-center ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)}/>
           </PopoverContent></Popover>
           <FishMonitorLibrary study={study} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
