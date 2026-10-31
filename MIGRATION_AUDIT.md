@@ -471,3 +471,59 @@ package.json 与 package-lock.json 的根声明不一致：
 - [Lovable：部署、托管与所有权边界](https://docs.lovable.dev/tips-tricks/deployment-hosting-ownership)
 - [Vercel：Vite SPA 深层路由 rewrite](https://vercel.com/docs/frameworks/frontend/vite#using-vite-to-make-spas)
 - [Supabase：Edge Functions 环境变量与默认 Secrets](https://supabase.com/docs/guides/functions/secrets)
+
+
+## 13. 连续迁移补充核对（2026-10-31）
+
+用户已批准连续推进，原库保持不删除、不重置、不付费；依赖版本另行确认。随后用户已确认以既有 bun.lock 的完整精确版本为基线，所有包版本和完整性哈希保持不变，只替换 Lovable npm 缓存下载地址为公开 npm；Vercel 明确使用冻结安装，不再使用失配的 npm 锁文件。
+
+补充检查发现 bun.lock 已记录 MCP 0.22.0、Zod 4.4.3、drizzle-kit 0.31.11、drizzle-orm 0.45.4、postgres 3.4.9。公开 npm 对这 5 项的完整性哈希与现有锁一致。第 8 节的 npm 安装阻塞仍是事实；此处选择沿用既有 Bun 锁，避免另行选择依赖版本。其余全部版本保持该锁原值，冻结安装失败时停止。
+
+现已通过只读 SQL 验证实际库：16 张 public 表均启用 RLS，实际 59 条策略（静态清单中的 4 条 trade_campaigns_user_* 不在线上），Auth 账号 8 个。原库约 84 MB、PostgreSQL 17.6；导出前 Storage bucket/object 均为 0。实际数据基线优先于仓库迁移推导，绝不为凑静态清单重放旧迁移。
+
+| 必要适配 | 原因 | 还原方式 |
+| --- | --- | --- |
+| bun.lock 仅替换下载地址；新增 .npmrc | 构建不再从 Lovable 包缓存下载；版本和完整性不变 | 采用原提交中的原锁配置；不得用安装/更新命令重解版本 |
+| vercel.json | 固定 Bun 冻结安装、Vite 构建、dist 和 SPA rewrite | 新文件尚未部署到原站；原站无改动 |
+| MCP metrics:false | 禁止 SDK 向 Lovable 发送使用统计，保留 5 个只读工具及 OAuth/RLS | 恢复此字段前须另行确认外部统计传输 |
+| 5 个 MCP 工具的 publishable key 读取兼容 | 同时识别原单数变量、新 Supabase 默认 publishable JSON 字典与 legacy anon key；仍使用用户令牌执行 RLS | 恢复原单数变量读取；不涉及工具输入输出或交易算法 |
+| 备份脚本、只读 SQL、离线行数比较脚本 | 生成可重复备份与核对材料，缺参数/缺工具时失败退出；不执行恢复或改库 | 均为新增工具，不影响应用运行；本任务不删除文件 |
+| .gitignore 新增 backups/.vercel/supabase/.temp | 私有备份和部署元数据不得提交 | 保持原库与备份不变，不撤销隐私忽略规则 |
+
+原库完整导出已获得用户关于 Cloud Storage、注册邮箱临时链接和本机私有下载的明确授权。只有下载完成并验证 archive/校验和、行数与账号范围后，才可以标记备份完成。当前尚未恢复新库或部署 Vercel。
+
+### 13.1 干净构建与部署防误连验证
+
+使用官方 npm 分发的隔离 Bun 1.4.4，在全新目录按现有 bun.lock 冻结安装成功：683 个包，锁文件保持不变，全部直接依赖与原锁一致。随后 npm run build、锁定 TypeScript 5.8.3 类型检查均通过。旧第 8 节描述的是首阶段历史限制，现已通过此冻结安装消除。
+
+在尚未更换后端变量的相同构建条件下，新构建入口 assets/index-ZrLBkLbH.js 与线上 456 版逐字节 SHA-256 相同：b2eb9785ca1827e8b319396aa6af3f238975b7b63d14382b6b148d79a45fb127。此项证明依赖基线可重复，不代表新后端或整站已经验收。
+
+新增 deployment-target.json 与部署环境检查脚本，在安装及构建前要求显式填写三个前端变量，并核对已记录的新 project-ref、URL 和仅限浏览器的 publishable/anon key。目标未创建时故意阻止独立发布，避免仓库旧 .env 让 Vercel 意外继续连接旧 Cloud。只影响独立流水线，不修改本地开发命令或应用逻辑；还原为原 Vite 构建配置即可撤销该部署检查。
+
+index.html 的两个外部分享图片地址改为 public/social-preview.png，图片从原地址逐字节复制（69079 字节，SHA-256 fd65615ef7b3934ceda47549df7ead2e11b5188188b28b2054ba262045dba64f），避免独立站继续依赖原平台静态资源。界面、图片内容和计算均不变。恢复原提交两个 metadata 地址可撤销。
+
+已新增 DEPLOY.md、VERIFY.md、MIGRATION_STATUS.md 和仅含空变量名的 .env.example，记录独立发布、验收及回滚；这些文档不是已经上线的声明。
+
+### 13.2 实际对象和相关验证
+
+实际 public 函数有 7 个、非内部触发器 14 个。额外保留的函数包括历史 prune_campaign_counterfactuals；静态迁移推导的 6 个函数不代表实际库最终目录。已通过只读 catalog 查询把实际函数、触发器、约束、授权及列信息保存在忽略提交的私有 backups 目录。此处仅读取定义，没有调用历史清理函数、执行历史 SQL 或修改原库。
+
+65 项既有代理/持久化回归检查全部通过：fishExchanges 16、fishReliability 21、fishStocks 10、accountBlobSync 13、persistedStateStorage 5。部署环境检查使用虚构值验证 12 种允许/拒绝情形，全部符合预期。这些验证不替代恢复后数据和真实登录验收。
+
+Vercel 控制台已确认用户的免费 Hobby 账号存在；新 Supabase 仍等待用户本人设置新数据库密码并提交创建。未恢复数据、未导入部署、未修改 main。
+
+### 13.3 原生完整备份验证与新目标
+
+已下载平台导出的 veil-of-ignorance_261031.backup.zip，原下载文件保留，私有副本在 backups/ 下且已被 Git 忽略。ZIP 27004687 字节；其中 custom archive 27004527 字节，SHA-256 为 8190c071c5d5e4c461ab3f2eadf60a2090dda6dd2a59caeb8c96e4dabc7be7ef。隔离的官方 PostgreSQL 客户端完成目录读取及全部 zstd 数据块解码，生成私有 SQL 49344071 字节，未执行该 SQL。
+
+归档含 56 张表的数据部分，其中 public 16 张、auth 27 张；public 59 策略、7 函数、14 触发器与实际目录吻合。Auth 8 个账号均保留密码哈希，8 个 profiles 用户 ID 集合一致。user_sim_state 有 241 行；其中账号大块存档 8 个头行、44 个分片均通过 rev、完整性、gzip、JSON 与长度校验，共 488819247 个序列化字符。这证明该快照中的分片可用，不代表之后没有新增写入或所有浏览器本机缓存已转移。
+
+新目标由用户本人创建并经控制台确认：elynuzxnvjzypjgzkemc，Free 组织、Singapore、Nano、Healthy。deployment-target.json 已记录此标识；原 .env、原 config.toml 项目关联尚未改动，防止误触原后端。当前尚未恢复新库或部署前端。用户随后要求由代理填写现有 key，已仅将浏览器 Publishable key 写入本机忽略提交的 .env.local，不打印值；数据库密码不能从平台回读，正等待用户在仅监听 127.0.0.1 的本机页提供。
+
+托管 auth/storage/realtime 的内置迁移历史不能盲目覆盖新项目。恢复前还需比对目标结构与对象权限，保留实际自定义 auth.users 触发器；全部历史文件仍不重放。新旧最终写入边界和逐表/内容核对尚待完成。
+
+### 13.4 新目标构建配置
+
+supabase/config.toml 的 project_id、生成的 supabase/functions/mcp/index.ts OAuth issuer 和 .lovable/mcp/manifest.json issuer 均改为已验证的新 project-ref elynuzxnvjzypjgzkemc，避免命令误部署原项目或 OAuth 发现仍指向旧库。源码中的 issuer 仍由构建环境派生；五个工具和鉴权/RLS 语义保留。回退这些迁移分支配置到原提交可还原旧目标，切勿在回退后误执行新目标恢复或部署命令。
+
+本迁移工作树原 node_modules 独立副本完整移至忽略提交的 generated/pre-frozen-node-modules-20261031，根目录改为引用同一工作树内已冻结安装的依赖目录。未删除原副本、未链接主目录依赖、未升级包。

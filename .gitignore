@@ -29,3 +29,8 @@ dist-ssr
 .home/
 generated/
 exports/
+
+# Private migration backups and deployment metadata
+backups/
+.vercel/
+supabase/.temp/
