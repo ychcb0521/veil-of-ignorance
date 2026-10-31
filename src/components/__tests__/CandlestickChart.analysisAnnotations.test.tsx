@@ -198,6 +198,24 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.dataList.map(b => b.timestamp)).toEqual([300000,600000]);
   });
 
+  it.each([['PRS6H','PRS-6H',.5],['ATI6H','ATI-6H',1]] as const)('%s 在实际盘面按CDA模式创建副图、独立关闭并在重开后恢复',(id,label,period)=>{
+    const key='sim_anon_indicators',previous=localStorage.getItem(key),root=document.createElement('div');document.body.appendChild(root);
+    localStorage.setItem(key,JSON.stringify([{type:'CDA',period:6,enabled:true},{type:id,period,avgHours:24,enabled:true}]));
+    Object.assign(mocks.chart,{getDom:()=>root,overrideIndicator:vi.fn()});
+    let view=render(<TooltipProvider><CandlestickChart data={[candle(300000),candle(600000)]} symbol="TESTUSDT"/></TooltipProvider>);
+    try{
+      const created=()=>(mocks.chart.createIndicator.mock.calls as unknown as [{name:string}][]).map(([arg])=>arg.name);
+      expect(created()).toEqual(['CDA_CUSTOM','CDA_AVG2_CUSTOM',id+'_CUSTOM',id+'_AVG2_CUSTOM']);
+      fireEvent.click(screen.getByRole('button',{name:'指标'}));fireEvent.click(screen.getByRole('button',{name:label+' 显示 avg_x'}));
+      expect(created()).toContain(id+'_AVG_CUSTOM');
+      fireEvent.click(screen.getByRole('button',{name:'关闭 '+label+' · 原值 副图'}));expect(JSON.parse(localStorage.getItem(key)!).find((v:any)=>v.type===id).showRaw).toBe(false);
+      view.unmount();mocks.chart.createIndicator.mockClear();
+      view=render(<TooltipProvider><CandlestickChart data={[candle(300000),candle(600000)]} symbol="TESTUSDT"/></TooltipProvider>);
+      expect(created()).not.toContain(id+'_CUSTOM');expect(created()).toContain(id+'_AVG_CUSTOM');expect(created()).toContain(id+'_AVG2_CUSTOM');
+      fireEvent.click(screen.getByRole('button',{name:'指标'}));fireEvent.click(screen.getByRole('button',{name:label+' 显示 原值'}));expect(created()).toContain(id+'_CUSTOM');
+    }finally{view.unmount();root.remove();delete(mocks.chart as any).getDom;delete(mocks.chart as any).overrideIndicator;if(previous==null)localStorage.removeItem(key);else localStorage.setItem(key,previous);}
+  });
+
   it('五项研究指标各创建三个副图；参数与 BTC 更新传播到三条线，关闭时全部移除', () => {
     const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
     localStorage.setItem(key, JSON.stringify(RESEARCH_INDICATORS.map(item => ({ type: item.id, period: item.period, enabled: true, showAverage: true, color: '#F6465D' }))));
@@ -1816,4 +1834,5 @@ describe('layoutAnalysisFloatingLabels', () => {
       }
     }
   });
+
 });

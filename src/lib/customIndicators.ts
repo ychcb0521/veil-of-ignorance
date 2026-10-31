@@ -284,7 +284,7 @@ export function bssPoints(dataList: KLineData[], recentHours: number | undefined
  */
 export const AVG_DEFAULT_HOURS = 24;
 /** 均线副图（第二个参数 = 均线时长 N）。 */
-export const AVG_PARAM_INDICATORS = new Set(['DSP_OVERLAY_AVG_CUSTOM', ...AVG_HIGHLIGHT_SPECS.flatMap(spec => [researchKcName(spec.id, 1), researchKcName(spec.id, 2)])]);
+export const AVG_PARAM_INDICATORS = new Set(['DSP_OVERLAY_AVG_CUSTOM',...['PRS6H','ATI6H'].flatMap(id=>[researchKcName(id,1),researchKcName(id,2)]), ...AVG_HIGHLIGHT_SPECS.flatMap(spec => [researchKcName(spec.id, 1), researchKcName(spec.id, 2)])]);
 
 const validHours = (h: unknown, fallback: number) => {
   const n = Number(h);
@@ -343,14 +343,14 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
       const label = level === 0 ? item.short : 'avg_' + item.core + (level === 2 ? '_2' : '');
       const color=(v:number|undefined)=>item.templateId!=='STATE'?vColor(v):v==null?'#F0B90B':level===0&&v>=.5&&v<=.6?'#FFD600':v>item.neutral?'#0ECB81':v===item.neutral?'#F0B90B':'#F6465D';
       registerIndicator({
-        name: researchKcName(item.id, level), shortName: label, calcParams: [researchDefaultPeriod(item), 0, 0], precision: 8,
+        name: researchKcName(item.id, level), shortName: label, calcParams: item.marketEvidence&&level>0?[researchDefaultPeriod(item),AVG_DEFAULT_HOURS,0,0]:[researchDefaultPeriod(item),0,0], precision: 8,
         ...(item.min < item.max ? { minValue: item.min, maxValue: item.max } : {}),
         draw: zeroLine(ORANGE_DASH_LINE, item.neutral,item.neutralLabel),
         createTooltipDataSource: ({ defaultStyles,indicator,crosshair }) => {
           const def=chartFeatureDef(item.featureId);
           const statusRow=indicator.result.at(-1) as Record<string,number>|undefined;
           const status=statusRow?.__pending?' · 指标计算中…':statusRow?.__missing?' · 暂无有效读数':'';
-          if(!def?.focusVersion)return {name:def?.short??label,calcParamsText:status,icons:defaultStyles.tooltip.icons,values:undefined as never};
+          if(!def?.focusVersion)return {name:item.marketEvidence&&level>0?label:def?.short??label,calcParamsText:status,icons:defaultStyles.tooltip.icons,values:undefined as never};
           let focus='加权参数待修正';try{const vars=evaluateOnBars([],compileFeatureFormula(def.formula),def).vars;focus=`近${vars.get((def.focusPrefix??'focus2')+'_h')}h ×${vars.get((def.focusPrefix??'focus2')+'_weight')}`;}catch{/* Invalid account formulas remain visible. */}
           const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
           const keys=['value',...(level===0?item.components??[]:[])],format=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':Number(v.toPrecision(7)).toString();
@@ -361,7 +361,7 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
           color: color((data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value), size: 1.5,
         }) }],
         calc: (data, indicator) => {
-          const values = researchChartSeries(data, item, indicator.calcParams[0]);
+          const values = researchChartSeries(data, item, indicator.calcParams[0],level>0&&item.marketEvidence?{averageHours:indicator.calcParams[1]??24}:{});
           const rows=indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
           const missing=!(level===0?values.core:level===1?values.avg:values.avg2).some(v=>v!=null&&Number.isFinite(v));
           return rows.map((row,i)=>({...row,__pending:values.pending?1:0,__missing:missing?1:0,...(values.components?Object.fromEntries(Object.entries(values.components).map(([name,series])=>[name,series[i]??undefined])):{})}));
@@ -403,6 +403,7 @@ export function indicatorCalcParams(kcName: string, ind: { type?: string; period
   if (kcName === 'DSP_OVERLAY_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
+  if(research?.marketEvidence&&kcName!==researchKcName(research.id))return [ind.period,validHours(ind.avgHours,AVG_DEFAULT_HOURS),btcReferenceVersion()+researchHistoryVersion(),researchDefinitionVersion(research)];
   if (research) return [ind.period, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(research)];
   const legacyId = kcName === 'CBI_CUSTOM' ? 'cbi' : kcName === 'CBA2_CUSTOM' ? 'cba-2' : undefined;
   if (legacyId) return [ind.period, researchDefinitionVersion({ featureId: legacyId } as ResearchIndicator)];
@@ -1478,7 +1479,7 @@ export function registerCustomIndicators() {
       const line = level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
-        calcParams: [item.period, 0, 0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
+        calcParams: 'marketEvidence' in item&&item.marketEvidence&&level>0?[item.period,AVG_DEFAULT_HOURS,0,0]:[item.period,0,0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
         // Fixed-range averages retain their reference bounds; other averages use visible values.
         ...(level === 0 ? { minValue: item.min, maxValue: item.max } : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
         draw: args => {
@@ -1486,21 +1487,9 @@ export function registerCustomIndicators() {
           return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);
         },
         createTooltipDataSource: ({ indicator, defaultStyles, crosshair }) => {
-          if(item.id==='PRS6H'){
-            const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined,fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':Number(v.toPrecision(7)).toString();
-            return {name:label,calcParamsText:`6h · ${PRS6H_STATES[row?.PRS6H_state_code??-1]??'DATA_UNAVAILABLE'} · 研究初值`,icons:defaultStyles.tooltip.icons,values:[{title:'证据分: ',value:fmt(row?.value)},{title:'原始证据: ',value:fmt(row?.PRS6H_evidence_raw)},...['T','S','D','B','V'].map(k=>({title:k+': ',value:fmt(row?.['PRS6H_'+k])})),{title:'市场就绪: ',value:row?.PRS6H_market_ready===1?'是':row?.PRS6H_market_ready===0?'否':'未知'},...[['PRS6H_support','固定支撑'],['PRS6H_platform_upper','平台上沿'],['PRS6H_invalidation','失效参考K']].map(([key,title])=>({title:title+': ',value:fmt(row?.[key])}))]};
-          }
-          if(item.id==='ATI6H'){
-            const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
-            const fmt=(n:number|undefined)=>n==null||!Number.isFinite(n)?'—':Number(n.toPrecision(7)).toString();
-            const weakest=ATI6H_COMPONENTS.find(k=>row?.['ATI6H_s'+k]===row?.ATI6H_min);
-            const status=({'1':'有效结构','0':'尚无结构','-1':'支撑已破位','-2':'结构过期','-3':'数据中断','-4':'等待新结构'} as Record<string,string>)[String(row?.ATI6H_structure_status_code)]??'数据不足';
-            return {name:label,calcParamsText:`6h · 证据半衰期 ${indicator.calcParams[0]}h · ${status}`,icons:defaultStyles.tooltip.icons,values:[
-              {title:'ATI-6H: ',value:fmt(row?.value)},
-              ...ATI6H_COMPONENTS.map(k=>({title:k+' '+ATI6H_LABELS[k]+': ',value:fmt(row?.['ATI6H_s'+k])})),
-              {title:'最弱项: ',value:weakest??'—'},
-              ...[['ATI6H_support_price','固定支撑'],['ATI6H_support_failure_price','失效参考价'],['ATI6H_breakout_price','固定突破线'],['ATI6H_nearest_resistance_price','最近阻力']].map(([key,title])=>({title:title+': ',value:fmt(row?.[key])})),
-            ]};
+          if(level>0&&'marketEvidence' in item&&item.marketEvidence){const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;return {name:label,calcParamsText:`(${indicator.calcParams[1]??24}h) · 展示均值`,icons:defaultStyles.tooltip.icons,values:[{title:label+': ',value:row?.value==null?'—':Number(row.value.toPrecision(7)).toString()}]};}
+          if('marketEvidence' in item&&item.marketEvidence){
+            return {name:label,calcParamsText:`(${indicator.calcParams[0]}h)`,icons:defaultStyles.tooltip.icons,values:undefined as never};
           }
           const retentionDef=chartFeatureDef(item.featureId);
           if(retentionDef?.retentionSourceId){const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;const prefix=retentionDef.retentionPrefix??'sr';const keys=['base','retention_z','price_z','support','flow','impact','anomaly_z'];const fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':v.toFixed(5);return {name:retentionDef.short,calcParamsText:`(${indicator.calcParams[0]}) · 独立参数v1`,icons:defaultStyles.tooltip.icons,values:[{title:'增强读数: ',value:fmt(row?.value)},...keys.map((key,i)=>({title:RETENTION_COMPONENT_LABELS[i]+': ',value:fmt(row?.[prefix+'_'+key])}))]};}
@@ -1531,7 +1520,7 @@ export function registerCustomIndicators() {
           return { color, size: 1.5 };
         } }],
         calc: (dataList, indicator) => {
-          const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
+          const values = researchChartSeries(dataList, item, indicator.calcParams[0],level>0&&'marketEvidence' in item&&item.marketEvidence?{averageHours:indicator.calcParams[1]??24}:{});
           const rows = indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
           return values.components ? rows.map((row, i) => ({ ...row,
             ...Object.fromEntries(Object.entries(values.components).map(([name,series]) => [name, series[i] ?? undefined])),

@@ -15,12 +15,14 @@ const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'PRS6H', 'A
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
-  it.each([['ATI-6H','ATI6H',1,1],['PRS-6H','PRS6H',.5,100]] as const)('%s 与 CDA 一样能添加原生副图，不附带额外均值',(label,id,period,max)=>{
+  it.each([['ATI-6H','ATI6H',1,1],['PRS-6H','PRS6H',.5,100]] as const)('%s 与 CDA 一样能添加原值、avg、avg₂并独立开关',(label,id,period,max)=>{
     const changed=vi.fn();function Menu(){const [items,setItems]=useState<IndicatorConfig[]>([]);return <IndicatorMenu open indicators={items} onClose={()=>{}} onIndicatorsChange={next=>{setItems(next);changed(next);}}/>;}
     render(<Menu/>);fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:label}});
     fireEvent.click(screen.getByText(label));expect(changed.mock.lastCall![0]).toMatchObject([{type:id,period,enabled:true}]);
-    expect(visibleIndicatorCompanions(changed.mock.lastCall![0][0])).toEqual([]);expect(screen.queryByRole('button',{name:label+' 显示 avg_x_2'})).toBeNull();
-    expect(registered.get(id+'_CUSTOM')).toMatchObject({minValue:0,maxValue:max});expect(registered.has(id+'_AVG_CUSTOM')).toBe(false);
+    expect(visibleIndicatorCompanions(changed.mock.lastCall![0][0]).map(p=>p.key)).toEqual([id+'#AVG2']);expect(screen.getByRole('button',{name:label+' 显示 avg_x_2'})).toHaveAttribute('aria-pressed','true');
+    fireEvent.click(screen.getByRole('button',{name:label+' 显示 avg_x'}));expect(visibleIndicatorCompanions(changed.mock.lastCall![0][0])).toHaveLength(2);
+    fireEvent.change(screen.getByLabelText(label+' 均线时长 N（小时）'),{target:{value:'12'}});fireEvent.blur(screen.getByLabelText(label+' 均线时长 N（小时）'));expect(changed.mock.lastCall![0][0].avgHours).toBe(12);
+    expect(registered.get(id+'_CUSTOM')).toMatchObject({minValue:0,maxValue:max});expect(registered.has(id+'_AVG_CUSTOM')).toBe(true);expect(registered.get(id+'_AVG_CUSTOM').calcParams[1]).toBe(24);expect(registered.get(id+'_AVG2_CUSTOM').calcParams[1]).toBe(24);
   });
   it('状态S版本2只出现在近2小时加权分组，独立添加并保留0–1范围及原S颜色',()=>{
     const changed=vi.fn();render(<IndicatorMenu open indicators={[]} onClose={()=>{}} onIndicatorsChange={changed}/>);
@@ -92,7 +94,7 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     function Menu() { const [items,setItems] = useState<IndicatorConfig[]>(initial); return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => {setItems(next);changed(next)}}/>; }
     render(<Menu />); fireEvent.click(screen.getByRole('button',{name:'自制区'}));
-    for(const id of ids.filter(id=>!['ATI6H','PRS6H'].includes(id))){
+    for(const id of ids){
       const ind=initial.find(i=>i.type===id)!;
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG_CUSTOM'))).toBe(false);
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG2_CUSTOM'))).toBe(true);

@@ -7,7 +7,7 @@
 - `prs6h.ts`：唯一因果状态机、参数校验、逐根 push、批量回放、检查点与市场事件。
 - `deepDig/features.ts`：独立注册、native 输入适配、公式变量、配置版本键、24h 预热计划。`analysis.ts` / `series.ts` / `export.ts`：描述/推断统计、双精度曲线、解释明细、CSV/JSON。
 - `Prs6hEvidenceView.tsx` / `DefinitionPanel.tsx` / `FeatureView.tsx`：分数、五分项、状态/原因、固定价格图、时间游标、参数 JSON、研究诊断和导出。
-- `researchIndicators.ts` / `featureSource.ts` / `customIndicators.ts` / `IndicatorMenu.tsx` / `customIndicatorGroups.ts`：盘面菜单与原生 0–100 副图；不自动叠加 avg / avg2。`chartComputeClient.ts` / `chartCompute.worker.ts`：后台计算、正式收盘遮罩、断点初态。
+- `researchIndicators.ts` / `featureSource.ts` / `customIndicators.ts` / `IndicatorMenu.tsx` / `customIndicatorGroups.ts`：盘面菜单与原生 0–100 副图；与 CDA 一样提供原值、avg、avg₂独立副图，默认原值和avg₂，普通avg可单独开启；均线N可调并保存。`chartComputeClient.ts` / `chartCompute.worker.ts`：后台计算、正式收盘遮罩、断点初态。
 - `prs6hPersistence.ts`：独立 IndexedDB `veil-prs6h-state-v1`，按账号命名空间、配置、品种、周期、数据源/版本保存。只恢复不晚于输入起点的检查点；不把未来状态套在过去。无可用初态时从明确的加载起点顺序回放，解释输出记录初始化时间。
 - `fish/algorithm.ts` / `fishScanner.ts` / `fish/adapters.ts` / `fish/intersection.ts` / `fish/reconstructionLoader.ts`：统一选择、捕捞、组合、冻结快照与历史复原；原生标志不会在编译筛选程序时丢失。`fish/quality.ts` 恢复捕获时的 PRS 配置，避免用今天参数解释旧鱼。
 - `fish/qualityAdditionScan.ts` / `qualityAddition.ts` / `QualitySellEvidence.tsx`：现有条件加仓**模拟回放**只消费 PRS 的一次性 MARKET_READY 事件，保存信号分项、结构身份、固定坐标与门控明细。原有卖出、半仓镜像、风险覆盖计算和成交价机制保持原规则。
@@ -107,3 +107,9 @@ Deep Dig 编辑该特征 →「PRS-6H 参数（研究初值）」可修改 JSON�
 捕捞沿用原有「截止时刻仍达标」语义。PRS在首次就绪后结束候选，因此是事件型指标；每1h自动扫描可能错过两次扫描之间的5m就绪点。Deep Dig和已有条件加仓回放逐根检查，可以查看这些历史事件；不会把已经过去的事件冒充当前可执行机会。
 
 2026-10-31 最终验证：16个核心/接入测试文件115项通过；ATI/PRS原生菜单2项通过；真实TimeControl捕捞面板重开1项通过，合计118项针对性验证。TypeScript完整检查通过，生产构建通过（已有大分块提示保留）。浏览器实际添加PRS副图、刷新后从独立IndexedDB读取检查点、通过界面导出完整JSON均已验证；合成正例84.83896326796076分、一个事件。未宣称全库套件全绿：早期扩大回归中的既有卖方断言及TimeControl评分/删除用例在187b4f70基线同样有失败，未借本次任务改写相关业务。
+
+## 456：与CDA一致的实际盘面显示
+
+PRS-6H 与 ATI-6H 均可从主盘面「指标→自制区→多头追加支持证据」添加。与CDA相同：原值、avg、avg₂独立显示/隐藏，叉号只关闭对应副图，刷新后保留选择，N默认24h且可调整。图例采用紧凑样式，详细门控与结构继续在Deep Dig解释面板查看。avg/avg₂只在图表显示链路追加，不修改原始特征定义、市场分数、就绪事件和风控逻辑。加载历史时补足均值依赖，并保留已收盘遮罩、精确tick和数据版本刷新。
+
+456验证：44项计算、原生指标及接入回归通过，2项指标菜单测试和2项真实CandlestickChart副图开关/重开测试通过。浏览器实测PRS-6H和CDA同盘面的六个副图，刷新后保留显示设置。

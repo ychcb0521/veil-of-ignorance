@@ -171,8 +171,11 @@ const historyBarsCache = new Map<string, number>();
 export function chartFeatureHistoryBars(featureId: string, period: number, formula: string, barMinutes = 5): number {
   const def = chartFeatureDef(featureId);
   if (!def) return 0;
-  if(featureTemplateId(def)==='prs6h')return Math.ceil(24*60/barMinutes);
-  if(featureTemplateId(def)==='ati6h')return Math.ceil((def.ATI6H_parameters?.WINDOW_HOURS??6)*60/barMinutes)+5*mbi2NOf(ati6hDependencyOf(def),barMinutes)+2;
+  if(['prs6h','ati6h'].includes(featureTemplateId(def)??'')){
+    const warm=featureTemplateId(def)==='prs6h'?Math.ceil(24*60/barMinutes):Math.ceil((def.ATI6H_parameters?.WINDOW_HOURS??6)*60/barMinutes)+5*mbi2NOf(ati6hDependencyOf(def),barMinutes)+2;
+    const rolling=programHistoryBars(compileFeatureFormula(formula).program,{...featureParams(def),BAR_MINUTES:barMinutes},barMinutes);
+    return warm+rolling;
+  }
   const usesMbi = featureUsesMbi(def), usesMbi2=featureUsesMbi2(def);
   if(usesMbi2&&!def.retentionSourceId)return Math.ceil(48*60/barMinutes)+5*mbi2NOf({...def,MBI2_T_HOURS:period},barMinutes);
   const binding = CHART_PARAM[featureTemplateId(def) ?? featureId];

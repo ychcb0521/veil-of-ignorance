@@ -4,7 +4,7 @@ import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindo
 
 export interface KlineData {
   /** Market-evidence-only raw quote amounts; never alter existing indicators’ normalized fields. */
-  ATI6H_quoteVolume?:number; ATI6H_takerBuyQuoteVolume?:number;
+  ATI6H_quoteVolume?:number; ATI6H_takerBuyQuoteVolume?:number; ATI6H_tick_size?:number; PRS6H_tick_size?:number;
   /** CBA-2只读取已收盘K线；回放成形根显式标记false。 */
   cba2Closed?: boolean;
   time: number; // ms timestamp (open time)

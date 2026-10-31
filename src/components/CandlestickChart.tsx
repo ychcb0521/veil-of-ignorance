@@ -326,6 +326,7 @@ function toKLineData(d: KlineData): KLineData {
     close: d.close,
     volume: d.volume,
     // 金额两列（USDT）：动态谢林点只用金额；没有就不写，指标按缺失处理
+    ...(d.ATI6H_tick_size!=null?{ATI6H_tick_size:d.ATI6H_tick_size}:{}),...(d.PRS6H_tick_size!=null?{PRS6H_tick_size:d.PRS6H_tick_size}:{}),
     ...chartAmountFields(d),
   };
 }
