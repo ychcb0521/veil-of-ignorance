@@ -1,9 +1,11 @@
 // 【用户要求】2026-10-21「我希望捕捉到的新鱼能够及时发送到我的邮箱，并且邮箱地址数量可以添加」
 import {beforeEach,expect,it,vi} from 'vitest';
 import {act,fireEvent,render,renderHook,screen} from '@testing-library/react';
-import {FISH_EMAIL_MAX_ROWS,composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
+import {fishEmailAlgorithm,fishEmailMatches,fishEmailSourceLabel,FISH_EMAIL_MAX_ROWS,composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
 import {useFishNotify} from '@/hooks/useFishNotify';
 import {fishVisibleCatchKey} from '@/lib/fish/records';
+import {notifyPersistedStateHydrated} from '@/lib/persistedStateStorage';
+import * as sync from '@/lib/simStateSync';
 import {FishNotifySettings} from '@/components/FishNotifySettings';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const fish=(symbol:string,h:number,extra:Partial<TradeSignal>={}):TradeSignal=>({id:symbol,symbol,timeMs:Date.UTC(2026,9,21,h),timeLabel:'',fallbackZone:'',fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:1,featureShort:'CBI-2'},...extra});
@@ -139,4 +141,76 @@ it('只发 CBI-2·avg₂ 与 CBA·avg₂ 共振的鱼：只命中一个、或只
  const body=JSON.parse((request.mock.calls[0] as unknown as [string,{body:string}])[1].body).template_params;
  expect(body.message).toContain('BOTHUSDT');expect(body.message).not.toContain('CBIUSDT');expect(body.message).not.toContain('AVGUSDT');
  expect(body.message_html).toContain('CBI-2·avg₂ 与 CBA·avg₂ 共振');
+});
+
+
+it('手动来源按实际命中的指标及序列筛选，交集和并集不同，空选择不回退默认',()=>{
+ const cbi = fishEmailAlgorithm(snap('cbi2','avg_CBI2_2','CBI-2'))!;
+ const cba = fishEmailAlgorithm(snap('cba','avg_CBA_2','CBA'))!;
+ const all = res('ALLUSDT', 1);
+ const only = {...all, fish: {...all.fish!, hitAlgorithms: [1]}};
+ const unrelated = {...all, fish: {...all.fish!, algorithms: [snap('other','avg_CBI2_2','CBI-2')], hitAlgorithms: [1]}};
+ expect(fishEmailMatches(only, {...ready, sourceAlgorithms:[cbi,cba], sourceCombination:'and'})).toBe(false);
+ expect(fishEmailMatches(only, {...ready, sourceAlgorithms:[cbi,cba], sourceCombination:'or'})).toBe(true);
+ expect(fishEmailMatches(only, {...ready, sourceAlgorithms:[cba]})).toBe(false);
+ expect(fishEmailMatches(all, {...ready, sourceAlgorithms:[]})).toBe(false);
+ expect(fishEmailMatches(unrelated, {...ready, sourceAlgorithms:[cbi]})).toBe(false);
+ const customized = {...ready, sourceAlgorithms:[cbi], sourceCombination:'or' as const};
+ saveFishNotify(customized);
+ expect(readFishNotify()).toEqual(customized);
+ const label=fishEmailSourceLabel({...customized,sourceAlgorithms:[{...cbi,label:'<来源>'}]});
+ const email=composeFishEmail([all],1,undefined,label);
+ expect(email.message).toContain('<来源>');expect(email.message_html).toContain('&lt;来源&gt;');expect(email.message_html).not.toContain('<来源>');
+});
+
+it('来源算法与合并方式在重挂、账号切换和云端回填后沿用手动设置，自动与测试邮件使用同一来源',async()=>{
+ const push=vi.spyOn(sync,'queueSimStatePush').mockImplementation(()=>{});
+ const login=(id:string)=>localStorage.setItem('sb-source-test-auth-token',JSON.stringify({user:{id}}));
+ const cbi=fishEmailAlgorithm(snap('cbi2','avg_CBI2_2','CBI-2'))!;
+ const current=res('ONLYUSDT',1);current.fish!.hitAlgorithms=[1];
+ const request=vi.fn(async()=>new Response('OK'));
+ login('source-a');saveFishNotify(ready);
+ const first=renderHook(()=>useFishNotify('source-a',request as any,()=>[current]));
+ act(()=>first.result.current.update({...ready,sourceAlgorithms:[cbi],sourceCombination:'or'}));
+ expect(push).toHaveBeenLastCalledWith('source-a','fish_notify_v1',expect.objectContaining({sourceAlgorithms:[cbi],sourceCombination:'or'}));
+ first.unmount();
+ const view=renderHook(({owner})=>useFishNotify(owner,request as any,()=>[current]),{initialProps:{owner:'source-a'}});
+ expect(view.result.current.config.sourceAlgorithms).toEqual([cbi]);
+ await act(async()=>{await view.result.current.send([current]);});
+ expect(request).toHaveBeenCalledTimes(1);
+ expect(JSON.parse((request.mock.calls[0] as any)[1].body).template_params.message).toContain('CBI-2·avg₂的信号 1 条');
+ login('source-b');view.rerender({owner:'source-b'});
+ expect(view.result.current.config.sourceAlgorithms).toBeUndefined();
+ login('source-a');view.rerender({owner:'source-a'});
+ expect(view.result.current.config.sourceAlgorithms).toEqual([cbi]);
+ act(()=>notifyPersistedStateHydrated('sim_source-a_fish_notify_v1'));
+ expect(view.result.current.config.sourceCombination).toBe('or');
+ await act(async()=>{await view.result.current.test();});
+ expect(JSON.parse((request.mock.calls[1] as any)[1].body).template_params.message).toContain('ONLYUSDT');
+ act(()=>view.result.current.update({...view.result.current.config,sourceAlgorithms:[]}));
+ await act(async()=>{await view.result.current.send([res('BLOCKEDUSDT',2)]);});
+ expect(request).toHaveBeenCalledTimes(2);
+ view.unmount();push.mockRestore();
+});
+
+it('来源选择界面默认折叠，手动切换交并集和算法立即保存，重开不替换为捕捞的新配置',()=>{
+ const cbi=fishEmailAlgorithm(snap('cbi2','avg_CBI2_2','CBI-2'))!;
+ const cda=fishEmailAlgorithm(snap('cda','CDA','CDA'))!;
+ const notify:any={config:{...ready,sourceAlgorithms:[cbi],sourceCombination:'or'},status:null,sending:false,update:vi.fn((c:any)=>{notify.config=c;}),send:vi.fn(),test:vi.fn()};
+ const view=render(<FishNotifySettings notify={notify} algorithms={[cda]}/>);
+ expect(screen.getByTestId('fish-notify-sources')).not.toHaveAttribute('open');
+ fireEvent.click(screen.getByText(/来源算法 ·/));
+ expect(screen.getByRole('checkbox',{name:'邮件来源：CBI-2·avg₂'})).toBeChecked();
+ fireEvent.click(screen.getByRole('checkbox',{name:'邮件来源：CDA 原值'}));
+ expect(notify.update).toHaveBeenLastCalledWith(expect.objectContaining({sourceAlgorithms:[cbi,cda],sourceCombination:'or'}));
+ view.rerender(<FishNotifySettings notify={{...notify}} algorithms={[]}/>);
+ expect(screen.getByRole('checkbox',{name:'邮件来源：CDA 原值'})).toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'交集'}));
+ expect(notify.update).toHaveBeenLastCalledWith(expect.objectContaining({sourceCombination:'and',sourceAlgorithms:[cbi,cda]}));
+ view.unmount();
+ render(<FishNotifySettings notify={{...notify}} algorithms={[]}/>);
+ expect(screen.getByTestId('fish-notify-sources')).not.toHaveAttribute('open');
+ fireEvent.click(screen.getByText(/来源算法 ·/));
+ expect(screen.getByRole('button',{name:'交集'})).toHaveAttribute('aria-pressed','true');
+ expect(screen.getByRole('checkbox',{name:'邮件来源：CDA 原值'})).toBeChecked();
 });

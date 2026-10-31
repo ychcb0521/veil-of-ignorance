@@ -994,7 +994,7 @@ describe('JournalCampaignsPage sorting', () => {
     const actions = children.at(-1)!;
     expect(actions).toHaveAttribute('data-testid', 'campaign-actions-toggle');
     expect(actions).toHaveClass('ml-auto');
-    expect(actions).toHaveAccessibleName('导出与下载');
+    expect(actions).toHaveAccessibleName('选择与导出');
     expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
     // 每个排序项外面包着一层（data-sort-item，放悬停才出现的「+」与多级时的级数角标，不占尺寸），分隔线仍是直接的子节点

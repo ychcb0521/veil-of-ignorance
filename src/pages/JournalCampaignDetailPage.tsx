@@ -1,3 +1,4 @@
+import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
@@ -2750,7 +2751,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="min-w-0">
-              <h1 className="text-[14px] font-medium truncate">{campaign.title}</h1>
+              <QualityCampaignCardTitle campaign={campaign} as="h1" className="text-[14px] font-medium leading-5" />
               <div className="font-mono text-[11px] text-muted-foreground flex flex-wrap items-center gap-2">
                 <span
                   className="rounded border border-border bg-card px-1.5 py-0.5 text-[10px]"
@@ -2758,7 +2759,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                 >
                   {campaignDisplayCode}
                 </span>
-                <span>{campaign.symbol}</span>{campaign.comparison && <span title={campaign.comparison.sellLabel} className="max-w-[min(32rem,60vw)] truncate rounded border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary" data-testid="comparison-campaign-badge">持仓监测 · {campaign.comparison.sellLabel}</span>}
+                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="comparison-campaign-badge">持仓监测</span>}
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>

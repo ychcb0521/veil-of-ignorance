@@ -12,7 +12,8 @@ import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedSt
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
-import { fishCaughtBy, fishVisibleCatchKey } from './records';
+import { fishCaughtBy, fishVisibleCatchKey, fishMetricLabel, fishSourceLabel } from './records';
+import type { FishSnapshot } from './algorithm';
 import { qualityMembers } from './quality';
 import { focusDetector, FOCUS_DETECTORS } from './qualityFocusSignals';
 
@@ -27,7 +28,36 @@ export function fishEmailResonates(s: TradeSignal): boolean {
   return FOCUS_DETECTORS.every(name => hit.has(name));
 }
 
-export interface FishNotifyConfig { enabled: boolean; emails: string[]; serviceId: string; templateId: string; publicKey: string }
+export interface FishEmailAlgorithm { key: string; label: string }
+export interface FishNotifyConfig { enabled: boolean; emails: string[]; serviceId: string; templateId: string; publicKey: string;
+  /** undefined 保留旧账号的两项共振规则；显式 [] 表示用户清空，绝不回退到默认。 */
+  sourceAlgorithms?: FishEmailAlgorithm[]; sourceCombination?: 'and' | 'or';
+}
+/** 与捕捞记录中的指标及实际序列匹配；阈值、方向仍由捕捞负责，不按显示文字猜命中。 */
+export function fishEmailAlgorithm(snapshot: Partial<FishSnapshot>): FishEmailAlgorithm | undefined {
+  const legacy = focusDetector(snapshot as FishSnapshot);
+  const featureId = snapshot.featureId ?? snapshot.algorithmKey?.split('|')[0]
+    ?? (legacy === 'avg_CBI2_2' ? 'cbi2' : legacy === 'avg_CBA_2' ? 'cba' : undefined);
+  const metric = fishMetricLabel(snapshot);
+  if (!featureId || metric === '结果（指标未记录）') return undefined;
+  return { key: JSON.stringify([featureId, metric]), label: fishSourceLabel(snapshot) };
+}
+export const DEFAULT_FISH_EMAIL_ALGORITHMS: readonly FishEmailAlgorithm[] = [
+  { key: JSON.stringify(['cbi2', 'avg_CBI2_2']), label: 'CBI-2·avg₂' },
+  { key: JSON.stringify(['cba', 'avg_CBA_2']), label: 'CBA·avg₂' },
+];
+export const fishEmailSources = (config: FishNotifyConfig): readonly FishEmailAlgorithm[] => config.sourceAlgorithms ?? DEFAULT_FISH_EMAIL_ALGORITHMS;
+export function fishEmailMatches(signal: TradeSignal, config: FishNotifyConfig): boolean {
+  if (config.sourceAlgorithms === undefined) return fishEmailResonates(signal);
+  const selected = config.sourceAlgorithms;
+  if (!selected.length) return false;
+  const hit = new Set(qualityMembers(signal).map(fishEmailAlgorithm).filter(Boolean).map(a => a!.key));
+  return config.sourceCombination === 'or' ? selected.some(a => hit.has(a.key)) : selected.every(a => hit.has(a.key));
+}
+export function fishEmailSourceLabel(config: FishNotifyConfig): string {
+  if (config.sourceAlgorithms === undefined) return FISH_EMAIL_RESONANCE_LABEL;
+  return config.sourceAlgorithms.length ? config.sourceAlgorithms.map(a => a.label).join(config.sourceCombination === 'or' ? ' ∪ ' : ' ∩ ') : '未选择来源算法';
+}
 export const DEFAULT_FISH_NOTIFY: FishNotifyConfig = { enabled: false, emails: [], serviceId: '', templateId: '', publicKey: '' };
 export const FISH_NOTIFY_MAX_EMAILS = 20;
 const LOGICAL_KEY = 'fish_notify_v1';
@@ -40,7 +70,12 @@ export function normalizeFishNotify(raw: unknown): FishNotifyConfig {
   const x = (raw && typeof raw === 'object' ? raw : {}) as Partial<FishNotifyConfig>;
   const emails = Array.isArray(x.emails) ? [...new Set(x.emails.filter((e): e is string => typeof e === 'string' && isEmail(e)).map(e => e.trim().toLowerCase()))].slice(0, FISH_NOTIFY_MAX_EMAILS) : [];
   const text = (v: unknown) => typeof v === 'string' ? v.trim() : '';
-  return { enabled: x.enabled === true, emails, serviceId: text(x.serviceId), templateId: text(x.templateId), publicKey: text(x.publicKey) };
+  const sourceAlgorithms = Array.isArray(x.sourceAlgorithms) ? [...new Map(x.sourceAlgorithms
+    .filter(a => a && typeof a.key === 'string' && a.key.length > 0 && a.key.length <= 2048 && typeof a.label === 'string' && a.label.trim())
+    .map(a => [a.key, { key: a.key, label: a.label.trim().slice(0, 160) }])).values()].slice(0, 100) : undefined;
+  return { enabled: x.enabled === true, emails, serviceId: text(x.serviceId), templateId: text(x.templateId), publicKey: text(x.publicKey),
+    ...(sourceAlgorithms !== undefined ? { sourceAlgorithms, sourceCombination: x.sourceCombination === 'or' ? 'or' as const : 'and' as const } : {}) };
+
 }
 export function readFishNotify(): FishNotifyConfig {
   try { return normalizeFishNotify(JSON.parse(readPersistedStateRaw(storageKey()) ?? 'null')); } catch { return DEFAULT_FISH_NOTIFY; }
@@ -75,7 +110,7 @@ export function fishNotifyMissing(c: FishNotifyConfig): string {
  */
 /** 邮件表格最多列这么多行（其余写「还有 N 条」），保证不超过 EmailJS 免费版的大小上限。 */
 export const FISH_EMAIL_MAX_ROWS = 60;
-export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), newKeys?: ReadonlySet<string>) {
+export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), newKeys?: ReadonlySet<string>, sourceLabel = FISH_EMAIL_RESONANCE_LABEL) {
   const rows = [...fish].sort((a, b) => b.timeMs - a.timeMs).map(s => ({
     symbol: s.symbol,
     market: [s.market === 'us_stock' ? '美股' : '', s.exchange && s.exchange !== 'binance' ? EXCHANGE_NAMES[s.exchange] ?? s.exchange : ''].filter(Boolean).join(' · '),
@@ -86,14 +121,14 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   const added = newKeys ? rows.filter(r => r.isNew).length : rows.length;
   const tail = newKeys && added < rows.length ? `（新增 ${added}）` : '';
   const subject = `信号通知 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
-  const message = [`${FISH_EMAIL_RESONANCE_LABEL}的信号 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
+  const message = [`${sourceLabel}的信号 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
   const esc = (v: string) => v.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   // EmailJS 免费版模板变量合计约 50KB：样式尽量放在 table 上继承，每行只留必需的内联样式；最多列 60 行
   const shown = rows.slice(0, FISH_EMAIL_MAX_ROWS), more = rows.length - shown.length;
   const sans = "-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif", mono = 'ui-monospace,Menlo,Consolas,monospace';
   const cell = 'padding:8px 12px;border-top:1px solid #f0f1f3';
   const message_html = `<div style="font:14px ${sans};color:#111827;max-width:720px">`
-    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600">${FISH_EMAIL_RESONANCE_LABEL} <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
+    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600">${esc(sourceLabel)} <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
     + `${tail ? ` <span style="font-size:12px;font-weight:400;color:#6b7280">本轮新增 ${added}</span>` : ''}</div>`
     + `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;width:100%;font:13px ${mono};color:#374151">`
     + `<tr style="background:#f8fafc;font:12px ${sans};color:#6b7280;text-align:left">${['标的', '信号时间 ↓', '算法类型', '市场'].map(h => `<th style="padding:9px 12px;font-weight:500">${h}</th>`).join('')}</tr>`

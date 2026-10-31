@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as campaignSummary from '@/lib/campaignSummaryExport';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -12,6 +13,9 @@ const fixture = vi.hoisted(() => ({
   error: null, failedCount: 0, retry: vi.fn(), setRows: vi.fn(), beginMutation: () => () => {},
 }));
 vi.mock('@/hooks/useCampaignList', () => ({ useCampaignList: () => fixture }));
+const monitoring = vi.hoisted(() => ({ rows: [] as CampaignCardData[] }));
+vi.mock('@/hooks/useQualityCampaignList', () => ({ useQualityCampaignList: () => ({ ...fixture, rows: monitoring.rows }) }));
+let selectionVisited = false;
 const auth = vi.hoisted(() => ({ userId: 'user-batch' }));
 const dialogState = vi.hoisted(() => ({ fail: false }));
 const toastError = vi.hoisted(() => vi.fn());
@@ -86,6 +90,8 @@ beforeEach(() => {
     row('no-metric', 'No Metric', '2026-04-15T01:00:00Z', 1, null),
   ];
   fixture.complete = true;
+  monitoring.rows = [];
+  selectionVisited = false;
   auth.userId = 'user-batch';
   dialogState.fail = false;
   toastError.mockClear();
@@ -105,9 +111,12 @@ function renderPage(search = '?sort=time&direction=desc&chart=importance') {
   const view = render(pageTree(search));
   return { ...view, rerenderPage: () => view.rerender(pageTree(search)) };
 }
-const selectMode = () => {
+const selectMode = (startEmpty = true) => {
   if (screen.getByTestId('campaign-actions-toggle').getAttribute('aria-expanded') !== 'true') fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
   fireEvent.click(screen.getByTestId('campaign-batch-select-toggle'));
+  // 既有导出交互用例从空样本开始，默认全选由下方独立用例验证。再次进入不重置选择。
+  if (!selectionVisited && startEmpty) fireEvent.click(screen.getByRole('button', { name: '清空' }));
+  selectionVisited = true;
 };
 /** 假 IntersectionObserver：记下观察目标与参数，测试里手动回报可见比例。 */
 function stubIntersectionObserver() {
@@ -144,7 +153,7 @@ async function openPreview() {
 describe('JournalCampaignsPage batch export wiring', () => {
   it('folds secondary actions into one subtle accessible control and closes the menu after choosing batch selection', () => {
     renderPage();
-    const more = screen.getByRole('button', { name: '导出与下载' });
+    const more = screen.getByRole('button', { name: '选择与导出' });
     expect(more).toHaveClass('text-muted-foreground/40');
     expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
@@ -255,7 +264,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     }
   }, 15_000);
 
-  it('switching the login account clears the selection and leaves selection mode', () => {
+  it('switching the login account starts with its own default-all selection and leaves selection mode', () => {
     const view = renderPage();
     selectMode();
     fireEvent.click(check('Alpha'));
@@ -265,8 +274,8 @@ describe('JournalCampaignsPage batch export wiring', () => {
     view.rerenderPage();
     expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
     selectMode();
-    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('0');
-    expect(check('Alpha')).not.toBeChecked();
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('4');
+    expect(check('Alpha')).toBeChecked();
   }, 15_000);
 
   it('preserves metric-excluded selections, shows them clearly and appends them after the current sorted list', async () => {
@@ -281,7 +290,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     expect(queueIds()).toEqual(['alpha', 'no-metric']);
   }, 15_000);
 
-  it('clears out-of-date selections when the operation date scope changes, without resurrecting them on reset', async () => {
+  it('intersects selection with the date scope and keeps the original choices when the scope is restored', async () => {
     renderPage();
     selectMode();
     fireEvent.click(screen.getByRole('button', { name: '全选列表（4）' }));
@@ -297,10 +306,10 @@ describe('JournalCampaignsPage batch export wiring', () => {
     }
     fireEvent.click(screen.getByTestId('campaign-range-clear'));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-    expect(check('Alpha')).not.toBeChecked();
-    expect(check('No Metric')).not.toBeChecked();
+    expect(check('Alpha')).toBeChecked();
+    expect(check('No Metric')).toBeChecked();
     await openPreview();
-    expect(queueIds()).toEqual(['charlie', 'bravo']);
+    expect(queueIds()).toEqual(['no-metric', 'charlie', 'bravo', 'alpha']);
   }, 15_000);
 
   it('retains selection when exiting and re-entering selection mode, then restores ordinary scatter navigation', () => {
@@ -416,7 +425,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
       fireEvent.click(screen.getByRole('button', { name: '全部下载后关闭' }));
       expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
       await waitFor(() => expect(screen.getByTestId('campaign-actions-toggle')).toHaveFocus());
-      expect(screen.getByTestId('campaign-actions-toggle')).toHaveAccessibleName('导出与下载');
+      expect(screen.getByTestId('campaign-actions-toggle')).toHaveAccessibleName('选择与导出');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -454,7 +463,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
       fireEvent.keyDown(screen.getByTestId('campaign-batch-export-open'), { key: 'Escape' });
       expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
       await waitFor(() => expect(toggle).toHaveFocus());
-      expect(toggle).toHaveAccessibleName('导出与下载');
+      expect(toggle).toHaveAccessibleName('选择与导出');
       // 底部浮条上的「退出选择」：同样交给开关
       selectMode();
       report(0);
@@ -553,3 +562,114 @@ describe('JournalCampaignsPage batch export wiring', () => {
     expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent(String(points.length));
   }, 15_000);
 });
+
+
+describe('统计概览与板块独立批量选择', () => {
+  it('defaults to all, keeps deselected cards available, and updates every summary without an empty-selection fallback', async () => {
+    renderPage();
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 3 场，其中盈利 2 场，亏损 1 场/);
+    expect(screen.queryByTestId('campaign-statistics-selection')).not.toBeInTheDocument();
+    selectMode(false);
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('4');
+    expect(check('Alpha')).toBeChecked();
+    fireEvent.click(check('Alpha'));
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2 场，其中盈利 2 场，亏损 0 场/);
+    expect(screen.getByTestId('campaign-statistics-selection')).toHaveTextContent('已选 3 / 4');
+    await openPreview();
+    expect(queueIds()).toEqual(['no-metric', 'charlie', 'bravo']);
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 0 场/);
+    expect(screen.getByTestId('campaign-batch-export-open')).toBeDisabled();
+    expect(screen.getByTestId('campaign-statistics-selection')).toHaveTextContent('已选 0 / 4');
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
+    fireEvent.click(screen.getByRole('button', { name: '恢复全选' }));
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 3 场/);
+  }, 15_000);
+
+  it('separates personal and monitoring statistics and selections while applying monitoring filters to both summary and export', async () => {
+    const monitored = (id: string, ratio: number, sellKey: string): CampaignCardData => {
+      const result = row(id, id, '2026-02-15T01:00:00Z', 2, ratio, 6);
+      result.campaign.comparison = { section: 'sell', runKey: id, sellKey, sellLabel: `卖出算法组合${sellKey}`, detectors: [], category: '顺势', valuedAt: 1 };
+      return result;
+    };
+    monitoring.rows = [monitored('monitor-win', 100, '1'), monitored('monitor-loss', -100, '2')];
+    renderPage();
+    selectMode(false);
+    fireEvent.click(check('Alpha'));
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2 场，其中盈利 2 场，亏损 0 场/);
+    fireEvent.click(screen.getByRole('button', { name: '持仓监测' }));
+    expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(2);
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2 场，其中盈利 1 场，亏损 1 场/);
+    selectMode(false);
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('2');
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 0 场/);
+    fireEvent.click(screen.getByRole('button', { name: '亲自交易' }));
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2 场，其中盈利 2 场，亏损 0 场/);
+    fireEvent.click(screen.getByRole('button', { name: '持仓监测' }));
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 0 场/);
+    selectMode(false);
+    fireEvent.click(screen.getByRole('button', { name: '恢复全选' }));
+    fireEvent.click(screen.getByRole('button', { name: '持仓监测筛选与说明' }));
+    fireEvent.change(screen.getByLabelText('战役卖出方案'), { target: { value: '2' } });
+    fireEvent.keyDown(screen.getByRole('dialog', { name: '持仓监测筛选与说明' }), { key: 'Escape' });
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(1);
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 1 场，其中盈利 0 场，亏损 1 场/);
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('1');
+    await openPreview();
+    expect(queueIds()).toEqual(['monitor-loss']);
+  }, 15_000);
+
+  it('includes asynchronously loaded campaigns in default-all mode, without overwriting an explicit empty selection', () => {
+    const all = fixture.rows;
+    fixture.rows = all.slice(0, 1);
+    fixture.complete = false;
+    const view = renderPage();
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 1 场/);
+    fixture.rows = all;
+    fixture.complete = true;
+    view.rerenderPage();
+    selectMode(false);
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('4');
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+    fixture.rows = [...all, row('late', 'Late', '2026-05-15T01:00:00Z', 1, 500, 8)];
+    view.rerenderPage();
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 0 场/);
+    fireEvent.click(screen.getByRole('button', { name: '恢复全选' }));
+    expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('5');
+  }, 15_000);
+});
+
+
+it('exports spreadsheet rows and risk aggregates from exactly the same selected sample', async () => {
+  const createDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+  const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:selected-campaigns') });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+  const summary = vi.spyOn(campaignSummary, 'buildCampaignSummarySheets');
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = renderPage();
+  try {
+    selectMode(false);
+    fireEvent.click(check('Alpha'));
+    fireEvent.click(check('No Metric'));
+    fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
+    fireEvent.click(screen.getByTestId('campaign-export-xlsx'));
+    if (!summary.mock.calls.length) {
+      fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
+      fireEvent.click(screen.getByTestId('campaign-export-xlsx-available'));
+    }
+    expect(summary).toHaveBeenCalledTimes(1);
+    expect(summary.mock.calls[0][0].map(row => row.campaign.id)).toEqual(['charlie', 'bravo']);
+    expect(summary.mock.calls[0][1].asymmetricSummary).toMatchObject({ sampleCount: 2, winCount: 2, lossCount: 0 });
+    expect(screen.getByTestId('campaign-valid-count')).toHaveAccessibleName(/有效战役 2 场，其中盈利 2 场，亏损 0 场/);
+  } finally {
+    view.unmount(); summary.mockRestore(); click.mockRestore();
+    if (createDescriptor) Object.defineProperty(URL, 'createObjectURL', createDescriptor); else Reflect.deleteProperty(URL, 'createObjectURL');
+    if (revokeDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeDescriptor); else Reflect.deleteProperty(URL, 'revokeObjectURL');
+  }
+}, 15_000);

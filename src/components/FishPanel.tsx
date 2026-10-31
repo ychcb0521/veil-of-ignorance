@@ -16,6 +16,9 @@ import {FISH_TURNOVER_FLOORS,FISH_MAX_ALGORITHMS} from '@/lib/fish/shared';
 import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
 import type {FishNotify} from '@/hooks/useFishNotify';
+import { fishEmailAlgorithm } from '@/lib/fish/notify';
+import { qualityMembers } from '@/lib/fish/quality';
+import { definitionKey } from '@/lib/deepDig/features';
 import {FishNotifySettings} from './FishNotifySettings';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
@@ -326,7 +329,10 @@ export function FishPanel(p: FishPanelProps) {
       <div className="relative h-px bg-border/60" aria-hidden>{scanning && x && x.total > 0 && <span className="absolute bottom-0 left-0 h-[2px] rounded-r-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />}</div>
     </header>
     <div className="min-w-0 space-y-3 px-4 pb-4 pt-3">
-    {open.notify&&p.notify&&<FishNotifySettings notify={p.notify}/>}
+    {open.notify&&p.notify&&<FishNotifySettings notify={p.notify} algorithms={[
+      ...pool.map(plan => fishEmailAlgorithm({ featureId: plan.def.id, featureShort: plan.def.short, statistic: plan.settings.statistic, definitionKey: definitionKey(plan.def) })),
+      ...p.signals.flatMap(signal => qualityMembers(signal).map(fishEmailAlgorithm)),
+    ].filter((a): a is NonNullable<typeof a> => Boolean(a))}/>}
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <FishCheck disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />

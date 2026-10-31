@@ -77,3 +77,19 @@ it('捕捞、鱼舱、鱼质量是三个同级模块，独立折叠', async () =
  fireEvent.click(screen.getByRole('button',{name:/^鱼质量/,expanded:true}));
  expect(screen.getByRole('button',{name:/^鱼舱/})).toBeVisible();
 });
+
+it('邮件来源展示实际捕捞序列与已保存的额外来源，打开或调整捕捞阈值不会覆盖邮件选择',()=>{
+ const source={key:JSON.stringify(['drift-speed-z','avg_a_2']),label:'DSP·a·avg₂'};
+ const notify={config:{enabled:false,emails:[],serviceId:'',templateId:'',publicKey:'',sourceAlgorithms:[source],sourceCombination:'or' as const},status:null,sending:false,update:vi.fn(),send:vi.fn(),test:vi.fn()};
+ render(panel({notify}));
+ fireEvent.click(screen.getByRole('button',{name:'更多'}));
+ fireEvent.click(screen.getByTestId('fish-notify-toggle'));
+ fireEvent.click(screen.getByText(/来源算法 ·/));
+ expect(screen.getByRole('checkbox',{name:'邮件来源：DSP·a·avg₂'})).toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'邮件来源：CBI-2·avg₂'})).not.toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'邮件来源：CBI-2·avg'})).not.toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'邮件来源：CBA·avg'})).not.toBeChecked();
+ fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'12'}});
+ expect(notify.update).not.toHaveBeenCalled();
+ expect(screen.getByRole('checkbox',{name:'邮件来源：DSP·a·avg₂'})).toBeChecked();
+},15_000);

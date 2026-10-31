@@ -1,3 +1,4 @@
+import { CampaignSectionControls } from '@/components/journal/CampaignSectionControls';
 import {QualityCampaignCardTitle} from '@/components/journal/QualityCampaignCardTitle';
 import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -49,7 +50,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useQualityCampaignList } from '@/hooks/useQualityCampaignList';
 import { DetectCategoryStats } from '@/components/DetectCategoryStats';
-import { CAMPAIGN_SECTIONS, campaignSection } from '@/lib/campaignSections';
+import { campaignSection } from '@/lib/campaignSections';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
 import { chartBoxHeightToFitViewport } from '@/lib/chartViewportFit';
@@ -128,7 +129,7 @@ import {
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
-import { orderedCampaignExportTargets, retainCampaignSelection, toggleCampaignSelection, type CampaignExportTarget } from '@/lib/campaignBatchSelection';
+import { orderedCampaignExportTargets, toggleCampaignSelection, type CampaignExportTarget } from '@/lib/campaignBatchSelection';
 import {
   appendSortLevel,
   campaignLeverage,
@@ -2398,11 +2399,6 @@ export default function JournalCampaignsPage() {
   // 探测信号类别：统计表看全部类别，卡片列表按选中的类别再筛
   const rows = useMemo(() => !categoryFilter ? baseRows : baseRows.filter(row => (row.campaign.comparison?.category ?? '未分类') === categoryFilter), [baseRows, categoryFilter]);
   const comparisonCategories = useMemo(() => [...new Set(baseRows.map(row => row.campaign.comparison?.category ?? '未分类'))].sort(), [baseRows]);
-  const comparisonReturns = useMemo(() => {
-    const closed = rows.filter(row => isResolvedCampaign(row.campaign)), values = closed.map(row => row.campaign.final_realized_pnl!);
-    return { closed: closed.length, total: rows.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
-      mean: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, worst: values.length ? Math.min(...values) : null };
-  }, [rows]);
   const comparisonPlans = useMemo(() => [...new Map(sourceRows.filter(row => row.campaign.comparison).map(row => [row.campaign.comparison!.sellKey, row.campaign.comparison!.sellLabel])).entries()], [sourceRows]);
   const comparisonDetectors = useMemo(() => [...new Map(sourceRows.flatMap(row => row.campaign.comparison?.detectors.map(d => [d.id, d.label] as const) ?? [])).entries()], [sourceRows]);
   const changeComparisonFilter = (key: string, value: string) => { const params = new URLSearchParams(location.search); params.set(key, value); nav({ pathname: location.pathname, search: params.toString() }); };
@@ -2457,13 +2453,28 @@ export default function JournalCampaignsPage() {
   const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
   const [expandedCampaignIds, setExpandedCampaignIds] = useState<Set<string>>(() => new Set());
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedCampaignIds, setSelectedCampaignIds] = useState<ReadonlySet<string>>(() => new Set());
+  // 每个账号、板块和回收站独立选择。未手动选择时始终全选，异步加载的新行也自动纳入。
+  const selectionScope = JSON.stringify([userId, section, binView]);
+  const [campaignSelections, setCampaignSelections] = useState<ReadonlyMap<string, ReadonlySet<string>>>(() => new Map());
+  const selectedCampaignIds = useMemo<ReadonlySet<string>>(() => campaignSelections.get(selectionScope)
+    ?? new Set(sourceRows.map(row => row.campaign.id)), [campaignSelections, selectionScope, sourceRows]);
+  const selectionContext = useRef({ scope: selectionScope, ids: selectedCampaignIds });
+  selectionContext.current = { scope: selectionScope, ids: selectedCampaignIds };
+  const setSelectedCampaignIds = useCallback((next: ReadonlySet<string> | ((current: ReadonlySet<string>) => ReadonlySet<string>)) => {
+    const { scope, ids } = selectionContext.current;
+    setCampaignSelections(previous => new Map(previous).set(scope,
+      typeof next === 'function' ? next(previous.get(scope) ?? ids) : next));
+  }, []);
+  const restoreAllCampaigns = useCallback(() => {
+    const { scope } = selectionContext.current;
+    setCampaignSelections(previous => { const next = new Map(previous); next.delete(scope); return next; });
+  }, []);
   const [selectFirstCount, setSelectFirstCount] = useState('10');
   const [exportTargets, setExportTargets] = useState<CampaignExportTarget[] | null>(null);
   const toggleExportSelection = useCallback((id: string) => setSelectedCampaignIds(current => toggleCampaignSelection(current, id)), []);
   useEffect(() => {
-    setSelectionMode(false); setSelectedCampaignIds(new Set()); setExportTargets(null);
-  }, [userId]);
+    setSelectionMode(false); setExportTargets(null); setActionsOpen(false); setSummaryExportPending(false);
+  }, [userId, section, binView]);
   const batchToggleRef = useRef<HTMLButtonElement | null>(null);
   const selectionBarRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -2656,7 +2667,7 @@ export default function JournalCampaignsPage() {
   }, [campaignRowsComplete, location.key, userId]);
 
   /**
-   * 所选操作时间段内的战役。统计、卡片、散点图全部读它，**只有**批量操作读原始 rows——
+   * 所选操作时间段内的战役。卡片、散点图读它，统计再取其中已选样本，**只有**批量操作读原始 rows——
    * 一次「结束全部进行中战役」若被日期筛选悄悄漏掉几场，那是会写进库的错。
    *
    * 全选时返回同一个数组引用，不产生新对象：默认路径下所有下游 memo 一次都不会白算。
@@ -2683,9 +2694,19 @@ export default function JournalCampaignsPage() {
   const staticDrawdownByCampaign = pricePaths.staticDrawdowns;
   const unrealizedMetricLoading = pricePaths.loading;
   const unrealizedMetricProgress = pricePaths;
-  useEffect(() => {
-    if (campaignRowsComplete) setSelectedCampaignIds(current => retainCampaignSelection(current, new Set(scopedRows.map(row => row.campaign.id))));
-  }, [scopedRows, campaignRowsComplete]);
+  // 统计与导出取当前板块 × 筛选 × 时间段 × 已选样本。卡片和散点保留全范围，取消勾选后仍可重新选择。
+  const statisticsRows = useMemo(() => {
+    const selected = scopedRows.filter(row => selectedCampaignIds.has(row.campaign.id));
+    return selected.length === scopedRows.length ? scopedRows : selected;
+  }, [scopedRows, selectedCampaignIds]);
+  const monitoringCategoryRows = useMemo(() => baseRows.filter(row => selectedCampaignIds.has(row.campaign.id)
+    && (isAllRange(operationRange) || isWithinOperationRange(campaignOperationTime(row.legs, row.tradeRecords), operationRange))),
+  [baseRows, selectedCampaignIds, operationRange]);
+  const comparisonReturns = useMemo(() => {
+    const closed = statisticsRows.filter(row => isResolvedCampaign(row.campaign)), values = closed.map(row => row.campaign.final_realized_pnl!);
+    return { closed: closed.length, total: statisticsRows.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
+      mean: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, worst: values.length ? Math.min(...values) : null };
+  }, [statisticsRows]);
   /** 因为没有客观操作时间而被时间段挡在外面的场数——不声不响地少几场是不能接受的。 */
   const undatedExcludedCount = useMemo(() => {
     if (isAllRange(operationRange)) return 0;
@@ -2767,11 +2788,11 @@ export default function JournalCampaignsPage() {
   }, [userId, beginMutation, setRows, setBusyCampaignId]);
 
   const performanceSamples = useMemo(
-    () => scopedRows.map(row => ({
+    () => statisticsRows.map(row => ({
       campaign: row.campaign,
       payoffRatio: rowPayoffRatio(row),
     })),
-    [scopedRows],
+    [statisticsRows],
   );
   const performance = useMemo(
     () => summarizeCampaignPerformance(performanceSamples),
@@ -2786,20 +2807,20 @@ export default function JournalCampaignsPage() {
    * 对这批已结束的战役逐场连乘、取几何平均——平均每场把本金乘上几倍。取样与「有效战役」同一批（已结束）。
    */
   const geometricSummary = useMemo(() => {
-    const resolved = scopedRows.filter(row => isResolvedCampaign(row.campaign));
+    const resolved = statisticsRows.filter(row => isResolvedCampaign(row.campaign));
     return {
       one: summarizeGeometricExpectancy(resolved.map(row => rowGeometricGrowth(row))),
       two: summarizeGeometricExpectancy(resolved.map(row => rowGeometricGrowthMagic(row))),
       three: summarizeGeometricExpectancy(resolved.map(row => rowGeometricGrowthTheoretical(row))),
     };
-  }, [scopedRows]);
+  }, [statisticsRows]);
   /**
    * 【用户要求】统计概览的 L_磨损（与盈亏比同一单位 R）：当前列表里已结束战役的 L_磨损加总（总磨损），括号里两部分相加——
    * 中途对冲的损益 + 最终对冲磨损；概览突出每场均值，浮层保留累计值与样本数。
    */
   const executionWearSummary = useMemo(() => {
     let count = 0, total = 0, hedge = 0, other = 0;
-    for (const row of scopedRows) {
+    for (const row of statisticsRows) {
       if (!isResolvedCampaign(row.campaign)) continue;
       const wear = rowExecutionWear(row);
       if (wear.total == null) continue;
@@ -2809,15 +2830,15 @@ export default function JournalCampaignsPage() {
       other += wear.other ?? 0;
     }
     return count === 0 ? null : { count, total, hedge, other, mean: total / count };
-  }, [scopedRows]);
+  }, [statisticsRows]);
   // 镜像止盈达成统计（战役维度，全表口径）。
   const mirrorTp = useMemo(
-    () => summarizeMirrorTp(scopedRows.map(row => ({
+    () => summarizeMirrorTp(statisticsRows.map(row => ({
       achieved: campaignAchievedMirrorTp(row.legs, row.tradeRecords),
       payoffRatio: rowPayoffRatio(row),
       realizedPnl: row.campaign.final_realized_pnl ?? null,
     }))),
-    [scopedRows],
+    [statisticsRows],
   );
   const mirrorTpRateLabel = mirrorTp.achievedRatePct == null ? '—' : `${mirrorTp.achievedRatePct.toFixed(0)}%`;
   const mirrorTpNotAchievedRateLabel = mirrorTp.notAchievedRatePct == null ? '—' : `${mirrorTp.notAchievedRatePct.toFixed(0)}%`;
@@ -3028,19 +3049,20 @@ export default function JournalCampaignsPage() {
     const columns = sortCrossTabs.reduce((max, crossTab) => Math.max(max, crossTab?.columns.length ?? 0), 0);
     return Math.min(52, Math.max(30, 20 + columns * 3.4));
   }, [sortCrossTabs]);
+  const selectedDisplayRows = useMemo(() => displayRows.filter(row => selectedCampaignIds.has(row.campaign.id)), [displayRows, selectedCampaignIds]);
   /**
-   * 【用户要求】导出 Excel 汇总表（统计分析、找相关性）：当前时间段（含回收站视图）里的全部战役，
+   * 【用户要求】导出 Excel 汇总表（统计分析、找相关性）：当前时间段（含回收站视图）里的已选战役，
    * 按当前排序的次序排，被当前排序口径筛掉的战役接在最后（样本不缺）；列见 campaignSummaryColumns。
    */
   const handleExportSummaryXlsx = useCallback((availableOnly = false) => {
     try {
-      if (!availableOnly && displayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) {
+      if (!availableOnly && selectedDisplayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) {
         setSummaryExportPending(true);
         return;
       }
       setSummaryExportPending(false);
       const listed = new Set(sortedRows.map(row => row.campaign.id));
-      const rowsForExport = [...sortedRows, ...displayRows.filter(row => !listed.has(row.campaign.id))];
+      const rowsForExport = [...sortedRows, ...selectedDisplayRows.filter(row => !listed.has(row.campaign.id))].filter(row => selectedCampaignIds.has(row.campaign.id));
       const blob = buildXlsx(buildCampaignSummarySheets(rowsForExport, {
         mirrorTpLabel: row => cardMetricReadings(row as CampaignDisplayData).mirrorTp,
         asymmetricSummary: asymmetricRisk,
@@ -3058,13 +3080,13 @@ export default function JournalCampaignsPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '导出失败');
     }
-  }, [asymmetricRisk, displayRows, dynamicDrawdownByCampaign, peakPriceChangeByCampaign, sortedRows]);
+  }, [asymmetricRisk, selectedCampaignIds, selectedDisplayRows, dynamicDrawdownByCampaign, peakPriceChangeByCampaign, sortedRows]);
   useEffect(() => {
     if (!summaryExportPending) return;
-    if (displayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) return;
+    if (selectedDisplayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) return;
     setSummaryExportPending(false);
     handleExportSummaryXlsx();
-  }, [displayRows, dynamicDrawdownByCampaign, handleExportSummaryXlsx, peakPriceChangeByCampaign, summaryExportPending]);
+  }, [selectedDisplayRows, dynamicDrawdownByCampaign, handleExportSummaryXlsx, peakPriceChangeByCampaign, summaryExportPending]);
   // 行情分批算出涨幅未兑现时，别的散点序列不跟着重建：它们只依赖战役行本身。
   const baseMetricSeriesByKey = useMemo(() => {
     const samples = scopedRows.map(source => {
@@ -4327,7 +4349,7 @@ export default function JournalCampaignsPage() {
       ref={selectionBarRef}
       data-testid="campaign-batch-selection-bar"
       role="toolbar"
-      aria-label="批量下载：选择战役"
+      aria-label="批量选择战役"
       data-placement={detached ? 'flow' : 'sticky'}
       className={`flex min-h-10 flex-wrap items-center gap-x-1 gap-y-1 bg-[#F0B90B]/[0.045] py-1.5 text-[10px] text-muted-foreground dark:bg-[#F0B90B]/[0.035] ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET} ${
         detached
@@ -4342,6 +4364,8 @@ export default function JournalCampaignsPage() {
         <span data-testid="campaign-batch-selected-count" className="font-mono text-[11px] tabular-nums text-foreground">{selectedExportTargets.length}</span>
         场
       </span>
+      <span className="mr-1 text-muted-foreground/60">统计与导出同步</span>
+      <button type="button" className={BATCH_BAR_BUTTON} onClick={restoreAllCampaigns} title="恢复当前板块全选；统计仍遵循当前筛选与时间段">恢复全选</button>
       <span aria-hidden="true" className="mx-1 hidden h-4 w-px shrink-0 bg-border sm:block" />
       <button
         type="button"
@@ -4396,7 +4420,7 @@ export default function JournalCampaignsPage() {
       </form>
       <button
         type="button"
-        disabled={selectedCampaignIds.size === 0}
+        disabled={statisticsRows.length === 0}
         className={`${BATCH_BAR_BUTTON} border-transparent`}
         onClick={() => setSelectedCampaignIds(new Set())}
       >
@@ -4448,7 +4472,7 @@ export default function JournalCampaignsPage() {
                 </span>
               )}
             </h1>
-            <p className="text-[11px] text-muted-foreground">{binView ? '只显示回收站里的战役' : comparing ? '鱼质量 · 100 USDT · 1 倍模拟多单' : '复盘的高层单位'}</p>
+            <p className="text-[11px] text-muted-foreground">{binView ? '只显示回收站里的战役' : comparing ? '持仓监测结果' : '复盘的高层单位'}</p>
           </div>
           <div className="flex-1" />
           {/* 回收站视图下没有「归类历史交易」（新战役不会归类进回收站），换成「返回战役」 */}
@@ -4497,11 +4521,19 @@ export default function JournalCampaignsPage() {
 
       {/* 选择模式下底部留出浮条（bottom-4 + h-10）的高度：翻到列表最末，最后一张卡片的指标行不被浮条压住 */}
       <main className={`mx-auto max-w-[1600px] px-4 py-5 sm:px-6${selectionMode ? ' pb-20' : ''}`}>
-        <div className="mb-4 flex flex-wrap items-center gap-3" data-testid="campaign-section-controls">
-          <nav className="inline-flex rounded-md bg-muted/60 p-0.5 text-[12px]" aria-label="交易战役板块">{CAMPAIGN_SECTIONS.map(item => <button type="button" key={item.id} aria-current={section === item.id ? 'page' : undefined} className={`rounded px-3 py-1.5 ${section === item.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => { const params = new URLSearchParams(location.search); params.delete('sell'); params.delete('detector'); params.delete('category'); params.delete('bin'); if (item.id === 'personal') params.delete('section'); else params.set('section', item.id); nav({ pathname: '/journal/campaigns', search: params.toString() }); }}>{item.label}</button>)}</nav>
-          {comparing && <><select aria-label="战役卖出方案" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={sellFilter} onChange={e => changeComparisonFilter('sell', e.target.value)}><option value="">全部卖出方案</option>{comparisonPlans.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{comparing && <select aria-label="战役探测算法" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={detectorFilter} onChange={e => changeComparisonFilter('detector', e.target.value)}><option value="">全部探测算法</option>{comparisonDetectors.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>}{comparing && <select aria-label="战役探测信号类别" className="h-8 max-w-80 rounded border border-border bg-card px-2 text-[11px]" value={categoryFilter} onChange={e => changeComparisonFilter('category', e.target.value)}><option value="">全部探测信号类别</option>{comparisonCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>}<span className="inline-flex items-center gap-0.5"><Popover><PopoverTrigger asChild><button type="button" aria-label="卖出与探测说明" title="卖出与探测说明" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/35 transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Info aria-hidden strokeWidth={1.4} className="h-3.5 w-3.5"/></button></PopoverTrigger><PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} aria-label="卖出与探测说明" className={`w-80 ${POPOVER_VIEWPORT_MAX_W} max-h-[min(80vh,var(--radix-popover-content-available-height))] space-y-2 overflow-y-auto overscroll-contain p-3 text-[11px] leading-relaxed`}><p className="font-medium">卖出与探测（控制变量法）</p><p className="text-muted-foreground">每个信号、每套卖出规则独立比较；选同一卖出方案比较探测算法（控制变量），同一交易命中多个探测算法时只计一次。结果保存在当前账号的本机副本中。</p>{comparisonList.buyFilterLabel && <p className="text-muted-foreground" data-testid="comparison-buy-filter">买入过滤：{comparisonList.buyFilterLabel}</p>}<p className="text-muted-foreground">未设价格保护线或未加仓的风险指标，沿用原战役口径显示「—」。</p></PopoverContent></Popover><button type="button" aria-label={comparisonStatsOpen ? '收起比较统计' : '展开比较统计'} title={comparisonStatsOpen ? '收起比较统计' : '比较统计'} aria-expanded={comparisonStatsOpen} aria-controls="comparison-campaign-overview" onClick={() => setComparisonStatsOpen(v => !v)} className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${comparisonStatsOpen ? 'bg-muted text-foreground/70' : 'text-muted-foreground/35 hover:text-muted-foreground'}`}><Table2 aria-hidden strokeWidth={1.4} className="h-3.5 w-3.5"/></button></span></>}
-        </div>
-        {comparing && comparisonStatsOpen && <section id="comparison-campaign-overview" aria-label="比较统计"><div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span><span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span></div><DetectCategoryStats rows={baseRows} active={categoryFilter} onSelect={c => changeComparisonFilter('category', c)}/></section>}
+        <CampaignSectionControls
+          section={section}
+          onSectionChange={next => {
+            const params = new URLSearchParams(location.search);
+            params.delete('sell'); params.delete('detector'); params.delete('category'); params.delete('bin');
+            if (next === 'personal') params.delete('section'); else params.set('section', next);
+            nav({ pathname: '/journal/campaigns', search: params.toString() });
+          }}
+          monitoring={{ sellFilter, detectorFilter, categoryFilter, plans: comparisonPlans, detectors: comparisonDetectors,
+            categories: comparisonCategories, buyFilterLabel: comparisonList.buyFilterLabel, statsOpen: comparisonStatsOpen,
+            onFilterChange: changeComparisonFilter, onStatsToggle: () => setComparisonStatsOpen(value => !value) }}
+        />
+        {comparing && comparisonStatsOpen && <section id="comparison-campaign-overview" aria-label="比较统计"><div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span><span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span></div><DetectCategoryStats rows={monitoringCategoryRows} active={categoryFilter} onSelect={c => changeComparisonFilter('category', c)}/></section>}
         {!comparing && activeCount > 0 && (
           <button
             type="button"
@@ -5141,9 +5173,9 @@ export default function JournalCampaignsPage() {
                     ref={batchToggleRef}
                     type="button"
                     data-testid="campaign-actions-toggle"
-                    aria-label="导出与下载"
+                    aria-label="选择与导出"
                     data-selection-mode={selectionMode}
-                    title={summaryExportPending ? '导出正在准备数据，点击查看操作' : '更多操作：导出与批量下载'}
+                    title={summaryExportPending ? '导出正在准备数据，点击查看操作' : '更多操作：批量选择、统计样本与导出'}
                     className={`ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-transparent transition-colors hover:border-border/60 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${selectionMode || summaryExportPending ? 'text-[#B7860B]' : 'text-muted-foreground/40 hover:text-foreground/80 focus-visible:text-foreground/80'}`}
                   >
                     <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
@@ -5153,11 +5185,11 @@ export default function JournalCampaignsPage() {
               <button
                 type="button"
                 data-testid="campaign-export-xlsx"
-                disabled={!campaignRowsComplete || displayRows.length === 0 || summaryExportPending}
+                disabled={!campaignRowsComplete || selectedDisplayRows.length === 0 || summaryExportPending}
                 title={summaryExportPending
                   ? '正在补齐峰值涨幅、涨幅未兑现与动态最大回撤，完成后自动下载'
                   : campaignRowsComplete
-                  ? `导出 Excel 汇总表：当前时间段里的全部 ${displayRows.length} 场战役，一场一行，排序方式与盈亏概览的全部参数（数值不带单位，便于做相关性分析）`
+                  ? `导出 Excel 汇总表：当前时间段里的已选 ${selectedDisplayRows.length} 场战役，一场一行，排序方式与盈亏概览的全部参数（数值不带单位，便于做相关性分析）`
                   : '战役还在加载，全部读完后才能导出'}
                 onClick={() => { setActionsOpen(false); void handleExportSummaryXlsx(); }}
                 className="flex h-8 w-full items-center gap-2 rounded px-2 text-xs text-foreground/80 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40"
@@ -5167,7 +5199,7 @@ export default function JournalCampaignsPage() {
               </button>
               {summaryExportPending ? (
                 <>
-                  <button type="button" data-testid="campaign-export-xlsx-available" className="flex h-8 w-full items-center rounded px-2 text-xs text-muted-foreground hover:bg-muted/70" title="立即导出全部战役，尚未加载的新指标留空" onClick={() => { setActionsOpen(false); void handleExportSummaryXlsx(true); }}>导出现有数据</button>
+                  <button type="button" data-testid="campaign-export-xlsx-available" className="flex h-8 w-full items-center rounded px-2 text-xs text-muted-foreground hover:bg-muted/70" title="立即导出已选战役，尚未加载的新指标留空" onClick={() => { setActionsOpen(false); void handleExportSummaryXlsx(true); }}>导出现有数据</button>
                   <button type="button" className="flex h-8 w-full items-center rounded px-2 text-xs text-muted-foreground hover:bg-muted/70" onClick={() => { setActionsOpen(false); setSummaryExportPending(false); }}>取消等待</button>
                 </>
               ) : null}
@@ -5177,8 +5209,8 @@ export default function JournalCampaignsPage() {
                 data-testid="campaign-batch-select-toggle"
                 disabled={!campaignRowsComplete}
                 title={campaignRowsComplete
-                  ? selectionMode ? '退出选择模式（Esc）；已选的战役保留' : '勾选卡片或点击散点，把多场战役一次下载成 PNG 压缩包'
-                  : '战役还在加载，全部读完后才能批量下载'}
+                  ? selectionMode ? '退出选择模式（Esc）；已选的战役保留' : '默认全选；勾选卡片或点击散点调整统计样本，也可批量导出 PNG'
+                  : '战役还在加载，全部读完后才能调整选择'}
                 onClick={() => { setActionsOpen(false); setSelectionMode(current => !current); }}
                 className={`flex h-8 w-full items-center gap-2 rounded border border-transparent px-2 text-xs transition-[color,background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 ${
                   selectionMode
@@ -5186,8 +5218,8 @@ export default function JournalCampaignsPage() {
                     : 'text-foreground/80 hover:bg-muted/70'
                 }`}
               >
-                {selectionMode ? <X aria-hidden="true" className="h-3 w-3" /> : <Download aria-hidden="true" className="h-3 w-3" />}
-                {selectionMode ? '退出选择' : '批量下载'}
+                {selectionMode ? <X aria-hidden="true" className="h-3 w-3" /> : <ListChecks aria-hidden="true" className="h-3 w-3" />}
+                {selectionMode ? '退出选择' : '批量选择'}
               </button>
                 </PopoverContent>
               </Popover>
@@ -5202,6 +5234,12 @@ export default function JournalCampaignsPage() {
                 <Activity aria-hidden="true" className="h-3.5 w-3.5" />
                 统计概览
               </span>
+            {statisticsRows.length !== scopedRows.length && <button type="button"
+              data-testid="campaign-statistics-selection" disabled={!campaignRowsComplete} onClick={() => setSelectionMode(true)}
+              title="当前概览只统计已选样本；点击调整选择，可恢复全选"
+              className="mr-1 inline-flex h-7 items-center gap-1 rounded px-1.5 text-[10px] text-[#8F6B00] hover:bg-[#F0B90B]/[0.08] dark:text-[#E8B21C]">
+              已选 {statisticsRows.length} / {scopedRows.length}
+            </button>}
             {/* 【用户要求】指标字母表：每个指标一个字母，与 Deep dig 分组标准处同一张表 */}
             <Popover>
               <PopoverTrigger asChild>
@@ -5347,7 +5385,7 @@ export default function JournalCampaignsPage() {
                   <div>主力开仓名义仓位按初始 M 与镜像 Legs 去重求和，采用镜像 TP 落袋前的真实全暴露；后续加仓、重入和反向对冲不计入。</div>
                   <div>若 A、B 都存在，取离主力开仓价更远的一档；只有一档时使用该档。</div>
                   <div>历史战役优先使用保存的原始委托价，不使用触发成交后的滑点价；旧记录缺失委托快照时，才回退到 Legs、成交记录或事件数据。</div>
-                  <div>此处有效战役为：已结束，并具备有效已实现净盈亏与初始最大预期亏损的战役。</div>
+                  <div>统计范围：当前板块、筛选和操作时间段内的已选战役。此处有效战役为：已结束，并具备有效已实现净盈亏与初始最大预期亏损的战役。</div>
                   <div>没有加仓的战役同样纳入；缺少有效初始风险或结算净盈亏时不纳入。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-1 border-t border-border/60 pt-2 text-center">
@@ -5377,7 +5415,7 @@ export default function JournalCampaignsPage() {
               <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-96 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">镜像止盈达成统计</div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>「实现镜像止盈」= 该战役的镜像止盈委托真正成交（触发后进入「已锁定不亏」）。口径为当前列表全部 {mirrorTp.total} 场战役。</div>
+                  <div>「实现镜像止盈」= 该战役的镜像止盈委托真正成交（触发后进入「已锁定不亏」）。口径为当前范围内已选 {mirrorTp.total} 场战役。</div>
                   <div>达成率 = 实现 ÷ 全部；达成盈利率 = 实现且盈利 ÷ 实现。</div>
                   <div>分档优先按盈亏比 判定：<span className="text-foreground">|b| ≤ 0.1 记为中性档</span>。这是既有的展示阈值，不代表手续费范围或实际净盈亏持平；b 无法计算时，该分档沿用已实现盈亏的正负，仍不据此补算 b。</div>
                 </div>
@@ -5433,7 +5471,7 @@ export default function JournalCampaignsPage() {
                     <div>进行中、盈亏平衡、已删除及分母无效的战役不计入胜负。</div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">当前列表没有可计算胜率的已结束战役。</div>
+                  <div className="mt-2 text-muted-foreground">当前已选样本没有可计算胜率的已结束战役。</div>
                 )}
               </PopoverContent>
             </Popover>
@@ -5506,7 +5544,7 @@ export default function JournalCampaignsPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">当前列表没有带有效盈亏比的战役。</div>
+                  <div className="mt-2 text-muted-foreground">当前已选样本没有带有效盈亏比的战役。</div>
                 )}
               </PopoverContent>
             </Popover>
@@ -5539,11 +5577,11 @@ export default function JournalCampaignsPage() {
                     <div className="font-mono">
                       累计磨损：{formatExecutionWearR(executionWearSummary.hedge)} {executionWearSummary.other < 0 ? '−' : '+'} {Math.abs(executionWearSummary.other).toFixed(2)} = {formatExecutionWearR(executionWearSummary.total)}（{executionWearSummary.count} 场）
                     </div>
-                    <div>概览读数为每场战役 L_磨损的算术均值；无磨损的有效战役按 0 参与，缺失值不参与。累计磨损由两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。取样：当前列表里已结束、算得出 L_磨损的战役。</div>
+                    <div>概览读数为每场战役 L_磨损的算术均值；无磨损的有效战役按 0 参与，缺失值不参与。累计磨损由两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。取样：当前已选样本里已结束、算得出 L_磨损的战役。</div>
                     <div>{EXECUTION_WEAR_RULE}</div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">当前列表需要至少一场已结束、算得出 L_磨损的主多战役。</div>
+                  <div className="mt-2 text-muted-foreground">当前已选样本需要至少一场已结束、算得出 L_磨损的主多战役。</div>
                 )}
               </PopoverContent>
             </Popover>
@@ -5585,7 +5623,7 @@ export default function JournalCampaignsPage() {
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground">
-                    当前列表需要至少一场有有效盈亏比的战役，并且要有可计算的胜率，才能得到期望值。
+                    当前已选样本需要至少一场有有效盈亏比的战役，并且要有可计算的胜率，才能得到期望值。
                   </div>
                 )}
               </PopoverContent>
@@ -5639,11 +5677,11 @@ export default function JournalCampaignsPage() {
                       );
                     })}
                     <div className="border-t border-border/60 pt-2">
-                      取样：当前列表里已结束的战役，各方法只数算得出的那几场。不用胜率、也不用平均值，样本是什么就走什么；这是固定 {fixedFractionLabel} 下注的模型值，不是账户实际净收益。
+                      取样：当前已选样本里已结束的战役，各方法只数算得出的那几场。不用胜率、也不用平均值，样本是什么就走什么；这是固定 {fixedFractionLabel} 下注的模型值，不是账户实际净收益。
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">当前列表需要至少一场已结束、算得出单场几何期望的战役。</div>
+                  <div className="mt-2 text-muted-foreground">当前已选样本需要至少一场已结束、算得出单场几何期望的战役。</div>
                 )}
               </PopoverContent>
             </Popover>
