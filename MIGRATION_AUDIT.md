@@ -527,3 +527,39 @@ Vercel 控制台已确认用户的免费 Hobby 账号存在；新 Supabase 仍�
 supabase/config.toml 的 project_id、生成的 supabase/functions/mcp/index.ts OAuth issuer 和 .lovable/mcp/manifest.json issuer 均改为已验证的新 project-ref elynuzxnvjzypjgzkemc，避免命令误部署原项目或 OAuth 发现仍指向旧库。源码中的 issuer 仍由构建环境派生；五个工具和鉴权/RLS 语义保留。回退这些迁移分支配置到原提交可还原旧目标，切勿在回退后误执行新目标恢复或部署命令。
 
 本迁移工作树原 node_modules 独立副本完整移至忽略提交的 generated/pre-frozen-node-modules-20261031，根目录改为引用同一工作树内已冻结安装的依赖目录。未删除原副本、未链接主目录依赖、未升级包。
+
+### 13.5 新库恢复与逐字段验收
+
+用户已提供现有新库密码，代理仅写入本机忽略提交的私有配置。连接使用后台实际提供的 Supabase Root 2021 CA，sslmode=verify-full；没有关闭证书或主机名校验。目标初始 public 表、Auth 用户及 Storage 均为空，PostgreSQL 17.11。
+
+选择性恢复已在一个事务中提交：按新库实际外键顺序复制 Auth 数据，导入 public 结构和数据后创建约束/RLS/触发器，保留自定义 auth.users 注册触发器和原迁移记录。事务内 45 项表行数、16 个 RLS 表、59 条策略及账号关联检查通过。未写原库、未调用清理函数、未运行历史迁移、未清空或重置。
+
+原库独有 sandbox_exec 为 Lovable 平台的 LOGIN/BYPASSRLS 角色，应用代码没有引用。新库没有创建该角色，也没有带入其 16 项 SELECT/INSERT 授权；其余 schema/default ACL 与原库一致。原 archive 和权限目录均保留，未删除源角色。另发现新平台默认 ACL 会额外授予新建 handle_new_user 函数 anon/authenticated 执行权，已仅在新库收回这两项，使该函数与原库一样仅为 postgres/service_role 执行范围。
+
+已只读导出新库 45 张恢复表，用列名对齐后的 COPY 字段逐行 SHA-256 比对：全部相同，包括账号密码哈希和大块研究数据。源与目标 7 函数（含 ACL）、14 public 触发器、126 约束、59 RLS 和应用表授权均比对一致。连接器将策略 roles 返回 PostgreSQL 数组文本，新库 JSON 返回数组，已规范格式再比较。
+
+逐表 56 项行数有 55 项一致。唯一差异 realtime.schema_migrations 旧 68 / 新 91，源版本全部包含在新库，新增 23 条由新平台管理。已按用户要求暂停并报告；用户明确批准保留新系统记录、只读核对通过后继续。未覆盖、删除或降级系统记录。完整对比表见 MIGRATION_ROW_COMPARISON.md。该验收对应备份快照，最终切换仍需增量核对。
+
+Vercel 免费项目已创建；正式追踪分支已保存为 migrate-off-lovable，公开前端变量只含 3 个 VITE_SUPABASE 项，数据库密码没有配置进 Vercel。分配地址 https://veil-of-ignorance-ten.vercel.app/ 尚未完成首次正式部署。原站仍为回退入口；新库后续产生写入时不能直接以旧快照覆盖回滚。
+
+### 13.6 函数、OAuth 与 Storage 工具
+
+两个 Edge Functions 已在新项目部署。fish-market-proxy 三交易所 GET 均 200，非法路由/外部地址 400、POST 405、OPTIONS 204。mcp 发现文档 200，匿名与无效令牌均 401；五个只读工具的源码和逐用户 RLS 保留。
+
+用户对 MCP 网关设置作了单独确认后，关闭 legacy JWT 网关（verify_jwt=false），由源码 SDK 验证 OAuth 签名、issuer/audience/client_id。新 OAuth Server、动态客户端注册已保存，授权路径 /.lovable/oauth/consent；Site URL 和两个重定向均为新正式站。发现文档指向新项目且 HTTP 200。还原方法是在另行审阅后调整平台 OAuth/网关及对应 config.toml；不能为排错绕过 SDK 身份检查。
+
+新增 scripts/restore_storage.mjs，默认本地校验，--apply 才使用指定新项目服务端凭证。只向已匹配权限的 bucket 新增缺失文件，拒绝覆盖或删除，逐个验 SHA-256。原业务 Storage 文件为 0；导出后新增的私有数据库备份文件已按原 bucket/路径保存本机，并在 manifest 标为迁移产物、默认不上传到业务站。该工具不改变应用；保留不用即可。
+
+用户已暂停旧站写入。最后一轮 user_sim_state 增量核对为 241 对 241 行，键集合一致，43 条约 31 MB 待增量合并。其他 15 张 public 表此前逐表摘要一致。完成前不把新站视为最终切换。
+
+### 13.7 最终增量与正式构建准备
+
+用户已明确回复“旧站已暂停”，后续只读元数据确认 241 行及各内容/时间戳保持稳定。43 条增量共 31,187,784 字节逐条保存、MD5/长度校验，未增加或移除任何键。原下载和快照继续保留，增量副本亦为私有且不提交。
+
+在新项目单事务中，仅更新这 43 条现有 user_sim_state：写前验证旧值及时间戳未变化，事务内临时抑制触发器以保留原时间戳，写后恢复会话默认并校验所有新值/时间戳，任何失败回滚。于 2026-10-31 08:01:38 UTC 成功提交。未写原库，未删除记录，未改变持久化 schema 或触发器定义。还原不能丢弃新站后续写入；原备份与增量均保留，先审阅按键合并方案。
+
+最后新旧 16 张 public 表行数与内容摘要全部一致，包括 campaign 467、journal 152、rules 61、profiles 8、状态 241。摘要比较按表名、行数和哈希，不把连接器 JSON 属性顺序视为数据差异。新库 8 个存档头、44 分片完整解压，rev、JSON 与 UTF-16 序列化长度全部通过。此前 45 张恢复表的全字段 SHA-256 及账号密码哈希验证继续保留。
+
+最终本地生产构建再次通过（32.89 秒），依赖声明和锁版本没有后续变更；既有大分块警告保留、不重构。Storage 恢复 4 项本地保护检查通过：有效文件、坏哈希、路径穿越、错误目标；没有网络或云写入。备份工具补记 Content-Type/缓存头，恢复工具沿用，避免文件展示属性改变。
+
+下一步由迁移分支的新提交触发 Vercel Production，尚需记录实际 Ready、commit、正式网址及登录/业务验收。此处不提前宣称上线完成。

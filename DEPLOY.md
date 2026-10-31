@@ -18,7 +18,8 @@
 5. 只向用户指定的新项目恢复。恢复前确认目标地址、public 业务表/业务用户为空，计划无清理/覆盖删除；使用 --no-owner --no-acl，单事务、遇错停止。不要使用 --clean、db reset、强推或为了重试删除数据。
 6. 托管 auth/storage schema 已由 Supabase 初始化，须审阅 archive 目录并选择兼容对象/数据，不能整库盲目覆盖系统对象。Auth 用户 UUID 和密码哈希必须保留；新项目会话需重新登录。平台迁移历史、JWT 签名、Secrets、SMTP 和 OAuth 配置单独核对。
 7. scripts/migration_inventory.sql 在只读连接中导出逐表行数；scripts/compare_migration_inventory.py 比对两份清单，有差异返回非零。行数只是第一层，还需核对关键字段/关联、RLS/权限、分片数据和文件哈希。
-8. 旧站导出后仍可能写入。正式切换要有最终停止写入的边界，或经过确认的增量合并；不能把早期快照当最终全量一致。此任务不自动关闭旧服务。
+8. `node scripts/restore_storage.mjs --manifest /绝对路径/storage/manifest.json` 默认只校验；加 `--apply` 才按原 bucket/路径上传，需本机 TARGET_SUPABASE_URL / TARGET_SUPABASE_SERVICE_ROLE_KEY。脚本拒绝修改 bucket 权限、覆盖不同文件或删除文件，上传后逐个验 SHA-256。数据库导出产物 bucket 默认排除，业务 Storage 文件本次为 0。上传语义参考 [Supabase 官方文档](https://supabase.com/docs/reference/javascript/storage-from-upload)。
+9. 旧站导出后仍可能写入。正式切换要有最终停止写入的边界，或经过确认的增量合并；不能把早期快照当最终全量一致。此任务不自动关闭旧服务。
 
 ## 3. 环境变量
 
@@ -67,6 +68,7 @@ supabase functions deploy mcp
 
 - supabase/config.toml 和 CLI 链接必须指向新项目；执行前再次核对，不能部署到原 Cloud。
 - fish-market-proxy 保留现有只读公开行情白名单及 verify_jwt=false；验证三交易所合法 GET、非法路径 400、写请求 405，不传递用户凭证给交易所。
+- mcp 的 `verify_jwt=false` 已按用户单独批准与原站保持一致：只取消 legacy JWT 网关层，SDK 内仍验证 OAuth 签名、issuer/audience/client_id；匿名和无效令牌测试均返回 401。OAuth Server、动态注册已启用，授权路径仍为 `/.lovable/oauth/consent`。
 - mcp 保留 5 个只读工具、OAuth issuer/audience/client claim 和逐用户 RLS。核对公开发现、OAuth 和工具调用；遇认证问题先查配置，不得直接放宽权限让测试通过。
 - 原生本地构建会生成 supabase/functions/mcp/index.ts，发布前必须使用新项目的构建变量生成并审阅；.lovable/mcp/manifest.json 也应与新 issuer 对齐。
 - 单独查看 Supabase 函数部署记录、日志和真实响应。Vercel 前端 Ready 不代表函数已经部署。

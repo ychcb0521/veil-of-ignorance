@@ -26,7 +26,7 @@ for(const bucket of buckets){
         const path=safePath(bucket.id,name);await mkdir(dirname(path),{recursive:true,mode:0o700});
         const response=await request('/storage/v1/object/'+encodeURIComponent(bucket.id)+'/'+name.split('/').map(encodeURIComponent).join('/'));const data=Buffer.from(await response.arrayBuffer());
         const handle=await open(path,'wx',0o600);try{await handle.writeFile(data);}finally{await handle.close();}
-        manifest.files.push({bucket:bucket.id,path:name,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex')});}
+        manifest.files.push({bucket:bucket.id,path:name,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),content_type:response.headers.get('content-type'),cache_control:response.headers.get('cache-control')});}
       if(page.length<1000)break;offset+=page.length;
     }
   }
