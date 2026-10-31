@@ -74,7 +74,7 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'> & { id?: string; formula?: string },
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'> & { id?: string; formula?: string },
   names: readonly string[],
   offsets: readonly number[],
 ): Float32Array | Float64Array | null {

@@ -22,3 +22,9 @@ it('rejects invalid native parameters before saving and exposes their units and 
  fireEvent.change(screen.getByLabelText('SBS5M 参数配置'),{target:{value:'{"box_formation_bars":0}'}});fireEvent.click(screen.getByRole('button',{name:/^保存$/}));expect(saved).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('参数越界');
  fireEvent.change(screen.getByLabelText('SBS5M 参数配置'),{target:{value:'{"active_box_max_age":5}'}});fireEvent.click(screen.getByRole('button',{name:/^保存$/}));expect(saved.mock.lastCall[0].SBS5M_config).toEqual({active_box_max_age:5});
 });
+
+it('lets price research select one symbol before running while preserving the saved definition',()=>{
+ const saved=vi.fn(),samples={campaigns:[{symbol:'BTCUSDT'},{symbol:'ETHUSDT'}],signals:[]} as unknown as Parameters<typeof DefinitionPanel>[0]['samples'];
+ render(<DefinitionPanel def={SBS5M_DEF} editing={false} onEditingChange={()=>{}} onSave={saved} samples={samples}/>);
+ fireEvent.change(screen.getByLabelText('SBS5M 研究标的'),{target:{value:'ETHUSDT'}});expect(saved.mock.lastCall[0]).toMatchObject({id:'sbs_5m',SBS5M_research_symbol:'ETHUSDT'});
+});

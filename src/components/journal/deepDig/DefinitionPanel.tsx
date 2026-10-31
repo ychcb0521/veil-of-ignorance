@@ -54,6 +54,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
           <Pencil className="h-3 w-3" />编辑定义
         </button>
       </div>
+      {def.chartTemplate==='sbs_5m'&&<SbsResearchSymbol def={def} samples={samples} onChange={v=>onSave({...def,SBS5M_research_symbol:v})}/>}
       {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.definition}</p>}
       <div className="grid max-w-[720px] grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
@@ -100,6 +101,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           <input value={draft.short} onChange={e => set('short', e.target.value)} className={cn(INPUT, 'w-[72px]')} placeholder="简称" aria-label="简称" title="简称：表头与规律里用" />
         </div>
       </div>
+      {draft.chartTemplate==='sbs_5m'&&<SbsResearchSymbol def={draft} samples={samples} onChange={v=>set('SBS5M_research_symbol',v)}/>}
       {tried && !draft.name.trim() && <div className={cn('pl-[64px]', RED)}>名称不能为空</div>}
       <div className="flex gap-2">
         <span className={label}>定义</span>
@@ -555,4 +557,10 @@ function GroupWarnings({ preview, testId }: { preview: ReturnType<typeof preview
     {!preview.control && '对照组没有可用样本，请检查条件范围。'}
     {'范围示例：1 < b and b < 10 表示 1 到 10 之间；1 > b 表示 b 小于 1。'}
   </div>;
+}
+
+function SbsResearchSymbol({def,samples,onChange}:{def:DeepDigFeatureDef;samples:DefinitionPanelProps['samples'];onChange:(symbol:string|undefined)=>void}){
+ const rows=samples[def.source??'campaigns'],symbols=[...new Set((rows??[]).filter(r=>!r.excluded&&!r.unsupportedReason).map(r=>r.symbol))].sort();
+ if(def.SBS5M_research_symbol&&!symbols.includes(def.SBS5M_research_symbol))symbols.unshift(def.SBS5M_research_symbol);
+ return <div className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-muted-foreground">研究标的</span><select aria-label="SBS5M 研究标的" className={INPUT} value={def.SBS5M_research_symbol??''} onChange={e=>onChange(e.target.value||undefined)}><option value="">{(def.SBS5M_dimension??'price')==='price'?'请选择单一品种':'全部品种'}</option>{symbols.map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select><span className="text-[10.5px] text-muted-foreground">{rows===null?'正在读取样本…':(def.SBS5M_dimension??'price')==='price'?'支撑价格按单一品种研究':'标准化维度可跨品种研究'}</span></div>;
 }

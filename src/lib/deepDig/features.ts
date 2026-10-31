@@ -31,6 +31,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program, type FormulaEvaluationCache } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
+  SBS5M_research_symbol?:string;
   SBS5M_config?: Partial<SbsConfig>;
   SBS5M_dimension?: 'price' | 'quality' | 'distance' | 'step';
   PRS6H_config?:PrsConfig;
@@ -147,7 +148,7 @@ export const featureTemplateId = (d: { id?: string; chartTemplate?: string }) =>
 export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => ['cba-2', 'ctba', 'sbs_5m'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint; SBS5M_symbol?:string; SBS5M_tick_size?:number|null; SBS5M_data_source?:string; SBS5M_data_version?:string; SBS5M_initialization_id?:string; SBS5M_checkpoint?:SbsCheckpoint };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint; SBS5M_symbol?:string; SBS5M_tick_size?:number|null; SBS5M_data_source?:string; SBS5M_data_version?:string; SBS5M_initialization_id?:string; SBS5M_checkpoint?:SbsCheckpoint };
 export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
 export const featureUsesMbi2 = (d:{id?:string;formula?:string}) => d.id==='mbi2'||/\bmbiz2\s*\(/.test((d.formula??'').replace(/(#|\/\/).*$/gm,''));
 export const featureUsesMbiFamily = (d:{id?:string;formula?:string}) => featureUsesMbi(d)||featureUsesMbi2(d);
@@ -1111,7 +1112,7 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
   const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
@@ -1124,7 +1125,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
   if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
   if(featureUsesMbi2(d)){const p=featureParams(d);key.push(`MBI2_T_HOURS=${p.MBI2_T_HOURS}`,`MBI2_Z0=${p.MBI2_Z0}`,`MBI2_BAND=${p.MBI2_BAND}`,`MBI2_CONFIRM=${p.MBI2_CONFIRM}`);}
-  if(featureTemplateId(d)===SBS5M_ID)key.push(SBS5M_VERSION,sbsConfigHash(d.SBS5M_config),'SBS5M_config='+JSON.stringify(sbsParameters(d.SBS5M_config)),'SBS5M_dimension='+(d.SBS5M_dimension??'price'),'init:window-start-v1');
+  if(featureTemplateId(d)===SBS5M_ID)key.push(SBS5M_VERSION,sbsConfigHash(d.SBS5M_config),'SBS5M_config='+JSON.stringify(sbsParameters(d.SBS5M_config)),'SBS5M_dimension='+(d.SBS5M_dimension??'price'),'init:window-start-v1','SBS5M_research_symbol='+(d.SBS5M_research_symbol??''));
   if(featureTemplateId(d)==='prs6h')key.push(PRS6H_VERSION,'PRS6H_config='+JSON.stringify(d.PRS6H_config??{}),d.PRS6H_config?.volumeMode??'quote');
   if(featureTemplateId(d)==='ati6h')key.push(ATI6H_VERSION,'ATI6H_parameters='+JSON.stringify(d.ATI6H_parameters??{}),'ATI6H_volume_mode='+(d.ATI6H_volume_mode??'taker'),'ATI6H_dependency='+JSON.stringify(ati6hDependencyOf(d)));
   if (d.chartTemplate) key.push("chart=" + d.chartTemplate);
@@ -1408,7 +1409,7 @@ export interface DefinitionCheck {
 }
 
 /** 保存前检查：公式、分组标准能否解析，显示倍率是不是正数。 */
-export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'interval' | 'chartTemplate' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'> & {id?:string}): DefinitionCheck {
+export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'interval' | 'chartTemplate' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'> & {id?:string}): DefinitionCheck {
   const msg = (f: () => unknown) => {
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };

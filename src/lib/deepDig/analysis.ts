@@ -45,7 +45,7 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol'>;
 
 export interface DeepDigRow {
   SBS5M_details?:SbsRow;
@@ -133,7 +133,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
+  return { ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -236,7 +236,9 @@ export async function collectDeepDigRun(
   const source = def.source ?? 'campaigns';
   const groups = compileGroups(def.positive, def.control, source);
   // 【用户要求】样本可以是交易战役，也可以是信号库的信号（时间点 = 那条信号的时间）
-  const samples = source === 'signals' ? (options.signals ?? []).map(signalSample) : report.rows.map(campaignSample);
+  const allSamples = source === 'signals' ? (options.signals ?? []).map(signalSample) : report.rows.map(campaignSample);
+  const samples=featureTemplateId(def)===SBS5M_ID&&def.SBS5M_research_symbol?allSamples.filter(s=>s.symbol===def.SBS5M_research_symbol):allSamples;
+  if(featureTemplateId(def)===SBS5M_ID&&def.SBS5M_research_symbol&&!samples.length)throw Error('所选研究标的没有可用样本，请重新选择。');
   if(featureTemplateId(def)===SBS5M_ID&&((def.SBS5M_dimension??'price')==='price'||[...compiled.program.inputs].some(n=>/^SBS5M_raw_(value|support_price|box_top|invalidation_price|candidate_support_price|candidate_box_top|candidate_invalidation_price)$/.test(n)))&&new Set(samples.filter(s=>!s.unsupportedReason&&!s.excluded).map(s=>s.symbol)).size>1)throw Error('SBS-5M 支撑价有价格单位，不能混合统计不同品种。请选择单一品种，或选择 SBS·证据 / 距离 / 台阶。');
   const collected = await collectRunEvents(report, {
     ...options,
