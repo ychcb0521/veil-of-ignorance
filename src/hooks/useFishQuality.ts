@@ -12,6 +12,8 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualitySellCombo, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, ensureQualitySellCombo, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
+import { loadQualityMonitorArchive, stripStoredQualityArchiveBodies } from '@/lib/fish/qualityArchiveStore';
+import type { QualityMonitorArchive } from '@/lib/fish/qualityMonitorLibrary';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
 import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/qualityVeto';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
@@ -238,7 +240,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if(archived!==current.current){
         if(!await saveQualityStudy(savedOwner,archived))throw Error('监测结果归档失败，未开始重算；原结果仍保留，请重试');
         if(account.current!==savedOwner||generation.current!==epoch)return;
-        change(s=>({...s,monitorLibrary:archived.monitorLibrary}));
+        // 正文已存进归档库，内存里只留目录（不然每 15 秒的保存都要多复制 40 MB）。
+        change(s=>({...s,monitorLibrary:stripStoredQualityArchiveBodies(savedOwner,archived).monitorLibrary}));
       }
       if(account.current===savedOwner&&generation.current===epoch){setArchiving(false);void start(false,'restart');}
     }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'归档失败，未开始重算');}
@@ -264,10 +267,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       const next=copyMonitorStudy(current.current,snapshot,Date.now(),sourceRoundId);
       if(!await saveQualityStudy(savedOwner,next))throw Error('副本未保存，当前总表仍保留，请重试');
       if(account.current!==savedOwner||generation.current!==epoch)return false;
-      change(s=>({...preserveQualityMonitorLibrary(s,next),filterLibrary:s.filterLibrary}));return true;
+      change(s=>stripStoredQualityArchiveBodies(savedOwner,{...preserveQualityMonitorLibrary(s,next),filterLibrary:s.filterLibrary}));return true;
     }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'复制归档失败');return false;}
     finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
   },[cancel,cancelFilter,entry.cancel,postExit.cancel,change]);
+  /** 打开一份完整归档：正文按需从本机归档库（或账号云端）读出。 */
+  const loadMonitorArchive=useCallback((archive:QualityMonitorArchive)=>loadQualityMonitorArchive(account.current,archive,current.current),[]);
   // 挖到的鱼自动导入和勾选；只有已经主动开始监测，才把新鱼接到监测任务中。
   useEffect(() => {
     if (!ready || !readyRef.current) return;
@@ -344,7 +349,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'restoreMonitorStudy'|'setMonitorEntryHidden'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'restoreMonitorStudy'|'setMonitorEntryHidden'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'>>;

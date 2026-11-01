@@ -79,7 +79,11 @@ export interface QualityMonitorLibrary {
   version: 1; importedLegacy: boolean; settings: QualityMonitorSetting[]; records: QualityMonitorRecord[]; rounds: QualityMonitorRound[];
 }
 export type QualityMonitorArchiveStudy=Omit<FishQualityStudy,'monitorLibrary'|'filterLibrary'|'campaignRepair'>;
-export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart'|'copy'|'copy-source';sourceRoundId?:string;study:QualityMonitorArchiveStudy}
+/**
+ * study = 归档时整张总表的独立快照（约 40 MB）。保存时正文移到单独的归档库（qualityArchiveStore），
+ * 总表里只留没有 study 的目录项；需要看时用 loadQualityMonitorArchive 按需读出。
+ */
+export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart'|'copy'|'copy-source';sourceRoundId?:string;study?:QualityMonitorArchiveStudy}
 /** Save the whole current table, including rows outside today's filters/selection. */
 export function archiveQualityMonitorStudy(study:FishQualityStudy,at=Date.now(),reason:QualityMonitorArchive['reason']='restart'):FishQualityStudy{
   if(reason==='restart'&&!study.results.length&&!study.campaignRuns?.length)return study;

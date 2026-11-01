@@ -1,6 +1,6 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import {Blob as NativeBlob} from 'node:buffer';
-import {prepareAccountBlobEncoding,serializeAccountBlob,deserializeAccountBlob,fingerprintAccountBlob} from '../accountBlobCodec';
+import {prepareAccountBlobEncoding,serializeAccountBlob,serializeAccountBlobChunks,deserializeAccountBlob,fingerprintAccountBlob} from '../accountBlobCodec';
 vi.mock('@/integrations/supabase/client',()=>({supabase:{from:vi.fn(),auth:{getSession:vi.fn()}}}));
 import {prepareAccountBlob,decodeAccountBlob} from '../accountBlobSync';
 beforeEach(()=>vi.stubGlobal('Blob',NativeBlob));
@@ -22,4 +22,17 @@ it('uses a dedicated encoder worker and releases it after receiving a valid resu
 it('rejects failed worker encoding and terminates the worker instead of uploading a partial blob',async()=>{
  const stopped=vi.fn();class Encoder{onmessage:any;onerror:any;terminate(){stopped();}postMessage(){queueMicrotask(()=>this.onmessage({data:{ok:false}}));}}
  vi.stubGlobal('Worker',Encoder);await expect(prepareAccountBlob({x:1})).rejects.toThrow('编码失败');expect(stopped).toHaveBeenCalledTimes(1);
+});
+
+it('streams exactly the same JSON as one-shot serialization, including tagged, skipped and nested values',()=>{
+ const value:any={a:[1,undefined,()=>1,NaN,{b:new Map([['k',{c:[new Set(['x']),new Date(5)]}]])}],d:undefined,e:{f:{g:{h:{i:{j:[-Infinity,'档案']}}}}},'quote"key':null,empty:{},list:[],nested:[[[[[1]]]]],obj:Object.assign(Object.create(null),{z:1})};
+ expect([...serializeAccountBlobChunks(value)].join('')).toBe(serializeAccountBlob(value));
+ expect([...serializeAccountBlobChunks([value,value])].join('')).toBe(serializeAccountBlob([value,value]));
+ expect([...serializeAccountBlobChunks(new Map([['m',1]]))].join('')).toBe(serializeAccountBlob(new Map([['m',1]])));
+});
+it('decodes very large archives on the page thread instead of the memory-capped worker',async()=>{
+ const created=vi.fn();vi.stubGlobal('Worker',class{constructor(){created();}});
+ const value={rows:Array.from({length:30000},(_,i)=>({i,note:'x'.repeat(60)}))},text=serializeAccountBlob(value);
+ expect(text.length).toBeGreaterThan(2_000_000);
+ expect(await decodeAccountBlob('json',text)).toEqual(value);expect(created).not.toHaveBeenCalled();
 });

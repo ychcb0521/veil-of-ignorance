@@ -30,6 +30,7 @@ import NotFound from "./pages/NotFound.tsx";
 const OAuthConsent = lazy(() => import('./pages/OAuthConsent.tsx'));
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
 import { AuthBootRecoveryScreen } from "./components/AuthBootRecoveryScreen.tsx";
+import { NewVersionNotice } from "./components/NewVersionNotice.tsx";
 
 const queryClient = new QueryClient();
 
@@ -132,6 +133,7 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <NewVersionNotice />
         <AuthProvider>
           <BrowserRouter>
             <AppRoutes />

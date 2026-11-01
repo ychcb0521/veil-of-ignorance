@@ -144,8 +144,14 @@ export async function prepareAccountBlob(value:unknown,knownHash?:string):Promis
   const json=serializeAccountBlob(value),hash=fingerprintAccountBlob(json);
   return {hash,...(hash===knownHash?{}:{encoded:await encodeAccountBlob(value,json)})};
 }
+/**
+ * Worker 只解中等大小的存档。Chrome 给 Worker 的 JS 内存上限约 470 MB，超了整个标签页一起崩溃（错误代码 5）；
+ * 一份 2M 字的 gzip 存档解开后 JSON 可达几千万字（中文按 2 字节计），再加解析结果和回传拷贝就会越线。
+ * 更大的在主线程解（上限约 4 GB）：卡一两秒，但不会崩。
+ */
+const DECODE_IN_WORKER_MAX_CHARS = 2_000_000;
 export async function decodeAccountBlob(enc: Head['enc'], text: string): Promise<unknown> {
-  if (typeof Worker === 'function' && text.length > 1_000_000) {
+  if (typeof Worker === 'function' && text.length > 1_000_000 && text.length <= DECODE_IN_WORKER_MAX_CHARS) {
     return new Promise((resolve,reject) => {
       const worker = new Worker(new URL('./workers/accountBlobDecoder.worker.ts', import.meta.url), {type:'module'});
       const finish = () => { clearTimeout(timer); worker.terminate(); };
@@ -386,6 +392,15 @@ export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: st
     await writeMeta(adapter.name, owner, { ...(meta ?? { syncedAt: 0 }), savedAt });
     return true;
   }).then(signed => { if (signed) schedulePush(adapter, owner); }, () => schedulePush(adapter, owner));
+}
+
+/** 对账，并等它排下的上传也做完。供要逐个处理的大存档用：一次只编码一份，内存峰值不叠加。 */
+export async function syncAccountBlobFully(adapter: AccountBlobAdapter<any>, owner: string): Promise<AccountBlobSyncStatus> {
+  const status = await syncAccountBlobOnLoad(adapter, owner, 600_000);
+  const id = idOf(adapter.name, owner), pending = pushTimers.get(id);
+  if (pending) { clearTimeout(pending.timer); pushTimers.delete(id); await runPush(pending.adapter, pending.owner, pending.settled); }
+  await queues.get(id);
+  return status;
 }
 
 /** 测试用：立刻执行所有排队的上传并等它们完成。 */

@@ -3,7 +3,7 @@ import {FishContinuousTable} from './FishContinuousTable';
 import {FishLibraryDataActions} from './FishLibraryTransferContext';
 import {monitorRoundStudy} from '@/lib/fish/qualityMonitorArchive';
 import { focusSignalKey, qualityFocusSignals, focusSignalLabel } from '@/lib/fish/qualityFocusSignals';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowRightCircle, ArrowUpRight, ChevronDown, Database, Download, MoreHorizontal, Copy, Trash2, Undo2 } from 'lucide-react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { monitorCampaignUnavailable, qualityMonitorCampaignPath } from '@/lib/fish/qualityMonitorCampaign';
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { FishQualityInfo } from '@/components/FishQualityModule';
 import { qualityDefinition, type FishQualityStudy } from '@/lib/fish/quality';
 import { qualityRuleLabel, qualityVersionedRuleLabel } from '@/lib/fish/qualityCampaignArchive';
-import { qualityMonitorRoundRecordIds, type QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
+import { qualityMonitorRoundRecordIds, type QualityMonitorArchive, type QualityMonitorArchiveStudy, type QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
 import { downloadMonitorRecords, monitorAlgorithmKey, monitorBuying as buying, monitorColumns, monitorDetectorKey, monitorDetectorLabel, monitorDetectors, monitorResult, monitorStatus, monitorValue, sortMonitorRecords, type MonitorSortKey } from '@/lib/fish/qualityMonitorTable';
 import { activeHoldingVetoes } from '@/lib/fish/qualityVeto';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -27,7 +27,7 @@ function Formula({ label, snapshot }: { label: string; snapshot: QualityMonitorS
   let formula: string; try { formula = qualityDefinition(snapshot).formula; } catch { formula = snapshot.definitionKey; }
   return <div><p className="font-medium">{label} · {snapshot.interval}</p><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-[10px]">{formula}</pre></div>;
 }
-export function FishMonitorLibrary({ study, onJump, canJump, onOpenCampaign,renderStudy,onCopyStudy,onSetHidden }: { study: FishQualityStudy; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onOpenCampaign?:()=>void;renderStudy?:(snapshot:FishQualityStudy)=>ReactNode;onCopyStudy?:(snapshot:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean> }) {
+export function FishMonitorLibrary({ study, onJump, canJump, onOpenCampaign,renderStudy,onCopyStudy,onSetHidden,loadArchive }: { study: FishQualityStudy; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onOpenCampaign?:()=>void;renderStudy?:(snapshot:FishQualityStudy)=>ReactNode;onCopyStudy?:(snapshot:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;loadArchive?:(archive:QualityMonitorArchive)=>Promise<QualityMonitorArchiveStudy> }) {
   const router=useInRouterContext();
   const [showDeleted,setShowDeleted]=useState(false),[deleteId,setDeleteId]=useState(''),[directoryBusy,setDirectoryBusy]=useState(''),[directoryError,setDirectoryError]=useState('');
   const hideEntry=async(id:string,hidden:boolean)=>{if(!onSetHidden||directoryBusy)return;setDirectoryBusy(id);setDirectoryError('');try{if(!await onSetHidden(id,hidden))throw Error('目录修改未保存，请重试');setDeleteId('');if(hidden)setArchiveId('');}catch(e){setDirectoryError((e as Error).message);}finally{setDirectoryBusy('');}};
@@ -47,7 +47,18 @@ export function FishMonitorLibrary({ study, onJump, canJump, onOpenCampaign,rend
   const visibleDirectory=directory.filter(item=>showDeleted||!library?.directoryEdits?.[item.id]?.hidden);
   const deletedCount=directory.filter(item=>library?.directoryEdits?.[item.id]?.hidden).length;
   const selectedArchive=directory.find(a=>a.id===archiveId);
-  const archiveStudy=useMemo(()=>open&&zone==='directory'&&selectedArchive?(selectedArchive.archive?selectedArchive.archive.study:monitorRoundStudy(study,selectedArchive.round!)):undefined,[open,zone,selectedArchive,study]);
+  // 归档正文单独存放（几十 MB 一份），点开哪份才读哪份。
+  const [loadedArchive,setLoadedArchive]=useState<{id:string;study?:QualityMonitorArchiveStudy;error?:string}>();
+  const pendingArchive=open&&zone==='directory'&&selectedArchive?.archive&&!selectedArchive.archive.study?selectedArchive.archive:undefined;
+  useEffect(()=>{
+    if(!pendingArchive||loadedArchive?.id===pendingArchive.id&&loadedArchive.study)return;
+    if(!loadArchive){setLoadedArchive({id:pendingArchive.id,error:'这份归档的正文不在当前页面'});return;}
+    let active=true;setLoadedArchive({id:pendingArchive.id});
+    loadArchive(pendingArchive).then(body=>{if(active)setLoadedArchive({id:pendingArchive.id,study:body});},e=>{if(active)setLoadedArchive({id:pendingArchive.id,error:e instanceof Error?e.message:'归档读取失败，请重试'});});
+    return()=>{active=false;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[pendingArchive?.id,loadArchive]);
+  const archiveStudy=useMemo(()=>open&&zone==='directory'&&selectedArchive?(selectedArchive.archive?(selectedArchive.archive.study??(loadedArchive?.id===selectedArchive.archive.id?loadedArchive.study:undefined)) as FishQualityStudy|undefined:monitorRoundStudy(study,selectedArchive.round!)):undefined,[open,zone,selectedArchive,study,loadedArchive]);
   const roundNumbers = useMemo(() => new Map(rounds.filter(r => !r.legacy).reverse().map((r, i) => [r.id, i + 1])), [rounds]);
   const selectedRound = rounds.find(r => r.id === roundId);
   const scoped = useMemo(() => {
@@ -94,7 +105,7 @@ export function FishMonitorLibrary({ study, onJump, canJump, onOpenCampaign,rend
         {visibleDirectory.map(item=><div key={item.id} className={`group/archive rounded-lg border border-border/60 ${library?.directoryEdits?.[item.id]?.hidden?'opacity-60':''}`} data-testid="monitor-archive-item">
           <div className="flex items-center"><button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={`打开监测归档 ${item.id}`} aria-expanded={archiveId===item.id} onClick={()=>setArchiveId(archiveId===item.id?'':item.id)}><ChevronDown className={`h-3 w-3 ${archiveId===item.id?'rotate-180':''}`}/><span className="font-mono">{date(item.at)}</span><span className="font-medium">{item.archive?item.archive.reason==='copy'?'载入副本前归档':item.archive.reason==='copy-source'?'监测轮次快照':'重算前完整归档':item.round?.legacy?'历史记录':'监测轮次'}</span><span className="text-muted-foreground">{item.archive?`${item.archive.study.results.length} 项运行结果`:`${qualityMonitorRoundRecordIds(library!,item.round!).length} 条记录 · ${roundState[item.round!.state]}`}</span></button>{onSetHidden&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={`管理监测归档 ${item.id}`} disabled={!!directoryBusy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{library?.directoryEdits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hideEntry(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
           {deleteId===item.id&&<div role="alert" className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-[11px]"><span>删除这项目录？可在已删除目录中恢复。</span><button type="button" disabled={!!directoryBusy} className={`${action} text-destructive`} onClick={()=>void hideEntry(item.id,true)}>确认删除目录</button><button type="button" className={action} onClick={()=>setDeleteId('')}>取消</button></div>}
-          {archiveId===item.id&&archiveStudy&&<div className="border-t" data-testid="monitor-archive-content">{onCopyStudy&&<div className="flex items-center gap-1 px-4 pt-3"><button type="button" disabled={!!directoryBusy} onClick={()=>void copyEntry()} className={`${action} text-primary`}><Copy className="h-3 w-3"/>{directoryBusy===item.id?'正在保存副本…':'复制到持仓监测'}</button><FishQualityInfo label="复制归档说明"><p>先将当前总表完整归档，再载入独立副本。原归档保留，副本可修改条件、筛选和勾选后自行运行。</p></FishQualityInfo></div>}{!item.archive&&<p className="px-4 pt-3 text-[10px] text-muted-foreground">早期轮次仅保存记录引用，重复条件可能已更新，展示当前仍保存的版本；未保存的探测值、入场读数和反事实保持缺失。重算前完整归档则保留当时的独立快照。</p>}{renderStudy(archiveStudy)}</div>}
+          {archiveId===item.id&&!archiveStudy&&loadedArchive?.id===item.id&&<p role={loadedArchive.error?'alert':'status'} className={`border-t px-4 py-3 text-[10.5px] ${loadedArchive.error?'text-destructive':'text-muted-foreground'}`}>{loadedArchive.error??'正在读取归档…'}</p>}{archiveId===item.id&&archiveStudy&&<div className="border-t" data-testid="monitor-archive-content">{onCopyStudy&&<div className="flex items-center gap-1 px-4 pt-3"><button type="button" disabled={!!directoryBusy} onClick={()=>void copyEntry()} className={`${action} text-primary`}><Copy className="h-3 w-3"/>{directoryBusy===item.id?'正在保存副本…':'复制到持仓监测'}</button><FishQualityInfo label="复制归档说明"><p>先将当前总表完整归档，再载入独立副本。原归档保留，副本可修改条件、筛选和勾选后自行运行。</p></FishQualityInfo></div>}{!item.archive&&<p className="px-4 pt-3 text-[10px] text-muted-foreground">早期轮次仅保存记录引用，重复条件可能已更新，展示当前仍保存的版本；未保存的探测值、入场读数和反事实保持缺失。重算前完整归档则保留当时的独立快照。</p>}{renderStudy(archiveStudy)}</div>}
         </div>)}
       </div>}
       {zone!=='directory'&&<>

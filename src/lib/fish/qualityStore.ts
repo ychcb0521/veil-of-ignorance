@@ -6,6 +6,7 @@ import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
 import { preserveQualityFilterLibrary } from './qualityFilterLibrary';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies, withoutQualityArchiveBodies } from './qualityArchiveStore';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -36,6 +37,7 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
   if (pending) return pending;
   const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: stopQualityRepair(loaded.study, Date.now()) }));
   pendingReads.set(key, task);
+  void task.then(loaded => { void syncStoredQualityArchiveBodies(owner, loaded.study); }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };
   void task.then(release, release);
   return task;
@@ -43,6 +45,8 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
 /** Synchronize before a read; the campaign worker opens the durable copy itself. */
 export async function prepareQualityCampaignRead(owner?: string): Promise<{ durable: boolean; warning?: string }> {
   const syncStatus = await syncAccountBlobOnLoad(qualityAccountBlob, owner, 180_000);
+  // 持仓监测的 Worker 会整条读这份记录：先确保归档正文已经移出去（旧记录可达 478 MB，超过 Worker 内存上限）。
+  await ensureQualityArchivesDetached(owner);
   const warning = syncStatus === 'timed_out' ? '账号研究恢复超时，原数据仍保留，请重试。'
     : syncStatus === 'failed' ? '账号研究恢复失败，原数据仍保留，请重试。' : undefined;
   await writes.get(keyOf(owner));
@@ -94,17 +98,66 @@ export function mergeRemoteQualityStudy(local: FishQualityStudy | undefined, rem
 }
 // Serialize writes per account. A slow earlier write must never overwrite a later result/rule edit.
 const writes = new Map<string, Promise<boolean>>();
+
+/**
+ * 一次性迁移：旧记录里内嵌的归档正文移到归档库（见 qualityArchiveStore 的事故说明）。
+ * 排在该账号的写队列里；每页每账号查一次，查过且干净就在本机记一笔，以后打开不再为此整条读。
+ */
+const DETACHED_MARK = (owner?: string) => `veil-fish-quality-archives-detached-v1:${owner ?? 'anonymous'}`;
+const detachChecks = new Map<string, Promise<void>>();
+export function ensureQualityArchivesDetached(owner?: string, force = false): Promise<void> {
+  const key = keyOf(owner), existing = detachChecks.get(key);
+  if (existing && !force) return existing;
+  if (force) { try { localStorage.removeItem(DETACHED_MARK(owner)); } catch { /* 下面照样迁移 */ } }
+  else { try { if (localStorage.getItem(DETACHED_MARK(owner)) === '1') { const done = Promise.resolve(); detachChecks.set(key, done); return done; } } catch { /* 查一次 */ } }
+  const read = async (db: IDBDatabase) => new Promise<unknown>((resolve, reject) => {
+    const req = db.transaction(STORE).objectStore(STORE).get(key);
+    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+  });
+  const run = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
+    let clean = false;
+    try {
+      let db = await open(), stored: unknown;
+      try { stored = await read(db); } finally { db.close(); }
+      if (!valid(stored) || !qualityStudyHasInlineArchives(stored)) clean = true;
+      else {
+        await detachQualityArchiveBodies(owner, stored);
+        stored = undefined; // 先放掉这份几百 MB 的副本，再重读一次（期间别的标签页可能写过）
+        db = await open();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), again = store.get(key);
+            again.onsuccess = () => { if (valid(again.result)) { const next = stripStoredQualityArchiveBodies(owner, again.result); clean = !qualityStudyHasInlineArchives(next); if (next !== again.result) store.put(next, key); else resolve(); } else { clean = true; resolve(); } };
+            tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+          });
+        } finally { db.close(); }
+      }
+    } catch { clean = false; }
+    if (clean) { try { localStorage.setItem(DETACHED_MARK(owner), '1'); } catch { /* 下次打开再查一次 */ } }
+    else detachChecks.delete(key);
+    return true;
+  });
+  writes.set(key, run);
+  void run.finally(() => { if (writes.get(key) === run) writes.delete(key); });
+  const done = run.then(() => undefined, () => undefined);
+  if (!force) detachChecks.set(key, done);
+  return done;
+}
 export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly?: boolean; remote?: {preferRemote:boolean} }): Promise<boolean> {
-  const key = keyOf(owner), copy = structuredClone(study);
-  const merge = (previous: unknown) => options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy);
+  const key = keyOf(owner);
+  let copy = structuredClone(study);
+  const merge = (previous: unknown) => stripStoredQualityArchiveBodies(owner, options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy));
+  let leftInline = false;
   const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
     let durablePrevious: FishQualityStudy | undefined;
+    // 新归档的正文先写进归档库，总表只存目录。
+    copy = await detachQualityArchiveBodies(owner, copy);
     try {
       const db = await open();
       try {
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), read = store.get(key);
-          read.onsuccess = () => { durablePrevious = valid(read.result) ? read.result : undefined; store.put(merge(read.result), key); };
+          read.onsuccess = () => { durablePrevious = valid(read.result) ? read.result : undefined; const next = merge(read.result); leftInline = qualityStudyHasInlineArchives(next); store.put(next, key); };
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
       } finally { db.close(); }
@@ -118,6 +171,8 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
     }
   });
   writes.set(key, task);
+  // 记录里还剩内嵌正文（旧标签页写回的、或这次没写进归档库的）：排在这次保存之后再迁一次。
+  void task.then(() => { if (leftInline) void ensureQualityArchivesDetached(owner, true); });
   void task.then(ok => { if (ok) noteAccountBlobSaved(qualityAccountBlob, owner); });
   void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner, repair: copy.campaignRepair && { id: copy.campaignRepair.id, state: copy.campaignRepair.state } } })); });
   void task.finally(() => { if (writes.get(key) === task) writes.delete(key); });
@@ -130,6 +185,7 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
   async mergeRemote(owner,value,context){if(value&&!await saveQualityStudy(owner,value,{remote:{preferRemote:context?.preferRemote??false}}))throw Error('鱼质量跨设备合并未保存');},
   async read(owner) {
     const key = keyOf(owner);
+    await ensureQualityArchivesDetached(owner);
     await writes.get(key);
     let fallback: unknown;
     try { fallback = JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { /* 只看 IndexedDB */ }
@@ -140,21 +196,23 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
           const req = db.transaction(STORE).objectStore(STORE).get(key);
           req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
         });
-        if (valid(fallback)) return preserveStudy(valid(stored) ? stored : undefined, fallback);
-        return valid(stored) ? stored : undefined;
+        // 上传的总表不带归档正文：正文各有各的云端存档（qualityArchiveBodyBlob）。
+        if (valid(fallback)) return withoutQualityArchiveBodies(preserveStudy(valid(stored) ? stored : undefined, fallback));
+        return valid(stored) ? withoutQualityArchiveBodies(stored) : undefined;
       } finally { db.close(); }
-    } catch { return valid(fallback) ? fallback : undefined; }
+    } catch { return valid(fallback) ? withoutQualityArchiveBodies(fallback) : undefined; }
   },
   write(owner, study) {
     const key = keyOf(owner);
     const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
+      const incoming = study && valid(study) ? await detachQualityArchiveBodies(owner, study) : study;
       const db = await open();
       try {
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
-          if (study && valid(study)) {
+          if (incoming && valid(incoming)) {
             const read = store.get(key);
-            read.onsuccess = () => store.put(preserveLibraries(valid(read.result) ? read.result : undefined, study), key);
+            read.onsuccess = () => store.put(stripStoredQualityArchiveBodies(owner, preserveLibraries(valid(read.result) ? read.result : undefined, incoming)), key);
           } else store.delete(key);
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
