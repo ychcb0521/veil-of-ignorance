@@ -11,6 +11,10 @@ import {definitionKey} from '../deepDig/features';
 import {buildQualityCampaignData} from '../fish/qualityCampaigns';
 import type {ResearchBar} from '../deepRsa/window';
 import type {FishReconstructionLoader} from '../fish/reconstruction';
+import {compileFishProgram} from '../fish/algorithm';
+import {makeQualityBuyFilter} from '../fish/qualityFilters';
+import {BUILTIN_FEATURES} from '../deepDig/features';
+import type {AdditionCandidate} from '../fish/qualityAdditionScan';
 const M=60000,STEP=5*M;
 const row={id:'structure',symbol:'TESTUSDT',timeMs:T+400*STEP,timeLabel:'',fallbackZone:''};
 const plain=(at:number,price=90):ResearchBar=>({openTime:at,open:price,high:price+1,low:price-1,close:price,volume:10,quoteVolume:1000,takerBuyVolume:5,takerBuyQuoteVolume:500,DBL5_tick_size:1,SBS5M_tick_size:.1,PRS6H_tick_size:.1});
@@ -122,4 +126,25 @@ describe('native box decisions for holding additions',()=>{
   const data=buildQualityCampaignData('owner',{sample:qualitySample,plan:group,result,detectors:[],observeHours:0,firstEvaluatedAt:o.entry},'sell');expect(data.campaign.comparison!.sellEvidence!.additionFills![0].structureEvidence).toEqual(result.additionFills![0].structureEvidence);
   const {evaluateCampaignAddSizing}=await import('../campaignAddSizingCheck');expect([...evaluateCampaignAddSizing(data).values()].every(v=>v.status==='ok')).toBe(true);
  });
+
+ it('checks 方向 conditions at the box event itself: unmet conditions skip the event, met ones are recorded with the fill',async()=>{
+  const price=(direction:'<'|'>',threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'add-dir-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction,threshold,constraints:[]}),scale:1,threshold,direction,metric:'结果',label:'收盘价'});
+  const o=context(sample()),structure={...rule(),buffer:.5};
+  const plain=await findCalculatorAdditions({...o,structure,maxRounds:1});expect(plain.fills).toHaveLength(1);
+  const met=await findCalculatorAdditions({...o,structure,required:[price('>',0)],maxRounds:1});
+  expect(met.fills).toHaveLength(1);expect(met.fills[0]).toMatchObject({at:plain.fills[0].at,price:plain.fills[0].price,quantity:plain.fills[0].quantity});
+  expect(met.fills[0].conditions).toHaveLength(1);expect(met.fills[0].conditions![0]).toMatchObject({label:'收盘价',direction:'>',threshold:0,at:plain.fills[0].at});
+  const unmet=await findCalculatorAdditions({...o,structure,required:[price('>',1e9)],maxRounds:1});expect(unmet.fills).toEqual([]);
+ });
+ it('adds 方向 conditions to the identity only when present, so existing box and detector plans keep their results',()=>{
+  const old={...defaultQualityAddition(),enabled:true},box={...old,source:'structure' as const,structure:rule()},filter=makeQualityBuyFilter('mbi:MBI','>',.5,true,BUILTIN_FEATURES);
+  for(const base of [old,box]){
+   const key=JSON.stringify(additionIdentity(base));
+   expect(JSON.stringify(additionIdentity({...base,prerequisites:[]}))).toBe(key);
+   expect(JSON.stringify(additionIdentity({...base,prerequisites:[filter]}))).not.toBe(key);
+   expect(JSON.stringify(additionIdentity({...base,maxRounds:2,rounds:[base,{...base,prerequisites:[filter]}]}))).not.toBe(JSON.stringify(additionIdentity({...base,maxRounds:2,rounds:[base,base]})));
+  }
+  expect(()=>validateQualityAddition({...box,prerequisites:[{...filter,threshold:NaN}]})).toThrow('方向条件');
+ });
 });
+

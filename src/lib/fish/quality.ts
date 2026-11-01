@@ -1,7 +1,7 @@
 import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
 import {orderedSellStages,qualitySellStagesIdentity,qualityStagePlan,validateQualitySellStages,qualitySellStagesLabel,type QualitySellStage,type QualitySellStageActivation} from './qualitySellStages';
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
-import { additionIdentity, qualityAdditionConditions, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import { additionIdentity, qualityAdditionConditions, qualityAdditionPrerequisites, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -550,7 +550,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           }
           if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
-        const required=condition.source==='custom'?candidates.splice(1):undefined;
+        // 「方向」条件（必要不充分）：与时机同一时刻全部满足。自选指标时机沿用「首条触发、其余同时满足」。
+        let required=condition.source==='custom'?candidates.splice(1):undefined;
+        if(condition.source!=='custom'){const timing=candidates.length;for(const f of qualityAdditionPrerequisites(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);if(candidates.length>timing)required=candidates.splice(timing);}
         return {candidates,required,structure:condition.source==='structure'?condition.structure:undefined,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr};};
         const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;

@@ -88,10 +88,10 @@ it('merges multiple entries and sources at the same signal time, displays result
  s.study.selectedRowIds=qualityDisplayRows(s.study).map(r=>r.id);
  render(<FishQuality state={s}/>);
  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号');
- expect(screen.getByText('-5.00%～+10.00%')).toBeInTheDocument();
+ const merged=screen.getByTitle(/收益率 -5\.00%～\+10\.00%/);expect(merged).toBeInTheDocument();
  expect(screen.getByTestId('quality-fish-row')).not.toHaveTextContent('信号库');
- fireEvent.click(screen.getByText('-5.00%～+10.00%'));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
- for(const label of ['+10.00%','-5.00%'])expect(screen.getByText(label)).toBeInTheDocument();
+ fireEvent.click(screen.getByTitle(/收益率 -5\.00%～\+10\.00%/));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
+ for(const label of ['+10.00%','-5.00%'])expect(screen.getAllByTitle(new RegExp('收益率 '+label.replace(/[+.]/g,m=>'\\'+m))).length).toBeGreaterThan(0);
 });
 it('keeps source filters working without source badges in detector comparison rows', () => {
   const s=state();
@@ -461,10 +461,10 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   expect(held('BBBUSDT')).toEqual(['30 分钟', '30 分钟']);
   expect(held('CCCUSDT')).toEqual(['30.0 小时', '30.0 小时']);
   expect(within(row('BBBUSDT')).queryByText('未买入')).toBeNull();
-  // 镜像与探测标签固定分列：峰值 → 卖出涨跌幅 → 半仓镜像 → 探测标签 → 持仓时间
+  // 镜像与探测标签固定分列：峰值 → 首仓涨幅 → 半仓镜像 → 探测标签 → 持仓时间
   const headers = screen.getAllByRole('columnheader').map(h => h.textContent ?? '');
   const peak = headers.findIndex(h => h.startsWith('峰值涨幅'));
-  expect(headers[peak + 1]).toMatch(/^卖出涨跌幅/);
+  expect(headers[peak + 1]).toMatch(/^首仓涨幅/);
   expect(headers[peak + 2]).toMatch(/^半仓镜像/);
   expect(headers[peak + 3]).toMatch(/^加仓次数/);
   expect(headers[peak + 4]).toMatch(/^探测标签/);
@@ -854,10 +854,10 @@ it('saves renamed algorithms and edited addition conditions together from the up
  const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
  fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'7.5'}});
  fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'2'}});
- fireEvent.click(screen.getByLabelText('卖出算法 1 启用次数切换'));fireEvent.change(screen.getByLabelText('卖出算法 1 切换 1 门槛'),{target:{value:'.5'}});fireEvent.change(screen.getByLabelText('卖出算法 1 切换 2 门槛'),{target:{value:'.8'}});
+ fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 2 次'}));fireEvent.click(screen.getByLabelText('第 2 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 2 次加仓后卖出 指标门槛'),{target:{value:'.5'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 3 次'}));fireEvent.click(screen.getByLabelText('第 3 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 3 次加仓后卖出 指标门槛'),{target:{value:'.8'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 1 次'}));
  fireEvent.click(screen.getByRole('button',{name:'添加加仓止盈约束'}));fireEvent.click(screen.getAllByLabelText(/^启用持仓否决/).at(-1)!);fireEvent.change(screen.getByLabelText(/几何仓位倍数/),{target:{value:'125'}});fireEvent.change(screen.getByLabelText(/均衡价涨幅/),{target:{value:'6'}});
  fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'改名并保留加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
- expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5,entryBufferAtr:3.25,supportOffsetAtr:2,rounds:[{entryBufferAtr:3.25,supportOffsetAtr:2},{entryBufferAtr:2,supportOffsetAtr:1.5},{entryBufferAtr:2,supportOffsetAtr:1.5}]}});expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].holdingVetoes).toEqual(expect.arrayContaining([expect.objectContaining({kind:'addition-geometric-profit',geometricMultiple:125,threshold:6,enabled:true})]));expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].sellStages).toMatchObject([{afterAdditions:6,rule:{threshold:.5}},{afterAdditions:7,rule:{threshold:.8}}]);expect(s.start).not.toHaveBeenCalled();
+ expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5,entryBufferAtr:3.25,supportOffsetAtr:2,rounds:[{entryBufferAtr:3.25,supportOffsetAtr:2},{entryBufferAtr:2,supportOffsetAtr:1.5},{entryBufferAtr:2,supportOffsetAtr:1.5}]}});expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].holdingVetoes).toEqual(expect.arrayContaining([expect.objectContaining({kind:'addition-geometric-profit',geometricMultiple:125,threshold:6,enabled:true})]));expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].sellStages).toMatchObject([{afterAdditions:2,rule:{threshold:.5}},{afterAdditions:3,rule:{threshold:.8}}]);expect(s.start).not.toHaveBeenCalled();
 });
 
 it('names the combination table and keeps bottom and horizontal scroll stable when the browser would clamp temporarily shortened rows',()=>{
@@ -896,8 +896,16 @@ it('saves independent veto count stages alongside addition drafts without starti
 
 it('copies pending combination, per-round additions, mirror and both exit stages together and keeps later edits independent',()=>{
  const s=state(),a=s.study.sellPlans![0],b=s.study.sellPlans![1];s.study.sellPlans=[{...a,label:'组合模板',rule:{metric:a.metric,direction:'<',threshold:.5},combo:{switchPct:5.1,beforeLabel:a.label,after:{label:b.label,metric:b.metric,snapshot:b.snapshot,rule:{metric:b.metric,direction:'<',threshold:.4}}}}];const before=structuredClone(s.study.sellPlans);render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
- fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'7'}});fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'8'}});fireEvent.click(screen.getByLabelText('启用一票条件次数切换'));fireEvent.click(screen.getByLabelText('卖出算法 1 启用次数切换'));fireEvent.change(screen.getByLabelText('卖出算法 1 切换 1 门槛'),{target:{value:'.4'}});fireEvent.change(screen.getByLabelText('卖出算法 1 切换 2 门槛'),{target:{value:'.7'}});fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'.25'}});
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'7'}});fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'8'}});fireEvent.click(screen.getByLabelText('启用一票条件次数切换'));fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 6 次'}));fireEvent.click(screen.getByLabelText('第 6 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 6 次加仓后卖出 指标门槛'),{target:{value:'.4'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 7 次'}));fireEvent.click(screen.getByLabelText('第 7 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 7 次加仓后卖出 指标门槛'),{target:{value:'.7'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 1 次'}));fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'.25'}});
  fireEvent.click(screen.getByLabelText('复制卖出算法 1'));expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByTestId('sell-plan-draft-count')).toHaveTextContent('2 套');const copyId=screen.getByTestId('sell-plan-draft-1').getAttribute('data-plan-id');expect(screen.getByTestId('quality-monitor-editor')).toHaveAttribute('data-plan-id',copyId);expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(8);expect(screen.getByLabelText('一票切换 1 持仓否决 1 阈值')).toHaveValue(20);expect(screen.getByLabelText('卖出算法 2 门槛')).toHaveValue(.25);
  fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'4.5'}});fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'9'}});fireEvent.change(screen.getByLabelText('一票切换 1 持仓否决 1 阈值'),{target:{value:'18'}});fireEvent.change(screen.getByLabelText('卖出算法 2 门槛'),{target:{value:'.35'}});
  fireEvent.click(within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab')[0]);expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(8);expect(screen.getByLabelText('一票切换 1 持仓否决 1 阈值')).toHaveValue(20);fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();const [original,copy]=vi.mocked(s.setSellPlans).mock.calls[0][0];expect(original).toMatchObject({id:a.id,rule:{threshold:.25},addition:{maxRounds:7,entryBufferAtr:3.25},mirrorTakeProfit:{gainPct:8},vetoStages:[{afterAdditions:6,conditions:[{threshold:20}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy).toMatchObject({id:copyId,label:'组合模板（副本）',rule:{threshold:.35},addition:{maxRounds:7,entryBufferAtr:4.5},mirrorTakeProfit:{gainPct:9},vetoStages:[{afterAdditions:6,conditions:[{threshold:18}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy.combo).toEqual(original.combo);expect(copy.sellStages).toEqual(original.sellStages);expect(s.study.sellPlans).toEqual(before);expect(s.start).not.toHaveBeenCalled();
+});
+
+it('shows the sell column as three named, aligned parts: additions, relative gain and progress',()=>{
+ const s=state();render(<FishQuality state={s}/>);
+ const parts=screen.getAllByTestId('quality-sell-parts')[0];expect([...parts.children].map(c=>c.textContent)).toEqual(['加仓次数','相对涨幅','进程']);
+ const cells=screen.getAllByTestId('quality-sell-relative-gain');expect(cells.length).toBeGreaterThan(0);
+ for(const c of cells){const button=c.parentElement!;expect([...button.children].map(x=>x.getAttribute('data-testid'))).toEqual(['quality-sell-additions','quality-sell-relative-gain','quality-sell-progress']);}
+ expect(screen.getByRole('button',{name:`按${s.study.sellPlans![0].label}相对涨幅排序`})).toBeInTheDocument();
 });

@@ -10,13 +10,15 @@ export interface QualityAdditionRule {
   rounds?:QualityAdditionRoundRule[];
   /** Custom indicators are conjunctive; condition remains the legacy first indicator. */
   conditions?: QualityBuyFilter[];
+  /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
+  prerequisites?: QualityBuyFilter[];
   minGainPct?:number;
   /** Per-round ATR distances: T >= S + entryBufferAtr * ATR; K = T - supportOffsetAtr * ATR. */
   entryBufferAtr?:number; supportOffsetAtr?:number;
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
-export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'>;
+export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'>;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
 const atrIdentity=(rule:QualityAdditionRoundRule)=>{const a=qualityAdditionAtrSettings(rule);return [a.entryBufferAtr,a.supportOffsetAtr];};
 const customAtrSettings=(rule:QualityAdditionRoundRule)=>{const a=qualityAdditionAtrSettings(rule);return a.entryBufferAtr!==2||a.supportOffsetAtr!==1.5;};
@@ -40,13 +42,23 @@ export function qualityAdditionConditions(rule?:Pick<QualityAdditionRule,'condit
   return (rule?.conditions?.length?rule.conditions:rule?.condition?[rule.condition]:[]).filter(f=>f.enabled!==false);
 }
 const conditionIdentity=(f:QualityBuyFilter)=>[f.metric,f.direction,f.threshold,f.snapshot.definitionKey,f.snapshot.interval];
+/**
+ * 加仓「方向」（代码里叫 prerequisites）：必要不充分，时机触发的那一刻须全部满足。
+ * 自选指标时机下，conditions[0] 是时机本身、其余是前提（与旧格式「同一时刻全部满足」完全相同）；
+ * 箱体与原探测时机下，前提单独存在 prerequisites（不复用 conditions：旧规则里可能残留未生效的 condition）。
+ */
+export const qualityAdditionPrerequisites=(rule?:Pick<QualityAdditionRule,'source'|'conditions'|'condition'|'prerequisites'>)=>rule?.source==='custom'?qualityAdditionConditions(rule).slice(1):(rule?.prerequisites??[]).filter(f=>f.enabled!==false);
+/** 箱体或原探测时机附加的指标前提；没有前提时不改变既有结果的身份。 */
+const prerequisiteIdentity=(rule:QualityAdditionRoundRule)=>rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?[['timing-prerequisites-v1',qualityAdditionPrerequisites(rule).map(conditionIdentity)]]:[];
+const timingIdentity=(r:QualityAdditionRoundRule)=>{const base=r.source==='structure'?r.structure&&structureAdditionIdentity(r.structure):r.source==='detector'?r.stricterPct:qualityAdditionConditions(r).map(conditionIdentity);const extra=prerequisiteIdentity(r);return extra.length?[base,...extra]:base;};
 export const defaultQualityAddition = (): QualityAdditionRule => ({ enabled: false, source: 'detector', stricterPct: 10, quantityMode: 'calculator', quantity: 1, repeat:true });
 export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule?.enabled ? [] : [rule.quantityMode==='calculator'?'holding-add-after-half-2atr-balance-v3':rule.quantityMode?'holding-add-once-after-half-quantity-v2':'holding-add-once-v1',rule.source,
   rule.source === 'structure' ? rule.structure&&structureAdditionIdentity(rule.structure) : rule.source === 'detector' ? rule.stricterPct : qualityAdditionConditions(rule)[0] && conditionIdentity(qualityAdditionConditions(rule)[0]),
   rule.quantityMode??rule.amountMode,...(rule.quantityMode==='calculator'?[rule.repeat!==false]:[]),rule.quantityMode?(rule.quantityMode==='fixed'?rule.quantity:null):(rule.amountMode==='fixed'?rule.amountUsdt:null),
   ...(rule.source==='custom'&&qualityAdditionConditions(rule).length>1?[['all-indicators-v1',...qualityAdditionConditions(rule).slice(1).map(conditionIdentity)]]:[]),
+  ...prerequisiteIdentity(rule),
   ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,'real-average']]:[]),
-  ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,r.source==='structure'?r.structure&&structureAdditionIdentity(r.structure):r.source==='detector'?r.stricterPct:qualityAdditionConditions(r).map(conditionIdentity),r.minGainPct??null])??null]]:[]),
+  ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   ...(rule.quantityMode==='calculator'&&[rule,...(rule.rounds??[])].some(customAtrSettings)?[['addition-atr-settings-v1',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
@@ -56,6 +68,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   else if (rule.amountMode === 'fixed' && (!(rule.amountUsdt! > 0) || !Number.isFinite(rule.amountUsdt))) throw new Error('加仓金额须为大于 0 的有限数字');
   if (rule.source === 'detector' && (!(rule.stricterPct > 0) || !Number.isFinite(rule.stricterPct))) throw new Error('加仓门槛提高幅度须为大于 0 的有限数字');
   if (rule.source === 'custom' && (!qualityAdditionConditions(rule).length || qualityAdditionConditions(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))) throw new Error('请选择加仓指标并填写有限数字门槛');
+  if(rule.source!=='custom'&&qualityAdditionPrerequisites(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))throw new Error('加仓方向条件的指标须填写有限数字门槛');
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
   if(rule.quantityMode==='calculator'){
     const atr=qualityAdditionAtrSettings(rule);
@@ -76,7 +89,7 @@ function additionFormulaLabel(rule:QualityAdditionRule){
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
   return rounds.some(r=>{const a=qualityAdditionAtrSettings(r);return a.entryBufferAtr!==first.entryBufferAtr||a.supportOffsetAtr!==first.supportOffsetAtr;})?'逐轮 ATR 倍数独立设置':`T≥S+${first.entryBufferAtr}ATR · K=T−${first.supportOffsetAtr}ATR`;
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.minGainPct!=null?` 且 相对当前持仓均价上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${rule.minGainPct!=null?` 且 相对当前持仓均价上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],

@@ -37,6 +37,18 @@ function constraintReader(candidate:AdditionCandidate,o:ScanOptions){
   return observation(candidate,cache.bars,cache.values,Math.round((barAt-cache.from)/plan.step),o.entry);
  };
 }
+/**
+ * 箱体时机的指标前提：事件时刻 at 各条前提须同时满足（各自只读当时最后一根已收盘 K 线）。
+ * 全部满足返回各条读数；任一不满足返回 undefined。
+ */
+export function requiredConditionsReader(required:readonly AdditionCandidate[],o:Pick<ScanOptions,'row'|'entry'|'end'|'load'|'signal'>){
+ const readers=required.map(candidate=>constraintReader(candidate,{...o,candidates:[]}));
+ return async(at:number):Promise<QualityAdditionObservation[]|undefined>=>{
+  const out:QualityAdditionObservation[]=[];
+  for(const read of readers){const confirmed=await read(at);if(!confirmed)return;out.push(confirmed);}
+  return out;
+ };
+}
 export async function findQualityAdditionTrigger(o:ScanOptions):Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>{
  let best:Omit<QualityAdditionFill,'price'|'quantity'|'notional'>|undefined;
  const required=(o.required??[]).map(candidate=>constraintReader(candidate,o));

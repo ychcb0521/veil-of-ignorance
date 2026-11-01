@@ -2,7 +2,7 @@ import {advanceChartAtr,type ChartAtrState} from '@/lib/atr';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
 import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
-import {findQualityAdditionTrigger,type AdditionCandidate} from './qualityAdditionScan';
+import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
 import {qualityAdditionAtrSettings,type QualityAdditionFill,type QualityAdditionRoundRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,type StructureAdditionRule} from './qualityAdditionStructure';
 import {ADDITION_PROFIT_KIND,activeHoldingVetoes,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
@@ -40,7 +40,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  // A realized half mirror is mandatory. Its own minute cannot establish an ordered addition.
  const halfMirror=o.mirror;if(halfMirror?.fraction!==.5)return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
- let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o);
+ let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const bars=o.prices.filter(b=>b.openTime<o.end);let size=1;while(size<bars.length)size*=2;
  const highTree=new Float64Array(size*2).fill(-Infinity);
  const lowTree=new Float64Array(size*2).fill(Infinity);bars.forEach((b,i)=>{if(!(b.open>0)||!(b.low>0)||!Number.isFinite(b.open)||!Number.isFinite(b.low)||!Number.isFinite(b.high)||b.high<Math.max(b.open,b.low))throw Error('加仓行情读数无效');lowTree[size+i]=b.low;highTree[size+i]=b.high;});for(let i=size-1;i>0;i--){lowTree[i]=Math.min(lowTree[i*2],lowTree[i*2+1]);highTree[i]=Math.max(highTree[i*2],highTree[i*2+1]);}
@@ -85,6 +85,12 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const hit=round.structure?await readStructure(round.structure,after,scanEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct}:undefined):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:scanEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
   if(!hit)return {fills,stop};
+  // 箱体时机的「方向」指标条件（必要不充分）：事件那一刻不全满足，就跳过这个事件、继续等下一个。
+  if(hit.structureEvidence&&round.required?.length){
+   let read=prerequisiteReaders.get(round.required);if(!read)prerequisiteReaders.set(round.required,read=requiredConditionsReader(round.required,o));
+   const confirmed=await read(hit.at);if(!confirmed){after=hit.at;continue;}
+   hit.conditions=confirmed;
+  }
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
   const {entryBufferAtr,supportOffsetAtr}=qualityAdditionAtrSettings(round);

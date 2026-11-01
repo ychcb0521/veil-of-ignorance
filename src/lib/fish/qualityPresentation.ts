@@ -11,6 +11,23 @@ export const qualitySalePriceChangePct=(result?:QualityResult):number|null=>{
  if(result?.status!=='closed'||!Number.isFinite(result.entryPrice)||!(result.entryPrice!>0)||!Number.isFinite(result.endPrice)||!(result.endPrice!>0))return null;
  const value=(result.endPrice!/result.entryPrice!-1)*100;return Number.isFinite(value)?value:null;
 };
+/**
+ * 相对涨幅 G（与交易战役同口径）＝ (F − Kₘ) ÷ (E − K初)，以首仓风险距离为单位，返回 ×100 的数值（2.5 倍记作 250）。
+ * F 最终卖出价；Kₘ 最后一次加仓的止损线 K；E 首次买入价；K初 ＝ E × (1 − 静态回撤阈值%)——
+ * 与鱼质量战役的初始风险相同（硬性终止里启用的静态回撤，多条取最小值）。
+ * 只算有实际加仓且已卖出的持仓（交易战役同样只算有加仓的）；缺任一项返回 null 并说明原因。
+ */
+export function qualityRelativeGain(plan:Pick<QualityGroup,'holdingVetoes'>,result?:QualityResult):{value:number|null;reason:string}{
+ if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有相对涨幅':'尚无卖出结果'};
+ const fills=qualityAdditionFills(result);if(!fills.length)return {value:null,reason:'没有实际加仓：相对涨幅只算有加仓的持仓（与交易战役一致）'};
+ const stops=(plan.holdingVetoes??[]).filter(v=>v.enabled&&v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100).map(v=>v.threshold);
+ if(!stops.length)return {value:null,reason:'缺少初始止损 K初：请在硬性终止里启用静态回撤'};
+ const E=result.entryPrice,F=result.endPrice,K=fills.at(-1)?.sizing?.support,K0=E!=null?E*(1-Math.min(...stops)/100):undefined;
+ if(![E,F,K,K0].every(v=>v!=null&&Number.isFinite(v)&&v>0)||!(E!>K0!))return {value:null,reason:'缺少买入价、卖出价或加仓止损线'};
+ const value=(F!-K!)/(E!-K0!)*100;
+ return Number.isFinite(value)?{value,reason:`G＝(F ${F} − Kₘ ${K}) ÷ (E ${E} − K初 ${+K0!.toPrecision(10)})`}:{value:null,reason:'相对涨幅超出可计算范围'};
+}
+export const qualityRelativeGainText=(value:number|null)=>value==null?'—':`${(value/100).toFixed(2)}×`;
 export interface HalfMirrorSummary { state:'disabled'|'pending'|'error'|'untriggered'|'filled'; label:string; value:number|null; text:string; detail:string }
 const pct=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;
 type MirrorResult = Pick<QualityResult,'status'|'returnPct'|'entryPrice'|'initialNotional'|'mirrorRealizedPnl'|'remainingPnl'> & {mirrorFill?:QualityMirrorFill};

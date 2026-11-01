@@ -1,13 +1,13 @@
 import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import { afterEach,expect,it } from 'vitest';
 import { useState } from 'react';
-import { additionDraft,parseAdditionDraft,FishQualityAdditionEditor } from '../FishQualityAdditionEditor';
+import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor } from '../FishQualityAdditionEditor';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 afterEach(cleanup);
-function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r)}}>验证保存</button><output/></>}
+function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 it('provides original-detector rescan and multiround calculator defaults, supports custom feature thresholds and unique equilibrium sizing',()=>{
  render(<Editor/>);expect(screen.getByLabelText('启用条件加仓')).not.toBeChecked();expect(screen.getByLabelText('加仓条件来源')).toBeDisabled();
- expect(screen.getByText(/按平衡公式自动计算/)).toBeInTheDocument();expect(screen.getByLabelText('最多加仓次数')).toHaveValue(3);
+ for(const part of ['addition-prerequisites','addition-timing','addition-sell'])expect(screen.getByTestId(part)).toBeInTheDocument();expect(screen.getAllByRole('heading',{level:5}).map(h=>h.textContent)).toEqual(['方向','位置','卖出']);expect(screen.getByLabelText('最多加仓次数')).toHaveValue(3);
  fireEvent.click(screen.getByLabelText('启用条件加仓'));expect(screen.getByLabelText('加仓门槛提高幅度')).toHaveValue(10);
  fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'custom'}});fireEvent.change(screen.getByLabelText('加仓特征值'),{target:{value:'mbi-bear'}});
  fireEvent.change(screen.getByLabelText('加仓方向'),{target:{value:'<'}});fireEvent.change(screen.getByLabelText('加仓指标门槛'),{target:{value:'-0.7'}});
@@ -27,16 +27,16 @@ it('retains a configured custom condition when the module is disabled',()=>{
 
 it('persists calculator defaults and the chosen number of rounds with no cash input',()=>{
  const d={...additionDraft(),enabled:true};expect(parseAdditionDraft(d,BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:true});expect(parseAdditionDraft({...d,maxRounds:'1'},BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:false});
- render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('首轮计算基准 Q 为镜像后的剩余币数');expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('最早从下一分钟起检查条件');
+ render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('首轮计算基准 Q 为镜像后的剩余币数');expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('最早从下一分钟起检查条件');
 });
 it('adds and removes conjunctive indicators, saves gain against current holding average and restores every constraint',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'custom'}});
  fireEvent.change(screen.getByLabelText('加仓特征值'),{target:{value:'mbi'}});fireEvent.change(screen.getByLabelText('加仓指标门槛'),{target:{value:'.8'}});
- fireEvent.click(screen.getByRole('button',{name:'＋ 添加指标条件'}));fireEvent.change(screen.getByLabelText('加仓特征值 2'),{target:{value:'mbi-bear'}});fireEvent.change(screen.getByLabelText('加仓方向 2'),{target:{value:'<'}});fireEvent.change(screen.getByLabelText('加仓指标门槛 2'),{target:{value:'-.7'}});
- fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));expect(screen.getByText('相对当前持仓均价')).toBeInTheDocument();expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(5);fireEvent.click(screen.getByRole('button',{name:'验证保存'}));
+ fireEvent.click(screen.getByRole('button',{name:'＋ 添加方向条件'}));fireEvent.change(screen.getByLabelText('加仓方向条件 1 特征值'),{target:{value:'mbi-bear'}});fireEvent.change(screen.getByLabelText('加仓方向条件 1 方向'),{target:{value:'<'}});fireEvent.change(screen.getByLabelText('加仓方向条件 1 指标门槛'),{target:{value:'-.7'}});
+ fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));expect(screen.getByText(/相对当前持仓均价/)).toBeInTheDocument();expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(5);fireEvent.click(screen.getByRole('button',{name:'验证保存'}));
  const rule=JSON.parse(document.querySelector('output')!.textContent!);expect(rule).toMatchObject({minGainPct:5,conditions:[{metric:'MBI',threshold:.8},{metric:'MBI_bear',direction:'<',threshold:-.7}]});expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
  expect(parseAdditionDraft({...additionDraft(rule),enabled:false},BUILTIN_FEATURES).conditions).toEqual(rule.conditions);
- fireEvent.click(screen.getByLabelText('删除加仓指标 2'));fireEvent.click(screen.getByRole('button',{name:'验证保存'}));expect(JSON.parse(document.querySelector('output')!.textContent!)).toMatchObject({minGainPct:5});expect(JSON.parse(document.querySelector('output')!.textContent!).conditions).toBeUndefined();
+ fireEvent.click(screen.getByLabelText('删除加仓方向条件 1'));fireEvent.click(screen.getByRole('button',{name:'验证保存'}));expect(JSON.parse(document.querySelector('output')!.textContent!)).toMatchObject({minGainPct:5});expect(JSON.parse(document.querySelector('output')!.textContent!).conditions).toBeUndefined();
  expect(()=>parseAdditionDraft({...additionDraft(rule),minGainPct:''},BUILTIN_FEATURES)).toThrow('涨幅门槛');
 });
 it('saves independent source, thresholds and gain gates for each selected addition round',()=>{
@@ -86,3 +86,25 @@ it('does not reinterpret legacy ATR saves and rejects blank box redundancy',()=>
  const saved=parseAdditionDraft({...d,enabled:true,source:'structure',structureBuffer:'0'},BUILTIN_FEATURES);expect(saved.structure?.buffer).toBe(0);
  expect(parseAdditionDraft({...additionDraft(saved),enabled:false},BUILTIN_FEATURES).structure).toEqual(saved.structure);
 });
+it('box position with 方向 conditions saves them as prerequisites of that round only, and restores them',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'2'}});
+ fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});fireEvent.click(screen.getByRole('button',{name:'＋ 添加方向条件'}));
+ fireEvent.change(screen.getByLabelText('加仓方向条件 1 特征值'),{target:{value:'mbi'}});fireEvent.change(screen.getByLabelText('加仓方向条件 1 指标门槛'),{target:{value:'.6'}});
+ fireEvent.click(screen.getByRole('button',{name:'验证保存'}));
+ const rule=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(rule.rounds[0]).toMatchObject({source:'structure',prerequisites:[{metric:'MBI',direction:'>',threshold:.6}]});expect(rule.rounds[0].conditions).toBeUndefined();expect(rule.rounds[1].prerequisites).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+});
+it('sets an independent seller for each addition round and keeps switches beyond the round limit',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'2'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));fireEvent.click(screen.getByLabelText('第 2 次加仓后改用卖出算法'));
+ fireEvent.change(screen.getByLabelText('第 2 次加仓后卖出 特征值'),{target:{value:'cda'}});fireEvent.change(screen.getByLabelText('第 2 次加仓后卖出 方向'),{target:{value:'<'}});fireEvent.change(screen.getByLabelText('第 2 次加仓后卖出 指标门槛'),{target:{value:'.5'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('第 1 次加仓后改用卖出算法')).not.toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'验证保存'}));
+ const stages=JSON.parse(document.querySelector('[data-stages]')!.textContent!),rule=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(stages).toHaveLength(1);expect(stages[0]).toMatchObject({afterAdditions:2,snapshot:{featureId:'cda'},rule:{direction:'<',threshold:.5}});
+ const restored=additionDraft(rule,stages);expect(restored.otherRounds[0].sellSwitch).toMatchObject({enabled:true,threshold:'.5'.replace('.','0.')});expect(parseAdditionSellStages(restored,BUILTIN_FEATURES)).toEqual(stages);
+ const later={...stages[0],afterAdditions:6},kept=additionDraft(rule,[...stages,later]);expect(kept.laterSellStages).toEqual([later]);expect(parseAdditionSellStages(kept,BUILTIN_FEATURES)).toEqual([...stages,later]);
+ expect(()=>parseAdditionSellStages({...restored,otherRounds:[{...restored.otherRounds[0],sellSwitch:{...restored.otherRounds[0].sellSwitch,threshold:''}}]},BUILTIN_FEATURES)).toThrow('第 2 次加仓');
+});
+
