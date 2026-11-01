@@ -27,6 +27,22 @@ export function qualityRelativeGain(plan:Pick<QualityGroup,'holdingVetoes'>,resu
  const value=(F!-K!)/(E!-K0!)*100;
  return Number.isFinite(value)?{value,reason:`G＝(F ${F} − Kₘ ${K}) ÷ (E ${E} − K初 ${+K0!.toPrecision(10)})`}:{value:null,reason:'相对涨幅超出可计算范围'};
 }
+/**
+ * 几何仓位 M（与交易战役同口径）＝ (1 − αf) × ∏(1 + αₖ)：加仓后相对首仓的仓位倍数。
+ * αf 首次加仓前已卖出的首仓比例（这里就是半仓镜像）；αₖ 第 k 次加仓币数 ÷ 加仓前持币数。
+ * 没有加仓：已卖出时 αf 计入镜像，仍持有时不计（交易战役同样只在战役结束后计入未加仓前的减仓）。
+ */
+export function qualityGeometricPosition(result?:QualityResult):number|null{
+ if(!result||(result.status!=='open'&&result.status!=='closed'))return null;
+ const E=result.entryPrice,notional=result.initialNotional;if(!(E!>0)||!(notional!>0)||!Number.isFinite(E)||!Number.isFinite(notional))return null;
+ const fills=qualityAdditionFills(result),mirror=result.mirrorFill,initial=notional!/E!;
+ const reduction=fills.length?(mirror&&mirror.at<=fills[0].at?mirror.fraction:0):result.status==='closed'&&mirror?mirror.fraction:0;
+ if(!(reduction>=0&&reduction<=1))return null;
+ let held=initial*(1-reduction),value=1-reduction;
+ for(const f of fills){const before=f.sizing?.coinsBefore??held;if(!(before>0)||!(f.quantity>=0))return null;value*=1+f.quantity/before;held=before+f.quantity;}
+ return Number.isFinite(value)?value:null;
+}
+export const qualityGeometricPositionText=(value:number|null)=>value==null?'—':`${value.toFixed(2)}x`;
 export const qualityRelativeGainText=(value:number|null)=>value==null?'—':`${(value/100).toFixed(2)}×`;
 export interface HalfMirrorSummary { state:'disabled'|'pending'|'error'|'untriggered'|'filled'; label:string; value:number|null; text:string; detail:string }
 const pct=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;

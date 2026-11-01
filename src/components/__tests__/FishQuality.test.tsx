@@ -732,7 +732,7 @@ it('places run state second and bulk-selects only pending entries under the curr
   const header = screen.getByTestId('quality-run-state-column');
   expect(header.parentElement!.children[1]).toBe(header);
   const aCell = within(screen.getAllByTestId('quality-fish-row').find(r=>r.textContent!.includes('AAAUSDT'))!).getByTestId('quality-run-state-cell');
-  expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveAttribute('aria-label','已完成'); expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent('✓'); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent('未运行');
+  expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveAttribute('aria-label','已完成'); expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent(/^1$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent(/^0$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveAttribute('aria-label','未运行');
   fireEvent.click(screen.getByRole('button',{name:'运行状态筛选与批量选取'}));
   const picker = screen.getByTestId('quality-run-state-picker');
   fireEvent.change(within(picker).getByLabelText('运行状态的工作步骤'),{target:{value:'filter'}});
@@ -902,10 +902,10 @@ it('copies pending combination, per-round additions, mirror and both exit stages
  fireEvent.click(within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab')[0]);expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(8);expect(screen.getByLabelText('一票切换 1 持仓否决 1 阈值')).toHaveValue(20);fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();const [original,copy]=vi.mocked(s.setSellPlans).mock.calls[0][0];expect(original).toMatchObject({id:a.id,rule:{threshold:.25},addition:{maxRounds:7,entryBufferAtr:3.25},mirrorTakeProfit:{gainPct:8},vetoStages:[{afterAdditions:6,conditions:[{threshold:20}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy).toMatchObject({id:copyId,label:'组合模板（副本）',rule:{threshold:.35},addition:{maxRounds:7,entryBufferAtr:4.5},mirrorTakeProfit:{gainPct:9},vetoStages:[{afterAdditions:6,conditions:[{threshold:18}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy.combo).toEqual(original.combo);expect(copy.sellStages).toEqual(original.sellStages);expect(s.study.sellPlans).toEqual(before);expect(s.start).not.toHaveBeenCalled();
 });
 
-it('shows the sell column as three named, aligned parts: additions, relative gain and progress',()=>{
+it('shows the sell column as named, aligned parts: additions, geometric position, relative gain and progress',()=>{
  const s=state();render(<FishQuality state={s}/>);
- const parts=screen.getAllByTestId('quality-sell-parts')[0];expect([...parts.children].map(c=>c.textContent)).toEqual(['加仓次数','相对涨幅','进程']);
+ const parts=screen.getAllByTestId('quality-sell-parts')[0];expect([...parts.children].map(c=>c.textContent)).toEqual(['加仓次数','几何仓位','相对涨幅','进程']);
  const cells=screen.getAllByTestId('quality-sell-relative-gain');expect(cells.length).toBeGreaterThan(0);
- for(const c of cells){const button=c.parentElement!;expect([...button.children].map(x=>x.getAttribute('data-testid'))).toEqual(['quality-sell-additions','quality-sell-relative-gain','quality-sell-progress']);}
+ for(const c of cells){const button=c.parentElement!;expect([...button.children].map(x=>x.getAttribute('data-testid'))).toEqual(['quality-sell-additions','quality-sell-geometric','quality-sell-relative-gain','quality-sell-progress']);}
  expect(screen.getByRole('button',{name:`按${s.study.sellPlans![0].label}相对涨幅排序`})).toBeInTheDocument();
 });

@@ -31,3 +31,18 @@ it('is empty, with a reason, when the campaign would have none', () => {
   expect(qualityRelativeGain(none.plan, { ...none.result, status: 'open' }).value).toBeNull();
   expect(qualityRelativeGainText(null)).toBe('—');
 });
+
+it('几何仓位 follows the campaign formula; without additions it equals the campaign value', async () => {
+  const { qualityGeometricPosition, qualityGeometricPositionText } = await import('../qualityPresentation');
+  const withAdd = trade([stop(10)]), noAdd = trade([stop(10)], false);
+  const campaignM = (t: ReturnType<typeof trade>) => computeCampaignGeometricMetrics(t.data.campaign, t.data.legs, t.data.tradeRecords).positionGeometricMultiple;
+  expect(qualityGeometricPosition(withAdd.result)).toBeCloseTo(.5 * (1 + 2 / .5));
+  // 交易战役当前对鱼质量战役算出 3：投影把各笔的「实际操作时间」都记成计算时刻，镜像卖出被排到加仓之后，没有计入 αf。
+  // 按公式定义（镜像在加仓前卖出 50%，加仓前持币 0.5）应为 2.5。
+  expect(campaignM(withAdd)).toBeCloseTo(3);
+  expect(qualityGeometricPosition(noAdd.result)).toBeCloseTo(campaignM(noAdd)!);
+  expect(qualityGeometricPosition(noAdd.result)).toBeCloseTo(.5);
+  const plain = { ...noAdd.result, mirrorFill: undefined };expect(qualityGeometricPosition(plain)).toBe(1);
+  expect(qualityGeometricPosition({ ...noAdd.result, status: 'open' })).toBe(1);
+  expect(qualityGeometricPositionText(2.5)).toBe('2.50x');expect(qualityGeometricPositionText(null)).toBe('—');
+});
