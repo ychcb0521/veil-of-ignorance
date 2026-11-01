@@ -27,7 +27,7 @@ it('retains a configured custom condition when the module is disabled',()=>{
 
 it('persists calculator defaults and the chosen number of rounds with no cash input',()=>{
  const d={...additionDraft(),enabled:true};expect(parseAdditionDraft(d,BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:true});expect(parseAdditionDraft({...d,maxRounds:'1'},BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:false});
- render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('首轮计算基准 Q 为镜像后的剩余币数');expect(screen.getByText(/首轮成本线 S/)).toHaveTextContent('最早从下一分钟起检查条件');
+ render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮为半仓镜像后的剩余币数/)).toBeInTheDocument();expect(screen.getByText('Q × (K − S) + P = 新增币数 × (T − K)')).toBeInTheDocument();expect(screen.getByText(/最早从下一分钟起检查/)).toBeInTheDocument();expect(screen.getByRole('heading',{name:'加仓量（均衡公式）'})).toBeInTheDocument();
 });
 it('adds and removes conjunctive indicators, saves gain against current holding average and restores every constraint',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'custom'}});
@@ -69,11 +69,11 @@ it('rejects missing, negative or non-finite formula distances, and a zero suppor
  expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:'.5'},BUILTIN_FEATURES)).not.toThrow();
 });
 
-// 【用户要求】2026-11-01 位置只有算法 + 一行「K ≤ C − n×ATR」：C 为箱体支撑（不用 S，免得和成本线 S 混淆），n 存为箱体冗余（单位 ATR）。
-it('offers native box timing and K ≤ C − n×ATR with an independent saved choice for each round',()=>{
+// 【用户要求】2026-11-01 位置只有算法 + 一行「K ≤ 旧C − n×ATR」：新 C 产生即加仓，K 取上一箱体的旧 C（不用 S，免得和成本线混淆），n 存为箱体冗余（单位 ATR，默认 0）。
+it('offers native box timing and K ≤ 旧C − n×ATR with an independent saved choice for each round',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});
- expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.5);expect(screen.queryByLabelText('K回撤ATR倍数')).not.toBeInTheDocument();
- expect(screen.getByTestId('addition-timing')).toHaveTextContent('K ≤ C −');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤ S');expect(screen.queryByLabelText('箱体K基准')).toBeNull();expect(screen.queryByLabelText('箱体冗余单位')).toBeNull();
+ expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(0);expect(screen.queryByLabelText('K回撤ATR倍数')).not.toBeInTheDocument();
+ expect(screen.getByTestId('addition-timing')).toHaveTextContent('K ≤ 旧C −');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤ S');expect(screen.queryByLabelText('箱体K基准')).toBeNull();expect(screen.queryByLabelText('箱体冗余单位')).toBeNull();
  fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.75'}});
  fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
  fireEvent.click(screen.getByRole('button',{name:'验证保存'}));const saved=JSON.parse(document.querySelector('output')!.textContent!);

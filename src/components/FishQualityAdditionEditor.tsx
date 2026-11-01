@@ -16,7 +16,7 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
  *   方向（必要不充分：时机那一刻须全部满足，可选指标与涨幅门槛；用户 2026-11-01 定名「方向」，代码里仍叫 prerequisites）、
  *   位置（必要充分：达到即加仓，主要用箱体 DBL / SBS；用户定名「位置」，代码里仍按 source/structure 存）、
  *   卖出（必要充分：碰到均衡线 K、可不断添加的否决条件——存为方案的 vetoStages，以及可选的「本次加仓后改用的卖出算法」）。
- * 2026-11-01 用户：位置 = 截图里的算法 + 一行「K ≤ C − n×ATR」（C 为箱体支撑，用 C 是为了不和成本线 S 混淆；K 为计算加仓量的 K）；原「入场距离 T ≥ S＋n×ATR」删除；
+ * 2026-11-01 用户：位置 = 截图里的算法 + 一行「K ≤ 旧C − n×ATR」（C 为箱体支撑，不用 S 免得和成本线混淆；新 C 产生即加仓，K 取上一箱体的旧 C，多留一个箱体作冗余）；原「入场距离 T ≥ S＋n×ATR」删除；
  * 卖出 =「一条条终止条件，像硬性终止那样可不断增加，如碰到 K 卖出、5 分钟回撤超 10% 卖出」。
  * 数据沿用原格式：自选指标时机的方向条件仍是 conditions[1..]；箱体 / 原探测时机的存 prerequisites；
  * 「本次加仓后改用的卖出算法」就是方案的 sellStages（afterAdditions = 第几次）。
@@ -31,7 +31,7 @@ const conditionDraft=(f?:ReturnType<typeof qualityAdditionConditions>[number]):C
 const sellSwitchDraft=(stage?:QualitySellStage):SellSwitchDraft=>stage?{enabled:true,choice:stage.snapshot.featureId+':'+stage.metric,direction:stage.rule.direction,threshold:String(stage.rule.threshold)}:{enabled:false,choice:'',direction:'<',threshold:''};
 const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage):RoundDraft=>{
  const custom=rule.source==='custom',conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);
- return {source:rule.source,structure:structuredClone(rule.structure??defaultStructureAddition()),structureBuffer:String(rule.structure?.buffer??.5),stricterPct:String(rule.stricterPct),
+ return {source:rule.source,structure:structuredClone(rule.structure??defaultStructureAddition()),structureBuffer:String(rule.structure?.buffer??0),stricterPct:String(rule.stricterPct),
   ...conditionDraft(custom?conditions[0]:undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),
   gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage)};
 };
@@ -74,6 +74,10 @@ export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFea
  return all.length?all.sort((a,b)=>a.afterAdditions-b.afterAdditions):undefined;
 }
 const field='h-8 min-w-0 rounded-md border border-border/60 bg-background px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40';
+/** 说明弹窗里的一小节：短标题 + 正文，替代大段连续文字。 */
+function InfoBlock({title,children}:{title:string;children:ReactNode}){
+ return <section className="space-y-1"><h6 className="text-[11px] font-medium text-foreground">{title}</h6><div className="space-y-1 text-[11px] leading-relaxed text-muted-foreground">{children}</div></section>;
+}
 function Part({title,role,info,children,testId}:{title:string;role:string;info:ReactNode;children:ReactNode;testId:string}){
  return <section className="space-y-2 rounded-md border border-border/60 bg-background/60 p-2.5" data-testid={testId}>
   <div className="flex items-center gap-1.5"><h5 className="text-[11px] font-medium">{title}</h5><span className="text-[10px] text-muted-foreground">{role}</span><FishQualityInfo label={`${title}说明`}>{info}</FishQualityInfo></div>
@@ -104,13 +108,39 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  </div>;
  const box=d.source==='structure';
  return <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/[0.03] p-3" data-testid="quality-addition-editor">
-  <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">③ 加仓细节</h4><FishQualityInfo label="加仓细节说明"><div className="space-y-2">
-   <p>每次加仓的方向、位置、卖出各自独立保存，修改某一次不会改动其他次；加仓数量按平衡公式自动计算。</p>
-   <p>首次加仓须在半仓镜像（卖出初始币数 50%）实际成交之后，最早从下一分钟起检查条件；未启用半仓镜像或尚未成交时不加仓。首轮计算基准 Q 为镜像后的剩余币数，后续按当时剩余总币数计算。首轮成本线 S 为首次买入价；加仓后 S 更新为本轮 K。{box?'K 按所选箱体基准减冗余计算；新 K 不得低于上轮 K，否则不加仓，S 和止损线均不改变。':'K 按本轮回撤倍数计算。'}K 是本次均衡线：Q×(K−S)＋本轮可用落袋利润 P＝新增币数×(T−K)，由此唯一确定币数；已用利润不重复使用。K 同时作为实际止损线：触线卖出剩余持仓，跳空按开盘价；同分钟先后不明时优先止损。落袋利润先补足退回 K 时的旧仓亏损，剩余部分再除以 T−K，折算为新增币数。</p>
-   <p>首轮把半仓镜像已落袋利润一并计入加仓数量；用过的利润后续不再重复使用。ATR 为加仓时已收盘的 5 分钟 ATR(14)。</p>
-   <p>只用新确认的原周期收盘读数，达标后按下一分钟开盘价模拟加仓；不继承开仓前的命中状态，公式预热历史保留。续算不会重复加仓，同一开盘时点卖出与加仓同时触发时优先卖出。信号库没有原探测算法时，请选择自选指标；自定义公式可先在 Deep Dig 中新增。</p>
-   <p>成交金额 = 加仓币数 × 加仓成交价。加仓后按各次成交数量和价格计算成本，收益率 = 总盈亏 ÷ 累计投入。止盈、否决和分段切换仍以首次买入价为基准；部分镜像止盈只卖初始币数，100% 则卖出当时全部持仓。保存后点击「开始监测」生效，旧轮次保留。</p>
-  </div></FishQualityInfo></div><label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"><input aria-label="启用条件加仓" type="checkbox" checked={d.enabled} onChange={e=>patch({enabled:e.target.checked})} className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"/>启用</label></div>
+  <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">③ 加仓细节</h4><FishQualityInfo label="加仓细节说明">
+   <div className="space-y-3">
+    <InfoBlock title="每次加仓：三段依次判断">
+     <ol className="list-decimal space-y-0.5 pl-4">
+      <li><b className="font-medium text-foreground">方向</b>（前提）：指标与涨幅门槛须全部满足，否则不加仓。</li>
+      <li><b className="font-medium text-foreground">位置</b>（触发）：箱体算法在 5 分钟线上产生新 C 的那一刻加仓，按下一分钟开盘价成交。</li>
+      <li><b className="font-medium text-foreground">卖出</b>：碰到 K 或任一否决条件达标，卖出全部持仓。</li>
+     </ol>
+     <p>各次加仓独立设置，改一次不影响其他次。</p>
+    </InfoBlock>
+    <InfoBlock title="加仓量（均衡公式）">
+     <p className="rounded bg-muted/60 px-2 py-1 text-center font-mono text-foreground">Q × (K − S) + P = 新增币数 × (T − K)</p>
+     <dl className="grid grid-cols-[1.25rem_1fr] gap-x-2 gap-y-0.5">
+      <dt className="font-mono text-foreground">T</dt><dd>加仓价</dd>
+      <dt className="font-mono text-foreground">K</dt><dd>均衡线，也是加仓后的止损线：箱体位置 K ≤ 旧C − n×ATR；指标位置 K＝T − n×ATR</dd>
+      <dt className="font-mono text-foreground">C</dt><dd>箱体支撑：新 C 触发加仓；旧 C 是上一箱体的支撑，多留一个箱体作冗余</dd>
+      <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后为上一次的 K</dd>
+      <dt className="font-mono text-foreground">Q</dt><dd>加仓前持币数（首轮为半仓镜像后的剩余币数）</dd>
+      <dt className="font-mono text-foreground">P</dt><dd>本轮可用落袋利润：首轮含半仓镜像利润，用过的不再重复用</dd>
+     </dl>
+    </InfoBlock>
+    <InfoBlock title="时序">
+     <ul className="list-disc space-y-0.5 pl-4">
+      <li>首次加仓须在半仓镜像成交之后，最早从下一分钟起检查。</li>
+      <li>卖出与加仓同时触发时先卖出；同一分钟先后不明时优先止损，跳空按开盘价。</li>
+      <li>只用新确认的收盘读数；ATR 为加仓时已收盘的 5 分钟 ATR(14)；续算不会重复加仓。</li>
+     </ul>
+    </InfoBlock>
+    <InfoBlock title="收益口径">
+     <p>收益率＝总盈亏 ÷ 累计投入；止盈、否决和分段切换仍以首次买入价为基准。保存后点「开始监测」生效，旧轮次保留。</p>
+    </InfoBlock>
+   </div>
+  </FishQualityInfo></div><label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"><input aria-label="启用条件加仓" type="checkbox" checked={d.enabled} onChange={e=>patch({enabled:e.target.checked})} className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"/>启用</label></div>
   <div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-[11px] text-muted-foreground">最多加仓<input aria-label="最多加仓次数" type="number" min="1" max="100" step="1" disabled={!d.enabled} value={all.maxRounds} onChange={e=>setLimit(e.target.value)} className={field+' w-16'}/>次</label>
    <div role="tablist" aria-label="选择加仓轮次" className="flex flex-wrap gap-1">{Array.from({length:count},(_,i)=><button key={i} type="button" role="tab" aria-selected={index===i} className={`rounded px-2 py-1 text-[11px] ${index===i?'bg-primary/15 text-primary':'bg-muted/40 text-muted-foreground hover:bg-muted'}`} onClick={()=>setSelectedRound(i)}>第 {i+1} 次</button>)}</div></div>
 
@@ -121,19 +151,26 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     <input aria-label="加仓涨幅门槛" type="number" min="0" step="any" disabled={!d.enabled||!d.gainEnabled} className={field+' w-16'} value={d.minGainPct} onChange={e=>patch({minGainPct:e.target.value})}/>%</div>
   </Part>
 
-  <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-2">
-   <p>箱体位置：只在 5 分钟收盘确认事件后、下一分钟开盘模拟加仓；每个箱体最多加仓一次，候选箱体不参与。{d.structure.algorithm==='dbl5'?'DBL-5 的「支撑抬高」包含完整台阶与内部箱底抬高。':'SBS-5M 的确认已包含冻结后的独立测试；回踩只用正式支撑的再次测试成功事件。'}</p>
-   <p>自选指标：读数越过门槛即触发。原探测算法：任一原探测算法以更严格的门槛再次命中即触发（调整量为原门槛绝对值 × 百分比，原门槛为 0 时按 1 个单位）。</p>
-   <p>K 是计算加仓量用的 K（本次均衡线，也是加仓后的止损线）。{box?'C 为箱体算法找到的支撑（已确认的箱体下轨；SBS 旧设置可能取固定失效线）；K＝C − n×5 分钟 ATR(14)，再向下对齐报价步长，所以 K ≤ C − n×ATR。新 K 不得低于上一次的 K，否则这次不加仓。':'非箱体位置没有支撑 C，K＝加仓价 T − n×5 分钟 ATR(14)。'}加仓币数由均衡公式唯一确定：Q×（K − S）＋本轮可用落袋利润＝新增币数 ×（T − K），S 为成本线、Q 为加仓前持币数。K 越低，同一位置可加的币数通常越少。</p>
+  <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
+   <InfoBlock title="箱体位置（5 分钟线）">
+    <p>新 C（{d.structure.algorithm==='dbl5'?'DBL-5 支撑抬高含完整台阶与内部箱底抬高':'SBS-5M 确认已含冻结后的独立测试；回踩只用正式支撑的再次测试成功'}）收盘确认后，下一分钟开盘加仓；每个箱体最多加仓一次，候选箱体不参与。</p>
+   </InfoBlock>
+   <InfoBlock title="K ≤ 旧C − n × ATR">
+    <p>旧 C 是新 C 产生前仍然有效的上一箱体支撑：始终多留一个箱体空间作冗余，给行情呼吸的时间。K 再减去 n 个 5 分钟 ATR(14)（n 可为 0），向下对齐报价步长。</p>
+    <p>首个箱体、或中途支撑失效时没有旧 C，不加仓；新 K 低于上一次的 K 时也不加仓。</p>
+   </InfoBlock>
+   <InfoBlock title="指标位置">
+    <p>自选指标：读数越过门槛即触发。原探测算法：以更严格的门槛再次命中即触发（调整量＝原门槛绝对值 × 百分比，原门槛为 0 时按 1 个单位）。这两种位置 K＝T − n×ATR。信号库没有原探测算法时请选自选指标，自定义公式可先在 Deep Dig 中新增。</p>
+   </InfoBlock>
   </div>}>
    <div className="grid grid-cols-2 gap-2">
-    <label className="space-y-1 text-[10px] text-muted-foreground">位置算法<select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs)}:{})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">自选指标</option><option value="detector">原探测算法再次命中</option></select></label>
-    {box&&<label className="space-y-1 text-[10px] text-muted-foreground">箱体算法<select aria-label="箱体加仓算法" className={field+' w-full'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),structureBuffer:'.5'})}><option value="dbl5">DBL-5 · 达瓦斯下轨</option><option value="sbs5m">SBS-5M · 台阶支撑</option></select></label>}
+    <label className="space-y-1 text-[10px] text-muted-foreground">位置算法<select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">自选指标</option><option value="detector">原探测算法再次命中</option></select></label>
+    {box&&<label className="space-y-1 text-[10px] text-muted-foreground">箱体算法<select aria-label="箱体加仓算法" className={field+' w-full'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),structureBuffer:'0'})}><option value="dbl5">DBL-5 · 达瓦斯下轨</option><option value="sbs5m">SBS-5M · 台阶支撑</option></select></label>}
    </div>
    {box&&<label className="flex items-center gap-2 text-[11px] text-muted-foreground">触发事件<select aria-label="箱体加仓时机" className={field+' flex-1'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></label>}
    {d.source==='custom'&&indicator(d,'加仓{x}',change=>patch(change))}
    {d.source==='detector'&&<label className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">沿原探测方向提高门槛<input aria-label="加仓门槛提高幅度" type="number" step="any" min="0" disabled={!d.enabled} value={d.stricterPct} onChange={e=>patch({stricterPct:e.target.value})} className={field+' w-20'}/>%</label>}
-   {box?<label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K ≤ C −</span><input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</span></label>
+   {box?<label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K ≤ 旧C −</span><input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">{d.structure.bufferUnit==='percent'?'% × 旧C':'× ATR'}</span></label>
    :<label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K ＝ T −</span><input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">× ATR</span></label>}
   </Part>
 

@@ -65,8 +65,10 @@ describe('native box decisions for holding additions',()=>{
  it('never uses future confirmation and retains one decision per box across resume and pagination',async()=>{
   const o=context(sample()),read=createStructureAdditionReader(o),r=rule('dbl5','confirm');
   const early=await read(r,o.entry,T+8*STEP,[]);expect(early).toBeUndefined();
-  const first=await read(r,o.entry,o.end,[]);expect(first).toMatchObject({at:T+8*STEP,structureEvidence:{supportPrice:100,event:'BASELINE'}});
-  const fake={...first!,quantity:1,notional:100};const next=await read(r,o.entry,o.end,[fake]);expect(next).toMatchObject({at:T+14*STEP,structureEvidence:{supportPrice:102}});
+  // 【用户要求】2026-11-01 新 C 产生即加仓、K 取上一箱体的旧 C：首个箱体（BASELINE）没有旧 C，不作加仓位置
+  expect(await read(r,o.entry,T+14*STEP,[])).toBeUndefined();
+  const first=await read(r,o.entry,o.end,[]);expect(first).toMatchObject({at:T+14*STEP,structureEvidence:{supportPrice:102,previousSupportPrice:100,basePrice:100,event:'UP_STEP'}});
+  const fake={...first!,quantity:1,notional:100};const next=await read(r,o.entry,o.end,[fake]);expect(next).toBeUndefined();
   expect(await read(r,first!.at,o.end,[fake])).toEqual(next);
   const restored=await createStructureAdditionReader(o)(r,first!.at,o.end,[fake]);expect(restored).toEqual(next);
   const longer={...o,end:T+250*STEP,row:{...o.row,timeMs:T+250*STEP}};expect(await createStructureAdditionReader(longer)(r,o.entry,longer.end,[])).toEqual(first);
@@ -75,15 +77,15 @@ describe('native box decisions for holding additions',()=>{
   const o=context(sample()),read=createStructureAdditionReader(o),r=rule('dbl5','confirm');
   expect(await read(r,T+14*STEP,o.end,[])).toBeUndefined();
   expect(await read(r,o.entry,o.end,[],{referencePrice:100,thresholdPct:10})).toBeUndefined();
-  const hit=await read(r,o.entry,o.end,[],{referencePrice:100,thresholdPct:2});expect(hit?.priceGate).toMatchObject({observedPrice:103,confirmedAt:T+8*STEP,referencePrice:100});
+  const hit=await read(r,o.entry,o.end,[],{referencePrice:100,thresholdPct:2});expect(hit?.priceGate).toMatchObject({observedPrice:105,confirmedAt:T+14*STEP,referencePrice:100});
  });
  it('rejects incomplete venue precision instead of falling back to candidate or inferred support',async()=>{
   const o=context(sample()),load=o.load;o.load=async(...args)=>(await load(...args)).map(b=>({...b,DBL5_tick_size:null,PRS6H_tick_size:null,ATI6H_tick_size:null}));await expect(createStructureAdditionReader(o)(rule(),o.entry,o.end,[])).rejects.toThrow('报价精度');
  });
  it('sizes at the next minute open with the chosen K and preserves the balance equation and export evidence',async()=>{
   const o=context(sample()),r=await findCalculatorAdditions({...o,structure:{...rule(),buffer:.5},maxRounds:1});expect(r.fills).toHaveLength(1);
-  const fill=r.fills[0],z=fill.sizing!;expect(fill).toMatchObject({at:T+14*STEP,price:105,structureEvidence:{event:'UP_STEP',supportPrice:102,k:z.support},sizing:{previousSupport:90}});
-  expect(z.support).toBeLessThan(102);expect(z.support).toBe(102-fill.structureEvidence!.bufferPrice!);
+  const fill=r.fills[0],z=fill.sizing!;expect(fill).toMatchObject({at:T+14*STEP,price:105,structureEvidence:{event:'UP_STEP',supportPrice:102,previousSupportPrice:100,basePrice:100,k:z.support},sizing:{previousSupport:90}});
+  expect(z.support).toBe(98);expect(z.support).toBe(100-fill.structureEvidence!.bufferPrice!);
   expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(fill.quantity*(fill.price-z.support));expect(z.coverageGap).toBeCloseTo(0);
   expect(additionEvidenceValues(fill)).toHaveLength(additionEvidenceHeaders.length);expect(JSON.parse(additionEvidenceValues(fill).at(-1) as string)).toEqual(fill.structureEvidence);
   const wide=await findCalculatorAdditions({...o,structure:{...rule(),buffer:1},maxRounds:1});expect(wide.fills[0].sizing!.support).toBeLessThan(z.support);expect(wide.fills[0].quantity).toBeLessThan(fill.quantity);
@@ -101,10 +103,11 @@ describe('native box decisions for holding additions',()=>{
  });
  it('uses SBS confirmed timing and its native fixed invalidation line through the same calculator',async()=>{
   const input=sbsComplete(),o=context(input),structure={...rule('sbs5m'),kBasis:'invalidation' as const};
-  const result=await findCalculatorAdditions({...o,structure,maxRounds:2});expect(result.fills.map(f=>f.structureEvidence!.supportPrice)).toEqual([100,104]);
+  const result=await findCalculatorAdditions({...o,structure,maxRounds:2});expect(result.fills.map(f=>[f.structureEvidence!.supportPrice,f.structureEvidence!.previousSupportPrice,f.sizing!.support])).toEqual([[100,89,88],[104,100,98.3]]);
   const fill=result.fills.at(-1)!;expect(fill.structureEvidence).toMatchObject({algorithm:'sbs5m',event:'STEP_CONFIRMED',supportPrice:104,kBasis:'invalidation'});
-  expect(fill.sizing!.support).toBeLessThanOrEqual(fill.structureEvidence!.nativeInvalidation!);
-  expect(fill.structureEvidence!.basePrice).toBe(fill.structureEvidence!.nativeInvalidation);
+  // K 基准是上一箱体的失效线（旧 C 那一箱），不是新箱体自己的失效线
+  expect(fill.structureEvidence!.basePrice).toBe(result.fills[0].structureEvidence!.nativeInvalidation);expect(fill.structureEvidence!.basePrice).toBeLessThan(fill.structureEvidence!.nativeInvalidation!);
+  expect(fill.sizing!.support).toBeLessThanOrEqual(fill.structureEvidence!.basePrice);
   expect((await findCalculatorAdditions({...o,structure,previous:result.fills,since:fill.at+M})).fills).toEqual(result.fills);
  });
  it('activates the frozen structure K as the protective exit and preserves it on resume',async()=>{
@@ -115,7 +118,7 @@ describe('native box decisions for holding additions',()=>{
  });
  it('does not let an invalid future candle cancel a previously available event',async()=>{
   const input=sample().map((b,i)=>i===17?{...b,DBL5_tick_size:3}:b),o=context(input);
-  const hit=await createStructureAdditionReader(o)(rule('dbl5','confirm'),o.entry,o.end,[]);expect(hit?.at).toBe(T+8*STEP);
+  const hit=await createStructureAdditionReader(o)(rule('dbl5','confirm'),o.entry,o.end,[]);expect(hit?.at).toBe(T+14*STEP);
  });
  it('integrates structure decisions through evaluateQualitySample, saved campaign and personal sizing validation',async()=>{
   const o=context(sample()),def={id:'never-sell',name:'不卖',short:'不卖',definition:'',formula:'raw = C',scale:1,unit:'',positive:'1',control:'0',interval:'1m' as const};
