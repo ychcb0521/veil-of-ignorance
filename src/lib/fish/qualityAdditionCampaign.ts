@@ -19,7 +19,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
    const add=adds[index-1];
    const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price} · S=${add.sizing.previousSupport} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}${add.structureEvidence?` · ${add.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${add.structureEvidence.event} · 箱底 ${add.structureEvidence.supportPrice} · 冗余 ${add.structureEvidence.buffer}${add.structureEvidence.bufferUnit==='atr'?'ATR':'%'}`:''}`:''}`;
    const leg:TradeJournal={...data.legs[0],id:lot.id,trade_record_id:positionId,leg_role:lot.role,leg_sequence:index+1,
-     quality_addition_fill:add,pre_simulated_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
+     quality_addition_fill:add,pre_simulated_time:iso(lot.at),pre_real_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
      pre_account_equity_usdt:summary.totalInvested,post_realized_pnl:closed?lot.quantity*r.endPrice!-lot.notional:null};
    let realized=0;
    const opening:CampaignEvent={...data.campaign.actual_evolution[0],id:lot.id+'-entry',timestamp:iso(lot.at),event_type:'main_opened',journal_id:lot.id,leg_role:lot.role,leg_sequence:index+1,
@@ -29,7 +29,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
      const pnl=quantity*(price-lot.price),recordId=lot.id+'-'+kind;realized+=pnl;
      tradeRecords.push({id:recordId,positionId,symbol:data.campaign.symbol,side:'LONG',type:kind==='mirror'?'LIMIT':'MARKET',action:'CLOSE',entryPrice:lot.price,exitPrice:price,
        quantity,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl,fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,
-       openTime:lot.at,closeTime:at,openedRealAt:run.firstEvaluatedAt,closedRealAt:r.evaluatedAt,exit_reason_text:kind==='mirror'?'镜像止盈':r.reason??'卖出'});
+       openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,exit_reason_text:kind==='mirror'?'镜像止盈':r.reason??'卖出'});
      events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
        price,size_usdt:quantity*lot.price,realized_pnl:pnl,close_time:iso(at),exit_price:price,notes:kind==='mirror'?'镜像止盈':r.reason??'卖出',recorded_at:iso(r.evaluatedAt)});
    };
