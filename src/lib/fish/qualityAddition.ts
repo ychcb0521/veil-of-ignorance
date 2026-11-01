@@ -13,15 +13,14 @@ export interface QualityAdditionRule {
   /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
   prerequisites?: QualityBuyFilter[];
   minGainPct?:number;
-  /** Per-round ATR distances: T >= S + entryBufferAtr * ATR; K = T - supportOffsetAtr * ATR. */
+  /** K = T - supportOffsetAtr * ATR（非箱体位置）。entryBufferAtr（旧「入场距离 T ≥ S＋n×ATR」）2026-11-01 应用户要求删除：引擎不再检查，只为读旧数据保留字段。 */
   entryBufferAtr?:number; supportOffsetAtr?:number;
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
 export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'>;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
-const atrIdentity=(rule:QualityAdditionRoundRule)=>{const a=qualityAdditionAtrSettings(rule);return [a.entryBufferAtr,a.supportOffsetAtr];};
-const customAtrSettings=(rule:QualityAdditionRoundRule)=>{const a=qualityAdditionAtrSettings(rule);return a.entryBufferAtr!==2||a.supportOffsetAtr!==1.5;};
+const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(rule).supportOffsetAtr;
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
@@ -59,7 +58,8 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...prerequisiteIdentity(rule),
   ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,'real-average']]:[]),
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
-  ...(rule.quantityMode==='calculator'&&[rule,...(rule.rounds??[])].some(customAtrSettings)?[['addition-atr-settings-v1',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[])];
+  // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
+  ...(rule.quantityMode==='calculator'?[['addition-k-atr-no-entry-distance-v2',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
@@ -72,7 +72,6 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
   if(rule.quantityMode==='calculator'){
     const atr=qualityAdditionAtrSettings(rule);
-    if(!Number.isFinite(atr.entryBufferAtr)||atr.entryBufferAtr<0)throw new Error('T 高于 S 的 ATR 倍数须为不小于 0 的有限数字');
     if(rule.source!=='structure'&&(!Number.isFinite(atr.supportOffsetAtr)||atr.supportOffsetAtr<=0))throw new Error('K 回撤的 ATR 倍数须为大于 0 的有限数字');
   }
   if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
@@ -87,7 +86,7 @@ export function stricterAdditionThreshold(threshold: number, direction: '<' | '>
 function additionFormulaLabel(rule:QualityAdditionRule){
   const rounds=rule.rounds?.length?rule.rounds:[rule],first=qualityAdditionAtrSettings(rounds[0]);
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
-  return rounds.some(r=>{const a=qualityAdditionAtrSettings(r);return a.entryBufferAtr!==first.entryBufferAtr||a.supportOffsetAtr!==first.supportOffsetAtr;})?'逐轮 ATR 倍数独立设置':`T≥S+${first.entryBufferAtr}ATR · K=T−${first.supportOffsetAtr}ATR`;
+  return rounds.some(r=>qualityAdditionAtrSettings(r).supportOffsetAtr!==first.supportOffsetAtr)?'逐轮 ATR 倍数独立设置':`K=T−${first.supportOffsetAtr}ATR`;
 }
 export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${rule.minGainPct!=null?` 且 相对当前持仓均价上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */

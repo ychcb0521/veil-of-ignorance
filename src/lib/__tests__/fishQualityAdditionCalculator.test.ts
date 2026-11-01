@@ -117,11 +117,11 @@ describe('calculator additions with causal ATR and support stops',()=>{
  });
 });
 
-it('includes realized half-mirror profit in the first addition exactly as the calculator, without bypassing the two-ATR entry buffer',async()=>{
+it('includes realized half-mirror profit in the first addition exactly as the calculator; a hit close above S still adds (entry distance removed)',async()=>{
  const r=await run(group(),loader(rising),3),[a,b]=r.additionFills!;
  expect(a.sizing).toMatchObject({coinsBefore:.5,mirrorAvailableBefore:2.5,mirrorUsed:2.5,baseCoins:expect.closeTo(7/6),mirrorCoins:expect.closeTo(5/6)});expect(a.quantity).toBeCloseTo(2);
  expect(b.sizing).toMatchObject({mirrorAvailableBefore:0,mirrorUsed:0,mirrorCoins:0});
- const tooClose=await run(group(),loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3);expect(tooClose.additionFill).toBeUndefined();
+ const close=await run(group(),loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3),c=close.additionFill!;expect(c).toMatchObject({price:102,sizing:{previousSupport:100,support:99}});expect(c.sizing!.coinsBefore*(c.sizing!.support-c.sizing!.previousSupport)+c.sizing!.mirrorUsed).toBeCloseTo(c.quantity*(c.price-c.sizing!.support));
 });
 it('rechecks gain against the current actual weighted holding average after every successful addition',async()=>{
  const g=group();g.addition={...g.addition!,minGainPct:5};
@@ -151,15 +151,17 @@ it('exports frozen conjunctive readings, current-average gain and banked-profit 
  const study={...importQualityLibrary(newQualityStudy(T),[sample.source]),sellPlans:[g]},row=qualityComparisonRows(study)[0];study.selectedRowIds=[row.id];const r=await evaluateQualitySample(row,g,0,T+5*M,loader(m=>bar(T+m*M,100+m*10,1,99+m*10,m===0?106:101+m*10)),new AbortController().signal);study.results=[r];
  const begun=beginQualityMonitorRound(study,study,T),saved=captureQualityMonitorResult(begun.study,begun.capture,r,T+5*M),lib=saved.monitorLibrary!;
  const sheets=[...buildQualitySheets(study,[row]),...buildMonitorSheets(lib.records,new Map(lib.settings.map(s=>[s.id,s])))];
- for(const sheet of sheets){expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);if(!['加仓明细','加仓记录'].includes(sheet.name))continue;const headers=sheet.columns.map(c=>c.header),values=sheet.rows[0];expect(JSON.parse(values[headers.indexOf('同时满足的指标 JSON')] as string)).toHaveLength(2);expect(values[headers.indexOf('涨幅门槛 %')]).toBe(5);expect(values[headers.indexOf('涨幅基准均价')]).toBe(100);expect(values[headers.indexOf('本轮可用落袋利润 USDT')]).toBe(2.5);expect(values[headers.indexOf('落袋利润贡献币数')]).toBeGreaterThan(0);expect(values[headers.indexOf('K回撤ATR倍数')]).toBe(1.5);expect(values[headers.indexOf('最低ATR距离')]).toBe(2);}
+ for(const sheet of sheets){expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);if(!['加仓明细','加仓记录'].includes(sheet.name))continue;const headers=sheet.columns.map(c=>c.header),values=sheet.rows[0];expect(JSON.parse(values[headers.indexOf('同时满足的指标 JSON')] as string)).toHaveLength(2);expect(values[headers.indexOf('涨幅门槛 %')]).toBe(5);expect(values[headers.indexOf('涨幅基准均价')]).toBe(100);expect(values[headers.indexOf('本轮可用落袋利润 USDT')]).toBe(2.5);expect(values[headers.indexOf('落袋利润贡献币数')]).toBeGreaterThan(0);expect(values[headers.indexOf('K回撤ATR倍数')]).toBe(1.5);expect(values[headers.indexOf('最低ATR距离')]??null).toBeNull();}
 });
-it.each([[103.999,false],[104,true],[104.001,true]] as const)('requires actual price T=%s to be at least two ATR above dynamic S (allowed=%s)',async(price,allowed)=>{
- const r=await run(group(),loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,price,0,price-.1)),3);expect(!!r.additionFill).toBe(allowed);
- if(allowed){const a=r.additionFill!;expect(a.sizing).toMatchObject({requiredBufferAtr:2,costBufferAtr:expect.closeTo((price-100)/2),coverageGap:expect.closeTo(0)});expect(a.sizing!.support).toBeCloseTo(price-3);}
+// 2026-11-01 用户删除「入场距离 T ≥ S＋n×ATR」：位置达到即按均衡线 K 定量，不再要求 T 高出 S 多少（旧版 T＜104 不加仓）。
+it.each([100.5,102,103.999,104,110])('adds at T=%s without any minimum distance above dynamic S, balanced at K',async price=>{
+ const r=await run(group(),loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,price,0,price-.1)),3);expect(r.additionFill).toBeDefined();
+ const a=r.additionFill!,z=a.sizing!;expect(z.requiredBufferAtr).toBeUndefined();expect(z).toMatchObject({costBufferAtr:expect.closeTo((price-100)/2),coverageGap:expect.closeTo(0)});expect(z.support).toBeCloseTo(price-3);
+ expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(a.quantity*(a.price-z.support));
 });
-it('uses the previous K as dynamic S, skips too-close hits without changing it, and balances all rounds at K',async()=>{
+it('uses the previous K as dynamic S and balances all rounds at K',async()=>{
  const path=loader(m=>{const p=[100,104,104.5,105,105][m]??105;return bar(T+m*M,p,m<3?1:0,p-.1,m===0?106:p+.1);}),r=await run(group(),path,5);
- expect(r.additionFills!.map(a=>a.at)).toEqual([T+M,T+3*M]);const [first,second]=r.additionFills!;expect(first.quantity).toBeCloseTo(1);expect(second.quantity).toBeCloseTo(.5);expect(second.sizing).toMatchObject({previousSupport:101,support:102,mirrorAvailableBefore:0,requiredBufferAtr:2,costBufferAtr:2});
+ expect(r.additionFills!.map(a=>a.at)).toEqual([T+M,T+2*M,T+3*M]);const [first,second,third]=r.additionFills!;expect(first.quantity).toBeCloseTo(1);expect(second.quantity).toBeCloseTo(.25);expect(third.quantity).toBeCloseTo(.875/3);expect(second.sizing).toMatchObject({previousSupport:101,support:101.5,mirrorAvailableBefore:0,costBufferAtr:1.75});expect(third.sizing).toMatchObject({previousSupport:101.5,support:102});
  for(const a of r.additionFills!){const z=a.sizing!;expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(a.quantity*(a.price-z.support));expect((z.coinsBefore*z.previousSupport+a.quantity*a.price-z.mirrorUsed)/(z.coinsBefore+a.quantity)).toBeCloseTo(z.support);expect(z.coverageGap).toBeCloseTo(0);}
  for(const v of evaluateCampaignAddSizing(campaign(group(),r)).values())expect(v.status).toBe('ok');expect(await run(group(),path,5,await run(group(),path,2))).toEqual(r);
 });
@@ -171,27 +173,28 @@ it('uses independent round conditions in order, respects the cap after resume, a
  const changed={...g,addition:{...g.addition!,rounds:[g.addition!.rounds![0],{...g.addition!.rounds![1],minGainPct:20}]}};expect((await run(changed,path,8)).key).not.toBe(r.key);
 });
 
-it.each([[105.999,false],[106,true],[106.001,true]] as const)('uses configured root ATR distances at the exact T boundary (%s, allowed=%s)',async(price,allowed)=>{
+it.each([101,105.999,106])('uses the configured root K offset at T=%s; a stale entry distance in old data is ignored',async price=>{
  const g=group();g.addition={...g.addition!,entryBufferAtr:3,supportOffsetAtr:2};
- const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,price,0,price-.1)),3);expect(!!r.additionFill).toBe(allowed);
- if(allowed){const a=r.additionFill!,z=a.sizing!;expect(z).toMatchObject({requiredBufferAtr:3,supportOffsetAtr:2,atr:2,support:expect.closeTo(price-4)});expect(a.quantity).toBeCloseTo((.5*(z.support-100)+2.5)/4);}
+ const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,price,0,price-.1)),3);expect(r.additionFill).toBeDefined();
+ const a=r.additionFill!,z=a.sizing!;expect(z).toMatchObject({supportOffsetAtr:2,atr:2,support:expect.closeTo(price-4)});expect(z.requiredBufferAtr).toBeUndefined();expect(a.quantity).toBeCloseTo((.5*(z.support-100)+2.5)/4);
 });
-it('applies each round’s own ATR entry and support distances to sizing, frozen evidence, resume and whole-position stops',async()=>{
+it('applies each round’s own K offset to sizing, frozen evidence, resume and whole-position stops',async()=>{
  const g=group(),round={source:'custom' as const,stricterPct:10,condition:g.addition!.condition};
- g.addition={...g.addition!,maxRounds:2,rounds:[{...round,entryBufferAtr:4,supportOffsetAtr:1},{...round,entryBufferAtr:3,supportOffsetAtr:2}]};
+ g.addition={...g.addition!,maxRounds:2,rounds:[{...round,supportOffsetAtr:1},{...round,supportOffsetAtr:2}]};
  const path=loader(m=>{const p=[100,107.9,108,110,112,114][m]??113;return bar(T+m*M,p,1,m>=6?107:p-.1,m===0?106:p+.1);});
- const r=await run(g,path,6),[first,second]=r.additionFills!;expect(r.additionFills!.map(a=>a.at)).toEqual([T+2*M,T+4*M]);
- expect(first).toMatchObject({quantity:2.75,sizing:{previousSupport:100,support:106,requiredBufferAtr:4,supportOffsetAtr:1,mirrorUsed:2.5}});
- expect(second).toMatchObject({quantity:1.625,sizing:{previousSupport:106,support:108,requiredBufferAtr:3,supportOffsetAtr:2,mirrorUsed:0}});
+ const r=await run(g,path,6),[first,second]=r.additionFills!;expect(r.additionFills!.map(a=>a.at)).toEqual([T+M,T+3*M]);
+ expect(first).toMatchObject({quantity:expect.closeTo(2.725),sizing:{previousSupport:100,support:expect.closeTo(105.9),supportOffsetAtr:1,mirrorUsed:2.5}});
+ expect(second).toMatchObject({quantity:expect.closeTo(.3225/4),sizing:{previousSupport:expect.closeTo(105.9),support:106,supportOffsetAtr:2,mirrorUsed:0}});
  for(const a of r.additionFills!){const z=a.sizing!;expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(a.quantity*(a.price-z.support));expect(z.coverageGap).toBeCloseTo(0);}
  expect(await run(g,path,6,await run(g,path,3))).toEqual(r);
  const data=campaign(g,r);expect(data.campaign.comparison!.sellEvidence!.additionFills).toEqual(r.additionFills);expect(data.legs.filter(l=>l.quality_addition_fill).map(l=>l.quality_addition_fill!.sizing!.supportOffsetAtr)).toEqual([1,2]);for(const v of evaluateCampaignAddSizing(data).values())expect(v.status).toBe('ok');
- const stopped=await run(g,path,8);expect(stopped).toMatchObject({status:'closed',endTime:T+6*M,endPrice:108,remainingQuantity:0});expect(stopped.additionFills).toHaveLength(2);expect(await run(g,path,8,r)).toEqual(stopped);
- const changed={...g,addition:{...g.addition!,rounds:[g.addition!.rounds![0],{...g.addition!.rounds![1],entryBufferAtr:5}]}};expect((await run(changed,path,6)).key).not.toBe(r.key);
+ const drop=loader(m=>{const p=[100,107.9,108,110,112,114][m]??113;return bar(T+m*M,p,1,m>=6?105.5:p-.1,m===0?106:p+.1);});
+ const stopped=await run(g,drop,8);expect(stopped).toMatchObject({status:'closed',endTime:T+6*M,endPrice:106,remainingQuantity:0});expect(stopped.additionFills).toHaveLength(2);expect(await run(g,drop,8,await run(g,drop,6))).toEqual(stopped);
+ const changed={...g,addition:{...g.addition!,rounds:[g.addition!.rounds![0],{...g.addition!.rounds![1],supportOffsetAtr:3}]}};expect((await run(changed,path,6)).key).not.toBe(r.key);
 });
 it('allows a wider K offset when banked mirror profit covers the old-position loss, still sizing at exact balance',async()=>{
- const g=group();g.addition={...g.addition!,entryBufferAtr:1,supportOffsetAtr:2,maxRounds:1};
- const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3);expect(r.additionFill).toMatchObject({price:102,quantity:.375,sizing:{support:98,previousSupport:100,mirrorUsed:2.5,requiredBufferAtr:1,supportOffsetAtr:2,coverageGap:0}});
+ const g=group();g.addition={...g.addition!,supportOffsetAtr:2,maxRounds:1};
+ const r=await run(g,loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3);expect(r.additionFill).toMatchObject({price:102,quantity:.375,sizing:{support:98,previousSupport:100,mirrorUsed:2.5,supportOffsetAtr:2,coverageGap:0}});
 });
 
 const geometricProfit=(multiple=100,gain=5)=>makeQualityHoldingVeto('addition-geometric-profit','>=',gain,true,undefined,multiple);

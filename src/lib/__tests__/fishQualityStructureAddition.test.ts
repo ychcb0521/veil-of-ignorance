@@ -93,11 +93,11 @@ describe('native box decisions for holding additions',()=>{
   expect(full.fills).toHaveLength(1);expect(full.fills).toEqual(first.fills);
   expect((await findCalculatorAdditions({...o,since:T+15*STEP,previous:first.fills,structure:rule(),maxRounds:3})).fills).toEqual(full.fills);
  });
- it('does not add on a gap below the confirmed floor or when risk budget / entry buffer is insufficient',async()=>{
+ it('does not add on a gap below the confirmed floor or when risk budget is insufficient; the removed entry distance no longer blocks',async()=>{
   const o=context(sample()),prices=o.prices.map(b=>b.openTime===T+14*STEP?{...b,open:101}:b);
   expect((await findCalculatorAdditions({...o,prices,structure:rule()})).fills).toEqual([]);
   expect((await findCalculatorAdditions({...o,structure:{...rule(),buffer:10}})).fills).toEqual([]);
-  expect((await findCalculatorAdditions({...o,structure:rule(),entryBufferAtr:100})).fills).toEqual([]);
+  expect((await findCalculatorAdditions({...o,structure:rule(),entryBufferAtr:100})).fills).toEqual((await findCalculatorAdditions({...o,structure:rule()})).fills);
  });
  it('uses SBS confirmed timing and its native fixed invalidation line through the same calculator',async()=>{
   const input=sbsComplete(),o=context(input),structure={...rule('sbs5m'),kBasis:'invalidation' as const};

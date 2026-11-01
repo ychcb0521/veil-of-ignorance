@@ -46,37 +46,38 @@ it('saves independent source, thresholds and gain gates for each selected additi
  const rule=JSON.parse(document.querySelector('output')!.textContent!);expect(rule).toMatchObject({maxRounds:2,rounds:[{source:'detector',stricterPct:12,minGainPct:5},{source:'custom',condition:{threshold:.9},minGainPct:10}]});expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);expect(()=>parseAdditionDraft({...additionDraft(rule),maxRounds:'1.5'},BUILTIN_FEATURES)).toThrow('整数');
 });
 
-it('edits both formula multipliers independently per round and restores them after saving or resizing the list',()=>{
- render(<Editor/>);expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(2);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);expect(screen.getByLabelText('K回撤ATR倍数')).toBeDisabled();
+it('edits the K multiplier independently (entry distance removed 2026-11-01) per round and restores them after saving or resizing the list',()=>{
+ render(<Editor/>);expect(screen.queryByLabelText('T高于S的ATR倍数')).toBeNull();expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);expect(screen.getByLabelText('K回撤ATR倍数')).toBeDisabled();
  fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'2'}});
- fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'1.75'}});
- fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(2);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);
- fireEvent.change(screen.getByLabelText('T高于S的ATR倍数'),{target:{value:'4'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'2.5'}});
+ fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'1.75'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);
+ fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'2.5'}});
  fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'1'}});fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'4'}});
- fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(4);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(2.5);
- fireEvent.click(screen.getByRole('tab',{name:'第 4 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.75);
- fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('T高于S的ATR倍数')).toHaveValue(3.25);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.75);
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(2.5);
+ fireEvent.click(screen.getByRole('tab',{name:'第 4 次'}));expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.75);
+ fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.75);
  fireEvent.click(screen.getByRole('button',{name:'验证保存'}));const rule=JSON.parse(document.querySelector('output')!.textContent!);
- expect(rule.rounds).toMatchObject([{entryBufferAtr:3.25,supportOffsetAtr:1.75},{entryBufferAtr:4,supportOffsetAtr:2.5},{entryBufferAtr:2,supportOffsetAtr:1.5},{entryBufferAtr:3.25,supportOffsetAtr:1.75}]);expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+ expect(rule.rounds).toMatchObject([{supportOffsetAtr:1.75},{supportOffsetAtr:2.5},{supportOffsetAtr:1.5},{supportOffsetAtr:1.75}]);expect(rule.rounds.some((r:{entryBufferAtr?:number})=>'entryBufferAtr' in r)).toBe(false);expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
 });
 it('rejects missing, negative or non-finite formula distances, and a zero support offset',()=>{
  const draft={...additionDraft(),enabled:true};
  for(const value of ['', '-1','Infinity','NaN']){
-  expect(()=>parseAdditionDraft({...draft,entryBufferAtr:value},BUILTIN_FEATURES)).toThrow('T 高于 S');
   expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:value},BUILTIN_FEATURES)).toThrow('K 回撤');
  }
  expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:'0'},BUILTIN_FEATURES)).toThrow('K 回撤');
  expect(()=>parseAdditionDraft({...draft,otherRounds:[{...draft.otherRounds[0],supportOffsetAtr:'0'},draft.otherRounds[1]]},BUILTIN_FEATURES)).toThrow('第 2 次加仓');
- expect(()=>parseAdditionDraft({...draft,entryBufferAtr:'0',supportOffsetAtr:'.5'},BUILTIN_FEATURES)).not.toThrow();
+ expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:'.5'},BUILTIN_FEATURES)).not.toThrow();
 });
 
-it('offers native box timing and K redundancy with an independent saved choice for each round',()=>{
+// 【用户要求】2026-11-01 位置只有算法 + 一行「K ≤ S − n×ATR」：S 为箱体支撑，n 存为箱体冗余（单位 ATR）。
+it('offers native box timing and K ≤ S − n×ATR with an independent saved choice for each round',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});
  expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.5);expect(screen.queryByLabelText('K回撤ATR倍数')).not.toBeInTheDocument();
- fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.75'}});fireEvent.change(screen.getByLabelText('箱体冗余单位'),{target:{value:'percent'}});
- fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体K基准'),{target:{value:'invalidation'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
+ expect(screen.getByTestId('addition-timing')).toHaveTextContent('K ≤ S −');expect(screen.queryByLabelText('箱体K基准')).toBeNull();expect(screen.queryByLabelText('箱体冗余单位')).toBeNull();
+ fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.75'}});
+ fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
  fireEvent.click(screen.getByRole('button',{name:'验证保存'}));const saved=JSON.parse(document.querySelector('output')!.textContent!);
- expect(saved.rounds).toMatchObject([{source:'structure',structure:{algorithm:'dbl5',trigger:'raise',bufferUnit:'percent',buffer:.75}},{source:'structure',structure:{algorithm:'sbs5m',trigger:'retest',kBasis:'invalidation',bufferUnit:'atr',buffer:.25}},{source:'detector'}]);
+ expect(saved.rounds).toMatchObject([{source:'structure',structure:{algorithm:'dbl5',trigger:'raise',kBasis:'support',bufferUnit:'atr',buffer:.75}},{source:'structure',structure:{algorithm:'sbs5m',trigger:'retest',kBasis:'support',bufferUnit:'atr',buffer:.25}},{source:'detector'}]);
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
  fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.75);
 });

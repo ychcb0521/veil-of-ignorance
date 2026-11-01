@@ -28,15 +28,16 @@ it('versions all conditions and gain gates while retaining old single-condition 
  for(const minGainPct of [-1,NaN,Infinity])expect(()=>validateQualityAddition({...rule,minGainPct})).toThrow('涨幅门槛');expect(()=>validateQualityAddition({...rule,minGainPct:0})).not.toThrow();
 });
 
-it('keeps default ATR identities stable but versions either multiplier independently in every round',()=>{
+it('ignores the removed entry distance and versions the K multiplier independently in every round',()=>{
  const rule={...defaultQualityAddition(),enabled:true};
  expect(additionIdentity(rule)).toEqual(additionIdentity({...rule,entryBufferAtr:2,supportOffsetAtr:1.5}));
- for(const patch of [{entryBufferAtr:3},{supportOffsetAtr:2}])expect(additionIdentity({...rule,...patch})).not.toEqual(additionIdentity(rule));
+ expect(additionIdentity({...rule,entryBufferAtr:3})).toEqual(additionIdentity(rule));expect(additionIdentity({...rule,supportOffsetAtr:2})).not.toEqual(additionIdentity(rule));
+ expect(JSON.stringify(additionIdentity(rule))).toContain('addition-k-atr-no-entry-distance-v2');
  const round={source:rule.source,stricterPct:rule.stricterPct},multi={...rule,maxRounds:2,rounds:[round,round]};
  expect(additionIdentity(multi)).toEqual(additionIdentity({...multi,rounds:[{...round,entryBufferAtr:2,supportOffsetAtr:1.5},round]}));
- for(let i=0;i<2;i++)for(const patch of [{entryBufferAtr:3},{supportOffsetAtr:2}]){
+ for(let i=0;i<2;i++)for(const patch of [{supportOffsetAtr:2}]){
   const changed={...multi,rounds:multi.rounds.map((r,j)=>j===i?{...r,...patch}:r)};expect(additionIdentity(changed)).not.toEqual(additionIdentity(multi));
  }
- expect(additionLabel({...rule,entryBufferAtr:3,supportOffsetAtr:2})).toContain('T≥S+3ATR · K=T−2ATR');
+ expect(additionLabel({...rule,entryBufferAtr:3,supportOffsetAtr:2})).toContain('K=T−2ATR');expect(additionLabel({...rule,entryBufferAtr:3,supportOffsetAtr:2})).not.toContain('T≥S');
  expect(additionLabel({...multi,rounds:[round,{...round,supportOffsetAtr:2}]})).toContain('逐轮 ATR 倍数独立设置');
 });

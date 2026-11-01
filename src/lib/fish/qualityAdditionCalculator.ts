@@ -93,14 +93,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   }
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
-  const {entryBufferAtr,supportOffsetAtr}=qualityAdditionAtrSettings(round);
+  const {supportOffsetAtr}=qualityAdditionAtrSettings(round);
   const selected=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
   const K=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
   if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support))continue;
   if(hit.structureEvidence&&selected)hit.structureEvidence={...hit.structureEvidence,...selected};
-  // This entry rule is independent of the indicator and average-price gain gates.
-  const buffer=hit.price-S,minimum=entryBufferAtr*atr!;
-  if(buffer+8*Number.EPSILON*Math.max(hit.price,S,minimum)<minimum||!(K>0))continue;
+  // 2026-11-01 用户删除「入场距离 T ≥ S＋n×ATR」门槛：位置达到即按均衡线 K 定量，不再要求 T 高出 S 多少。
+  const buffer=hit.price-S;
+  if(!(K>0))continue;
   const mirror=o.mirror&&(o.mirror.at<hit.at||o.mirror.at===hit.at&&o.mirror.atOpen)?o.mirror:undefined;
   const sold=mirror?o.notional/o.entryPrice*mirror.fraction:0;
   const Q=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-sold;
@@ -111,7 +111,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
   if(sized.error||!(sized.addCoins>0))continue;
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
-  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,requiredBufferAtr:entryBufferAtr,...(hit.structureEvidence?{}:{supportOffsetAtr}),coverageGap:sized.coverageGap}});
+  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),coverageGap:sized.coverageGap}});
   if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price}};
  }
  return {fills,stop:findPositionExit(fills.at(-1)?.sizing?.support,Math.max(o.since,fills.at(-1)?.at??o.since))};
