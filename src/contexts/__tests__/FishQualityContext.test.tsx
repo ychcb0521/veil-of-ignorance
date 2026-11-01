@@ -18,6 +18,16 @@ function Other() { const navigate = useNavigate(); return <button onClick={() =>
 beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockResolvedValue({ study: newQualityStudy(T) }); storage.save.mockReset().mockResolvedValue(true); });
 afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); });
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+it('does not load or save the research archive during a campaign-only visit, then activates once on demand', async () => {
+  render(<MemoryRouter initialEntries={['/other']}><FishQualityProvider owner="a" run={vi.fn(async () => {})}><Routes><Route path="/" element={<Controls/>}/><Route path="/other" element={<Other/>}/></Routes></FishQualityProvider></MemoryRouter>);
+  await flush(20_000);
+  expect(storage.load).not.toHaveBeenCalled(); expect(storage.save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '返回' })); await flush();
+  expect(storage.load).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '其他页面' })); await flush();
+  fireEvent.click(screen.getByRole('button', { name: '返回' })); await flush();
+  expect(storage.load).toHaveBeenCalledTimes(1);
+});
 it('keeps evaluating and persisting through route unmounts and restores live progress on return', async () => {
   let task!: QualityRunOptions, finish!: () => void;
   const run = vi.fn(async (o: QualityRunOptions) => { task = o; await new Promise<void>(resolve => { finish = resolve; }); });

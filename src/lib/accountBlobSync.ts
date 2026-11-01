@@ -306,15 +306,18 @@ async function adopt(adapter: AccountBlobAdapter<any>, owner: string, head: Head
  */
 async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin: () => boolean): Promise<AccountBlobSyncStatus> {
   if (!(await signedInAs(owner))) return 'skipped';
-  const [meta, local, head] = await Promise.all([readMeta(adapter.name, owner), adapter.read(owner), fetchHead(adapter.name, owner)]);
+  // An unchanged head needs metadata only. Reading the whole 400+ MB research
+  // archive here would duplicate the campaign worker's read on every page load.
+  const [meta, head] = await Promise.all([readMeta(adapter.name, owner), fetchHead(adapter.name, owner)]);
+  const dirty = !!meta?.rev && meta.savedAt > meta.syncedAt;
+  if (head && meta?.rev && head.rev === meta.rev) {
+    if (dirty) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
+    return 'unchanged';
+  }
+  const local = await adapter.read(owner);
   const localWeight = adapter.weight(local);
   if (!head) {
     if (localWeight > 0 || (meta?.rev && meta.savedAt > meta.syncedAt)) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
-    return 'unchanged';
-  }
-  const dirty = !!meta?.rev && meta.savedAt > meta.syncedAt;
-  if (meta?.rev && head.rev === meta.rev) {
-    if (dirty) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
     return 'unchanged';
   }
   let takeCloud: boolean;

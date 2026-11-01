@@ -11,10 +11,12 @@ const FishQualityContext = createContext<{ state: FishQualityState; sources: (fi
 /** Owned by the authenticated app shell, outside the route boundary and collapsible panels. */
 export function FishQualityProvider({ owner, children, run = runPageFishQuality }: { owner?: string; children: ReactNode; run?: QualityRunner }) {
   const [input, setInput] = useState({ fish: EMPTY, library: EMPTY });
+  const [requested, setRequested] = useState(false);
   const [mined,setMined]=useState<readonly TradeSignal[]>(EMPTY);
-  useEffect(()=>{let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(r=>({...r.signal,mined:{...r.signal.mined,anchorMs:r.anchorMs}} as TradeSignal)));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner]);
-  const state = useFishQuality(owner, input.fish, run, input.library,mined);
+  useEffect(()=>{if (!requested) return;let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(r=>({...r.signal,mined:{...r.signal.mined,anchorMs:r.anchorMs}} as TradeSignal)));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner,requested]);
+  const state = useFishQuality(owner, input.fish, run, input.library,mined, requested);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[]) => {
+    setRequested(true);
     setInput(prior => prior.fish === fish && prior.library === library ? prior : { fish, library });
   }, []);
   const location = useLocation();

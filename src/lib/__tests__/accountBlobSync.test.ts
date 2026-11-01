@@ -66,6 +66,14 @@ beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.stat
 afterEach(() => { vi.useRealTimers(); });
 
 describe('accountBlobSync', () => {
+  it('checks an unchanged cloud revision without reading another full local research snapshot', async () => {
+    const a = await device({ items: [1, 2, 3] });
+    await a.reopen();
+    const read = vi.spyOn(a.adapter, 'read');
+    a.mod.__startNewPageForTests();
+    expect(await a.mod.syncAccountBlobOnLoad(a.adapter, 'u1')).toBe('unchanged');
+    expect(read).not.toHaveBeenCalled();
+  });
   it('uploads existing local data when the account has none, and a new device gets it back intact', async () => {
     const a = await device({ items: [1, 2, 3], map: new Map([['x', 1]]), nan: Number.NaN });
     await a.reopen();

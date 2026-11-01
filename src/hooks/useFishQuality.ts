@@ -22,7 +22,7 @@ import {migrateQualitySourceRows} from '@/lib/fish/quality';
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
 const NO_SIGNALS: readonly TradeSignal[] = [];
-export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS) {
+export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true) {
   const definitions = useFeatureDefinitions();
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [archiving,setArchiving]=useState(false),archiveLock=useRef(false);
@@ -66,6 +66,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     setTimeout(() => { if (readyRef.current && epoch === generation.current && revision === intentRevision.current) action(); }, delay);
   }, []);
   useEffect(() => {
+    if (!enabled) return;
     let active = true, loaded = false; const epoch = ++generation.current;
     archiveLock.current=false;setArchiving(false);
     readyRef.current = false; rerun.current = false; selectionApproved.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
@@ -87,7 +88,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };
     window.addEventListener('pagehide', flush);
     return () => { void monitorFinalizer.current?.('paused', false); active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; filterController.current?.abort(); filterController.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
-  }, [owner]);
+  }, [owner, enabled]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
     const next = syncQualitySellDefinitions(current.current, definitions);

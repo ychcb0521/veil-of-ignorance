@@ -17,6 +17,15 @@ beforeEach(() => {
   vi.stubGlobal('indexedDB', { open() { const req: any = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('shares concurrent study reads but releases the snapshot before the next read', async () => {
+  const store = await import('@/lib/fish/qualityStore');
+  await store.saveQualityStudy('shared-read', newQualityStudy(100));
+  const first = store.loadQualityStudy('shared-read'), second = store.loadQualityStudy('shared-read');
+  expect(second).toBe(first);
+  const before = await first;
+  await store.saveQualityStudy('shared-read', { ...before.study, observeHours: 72 });
+  expect((await store.loadQualityStudy('shared-read')).study.observeHours).toBe(72);
+});
 it('reloads full independent restart snapshots after newer results, stale saves and remote merges',async()=>{
  const store=await import('@/lib/fish/qualityStore'),s=archiveQualityMonitorStudy(monitorArchiveFixture(),ARCHIVE_T+4000000),frozen=structuredClone(s.monitorLibrary!.archives![0]);expect(await store.saveQualityStudy('archive',s)).toBe(true);
  const newer={...s,results:s.results.map(r=>({...r,returnPct:-7}))};await store.saveQualityStudy('archive',newer);await store.saveQualityStudy('archive',{...newer,monitorLibrary:{...newer.monitorLibrary!,archives:[]}});await store.qualityAccountBlob.mergeRemote!('archive',{...newer,monitorLibrary:{...newer.monitorLibrary!,archives:[]}});

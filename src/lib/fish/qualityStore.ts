@@ -30,16 +30,30 @@ function valid(value: unknown): value is FishQualityStudy {
     && Array.isArray(v.samples) && Array.isArray(v.groups) && Array.isArray(v.results);
 }
 /** 纠错已停用：读出来的记录一律先结束纠错（已核验的保留，其余恢复原样），见 stopQualityRepair。 */
-export async function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
-  const loaded = await loadQualityStudyRaw(owner);
-  return { ...loaded, study: stopQualityRepair(loaded.study, Date.now()) };
+const pendingReads = new Map<string, Promise<{ study: FishQualityStudy; warning?: string }>>();
+export function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
+  const key = keyOf(owner), pending = pendingReads.get(key);
+  if (pending) return pending;
+  const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: stopQualityRepair(loaded.study, Date.now()) }));
+  pendingReads.set(key, task);
+  const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };
+  void task.then(release, release);
+  return task;
+}
+/** Synchronize before a read; the campaign worker opens the durable copy itself. */
+export async function prepareQualityCampaignRead(owner?: string): Promise<{ durable: boolean; warning?: string }> {
+  const syncStatus = await syncAccountBlobOnLoad(qualityAccountBlob, owner, 180_000);
+  const warning = syncStatus === 'timed_out' ? '账号研究恢复超时，原数据仍保留，请重试。'
+    : syncStatus === 'failed' ? '账号研究恢复失败，原数据仍保留，请重试。' : undefined;
+  await writes.get(keyOf(owner));
+  // Legacy fallback may be newer than IndexedDB; retain its existing merge path.
+  let legacy = false;
+  try { legacy = localStorage.getItem(keyOf(owner)) != null; } catch { /* durable storage can still work */ }
+  return { durable: !legacy && typeof indexedDB !== 'undefined', warning };
 }
 async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   // 【用户要求】2026-10-27 鱼质量研究跟账号走：先和云端对一次账（换电脑登录也能看到），再读本机。
-  const syncStatus=await syncAccountBlobOnLoad(qualityAccountBlob, owner,180_000);
-  const recoveryError=syncStatus==='timed_out'?'账号研究恢复超时，原数据仍保留，请重试。':syncStatus==='failed'?'账号研究恢复失败，原数据仍保留，请重试。':undefined;
-  // A detail link can open immediately after the evaluator unmounts and flushes.
-  await writes.get(keyOf(owner));
+  const {warning: recoveryError} = await prepareQualityCampaignRead(owner);
   let fallback: unknown;
   try { fallback = JSON.parse(localStorage.getItem(keyOf(owner)) ?? 'null'); } catch { /* durable copy still works */ }
   try {
