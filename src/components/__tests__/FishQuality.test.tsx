@@ -733,6 +733,8 @@ it('places run state second and bulk-selects only pending entries under the curr
   expect(header.parentElement!.children[1]).toBe(header);
   const aCell = within(screen.getAllByTestId('quality-fish-row').find(r=>r.textContent!.includes('AAAUSDT'))!).getByTestId('quality-run-state-cell');
   expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveAttribute('aria-label','已完成'); expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent(/^1$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent(/^0$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveAttribute('aria-label','未运行');
+  // 【用户要求】2026-11-01 运行状态只显示 0 和 1：单元格里没有「过滤 / 监测」字样和进度分数，字样在表头
+  expect(aCell).toHaveTextContent(/^10$/);expect(within(header).getByTestId('quality-run-state-parts')).toHaveTextContent('过滤监测');
   fireEvent.click(screen.getByRole('button',{name:'运行状态筛选与批量选取'}));
   const picker = screen.getByTestId('quality-run-state-picker');
   fireEvent.change(within(picker).getByLabelText('运行状态的工作步骤'),{target:{value:'filter'}});
@@ -806,7 +808,7 @@ it('places folded capture values after ratings, aligns each detector reading aft
  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-detector-value-cell')).toHaveTextContent('3 项');
  fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
  expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
- for(const text of ['12.5','0','-8.4'])expect(within(screen.getByTestId('quality-fish-table')).getByText(text,{exact:true})).toBeInTheDocument();
+ for(const text of ['12.5','0','-8.4'])expect(within(screen.getByTestId('quality-fish-table')).getAllByText(text,{exact:true}).filter(el=>!el.closest('[data-testid="quality-run-state-cell"]'))).toHaveLength(1);
  fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^12.5/);
  fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^-8.4/);
  fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(s.setSelectedRows).not.toHaveBeenCalled();
