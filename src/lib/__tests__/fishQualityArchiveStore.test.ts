@@ -78,3 +78,14 @@ it('keeps only directory entries in memory after a restart is saved', async () =
   expect(inline(archives.stripStoredQualityArchiveBodies('memory', archived))).toBe(0);
   expect(inline(archives.stripStoredQualityArchiveBodies('someone-else', archived))).toBe(1);
 });
+
+it('records result counts on directory entries and backfills entries migrated before counts existed', async () => {
+  const store = await import('@/lib/fish/qualityStore');
+  await store.qualityAccountBlob.write('counted', legacyStudy());
+  const slim = disk.get('fish-quality:counted') as FishQualityStudy;
+  expect(slim.monitorLibrary!.archives!.every(a => !a.study && Number.isFinite(a.resultCount))).toBe(true);
+  const uncounted = { ...slim, monitorLibrary: { ...slim.monitorLibrary!, archives: slim.monitorLibrary!.archives!.map(({ resultCount: _n, ...a }) => a) } };
+  disk.set('fish-quality:counted', uncounted);
+  await store.backfillQualityArchiveCounts('counted', uncounted);
+  expect((disk.get('fish-quality:counted') as FishQualityStudy).monitorLibrary!.archives!.map(a => a.resultCount)).toEqual(slim.monitorLibrary!.archives!.map(a => a.resultCount));
+});

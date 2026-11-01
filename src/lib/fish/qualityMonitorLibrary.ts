@@ -83,7 +83,11 @@ export type QualityMonitorArchiveStudy=Omit<FishQualityStudy,'monitorLibrary'|'f
  * study = 归档时整张总表的独立快照（约 40 MB）。保存时正文移到单独的归档库（qualityArchiveStore），
  * 总表里只留没有 study 的目录项；需要看时用 loadQualityMonitorArchive 按需读出。
  */
-export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart'|'copy'|'copy-source';sourceRoundId?:string;study?:QualityMonitorArchiveStudy}
+export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart'|'copy'|'copy-source';sourceRoundId?:string;study?:QualityMonitorArchiveStudy;
+  /** 目录显示用的运行结果数：正文移走时记下，目录不必为它读正文。 */
+  resultCount?:number}
+/** 目录里的「N 项运行结果」：正文在就数正文，不在就用目录里记下的数；都没有返回 null（只读目录项时绝不能去碰 study）。 */
+export function qualityMonitorArchiveResultCount(archive:QualityMonitorArchive):number|null{return archive.study?archive.study.results.length:Number.isFinite(archive.resultCount)?archive.resultCount!:null;}
 /** Save the whole current table, including rows outside today's filters/selection. */
 export function archiveQualityMonitorStudy(study:FishQualityStudy,at=Date.now(),reason:QualityMonitorArchive['reason']='restart'):FishQualityStudy{
   if(reason==='restart'&&!study.results.length&&!study.campaignRuns?.length)return study;

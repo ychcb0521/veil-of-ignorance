@@ -12,6 +12,7 @@
 import type { FishQualityStudy } from './quality';
 import type { QualityMonitorArchive, QualityMonitorArchiveStudy } from './qualityMonitorLibrary';
 import { applyArchiveSourceDeletions } from './libraryDeletion';
+import { compactQualityRuns } from './qualityStudyCompact';
 import { noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 const DATABASE = 'veil-fish-quality-archives-v1', STORE = 'bodies';
@@ -88,7 +89,7 @@ export function qualityArchiveBodyBlob(id: string): AccountBlobAdapter<QualityMo
 
 const hasInlineBody = (study: FishQualityStudy | undefined) => !!study?.monitorLibrary?.archives?.some(a => a.study);
 export const qualityStudyHasInlineArchives = hasInlineBody;
-const directoryEntry = ({ study: _body, ...entry }: QualityMonitorArchive): QualityMonitorArchive => entry;
+const directoryEntry = ({ study, ...entry }: QualityMonitorArchive): QualityMonitorArchive => study ? { ...entry, resultCount: study.results.length } : entry;
 
 /** 已确认存进归档库的正文从总表里拿掉，只留目录；其余原样。 */
 export function stripStoredQualityArchiveBodies(owner: string | null | undefined, study: FishQualityStudy): FishQualityStudy {
@@ -114,7 +115,7 @@ export async function detachQualityArchiveBodies(owner: string | null | undefine
     if (!archive.study || ids.has(archive.id)) continue;
     try {
       if (!(await hasBody(owner, archive.id))) {
-        await putBody(owner, archive.id, archive.study);
+        await putBody(owner, archive.id, compactQualityRuns(archive.study));
         if (owner) noteAccountBlobSaved(qualityArchiveBodyBlob(archive.id), owner);
       }
       ids.add(archive.id);
@@ -154,6 +155,11 @@ export function syncStoredQualityArchiveBodies(owner: string | null | undefined,
   })();
   uploads.set(owner, task);
   return task;
+}
+
+/** 本机归档库里那份正文的运行结果数；没有正文返回 undefined。用于给早先迁移、还没记数的目录项补数。 */
+export async function readStoredQualityArchiveResultCount(owner: string | null | undefined, id: string): Promise<number | undefined> {
+  try { return (await getBody(owner, id))?.results.length; } catch { return undefined; }
 }
 
 export function __resetQualityArchiveStoreForTests(): void { stored.clear(); blobs.clear(); uploads.clear(); }

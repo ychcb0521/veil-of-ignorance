@@ -21,3 +21,12 @@ it('offers copying only within an opened entry and closes after a durable succes
 it('keeps the archive open and reports an unsuccessful copy without claiming completion',async()=>{
  const study=archived(),copy=vi.fn().mockResolvedValue(false);render(<FishMonitorLibrary study={study} renderStudy={renderStudy} onCopyStudy={copy}/>);fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+study.monitorLibrary!.archives![0].id}));fireEvent.click(screen.getByRole('button',{name:'复制到持仓监测'}));expect(await screen.findByRole('alert')).toHaveTextContent('当前总表仍保留');expect(screen.getByRole('dialog')).toBeInTheDocument();
 });
+it('lists directory-only archives (body stored separately) without touching the body, and loads the body when opened',async()=>{
+ const full=archived(),entry=full.monitorLibrary!.archives![0],{study:body,...stub}=entry,count=body!.results.length;
+ const withCount={...full,monitorLibrary:{...full.monitorLibrary!,archives:[{...stub,resultCount:count}]}},bare={...full,monitorLibrary:{...full.monitorLibrary!,archives:[stub]}};
+ const load=vi.fn().mockResolvedValue(body),view=render(<FishMonitorLibrary study={withCount} renderStudy={renderStudy} loadArchive={load}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));expect(screen.getByText(`${count} 项运行结果`)).toBeInTheDocument();expect(load).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+stub.id}));expect(await screen.findByText('冻结总表')).toBeInTheDocument();expect(load).toHaveBeenCalledWith(expect.objectContaining({id:stub.id}));
+ view.rerender(<FishMonitorLibrary study={bare} renderStudy={renderStudy} loadArchive={vi.fn().mockRejectedValue(new Error('这份归档的正文不在本机'))}/>);
+ expect(screen.getByText('完整快照')).toBeInTheDocument();
+});

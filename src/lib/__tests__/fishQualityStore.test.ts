@@ -29,7 +29,7 @@ it('shares concurrent study reads but releases the snapshot before the next read
 it('reloads full independent restart snapshots after newer results, stale saves and remote merges',async()=>{
  const store=await import('@/lib/fish/qualityStore'),s=archiveQualityMonitorStudy(monitorArchiveFixture(),ARCHIVE_T+4000000),frozen=structuredClone(s.monitorLibrary!.archives![0]);expect(await store.saveQualityStudy('archive',s)).toBe(true);
  const newer={...s,results:s.results.map(r=>({...r,returnPct:-7}))};await store.saveQualityStudy('archive',newer);await store.saveQualityStudy('archive',{...newer,monitorLibrary:{...newer.monitorLibrary!,archives:[]}});await store.qualityAccountBlob.mergeRemote!('archive',{...newer,monitorLibrary:{...newer.monitorLibrary!,archives:[]}});
- const restored=(await store.loadQualityStudy('archive')).study,{study:frozenBody,...directory}=frozen;expect(restored.monitorLibrary!.archives).toEqual([directory]);expect(restored.results[0].returnPct).toBe(-7);
+ const restored=(await store.loadQualityStudy('archive')).study,{study:frozenBody,...directory}=frozen;expect(restored.monitorLibrary!.archives).toEqual([{...directory,resultCount:frozenBody!.results.length}]);expect(restored.results[0].returnPct).toBe(-7);
  // 正文单独存放：总表只留目录，打开时按需读出，仍是重算前那份独立快照。
  const {loadQualityMonitorArchive}=await import('@/lib/fish/qualityArchiveStore'),body=await loadQualityMonitorArchive('archive',restored.monitorLibrary!.archives![0],restored);expect(body).toEqual(frozenBody);expect(body.results[0].returnPct).toBe(10);expect((await store.loadQualityStudy('other')).study.monitorLibrary?.archives).toBeUndefined();
 });
