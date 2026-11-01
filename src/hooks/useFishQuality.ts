@@ -19,7 +19,7 @@ import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/quality
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
 import { beginQualityFilterRound, finishQualityFilterRound, recoverQualityFilterRounds } from '@/lib/fish/qualityFilterLibrary';
 import { archiveQualityMonitorStudy, adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds } from '@/lib/fish/qualityMonitorLibrary';
-import {migrateQualitySourceRows} from '@/lib/fish/quality';
+import {migrateQualitySourceRows,type QualityRunTiming} from '@/lib/fish/quality';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
@@ -147,9 +147,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const releaseNotifications = beginHistoryOnlyNotifications();
     aborter.signal.addEventListener('abort', releaseNotifications, { once: true });
     setRunning(true); setError('');
+    const timings: QualityRunTiming[] = [], startedAt = performance.now();
     setProgress({ done: 0, total: frozen.sellPlans ? frozenSamples.size * qualityRunGroups(frozen).length : frozen.samples.reduce((total, s) => total + s.groups.length, 0), current: '' });
     try {
-      await latestRun.current({ study: frozen, signal: aborter.signal, mode, task: 'monitor', priority: () => priorityRef.current,
+      await latestRun.current({ study: frozen, signal: aborter.signal, mode, task: 'monitor', priority: () => priorityRef.current, onTiming: t => { timings.push(t); },
         onProgress: p => { if (epoch === generation.current && revision === intentRevision.current && !aborter.signal.aborted) setProgress(p); },
         onFilterReading: reading => {
           if (epoch !== generation.current || revision !== intentRevision.current || aborter.signal.aborted || !readingKeys.has(reading.key)) return;
@@ -173,6 +174,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       await finish('complete');
     } catch (e) { if (epoch === generation.current && revision === intentRevision.current && !aborter.signal.aborted) setError(e instanceof Error ? e.message : '评估失败'); await finish(aborter.signal.aborted ? 'paused' : 'failed', true, e instanceof Error ? e.message : '评估失败'); }
     finally {
+      reportQualityRunTimings(timings, performance.now() - startedAt);
       aborter.signal.removeEventListener('abort', savePartial);
       aborter.signal.removeEventListener('abort', releaseNotifications); releaseNotifications();
       if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { const queued = rerun.current; rerun.current = false; defer(() => void start(true, queued === 'refresh' ? undefined : queued), 0); } } }
@@ -353,3 +355,14 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
 export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'>>;
+
+/**
+ * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，
+ * 慢的时候打开浏览器控制台就能看到是哪几笔拖慢。2026-11-01 用户要求「增加一些调试信息」。
+ */
+function reportQualityRunTimings(timings: readonly QualityRunTiming[], wallMs: number) {
+  if (!timings.length) return;
+  const total = timings.reduce((n, t) => n + t.ms, 0), slow = [...timings].sort((a, b) => b.ms - a.ms).slice(0, 5);
+  try { (window as unknown as { __veilQualityTimings?: unknown }).__veilQualityTimings = { wallMs, timings: [...timings] }; } catch { /* 只读环境忽略 */ }
+  console.info(`[持仓监测] ${timings.length} 笔 · 用时 ${(wallMs / 1000).toFixed(1)}s（各笔累计 ${(total / 1000).toFixed(1)}s，平均 ${(total / timings.length / 1000).toFixed(1)}s）· 最慢：${slow.map(t => `${t.symbol} ${(t.ms / 1000).toFixed(1)}s`).join('，')}`);
+}

@@ -619,7 +619,14 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
   }
 }
 export interface QualityProgress { done: number; total: number; current: string }
+/** 持仓监测同时计算的行数：取数是瓶颈（逐个等交易所返回），并行能把等待叠起来；请求总量仍由限频预算控制。 */
+export const QUALITY_CONCURRENCY = 4, QUALITY_CONCURRENCY_MAX = 8;
+export interface QualityRunTiming { sampleId: string; groupId: string; symbol: string; ms: number }
 export interface QualityRunOptions {
+  /** 同时计算的行数（默认 QUALITY_CONCURRENCY）。 */
+  concurrency?: number;
+  /** 每笔评估的用时（调试与耗时统计用）。 */
+  onTiming?: (t: QualityRunTiming) => void;
   study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void;
   /** Filter modes reuse saved trades; restart replays selected sell experiments from entry, including completed results. */
   mode?: 'filter' | 'filter-only' | 'restart';
@@ -700,24 +707,35 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     const state = qualityFilterStatus(study, row, plan, readings).state;
     return state === 'none' || state === 'pass';
   };
-  let done = 0;
-  for (let batch = next(); batch; batch = next()) {
-    // 买入过滤只作用于比较卖出：没买入的行仍按「比较探测」固定的那套卖出方案评估
-    const kept: typeof batch = [];
-    for (const task of batch) { const bought = await passes(task.s, task.g); if (task.g.id === study.selectedSellId || bought) kept.push(task); }
-    if (kept.length < batch.length) { done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' }); }
-    batch = kept; if (!batch.length) continue;
-    for (const { s, g } of batch) {
-    abort(signal);
-    options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
-    const cached = previous.get(qualityResultKey(s, g, study.observeHours));
-    if (filtersOnly || options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
-    const finished = cached?.complete || cached?.status === 'closed' && Number.isFinite(cached.returnPct);
-    if (!finished && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
-    done++;
-    await new Promise(resolve => setTimeout(resolve, 0));
+  let done = 0, failure: unknown;
+  // 【用户要求】2026-11-01「持仓监测批量运行好慢」：实测 3 笔 19 秒里 74% 在逐个等币安返回 K 线（每次约 0.3 秒，一次只发一个）。
+  // 改为同时算几行（同一行的几套卖出方案仍连着算，共用刚取到的 K 线）；请求总量仍受同一个限频预算约束。
+  const worker = async () => {
+    for (let batch = failure === undefined ? next() : undefined; batch; batch = failure === undefined ? next() : undefined) {
+      // 买入过滤只作用于比较卖出：没买入的行仍按「比较探测」固定的那套卖出方案评估
+      const kept: typeof batch = [];
+      for (const task of batch) { const bought = await passes(task.s, task.g); if (task.g.id === study.selectedSellId || bought) kept.push(task); }
+      if (kept.length < batch.length) { done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' }); }
+      batch = kept; if (!batch.length) continue;
+      for (const { s, g } of batch) {
+        abort(signal);
+        options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
+        const cached = previous.get(qualityResultKey(s, g, study.observeHours));
+        if (filtersOnly || options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
+        const finished = cached?.complete || cached?.status === 'closed' && Number.isFinite(cached.returnPct);
+        if (!finished && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) {
+          const t = performance.now(), result = await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached);
+          options.onTiming?.({ sampleId: s.id, groupId: g.id, symbol: s.source.symbol, ms: performance.now() - t });
+          options.onResult(result);
+        }
+        done++;
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     }
-  }
+  };
+  const lanes = Math.max(1, Math.min(QUALITY_CONCURRENCY_MAX, Math.floor(options.concurrency ?? QUALITY_CONCURRENCY)));
+  await Promise.all(Array.from({ length: lanes }, () => worker().catch(error => { failure ??= error; })));
+  if (failure !== undefined) throw failure;
   options.onProgress({ done, total: tasks.length, current: '' });
 }
 export function qualityGroupSummary(study: FishQualityStudy, group: QualityGroup) {

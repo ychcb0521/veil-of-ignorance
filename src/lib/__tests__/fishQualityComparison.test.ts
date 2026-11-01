@@ -152,10 +152,28 @@ it('evaluates rows in the on-screen order, re-reads that order after every row a
   const load = vi.fn(async (_r, from: number, cut: number, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
   const order: string[] = [], last = rows.at(-1)!.id, second = rows.at(-2)!.id;
   let priority: string[] = [last];
-  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), priority: () => priority,
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), priority: () => priority, concurrency: 1,
     onResult: r => { order.push(r.sampleId); if (order.length === 2) priority = [second, last]; } }, load, T + 10 * M);
   const rowsInOrder = order.filter((id, i) => order[i - 1] !== id);
   expect(rowsInOrder.slice(0, 2)).toEqual([last, second]);
   expect(order.slice(0, 4)).toEqual([last, last, second, second]);
   expect(new Set(order).size).toBe(rows.length); expect(order).toHaveLength(rows.length * 2);
+});
+
+// 【用户要求】2026-11-01「持仓监测批量运行好慢」：几行同时算（等交易所返回时不再空等），仍按界面顺序开始、每行只算一次。
+it('runs several rows at once, starting them in on-screen order, and evaluates every row exactly once', async () => {
+  const s = importQualityLibrary(study(), ['AAAUSDT', 'BBBUSDT', 'CCCUSDT', 'DDDUSDT', 'EEEUSDT'].map(symbol => libSignal(symbol)), T + 2 * M), rows = qualityComparisonRows(s);
+  s.selectedRowIds = rows.map(r => r.id);
+  const started: string[] = [];
+  let inFlight = 0, peak = 0;
+  const load = vi.fn(async (r: { symbol: string }, from: number, cut: number, plan: { step: number }) => {
+    if (!started.includes(r.symbol)) started.push(r.symbol);
+    inFlight++; peak = Math.max(peak, inFlight); await new Promise(resolve => setTimeout(resolve, 5)); inFlight--;
+    return Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 }));
+  });
+  const priority = [...rows].reverse().map(r => r.id), results: string[] = [];
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), priority: () => priority, concurrency: 3, onResult: r => results.push(r.sampleId + '|' + r.groupId) }, load, T + 10 * M);
+  expect(peak).toBeGreaterThan(1);
+  expect(started.slice(0, 3)).toEqual([...rows].reverse().slice(0, 3).map(r => r.source.symbol));
+  expect(new Set(results).size).toBe(results.length); expect(results).toHaveLength(rows.length * (s.sellPlans?.length ?? 1));
 });
