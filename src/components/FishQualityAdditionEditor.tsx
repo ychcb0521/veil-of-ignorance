@@ -16,7 +16,7 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
  *   方向（必要不充分：时机那一刻须全部满足，可选指标与涨幅门槛；用户 2026-11-01 定名「方向」，代码里仍叫 prerequisites）、
  *   位置（必要充分：达到即加仓，主要用箱体 DBL / SBS；用户定名「位置」，代码里仍按 source/structure 存）、
  *   卖出（必要充分：碰到均衡线 K、可不断添加的否决条件——存为方案的 vetoStages，以及可选的「本次加仓后改用的卖出算法」）。
- * 2026-11-01 用户：位置 = 截图里的算法 + 一行「K ≤ S − n×ATR」（S 为箱体支撑，K 为计算加仓量的 K）；原「入场距离 T ≥ S＋n×ATR」删除；
+ * 2026-11-01 用户：位置 = 截图里的算法 + 一行「K ≤ C − n×ATR」（C 为箱体支撑，用 C 是为了不和成本线 S 混淆；K 为计算加仓量的 K）；原「入场距离 T ≥ S＋n×ATR」删除；
  * 卖出 =「一条条终止条件，像硬性终止那样可不断增加，如碰到 K 卖出、5 分钟回撤超 10% 卖出」。
  * 数据沿用原格式：自选指标时机的方向条件仍是 conditions[1..]；箱体 / 原探测时机的存 prerequisites；
  * 「本次加仓后改用的卖出算法」就是方案的 sellStages（afterAdditions = 第几次）。
@@ -124,7 +124,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-2">
    <p>箱体位置：只在 5 分钟收盘确认事件后、下一分钟开盘模拟加仓；每个箱体最多加仓一次，候选箱体不参与。{d.structure.algorithm==='dbl5'?'DBL-5 的「支撑抬高」包含完整台阶与内部箱底抬高。':'SBS-5M 的确认已包含冻结后的独立测试；回踩只用正式支撑的再次测试成功事件。'}</p>
    <p>自选指标：读数越过门槛即触发。原探测算法：任一原探测算法以更严格的门槛再次命中即触发（调整量为原门槛绝对值 × 百分比，原门槛为 0 时按 1 个单位）。</p>
-   <p>K 是计算加仓量用的 K（本次均衡线，也是加仓后的止损线）。{box?'S 为箱体算法找到的支撑（已确认的箱体下轨；SBS 旧设置可能取固定失效线）；K＝S − n×5 分钟 ATR(14)，再向下对齐报价步长，所以 K ≤ S − n×ATR。新 K 不得低于上一次的 K，否则这次不加仓。':'非箱体位置没有支撑 S，K＝加仓价 T − n×5 分钟 ATR(14)。'}加仓币数由均衡公式唯一确定：持仓币数 ×（K − 成本线）＋本轮可用落袋利润＝新增币数 ×（T − K）。K 越低，同一位置可加的币数通常越少。</p>
+   <p>K 是计算加仓量用的 K（本次均衡线，也是加仓后的止损线）。{box?'C 为箱体算法找到的支撑（已确认的箱体下轨；SBS 旧设置可能取固定失效线）；K＝C − n×5 分钟 ATR(14)，再向下对齐报价步长，所以 K ≤ C − n×ATR。新 K 不得低于上一次的 K，否则这次不加仓。':'非箱体位置没有支撑 C，K＝加仓价 T − n×5 分钟 ATR(14)。'}加仓币数由均衡公式唯一确定：Q×（K − S）＋本轮可用落袋利润＝新增币数 ×（T − K），S 为成本线、Q 为加仓前持币数。K 越低，同一位置可加的币数通常越少。</p>
   </div>}>
    <div className="grid grid-cols-2 gap-2">
     <label className="space-y-1 text-[10px] text-muted-foreground">位置算法<select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs)}:{})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">自选指标</option><option value="detector">原探测算法再次命中</option></select></label>
@@ -133,7 +133,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    {box&&<label className="flex items-center gap-2 text-[11px] text-muted-foreground">触发事件<select aria-label="箱体加仓时机" className={field+' flex-1'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></label>}
    {d.source==='custom'&&indicator(d,'加仓{x}',change=>patch(change))}
    {d.source==='detector'&&<label className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">沿原探测方向提高门槛<input aria-label="加仓门槛提高幅度" type="number" step="any" min="0" disabled={!d.enabled} value={d.stricterPct} onChange={e=>patch({stricterPct:e.target.value})} className={field+' w-20'}/>%</label>}
-   {box?<label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K ≤ S −</span><input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">{d.structure.bufferUnit==='percent'?'% × S':'× ATR'}</span></label>
+   {box?<label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K ≤ C −</span><input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</span></label>
    :<label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K ＝ T −</span><input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">× ATR</span></label>}
   </Part>
 

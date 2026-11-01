@@ -69,11 +69,11 @@ it('rejects missing, negative or non-finite formula distances, and a zero suppor
  expect(()=>parseAdditionDraft({...draft,supportOffsetAtr:'.5'},BUILTIN_FEATURES)).not.toThrow();
 });
 
-// 【用户要求】2026-11-01 位置只有算法 + 一行「K ≤ S − n×ATR」：S 为箱体支撑，n 存为箱体冗余（单位 ATR）。
-it('offers native box timing and K ≤ S − n×ATR with an independent saved choice for each round',()=>{
+// 【用户要求】2026-11-01 位置只有算法 + 一行「K ≤ C − n×ATR」：C 为箱体支撑（不用 S，免得和成本线 S 混淆），n 存为箱体冗余（单位 ATR）。
+it('offers native box timing and K ≤ C − n×ATR with an independent saved choice for each round',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});
  expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.5);expect(screen.queryByLabelText('K回撤ATR倍数')).not.toBeInTheDocument();
- expect(screen.getByTestId('addition-timing')).toHaveTextContent('K ≤ S −');expect(screen.queryByLabelText('箱体K基准')).toBeNull();expect(screen.queryByLabelText('箱体冗余单位')).toBeNull();
+ expect(screen.getByTestId('addition-timing')).toHaveTextContent('K ≤ C −');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤ S');expect(screen.queryByLabelText('箱体K基准')).toBeNull();expect(screen.queryByLabelText('箱体冗余单位')).toBeNull();
  fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.75'}});
  fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'structure'}});fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
  fireEvent.click(screen.getByRole('button',{name:'验证保存'}));const saved=JSON.parse(document.querySelector('output')!.textContent!);
