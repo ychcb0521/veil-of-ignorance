@@ -10,6 +10,7 @@ import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
  */
 
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { CircleHelp, Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP, type CustomPaneVisibility } from '@/lib/customIndicators';
@@ -248,6 +249,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string | null>('custom');
   const panelRef = useRef<HTMLDivElement>(null);
+  /** 原位置的定位点：菜单本体浮在页面最外层，按它对齐「指标」按钮。 */
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [floating, setFloating] = useState(false);
   const positionRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
   const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -299,20 +303,30 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     };
   }, [open, onClose]);
 
-  // The menu is anchored to the chart toolbar, which sits left of the price axis.
-  // A viewport-wide max width can therefore still clip the menu behind the chart edge.
+  /**
+   * 【用户要求】2026-11-01「指标表卡上端可以叉掉的部位被挡住了」：菜单原先放在图表容器里（overflow-hidden），
+   * 只按视口夹位置——页面往下滚时菜单被往上推出图表边界，标题栏和关闭按钮被裁掉、再被页面固定标题栏盖住。
+   * 现在图表里的菜单挂到 body（fixed、最上层），按原位置的定位点对齐，并整张夹在视口内：标题栏始终可见，
+   * 太高时只让列表滚动。页面滚动、缩放时跟着定位点重新摆放；拖动偏移保留并重新夹在视口内。
+   */
   useLayoutEffect(() => {
-    if (!open || !panelRef.current) return;
-    const panel = panelRef.current;
-    const host = panel.closest<HTMLElement>('[data-chart-indicator-host]');
+    if (!open) { setFloating(false); return; }
+    setFloating(!!anchorRef.current?.closest('[data-chart-indicator-host]'));
+  }, [open]);
+  useLayoutEffect(() => {
+    if (!open || !floating || !panelRef.current || !anchorRef.current) return;
+    const panel = panelRef.current, anchor = anchorRef.current;
+    const host = anchor.closest<HTMLElement>('[data-chart-indicator-host]');
     if (!host) return;
     const fit = () => {
       panel.style.transform = 'none';
       const boundary = host.querySelector<HTMLElement>('[data-chart-indicator-boundary]') ?? host;
-      const boundaryLeft = Math.max(8, boundary.getBoundingClientRect().left + 8);
-      const rect = panel.getBoundingClientRect();
-      panel.style.maxWidth = `${Math.max(0, Math.min(384, rect.right - boundaryLeft))}px`;
-      panel.style.maxHeight = `${Math.max(0, Math.min(window.innerHeight - 16, boundary.getBoundingClientRect().bottom - rect.top - 8))}px`;
+      const at = anchor.getBoundingClientRect(), boundaryLeft = Math.max(8, boundary.getBoundingClientRect().left + 8);
+      panel.style.maxWidth = `${Math.max(0, Math.min(384, at.right - boundaryLeft))}px`;
+      panel.style.maxHeight = `${Math.max(0, window.innerHeight - 16)}px`;
+      const width = panel.getBoundingClientRect().width;
+      panel.style.left = `${at.right - width}px`;
+      panel.style.top = `${at.top}px`;
       const fitted = panel.getBoundingClientRect();
       const left = Math.max(8, Math.min(window.innerWidth - fitted.width - 8, fitted.left + positionRef.current.x));
       const top = Math.max(8, Math.min(window.innerHeight - fitted.height - 8, fitted.top + positionRef.current.y));
@@ -323,10 +337,10 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     const observer = new ResizeObserver(fit);
     observer.observe(host);
     observer.observe(panel);
-    if (panel.parentElement) observer.observe(panel.parentElement);
     window.addEventListener('resize', fit);
-    return () => { observer.disconnect(); window.removeEventListener('resize', fit); };
-  }, [open]);
+    window.addEventListener('scroll', fit, { capture: true, passive: true });
+    return () => { observer.disconnect(); window.removeEventListener('resize', fit); window.removeEventListener('scroll', fit, { capture: true }); };
+  }, [open, floating]);
 
 
   const availableCatalog = useMemo(() => [
@@ -402,10 +416,11 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
   const categories = ['custom', 'trend', 'momentum', 'volatility', 'volume', 'other'];
   const supportedCount = availableCatalog.filter(i => isSupported(i.id)).length;
 
-  return (
+  const panel = (
     <div
       ref={panelRef}
-      className="absolute right-0 top-10 z-[120] flex flex-col w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden origin-top"
+      data-indicator-menu-panel
+      className={`${floating ? 'fixed' : 'absolute right-0 top-10'} z-[120] flex flex-col w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden origin-top`}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -514,6 +529,10 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
       </div>
     </div>
   );
+  return <>
+    <span ref={anchorRef} aria-hidden data-indicator-menu-anchor className="pointer-events-none absolute right-0 top-10 h-0 w-0"/>
+    {floating && typeof document !== 'undefined' ? createPortal(panel, document.body) : panel}
+  </>;
 }
 
 const IndicatorRow = forwardRef<HTMLDivElement, {
