@@ -58,8 +58,8 @@ it('allows a veto-only sell plan to run and be fixed for detector comparison wit
  const s=state(),plan=s.study.sellPlans![0];plan.holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',5)];
  render(<FishQuality state={s}/>);
  const editor=screen.getByRole('button',{name:'设置状态 S 原始值卖出算法'});expect(editor).toHaveAttribute('title',expect.stringContaining('仅一票否决'));
- // 【用户要求】2026-11-01 卖出列表头只留四栏名称，与「静态最大回撤」同一行
- expect(screen.getAllByTestId('quality-sell-column')[0]).toHaveTextContent(/^加仓次数.*几何仓位.*相对涨幅.*进程/);
+ // 【用户要求】2026-11-01 卖出列表头只留三栏名称（进程已删），与「静态最大回撤」同一行
+ expect(screen.getAllByTestId('quality-sell-parts')[0]).toHaveTextContent(/^加仓次数.*几何仓位.*相对涨幅$/);
  fireEvent.click(editor);fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
  expect(s.selectSell).toHaveBeenCalledWith(plan.id);expect(screen.queryByRole('button',{name:'清除门槛'})).toBeNull();
  fireEvent.click(editor);
@@ -244,14 +244,15 @@ it('sorts each sell header by numeric return in both directions, keeps missing r
   render(<FishQuality state={s}/>);
   const symbols = () => screen.getAllByTestId('quality-fish-row').map(r => r.textContent);
   for (const label of ['状态 S 原始值', 'CDA 原始值']) {
-    fireEvent.click(screen.getByRole('button', { name: `按${label}收益率排序` }));
+    // 【用户要求】2026-11-01 卖出列不再有收益率栏（进程已删）：按同口径的首仓涨幅排序（本例出场价＝100＋收益率）
+    fireEvent.click(screen.getByRole('button', { name: `按${label}首仓涨幅排序` }));
     expect(symbols()[0]).toContain('GAIN'); expect(symbols().at(-1)).toContain('MISSING');
-    fireEvent.click(screen.getByRole('button', { name: `按${label}收益率排序` }));
+    fireEvent.click(screen.getByRole('button', { name: `按${label}首仓涨幅排序` }));
     expect(symbols()[0]).toContain('LOSS'); expect(symbols().at(-1)).toContain('MISSING');
   }
-  const link = screen.getAllByRole('link', { name: /已卖出/ })[0];
+  const link = screen.getAllByTestId('quality-sell-additions')[0].closest('a')!;
   expect(link.getAttribute('href')).toMatch(/^\/journal\/campaigns\/fish-sell-.*\?section=quality$/);
-  expect(screen.getAllByTestId('quality-sell-column')[1]).toHaveAttribute('aria-sort', 'ascending');
+  expect(screen.getAllByTestId('quality-price-change-header')[1]).toHaveAttribute('aria-sort', 'ascending');
 });
 
 // 【用户要求】2026-10-26 盈亏分布模块与卖出方案同步提示都删掉，盘面保持干净
@@ -310,19 +311,19 @@ it('sorts by every header, keeping empty values last in both directions', () => 
   s.study = importQualityLibrary(s.study, [{ id: 'l1', symbol: 'BBBUSDT', timeMs: T - 3600_000, timeLabel: '', fallbackZone: '', quality: 5 }, { id: 'l2', symbol: 'CCCUSDT', timeMs: T - 7200_000, timeLabel: '', fallbackZone: '', quality: 2 }]);
   const plan = s.study.sellPlans![0]; plan.rule = { metric: plan.metric, direction: '<', threshold: .5 };
   const rows = qualityComparisonRows(s.study), lib1 = rows.find(r => r.source.symbol === 'BBBUSDT')!, lib2 = rows.find(r => r.source.symbol === 'CCCUSDT')!;
-  s.study.results.push({ key: qualityResultKey(lib1, plan, 0), sampleId: lib1.id, groupId: plan.id, evaluatedAt: T, status: 'closed', returnPct: -3 }, { key: qualityResultKey(lib2, plan, 0), sampleId: lib2.id, groupId: plan.id, evaluatedAt: T, status: 'closed', returnPct: 8 });
+  s.study.results.push({ key: qualityResultKey(lib1, plan, 0), sampleId: lib1.id, groupId: plan.id, evaluatedAt: T, status: 'closed', returnPct: -3, entryTime: T, entryPrice: 100, endTime: T + 60_000, endPrice: 97 }, { key: qualityResultKey(lib2, plan, 0), sampleId: lib2.id, groupId: plan.id, evaluatedAt: T, status: 'closed', returnPct: 8, entryTime: T, entryPrice: 100, endTime: T + 60_000, endPrice: 108 });
   render(<FishQuality state={s}/>);
   const symbols = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
   for (const label of ['标的', '信号时间', '市场', '评分', '捕捞过程', '探测算法']) expect(screen.getByRole('button', { name: `按${label}排序` })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '按评分排序' })); expect(symbols()).toEqual(['BBBUSDT', 'CCCUSDT', 'AAAUSDT']);
   fireEvent.click(screen.getByRole('button', { name: '按评分排序' })); expect(symbols()).toEqual(['CCCUSDT', 'BBBUSDT', 'AAAUSDT']); // 无评分仍在最后
-  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' })); expect(symbols()).toEqual(['CCCUSDT', 'BBBUSDT', 'AAAUSDT']);
-  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' })); expect(symbols()).toEqual(['BBBUSDT', 'CCCUSDT', 'AAAUSDT']);
+  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值首仓涨幅排序' })); expect(symbols()).toEqual(['CCCUSDT', 'BBBUSDT', 'AAAUSDT']);
+  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值首仓涨幅排序' })); expect(symbols()).toEqual(['BBBUSDT', 'CCCUSDT', 'AAAUSDT']);
   fireEvent.click(screen.getByRole('button', { name: '按捕捞过程排序' })); expect(symbols()[0]).toBe('AAAUSDT');
   fireEvent.click(screen.getByRole('button', { name: '按标的排序' })); expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
   expect(screen.getByRole('columnheader', { name: /标的/ })).toHaveAttribute('aria-sort', 'ascending');
 });
-it('sorts sell returns among bought signals only; not-bought and pending rows stay last', async () => {
+it('sorts sell outcomes among bought signals only; not-bought and pending rows stay last', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
   const s = state();
@@ -330,10 +331,10 @@ it('sorts sell returns among bought signals only; not-bought and pending rows st
   const plan = s.study.sellPlans![0], f = makeQualityBuyFilter('state:state', '>', .7); plan.rule = { metric: plan.metric, direction: '<', threshold: .5 };
   const rows = qualityComparisonRows(s.study), by = (sym: string) => rows.find(r => r.source.symbol === sym)!;
   // BBB 收益最高但没买入，CCC 待判断，DDD 买入
-  s.study.results.push(...[['BBBUSDT', 50], ['CCCUSDT', 40], ['DDDUSDT', 1]].map(([sym, v]) => ({ key: qualityResultKey(by(sym as string), plan, 0), sampleId: by(sym as string).id, groupId: plan.id, evaluatedAt: T, status: 'closed' as const, returnPct: v as number })));
+  s.study.results.push(...[['BBBUSDT', 50], ['CCCUSDT', 40], ['DDDUSDT', 1]].map(([sym, v]) => ({ key: qualityResultKey(by(sym as string), plan, 0), sampleId: by(sym as string).id, groupId: plan.id, evaluatedAt: T, status: 'closed' as const, returnPct: v as number, entryTime: T, entryPrice: 100, endTime: T + 60_000, endPrice: 100 + (v as number) })));
   s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(by('BBBUSDT'), f), value: .1 }, { key: qualityFilterReadingKey(by('DDDUSDT'), f), value: .9 }] };
   render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' }));
+  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值首仓涨幅排序' }));
   expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('DDDUSDT');
 });
 it('links only sold or held trades to their campaign; a registered buy waiting for a threshold is not a link', () => {
@@ -343,8 +344,8 @@ it('links only sold or held trades to their campaign; a registered buy waiting f
     { key: qualityResultKey(row, cPlan, 0), sampleId: row.id, groupId: cPlan.id, evaluatedAt: T, status: 'waiting', entryTime: T, entryPrice: 10 });
   render(<FishQuality state={s}/>);
   const first = screen.getAllByTestId('quality-fish-row')[0];
-  expect(within(first).getByText('已卖出').closest('a')).not.toBeNull();
-  expect(within(first).getByText('待设卖出').closest('a')).toBeNull();
+  const [sold, waiting] = within(first).getAllByTestId('quality-sell-additions');
+  expect(sold.closest('a')).not.toBeNull(); expect(waiting.closest('a')).toBeNull();
 });
 it('replaces dynamic drawdown with peak gain and sorts each seller independently, preserving zero and missing values',()=>{
  const s=state();s.study=importQualityLibrary(s.study,['HIGH','LOW','MISSING'].map(symbol=>({id:symbol,symbol,timeMs:T,timeLabel:'',fallbackZone:''})));
@@ -468,9 +469,9 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   const peak = headers.findIndex(h => h.startsWith('峰值涨幅'));
   expect(headers[peak + 1]).toMatch(/^首仓涨幅/);
   expect(headers[peak + 2]).toMatch(/^半仓镜像/);
-  expect(headers[peak + 3]).toMatch(/^加仓次数/);
-  expect(headers[peak + 4]).toMatch(/^探测标签/);
-  expect(headers[peak + 5]).toMatch(/^持仓时间/);
+  // 2026-11-01 半仓镜像后重复的「加仓次数」列已删（卖出列里已有）
+  expect(headers[peak + 3]).toMatch(/^探测标签/);
+  expect(headers[peak + 4]).toMatch(/^持仓时间/);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
@@ -653,7 +654,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '22');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '20');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -794,7 +795,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  // 未启用镜像的方案也保留独立状态列，不能挤入探测标签。
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 11));
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 10));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
@@ -880,15 +881,17 @@ it('shows actual addition counts per plan, distinguishes unknown states, sorts c
  s.study={...importQualityLibrary(newQualityStudy(T),['NONE','ONE','MULTI','PENDING','ERROR'].map((symbol,i)=>({id:symbol,symbol:symbol+'USDT',timeMs:T-i*60000,timeLabel:'',fallbackZone:''}))),sellPlans:[p]};
  const rows=qualityComparisonRows(s.study),fill={at:T+60000,price:110,quantity:1,notional:110,reading:1,threshold:.8,direction:'>' as const,metric:'raw',label:'条件',scanFrom:T,barOpenTime:T};
  s.study.results=rows.filter(r=>r.source.symbol!=='PENDINGUSDT').map(r=>({key:qualityResultKey(r,p,0),sampleId:r.id,groupId:p.id,evaluatedAt:T+60000,status:r.source.symbol==='ERRORUSDT'?'error' as const:'open' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,...(r.source.symbol==='ONEUSDT'?{additionFill:fill}:r.source.symbol==='MULTIUSDT'?{additionFill:fill,additionFills:[fill,{...fill,at:T+120000},{...fill,at:T+180000}]}:{})}));
- render(<FishQuality state={s}/>);const cellFor=(symbol:string)=>within(screen.getAllByTestId('quality-fish-row').find(r=>within(r).queryByText(symbol,{exact:true}))!).getByTestId('quality-addition-count');
- expect(cellFor('NONEUSDT')).toHaveTextContent('未加仓');expect(cellFor('ONEUSDT')).toHaveTextContent('已加仓 1 次');expect(cellFor('MULTIUSDT')).toHaveTextContent('已加仓 3 次');expect(cellFor('PENDINGUSDT')).toHaveTextContent('待评估');expect(cellFor('ERRORUSDT')).toHaveTextContent('缺数据');
+ render(<FishQuality state={s}/>);const cellFor=(symbol:string)=>within(screen.getAllByTestId('quality-fish-row').find(r=>within(r).queryByText(symbol,{exact:true}))!).getByTestId('quality-sell-additions');
+ // 【用户要求】2026-11-01 半仓镜像后重复的「加仓次数」列已删，次数只在卖出列的「加仓次数」一栏
+ expect(screen.queryByTestId('quality-addition-header')).toBeNull();expect(screen.queryByTestId('quality-addition-count')).toBeNull();
+ expect(cellFor('NONEUSDT')).toHaveTextContent('0 次');expect(cellFor('ONEUSDT')).toHaveTextContent('1 次');expect(cellFor('MULTIUSDT')).toHaveTextContent('3 次');expect(cellFor('PENDINGUSDT')).toHaveTextContent('—');expect(cellFor('ERRORUSDT')).toHaveTextContent('—');
  fireEvent.click(screen.getByRole('button',{name:`按${p.label}加仓次数排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('MULTIUSDT');fireEvent.click(screen.getByRole('button',{name:`按${p.label}加仓次数排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('NONEUSDT');
  const {buildQualitySheets}=await import('@/lib/fish/qualityExport'),sheets=buildQualitySheets(s.study,rows),sheet=sheets[0],idx=sheet.columns.findIndex(c=>c.header===`${p.label} · 加仓次数`);expect(sheet.rows.find(r=>r[0]==='MULTIUSDT')![idx]).toBe(3);expect(sheet.rows.find(r=>r[0]==='PENDINGUSDT')![idx]).toBeNull();for(const out of sheets)expect(out.rows.every(r=>r.length===out.columns.length)).toBe(true);
 });
 it('shows a range of addition counts for merged buys and separates them after expansion',()=>{
  const s=state(),first=s.study.samples[0],p=s.study.sellPlans![0];p.addition={enabled:true,source:'detector',stricterPct:10,quantityMode:'calculator',repeat:true};s.study.samples=[first,{...first,id:'count-later',enteredAt:first.enteredAt!+60000,groups:[s.study.groups[1].id],source:{...first.source,fish:s.study.samples[1].source.fish}}];s.study.sellPlans=[p];
  const fill={at:T+60000,price:110,quantity:1,notional:110,reading:1,threshold:.8,direction:'>' as const,metric:'raw',label:'条件',scanFrom:T,barOpenTime:T};s.study.results=qualityComparisonRows(s.study).map((r,i)=>({key:qualityResultKey(r,p,0),sampleId:r.id,groupId:p.id,evaluatedAt:T,status:'open',entryTime:r.enteredAt,entryPrice:100,endTime:T+120000,endPrice:110,additionFills:Array.from({length:i?3:1},(_,j)=>({...fill,at:T+(j+1)*60000}))}));
- render(<FishQuality state={s}/>);expect(screen.getByTestId('quality-addition-count')).toHaveTextContent('已加仓 1～3 次');fireEvent.click(within(screen.getByTestId('quality-addition-count')).getByRole('button'));expect(screen.getAllByTestId('quality-addition-count').map(c=>c.textContent).sort()).toEqual(['已加仓 1 次','已加仓 3 次']);
+ render(<FishQuality state={s}/>);expect(screen.getByTestId('quality-sell-additions')).toHaveTextContent('1～3 次');fireEvent.click(screen.getByTestId('quality-sell-additions').closest('button')!);expect(screen.getAllByTestId('quality-sell-additions').map(c=>c.textContent).sort()).toEqual(['1 次','3 次']);
 });
 
 const roundTab=(n:number)=>fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:`第 ${n} 次`}));
@@ -917,10 +920,10 @@ it('copies pending combination, per-round additions, mirror and both exit stages
  fireEvent.click(within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab')[0]);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(3.25);expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(8);roundTab(6);expect(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值')).toHaveValue(20);fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();const [original,copy]=vi.mocked(s.setSellPlans).mock.calls[0][0];expect(original).toMatchObject({id:a.id,rule:{threshold:.25},addition:{maxRounds:7,structure:{buffer:3.25}},mirrorTakeProfit:{gainPct:8},vetoStages:[{afterAdditions:6,conditions:[{threshold:20}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy).toMatchObject({id:copyId,label:'组合模板（副本）',rule:{threshold:.35},addition:{maxRounds:7,structure:{buffer:4.5}},mirrorTakeProfit:{gainPct:9},vetoStages:[{afterAdditions:6,conditions:[{threshold:18}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy.combo).toEqual(original.combo);expect(copy.sellStages).toEqual(original.sellStages);expect(s.study.sellPlans).toEqual(before);expect(s.start).not.toHaveBeenCalled();
 });
 
-it('shows the sell column as named, aligned parts: additions, geometric position, relative gain and progress',()=>{
+it('shows the sell column as named, aligned parts: additions, geometric position and relative gain (progress removed)',()=>{
  const s=state();render(<FishQuality state={s}/>);
- const parts=screen.getAllByTestId('quality-sell-parts')[0];expect([...parts.children].map(c=>c.textContent)).toEqual(['加仓次数','几何仓位','相对涨幅','进程']);
+ const parts=screen.getAllByTestId('quality-sell-parts')[0];expect([...parts.children].map(c=>c.textContent)).toEqual(['加仓次数','几何仓位','相对涨幅']);
  const cells=screen.getAllByTestId('quality-sell-relative-gain');expect(cells.length).toBeGreaterThan(0);
- for(const c of cells){const button=c.parentElement!;expect([...button.children].map(x=>x.getAttribute('data-testid'))).toEqual(['quality-sell-additions','quality-sell-geometric','quality-sell-relative-gain','quality-sell-progress']);}
+ for(const c of cells){const button=c.parentElement!;expect([...button.children].map(x=>x.getAttribute('data-testid'))).toEqual(['quality-sell-additions','quality-sell-geometric','quality-sell-relative-gain']);}
  expect(screen.getByRole('button',{name:`按${s.study.sellPlans![0].label}相对涨幅排序`})).toBeInTheDocument();
 });
