@@ -12,7 +12,7 @@ const T = Date.UTC(2026, 9, 20), EMPTY = [];
 const fish = [{ id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>' as const, scale: 1 } }];
 function Controls() {
   const q = usePageFishQuality(fish, EMPTY), navigate = useNavigate();
-  return <><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); void q.start(); }}>更新收益</button><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); q.setFilters([makeQualityBuyFilter('state:state', '>', .7)]); void q.startFilter(); }}>开始过滤</button><button onClick={() => navigate('/other')}>其他页面</button><span>结果 {q.study.results.length}</span><span>{q.running ? '运行中' : '已结束'}</span></>;
+  return <><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); void q.start(); }}>更新收益</button><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); q.setFilters([makeQualityBuyFilter('state:state', '>', .7)]); void q.startFilter(); }}>开始过滤</button><button onClick={() => navigate('/other')}>其他页面</button><button onClick={q.cancel}>暂停监测</button><span>结果 {q.study.results.length}</span><span>{q.running ? '运行中' : '已结束'}</span></>;
 }
 function Other() { const navigate = useNavigate(); return <button onClick={() => navigate('/')}>返回</button>; }
 beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockResolvedValue({ study: newQualityStudy(T) }); storage.save.mockReset().mockResolvedValue(true); });
@@ -59,4 +59,21 @@ it('keeps both independent tasks alive across navigation and reports their separ
   expect(screen.getByRole('status')).not.toHaveTextContent('过滤后台运行中'); expect(screen.getByRole('status')).toHaveTextContent('收益后台更新中');
   expect(monitor.signal.aborted).toBe(false); releases[1](); await flush();
   expect(screen.queryByRole('status')).toBeNull();
+});
+
+// 【用户要求】2026-11-01「点进战役后持仓监测停了」：离开页面不暂停；真正暂停时写下原因（监测库那一轮的 error）
+const lastRound = () => { const saved = storage.save.mock.calls.at(-1)![1] as { monitorLibrary?: { rounds: { state: string; error?: string; startedAt: number }[] } }; return [...(saved.monitorLibrary?.rounds ?? [])].sort((a, b) => a.startedAt - b.startedAt).at(-1); };
+it('does not pause on leaving the page, and records why a round was paused', async () => {
+  let task!: QualityRunOptions;
+  const run = vi.fn(async (o: QualityRunOptions) => { task = o; await new Promise<void>((_, reject) => o.signal.addEventListener('abort', () => reject(new DOMException('已暂停', 'AbortError')))); });
+  const view = render(<MemoryRouter><FishQualityProvider owner="a" run={run}><Routes><Route path="/" element={<Controls/>}/><Route path="/other" element={<Other/>}/></Routes></FishQualityProvider></MemoryRouter>);
+  await flush(); fireEvent.click(screen.getByRole('button', { name: '更新收益' })); await flush();
+  fireEvent.click(screen.getByRole('button', { name: '其他页面' })); await flush(1000);
+  expect(task.signal.aborted).toBe(false); expect(lastRound()?.state).toBe('running');
+  fireEvent.click(screen.getByRole('button', { name: '返回' })); await flush();
+  fireEvent.click(screen.getByRole('button', { name: '暂停监测' })); await flush(1000);
+  expect(task.signal.aborted).toBe(true); expect(lastRound()).toMatchObject({ state: 'paused', error: '手动点了「暂停监测」' });
+  fireEvent.click(screen.getByRole('button', { name: '更新收益' })); await flush();
+  view.unmount(); await flush(1000);
+  expect(lastRound()).toMatchObject({ state: 'paused', error: expect.stringContaining('页面关闭') });
 });

@@ -32,6 +32,19 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [filterRunning, setFilterRunning] = useState(false), [filterProgress, setFilterProgress] = useState<QualityProgress | null>(null), [filterError, setFilterError] = useState('');
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
   const current = useRef(study), account = useRef(owner), generation = useRef(0), controller = useRef<AbortController | null>(null);
+  /**
+   * 【用户要求】2026-11-01「点进战役后持仓监测停了」：每次暂停都记下原因（写进那一轮监测记录的 error，并打到控制台），
+   * 便于查清是谁中断了监测。只记正在跑的那一轮；同一轮只记第一个原因。
+   */
+  const pauseCause = useRef<{ reason: string; stack: string } | null>(null);
+  const markPause = (reason: string) => { if (controller.current && !controller.current.signal.aborted && !pauseCause.current) pauseCause.current = { reason, stack: new Error().stack ?? '' }; };
+  const takePause = () => {
+    const cause = pauseCause.current; pauseCause.current = null;
+    const reason = cause?.reason ?? '未记录的原因（请把浏览器控制台截图发给开发）';
+    console.info(`[持仓监测] 已暂停：${reason}`, cause?.stack ?? new Error().stack ?? '');
+    try { const w = window as unknown as { __veilQualityPauses?: unknown[] }; w.__veilQualityPauses = [...(w.__veilQualityPauses ?? []).slice(-19), { at: new Date().toISOString(), reason, stack: cause?.stack }]; } catch { /* 只读环境忽略 */ }
+    return reason;
+  };
   const readyRef = useRef(false), latestRun = useRef(run); latestRun.current = run;
   const rerun = useRef<false | 'refresh' | NonNullable<QualityRunOptions['mode']>>(false);
   const selectionApproved = useRef(false);
@@ -47,13 +60,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const scoped = (s: FishQualityStudy): FishQualityStudy => scopeRef.current ? { ...s, selectedRowIds: (s.selectedRowIds ?? []).filter(id => scopeRef.current!.has(id)) } : s;
   const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
-  if (account.current !== owner) { void monitorFinalizer.current?.('paused', false); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
+  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
     const next = preserveSourceDeletions(current.current,apply(current.current)); if (next !== current.current) { current.current = next; setStudy(next); }
   }, []);
   useEffect(()=>{
     if(typeof BroadcastChannel==='undefined')return;const channel=new BroadcastChannel('veil-fish-quality-deletions');
-    channel.onmessage=({data})=>{if(data?.owner!==account.current||!data.deletedSources)return;selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;controller.current?.abort();filterController.current?.abort();change(s=>preserveSourceDeletions({...s,deletedSources:data.deletedSources,deletedReadings:data.deletedReadings},s));};
+    channel.onmessage=({data})=>{if(data?.owner!==account.current||!data.deletedSources)return;selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;markPause('另一个标签页删除了信号来源');controller.current?.abort();filterController.current?.abort();change(s=>preserveSourceDeletions({...s,deletedSources:data.deletedSources,deletedReadings:data.deletedReadings},s));};
     return()=>channel.close();
   },[owner,change]);
   const postExit=useQualityPostExit(owner,ready && readyRef.current,study,run,change);
@@ -89,7 +102,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };
     window.addEventListener('pagehide', flush);
-    return () => { void monitorFinalizer.current?.('paused', false); active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; filterController.current?.abort(); filterController.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
+    return () => { markPause('页面关闭、刷新，或鱼质量模块被卸载'); void monitorFinalizer.current?.('paused', false, takePause()); active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; filterController.current?.abort(); filterController.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
   }, [owner, enabled]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
@@ -142,7 +155,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       })();return finishTask;
     };
     monitorFinalizer.current = finish;
-    const savePartial = () => { void finish('paused'); };
+    const savePartial = () => { if (!finalized) void finish('paused', true, takePause()); };
     aborter.signal.addEventListener('abort', savePartial, { once: true });
     const releaseNotifications = beginHistoryOnlyNotifications();
     aborter.signal.addEventListener('abort', releaseNotifications, { once: true });
@@ -226,17 +239,18 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     finally { if (filterController.current === aborter) { filterController.current = null; if (epoch === generation.current) setFilterRunning(false); } }
   }, [acceptReading, change]);
   const cancelFilter = useCallback(() => { filterRevision.current++; filterController.current?.abort(); filterController.current = null; setFilterRunning(false); }, []);
-  const cancel = useCallback(() => { intentRevision.current++; rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
+  // 「暂停监测」按钮直接把 cancel 当点击处理函数：收到的是事件对象，不是原因
+  const cancel = useCallback((reason?: unknown) => { markPause(typeof reason === 'string' ? reason : '手动点了「暂停监测」'); intentRevision.current++; rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
   /** Parameter saves pause the obsolete batch; only an explicit Start approves another run. */
   const pauseForSettings = useCallback(() => {
-    cancel(); controller.current=null; setRunning(false); setProgress(null);
+    cancel('保存了监测设置（保存设置会先暂停当前一轮）'); controller.current=null; setRunning(false); setProgress(null);
   },[cancel]);
   const restart = useCallback(async () => {
     if(!readyRef.current||archiveLock.current)return;
     archiveLock.current=true;setArchiving(true);setError('');const savedOwner=account.current,epoch=generation.current;
     try{
       intentRevision.current++;rerun.current=false;selectionApproved.current=false;
-      const finalize=monitorFinalizer.current;controller.current?.abort();await finalize?.('paused');controller.current=null;
+      const finalize=monitorFinalizer.current;markPause('从头重算：先归档当前一轮');controller.current?.abort();await finalize?.('paused');controller.current=null;
       if(account.current!==savedOwner||generation.current!==epoch)return;
       const archived=archiveQualityMonitorStudy(current.current);
       if(archived!==current.current){
@@ -262,7 +276,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if(!readyRef.current||archiveLock.current)return false;
     archiveLock.current=true;setArchiving(true);setError('');const savedOwner=account.current,epoch=generation.current;
     try{
-      cancel();cancelFilter();entry.cancel();postExit.cancel();
+      cancel('打开归档副本作为当前总表');cancelFilter();entry.cancel();postExit.cancel();
       const finalize=monitorFinalizer.current;await finalize?.('paused');
       if(account.current!==savedOwner||generation.current!==epoch)return false;
       controller.current=null;setRunning(false);setProgress(null);setFilterProgress(null);setFilterError('');
@@ -344,8 +358,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change,pauseForSettings]);
   const deleteSources=useCallback(async(targets:readonly DeleteTarget[])=>{
     if(!readyRef.current)throw Error('鱼质量尚未加载完成');const savedOwner=account.current;
-    selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;controller.current?.abort();filterController.current?.abort();
-    await monitorFinalizer.current?.('paused',false);if(account.current!==savedOwner)throw Error('账号已切换，请重新选择');
+    selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;markPause('删除了信号来源');controller.current?.abort();filterController.current?.abort();
+    await monitorFinalizer.current?.('paused',false,takePause());if(account.current!==savedOwner)throw Error('账号已切换，请重新选择');
     const next=markSourceDeletions(current.current,targets);if(!await saveQualityStudy(savedOwner,next))throw Error('过滤库、监测库的删除未能保存，请重试');
     if(account.current!==savedOwner)throw Error('账号已切换，原账号的关联删除已保存；请返回原账号继续删除来源记录');
     change(()=>next);
