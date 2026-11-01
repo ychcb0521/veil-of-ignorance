@@ -9,7 +9,7 @@ export interface AdditionCandidate { plan: FishProgram; scale: number; threshold
 const MINUTE=60000;
 interface ScanOptions {
  candidates:AdditionCandidate[];required?:AdditionCandidate[];row:TradeSignal;entry:number;end:number;notional?:number;quantity?:number;after?:number;
- priceAt?:ReadonlyMap<number,number>;priceGate?:{referencePrice:number;thresholdPct:number;basis:'real-average'};
+ priceAt?:ReadonlyMap<number,number>;priceGate?:{referencePrice:number;thresholdPct:number;basis:'real-average'|'cost-line'};
  load:FishReconstructionLoader;signal:AbortSignal;
 }
 function observation(candidate:AdditionCandidate,bars:readonly ResearchBar[],values:ReturnType<typeof evaluateFishProgram>,i:number,entry:number):QualityAdditionObservation|undefined{

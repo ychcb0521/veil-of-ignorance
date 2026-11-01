@@ -123,12 +123,17 @@ it('includes realized half-mirror profit in the first addition exactly as the ca
  expect(b.sizing).toMatchObject({mirrorAvailableBefore:0,mirrorUsed:0,mirrorCoins:0});
  const close=await run(group(),loader(m=>m===0?bar(T,100,1,99,106):bar(T+m*M,102,0,101)),3),c=close.additionFill!;expect(c).toMatchObject({price:102,sizing:{previousSupport:100,support:99}});expect(c.sizing!.coinsBefore*(c.sizing!.support-c.sizing!.previousSupport)+c.sizing!.mirrorUsed).toBeCloseTo(c.quantity*(c.price-c.sizing!.support));
 });
-it('rechecks gain against the current actual weighted holding average after every successful addition',async()=>{
+// 【用户要求】2026-11-01 涨幅门槛相对最新成本线 S（首轮为首次买入价，之后为上一次加仓的 K），不是持仓均价
+it('rechecks gain against the latest cost line S after every successful addition',async()=>{
  const g=group();g.addition={...g.addition!,minGainPct:5};
  const prices=[100,110,114,118,121,123],path=loader(m=>bar(T+m*M,prices[m]??123,1,(prices[m]??123)-1,m===0?106:(prices[m]??123)+1));
- const r=await run(g,path,6);expect(r.additionFills!.map(a=>a.at)).toEqual([T+2*M,T+4*M]);
- const [a,b]=r.additionFills!;expect(a.priceGate).toMatchObject({basis:'real-average',referencePrice:100,thresholdPct:5,observedPrice:110,confirmedAt:T+2*M});
- const avg=(.5*100+a.quantity*a.price)/(.5+a.quantity);expect(b.priceGate).toMatchObject({referencePrice:expect.closeTo(avg),observedPrice:118});expect(118).toBeLessThan(a.price*1.05);expect(b.priceGate!.gainPct).toBeGreaterThan(5);for(const v of evaluateCampaignAddSizing(campaign(g,r)).values())expect(v.status).toBe('ok');
+ const r=await run(g,path,6),[a,b]=r.additionFills!;expect(r.additionFills).toHaveLength(2);
+ expect(a.priceGate).toMatchObject({basis:'cost-line',referencePrice:100,thresholdPct:5,observedPrice:110,confirmedAt:T+2*M});
+ expect(b.priceGate).toMatchObject({basis:'cost-line',referencePrice:a.sizing!.support,thresholdPct:5});expect(b.priceGate!.observedPrice).toBeGreaterThanOrEqual(a.sizing!.support*1.05);
+ // 两次加仓之间没有更早达标的收盘：第二次就是第一根越过「上一次 K × 1.05」的收盘
+ // 第 m 根 K 线在 T+(m+1) 分钟收盘；确认第二次加仓的是第 (confirmedAt−T)/M − 1 根
+ const confirming=(b.priceGate!.confirmedAt-T)/M-1;expect(b.priceGate!.observedPrice).toBe(prices[confirming]??123);
+ for(let m=(a.at-T)/M;m<confirming;m++)expect(prices[m]??123).toBeLessThan(a.sizing!.support*1.05);for(const v of evaluateCampaignAddSizing(campaign(g,r)).values())expect(v.status).toBe('ok');
  expect(await run(g,path,6,await run(g,path,3))).toEqual(r);
  const stopped=await run(g,loader(m=>bar(T+m*M,[100,110,114,110][m]??110,1,([100,110,114,110][m]??110)-1,m===0?106:([100,110,114,110][m]??110)+1)),5);expect(stopped).toMatchObject({status:'closed',endTime:T+3*M,endPrice:110,remainingQuantity:0});expect(stopped.additionFills).toHaveLength(1);
 });
@@ -145,13 +150,13 @@ it('checks confirmed closing gain instead of an intrabar peak or the following o
  const onlyHigh=await run(g,loader(m=>bar(T+m*M,m===0?100:110,1,99,120,100)),3);expect(onlyHigh.mirrorFill).toBeDefined();expect(onlyHigh.additionFill).toBeUndefined();
  const confirmed=await run(g,loader(m=>m===0?bar(T,100,1,99,106,105):bar(T+m*M,104,0,103)),2);expect(confirmed.additionFill).toMatchObject({at:T+M,price:104,priceGate:{observedPrice:105,gainPct:expect.closeTo(5)}});
 });
-it('exports frozen conjunctive readings, current-average gain and banked-profit contributions in both downloads',async()=>{
+it('exports frozen conjunctive readings, cost-line gain and banked-profit contributions in both downloads',async()=>{
  const {newQualityStudy,importQualityLibrary,qualityComparisonRows}=await import('@/lib/fish/quality'),{buildQualitySheets}=await import('@/lib/fish/qualityExport'),{beginQualityMonitorRound,captureQualityMonitorResult}=await import('@/lib/fish/qualityMonitorLibrary'),{buildMonitorSheets}=await import('@/lib/fish/qualityMonitorTable');
  const g=group();g.addition={...g.addition!,conditions:[g.addition!.condition!,{...g.addition!.condition!,id:'price',label:'价格',snapshot:{...snapshot,definitionKey:definitionKey({...def,formula:'raw = C'})},threshold:115}],minGainPct:5};
  const study={...importQualityLibrary(newQualityStudy(T),[sample.source]),sellPlans:[g]},row=qualityComparisonRows(study)[0];study.selectedRowIds=[row.id];const r=await evaluateQualitySample(row,g,0,T+5*M,loader(m=>bar(T+m*M,100+m*10,1,99+m*10,m===0?106:101+m*10)),new AbortController().signal);study.results=[r];
  const begun=beginQualityMonitorRound(study,study,T),saved=captureQualityMonitorResult(begun.study,begun.capture,r,T+5*M),lib=saved.monitorLibrary!;
  const sheets=[...buildQualitySheets(study,[row]),...buildMonitorSheets(lib.records,new Map(lib.settings.map(s=>[s.id,s])))];
- for(const sheet of sheets){expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);if(!['加仓明细','加仓记录'].includes(sheet.name))continue;const headers=sheet.columns.map(c=>c.header),values=sheet.rows[0];expect(JSON.parse(values[headers.indexOf('同时满足的指标 JSON')] as string)).toHaveLength(2);expect(values[headers.indexOf('涨幅门槛 %')]).toBe(5);expect(values[headers.indexOf('涨幅基准均价')]).toBe(100);expect(values[headers.indexOf('本轮可用落袋利润 USDT')]).toBe(2.5);expect(values[headers.indexOf('落袋利润贡献币数')]).toBeGreaterThan(0);expect(values[headers.indexOf('K回撤ATR倍数')]).toBe(1.5);expect(values[headers.indexOf('最低ATR距离')]??null).toBeNull();}
+ for(const sheet of sheets){expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);if(!['加仓明细','加仓记录'].includes(sheet.name))continue;const headers=sheet.columns.map(c=>c.header),values=sheet.rows[0];expect(JSON.parse(values[headers.indexOf('同时满足的指标 JSON')] as string)).toHaveLength(2);expect(values[headers.indexOf('涨幅门槛 %')]).toBe(5);expect(values[headers.indexOf('涨幅基准价')]).toBe(100);expect(values[headers.indexOf('本轮可用落袋利润 USDT')]).toBe(2.5);expect(values[headers.indexOf('落袋利润贡献币数')]).toBeGreaterThan(0);expect(values[headers.indexOf('K回撤ATR倍数')]).toBe(1.5);expect(values[headers.indexOf('最低ATR距离')]??null).toBeNull();}
 });
 // 2026-11-01 用户删除「入场距离 T ≥ S＋n×ATR」：位置达到即按均衡线 K 定量，不再要求 T 高出 S 多少（旧版 T＜104 不加仓）。
 it.each([100.5,102,103.999,104,110])('adds at T=%s without any minimum distance above dynamic S, balanced at K',async price=>{

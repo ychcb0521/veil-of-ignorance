@@ -88,8 +88,8 @@ export function structureAdditionK(e:StructureAdditionEvidence,atr:number):{k:nu
 interface ReaderOptions {row:TradeSignal;entry:number;end:number;load:FishReconstructionLoader;signal:AbortSignal}
 /** Fixed entry-relative replay origin, sequential checkpoints across pages; resume replays the same origin. */
 export function createStructureAdditionReader(o:ReaderOptions){
- const readers=new Map<string,{read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number})=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
- return async(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:{referencePrice:number;thresholdPct:number})=>{
+ const readers=new Map<string,{read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'})=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
+ return async(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'})=>{
   validateStructureAddition(rule);const key=JSON.stringify(structureAdditionIdentity(rule));let reader=readers.get(key);
   if(!reader){
    const def=rule.definition,compiled=compileFeatureFormula(def.formula),plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
@@ -113,7 +113,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
     for(const {e,close} of decisions){
      if(e.at<=after||e.at>=until||used.has(`${e.algorithm}:${e.boxId}`))continue;
      let priceGate:QualityAdditionFill['priceGate'];
-     if(gain){if(!(gain.referencePrice>0)||!Number.isFinite(gain.referencePrice))throw Error('加仓涨幅基准价无效');if(close<gain.referencePrice*(1+gain.thresholdPct/100))continue;priceGate={basis:'real-average',...gain,observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at};}
+     if(gain){if(!(gain.referencePrice>0)||!Number.isFinite(gain.referencePrice))throw Error('加仓涨幅基准价无效');if(close<gain.referencePrice*(1+gain.thresholdPct/100))continue;priceGate={...gain,basis:gain.basis??'real-average',observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at};}
      if(invalid.some(t=>t<=e.at))throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');
      return {at:e.at,price:NaN,scanFrom:o.entry,reading:e.supportPrice,threshold:0,direction:'>',metric:'confirmed_support',label:`${structureAlgorithmLabel(rule)} · ${structureTriggerLabel(rule)}`,featureId:def.id,definitionKey:e.definitionKey,barOpenTime:e.at-STEP,structureEvidence:structuredClone(e),...(priceGate?{priceGate}:{})};
     }

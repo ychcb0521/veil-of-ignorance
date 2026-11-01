@@ -57,7 +57,9 @@ it('allows a veto-only sell plan to run and be fixed for detector comparison wit
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
  const s=state(),plan=s.study.sellPlans![0];plan.holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',5)];
  render(<FishQuality state={s}/>);
- const editor=screen.getByRole('button',{name:'设置状态 S 原始值卖出算法'});expect(editor).toHaveTextContent('仅一票否决');
+ const editor=screen.getByRole('button',{name:'设置状态 S 原始值卖出算法'});expect(editor).toHaveAttribute('title',expect.stringContaining('仅一票否决'));
+ // 【用户要求】2026-11-01 卖出列表头只留四栏名称，与「静态最大回撤」同一行
+ expect(screen.getAllByTestId('quality-sell-column')[0]).toHaveTextContent(/^加仓次数.*几何仓位.*相对涨幅.*进程/);
  fireEvent.click(editor);fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
  expect(s.selectSell).toHaveBeenCalledWith(plan.id);expect(screen.queryByRole('button',{name:'清除门槛'})).toBeNull();
  fireEvent.click(editor);

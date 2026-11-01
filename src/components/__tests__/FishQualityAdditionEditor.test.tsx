@@ -32,10 +32,10 @@ it('persists calculator defaults and the chosen number of rounds with no cash in
  const d={...additionDraft(),enabled:true};expect(parseAdditionDraft({...d,quantityMode:'fixed',quantity:'75'},BUILTIN_FEATURES).quantityMode).toBe('calculator');expect(parseAdditionDraft(d,BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:true});expect(parseAdditionDraft({...d,maxRounds:'1'},BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:false});
  render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮为半仓镜像后的剩余币数/)).toBeInTheDocument();expect(screen.getByText('Q × (K − S) + P = 新增币数 × (T − K)')).toBeInTheDocument();expect(screen.getByText(/最早从下一分钟起检查/)).toBeInTheDocument();expect(screen.getByRole('heading',{name:'加仓量（均衡公式）'})).toBeInTheDocument();
 });
-it('adds and removes 方向 indicators, saves gain against current holding average and restores every constraint',()=>{
+it('adds and removes 方向 indicators, saves gain against the latest cost line S and restores every constraint',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  for(const [i,feature,dir,th] of [[1,'mbi','>','.8'],[2,'mbi-bear','<','-.7']] as const){fireEvent.click(screen.getByRole('button',{name:'＋ 添加方向条件'}));fireEvent.change(screen.getByLabelText(`加仓方向条件 ${i} 特征值`),{target:{value:feature}});fireEvent.change(screen.getByLabelText(`加仓方向条件 ${i} 方向`),{target:{value:dir}});fireEvent.change(screen.getByLabelText(`加仓方向条件 ${i} 指标门槛`),{target:{value:th}});}
- fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));expect(screen.getByText(/相对当前持仓均价/)).toBeInTheDocument();expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(5);
+ fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));expect(screen.getByText(/相对最新成本线 S/)).toBeInTheDocument();expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(5);
  const rule=save();expect(rule).toMatchObject({minGainPct:5,prerequisites:[{metric:'MBI',threshold:.8},{metric:'MBI_bear',direction:'<',threshold:-.7}]});expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
  expect(parseAdditionDraft({...additionDraft(rule),enabled:false},BUILTIN_FEATURES).prerequisites).toEqual(rule.prerequisites);
  fireEvent.click(screen.getByLabelText('删除加仓方向条件 1'));expect(save().prerequisites).toMatchObject([{metric:'MBI_bear'}]);

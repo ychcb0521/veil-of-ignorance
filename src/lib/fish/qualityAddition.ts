@@ -30,7 +30,7 @@ export interface QualityAdditionFill {
   reading: number; threshold: number; direction: '<' | '>'; metric: string; label: string;
   featureId?: string; definitionKey?: string; barOpenTime: number;
   conditions?: QualityAdditionObservation[];
-  priceGate?: {basis:'real-average';referencePrice:number;thresholdPct:number;observedPrice:number;gainPct:number;confirmedAt:number};
+  priceGate?: {basis:'real-average'|'cost-line';referencePrice:number;thresholdPct:number;observedPrice:number;gainPct:number;confirmedAt:number};
   sizing?: {support:number;previousSupport:number;atr:number;atrAt:number;coinsBefore:number;realAverageBefore:number;baseCoins:number;mirrorCoins:number;mirrorUsed:number;mirrorAvailableBefore?:number;costBufferAtr?:number;requiredBufferAtr?:number;supportOffsetAtr?:number;coverageGap?:number};
 }
 export interface QualityAdditionObservation {
@@ -56,7 +56,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   rule.quantityMode??rule.amountMode,...(rule.quantityMode==='calculator'?[rule.repeat!==false]:[]),rule.quantityMode?(rule.quantityMode==='fixed'?rule.quantity:null):(rule.amountMode==='fixed'?rule.amountUsdt:null),
   ...(rule.source==='custom'&&qualityAdditionConditions(rule).length>1?[['all-indicators-v1',...qualityAdditionConditions(rule).slice(1).map(conditionIdentity)]]:[]),
   ...prerequisiteIdentity(rule),
-  ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,'real-average']]:[]),
+  ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,rule.quantityMode==='calculator'?'cost-line':'real-average']]:[]),
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
   ...(rule.quantityMode==='calculator'?[['addition-k-atr-no-entry-distance-v2',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[])];
@@ -88,7 +88,7 @@ function additionFormulaLabel(rule:QualityAdditionRule){
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
   return rounds.some(r=>qualityAdditionAtrSettings(r).supportOffsetAtr!==first.supportOffsetAtr)?'逐轮 ATR 倍数独立设置':`K=T−${first.supportOffsetAtr}ATR`;
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${rule.minGainPct!=null?` 且 相对当前持仓均价上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`半仓镜像后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与半仓镜像后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],
@@ -110,5 +110,5 @@ export function additionPosition(notional: number, entry: number, mark: number, 
 }
 
 /** Both downloads retain the same frozen gate and sizing evidence as the campaign. */
-export const additionEvidenceHeaders=['本轮可用落袋利润 USDT','安全垫贡献币数','落袋利润贡献币数','同时满足的指标 JSON','涨幅门槛 %','涨幅基准均价','确认收盘价','确认涨幅 %','T高于S的ATR倍数','最低ATR距离','K平衡差 USDT','K回撤ATR倍数','箱体加仓依据 JSON'];
+export const additionEvidenceHeaders=['本轮可用落袋利润 USDT','安全垫贡献币数','落袋利润贡献币数','同时满足的指标 JSON','涨幅门槛 %','涨幅基准价','确认收盘价','确认涨幅 %','T高于S的ATR倍数','最低ATR距离','K平衡差 USDT','K回撤ATR倍数','箱体加仓依据 JSON'];
 export function additionEvidenceValues(a?:QualityAdditionFill){return [a?.sizing?.mirrorAvailableBefore??null,a?.sizing?.baseCoins??null,a?.sizing?.mirrorCoins??null,a?.conditions?JSON.stringify(a.conditions):null,a?.priceGate?.thresholdPct??null,a?.priceGate?.referencePrice??null,a?.priceGate?.observedPrice??null,a?.priceGate?.gainPct??null,a?.sizing?.costBufferAtr??null,a?.sizing?.requiredBufferAtr??null,a?.sizing?.coverageGap??null,a?.structureEvidence?null:a?.sizing?(a.sizing.supportOffsetAtr??1.5):null,a?.structureEvidence?JSON.stringify(a.structureEvidence):null];}

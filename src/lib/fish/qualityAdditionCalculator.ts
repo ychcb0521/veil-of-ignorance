@@ -81,8 +81,9 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const soldBefore=o.notional/o.entryPrice*halfMirror.fraction;
   const coinsBefore=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-soldBefore;
   const realAverageBefore=(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror.fraction)/coinsBefore;
-  const basis='real-average' as const,referencePrice=realAverageBefore;
-  const hit=round.structure?await readStructure(round.structure,after,scanEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct}:undefined):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:scanEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
+  // 【用户要求】2026-11-01 涨幅门槛相对最新成本线 S（首轮为首次买入价，之后为上一次的 K），不是持仓均价、也不是首仓
+  const basis='cost-line' as const,referencePrice=support??o.entryPrice;void realAverageBefore;
+  const hit=round.structure?await readStructure(round.structure,after,scanEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:scanEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
   if(!hit)return {fills,stop};
   // 箱体时机的「方向」指标条件（必要不充分）：事件那一刻不全满足，就跳过这个事件、继续等下一个。
