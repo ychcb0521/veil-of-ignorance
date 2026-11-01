@@ -15,11 +15,12 @@ import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
-  loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
+  parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
   setSignalQuality, normalizeSignalQuality, signalChartSymbol,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
+import { useSignalLibrary } from '@/hooks/useSignalLibrary';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
 import { usePageFishQuality } from '@/contexts/FishQualityContext';
@@ -122,7 +123,7 @@ export function TimeControl({
   const fishNotify = useFishNotify(user?.id, undefined, getMailFish);
   const fish = useFish(user?.id, { onCaught: fishNotify.send });
   mailFishRef.current = fish.unionFish;
-  const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
+  const [signals, setSignals] = useSignalLibrary();
   // 信号库的信号也进鱼质量，只参加卖出比较（与鱼舱的鱼分开）
   const fishQuality = usePageFishQuality(fish.signals, signals);
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
@@ -196,7 +197,6 @@ export function TimeControl({
   const jumpPropsRef = useRef({ onJumpToSignal, onSymbolChange });
   jumpPropsRef.current = { onJumpToSignal, onSymbolChange };
 
-  useEffect(() => { saveSignals(signals); }, [signals]);
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
 
   const signalAuditKey = useMemo(() => {
@@ -375,8 +375,8 @@ export function TimeControl({
     [fishQuality.deleteSources],
   );
   /**
-   * 打分。写回 signals 之后由既有的 `useEffect(() => saveSignals(signals))` 落盘，
-   * 并顺着 saveSignals 推到云端——所以「最新评分覆盖旧的」是自动成立的，
+   * 打分。setSignals 会将这次手动修改落盘，并顺着 saveSignals 推到云端；
+   * 云端恢复与首次展示不会回传旧缓存，所以「最新评分覆盖旧的」保持成立，
    * 不需要另开一条保存路径。
    */
   const handleRateSignal = useCallback((id: string, next: number) => {

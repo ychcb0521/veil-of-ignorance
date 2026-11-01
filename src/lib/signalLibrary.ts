@@ -18,6 +18,7 @@ import { stockCode } from './signalMarket';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
 import { queueSimStatePush } from './simStateSync';
+import { readPersistedStateRaw, writePersistedStateRaw } from './persistedStateStorage';
 import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
@@ -381,7 +382,7 @@ export function getDefaultSignals(): TradeSignal[] {
 export function loadSignals(): TradeSignal[] {
   if (typeof window === 'undefined') return getDefaultSignals();
   try {
-    const raw = window.localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY);
+    const raw = readPersistedStateRaw(SIGNAL_LIBRARY_STORAGE_KEY);
     if (raw == null) return getDefaultSignals();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return getDefaultSignals();
@@ -390,7 +391,7 @@ export function loadSignals(): TradeSignal[] {
       && typeof s.timeMs === 'number' && Number.isFinite(s.timeMs));
     if (localSignals.length === 0) return [];
 
-    const localVersion = window.localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY);
+    const localVersion = readPersistedStateRaw(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY);
     const carriesBundledDefaults = localSignals.some(s => s.id.startsWith('default-'));
     if (localVersion !== SIGNAL_LIBRARY_DEFAULT_VERSION && carriesBundledDefaults) {
       const merged = mergeSignals(localSignals, getDefaultSignals());
@@ -406,8 +407,8 @@ export function loadSignals(): TradeSignal[] {
 export function saveSignals(list: TradeSignal[]): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(list));
-    window.localStorage.setItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY, SIGNAL_LIBRARY_DEFAULT_VERSION);
+    writePersistedStateRaw(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(list));
+    writePersistedStateRaw(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY, SIGNAL_LIBRARY_DEFAULT_VERSION);
   } catch {
     /* ignore quota / serialization errors */
   }
