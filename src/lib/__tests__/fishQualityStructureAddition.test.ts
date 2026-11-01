@@ -3,7 +3,7 @@ import {computeDbl5} from '../dbl5m';
 import {computeSbs5m} from '../sbs5m';
 import {sample,T} from './fixtures/dblBars';
 import {sbsComplete,SBS_T} from './fixtures/sbsBars';
-import {defaultStructureAddition,structureAdditionSignal,structureAdditionK,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
+import {defaultStructureAddition,structureAdditionIdentity,structureAdditionSignal,structureAdditionK,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {additionIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
@@ -72,6 +72,16 @@ describe('native box decisions for holding additions',()=>{
   expect(await read(r,first!.at,o.end,[fake])).toEqual(next);
   const restored=await createStructureAdditionReader(o)(r,first!.at,o.end,[fake]);expect(restored).toEqual(next);
   const longer={...o,end:T+250*STEP,row:{...o.row,timeMs:T+250*STEP}};expect(await createStructureAdditionReader(longer)(r,o.entry,longer.end,[])).toEqual(first);
+ });
+ // 【用户要求】2026-11-01 加仓可选 K 用旧 C 还是新 C；默认旧 C，身份不变
+ it('lets K use the new C instead: the first box qualifies and K = new C − n×ATR, with its own identity',async()=>{
+  const o=context(sample()),r={...rule('dbl5','confirm'),kSource:'current' as const};
+  const first=await createStructureAdditionReader(o)(r,o.entry,o.end,[]);expect(first).toMatchObject({at:T+8*STEP,structureEvidence:{event:'BASELINE',supportPrice:100,basePrice:100}});expect(first!.structureEvidence!.previousSupportPrice).toBeUndefined();
+  const older=await findCalculatorAdditions({...o,structure:{...rule(),buffer:.5},maxRounds:1}),newer=await findCalculatorAdditions({...o,structure:{...rule(),buffer:.5,kSource:'current'},maxRounds:1});
+  expect(older.fills[0].sizing!.support).toBe(98);const f=newer.fills[0],z=f.sizing!;expect(f).toMatchObject({at:T+14*STEP,structureEvidence:{supportPrice:102,basePrice:102}});expect(z.support).toBe(100);
+  expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(f.quantity*(f.price-z.support));expect(f.quantity).toBeGreaterThan(older.fills[0].quantity);
+  expect(structureAdditionIdentity({...rule(),kSource:'previous'})).toEqual(structureAdditionIdentity(rule()));expect(structureAdditionIdentity({...rule(),kSource:'current'})).not.toEqual(structureAdditionIdentity(rule()));
+  expect(()=>validateStructureAddition({...rule(),kSource:'other' as never})).toThrow('K 基准');
  });
  it('checks closed-price gain at the event itself and discards events before the mirror or last decision',async()=>{
   const o=context(sample()),read=createStructureAdditionReader(o),r=rule('dbl5','confirm');

@@ -128,7 +128,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
      <p className="rounded bg-muted/60 px-2 py-1 text-center font-mono text-foreground">Q × (K − S) + P = 新增币数 × (T − K)</p>
      <dl className="grid grid-cols-[1.25rem_1fr] gap-x-2 gap-y-0.5">
       <dt className="font-mono text-foreground">T</dt><dd>加仓价</dd>
-      <dt className="font-mono text-foreground">K</dt><dd>均衡线，也是加仓后的止损线：K = 旧C − n×ATR</dd>
+      <dt className="font-mono text-foreground">K</dt><dd>均衡线，也是加仓后的止损线：K = 旧C 或新C − n×ATR（每次加仓自选）</dd>
       <dt className="font-mono text-foreground">C</dt><dd>箱体支撑：新 C 触发加仓；旧 C 是上一箱体的支撑，多留一个箱体作冗余</dd>
       <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后为上一次的 K</dd>
       <dt className="font-mono text-foreground">Q</dt><dd>加仓前持币数（首轮为半仓镜像后的剩余币数）</dd>
@@ -161,17 +161,17 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <InfoBlock title="箱体位置（5 分钟线）">
     <p>新 C（{d.structure.algorithm==='dbl5'?'DBL-5 支撑抬高含完整台阶与内部箱底抬高':'SBS-5M 确认已含冻结后的独立测试；回踩只用正式支撑的再次测试成功'}）收盘确认后，下一分钟开盘加仓；每个箱体最多加仓一次，候选箱体不参与。</p>
    </InfoBlock>
-   <InfoBlock title="K = 旧C − n × ATR">
-    <p>旧 C 是新 C 产生前仍然有效的上一箱体支撑：始终多留一个箱体空间作冗余，给行情呼吸的时间。K 再减去 n 个 5 分钟 ATR(14)（n 可为 0）；成交价位按交易所报价步长向下取整。</p>
-    <p>首个箱体、或中途支撑失效时没有旧 C，不加仓；新 K 低于上一次的 K 时也不加仓。</p>
+   <InfoBlock title="K = 旧C / 新C − n × ATR">
+    <p>每次加仓自己选 K 的基准。旧 C（默认）：新 C 产生前仍然有效的上一箱体支撑，始终多留一个箱体空间作冗余，给行情呼吸的时间。新 C：本次事件刚产生的箱体支撑，K 更高、同一位置可加的币数更多，但止损也更近。K 再减去 n 个 5 分钟 ATR(14)（n 可为 0）；成交价位按交易所报价步长向下取整。</p>
+    <p>选旧 C 时：首个箱体、或中途支撑失效时没有旧 C，不加仓。无论哪种，新 K 低于上一次的 K 时都不加仓。</p>
    </InfoBlock>
   </div>}>
    <div className="grid grid-cols-2 gap-2">
     <label className="space-y-1 text-[10px] text-muted-foreground">位置算法<select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{})})}><option value="structure">箱体 · DBL / SBS</option></select></label>
-    {box&&<label className="space-y-1 text-[10px] text-muted-foreground">箱体算法<select aria-label="箱体加仓算法" className={field+' w-full'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),structureBuffer:'0'})}><option value="dbl5">DBL-5 · 达瓦斯下轨</option><option value="sbs5m">SBS-5M · 台阶支撑</option></select></label>}
+    {box&&<label className="space-y-1 text-[10px] text-muted-foreground">箱体算法<select aria-label="箱体加仓算法" className={field+' w-full'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:d.structure.kSource}})}><option value="dbl5">DBL-5 · 达瓦斯下轨</option><option value="sbs5m">SBS-5M · 台阶支撑</option></select></label>}
    </div>
    {box&&<label className="flex items-center gap-2 text-[11px] text-muted-foreground">触发事件<select aria-label="箱体加仓时机" className={field+' flex-1'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></label>}
-   <label className="flex items-center gap-1.5 font-mono text-[11px]"><span className="shrink-0 text-muted-foreground">K = 旧C −</span><input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">{d.structure.bufferUnit==='percent'?'% × 旧C':'× ATR'}</span></label>
+   <div className="flex items-center gap-1.5 font-mono text-[11px]" data-testid="addition-k-row"><span className="shrink-0 text-muted-foreground">K =</span><select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑" className={field} disabled={!d.enabled} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option></select><span className="shrink-0 text-muted-foreground">−</span><input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={field+' w-16'}/><span className="shrink-0 text-muted-foreground">{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</span></div>
   </Part>
 
   <Part title="卖出" role="必要充分 · 任一达标即卖出全部持仓" testId="addition-sell" info={<div className="space-y-2">

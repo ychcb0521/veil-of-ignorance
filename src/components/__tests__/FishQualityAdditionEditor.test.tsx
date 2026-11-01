@@ -17,7 +17,7 @@ it('offers only the box position, with calculator defaults and K = 旧C − n×A
  expect([...(screen.getByLabelText('加仓条件来源') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['structure']);
  for(const gone of ['加仓特征值','加仓门槛提高幅度','K回撤ATR倍数','T高于S的ATR倍数','箱体K基准','箱体冗余单位'])expect(screen.queryByLabelText(gone)).toBeNull();
  expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(0);
- expect(screen.getByTestId('addition-timing')).toHaveTextContent('K = 旧C −');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
+ expect(screen.getByTestId('addition-k-row')).toHaveTextContent(/^K =/);expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
  const rule=save();expect(rule).toMatchObject({enabled:true,quantityMode:'calculator',quantity:1,source:'structure',structure:{algorithm:'dbl5',buffer:0}});expect(rule.rounds.map((r:QualityAdditionRule)=>r.source)).toEqual(['structure','structure','structure']);
 });
 it('converts legacy rounds: a custom indicator moves into 方向, an original-detector round becomes a box',()=>{
@@ -44,11 +44,11 @@ it('adds and removes 方向 indicators, saves gain against the latest cost line 
 it('keeps each round’s box algorithm, trigger, n and gain gate independent, also after resizing the list',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'2'}});
  fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.75'}});fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));
- tab(2);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(0);fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
+ tab(2);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(0);fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'current'}});fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});expect(screen.getByLabelText('K基准箱体')).toHaveValue('current');fireEvent.change(screen.getByLabelText('箱体加仓时机'),{target:{value:'retest'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'.25'}});
  fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'1'}});fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'3'}});
  tab(2);expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('sbs5m');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.25);
  tab(1);expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(.75);expect(screen.getByLabelText('加仓涨幅门槛')).toHaveValue(5);
- const rule=save();expect(rule.rounds).toMatchObject([{source:'structure',minGainPct:5,structure:{algorithm:'dbl5',trigger:'raise',kBasis:'support',bufferUnit:'atr',buffer:.75}},{source:'structure',structure:{algorithm:'sbs5m',trigger:'retest',buffer:.25}},{source:'structure'}]);expect(rule.rounds[1].minGainPct).toBeUndefined();
+ const rule=save();expect(rule.rounds).toMatchObject([{source:'structure',minGainPct:5,structure:{algorithm:'dbl5',trigger:'raise',kBasis:'support',bufferUnit:'atr',buffer:.75}},{source:'structure',structure:{algorithm:'sbs5m',trigger:'retest',buffer:.25}},{source:'structure'}]);expect(rule.rounds.map((r:QualityAdditionRule)=>r.structure?.kSource??'previous')).toEqual(['previous','current','previous']);expect(rule.rounds[1].minGainPct).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);expect(()=>parseAdditionDraft({...additionDraft(rule),maxRounds:'1.5'},BUILTIN_FEATURES)).toThrow('整数');
 });
 it('rejects a blank, negative or non-finite n and names the round',()=>{
