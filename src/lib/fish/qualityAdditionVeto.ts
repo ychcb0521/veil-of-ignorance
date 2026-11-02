@@ -20,6 +20,8 @@ export interface QualityAdditionEntryVeto {
   er?: number;
   /** 持仓期间急跌：几组「N 分钟内跌 ≥ X%」，任一组曾出现即否决。 */
   windows?: FastDropWindow[];
+  /** 【用户要求】2026-11-02 冲高回落：ATR 倍数与回落百分比（pct）都填时的组合方式，默认「且」。 */
+  join?: 'and' | 'or';
 }
 export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditionEntryVeto> = {
   'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: 1.5, ratio: 60 },
@@ -38,21 +40,33 @@ export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
     : v.kind === 'lower-spike' ? `向下大插针：近 ${d.lookbackBars} 根内下影 ≥ ${d.atr} ATR 或低于前收 ≥ ${d.pct}%`
       : v.kind === 'volatility' ? `高震荡：ATR ≥ 6 小时中位 ${d.ratio} 倍 或 ER(24) ≤ ${d.er}`
         : v.kind === 'fast-drop' ? `持仓期间急跌：${(d.windows ?? []).map(w => `${w.minutes} 分钟内跌 ≥ ${w.pct}%`).join(' 或 ')}`
-        : `冲高回落：距持仓最高点回落 ≥ ${d.atr} ATR`;
+        : `冲高回落：距持仓最高点回落 ${pullbackText(pullbackParams(v))}`;
 }
+/** 冲高回落实际用的门槛：ATR 与百分比都没填（旧数据）时沿用默认 2 ATR；填了哪个就只用哪个，不再补默认值。 */
+export const pullbackParams = (raw: QualityAdditionEntryVeto): QualityAdditionEntryVeto => raw.atr == null && raw.pct == null ? { ...raw, atr: ADDITION_VETO_DEFAULTS.pullback.atr } : { ...raw, join: raw.atr != null && raw.pct != null ? raw.join ?? 'and' : undefined };
+/** 冲高回落的门槛文字：≥ a ATR、≥ x%，或两者「且 / 或」。 */
+const pullbackText = (d: QualityAdditionEntryVeto) => [d.atr != null ? `≥ ${d.atr} ATR` : '', d.pct != null ? `≥ ${d.pct}%` : ''].filter(Boolean).join(d.join === 'or' ? ' 或 ' : ' 且 ');
 export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVeto[]) {
   for (const v of activeAdditionVetoes(vetoes)) {
     if (!ADDITION_VETO_KINDS.includes(v.kind)) throw new Error('加仓否决条件类型无效');
     const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }, bad = (x: number | undefined, lo: number, hi: number) => x == null || !Number.isFinite(x) || x < lo || x > hi;
     if ((v.kind === 'upper-wick' || v.kind === 'lower-spike') && (bad(d.lookbackBars, 1, 288) || !Number.isInteger(d.lookbackBars))) throw new Error(`${ADDITION_VETO_LABELS[v.kind]}：回看根数须为 1–288 的整数`);
     if (v.kind === 'fast-drop') { if (!d.windows?.length) throw new Error('持仓期间急跌：至少填一组「N 分钟内跌幅」'); for (const w of d.windows) if (bad(w.minutes, 1, 240) || !Number.isInteger(w.minutes) || bad(w.pct, 0, 100)) throw new Error('持仓期间急跌：分钟须为 1–240 的整数，跌幅须为 0–100%'); continue; }
+    if (v.kind === 'pullback') {
+      const d = pullbackParams(v);
+      if (d.atr == null && d.pct == null) throw new Error('冲高回落：ATR 倍数与回落百分比至少填一项');
+      if (d.atr != null && bad(d.atr, 0, 50)) throw new Error('冲高回落：ATR 倍数须为 0–50 的数字');
+      if (d.pct != null && bad(d.pct, 0, 100)) throw new Error('冲高回落：回落百分比须为 0–100%');
+      if (d.join != null && d.join !== 'and' && d.join !== 'or') throw new Error('冲高回落：组合方式无效');
+      continue;
+    }
     if (v.kind !== 'volatility' && bad(d.atr, 0, 50)) throw new Error(`${ADDITION_VETO_LABELS[v.kind]}：ATR 倍数须为 0–50 的数字`);
     if (v.kind === 'upper-wick' && bad(d.ratio, 0, 100)) throw new Error('长上影线：上影占比须为 0–100%');
     if (v.kind === 'lower-spike' && bad(d.pct, 0, 100)) throw new Error('向下大插针：跌幅须为 0–100%');
     if (v.kind === 'volatility' && (bad(d.ratio, 0, 50) || bad(d.er, 0, 1))) throw new Error('高震荡：ATR 倍数须为 0–50，效率比须为 0–1');
   }
 }
-export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
 export interface VetoBar { openTime: number; open: number; high: number; low: number; close: number }
 export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string }
@@ -100,8 +114,11 @@ export function evaluateAdditionVetoes(vetoes: readonly QualityAdditionEntryVeto
       if (hit) return { kind: v.kind, label: additionVetoLabel(v), reading: `${fmtTime(hit.at)} 起 ${hit.window.minutes} 分钟内跌 ${fmt(hit.drop)}%` };
     } else {
       let peak = -Infinity; for (const b of bars) if (b.openTime >= entry) peak = Math.max(peak, b.high);
-      const back = (peak - last.close) / A;
-      if (Number.isFinite(back) && back >= v.atr!) return { kind: v.kind, label: additionVetoLabel(v), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR` };
+      const back = (peak - last.close) / A, backPct = (peak - last.close) / peak * 100;
+      if (!Number.isFinite(back) || !Number.isFinite(backPct)) continue;
+      const p = pullbackParams(raw), byAtr = p.atr != null ? back >= p.atr : undefined, byPct = p.pct != null ? backPct >= p.pct - 1e-9 : undefined;
+      const hit = byAtr != null && byPct != null ? (p.join === 'or' ? byAtr || byPct : byAtr && byPct) : (byAtr ?? byPct)!;
+      if (hit) return { kind: v.kind, label: additionVetoLabel(raw), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR（${fmt(backPct)}%）` };
     }
   }
 }

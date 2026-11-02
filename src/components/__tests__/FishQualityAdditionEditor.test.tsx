@@ -113,4 +113,11 @@ it('saves per-round addition vetoes with editable parameters and restores them',
  fireEvent.click(screen.getByLabelText('启用加仓否决 持仓期间急跌'));expect(screen.getByLabelText('持仓期间急跌 第1组跌幅')).toHaveValue(5);fireEvent.change(screen.getByLabelText('持仓期间急跌 第2组跌幅'),{target:{value:'4'}});fireEvent.change(screen.getByLabelText('持仓期间急跌 第3组跌幅'),{target:{value:''}});
  expect(save().rounds[1].entryVetoes.find((v:{kind:string})=>v.kind==='fast-drop')).toEqual({kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5},{minutes:5,pct:4}]});
  const bad=additionDraft(rule);bad.otherRounds[0].entryVetoes.volatility.er='3';expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('效率比');
+ // 冲高回落加百分比：两项都填默认「且」，可改「或」；清空 ATR 就只按百分比
+ tab(1);fireEvent.change(screen.getByLabelText('冲高回落 回落百分比'),{target:{value:'4'}});
+ expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,atr:2,pct:4,join:'and'});
+ fireEvent.change(screen.getByLabelText('冲高回落组合方式'),{target:{value:'or'}});expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback').join).toBe('or');
+ fireEvent.change(screen.getByLabelText('冲高回落 回落ATR倍数'),{target:{value:''}});
+ const pctOnly=save();expect(pctOnly.rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,pct:4});
+ expect(parseAdditionDraft(additionDraft(pctOnly),BUILTIN_FEATURES).rounds[0].entryVetoes).toEqual(pctOnly.rounds[0].entryVetoes);
 });

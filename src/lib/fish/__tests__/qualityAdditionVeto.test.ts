@@ -45,3 +45,22 @@ it('vetoes a fast drop inside any configured minute window since entry, and need
   expect(() => validateAdditionVetoes([{ kind: 'fast-drop', enabled: true, windows: [] }])).toThrow('至少填一组');
   expect(() => validateAdditionVetoes([{ kind: 'fast-drop', enabled: true, windows: [{ minutes: 1.5, pct: 5 }] }])).toThrow('整数');
 });
+
+// 【用户要求】2026-11-02 冲高回落也能按百分比：≥ a ATR、≥ x%，两项都填时「且 / 或」（默认且）
+it('pullback accepts a percentage, alone or combined with ATR by and / or, without changing old identities', () => {
+  // 最高 170.2，最后收盘 164 → 回落 4.43 ATR、3.64%
+  const fall = [...calm(70), ...Array.from({ length: 10 }, (_, i) => ({ openTime: T + (70 + i) * STEP, open: 169 - i * .5, high: 169.2 - i * .5, low: 168.3 - i * .5, close: 168.5 - i * .5 }))];
+  const hit = (extra: Partial<QualityAdditionEntryVeto>) => evaluateAdditionVetoes(on('pullback', extra), fall, atrOf(fall), T);
+  expect(hit({ pct: 3 })).toMatchObject({ kind: 'pullback', reading: expect.stringContaining('3.64%') });
+  expect(hit({ pct: 4 })).toBeUndefined();
+  expect(hit({ atr: 2, pct: 4 })).toBeUndefined();
+  expect(hit({ atr: 2, pct: 4, join: 'or' })).toMatchObject({ kind: 'pullback' });
+  expect(hit({ atr: 20, pct: 3, join: 'and' })).toBeUndefined();
+  expect(hit({ atr: 20, pct: 3, join: 'or' })).toMatchObject({ label: '冲高回落：距持仓最高点回落 ≥ 20 ATR 或 ≥ 3%' });
+  expect(hit({})).toMatchObject({ label: '冲高回落：距持仓最高点回落 ≥ 2 ATR' });
+  expect(() => validateAdditionVetoes(on('pullback', { pct: 101 }))).toThrow('百分比');
+  expect(() => validateAdditionVetoes(on('pullback', { pct: 3 }))).not.toThrow();
+  expect(additionVetoIdentity(on('pullback', { atr: 2 }))).toEqual(additionVetoIdentity(on('pullback')));
+  expect(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2, pct: 3 })))).toContain('pullback-pct-v1');
+  expect(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2, pct: 3, join: 'or' })))).not.toBe(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2, pct: 3 }))));
+});

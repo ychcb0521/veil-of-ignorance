@@ -9,7 +9,7 @@ import {defaultStructureAddition,type StructureAdditionRule} from '@/lib/fish/qu
 import {boxAlgorithmVersion,CURRENT_BOX_VERSION,CURRENT_GUARD_VERSION,freezeStructureVersions,structureVersionLabel} from '@/lib/fish/boxAlgorithmVersions';
 import {BoxAlgorithmVersionNotes} from '@/components/FishQualityPlanVersions';
 import { FishQualityInfo } from '@/components/FishQualityModule';
-import { ADDITION_VETO_DEFAULTS, ADDITION_VETO_KINDS, ADDITION_VETO_LABELS, type AdditionEntryVetoKind, type QualityAdditionEntryVeto } from '@/lib/fish/qualityAdditionVeto';
+import { ADDITION_VETO_DEFAULTS, ADDITION_VETO_KINDS, ADDITION_VETO_LABELS, pullbackParams, type AdditionEntryVetoKind, type QualityAdditionEntryVeto } from '@/lib/fish/qualityAdditionVeto';
 import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVetoEditor';
 import type { VetoStagesDraft } from '@/components/FishQualityVetoStagesEditor';
 import type { HoldingVetoDraft } from '@/lib/fish/qualityFilters';
@@ -28,9 +28,9 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 interface ConditionDraft {choice:string;direction:'<'|'>';threshold:string}
 export interface SellSwitchDraft extends ConditionDraft {enabled:boolean}
 /** 加仓否决的编辑草稿：四条各自的开关与参数（字符串，保存时校验）。 */
-type VetoFieldDraft={enabled:boolean;lookbackBars:string;atr:string;ratio:string;pct:string;er:string;windows:{minutes:string;pct:string}[]};
+type VetoFieldDraft={enabled:boolean;lookbackBars:string;atr:string;ratio:string;pct:string;er:string;join?:'and'|'or';windows:{minutes:string;pct:string}[]};
 export type AdditionVetoDraft=Record<AdditionEntryVetoKind,VetoFieldDraft>;
-const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft=>Object.fromEntries(ADDITION_VETO_KINDS.map(kind=>{const v={...ADDITION_VETO_DEFAULTS[kind],...saved?.find(x=>x.kind===kind)},str=(x?:number)=>x==null?'':String(x);const defaults=ADDITION_VETO_DEFAULTS[kind].windows??[],windows=v.windows??defaults;return [kind,{enabled:!!saved?.find(x=>x.kind===kind)?.enabled,lookbackBars:str(v.lookbackBars),atr:str(v.atr),ratio:str(v.ratio),pct:str(v.pct),er:str(v.er),windows:Array.from({length:Math.max(3,windows.length)},(_,i)=>({minutes:str(windows[i]?.minutes??defaults[i]?.minutes),pct:windows[i]?str(windows[i].pct):''}))}];})) as AdditionVetoDraft;
+const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft=>Object.fromEntries(ADDITION_VETO_KINDS.map(kind=>{const found=saved?.find(x=>x.kind===kind),v=kind==='pullback'?pullbackParams(found??ADDITION_VETO_DEFAULTS.pullback):{...ADDITION_VETO_DEFAULTS[kind],...found},str=(x?:number)=>x==null?'':String(x);const defaults=ADDITION_VETO_DEFAULTS[kind].windows??[],windows=v.windows??defaults;return [kind,{enabled:!!saved?.find(x=>x.kind===kind)?.enabled,lookbackBars:str(v.lookbackBars),atr:str(v.atr),ratio:str(v.ratio),pct:str(v.pct),er:str(v.er),join:v.join??'and',windows:Array.from({length:Math.max(3,windows.length)},(_,i)=>({minutes:str(windows[i]?.minutes??defaults[i]?.minutes),pct:windows[i]?str(windows[i].pct):''}))}];})) as AdditionVetoDraft;
 interface RoundDraft extends ConditionDraft {entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft}
 export interface AdditionDraft extends RoundDraft {enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 支撑线下移减仓（各次加仓通用）。 */
@@ -66,7 +66,10 @@ function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef
   rule.condition=conditions[0];if(conditions.length>1)rule.conditions=conditions;
  }else{const prerequisites=build(d.extraConditions);if(prerequisites.length)rule.prerequisites=prerequisites;}
  if(d.gainEnabled)rule.minGainPct=d.minGainPct.trim()?Number(d.minGainPct):NaN;
- const num=(x:string)=>x.trim()?Number(x):NaN,vetoes=ADDITION_VETO_KINDS.filter(k=>d.entryVetoes?.[k]?.enabled).map(kind=>{const f=d.entryVetoes[kind],base=ADDITION_VETO_DEFAULTS[kind];return {kind,enabled:true,...(base.lookbackBars!=null?{lookbackBars:num(f.lookbackBars)}:{}),...(base.atr!=null?{atr:num(f.atr)}:{}),...(base.ratio!=null?{ratio:num(f.ratio)}:{}),...(base.pct!=null?{pct:num(f.pct)}:{}),...(base.er!=null?{er:num(f.er)}:{}),...(base.windows!=null?{windows:(f.windows??[]).filter(w=>w.pct.trim()).map(w=>({minutes:num(w.minutes),pct:num(w.pct)}))}:{})};});
+ const num=(x:string)=>x.trim()?Number(x):NaN,vetoes=ADDITION_VETO_KINDS.filter(k=>d.entryVetoes?.[k]?.enabled).map(kind=>{const f=d.entryVetoes[kind],base=ADDITION_VETO_DEFAULTS[kind];
+  // 冲高回落：ATR 与百分比各自可留空（留空＝不用这一项），两项都填时带上「且 / 或」
+  if(kind==='pullback')return {kind,enabled:true,...(f.atr.trim()?{atr:num(f.atr)}:{}),...(f.pct.trim()?{pct:num(f.pct)}:{}),...(f.atr.trim()&&f.pct.trim()?{join:f.join??'and'}:{})} as QualityAdditionEntryVeto;
+  return {kind,enabled:true,...(base.lookbackBars!=null?{lookbackBars:num(f.lookbackBars)}:{}),...(base.atr!=null?{atr:num(f.atr)}:{}),...(base.ratio!=null?{ratio:num(f.ratio)}:{}),...(base.pct!=null?{pct:num(f.pct)}:{}),...(base.er!=null?{er:num(f.er)}:{}),...(base.windows!=null?{windows:(f.windows??[]).filter(w=>w.pct.trim()).map(w=>({minutes:num(w.minutes),pct:num(w.pct)}))}:{})};});
  if(vetoes.length)rule.entryVetoes=vetoes;
  return rule;
 }
@@ -174,7 +177,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
 
   <Part title="否决" role="任一成立则这次不加仓 · 等下一个新 C" testId="addition-vetoes" info={<div className="space-y-2">
    <p>方向满足、新 C 出现之后再看这里：任一勾选的条件在加仓那一刻成立，这一次就不加仓，继续等下一个新 C。只用已收盘的 5 分钟 K 线，ATR 为 5 分钟 ATR(14)。</p>
-   <ul className="list-disc space-y-0.5 pl-4"><li>持仓期间急跌：买入后任意 N 分钟内（窗口首根开盘 → 末根收盘）跌幅达到设定值，与硬性终止「N 分钟内跌幅」同口径；跌幅留空即不用这一组。</li><li>长上影线：冲高被砸，上方抛压重。</li><li>向下大插针：有人砸盘、扫止损，K 容易被打到。</li><li>高震荡：波动放大或来回多、净涨少，加仓后被扫几乎必然。</li><li>冲高回落：从持仓最高点已明显回落、还没收复。</li></ul>
+   <ul className="list-disc space-y-0.5 pl-4"><li>持仓期间急跌：买入后任意 N 分钟内（窗口首根开盘 → 末根收盘）跌幅达到设定值，与硬性终止「N 分钟内跌幅」同口径；跌幅留空即不用这一组。</li><li>长上影线：冲高被砸，上方抛压重。</li><li>向下大插针：有人砸盘、扫止损，K 容易被打到。</li><li>高震荡：波动放大或来回多、净涨少，加仓后被扫几乎必然。</li><li>冲高回落：从持仓最高点已明显回落、还没收复。可按 ATR、按百分比，或两者「且 / 或」组合；两项都填默认「且」（回放里 ATR 更能分出成败，百分比适合再要求回落的绝对幅度够大）。</li></ul>
    <p>被否决的加仓会记在结果里（悬停卖出列可看时间与原因）。</p></div>}>
    {ADDITION_VETO_KINDS.map(kind=>{const f=d.entryVetoes?.[kind]??vetoDraftOf()[kind],set=(next:Partial<VetoFieldDraft>)=>patch({entryVetoes:{...(d.entryVetoes??vetoDraftOf()),[kind]:{...f,...next}}}),num=(key:keyof Omit<VetoFieldDraft,'enabled'|'windows'>,label:string,w='w-12')=><input aria-label={`${ADDITION_VETO_LABELS[kind]} ${label}`} type="number" step="any" disabled={!d.enabled||!f.enabled} value={f[key]} onChange={e=>set({[key]:e.target.value})} className={field+' h-6 '+w}/>;
     return <div key={kind} className="flex flex-wrap items-center gap-1 text-[11px]" data-testid={`addition-veto-${kind}`}><label className="flex items-center gap-1.5"><input type="checkbox" className="h-3 w-3" aria-label={`启用加仓否决 ${ADDITION_VETO_LABELS[kind]}`} disabled={!d.enabled} checked={f.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className="w-16 shrink-0 font-medium">{ADDITION_VETO_LABELS[kind]}</span></label>
@@ -182,7 +185,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       :kind==='lower-spike'?<>近 {num('lookbackBars','回看根数')} 根内，下影 ≥ {num('atr','ATR倍数')} ATR 或低于前收 ≥ {num('pct','跌幅')} %</>
       :kind==='volatility'?<>ATR ≥ 6 小时中位的 {num('ratio','ATR放大倍数')} 倍，或效率比 ER(24) ≤ {num('er','效率比')}</>
       :kind==='fast-drop'?<>任意{(f.windows??[]).map((w,i)=><span key={i} className="inline-flex items-center gap-1">{i>0&&<span>·</span>}<input aria-label={`持仓期间急跌 第${i+1}组分钟`} type="number" step="1" min="1" disabled={!d.enabled||!f.enabled} value={w.minutes} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,minutes:e.target.value}:x)})} className={field+' h-6 w-10'}/>分钟跌 ≥<input aria-label={`持仓期间急跌 第${i+1}组跌幅`} type="number" step="any" placeholder="不用" disabled={!d.enabled||!f.enabled} value={w.pct} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,pct:e.target.value}:x)})} className={field+' h-6 w-12'}/>%</span>)}</>
-      :<>从持仓最高点回落 ≥ {num('atr','回落ATR倍数')} ATR</>}</span></div>;})}
+      :<>从持仓最高点回落 ≥ {num('atr','回落ATR倍数')} ATR<select aria-label="冲高回落组合方式" disabled={!d.enabled||!f.enabled} value={f.join??'and'} onChange={e=>set({join:e.target.value as 'and'|'or'})} className={field+' h-6 px-1'}><option value="and">且</option><option value="or">或</option></select>≥ {num('pct','回落百分比')} %<span className="text-[10px]">（留空＝不用这一项）</span></>}</span></div>;})}
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
    <InfoBlock title="箱体位置（5 分钟线）">
