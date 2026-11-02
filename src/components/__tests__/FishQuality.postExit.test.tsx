@@ -46,12 +46,13 @@ it('distinguishes immature/missing observations and real zero while retaining th
  const cells=within(screen.getAllByTestId('quality-fish-row')[0]).getAllByTestId('quality-post-exit-value');expect(cells[0]).toHaveTextContent('0.00%');expect(cells[2]).toHaveTextContent('待满1h');expect(cells[8]).toHaveTextContent('待满6h');expect(JSON.stringify(s.study.results)).toBe(before);
 });
 
-it('keeps merged-entry ranges and expanded detector rows aligned with each actual exit',()=>{
+// 2026-11-02 同一信号不同买入时间各占一行，每格都是确切读数
+it('keeps each buy in its own row and expanded detector rows aligned with each actual exit',()=>{
  const s=state(),first=s.study.samples[0],second={...first,id:'later',enteredAt:first.enteredAt!+60000};s.study.samples=[first,second];
  const rows=qualityComparisonRows(s.study),plan=s.study.sellPlans![0];
  s.study.results=rows.flatMap((row,i)=>s.study.sellPlans!.map(p=>({key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T+36000000,status:'closed' as const,entryTime:row.enteredAt!,entryPrice:100,endTime:T+(i+10)*M,endPrice:110+i,returnPct:10+i})));
  s.study.postExitReadings=rows.map((row,i)=>{const result=s.study.results.find(v=>v.sampleId===row.id&&v.groupId===plan.id)!;return {key:qualityPostExitKey(row.source,result,plan)!,evaluatedAt:T+36000000,exitTime:result.endTime!,exitPrice:result.endPrice!,startMs:result.endTime!,excludedExitMinute:false,windows:POST_EXIT_HOURS.map(hours=>({hours,status:'ready' as const,peakPct:i?9:3,drawdown2Pct:i?4:1}))};});
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'展开'+plan.label+'卖后反事实'}));
- expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getAllByTestId('quality-post-exit-value')[0]).toHaveTextContent('+3.00%～+9.00%');
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);expect(screen.getAllByTestId('quality-post-exit-value').map(c=>c.textContent).filter(t=>t?.includes('%')).join(' ')).not.toContain('～');
  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);expect(screen.getAllByTestId('quality-post-exit-value')).toHaveLength(20);
 });

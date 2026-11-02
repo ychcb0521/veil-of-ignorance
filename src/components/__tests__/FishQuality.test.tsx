@@ -81,7 +81,8 @@ it('defaults to one row per symbol/time, toggles detector details from the heade
  fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
  fireEvent.click(checkbox());expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
 });
-it('merges multiple entries and sources at the same signal time, displays result ranges, and expands to their original outcomes',()=>{
+// 【用户要求】2026-11-02 结果不显示区间：同一信号不同时间的买入各占一行；同一次买入的信号库来源仍合并
+it('shows each buy of a signal as its own row with exact results, merging only sources of the same buy',()=>{
  const s=state(), first=s.study.samples[0];
  s.study.samples=[first,{...first,id:'later',enteredAt:first.enteredAt!+60000,groups:[s.study.groups[1].id],source:{...first.source,fish:s.study.samples[1].source.fish}}];
  s.study=importQualityLibrary(s.study,[{...first.source,id:'library',fish:undefined}]);
@@ -89,10 +90,9 @@ it('merges multiple entries and sources at the same signal time, displays result
  s.study.results=samples.map((r,i)=>({key:qualityResultKey(r,plan,0),sampleId:r.id,groupId:plan.id,evaluatedAt:T,status:'closed',returnPct:[10,-5,1][i],adversePct:-i,drawdownPct:i*2,heldHours:i+1}));
  s.study.selectedRowIds=qualityDisplayRows(s.study).map(r=>r.id);
  render(<FishQuality state={s}/>);
- expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号');
- const merged=screen.getByTitle(/收益率 -5\.00%～\+10\.00%/);expect(merged).toBeInTheDocument();
- expect(screen.getByTestId('quality-fish-row')).not.toHaveTextContent('信号库');
- fireEvent.click(screen.getByTitle(/收益率 -5\.00%～\+10\.00%/));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 2 行 · 1 条信号');
+ expect(screen.getByTestId('quality-fish-table')).not.toHaveTextContent('～');
+ for(const r of screen.getAllByTestId('quality-fish-row'))expect(r).not.toHaveTextContent('信号库');
  for(const label of ['+10.00%','-5.00%'])expect(screen.getAllByTitle(new RegExp('收益率 '+label.replace(/[+.]/g,m=>'\\'+m))).length).toBeGreaterThan(0);
 });
 it('keeps source filters working without source badges in detector comparison rows', () => {
@@ -888,10 +888,10 @@ it('shows actual addition counts per plan, distinguishes unknown states, sorts c
  fireEvent.click(screen.getByRole('button',{name:`按${p.label}加仓次数排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('MULTIUSDT');fireEvent.click(screen.getByRole('button',{name:`按${p.label}加仓次数排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('NONEUSDT');
  const {buildQualitySheets}=await import('@/lib/fish/qualityExport'),sheets=buildQualitySheets(s.study,rows),sheet=sheets[0],idx=sheet.columns.findIndex(c=>c.header===`${p.label} · 加仓次数`);expect(sheet.rows.find(r=>r[0]==='MULTIUSDT')![idx]).toBe(3);expect(sheet.rows.find(r=>r[0]==='PENDINGUSDT')![idx]).toBeNull();for(const out of sheets)expect(out.rows.every(r=>r.length===out.columns.length)).toBe(true);
 });
-it('shows a range of addition counts for merged buys and separates them after expansion',()=>{
+it('shows exact addition counts for each buy of the same signal in its own row',()=>{
  const s=state(),first=s.study.samples[0],p=s.study.sellPlans![0];p.addition={enabled:true,source:'detector',stricterPct:10,quantityMode:'calculator',repeat:true};s.study.samples=[first,{...first,id:'count-later',enteredAt:first.enteredAt!+60000,groups:[s.study.groups[1].id],source:{...first.source,fish:s.study.samples[1].source.fish}}];s.study.sellPlans=[p];
  const fill={at:T+60000,price:110,quantity:1,notional:110,reading:1,threshold:.8,direction:'>' as const,metric:'raw',label:'条件',scanFrom:T,barOpenTime:T};s.study.results=qualityComparisonRows(s.study).map((r,i)=>({key:qualityResultKey(r,p,0),sampleId:r.id,groupId:p.id,evaluatedAt:T,status:'open',entryTime:r.enteredAt,entryPrice:100,endTime:T+120000,endPrice:110,additionFills:Array.from({length:i?3:1},(_,j)=>({...fill,at:T+(j+1)*60000}))}));
- render(<FishQuality state={s}/>);expect(screen.getByTestId('quality-sell-additions')).toHaveTextContent('1～3 次');fireEvent.click(screen.getByTestId('quality-sell-additions').closest('button')!);expect(screen.getAllByTestId('quality-sell-additions').map(c=>c.textContent).sort()).toEqual(['1 次','3 次']);
+ render(<FishQuality state={s}/>);expect(screen.getAllByTestId('quality-sell-additions').map(c=>c.textContent).sort()).toEqual(['1 次','3 次']);
 });
 
 const roundTab=(n:number)=>fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:`第 ${n} 次`}));
@@ -973,4 +973,14 @@ it('groups detector, filter and entry columns under 买前过滤, renames 持仓
   // 隐藏 / 清除放在行尾，不插在开始按钮和「条件设置」之间
   for (const kind of ['filter', 'monitor']) expect(screen.getByTestId(`quality-${kind}-result-tools`).parentElement).toHaveClass('ml-auto');
   localStorage.clear();
+});
+
+// 【用户要求】2026-11-02 像 Excel 那样：每行左侧行号，底部显示已选行数
+it('numbers rows like a spreadsheet and shows how many rows are selected', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  const rows = screen.getAllByTestId('quality-fish-row');
+  expect(screen.getAllByTestId('quality-row-number').map(n => n.textContent)).toEqual(rows.map((_, i) => String(i + 1)));
+  expect(screen.getByTestId('quality-selected-row-count')).toHaveTextContent(`已选 ${rows.length} 行`);
+  cleanup(); render(<FishQuality state={{ ...s, study: { ...s.study, selectedRowIds: [] } }}/>);
+  expect(screen.queryByTestId('quality-selected-row-count')).toBeNull(); expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共');
 });

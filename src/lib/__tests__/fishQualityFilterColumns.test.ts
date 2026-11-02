@@ -37,19 +37,21 @@ it('runs only filters without any sell rules or price simulation, reuses reading
   expect(qualityFilterCell(rows[0], filter(1), map).status).toBe('满足');
 });
 
-it('keeps different entries in merged rows and distinguishes pending, errors, strict thresholds and measured zero', () => {
+// 【用户要求】2026-11-02 不同买入时间各占一行，每格都是确切读数，不再出现区间
+it('keeps different entries in separate rows and distinguishes pending, errors, strict thresholds and measured zero', () => {
   const study = base(), row = qualityComparisonRows(study)[0], f = filter(0);
   const later = { ...row, id: 'later', enteredAt: row.enteredAt! + M };
   const rows = collapseQualityTableRows([row, { ...row, id: 'detector-copy', signalId: row.id }, later]);
+  expect(rows).toHaveLength(2);
   const map = new Map<string, QualityFilterReading>();
-  expect(qualityFilterCell(rows[0], f, map)).toMatchObject({ value: '—', state: 'pending', status: '待计算 2/2' });
+  expect(qualityFilterCell(rows[0], f, map)).toMatchObject({ value: '—', state: 'pending' });
   map.set(qualityFilterReadingKey(row, f), { key: qualityFilterReadingKey(row, f), value: 0 });
   expect(qualityFilterCell(row, f, map)).toMatchObject({ value: '0', state: 'fail', status: '不满足' });
   map.set(qualityFilterReadingKey(later, f), { key: qualityFilterReadingKey(later, f), value: 1 });
-  expect(qualityFilterCell(rows[0], f, map)).toMatchObject({ value: '0～1', state: 'mixed', status: '满足 1/2' });
+  expect(qualityFilterCell(rows[0], f, map)).toMatchObject({ value: '0', state: 'fail' }); expect(qualityFilterCell(rows[1], f, map)).toMatchObject({ value: '1', state: 'pass' });
   map.set(qualityFilterReadingKey(later, f), { key: qualityFilterReadingKey(later, f), error: '历史不足' });
-  expect(qualityFilterCell(rows[0], f, map)).toMatchObject({ value: '—', state: 'error', status: '缺数据 1/2' });
-  expect(qualityFilterCell(rows[0], f, map).detail).toContain('历史不足');
+  expect(qualityFilterCell(rows[1], f, map)).toMatchObject({ value: '—', state: 'error' });
+  expect(qualityFilterCell(rows[1], f, map).detail).toContain('历史不足');
   study.sellPlans![0].buyFilters = [{ ...f, enabled: false }];
   expect(qualityFilterColumns(study)).toEqual([]);
 });

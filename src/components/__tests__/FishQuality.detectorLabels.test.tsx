@@ -32,11 +32,11 @@ it('retains every detector attribution when several detectors share one trade re
  s.study.groups=[{...plan,id:'det-a',label:'探测A'},{...plan,id:'det-b',label:'探测B'}];const entries=['det-a','det-b'].map(detectorId=>({row:{...base,id:'entry-'+detectorId,signalId:'same-entry',detectorId},result}));
  render(<table><tbody><tr><DetectorLabelCell plan={plan} entries={entries} study={s.study} expanded onExpand={()=>{}}/></tr></tbody></table>);expect(screen.getAllByTestId('quality-detector-label-item')).toHaveLength(2);expect(screen.getByText(/探测A/)).toBeInTheDocument();expect(screen.getByText(/探测B/)).toBeInTheDocument();expect(screen.getAllByText('轻微误报')).toHaveLength(2);
 });
-it('keeps labels attached to both entries when the table merges the same signal',()=>{
+it('keeps labels attached to each buy of the same signal, one row per buy',()=>{
  const s=state(),first=s.study.samples[0];s.study.samples=[first,{...first,id:'later',enteredAt:first.enteredAt!+M}];
  const rows=qualityComparisonRows(s.study),plan=s.study.sellPlans![0];
  s.study.results=rows.flatMap((row,i)=>s.study.sellPlans!.map(p=>({key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T+36000000,status:'closed' as const,entryTime:row.enteredAt!,entryPrice:100,endTime:T+10*M,endPrice:100,returnPct:i?2:0,pnl:i?2:0,mirrorFill:{at:T+5*M,price:105,fraction:.5,gainPct:5,atOpen:false}})));
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'展开'+plan.label+'探测标签'}));
- expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getAllByTestId('quality-detector-label-item').map(x=>x.dataset.label).sort()).toEqual(['hit','mild-false']);
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);expect(screen.getAllByTestId('quality-detector-label-item').map(x=>x.dataset.label).sort()).toEqual(['hit','mild-false']);
  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);expect(screen.getAllByTestId('quality-detector-label-item').map(x=>x.dataset.label).sort()).toEqual(['hit','mild-false']);
 });
