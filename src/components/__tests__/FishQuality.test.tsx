@@ -985,3 +985,36 @@ it('numbers rows like a spreadsheet and shows how many rows are selected', () =>
   cleanup(); render(<FishQuality state={{ ...s, study: { ...s.study, selectedRowIds: [] } }}/>);
   expect(screen.queryByTestId('quality-selected-row-count')).toBeNull(); expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共');
 });
+
+// 【用户要求】2026-11-02 持仓监测的组合算法存成模板，以后一键新建（全部参数照搬）
+it('saves a saved plan as a named template and creates a new plan from a template with every parameter', async () => {
+  const { saveQualityPlanTemplate, activeQualityPlanTemplates } = await import('@/lib/fish/qualityPlanTemplates');
+  const s = state(), a = s.study.sellPlans![0];
+  const good = { ...a, label: '好组合', rule: { metric: a.metric, direction: '<' as const, threshold: .45 }, mirrorTakeProfit: { enabled: true, gainPct: 2.5, sellPct: 67 },
+    holdingVetoes: [{ id: 'v1', label: '持仓过程静态最大回撤', kind: 'static-drawdown' as const, direction: '>=' as const, threshold: 5, enabled: true }] };
+  s.study = saveQualityPlanTemplate(s.study, good, '好组合', 1);
+  s.savePlanTemplate = vi.fn(); s.deletePlanTemplate = vi.fn();
+  render(<FishQuality state={s}/>); fireEvent.click(screen.getByLabelText('持仓监测条件'));
+  // 存为模板：已保存的方案可存，弹出命名框
+  fireEvent.click(screen.getByLabelText('把卖出算法 1 存为模板'));
+  fireEvent.change(screen.getByLabelText('模板名称'), { target: { value: '我的模板' } }); fireEvent.click(screen.getByRole('button', { name: '保存模板' }));
+  expect(s.savePlanTemplate).toHaveBeenCalledWith(a.id, '我的模板');
+  // 有未保存修改时不能存（模板保存的是已保存的设置）
+  fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'), { target: { value: '.3' } });
+  expect(screen.getByLabelText('把卖出算法 1 存为模板')).toBeDisabled();
+  // 从模板新建：新方案带上模板的全部参数，保存时一起写入
+  const count = s.study.sellPlans!.length;
+  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
+  expect(within(screen.getByTestId('plan-template-list')).getByText('好组合')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '用模板 好组合 新建方案' }));
+  expect(screen.getByTestId('sell-plan-draft-count')).toHaveTextContent(`${count + 1} 套`);
+  expect(screen.getByLabelText('镜像止盈卖出百分比')).toHaveValue(67);
+  fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
+  const saved = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0], made = saved.at(-1)!;
+  expect(made.id).not.toBe(a.id); expect(made.label).toBe('好组合');
+  expect(made).toMatchObject({ rule: { threshold: .45 }, mirrorTakeProfit: { gainPct: 2.5, sellPct: 67 }, holdingVetoes: [{ kind: 'static-drawdown', threshold: 5, enabled: true }] });
+  // 删除要再确认一次
+  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ })); fireEvent.click(screen.getByRole('button', { name: '删除模板 好组合' }));
+  expect(s.deletePlanTemplate).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: '确认删除模板 好组合' }));
+  expect(s.deletePlanTemplate).toHaveBeenCalledWith(activeQualityPlanTemplates(s.study)[0].id);
+});

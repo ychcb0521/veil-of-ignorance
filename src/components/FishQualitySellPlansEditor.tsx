@@ -1,7 +1,9 @@
 import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
 import {validateQualitySellStages} from '@/lib/fish/qualitySellStages';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Copy, Plus, X } from 'lucide-react';
+import { BookmarkPlus, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { qualityPlanFromTemplate, qualityPlanTemplateSummary, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
 import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
@@ -19,9 +21,41 @@ const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, l
   afterDirection: plan.combo?.after.rule.direction ?? '<', afterThreshold: plan.combo ? String(plan.combo.after.rule.threshold) : '', switchPct: String(plan.combo?.switchPct ?? 5.1) });
 
 export interface SellPlansDraftView { plans: QualityGroup[]; dirty: boolean; algorithmsDirty: boolean; error: string; save: (after?: (plans: QualityGroup[]) => QualityGroup[]) => boolean }
-export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan }: {
+/** 【用户要求】2026-11-02 模板：方案卡片「存为模板」、顶部「从模板新建」；模板保存的是已保存的整套设置。 */
+export interface PlanTemplateActions { templates: readonly (QualityPlanTemplate & { plan: QualityGroup })[]; save: (planId: string, name: string) => void; remove: (id: string) => void }
+function SaveTemplateButton({ index, defaultName, disabledReason, onSave }: { index: number; defaultName: string; disabledReason?: string; onSave: (name: string) => void }) {
+  const [open, setOpen] = useState(false), [name, setName] = useState(defaultName), [error, setError] = useState('');
+  const submit = () => { try { onSave(name); setOpen(false); } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败'); } };
+  return <Popover open={open} onOpenChange={next => { setOpen(next); if (next) { setName(defaultName); setError(''); } }}><PopoverTrigger asChild>
+    <button type="button" disabled={!!disabledReason} aria-label={'把卖出算法 ' + (index + 1) + ' 存为模板'} title={disabledReason ?? '存为模板：保存整套方案（组合算法、半仓镜像、加仓细节、硬性终止等全部参数），以后可一键新建'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"><BookmarkPlus className="h-3.5 w-3.5"/></button>
+  </PopoverTrigger><PopoverContent align="end" className="w-72 space-y-2 p-3 text-[11px]">
+    <p className="font-medium">存为模板</p>
+    <input aria-label="模板名称" autoFocus className={field + ' w-full'} value={name} onChange={e => { setName(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') submit(); }}/>
+    {error && <p role="alert" className="text-destructive">{error}</p>}
+    <div className="flex justify-end gap-2"><button type="button" className="rounded px-2 py-1 text-muted-foreground hover:bg-muted" onClick={() => setOpen(false)}>取消</button>
+      <button type="button" className="rounded bg-primary px-2 py-1 text-primary-foreground" onClick={submit}>保存模板</button></div>
+  </PopoverContent></Popover>;
+}
+function TemplatePicker({ actions, disabled, onUse }: { actions: PlanTemplateActions; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void }) {
+  const [open, setOpen] = useState(false), [confirm, setConfirm] = useState('');
+  const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
+  return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); }}><PopoverTrigger asChild>
+    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={actions.templates.length ? `已有 ${actions.templates.length} 个模板` : '还没有模板：在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>从模板新建{actions.templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{actions.templates.length}</span>}</button>
+  </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] p-1 text-[11px]" data-testid="plan-template-list">
+    {!actions.templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。</p>
+      : <ul className="max-h-80 overflow-y-auto">{actions.templates.map(t => <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
+        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="truncate text-[10px] text-muted-foreground" title={qualityPlanTemplateSummary(t.plan)}>{qualityPlanTemplateSummary(t.plan)}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)}</p></div>
+        <button type="button" className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20" aria-label={`用模板 ${t.name} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
+        {confirm === t.id
+          ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${t.name}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>
+          : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${t.name}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}
+      </li>)}</ul>}
+  </PopoverContent></Popover>;
+}
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates }: {
   plans: readonly QualityGroup[]; ready: boolean; onSave: (plans: QualityGroup[]) => void;
   onCopyPlan?: (source: QualityGroup, copy: QualityGroup) => void;
+  templates?: PlanTemplateActions;
   onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderHolding?: (view: SellPlansDraftView) => ReactNode;
 }) {
   const definitions = useFeatureDefinitions();
@@ -50,6 +84,13 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     onCopyPlan?.({...base, id: source.id}, copyBase);
     change([...drafts.slice(0, index + 1), copy, ...drafts.slice(index + 1)]);
     onSelectPlan?.(copy.id);
+  };
+  const uniqueLabel = (root: string) => { const labels = new Set(drafts.map(d => labelOf(d, baseOf(d)))); let label = root, n = 2; while (labels.has(label)) label = `${root}（${n++}）`; return label; };
+  const fromTemplate = (template: PlanTemplateActions['templates'][number]) => {
+    const copyBase = qualityPlanFromTemplate(template, newQualitySellPlanId(), uniqueLabel(template.name));
+    onCopyPlan?.({ ...template.plan, id: `template:${template.id}` }, copyBase);
+    change([...drafts, draftOf(copyBase)]);
+    onSelectPlan?.(copyBase.id);
   };
   const apply = (after?: (plans: QualityGroup[]) => QualityGroup[]) => {
     try {
@@ -93,12 +134,13 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   return <><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid="quality-sell-plans-editor">
     <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? '① 组合算法' : '卖出算法'} <span className="text-muted-foreground" data-testid="sell-plan-draft-count">{drafts.length} 套</span></h4>
-      <button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增卖出算法</button></div>
+      <button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增卖出算法</button>{templates && <TemplatePicker actions={templates} disabled={!ready} onUse={fromTemplate}/>}</div>
     <p className="text-[10.5px] leading-relaxed text-muted-foreground">每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。</p>
     {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无卖出算法，点击上方新增。</p>}
     {drafts.map((d, i) => <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
       <div className="flex items-center gap-1.5"><span className="text-[10px] tabular-nums text-muted-foreground">{i + 1}.</span><input aria-label={'卖出算法 ' + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
         <select aria-label={'卖出算法 ' + (i + 1) + ' 类型'} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>
+        {templates && <SaveTemplateButton index={i} defaultName={labelOf(d, baseOf(d))} disabledReason={!ready ? '尚未加载完成' : !plans.some(p => p.id === d.id) ? '新方案先点「保存全部方案」，再存为模板' : dirty || extraDirty ? '有未保存的修改：先点「保存全部方案」，模板保存的是已保存的设置' : undefined} onSave={name => templates.save(d.id, name)}/>}
         <button type="button" disabled={!ready} aria-label={'复制卖出算法 ' + (i + 1)} title="复制整套方案：含当前填写的组合算法、加仓、镜像止盈和一票条件" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" aria-label={'删除卖出算法 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></div>
       <div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">

@@ -1,3 +1,4 @@
+import { mergeQualityPlanTemplates } from './qualityPlanTemplates';
 import {preserveSourceDeletions,applySourceDeletions} from './libraryDeletion';
 import { preserveQualityPostExit } from './qualityPostExit';
 import { preserveQualityEntry } from './qualityEntry';
@@ -93,6 +94,7 @@ export function mergeRemoteQualityStudy(local: FishQualityStudy | undefined, rem
   return preserveStudy(other,{...other,...base,
     groups:byId(other.groups,base.groups,g=>g.id),samples:byId(other.samples,base.samples,r=>r.id),
     sellPlans:byId(other.sellPlans??[],base.sellPlans??[],g=>g.id),
+    planTemplates:mergeQualityPlanTemplates(other.planTemplates,base.planTemplates),
     results:byTime(other.results,base.results,r=>r.key,r=>r.evaluatedAt),campaignRuns:[...runs.values()],
     filterReadings:byTime(other.filterReadings??[],base.filterReadings??[],r=>r.key,r=>r.at??0),
   });

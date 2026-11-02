@@ -1,3 +1,4 @@
+import { deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
 import {preserveSourceDeletions,markSourceDeletions,type DeleteTarget} from '@/lib/fish/libraryDeletion';
@@ -344,6 +345,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     setProgress(null);
     change(s => s.results.length ? { ...archiveQualityStudy(s), results: [] } : s);
   }, [change,cancel]);
+  /** 【用户要求】2026-11-02 方案模板：只改模板，不暂停、不重算监测。 */
+  const savePlanTemplate = useCallback((planId: string, name: string) => {
+    const plan = current.current.sellPlans?.find(p => p.id === planId);
+    if (!plan) throw new Error('请先保存这套方案，再存为模板');
+    saveQualityPlanTemplate(current.current, plan, name); // 先校验名称，出错直接抛给界面
+    change(s => { const p = s.sellPlans?.find(x => x.id === planId); return p ? saveQualityPlanTemplate(s, p, name) : s; });
+  }, [change]);
+  const deletePlanTemplate = useCallback((id: string) => change(s => deleteQualityPlanTemplate(s, id)), [change]);
+  const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); change(s => renameQualityPlanTemplate(s, id, name)); }, [change]);
   /** Filters have their own catalog and run button; editing never changes or restarts monitoring. */
   const setFilters = useCallback((filters: QualityBuyFilter[]) => {
     cancelFilter(); setFilterProgress(null); setFilterError('');
@@ -378,10 +388,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，

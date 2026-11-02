@@ -618,3 +618,18 @@ it('clears filter readings and monitor results independently without stopping th
   act(() => h.result.current.clearMonitorResults());
   expect(h.result.current.study.results).toEqual([]); expect(monitoring.signal.aborted).toBe(true);
 });
+
+// 【用户要求】2026-11-02 方案模板：存 / 删模板只改模板库，不暂停、不重算正在运行的监测
+it('saves and deletes plan templates without pausing a running monitor', async () => {
+  const { activeQualityPlanTemplates } = await import('@/lib/fish/qualityPlanTemplates');
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(() => {}); }));
+  await flush(); chooseAndStart(h); await flush(600);
+  const monitoring = tasks.find(t => t.task === 'monitor')!, plan = h.result.current.study.sellPlans![0];
+  act(() => h.result.current.savePlanTemplate(plan.id, '好组合'));
+  const [t] = activeQualityPlanTemplates(h.result.current.study);
+  expect(t).toMatchObject({ name: '好组合', plan: { id: plan.id, label: plan.label } }); expect(monitoring.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
+  expect(() => h.result.current.savePlanTemplate('missing', 'x')).toThrow('先保存');
+  act(() => h.result.current.deletePlanTemplate(t.id));
+  expect(activeQualityPlanTemplates(h.result.current.study)).toEqual([]); expect(monitoring.signal.aborted).toBe(false);
+});

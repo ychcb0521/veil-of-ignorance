@@ -118,6 +118,8 @@ export interface FishQualityStudy {
   sellPlans?: QualityGroup[]; selectedSellId?: string; selectedRowIds?: string[];
   /** Explicitly managed lists must never have deleted default plans recreated. */
   sellPlansConfigured?: boolean;
+  /** 持仓监测方案模板（整套参数快照，见 qualityPlanTemplates）。 */
+  planTemplates?: import('./qualityPlanTemplates').QualityPlanTemplate[];
   /** Legacy saved field; no longer restricts display or execution. */
   cohortIds?: string[];
   /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
