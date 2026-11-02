@@ -131,13 +131,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       <dt className="font-mono text-foreground">K</dt><dd>均衡线，也是加仓后的止损线：K = 旧C 或新C − n×ATR（每次加仓自选）</dd>
       <dt className="font-mono text-foreground">C</dt><dd>箱体支撑：新 C 触发加仓；旧 C 是上一箱体的支撑，多留一个箱体作冗余</dd>
       <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后为上一次的 K</dd>
-      <dt className="font-mono text-foreground">Q</dt><dd>加仓前持币数（首轮为半仓镜像后的剩余币数）</dd>
-      <dt className="font-mono text-foreground">P</dt><dd>本轮可用落袋利润：首轮含半仓镜像利润，用过的不再重复用</dd>
+      <dt className="font-mono text-foreground">Q</dt><dd>加仓前持币数（首轮为镜像止盈后的剩余币数）</dd>
+      <dt className="font-mono text-foreground">P</dt><dd>本轮可用落袋利润：首轮含镜像止盈利润，用过的不再重复用</dd>
      </dl>
     </InfoBlock>
     <InfoBlock title="时序">
      <ul className="list-disc space-y-0.5 pl-4">
-      <li>首次加仓须在半仓镜像成交之后，最早从下一分钟起检查。</li>
+      <li>首次加仓须在镜像止盈成交之后（卖出比例不限，须留有余仓），最早从下一分钟起检查。</li>
       <li>卖出与加仓同时触发时先卖出；同一分钟先后不明时优先止损，跳空按开盘价。</li>
       <li>只用新确认的收盘读数；ATR 为加仓时已收盘的 5 分钟 ATR(14)；续算不会重复加仓。</li>
      </ul>

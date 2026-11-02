@@ -3,7 +3,7 @@ import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCov
 import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
-import {qualityAdditionAtrSettings,type QualityAdditionFill,type QualityAdditionRoundRule} from './qualityAddition';
+import {isPartialMirror,qualityAdditionAtrSettings,type QualityAdditionFill,type QualityAdditionRoundRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,type StructureAdditionRule} from './qualityAdditionStructure';
 import {ADDITION_PROFIT_KIND,activeHoldingVetoes,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
@@ -37,8 +37,8 @@ function atrReader(o:Options){
  };
 }
 export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number}}>{
- // A realized half mirror is mandatory. Its own minute cannot establish an ordered addition.
- const halfMirror=o.mirror;if(halfMirror?.fraction!==.5)return {fills:[]};
+ // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
+ const halfMirror=o.mirror;if(!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const bars=o.prices.filter(b=>b.openTime<o.end);let size=1;while(size<bars.length)size*=2;

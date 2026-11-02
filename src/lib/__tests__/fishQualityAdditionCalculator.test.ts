@@ -74,8 +74,12 @@ describe('calculator additions with causal ATR and support stops',()=>{
   const a=r.additionFills![0],P=.5*(r.mirrorFill!.price-100);expect(a).toMatchObject({at:T+2*M,sizing:{coinsBefore:.5,previousSupport:100,mirrorUsed:expect.closeTo(P)}});expect(a.quantity).toBeCloseTo((.5*17+P)/3);
   const resumed=await run(g,path,3,await run(g,path,2));expect(resumed).toMatchObject({additionFills:r.additionFills,mirrorFill:r.mirrorFill,totalInvested:r.totalInvested,remainingQuantity:r.remainingQuantity,averageEntryPrice:r.averageEntryPrice,pnl:r.pnl,endTime:r.endTime,endPrice:r.endPrice});
  });
- it.each([undefined,{enabled:false,gainPct:5,sellPct:50},{enabled:true,gainPct:50,sellPct:50},{enabled:true,gainPct:5,sellPct:25},{enabled:true,gainPct:5,sellPct:100}])('never adds before an actual half mirror or after a different mirror ratio (%j)',async mirrorTakeProfit=>{
-  const g={...group(),mirrorTakeProfit},requests:{from:number;to:number;step:number}[]=[],r=await run(g,loader(rising,0,requests),3);expect(r.additionFill).toBeUndefined();expect(r.additionFills).toBeUndefined();expect(requests.some(r=>r.step===5*M)).toBe(false);expect(r.additionNote).toContain('半仓镜像');
+ it.each([[undefined,'启用镜像止盈'],[{enabled:false,gainPct:5,sellPct:50},'启用镜像止盈'],[{enabled:true,gainPct:50,sellPct:50},'等待镜像止盈实际成交'],[{enabled:true,gainPct:5,sellPct:100},'没有余仓']] as const)('never adds without a filled partial mirror (%j)',async(mirrorTakeProfit,note)=>{
+  const g={...group(),mirrorTakeProfit},requests:{from:number;to:number;step:number}[]=[],r=await run(g,loader(rising,0,requests),3);expect(r.additionFill).toBeUndefined();expect(r.additionFills).toBeUndefined();expect(requests.some(r=>r.step===5*M)).toBe(false);expect(r.additionNote).toContain(note);
+ });
+ it('adds after a filled mirror of any partial ratio, sizing from the coins actually left (2026-11-02: no longer only 50%)',async()=>{
+  const g={...group(),mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:25}},r=await run(g,loader(rising),3);
+  expect(r.additionNote).toBeUndefined();expect(r.mirrorFill?.fraction).toBe(.25);expect(r.additionFills?.[0].sizing?.coinsBefore).toBeCloseTo(.75);
  });
  it('does not carry a pre-mirror trigger into a later addition when no fresh condition qualifies',async()=>{
   const g={...group(),mirrorTakeProfit:{enabled:true,gainPct:15,sellPct:50}},r=await run(g,loader(m=>bar(T+m*M,m<3?100:120,m<2?1:0,m<3?99:119,m===2?116:m<3?101:121)),5);

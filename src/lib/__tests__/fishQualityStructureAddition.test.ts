@@ -5,7 +5,7 @@ import {sample,T} from './fixtures/dblBars';
 import {sbsComplete,SBS_T} from './fixtures/sbsBars';
 import {defaultStructureAddition,structureAdditionIdentity,structureAdditionSignal,structureAdditionK,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
-import {additionIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
+import {additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
 import {definitionKey} from '../deepDig/features';
 import {buildQualityCampaignData} from '../fish/qualityCampaigns';
@@ -140,6 +140,28 @@ describe('native box decisions for holding additions',()=>{
   const {evaluateCampaignAddSizing}=await import('../campaignAddSizingCheck');expect([...evaluateCampaignAddSizing(data).values()].every(v=>v.status==='ok')).toBe(true);
  });
 
+ it('adds after any partial mirror (e.g. 67%), not only a half mirror; a 100% mirror leaves nothing to add to',async()=>{
+  // 【用户要求】2026-11-02「组合算法1」镜像卖 67%，条件达标却从不加仓：前提改为镜像已成交且留有余仓
+  const o=context(sample()),mirror={...o.mirror,fraction:.67};
+  const r=await findCalculatorAdditions({...o,mirror,structure:{...rule(),buffer:.5},maxRounds:1});expect(r.fills).toHaveLength(1);
+  const z=r.fills[0].sizing!;expect(z.coinsBefore).toBeCloseTo(100/90*(1-.67));
+  expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(r.fills[0].quantity*(r.fills[0].price-z.support));
+  expect((await findCalculatorAdditions({...o,mirror:{...o.mirror,fraction:1},structure:rule(),maxRounds:1})).fills).toEqual([]);
+  const def={id:'never-sell',name:'不卖',short:'不卖',definition:'',formula:'raw = C',scale:1,unit:'',positive:'1',control:'0',interval:'1m' as const};
+  const snapshot={featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),statistic:'raw',interval:'1m',scale:1,threshold:0,direction:'<' as const,average:0,cbi2:0,startAverage:0,previousAverage:0,cutoffMs:o.entry};
+  const qualitySample:QualitySample={id:'structure-67',enteredAt:o.entry,basis:'capture',importedAt:o.entry,groups:[],source:{...o.row,timeMs:o.entry,fish:snapshot}};
+  const group:QualityGroup={id:'g',label:'箱体加仓',snapshot,metric:'raw',rule:{metric:'raw',direction:'<',threshold:0},mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:67},addition:{...defaultQualityAddition(),enabled:true,source:'structure',structure:rule(),maxRounds:1}};
+  const result=await evaluateQualitySample(qualitySample,group,0,T+17*STEP,o.load,o.signal);
+  expect(result.status).not.toBe('error');expect(result.additionNote).toBeUndefined();expect(result.mirrorFill?.fraction).toBe(.67);expect(result.additionFills).toHaveLength(1);
+  const data=buildQualityCampaignData('owner',{sample:qualitySample,plan:group,result,detectors:[],observeHours:0,firstEvaluatedAt:o.entry},'sell');
+  const {evaluateCampaignAddSizing}=await import('../campaignAddSizingCheck');expect([...evaluateCampaignAddSizing(data).values()].every(v=>v.status==='ok')).toBe(true);
+ });
+ it('recomputes only plans whose mirror is not 50%: half-mirror identities stay unchanged',()=>{
+  const add={...defaultQualityAddition(),enabled:true};
+  expect(additionMirrorIdentity(add,{enabled:true,gainPct:5,sellPct:50} as never)).toEqual([]);
+  expect(additionMirrorIdentity(add,{enabled:true,gainPct:2.5,sellPct:67} as never)).toEqual([['addition-after-partial-mirror-v1']]);
+  expect(additionMirrorIdentity({...add,enabled:false},{enabled:true,sellPct:67})).toEqual([]);
+ });
  it('checks 方向 conditions at the box event itself: unmet conditions skip the event, met ones are recorded with the fill',async()=>{
   const price=(direction:'<'|'>',threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'add-dir-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction,threshold,constraints:[]}),scale:1,threshold,direction,metric:'结果',label:'收盘价'});
   const o=context(sample()),structure={...rule(),buffer:.5};

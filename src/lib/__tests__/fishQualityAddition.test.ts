@@ -133,10 +133,10 @@ it('invalidates earlier coin-sized cached trials while retaining frozen legacy c
  expect(additionIdentity(plan.addition)[0]).toBe('holding-add-once-after-half-quantity-v2');
  for(const quantity of [0,-1,NaN,Infinity])expect(()=>validateQualityAddition({...plan.addition,quantityMode:'fixed',quantity})).toThrow('加仓数量');expect(()=>validateQualityAddition({...plan.addition,quantityMode:'fixed',quantity:.25})).not.toThrow();
 });
-it.each(['entry','fixed'] as const)('requires a realized half mirror even for %s coin sizing',async quantityMode=>{
+it.each(['entry','fixed'] as const)('requires a realized partial mirror even for %s coin sizing',async quantityMode=>{
  const plan={...group(),addition:{...group().addition!,quantityMode,quantity:.5}},path=load(at=>at<T?bar(at):at===T?bar(at,100,110):bar(at,120));
- for(const mirrorTakeProfit of [undefined,{enabled:true,gainPct:50,sellPct:50},{enabled:true,gainPct:5,sellPct:25},{enabled:true,gainPct:5,sellPct:100}]){
-  const result=await run({...plan,mirrorTakeProfit},path);expect(result.additionFill).toBeUndefined();expect(result.additionNote).toContain('半仓镜像');
+ for(const mirrorTakeProfit of [undefined,{enabled:true,gainPct:50,sellPct:50},{enabled:true,gainPct:5,sellPct:100}]){
+  const result=await run({...plan,mirrorTakeProfit},path);expect(result.additionFill).toBeUndefined();expect(result.additionNote).toContain('镜像止盈');
  }
 });
 it('defers a coin-sized addition past the half-mirror opening minute and freezes campaign PnL correctly',async()=>{

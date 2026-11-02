@@ -1,7 +1,7 @@
 import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
 import {orderedSellStages,qualitySellStagesIdentity,qualityStagePlan,validateQualitySellStages,qualitySellStagesLabel,type QualitySellStage,type QualitySellStageActivation} from './qualitySellStages';
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
-import { additionIdentity, qualityAdditionConditions, qualityAdditionPrerequisites, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import { additionIdentity, additionMirrorIdentity, isPartialMirror, qualityAdditionConditions, qualityAdditionPrerequisites, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -266,6 +266,7 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
   if (mirrorExecutionIdentity(g).length) identity.push(mirrorExecutionIdentity(g));
   if (additionIdentity(g.addition).length) {
     identity.push(additionIdentity(g.addition));
+    identity.push(...additionMirrorIdentity(g.addition,g.mirrorTakeProfit));
     if(g.addition?.source==='detector') identity.push(Object.entries(s.readings ?? Object.fromEntries(qualityMembers(s.source).map(f=>[qualityGroupId(f),f]))).sort(([a],[b])=>a.localeCompare(b)).map(([id,f])=>[id,f.definitionKey,f.statistic,f.threshold,f.direction,f.H,f.constraints]));
   }
   return shortFishHash(JSON.stringify(identity));
@@ -530,8 +531,8 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined;
     if(group.addition?.enabled && (!additionFill||group.addition.quantityMode==='calculator')) {
       const config=group.addition;
-      if(config.quantityMode&&mirrorFill?.fraction!==.5){
-        additionNote=group.mirrorTakeProfit?.enabled&&group.mirrorTakeProfit.sellPct===50?'等待半仓镜像实际成交后再加仓':'首次加仓须先完成卖出 50% 初始币数的半仓镜像';
+      if(config.quantityMode&&!isPartialMirror(mirrorFill)){
+        additionNote=!group.mirrorTakeProfit?.enabled?'首次加仓须先启用镜像止盈':group.mirrorTakeProfit.sellPct>=100?'镜像止盈卖出 100% 后没有余仓，不能加仓':'等待镜像止盈实际成交后再加仓';
       }else{
         const buildAdditionCandidates=(condition:QualityAdditionRoundRule)=>{
         const candidates: AdditionCandidate[]=[];

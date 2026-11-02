@@ -30,7 +30,7 @@ it('converts legacy rounds: a custom indicator moves into 方向, an original-de
 });
 it('persists calculator defaults and the chosen number of rounds with no cash input',()=>{
  const d={...additionDraft(),enabled:true};expect(parseAdditionDraft({...d,quantityMode:'fixed',quantity:'75'},BUILTIN_FEATURES).quantityMode).toBe('calculator');expect(parseAdditionDraft(d,BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:true});expect(parseAdditionDraft({...d,maxRounds:'1'},BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:false});
- render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮为半仓镜像后的剩余币数/)).toBeInTheDocument();expect(screen.getByText('Q × (K − S) + P = 新增币数 × (T − K)')).toBeInTheDocument();expect(screen.getByText(/最早从下一分钟起检查/)).toBeInTheDocument();expect(screen.getByRole('heading',{name:'加仓量（均衡公式）'})).toBeInTheDocument();
+ render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮为镜像止盈后的剩余币数/)).toBeInTheDocument();expect(screen.getByText('Q × (K − S) + P = 新增币数 × (T − K)')).toBeInTheDocument();expect(screen.getByText(/最早从下一分钟起检查/)).toBeInTheDocument();expect(screen.getByRole('heading',{name:'加仓量（均衡公式）'})).toBeInTheDocument();
 });
 it('adds and removes 方向 indicators, saves gain against the latest cost line S and restores every constraint',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
