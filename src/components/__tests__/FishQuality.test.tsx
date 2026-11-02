@@ -470,8 +470,8 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   expect(headers[peak + 1]).toMatch(/^首仓涨幅/);
   expect(headers[peak + 2]).toMatch(/^半仓镜像/);
   // 2026-11-01 半仓镜像后重复的「加仓次数」列已删（卖出列里已有）
-  expect(headers[peak + 3]).toMatch(/^探测标签/);
-  expect(headers[peak + 4]).toMatch(/^持仓时间/);
+  // 2026-11-02 持仓监测里的「探测标签」已删（买前过滤已有）
+  expect(headers[peak + 3]).toMatch(/^持仓时间/);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
@@ -534,13 +534,12 @@ it('picks one or several detectors straight from the detector header, keeps the 
   expect(within(picker).getByText('已选 3 / 3')).toBeInTheDocument();
   fireEvent.click(within(picker).getByRole('button', { name: '全部' }));
   expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT', 'D3USDT']);
-  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('全部探测算法');
+  // 2026-11-02 筛选栏的探测算法下拉已删除（表头已有）
+  expect(screen.queryByRole('button', { name: '鱼质量的探测算法' })).toBeNull();
   fireEvent.click(boxes()[1]);
   expect(symbols()).toEqual(['D1USDT']);
-  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent(/> 8$/);
   fireEvent.click(boxes()[0]);
   expect(symbols()).toEqual(['D0USDT', 'D1USDT']);
-  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('探测算法 · 已选 2 个');
   expect(screen.getByRole('button', { name: '在表头选择探测算法' })).toHaveTextContent('2');
   expect(within(picker).getByText('已选 2 / 3')).toBeInTheDocument();
   // 再点一次取消其中一个；「仅此」只看这一项
@@ -654,7 +653,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '18');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '16');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -738,7 +737,7 @@ it('places run state second and bulk-selects only pending entries under the curr
   expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveAttribute('aria-label','已完成'); expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent(/^1$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent(/^0$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveAttribute('aria-label','未运行');
   // 【用户要求】2026-11-01 运行状态只显示 0 和 1：单元格里没有「过滤 / 监测」字样和进度分数，字样在表头
   expect(aCell).toHaveTextContent(/^10$/);expect(within(header).getByTestId('quality-run-state-parts')).toHaveTextContent('过滤监测');
-  fireEvent.click(screen.getByRole('button',{name:'运行状态筛选与批量选取'}));
+  expect(screen.queryByRole('button',{name:'运行状态筛选与批量选取'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'在表头筛选运行状态'}));
   const picker = screen.getByTestId('quality-run-state-picker');
   fireEvent.change(within(picker).getByLabelText('运行状态的工作步骤'),{target:{value:'filter'}});
   fireEvent.click(within(picker).getByRole('button',{name:'仅选尚未运行'}));
@@ -795,7 +794,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  // 未启用镜像的方案也保留独立状态列，不能挤入探测标签。
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 9));
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 8));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);

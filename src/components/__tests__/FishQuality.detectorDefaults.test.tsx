@@ -20,7 +20,7 @@ function state(empty = false): FishQualityState {
   return { study, ready: !empty, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', error: '', warning: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), startFilter: vi.fn(), cancelFilter: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn(), setSellPlans: vi.fn(), setRule: vi.fn(), setCombo: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn() };
 }
 afterEach(() => { cleanup(); finishQualityReturn(); });
-const open = () => { fireEvent.click(screen.getByRole('button', { name: '鱼质量的探测算法' })); return screen.getByTestId('quality-detector-picker'); };
+const open = () => { fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' })); return screen.getByTestId('quality-detector-picker'); };
 
 it('checks the four photographed levels after async hydration and scopes the table and monitoring to them', () => {
   const view = render(<FishQuality state={state(true)}/>), s = state();

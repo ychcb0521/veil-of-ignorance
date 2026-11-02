@@ -1,3 +1,4 @@
+import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
@@ -2836,6 +2837,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             title="战役元数据"
             testId="campaign-metadata"
             items={buildCampaignMetadataItems(campaign, objectiveOperationTime, campaignMetadataMetrics)}
+            footer={campaign.comparison?.monitorPlan ? <QualityMonitorSettingsButton plan={campaign.comparison.monitorPlan}/> : undefined}
           />
 
           <CampaignPnlOverviewPanel

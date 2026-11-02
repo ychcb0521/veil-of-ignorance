@@ -400,6 +400,8 @@ export interface TradeCampaign {
     category?: string;
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
+    /** 持仓监测：这场战役运行时冻结的整套方案（组合算法、半仓镜像、加仓细节、硬性终止等），只读展示用。 */
+    monitorPlan?: import('@/lib/fish/quality').QualityGroup;
     sellEvidence?: {
       /** Actual frozen final-sale reason; independent of the configured condition list. */
       exitReason?:string;

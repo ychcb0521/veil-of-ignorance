@@ -83,6 +83,8 @@ export interface CampaignPnlOverviewPanelProps {
   title: string;
   items: readonly OverviewPanelItem[];
   testId?: string;
+  /** 卡片最下方的附加入口（战役元数据：持仓监测设置）。 */
+  footer?: ReactNode;
 }
 
 /**
@@ -90,7 +92,7 @@ export interface CampaignPnlOverviewPanelProps {
  * 【用户要求】底部那行「期望口径」脚注删掉：胜率取 50% 写在算术期望的 ⓘ 里，资产分母用的是哪种写在几何期望的 ⓘ 里。反事实的「相对实际」、逐腿改动与操作按钮不进这张卡，
  * 放在它左边的「相对原始的变化情况」里（CounterfactualOverviewRow），两张面板的内部排布因此逐项相同。
  */
-export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOverviewPanelProps) {
+export function CampaignPnlOverviewPanel({ title, items, testId, footer }: CampaignPnlOverviewPanelProps) {
   // 【用户要求】不常用的指标（campaignMinorMetrics）折起来：标题行右角一个很小、很淡的「›」展开（与列表页同一个开关，跟账号走）
   const [showMinor, toggleMinor] = useShowMinorMetrics();
   if (items.some(item => item.column != null)) {
@@ -125,6 +127,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
             </div>
           ))}
         </div>
+        {footer && <div className="mt-3 border-t border-border/60 pt-2">{footer}</div>}
       </div>
     );
   }
@@ -168,6 +171,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
           );
         })}
       </div>
+      {footer && <div className="mt-3 border-t border-border/60 pt-2">{footer}</div>}
     </div>
   );
 }

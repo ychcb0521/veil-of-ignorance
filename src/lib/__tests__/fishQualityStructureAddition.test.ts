@@ -137,6 +137,16 @@ describe('native box decisions for holding additions',()=>{
   const group:QualityGroup={id:'g',label:'箱体加仓',snapshot,metric:'raw',rule:{metric:'raw',direction:'<',threshold:0},mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{...defaultQualityAddition(),enabled:true,source:'structure',structure:rule(),entryBufferAtr:0,maxRounds:1}};
   const result=await evaluateQualitySample(qualitySample,group,0,T+17*STEP,o.load,o.signal);expect(result.status).not.toBe('error');expect(result.additionFills).toHaveLength(1);
   const data=buildQualityCampaignData('owner',{sample:qualitySample,plan:group,result,detectors:[],observeHours:0,firstEvaluatedAt:o.entry},'sell');expect(data.campaign.comparison!.sellEvidence!.additionFills![0].structureEvidence).toEqual(result.additionFills![0].structureEvidence);
+  // 2026-11-02 战役元数据「持仓监测」：战役带上当时冻结的整套方案
+  expect(data.campaign.comparison!.monitorPlan).toEqual(group);expect(data.campaign.comparison!.monitorPlan).not.toBe(group);
+  // 2026-11-02 委托列：加仓的支撑线 K 作为提前挂好的止损单，页面与导出图同一结果
+  const addLeg=data.legs.find(l=>l.leg_role==='main_add_1')!,K=result.additionFills![0].sizing!.support;
+  const {buildCampaignLegsExportRows}=await import('../campaignLegsPngExport');
+  const rows=buildCampaignLegsExportRows({campaign:data.campaign,legs:data.legs,tradeRecords:data.tradeRecords,reverseHedgeOrders:[]});
+  expect(rows.find(r=>r.kind==='leg'&&r.legId===addLeg.id)!.cells[15].map(l=>l.text).join(' ')).toMatch(new RegExp(`^支撑线 K ${String(K).replace('.','\\.')}`));
+  const {render,screen,cleanup}=await import('@testing-library/react'),{createElement}=await import('react'),{MemoryRouter}=await import('react-router-dom'),{CampaignLegsList}=await import('@/components/journal/CampaignLegsList');
+  render(createElement(MemoryRouter,null,createElement(CampaignLegsList,{campaign:data.campaign,legs:data.legs,tradeRecords:data.tradeRecords,reverseHedgeOrders:[]})));
+  expect(screen.getByTestId(`leg-addition-stop-${addLeg.id}`)).toHaveTextContent('支撑线 K');expect(screen.queryByTestId(`leg-addition-stop-${data.legs[0].id}`)).toBeNull();cleanup();
   const {evaluateCampaignAddSizing}=await import('../campaignAddSizingCheck');expect([...evaluateCampaignAddSizing(data).values()].every(v=>v.status==='ok')).toBe(true);
  });
 
