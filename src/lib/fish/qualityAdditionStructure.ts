@@ -1,6 +1,6 @@
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
-import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
+import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,DBL5_GUARD_VERSION,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import {sbsParameters,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {compileFishProgram} from './algorithm';
@@ -13,7 +13,7 @@ export interface StructureAdditionRule {
  algorithm:'dbl5'|'sbs5m';trigger:'raise'|'confirm'|'retest';kBasis:'support'|'invalidation';
  bufferUnit:'atr'|'percent';buffer:number;
  /** K 的基准取哪个箱体的支撑：旧 C（上一箱体，默认，多留一个箱体作冗余）或新 C（本次事件刚产生的箱体）。2026-11-01 用户要求可选。 */
- kSource?:'previous'|'current';
+ kSource?:'previous'|'current'|'guard';
  /** Exact native parameters are frozen when the plan is saved. */
  definition:DeepDigFeatureDef;
 }
@@ -24,6 +24,8 @@ export interface StructureAdditionEvidence {
  kBasis:StructureAdditionRule['kBasis'];basePrice:number;bufferUnit:StructureAdditionRule['bufferUnit'];buffer:number;
  /** 旧 C：新 C 产生前一根 5 分钟线上仍然有效的那个箱体（上一轮）的支撑；K 以它为基准（basePrice）。 */
  previousBoxId?:string;previousSupportPrice?:number;
+ /** K 取 DBL-5 防守线时：加仓那一刻的防守线、行情状态，以及止损要连续几根 5 分钟收盘低于 K（冻结，之后不变）。 */
+ guardPrice?:number;guardRegime?:'trend'|'range';guardCloses?:number;
  /** Set only when sizing accepts a fill; no subsequent candle can move this K. */
  bufferPrice?:number;k?:number;
 }
@@ -44,6 +46,12 @@ export function withPreviousBox(rule:Pick<StructureAdditionRule,'kBasis'>,e:Stru
  if(base==null||!(base>0)||!Number.isFinite(base))return;
  return {...e,previousBoxId:previous.boxId,previousSupportPrice:previous.support,basePrice:base};
 }
+/** K 基准取 DBL-5 防守线（已含分行情冗余）；防守线不存在（刚跌破、尚未重建）时不加仓。 */
+export function withGuard(e:StructureAdditionEvidence,row:Dbl5Row):StructureAdditionEvidence|undefined {
+ const guard=row.darvas_5m_guard,regime=row.darvas_5m_guard_regime,closes=row.darvas_5m_guard_closes;
+ if(guard==null||!(guard>0)||!Number.isFinite(guard)||!regime||!closes)return;
+ return {...e,basePrice:guard,guardPrice:guard,guardRegime:regime,guardCloses:closes};
+}
 export function defaultStructureAddition(algorithm:StructureAdditionRule['algorithm']='dbl5',definitions:readonly DeepDigFeatureDef[]=[]):StructureAdditionRule {
  const builtin=algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
  const definition=structuredClone(definitions.find(d=>d.id===builtin.id)??builtin);
@@ -52,16 +60,17 @@ export function defaultStructureAddition(algorithm:StructureAdditionRule['algori
 export function validateStructureAddition(rule?:StructureAdditionRule):asserts rule is StructureAdditionRule {
  if(!rule||!['dbl5','sbs5m'].includes(rule.algorithm)||!['raise','confirm','retest'].includes(rule.trigger)||!['support','invalidation'].includes(rule.kBasis)||!['atr','percent'].includes(rule.bufferUnit))throw Error('箱体加仓算法或触发方式无效');
  if(rule.algorithm==='dbl5'&&(rule.trigger==='retest'||rule.kBasis==='invalidation'))throw Error('DBL-5 不提供独立回踩确认或算法失效线，请选择已确认下轨');
- if(rule.kSource!=null&&!['previous','current'].includes(rule.kSource))throw Error('K 基准须为旧 C 或新 C');
+ if(rule.kSource!=null&&!['previous','current','guard'].includes(rule.kSource))throw Error('K 基准须为旧 C、新 C 或防守线');
+ if(rule.kSource==='guard'&&(rule.algorithm!=='dbl5'||rule.kBasis!=='support'))throw Error('防守线目前只用于 DBL-5 的已确认下轨');
  if(!Number.isFinite(rule.buffer)||rule.buffer<0||rule.bufferUnit==='percent'&&rule.buffer>=100)throw Error('支撑冗余须为不小于 0 的有限数字；百分比须小于 100');
  const def=rule.definition,builtin=rule.algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
  if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!=='5m'||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
  if(rule.algorithm==='dbl5')dbl5Parameters(def.DBL5_config);else sbsParameters(def.SBS5M_config);
 }
-export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION];
+export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${DBL5_GUARD_VERSION}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION];
 export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
-export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureAlgorithmLabel(r)} · ${structureTriggerLabel(r)} · K＝${r.kSource==='current'?'新C':'旧C'}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}`;
+export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureAlgorithmLabel(r)} · ${structureTriggerLabel(r)} · K＝${r.kSource==='current'?'新C':r.kSource==='guard'?'防守线':'旧C'}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}`;
 /** Only selected, still-active confirmed structures may emit a decision. Pending boxes never qualify. */
 export function structureAdditionSignal(rule:StructureAdditionRule,row:Dbl5Row|SbsRow,initializationStart:number):StructureAdditionEvidence|undefined {
  if(!row.data_valid)throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');
@@ -109,7 +118,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
      dbl=result.DBL5_checkpoint;sbs=result.SBS5M_checkpoint;
      const rows=rule.algorithm==='dbl5'?result.DBL5_details!:result.SBS5M_details!;
      const closes=new Map(bars.map(b=>[b.openTime+STEP,b.close])),sources=new Map(bars.map(b=>[b.openTime+STEP,b.PRS6H_data_source??'binance-usdm']));
-     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),e=raw&&(rule.kSource==='current'?raw:withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
+     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
      cursor=to;await fishDelay(0,o.signal);
      if(decisions.some(({e,close})=>e.at>after&&e.at<until&&!used.has(`${e.algorithm}:${e.boxId}`)&&(!gain||close>=gain.referencePrice*(1+gain.thresholdPct/100))))break;
     }

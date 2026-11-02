@@ -51,6 +51,15 @@ it('keeps each round’s box algorithm, trigger, n and gain gate independent, al
  const rule=save();expect(rule.rounds).toMatchObject([{source:'structure',minGainPct:5,structure:{algorithm:'dbl5',trigger:'raise',kBasis:'support',bufferUnit:'atr',buffer:.75}},{source:'structure',structure:{algorithm:'sbs5m',trigger:'retest',buffer:.25}},{source:'structure'}]);expect(rule.rounds.map((r:QualityAdditionRule)=>r.structure?.kSource??'previous')).toEqual(['previous','current','previous']);expect(rule.rounds[1].minGainPct).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);expect(()=>parseAdditionDraft({...additionDraft(rule),maxRounds:'1.5'},BUILTIN_FEATURES)).toThrow('整数');
 });
+// 【用户要求】2026-11-02 K 可选 DBL-5 防守线；上涨 / 震荡冗余可调，卖出改为收盘确认
+it('offers the DBL-5 guard line as K with editable trend / range buffers and close-confirmed selling',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));expect(screen.queryByTestId('addition-guard-row')).toBeNull();
+ fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+ expect(screen.getByLabelText('上涨期防守冗余')).toHaveValue(.5);expect(screen.getByLabelText('震荡期防守冗余')).toHaveValue(1);
+ fireEvent.change(screen.getByLabelText('震荡期防守冗余'),{target:{value:'1.5'}});expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('5 分钟收盘跌破 K 即卖出');
+ const rule=save();expect(rule.rounds[0].structure).toMatchObject({kSource:'guard',definition:{DBL5_config:{guard_range_atr:1.5}}});
+ fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect([...(screen.getByLabelText('K基准箱体') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['previous','current']);
+});
 it('rejects a blank, negative or non-finite n and names the round',()=>{
  const draft={...additionDraft(),enabled:true};
  for(const value of ['', '-1','Infinity','NaN'])expect(()=>parseAdditionDraft({...draft,structureBuffer:value},BUILTIN_FEATURES)).toThrow('冗余');

@@ -3,11 +3,21 @@ import type {ResearchBar} from './deepRsa/window';
 export const DBL5_ID='darvas_5m_lower';
 export const DBL5_VERSION='dbl-5-v2';
 export const DBL5_STEP=300_000;
-export interface Dbl5Config {timeframe:'5m';n:number;window_minutes:number}
+export interface Dbl5Config extends Dbl5GuardConfig {timeframe:'5m';n:number;window_minutes:number}
 export const DBL5_DEFAULTS:Readonly<Dbl5Config>=Object.freeze({timeframe:'5m',n:3,window_minutes:360});
+/**
+ * 【用户要求】2026-11-02 防守线：箱体下轨把噪音当支撑（SUI 实测 24 次击穿 22 次 1 小时内收回）。
+ * 箱体识别不变，另叠一条分行情状态、留足冗余、按收盘确认跌破的线。参数只在用户设置时写入配置，旧定义的配置身份不变。
+ */
+export interface Dbl5GuardConfig {guard_trend_atr?:number;guard_range_atr?:number;guard_range_closes?:number}
+export const DBL5_GUARD_DEFAULTS=Object.freeze({guard_trend_atr:.5,guard_range_atr:1,guard_trend_closes:1,guard_range_closes:2,overlap:.5,atr_period:14});
+export const DBL5_GUARD_VERSION='dbl5-guard-v1';
+const GUARD_KEYS=['guard_trend_atr','guard_range_atr','guard_range_closes'] as const;
 export function dbl5Parameters(input:Partial<Dbl5Config>={}):Dbl5Config {
-  for(const key of Object.keys(input))if(!(key in DBL5_DEFAULTS))throw Error('DBL-5 未知参数：'+key);
+  for(const key of Object.keys(input))if(!(key in DBL5_DEFAULTS)&&!(GUARD_KEYS as readonly string[]).includes(key))throw Error('DBL-5 未知参数：'+key);
   const p={...DBL5_DEFAULTS,...input},W=p.window_minutes/5;
+  for(const key of ['guard_trend_atr','guard_range_atr'] as const){const v=p[key];if(v!==undefined&&(!Number.isFinite(v)||v<0||v>20))throw Error('DBL-5 防守线冗余须为 0–20 倍 ATR');}
+  if(p.guard_range_closes!==undefined&&(!Number.isInteger(p.guard_range_closes)||p.guard_range_closes<1||p.guard_range_closes>12))throw Error('DBL-5 震荡期收盘确认须为 1–12 根');
   if(p.timeframe!=='5m'||!Number.isInteger(W)||p.window_minutes<20||p.window_minutes>10080||!Number.isInteger(p.n)||p.n<1||2*p.n+1>=W)throw Error('DBL-5 需要固定5m，窗口20–10080分钟且为5的整数倍，满足 2n+1<W（默认n为1–35）');
   return p;
 }
@@ -69,12 +79,19 @@ export interface Dbl5Row {
   ended_box_id:string|null;ended_episode_id:string|null;double_breach:boolean;data_valid:boolean;data_continuous:boolean;reason_codes:string[];
   algorithm_version:string;config_hash:string;effective_parameters:Dbl5Config;tick_size:string|null;symbol:string;market:string;data_source:string;data_version:string;data_checksum:string;initialization_id:string;initialization_start:number|null;
   active:Dbl5Active|null;candidate_count:number;new_confirmations:(Dbl5Box&{selected:boolean})[];events:Dbl5Event[];
+  /** 防守线（价格）：上涨期＝箱底−a×ATR 只升不降；震荡期＝震荡区最低箱底−b×ATR；收盘确认跌破后清空，等下一个箱体重建。 */
+  darvas_5m_guard?:number|null;darvas_5m_guard_regime?:'trend'|'range'|null;darvas_5m_guard_closes?:number|null;darvas_5m_guard_atr?:number|null;darvas_5m_guard_broken?:boolean;darvas_5m_guard_segment?:number;
 }
+/** All prices in integer ticks (as numbers); ATR is Wilder over closed 5m candles of this same sequence. */
+export interface Dbl5GuardState {atr:number|null;samples:number;prev_close:number|null;line:number|null;regime:'trend'|'range'|null;floor:number|null;last_box:{box_id:string;lower:number;upper:number}|null;below:number;segment:number}
+const freshGuard=(segment=0):Dbl5GuardState=>({atr:null,samples:0,prev_close:null,line:null,regime:null,floor:null,last_box:null,below:0,segment});
 export interface Dbl5Checkpoint {
   checkpoint_version:1;timeframe:'5m';feature_id:typeof DBL5_ID;algorithm_version:string;effective_parameters:Dbl5Config;config_hash:string;
   symbol:string;market:string;data_source:string;data_version:string;tick_size:string|null;initialization_id:string;initialization_start:number|null;first_time:number|null;
   last_time:number|null;last_signature:string|null;data_checksum:string;active:Dbl5Active|null;candidates:Dbl5Candidate[];context:Dbl5Candle[];
   confirmed_boxes:Dbl5Box[];ended:Dbl5End[];events:Dbl5Event[];last_row:Dbl5Row|null;
+  /** Optional: older checkpoints restart the guard from their seed. */
+  guard?:Dbl5GuardState;
 }
 export interface Dbl5Options {symbol:string;market?:string;dataSource?:string;dataVersion?:string;tickSize?:string|number|null;config?:Partial<Dbl5Config>;asOf?:number;initializationId?:string;initializationStart?:number;checkpoint?:Dbl5Checkpoint}
 
@@ -82,7 +99,7 @@ export interface Dbl5Options {symbol:string;market?:string;dataSource?:string;da
 export class Dbl5Engine {
   readonly config:Dbl5Config;readonly config_hash:string;readonly symbol:string;readonly market:string;readonly data_source:string;readonly data_version:string;readonly initialization_id:string;readonly initialization_start:number|null;readonly asOf:number;
   tick_size:string|null;first_time:number|null=null;last_time:number|null=null;last_signature:string|null=null;data_checksum:string;
-  active:Dbl5Active|null=null;candidates:Dbl5Candidate[]=[];context:Dbl5Candle[]=[];confirmed_boxes:Dbl5Box[]=[];ended:Dbl5End[]=[];events:Dbl5Event[]=[];last_row:Dbl5Row|null=null;
+  active:Dbl5Active|null=null;candidates:Dbl5Candidate[]=[];context:Dbl5Candle[]=[];confirmed_boxes:Dbl5Box[]=[];ended:Dbl5End[]=[];events:Dbl5Event[]=[];last_row:Dbl5Row|null=null;guard:Dbl5GuardState=freshGuard();private current:Dbl5Candle|null=null;
   private eventIds=new Set<string>();
   constructor(options:Dbl5Options){
     const c=options.checkpoint;this.config=dbl5Parameters(options.config??c?.effective_parameters);this.config_hash=dbl5ConfigHash(this.config);
@@ -93,25 +110,52 @@ export class Dbl5Engine {
     if(this.initialization_start!==null&&(!Number.isSafeInteger(this.initialization_start)||this.initialization_start%DBL5_STEP!==0))throw Error('DBL-5 初始化起点必须为5m开盘时间');
     this.data_checksum=dbl5Hash(this.identity().filter((_,i)=>i!==7));
     if(c){if(c.checkpoint_version!==1||c.timeframe!=='5m'||c.feature_id!==DBL5_ID||c.algorithm_version!==DBL5_VERSION||c.config_hash!==this.config_hash||c.symbol!==this.symbol||c.market!==this.market||c.data_source!==this.data_source||c.data_version!==this.data_version||c.tick_size!==this.tick_size||c.initialization_id!==this.initialization_id||c.initialization_start!==this.initialization_start)throw Error('DBL-5 检查点身份、精度、版本或配置不一致');
-      const copy=structuredClone(c);this.first_time=copy.first_time;this.last_time=copy.last_time;this.last_signature=copy.last_signature;this.data_checksum=copy.data_checksum;this.active=copy.active;this.candidates=copy.candidates;this.context=copy.context;this.confirmed_boxes=copy.confirmed_boxes;this.ended=copy.ended;this.events=copy.events;this.last_row=copy.last_row;this.eventIds=new Set(this.events.map(e=>e.id));
+      const copy=structuredClone(c);this.first_time=copy.first_time;this.last_time=copy.last_time;this.last_signature=copy.last_signature;this.data_checksum=copy.data_checksum;this.active=copy.active;this.candidates=copy.candidates;this.context=copy.context;this.confirmed_boxes=copy.confirmed_boxes;this.ended=copy.ended;this.events=copy.events;this.last_row=copy.last_row;this.guard=copy.guard??freshGuard();this.eventIds=new Set(this.events.map(e=>e.id));
     }
   }
   private identity(){return [DBL5_ID,DBL5_VERSION,this.config_hash,this.symbol,this.market,this.data_source,this.data_version,this.tick_size,this.initialization_id,this.initialization_start];}
-  checkpoint():Dbl5Checkpoint {return structuredClone({checkpoint_version:1,timeframe:'5m',feature_id:DBL5_ID,algorithm_version:DBL5_VERSION,effective_parameters:this.config,config_hash:this.config_hash,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,tick_size:this.tick_size,initialization_id:this.initialization_id,initialization_start:this.initialization_start,first_time:this.first_time,last_time:this.last_time,last_signature:this.last_signature,data_checksum:this.data_checksum,active:this.active,candidates:this.candidates,context:this.context,confirmed_boxes:this.confirmed_boxes,ended:this.ended,events:this.events,last_row:this.last_row});}
+  checkpoint():Dbl5Checkpoint {return structuredClone({checkpoint_version:1,timeframe:'5m',feature_id:DBL5_ID,algorithm_version:DBL5_VERSION,effective_parameters:this.config,config_hash:this.config_hash,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,tick_size:this.tick_size,initialization_id:this.initialization_id,initialization_start:this.initialization_start,first_time:this.first_time,last_time:this.last_time,last_signature:this.last_signature,data_checksum:this.data_checksum,active:this.active,candidates:this.candidates,context:this.context,confirmed_boxes:this.confirmed_boxes,ended:this.ended,events:this.events,last_row:this.last_row,guard:this.guard});}
   private event(type:Dbl5Event['type'],at:number,box:Dbl5Box|null,episode:string|null,endedEpisode:string|null=null,double=false,reasons:string[]=[]):Dbl5Event {
     const e:Dbl5Event={id:'dbl5-event-'+dbl5Hash([this.identity(),box?.box_id,type,at,episode,reasons]),type,at,box_id:box?.box_id??null,episode_id:episode,ended_box_id:['SUPPORT_BROKEN','SUPPORT_EXPIRED','DATA_GAP','DATA_INVALID'].includes(type)?box?.box_id??null:null,ended_episode_id:endedEpisode,double_breach:double,reason_codes:reasons};
     if(!this.eventIds.has(e.id)){this.eventIds.add(e.id);this.events.push(e);}return e;
   }
   private end(at:number,reason:Dbl5End['reason']){const old=this.active;if(old)this.ended.push({box:structuredClone(old),ended_at:at,reason});this.active=null;return old;}
   private publish(at:number,event:Dbl5EventType,events:Dbl5Event[],confirmed:Dbl5Box[],endedBox:Dbl5Active|null,endedEpisode:string|null,double:boolean,valid:boolean,continuous:boolean,reasons:string[],close:bigint|null):Dbl5Row {
+    const guard=this.advanceGuard(valid?this.current:null,events),g=this.guard,tickPrice=(t:number|null)=>t===null||!this.tick_size||t<1?null:dbl5TickPrice(BigInt(Math.floor(t)),this.tick_size);
     const a=this.active,lower=a?BigInt(a.lower_ticks):null,upper=a?BigInt(a.upper_ticks):null;
     const dist=lower!==null&&close!==null?ratio(close-lower,lower):null,width=lower!==null&&upper!==null?ratio(upper-lower,lower):null;
     const row:Dbl5Row={at,darvas_5m_lower:a?.D??null,darvas_5m_upper:a?.U??null,darvas_5m_available:!!a,darvas_5m_distance_bps:dist===null||!Number.isFinite(10000*dist)?null:10000*dist,darvas_5m_width_bps:width===null||!Number.isFinite(10000*width)?null:10000*width,darvas_5m_age_minutes:a?(at-a.confirmed_at)/60000:null,darvas_5m_freshness:a?2**(-(at-a.floor_anchor_time)/3600000):null,
       darvas_5m_event:event,darvas_5m_status:!valid?'DATA_UNAVAILABLE':a?'ACTIVE':this.context.length<this.config.n?'WARMUP':'SEARCHING',formation_type:a?.formation_type??null,
       box_id:a?.box_id??null,episode_id:a?.episode_id??null,seed_time:a?.seed_time??null,origin_time:a?.origin_time??null,floor_anchor_time:a?.floor_anchor_time??null,top_confirmed_at:a?.top_confirmed_at??null,confirmed_at:a?.confirmed_at??null,expires_at:a?.expires_at??null,
       ended_box_id:endedBox?.box_id??null,ended_episode_id:endedEpisode,double_breach:double,data_valid:valid,data_continuous:continuous,reason_codes:reasons,algorithm_version:DBL5_VERSION,config_hash:this.config_hash,effective_parameters:{...this.config},tick_size:this.tick_size,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,data_checksum:this.data_checksum,initialization_id:this.initialization_id,initialization_start:this.initialization_start??(this.first_time===null?null:this.first_time-DBL5_STEP),
-      active:a?structuredClone(a):null,candidate_count:this.candidates.length,new_confirmations:confirmed.map(b=>({...b,selected:b.box_id===a?.box_id})),events};
+      active:a?structuredClone(a):null,candidate_count:this.candidates.length,new_confirmations:confirmed.map(b=>({...b,selected:b.box_id===a?.box_id})),events,
+      darvas_5m_guard:tickPrice(g.line),darvas_5m_guard_regime:g.line===null?null:g.regime,darvas_5m_guard_closes:g.line===null?null:this.guardCloses(g.regime),darvas_5m_guard_atr:g.atr===null||!this.tick_size?null:Number((g.atr*Number(this.tick_size)).toPrecision(12)),darvas_5m_guard_broken:guard.broken,darvas_5m_guard_segment:g.segment};
     this.last_row=structuredClone(row);return row;
+  }
+  private guardCloses(regime:'trend'|'range'|null){return regime==='trend'?DBL5_GUARD_DEFAULTS.guard_trend_closes:this.config.guard_range_closes??DBL5_GUARD_DEFAULTS.guard_range_closes;}
+  /** Order per closed candle: ATR → close-confirmed break of the prior line → a newly selected box may set the line for later candles. */
+  private advanceGuard(candle:Dbl5Candle|null,events:readonly Dbl5Event[]):{broken:boolean} {
+    const g=this.guard,reset=()=>{g.line=null;g.regime=null;g.floor=null;g.last_box=null;g.below=0;g.segment++;};
+    if(!candle){if(g.line!==null||g.last_box)reset();g.prev_close=null;return {broken:false};}
+    if(events.some(e=>e.type==='DATA_GAP')){if(g.line!==null||g.last_box)reset();g.prev_close=null;}
+    const h=Number(candle.high_ticks),l=Number(candle.low_ticks),c=Number(candle.close_ticks),P=DBL5_GUARD_DEFAULTS.atr_period;
+    const tr=g.prev_close===null?h-l:Math.max(h-l,Math.abs(h-g.prev_close),Math.abs(l-g.prev_close));
+    g.samples++;g.atr=g.atr===null?tr:g.samples<=P?g.atr+(tr-g.atr)/g.samples:(g.atr*(P-1)+tr)/P;g.prev_close=c;
+    let broken=false;
+    if(g.line!==null){g.below=c<g.line?g.below+1:0;if(g.below>=this.guardCloses(g.regime)){broken=true;reset();}}
+    const a=this.active;
+    if(a&&g.samples>=P&&g.last_box?.box_id!==a.box_id&&events.some(e=>e.box_id===a.box_id&&['BASELINE','UP_STEP','NESTED_HIGHER_FLOOR','SAME_FLOOR'].includes(e.type))){
+      const D=Number(a.lower_ticks),U=Number(a.upper_ticks),p=g.last_box,atr=g.atr!,trendAtr=this.config.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr,rangeAtr=this.config.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr;
+      if(g.line===null||!p){g.regime='range';g.floor=D;g.line=Math.floor(D-rangeAtr*atr);g.below=0;}
+      else{
+        const overlap=Math.min(U,p.upper)-Math.max(D,p.lower),trend=D>p.lower&&overlap<=DBL5_GUARD_DEFAULTS.overlap*Math.min(U-D,p.upper-p.lower);
+        if(trend){g.regime='trend';g.floor=D;g.line=Math.max(g.line,Math.floor(D-trendAtr*atr));}
+        else if(g.regime!=='range'){g.regime='range';g.floor=Math.min(p.lower,D);g.line=Math.floor(g.floor-rangeAtr*atr);}
+        else if(D<g.floor!){g.floor=D;g.line=Math.floor(D-rangeAtr*atr);}
+      }
+      if(g.line<1){reset();}else g.last_box={box_id:a.box_id,lower:D,upper:U};
+    }
+    return {broken};
   }
   push(bar:Dbl5Bar):Dbl5Row|null {
     if(bar.DBL5_closed===false||bar.PRS6H_closed===false)return null;
@@ -125,7 +169,7 @@ export class Dbl5Engine {
       if(tick==null)throw Error('MISSING_TICK_SIZE');const rule=dbl5TickRule(tick);if(this.tick_size!==null&&rule!==this.tick_size)throw Error('TICK_RULE_CHANGED');
       const [o,h,l,c]=[raw.open,raw.high,raw.low,raw.close].map(p=>dbl5PriceTicks(p,rule));
       if(l>o||l>c||o>h||c>h||!Number.isFinite(dbl5TickPrice(h,rule)))throw Error('INVALID_OHLC');
-      this.tick_size=rule;candle={at,open_ticks:String(o),high_ticks:String(h),low_ticks:String(l),close_ticks:String(c)};
+      this.tick_size=rule;candle={at,open_ticks:String(o),high_ticks:String(h),low_ticks:String(l),close_ticks:String(c)};this.current=candle;
     }catch(error){
       if(error instanceof Error&&error.message==='TICK_RULE_CHANGED')this.tick_size=dbl5TickRule(tick!);
       const old=this.end(at,'DATA_INVALID');this.candidates=[];this.context=[];this.last_time=at;this.last_signature=signature;this.data_checksum=dbl5Hash([this.data_checksum,signature,'DATA_INVALID']);
@@ -176,9 +220,14 @@ export class Dbl5Engine {
 }
 export function computeDbl5(bars:readonly Dbl5Bar[],options:Dbl5Options){const engine=new Dbl5Engine(options),rows=bars.flatMap(b=>{const row=engine.push(b);return row?[row]:[];});return {rows,checkpoint:engine.checkpoint(),events:engine.events,confirmed_boxes:engine.confirmed_boxes,ended:engine.ended};}
 export const DBL5_FIELDS=['DBL5','DBL5_upper','DBL5_available','DBL5_distance_bps','DBL5_width_bps','DBL5_age_minutes','DBL5_freshness','DBL5_event_baseline','DBL5_event_up_step','DBL5_event_nested_higher_floor','DBL5_event_same_floor','DBL5_event_support_broken','DBL5_event_support_expired','DBL5_event_data_gap'] as const;
-export const DBL5_RENDER_FIELDS=['_DBL5_episode','_DBL5_box','_DBL5_nested','_DBL5_baseline','_DBL5_up_step','_DBL5_same_floor','_DBL5_invalid','_DBL5_warmup'] as const;
+/** 绘图专用（不进公式，DBL5_FIELDS 决定内置公式与定义身份，不能动）；防守线也走这里。 */
+export const DBL5_RENDER_FIELDS=['_DBL5_guard','_DBL5_guard_trend','_DBL5_guard_broken','_DBL5_guard_segment','_DBL5_episode','_DBL5_box','_DBL5_nested','_DBL5_baseline','_DBL5_up_step','_DBL5_same_floor','_DBL5_invalid','_DBL5_warmup'] as const;
 export function dbl5Numeric(row:Dbl5Row,name:string):number|null {
   if(name==='_DBL5_episode'||name==='_DBL5_box'){const id=name==='_DBL5_episode'?row.episode_id:row.box_id;return id?parseInt(dbl5Hash(id).slice(0,12),16):null;}
+  if(name==='_DBL5_guard')return row.darvas_5m_guard??null;
+  if(name==='_DBL5_guard_trend')return row.darvas_5m_guard==null?null:row.darvas_5m_guard_regime==='trend'?1:0;
+  if(name==='_DBL5_guard_broken')return row.darvas_5m_guard_broken?1:0;
+  if(name==='_DBL5_guard_segment')return row.darvas_5m_guard==null?null:row.darvas_5m_guard_segment??0;
   if(name==='_DBL5_invalid')return row.darvas_5m_status==='DATA_UNAVAILABLE'?1:0;
   if(name==='_DBL5_warmup')return row.darvas_5m_status==='WARMUP'?1:0;
   if(name==='_DBL5_baseline')return row.formation_type==='BASELINE'?1:0;

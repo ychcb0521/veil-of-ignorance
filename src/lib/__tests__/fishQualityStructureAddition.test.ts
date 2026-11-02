@@ -3,7 +3,7 @@ import {computeDbl5} from '../dbl5m';
 import {computeSbs5m} from '../sbs5m';
 import {sample,T} from './fixtures/dblBars';
 import {sbsComplete,SBS_T} from './fixtures/sbsBars';
-import {defaultStructureAddition,structureAdditionIdentity,structureAdditionSignal,structureAdditionK,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
+import {defaultStructureAddition,structureAdditionIdentity,structureAdditionLabel,structureAdditionSignal,structureAdditionK,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
@@ -161,6 +161,25 @@ describe('native box decisions for holding additions',()=>{
   expect(additionMirrorIdentity(add,{enabled:true,gainPct:5,sellPct:50} as never)).toEqual([]);
   expect(additionMirrorIdentity(add,{enabled:true,gainPct:2.5,sellPct:67} as never)).toEqual([['addition-after-partial-mirror-v1']]);
   expect(additionMirrorIdentity({...add,enabled:false},{enabled:true,sellPct:67})).toEqual([]);
+ });
+ it('K can use the DBL-5 guard line: frozen guard, regime and close count; SBS cannot',async()=>{
+  const g={...rule(),kSource:'guard' as const};
+  expect(()=>validateStructureAddition({...rule('sbs5m'),kSource:'guard'})).toThrow('防守线');
+  expect(structureAdditionIdentity(g)).not.toEqual(structureAdditionIdentity(rule()));expect(structureAdditionLabel(g)).toContain('K＝防守线');
+  const o=context(sample()),r=await findCalculatorAdditions({...o,structure:g,maxRounds:1});
+  expect(r.fills.length).toBeGreaterThan(0);
+  for(const f of r.fills){const e=f.structureEvidence!;expect(e.guardPrice).toBe(e.basePrice);expect(['trend','range']).toContain(e.guardRegime);expect(e.guardCloses).toBe(e.guardRegime==='trend'?1:2);expect(f.sizing!.support).toBe(e.k);expect(e.k).toBeLessThanOrEqual(e.guardPrice!);}
+ });
+ it('a guard K stop ignores wicks and sells at the next minute open after the required closes',async()=>{
+  const o=context(sample()),at=o.entry+20*STEP,K=95;
+  const fill={at,price:100,quantity:1,notional:100,scanFrom:o.entry,reading:0,threshold:0,direction:'>' as const,metric:'confirmed_support',label:'',barOpenTime:at-STEP,structureEvidence:{...evidence(),guardPrice:K,guardRegime:'range' as const,guardCloses:2,k:K},sizing:{support:K,previousSupport:90,atr:1,atrAt:at,coinsBefore:1,realAverageBefore:90,baseCoins:1,mirrorCoins:0,mirrorUsed:0}};
+  const m=(t:number,open:number,low:number,close:number)=>({openTime:t,open,high:Math.max(open,close)+.1,low,close,volume:1,quoteVolume:1,takerBuyVolume:1,takerBuyQuoteVolume:1});
+  // 第一个 5 分钟：影线到 90 但收 96；第二个收 94（1 根）；第三个回到 96（清零）；第四、五个连续收 94、93 → 第六个 5 分钟的第一分钟开盘卖出
+  const closes=[96,94,96,94,93,92],prices=Array.from({length:35},(_,i)=>{const t=at+i*M,c=closes[Math.floor(i/5)]??92;return m(t,c,i===2?90:c-.1,c);});
+  const r=await findCalculatorAdditions({...o,since:at,end:at+35*M,prices,previous:[fill],maxRounds:1});
+  expect(r.stop).toMatchObject({at:at+25*M,price:92,support:K,atOpen:true,confirmCloses:2});
+  const trend=await findCalculatorAdditions({...o,since:at,end:at+35*M,prices,previous:[{...fill,structureEvidence:{...fill.structureEvidence,guardRegime:'trend' as const,guardCloses:1}}],maxRounds:1});
+  expect(trend.stop).toMatchObject({at:at+10*M,price:96,confirmCloses:1});
  });
  it('checks 方向 conditions at the box event itself: unmet conditions skip the event, met ones are recorded with the fill',async()=>{
   const price=(direction:'<'|'>',threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'add-dir-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction,threshold,constraints:[]}),scale:1,threshold,direction,metric:'结果',label:'收盘价'});

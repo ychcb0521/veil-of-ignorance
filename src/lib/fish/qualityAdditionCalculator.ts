@@ -11,7 +11,7 @@ import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
-interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause}
+interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>;
 interface Options extends AtrSettings {
  structure?:StructureAdditionRule;
@@ -44,8 +44,23 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const bars=o.prices.filter(b=>b.openTime<o.end);let size=1;while(size<bars.length)size*=2;
  const highTree=new Float64Array(size*2).fill(-Infinity);
  const lowTree=new Float64Array(size*2).fill(Infinity);bars.forEach((b,i)=>{if(!(b.open>0)||!(b.low>0)||!Number.isFinite(b.open)||!Number.isFinite(b.low)||!Number.isFinite(b.high)||b.high<Math.max(b.open,b.low))throw Error('加仓行情读数无效');lowTree[size+i]=b.low;highTree[size+i]=b.high;});for(let i=size-1;i>0;i--){lowTree[i]=Math.min(lowTree[i*2],lowTree[i*2+1]);highTree[i]=Math.max(highTree[i*2],highTree[i*2+1]);}
+ /**
+  * K 取防守线时：影线不算，5 分钟收盘连续 m 根低于 K（m 由加仓时的行情状态冻结：上涨 1、震荡 2）才确认，
+  * 下一分钟开盘卖出（可能低于 K）。5 分钟桶须整段在上次加仓之后。
+  */
+ const findGuardStop=(support:number,closes:number,from:number):SupportStop|undefined=>{
+  let below=0;const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
+  for(let i=first;i<bars.length;i++){
+   const b=bars[i],bucketEnd=b.openTime+MINUTE;if(bucketEnd%STEP!==0||bucketEnd-STEP<from)continue;
+   below=b.close<support?below+1:0;if(below<closes)continue;
+   const next=bars[i+1];if(!next)return;
+   const exit=o.ordinaryExit;if(exit&&next.openTime===exit.at&&exit.atOpen)return;
+   return {at:next.openTime,price:next.open,support,atOpen:true,confirmCloses:closes};
+  }
+ };
  const findStop=(support:number|undefined,from:number):SupportStop|undefined=>{
   if(support==null)return;
+  const closes=fills.at(-1)?.structureEvidence?.guardCloses;if(closes)return findGuardStop(support,closes,from);
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
   const search=(node:number,left:number,right:number):number=>{if(right<=first||lowTree[node]>support)return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
   const index=search(1,0,size),bar=bars[index];if(!bar)return;

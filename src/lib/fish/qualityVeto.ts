@@ -14,7 +14,7 @@ export const minuteDropWindow = (kind: QualityHoldingVeto['kind']) => kind === '
 export const ADDITION_PROFIT_KIND='addition-geometric-profit' as const;
 export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
 export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'>&{kind:string})=>v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
-export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number}};
+export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number}};
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
