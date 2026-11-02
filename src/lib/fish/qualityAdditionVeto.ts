@@ -24,10 +24,11 @@ export interface QualityAdditionEntryVeto {
   join?: 'and' | 'or';
 }
 export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditionEntryVeto> = {
-  'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: 1.5, ratio: 60 },
+  // 【用户要求】2026-11-02 默认值按 104 场战役的成败对比定（失败的加仓多在长上影、冲高回落 ≥2.5 ATR 之后），可修改
+  'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: .8, ratio: 65 },
   'lower-spike': { kind: 'lower-spike', enabled: false, lookbackBars: 12, atr: 2, pct: 3 },
   volatility: { kind: 'volatility', enabled: false, ratio: 1.8, er: .25 },
-  pullback: { kind: 'pullback', enabled: false, atr: 2 },
+  pullback: { kind: 'pullback', enabled: false, atr: 2.5 },
   // 【用户要求】2026-11-02 持仓期间曾出现任意 1 分钟跌超 5%、5 分钟超 7%、10 分钟超 10% 等，就不再加仓（PENGU 第 3 次加仓前那根长红线）
   'fast-drop': { kind: 'fast-drop', enabled: false, windows: [{ minutes: 1, pct: 5 }, { minutes: 5, pct: 7 }, { minutes: 10, pct: 10 }] },
 };
@@ -43,7 +44,9 @@ export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
         : `冲高回落：距持仓最高点回落 ${pullbackText(pullbackParams(v))}`;
 }
 /** 冲高回落实际用的门槛：ATR 与百分比都没填（旧数据）时沿用默认 2 ATR；填了哪个就只用哪个，不再补默认值。 */
-export const pullbackParams = (raw: QualityAdditionEntryVeto): QualityAdditionEntryVeto => raw.atr == null && raw.pct == null ? { ...raw, atr: ADDITION_VETO_DEFAULTS.pullback.atr } : { ...raw, join: raw.atr != null && raw.pct != null ? raw.join ?? 'and' : undefined };
+/** 早期只存了开关、没存门槛的冲高回落按当时的 2 ATR 读，默认值改了也不影响旧方案。 */
+const LEGACY_PULLBACK_ATR = 2;
+export const pullbackParams = (raw: QualityAdditionEntryVeto): QualityAdditionEntryVeto => raw.atr == null && raw.pct == null ? { ...raw, atr: LEGACY_PULLBACK_ATR } : { ...raw, join: raw.atr != null && raw.pct != null ? raw.join ?? 'and' : undefined };
 /** 冲高回落的门槛文字：≥ a ATR、≥ x%，或两者「且 / 或」。 */
 const pullbackText = (d: QualityAdditionEntryVeto) => [d.atr != null ? `≥ ${d.atr} ATR` : '', d.pct != null ? `≥ ${d.pct}%` : ''].filter(Boolean).join(d.join === 'or' ? ' 或 ' : ' 且 ');
 export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVeto[]) {
