@@ -1,5 +1,6 @@
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
+import {assertStructureVersionsAvailable,structureVersionLabel,type StructureVersions} from './boxAlgorithmVersions';
 import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,DBL5_GUARD_VERSION,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import {sbsParameters,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
@@ -16,6 +17,8 @@ export interface StructureAdditionRule {
  kSource?:'previous'|'current'|'guard';
  /** Exact native parameters are frozen when the plan is saved. */
  definition:DeepDigFeatureDef;
+ /** 【用户要求】2026-11-02 保存时冻结的箱体算法版本（如 dbl-5-v2、dbl5-guard-v1）；缺省按定义公式第一行认出。 */
+ versions?:StructureVersions;
 }
 export interface StructureAdditionEvidence {
  algorithm:StructureAdditionRule['algorithm'];trigger:StructureAdditionRule['trigger'];event:string;eventId:string;
@@ -66,11 +69,12 @@ export function validateStructureAddition(rule?:StructureAdditionRule):asserts r
  const def=rule.definition,builtin=rule.algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
  if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!=='5m'||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
  if(rule.algorithm==='dbl5')dbl5Parameters(def.DBL5_config);else sbsParameters(def.SBS5M_config);
+ assertStructureVersionsAvailable(rule);
 }
 export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${DBL5_GUARD_VERSION}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION];
 export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
-export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureAlgorithmLabel(r)} · ${structureTriggerLabel(r)} · K＝${r.kSource==='current'?'新C':r.kSource==='guard'?'防守线':'旧C'}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}`;
+export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureVersionLabel(r)} · ${structureTriggerLabel(r)} · K＝${r.kSource==='current'?'新C':r.kSource==='guard'?'防守线':'旧C'}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}`;
 /** Only selected, still-active confirmed structures may emit a decision. Pending boxes never qualify. */
 export function structureAdditionSignal(rule:StructureAdditionRule,row:Dbl5Row|SbsRow,initializationStart:number):StructureAdditionEvidence|undefined {
  if(!row.data_valid)throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');

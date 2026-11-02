@@ -20,6 +20,16 @@ it('offers only the box position, with calculator defaults and K = 旧C − n×A
  expect(screen.getByTestId('addition-k-row')).toHaveTextContent(/^K =/);expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
  const rule=save();expect(rule).toMatchObject({enabled:true,quantityMode:'calculator',quantity:1,source:'structure',structure:{algorithm:'dbl5',buffer:0}});expect(rule.rounds.map((r:QualityAdditionRule)=>r.source)).toEqual(['structure','structure','structure']);
 });
+// 【用户要求】2026-11-02 加仓设置的「位置」显示箱体算法版本，ⓘ 里写每个版本的逻辑；保存时冻结版本
+it('shows the box algorithm version in 位置, explains every version, and freezes it on save',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByTestId('addition-box-version')).toHaveTextContent('DBL-5 v2');
+ expect([...(screen.getByLabelText('箱体加仓算法') as HTMLSelectElement).options].map(o=>o.textContent)).toEqual(['DBL-5 v2 · 达瓦斯下轨','SBS-5M v1 · 台阶支撑']);
+ expect([...(screen.getByLabelText('K基准箱体') as HTMLSelectElement).options].map(o=>o.textContent)).toContain('防守线 v1（更结实）');
+ fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});expect(screen.getByTestId('addition-box-version')).toHaveTextContent('DBL-5 v2 · 防守线 v1');
+ fireEvent.click(screen.getByLabelText('箱体算法版本说明'));expect(screen.getByTestId('box-algorithm-versions')).toHaveTextContent('dbl5-guard-v1');
+ const rule=save();expect(rule.rounds[0].structure.versions).toEqual({box:'dbl-5-v2',guard:'dbl5-guard-v1'});
+});
 it('converts legacy rounds: a custom indicator moves into 方向, an original-detector round becomes a box',()=>{
  const mbi=makeQualityBuyFilter('mbi:MBI','>',.8,true,BUILTIN_FEATURES),bear=makeQualityBuyFilter('mbi-bear:MBI_bear','<',-.7,true,BUILTIN_FEATURES);
  const legacy:QualityAdditionRule={...defaultQualityAddition(),enabled:true,maxRounds:2,rounds:[{source:'custom',stricterPct:10,condition:mbi,conditions:[mbi,bear],minGainPct:5,supportOffsetAtr:2},{source:'detector',stricterPct:10}]};

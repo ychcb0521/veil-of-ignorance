@@ -5,11 +5,14 @@
  */
 import type { FishQualityStudy, QualityGroup } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
+import { freezeQualityPlan, planVersionChanges } from './qualityPlanVersions';
 
 export interface QualityPlanTemplate {
   id: string; name: string; savedAt: number; updatedAt: number;
   /** 删除后只留墓碑，不再保存方案正文。 */
   deleted?: true; plan?: QualityGroup;
+  /** 旧模板在 2026-11-02 版本保护上线时按当时代码补记版本清单的时间。 */
+  versionsBackfilledAt?: number;
 }
 const newTemplateId = () => `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 export const activeQualityPlanTemplates = (study: Pick<FishQualityStudy, 'planTemplates'>): (QualityPlanTemplate & { plan: QualityGroup })[] =>
@@ -18,7 +21,9 @@ export const activeQualityPlanTemplates = (study: Pick<FishQualityStudy, 'planTe
 export function saveQualityPlanTemplate(study: FishQualityStudy, plan: QualityGroup, name: string, now = Date.now()): FishQualityStudy {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('请填写模板名称');
-  const template: QualityPlanTemplate = { id: newTemplateId(), name: trimmed, savedAt: now, updatedAt: now, plan: structuredClone(plan) };
+  // 模板存的是这套方案实际冻结的版本；方案本身的版本已与代码不符时不能存（否则会把新版本当成旧版本存档）
+  if (plan.frozenVersions && planVersionChanges(plan).length) throw new Error('这套方案冻结的算法版本与当前代码不同，不能存为模板；请先在条件设置里重新保存');
+  const template: QualityPlanTemplate = { id: newTemplateId(), name: trimmed, savedAt: now, updatedAt: now, plan: structuredClone(plan.frozenVersions ? plan : freezeQualityPlan(plan)) };
   return { ...study, planTemplates: [...(study.planTemplates ?? []), template] };
 }
 export function deleteQualityPlanTemplate(study: FishQualityStudy, id: string, now = Date.now()): FishQualityStudy {
@@ -39,7 +44,12 @@ export function mergeQualityPlanTemplates(left?: readonly QualityPlanTemplate[],
   return [...map.values()];
 }
 /** 从模板新建方案：全部参数照搬，换新编号与名称。 */
-export const qualityPlanFromTemplate = (template: QualityPlanTemplate & { plan: QualityGroup }, id: string, label = template.name): QualityGroup => ({ ...structuredClone(template.plan), id, label });
+export const qualityPlanFromTemplate = (template: QualityPlanTemplate & { plan: QualityGroup }, id: string, label = template.name): QualityGroup => {
+  // 【用户要求】2026-11-02 模板冻结的算法版本与当前代码不同时不新建，免得按另一版逻辑运行
+  const changes = planVersionChanges(template.plan);
+  if (changes.length) throw new Error(`模板「${template.name}」的算法版本与当前代码不同：${changes.map(c => `${c.part}「${c.name}」${c.from ?? '（无）'} → ${c.to ?? '（已不存在）'}`).join('；')}`);
+  return { ...structuredClone(template.plan), id, label };
+};
 
 /** 模板列表里的一行摘要（各项参数仍以新建后的设置界面为准）。 */
 export function qualityPlanTemplateSummary(plan: QualityGroup): string {

@@ -11,9 +11,11 @@ const plan = { id: 'p1', label: '组合算法1', metric: 'state', snapshot: { fe
 it('saves a full snapshot, creates new plans with every parameter, and keeps the saved copy independent', () => {
   let s = saveQualityPlanTemplate(newQualityStudy(1), plan, '  好组合  ', 100);
   const [t] = activeQualityPlanTemplates(s);
-  expect(t.name).toBe('好组合'); expect(t.plan).toEqual(plan); expect(t.plan).not.toBe(plan);
+  // 2026-11-02 起模板另带保存时冻结的版本清单
+  const { frozenVersions, ...body } = t.plan;
+  expect(t.name).toBe('好组合'); expect(body).toEqual(plan); expect(frozenVersions?.length).toBeGreaterThan(0); expect(t.plan).not.toBe(plan);
   const made = qualityPlanFromTemplate(t, 'p9');
-  expect(made).toEqual({ ...plan, id: 'p9', label: '好组合' });
+  expect(made).toEqual({ ...plan, frozenVersions, id: 'p9', label: '好组合' });
   made.mirrorTakeProfit!.sellPct = 50; expect(activeQualityPlanTemplates(s)[0].plan.mirrorTakeProfit!.sellPct).toBe(67);
   expect(() => saveQualityPlanTemplate(s, plan, '  ')).toThrow('模板名称');
   s = saveQualityPlanTemplate(s, plan, '第二个', 200); expect(activeQualityPlanTemplates(s).map(x => x.name)).toEqual(['第二个', '好组合']);

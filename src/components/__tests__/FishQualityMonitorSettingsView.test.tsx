@@ -25,4 +25,6 @@ it('shows the frozen monitor settings with the same editors, read-only, with rou
   expect(within(within(view).getByTestId('quality-hard-stop')).getAllByRole('checkbox').some(c => (c as HTMLInputElement).checked)).toBe(true);
   for (const gone of [/保存/, /新增卖出算法/, /从模板新建/]) expect(within(view).queryByRole('button', { name: gone })).toBeNull();
   expect(within(view).queryByLabelText('复制卖出算法 1')).toBeNull();
-});
+  // 2026-11-02 版本保护：只读视图底部列出这场战役冻结的算法版本
+  expect(within(within(view).getByTestId('quality-plan-versions')).getByTestId('plan-version-list')).toBeInTheDocument();
+},20_000);

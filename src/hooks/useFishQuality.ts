@@ -1,3 +1,4 @@
+import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
@@ -92,7 +93,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (!active || epoch !== generation.current) return;
       const archived = recoverQualityFilterRounds(recoverQualityMonitorRounds(adoptQualityMonitorHistory(archiveQualityStudy(ensureQualitySellCombo(enableQualityComparison(migrateQualityCaptureEntries(value.study)))))));
       // 【用户要求】2026-10-26 盘面保持干净：卖出方案静默同步当前账号公式，不再显示同步提示
-      const migrated = migrateQualitySourceRows(separateQualityFilters(syncQualitySellDefinitions(archived)));
+      // 【用户要求】2026-11-02 版本保护：没冻结过的方案与模板按当前代码补记版本；只因跟随账号公式而变的指纹重新冻结
+      const migrated = backfillPlanVersions(refreezeSyncedFormulas(migrateQualitySourceRows(separateQualityFilters(syncQualitySellDefinitions(archived)))));
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
@@ -313,14 +315,14 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const plan=current.current.sellPlans?.find(p=>p.id===id)??current.current.groups.find(p=>p.id===id);
     if(!plan||JSON.stringify(plan.rule)===JSON.stringify(rule))return;
     pauseForSettings();
-    change(s => ({ ...archiveQualityStudy(s), groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? { ...g, rule } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
+    change(s => ({ ...archiveQualityStudy(s), groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? freezeQualityPlan({ ...g, rule }) : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
   }, [change,pauseForSettings]);
   /** Save the full segmented rule together; monitoring starts from the explicit button. */
   const setCombo = useCallback((id: string, rule: QualityExitRule, combo: QualitySellCombo) => {
     const plan=current.current.sellPlans?.find(p=>p.id===id&&p.combo);
     if(!plan||JSON.stringify([plan.rule,plan.combo])===JSON.stringify([rule,combo]))return;
     pauseForSettings();
-    change(s => ({ ...archiveQualityStudy(s), sellPlans: s.sellPlans?.map(g => g.id === id && g.combo ? { ...g, rule, combo } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
+    change(s => ({ ...archiveQualityStudy(s), sellPlans: s.sellPlans?.map(g => g.id === id && g.combo ? freezeQualityPlan({ ...g, rule, combo }) : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
   }, [change,pauseForSettings]);
   const setObserveHours = useCallback((hours: number) => {
     if(current.current.observeHours===hours)return;
@@ -368,7 +370,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     pauseForSettings();
     change(s => {
       const saved = materializePlanBuyFilters(archiveQualityStudy(s));
-      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes), ...(mirror ? {mirrorTakeProfit:structuredClone(mirror)} : {}), ...(addition ? {addition:structuredClone(addition)} : {}) } : p) };
+      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? freezeQualityPlan({ ...p, holdingVetoes: structuredClone(vetoes), ...(mirror ? {mirrorTakeProfit:structuredClone(mirror)} : {}), ...(addition ? {addition:structuredClone(addition)} : {}) }) : p) };
     });
   }, [change,pauseForSettings]);
   const setSellPlans = useCallback((plans: import('@/lib/fish/quality').QualityGroup[]) => {

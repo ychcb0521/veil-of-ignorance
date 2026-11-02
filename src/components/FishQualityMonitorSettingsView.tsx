@@ -12,6 +12,7 @@ import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVet
 import { holdingVetoDraft } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition } from '@/lib/fish/qualityAddition';
 import type { QualityGroup } from '@/lib/fish/quality';
+import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 
 const ignore = () => {};
 export function FishQualityMonitorSettingsView({ plan }: { plan: QualityGroup }) {
@@ -28,6 +29,7 @@ export function FishQualityMonitorSettingsView({ plan }: { plan: QualityGroup })
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span></div>
       <FishQualityHoldingVetoEditor draft={holdingVetoDraft(plan.holdingVetoes)} setDraft={ignore}/>
     </section>
+    <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="quality-plan-versions"><h4 className="text-xs font-medium">算法版本</h4><PlanVersionList plan={plan}/></section>
   </div>;
 }
 /** 战役元数据底部的入口按钮。 */

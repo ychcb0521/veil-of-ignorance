@@ -4,6 +4,7 @@ import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/
 import { makeQualityBuyFilter } from './qualityFilters';
 import { archiveQualityStudy } from './qualityCampaignArchive';
 import { materializePlanBuyFilters, type FishQualityStudy, type QualityGroup } from './quality';
+import { freezeSavedPlans } from './qualityPlanVersions';
 
 export const newQualitySellPlanId = () => 'sell-' + (globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
 
@@ -19,9 +20,9 @@ export function makeQualitySellPlan(choice: string, direction: '<' | '>', thresh
 }
 
 /** Archive before replacing active plans; detector data and prior libraries remain untouched. */
-export function replaceQualitySellPlans(study: FishQualityStudy, plans: readonly QualityGroup[]): FishQualityStudy {
+export function replaceQualitySellPlans(study: FishQualityStudy, incoming: readonly QualityGroup[]): FishQualityStudy {
   const ids = new Set<string>();
-  for (const plan of plans) {
+  for (const plan of incoming) {
     if (!plan.id || ids.has(plan.id)) throw new Error('卖出算法编号重复');
     ids.add(plan.id);
     validateQualitySellStages(plan);validateQualityVetoStages(plan);
@@ -29,6 +30,8 @@ export function replaceQualitySellPlans(study: FishQualityStudy, plans: readonly
     if (plan.rule && (!Number.isFinite(plan.rule.threshold) || !['<', '>'].includes(plan.rule.direction))) throw new Error('卖出门槛必须是有限数字');
     if (plan.combo && (!(plan.combo.switchPct > 0) || !Number.isFinite(plan.combo.switchPct) || !Number.isFinite(plan.combo.after.rule.threshold))) throw new Error('分段切换涨幅须大于 0，后段门槛须为有限数字');
   }
+  // 【用户要求】2026-11-02 保存时冻结版本：未改动的方案沿用已存的版本清单，新建或改过的按当前代码冻结
+  const plans = freezeSavedPlans(study.sellPlans, incoming);
   if (study.sellPlansConfigured && JSON.stringify(study.sellPlans) === JSON.stringify(plans)) return study;
   const saved = materializePlanBuyFilters(archiveQualityStudy(study));
   return { ...saved, sellPlansConfigured: true, sellPlans: structuredClone([...plans]),

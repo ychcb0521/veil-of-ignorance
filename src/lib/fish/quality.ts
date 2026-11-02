@@ -49,6 +49,8 @@ export interface QualityGroup {
   combo?: QualitySellCombo;
   sellStages?:QualitySellStage[];
   vetoStages?:QualityVetoStage[];vetoStageMode?:'overlay'|'replace';vetoPeakBasis?:'holding'|'stage';
+  /** 【用户要求】2026-11-02 保存时冻结的版本清单（所有算法的引擎版本号与公式指纹）；与当前代码不符时拒绝运行。 */
+  frozenVersions?: import('./qualityPlanVersions').PlanVersionEntry[];
 }
 export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
 /** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
@@ -691,6 +693,11 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   }
   const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
   const filtersOnly = options.task === 'filter' || options.task !== 'monitor' && onlyQualityFilters(study);
+  // 【用户要求】2026-11-02 版本保护：方案冻结的算法版本与当前代码不符时不运行，免得悄悄换成另一版逻辑
+  if (study.sellPlans && !filtersOnly) {
+    const {planVersionChanges,planVersionChangeText} = await import('./qualityPlanVersions');
+    for (const g of qualityRunGroups(study)) { const changes = planVersionChanges(g); if (changes.length) throw new Error(`「${g.label}」保存时冻结的算法版本与当前代码不同，已停止运行：${planVersionChangeText(changes)}。如确认改用新版本，请在条件设置里重新保存这套方案。`); }
+  }
   const tasks = study.sellPlans
     ? qualityRunSamples(study).flatMap(s => qualityRunGroups(study).map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);

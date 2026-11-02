@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BookmarkPlus, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
+import { planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
 import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
@@ -37,15 +39,16 @@ function SaveTemplateButton({ index, defaultName, disabledReason, onSave }: { in
   </PopoverContent></Popover>;
 }
 function TemplatePicker({ actions, disabled, onUse }: { actions: PlanTemplateActions; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void }) {
-  const [open, setOpen] = useState(false), [confirm, setConfirm] = useState('');
+  const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
-  return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); }}><PopoverTrigger asChild>
+  return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); }}><PopoverTrigger asChild>
     <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={actions.templates.length ? `已有 ${actions.templates.length} 个模板` : '还没有模板：在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>从模板新建{actions.templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{actions.templates.length}</span>}</button>
   </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] p-1 text-[11px]" data-testid="plan-template-list">
     {!actions.templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。</p>
       : <ul className="max-h-80 overflow-y-auto">{actions.templates.map(t => <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
-        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="truncate text-[10px] text-muted-foreground" title={qualityPlanTemplateSummary(t.plan)}>{qualityPlanTemplateSummary(t.plan)}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)}</p></div>
-        <button type="button" className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20" aria-label={`用模板 ${t.name} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
+        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="truncate text-[10px] text-muted-foreground" title={qualityPlanTemplateSummary(t.plan)}>{qualityPlanTemplateSummary(t.plan)}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${planVersionChanges(t.plan).length ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${t.name} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{planVersionChanges(t.plan).length ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
+          {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5"><PlanVersionList plan={t.plan}/></div>}</div>
+        <button type="button" disabled={planVersionChanges(t.plan).length > 0} title={planVersionChanges(t.plan).length ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${t.name} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
         {confirm === t.id
           ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${t.name}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>
           : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${t.name}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}
