@@ -43,6 +43,20 @@ export function qualityGeometricPosition(result?:QualityResult):number|null{
  return Number.isFinite(value)?value:null;
 }
 export const qualityGeometricPositionText=(value:number|null)=>value==null?'—':`${value.toFixed(2)}x`;
+/**
+ * 【用户要求】2026-11-02 组合表「相对涨幅」后加「盈亏比」，与交易战役同口径（campaignB.PAYOFF_RATIO_FORMULA）：
+ * 盈亏比 b ＝ 已实现净盈亏 ÷ 初始最大预期亏损 L₀；持仓监测的 L₀ ＝ 初始仓位 × 硬性终止静态回撤%（qualityCampaignStaticRisk 同一来源）。只算已卖出的持仓。
+ */
+export function qualityPayoffRatio(plan:Pick<QualityGroup,'holdingVetoes'>,result?:QualityResult):{value:number|null;reason:string}{
+ if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有盈亏比':'尚无卖出结果'};
+ const stops=(plan.holdingVetoes??[]).filter(v=>v.enabled&&v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100).map(v=>v.threshold);
+ if(!stops.length)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在硬性终止里启用静态回撤'};
+ const notional=result.initialNotional??100,L0=notional*Math.min(...stops)/100,pnl=result.pnl;
+ if(pnl==null||!Number.isFinite(pnl)||!(L0>0))return {value:null,reason:'缺少已实现盈亏'};
+ const value=pnl/L0;
+ return Number.isFinite(value)?{value,reason:`盈亏比＝已实现净盈亏 ${pnl.toFixed(2)} ÷ L₀ ${+L0.toPrecision(8)}（${notional} × ${Math.min(...stops)}%）`}:{value:null,reason:'盈亏比超出可计算范围'};
+}
+export const qualityPayoffRatioText=(value:number|null)=>value==null?'—':`${value>0?'+':''}${value.toFixed(2)}R`;
 export const qualityRelativeGainText=(value:number|null)=>value==null?'—':`${(value/100).toFixed(2)}×`;
 export interface HalfMirrorSummary { state:'disabled'|'pending'|'error'|'untriggered'|'filled'; label:string; value:number|null; text:string; detail:string }
 const pct=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;

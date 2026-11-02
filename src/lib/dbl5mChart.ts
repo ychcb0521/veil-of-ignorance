@@ -18,17 +18,19 @@ export function registerDbl5Indicator(item:ResearchIndicator){
         const row=indicator.result[i],value=row?.[field],identity=row?.[field==='DBL5_upper'?'_DBL5_box':'_DBL5_episode'];
         if(!Number.isFinite(value)||!Number.isFinite(identity)){previous=undefined;continue;}
         // Source candle timestamps are opens. Publish at its close, never at its opening centre.
-        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);ctx.beginPath();ctx.lineWidth=field==='value'?1.8:1;ctx.strokeStyle=field==='DBL5_upper'?'#8a96a5':row._DBL5_nested===1?'#bd952f':'#0b9f78';
+        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);ctx.beginPath();ctx.lineWidth=1;ctx.globalAlpha=field==='value'?.55:.4;ctx.strokeStyle=field==='DBL5_upper'?'#8a96a5':'#0b9f78';
         if(previous?.identity===identity){ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}ctx.stroke();previous={x,y,identity};
       }
     }
-    // 【用户要求】2026-11-02 防守线：上涨期蓝、震荡期紫，虚线阶梯；收盘确认跌破处打红叉
+    // 【用户要求】2026-11-02「颜色太多分不清」：防守线是唯一的主线（蓝色加粗），上涨期实线、震荡期虚线；箱底、箱顶退为淡色细线；
+    // 只保留防守线收盘确认跌破的红叉，箱底被影线刺穿的小叉不再画
+    ctx.globalAlpha=1;
     if(price){
-      let previous:{x:number;y:number;identity:number}|undefined;ctx.setLineDash([4,3]);ctx.lineWidth=1.4;
+      let previous:{x:number;y:number;identity:number}|undefined;ctx.lineWidth=2;ctx.strokeStyle='#2563eb';
       for(let i=Math.max(0,visibleRange.from-2);i<Math.min(indicator.result.length,visibleRange.to+1);i++){
         const row=indicator.result[i],value=row?._DBL5_guard,identity=row?._DBL5_guard_segment;
         if(!Number.isFinite(value)||!Number.isFinite(identity)){previous=undefined;continue;}
-        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);ctx.beginPath();ctx.strokeStyle=row._DBL5_guard_trend===1?'#3b82f6':'#8b5cf6';
+        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);ctx.beginPath();ctx.setLineDash(row._DBL5_guard_trend===1?[]:[5,3]);
         if(previous?.identity===identity){ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}ctx.stroke();previous={x,y,identity};
       }
       ctx.setLineDash([]);
@@ -36,9 +38,6 @@ export function registerDbl5Indicator(item:ResearchIndicator){
         const row=indicator.result[i],old=indicator.result[i-1]?._DBL5_guard;if(row?._DBL5_guard_broken!==1||!Number.isFinite(old))continue;
         const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(old);ctx.strokeStyle='#dc2626';ctx.lineWidth=1.6;ctx.beginPath();ctx.moveTo(x-4,y-4);ctx.lineTo(x+4,y+4);ctx.moveTo(x-4,y+4);ctx.lineTo(x+4,y-4);ctx.stroke();
       }
-    }
-    if(price)for(let i=Math.max(0,visibleRange.from-1);i<Math.min(indicator.result.length,visibleRange.to+1);i++){
-      const row=indicator.result[i];if(row?.DBL5_event_support_broken===1||row?.DBL5_event_support_expired===1){const old=indicator.result[i-1]?.value;if(!Number.isFinite(old))continue;const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(old);ctx.strokeStyle=row.DBL5_event_support_broken===1?'#d37c72':'#bd952f';ctx.beginPath();ctx.moveTo(x-3,y-3);ctx.lineTo(x+3,y+3);ctx.moveTo(x-3,y+3);ctx.lineTo(x+3,y-3);ctx.stroke();}
     }
     const visible=indicator.result.slice(Math.max(0,visibleRange.from),Math.min(indicator.result.length,visibleRange.to));
     if(visible.length&&!visible.some(r=>Number.isFinite(r?.value))){const last=visible.at(-1),text=last?._pending?'正在准备5m历史行情…':last?._DBL5_invalid===1?'行情或历史价格精度不可验证':last?._DBL5_warmup===1?'连续5m行情预热中':'当前可见范围暂无已确认箱体';ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText(item.short+' · '+text,8,40);}
