@@ -463,6 +463,11 @@ export interface TradeRecord {
    * 老记录为 undefined（界面显示「—」，绝不退回模拟时间冒充真实操作时间）。
    */
   closedRealAt?: number;
+  /**
+   * 客观操作时刻（真实物理时间），只在它与 closedRealAt 不是同一只钟时填写：持仓监测的模拟交易按行情时间成交、排序（closedRealAt），
+   * 操作时间却是监测真正算出这笔结果的时刻（2026-11-02 用户要求「操作时间要按照真实的物理时间」）。
+   */
+  operationAt?: number;
   /** 真实钱包时钟下的开仓时刻；与 closedRealAt 一起框出这笔交易在现实里的持有区间。老记录没有。 */
   openedRealAt?: number;
   /**

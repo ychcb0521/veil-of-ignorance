@@ -1,0 +1,80 @@
+/**
+ * 【用户要求】2026-11-02 加仓否决（不再加仓）：持仓期间已出现明显长上影线、向下大插针、进入高震荡、冲高回落未收复时，
+ * 新 C 出现也不加——ONTUSDT 第 3 次、STRKUSDT 第 2、3 次加仓都加在这类形态之后，扫损成了必然。
+ * 只看加仓那一刻已收盘的 5 分钟 K 线；ATR 为 5 分钟 ATR(14)（Wilder，与加仓 K 同一序列）。任一条成立即这次不加，继续等下一个新 C。
+ */
+export type AdditionEntryVetoKind = 'upper-wick' | 'lower-spike' | 'volatility' | 'pullback';
+export interface QualityAdditionEntryVeto {
+  kind: AdditionEntryVetoKind; enabled: boolean;
+  /** 回看根数（5 分钟）：长上影线 / 下插针。 */
+  lookbackBars?: number;
+  /** ATR 倍数：上影 / 下影长度、冲高回落幅度。 */
+  atr?: number;
+  /** 上影占整根振幅的最小比例（%）；高震荡：ATR 相对 6 小时中位数的倍数。 */
+  ratio?: number;
+  /** 下插针：最低价低于前一根收盘的百分比。 */
+  pct?: number;
+  /** 高震荡：效率比 ER(24) 上限（来回多、净涨少）。 */
+  er?: number;
+}
+export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditionEntryVeto> = {
+  'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: 1.5, ratio: 60 },
+  'lower-spike': { kind: 'lower-spike', enabled: false, lookbackBars: 12, atr: 2, pct: 3 },
+  volatility: { kind: 'volatility', enabled: false, ratio: 1.8, er: .25 },
+  pullback: { kind: 'pullback', enabled: false, atr: 2 },
+};
+export const ADDITION_VETO_KINDS = Object.keys(ADDITION_VETO_DEFAULTS) as AdditionEntryVetoKind[];
+export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落' };
+export const activeAdditionVetoes = (vetoes?: readonly QualityAdditionEntryVeto[]) => (vetoes ?? []).filter(v => v.enabled);
+export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
+  const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v };
+  return v.kind === 'upper-wick' ? `长上影线：近 ${d.lookbackBars} 根内上影 ≥ ${d.atr} ATR 且占整根 ≥ ${d.ratio}%`
+    : v.kind === 'lower-spike' ? `向下大插针：近 ${d.lookbackBars} 根内下影 ≥ ${d.atr} ATR 或低于前收 ≥ ${d.pct}%`
+      : v.kind === 'volatility' ? `高震荡：ATR ≥ 6 小时中位 ${d.ratio} 倍 或 ER(24) ≤ ${d.er}`
+        : `冲高回落：距持仓最高点回落 ≥ ${d.atr} ATR`;
+}
+export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVeto[]) {
+  for (const v of activeAdditionVetoes(vetoes)) {
+    if (!ADDITION_VETO_KINDS.includes(v.kind)) throw new Error('加仓否决条件类型无效');
+    const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }, bad = (x: number | undefined, lo: number, hi: number) => x == null || !Number.isFinite(x) || x < lo || x > hi;
+    if ((v.kind === 'upper-wick' || v.kind === 'lower-spike') && (bad(d.lookbackBars, 1, 288) || !Number.isInteger(d.lookbackBars))) throw new Error(`${ADDITION_VETO_LABELS[v.kind]}：回看根数须为 1–288 的整数`);
+    if (v.kind !== 'volatility' && bad(d.atr, 0, 50)) throw new Error(`${ADDITION_VETO_LABELS[v.kind]}：ATR 倍数须为 0–50 的数字`);
+    if (v.kind === 'upper-wick' && bad(d.ratio, 0, 100)) throw new Error('长上影线：上影占比须为 0–100%');
+    if (v.kind === 'lower-spike' && bad(d.pct, 0, 100)) throw new Error('向下大插针：跌幅须为 0–100%');
+    if (v.kind === 'volatility' && (bad(d.ratio, 0, 50) || bad(d.er, 0, 1))) throw new Error('高震荡：ATR 倍数须为 0–50，效率比须为 0–1');
+  }
+}
+export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+export interface VetoBar { openTime: number; open: number; high: number; low: number; close: number }
+export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string }
+/**
+ * bars / atr：截至决策时刻（含）已收盘的 5 分钟 K 线与对应 ATR，按时间升序；entry：首次买入时间（冲高回落从这里起算最高点）。
+ */
+export function evaluateAdditionVetoes(vetoes: readonly QualityAdditionEntryVeto[] | undefined, bars: readonly VetoBar[], atr: readonly number[], entry: number): AdditionVetoHit | undefined {
+  const active = activeAdditionVetoes(vetoes), n = bars.length;
+  if (!active.length || !n) return;
+  const A = atr[n - 1], last = bars[n - 1];
+  if (!(A > 0) || !Number.isFinite(A)) return;
+  const fmt = (x: number) => +x.toFixed(2);
+  for (const raw of active) {
+    const v = { ...ADDITION_VETO_DEFAULTS[raw.kind], ...raw };
+    if (v.kind === 'upper-wick') {
+      for (let i = Math.max(0, n - v.lookbackBars!); i < n; i++) { const b = bars[i], range = b.high - b.low, up = b.high - Math.max(b.open, b.close);
+        if (range > 0 && up >= v.atr! * A && up / range * 100 >= v.ratio!) return { kind: v.kind, label: additionVetoLabel(v), reading: `${fmtTime(b.openTime)} 上影 ${fmt(up / A)} ATR，占整根 ${Math.round(up / range * 100)}%` }; }
+    } else if (v.kind === 'lower-spike') {
+      for (let i = Math.max(1, n - v.lookbackBars!); i < n; i++) { const b = bars[i], prev = bars[i - 1].close, down = Math.min(b.open, b.close) - b.low, drop = (prev - b.low) / prev * 100;
+        if (down >= v.atr! * A || drop >= v.pct!) return { kind: v.kind, label: additionVetoLabel(v), reading: `${fmtTime(b.openTime)} 下影 ${fmt(down / A)} ATR，低于前收 ${fmt(drop)}%` }; }
+    } else if (v.kind === 'volatility') {
+      const recent = atr.slice(Math.max(0, n - 72)).filter(x => x > 0).sort((a, b) => a - b), median = recent[Math.floor(recent.length / 2)];
+      const ratio = median > 0 ? A / median : NaN;
+      let er = NaN; if (n > 24) { let path = 0; for (let i = n - 24; i < n; i++) path += Math.abs(bars[i].close - bars[i - 1].close); er = path > 0 ? Math.abs(last.close - bars[n - 25].close) / path : NaN; }
+      if (ratio >= v.ratio! || er <= v.er!) return { kind: v.kind, label: additionVetoLabel(v), reading: `ATR 为 6 小时中位 ${fmt(ratio)} 倍，ER(24) ${fmt(er)}` };
+    } else {
+      let peak = -Infinity; for (const b of bars) if (b.openTime >= entry) peak = Math.max(peak, b.high);
+      const back = (peak - last.close) / A;
+      if (Number.isFinite(back) && back >= v.atr!) return { kind: v.kind, label: additionVetoLabel(v), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR` };
+    }
+  }
+}
+const fmtTime = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(5, 16).replace('T', ' ');

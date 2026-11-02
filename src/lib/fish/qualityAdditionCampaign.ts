@@ -29,7 +29,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
      const pnl=quantity*(price-lot.price),recordId=lot.id+'-'+kind;realized+=pnl;
      tradeRecords.push({id:recordId,positionId,symbol:data.campaign.symbol,side:'LONG',type:kind==='mirror'?'LIMIT':'MARKET',action:'CLOSE',entryPrice:lot.price,exitPrice:price,
        quantity,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl,fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,
-       openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,exit_reason_text:kind==='mirror'?'镜像止盈':r.reason??'卖出'});
+       openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:kind==='mirror'?'镜像止盈':r.reason??'卖出'});
      events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
        price,size_usdt:quantity*lot.price,realized_pnl:pnl,close_time:iso(at),exit_price:price,notes:kind==='mirror'?'镜像止盈':r.reason??'卖出',recorded_at:iso(r.evaluatedAt)});
    };

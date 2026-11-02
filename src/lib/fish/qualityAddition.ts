@@ -1,4 +1,5 @@
 /** Conditional paper additions; disabled and legacy rules retain their frozen identities. */
+import { activeAdditionVetoes, additionVetoIdentity, validateAdditionVetoes } from './qualityAdditionVeto';
 import type { QualityBuyFilter } from './quality';
 import {validateStructureAddition,structureAdditionIdentity,structureAdditionLabel,type StructureAdditionRule,type StructureAdditionEvidence} from './qualityAdditionStructure';
 export interface QualityAdditionRule {
@@ -13,12 +14,14 @@ export interface QualityAdditionRule {
   /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
   prerequisites?: QualityBuyFilter[];
   minGainPct?:number;
+  /** 加仓否决（不再加仓）：任一启用条件在加仓那一刻成立，就跳过这一次（见 qualityAdditionVeto）。 */
+  entryVetoes?: import('./qualityAdditionVeto').QualityAdditionEntryVeto[];
   /** K = T - supportOffsetAtr * ATR（非箱体位置）。entryBufferAtr（旧「入场距离 T ≥ S＋n×ATR」）2026-11-01 应用户要求删除：引擎不再检查，只为读旧数据保留字段。 */
   entryBufferAtr?:number; supportOffsetAtr?:number;
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
-export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'>;
+export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryVetoes'>;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
 const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(rule).supportOffsetAtr;
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
@@ -66,7 +69,9 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,rule.quantityMode==='calculator'?'cost-line':'real-average']]:[]),
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
-  ...(rule.quantityMode==='calculator'?[['addition-k-atr-no-entry-distance-v2',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[])];
+  ...(rule.quantityMode==='calculator'?[['addition-k-atr-no-entry-distance-v2',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[]),
+  // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
+  ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
@@ -77,6 +82,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (rule.source === 'custom' && (!qualityAdditionConditions(rule).length || qualityAdditionConditions(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))) throw new Error('请选择加仓指标并填写有限数字门槛');
   if(rule.source!=='custom'&&qualityAdditionPrerequisites(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))throw new Error('加仓方向条件的指标须填写有限数字门槛');
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
+  validateAdditionVetoes(rule.entryVetoes);
   if(rule.quantityMode==='calculator'){
     const atr=qualityAdditionAtrSettings(rule);
     if(rule.source!=='structure'&&(!Number.isFinite(atr.supportOffsetAtr)||atr.supportOffsetAtr<=0))throw new Error('K 回撤的 ATR 倍数须为大于 0 的有限数字');

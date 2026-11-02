@@ -9,11 +9,12 @@ function safeTimeMs(value: number | string | null | undefined): number | null {
 
 /** The objective wallet-clock timestamp captured when a position was closed. */
 export function tradeRecordOperationTime(record: TradeRecord | null | undefined): number | null {
-  return safeTimeMs(record?.closedRealAt);
+  return safeTimeMs(record?.operationAt ?? record?.closedRealAt);
 }
 
+/** 同一仓位多条记录选「最新」按成交时钟（closedRealAt），不受操作时刻（operationAt）影响。 */
 function recordRecency(record: TradeRecord): number {
-  return tradeRecordOperationTime(record) ?? safeTimeMs(record.closeTime) ?? 0;
+  return safeTimeMs(record.closedRealAt) ?? safeTimeMs(record.closeTime) ?? 0;
 }
 
 /**

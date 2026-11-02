@@ -139,6 +139,9 @@ describe('native box decisions for holding additions',()=>{
   const data=buildQualityCampaignData('owner',{sample:qualitySample,plan:group,result,detectors:[],observeHours:0,firstEvaluatedAt:o.entry},'sell');expect(data.campaign.comparison!.sellEvidence!.additionFills![0].structureEvidence).toEqual(result.additionFills![0].structureEvidence);
   // 2026-11-02 战役元数据「持仓监测」：战役带上当时冻结的整套方案
   expect(data.campaign.comparison!.monitorPlan).toEqual(group);expect(data.campaign.comparison!.monitorPlan).not.toBe(group);
+  // 2026-11-02 操作时间按真实物理时间（监测算出结果的时刻），成交本身仍按行情时间
+  const {campaignOperationTime}=await import('../objectiveOperationTime');
+  expect(campaignOperationTime(data.legs,data.tradeRecords)).toBe(result.evaluatedAt);expect(data.tradeRecords.every(r=>r.closedRealAt===r.closeTime)).toBe(true);
   // 2026-11-02 委托列：加仓的支撑线 K 作为提前挂好的止损单，页面与导出图同一结果
   const addLeg=data.legs.find(l=>l.leg_role==='main_add_1')!,K=result.additionFills![0].sizing!.support;
   const {buildCampaignLegsExportRows}=await import('../campaignLegsPngExport');
@@ -190,6 +193,12 @@ describe('native box decisions for holding additions',()=>{
   expect(r.stop).toMatchObject({at:at+25*M,price:92,support:K,atOpen:true,confirmCloses:2});
   const trend=await findCalculatorAdditions({...o,since:at,end:at+35*M,prices,previous:[{...fill,structureEvidence:{...fill.structureEvidence,guardRegime:'trend' as const,guardCloses:1}}],maxRounds:1});
   expect(trend.stop).toMatchObject({at:at+10*M,price:96,confirmCloses:1});
+ });
+ it('skips a vetoed addition, records the time and reason, and waits for the next new C (2026-11-02 加仓否决)',async()=>{
+  const o=context(sample()),plain=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1});expect(plain.fills).toHaveLength(1);expect(plain.vetoed).toBeUndefined();
+  const all=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[{kind:'volatility',enabled:true,ratio:50,er:1}]});
+  expect(all.fills).toEqual([]);expect(all.vetoed?.[0]).toMatchObject({at:plain.fills[0].at,round:1,kind:'volatility',label:expect.stringContaining('高震荡')});
+  const off=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[{kind:'volatility',enabled:false,ratio:50,er:1}]});expect(off.fills).toHaveLength(1);
  });
  it('checks 方向 conditions at the box event itself: unmet conditions skip the event, met ones are recorded with the fill',async()=>{
   const price=(direction:'<'|'>',threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'add-dir-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction,threshold,constraints:[]}),scale:1,threshold,direction,metric:'结果',label:'收盘价'});

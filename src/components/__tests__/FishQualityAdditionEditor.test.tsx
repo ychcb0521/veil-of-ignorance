@@ -12,7 +12,7 @@ const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次
 // 【用户要求】2026-11-01 位置只用箱体算法（DBL / SBS），下方一行 K = 旧C − n×ATR，n 由用户自己填（新方案先填 0）。
 it('offers only the box position, with calculator defaults and K = 旧C − n×ATR',()=>{
  render(<Editor/>);expect(screen.getByLabelText('启用条件加仓')).not.toBeChecked();expect(screen.getByLabelText('加仓条件来源')).toBeDisabled();
- for(const part of ['addition-prerequisites','addition-timing','addition-sell'])expect(screen.getByTestId(part)).toBeInTheDocument();expect(screen.getAllByRole('heading',{level:5}).map(h=>h.textContent)).toEqual(['方向','位置','卖出']);expect(screen.getByLabelText('最多加仓次数')).toHaveValue(3);
+ for(const part of ['addition-prerequisites','addition-timing','addition-sell'])expect(screen.getByTestId(part)).toBeInTheDocument();expect(screen.getAllByRole('heading',{level:5}).map(h=>h.textContent)).toEqual(['方向','否决','位置','卖出']);expect(screen.getByLabelText('最多加仓次数')).toHaveValue(3);
  fireEvent.click(screen.getByLabelText('启用条件加仓'));
  expect([...(screen.getByLabelText('加仓条件来源') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['structure']);
  for(const gone of ['加仓特征值','加仓门槛提高幅度','K回撤ATR倍数','T高于S的ATR倍数','箱体K基准','箱体冗余单位'])expect(screen.queryByLabelText(gone)).toBeNull();
@@ -89,3 +89,16 @@ it('sets an independent seller for each addition round and keeps switches beyond
  expect(()=>parseAdditionSellStages({...restored,otherRounds:[{...restored.otherRounds[0],sellSwitch:{...restored.otherRounds[0].sellSwitch,threshold:''}}]},BUILTIN_FEATURES)).toThrow('第 2 次加仓');
 });
 
+// 【用户要求】2026-11-02 加仓否决：每次加仓可单独勾选长上影线 / 向下大插针 / 高震荡 / 冲高回落并调参数
+it('saves per-round addition vetoes with editable parameters and restores them',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByTestId('addition-vetoes')).toBeInTheDocument();expect(screen.getByLabelText('启用加仓否决 长上影线')).not.toBeChecked();expect(screen.getByLabelText('长上影线 ATR倍数')).toBeDisabled();
+ fireEvent.click(screen.getByLabelText('启用加仓否决 长上影线'));fireEvent.change(screen.getByLabelText('长上影线 ATR倍数'),{target:{value:'2'}});
+ fireEvent.click(screen.getByLabelText('启用加仓否决 冲高回落'));
+ tab(2);expect(screen.getByLabelText('启用加仓否决 长上影线')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用加仓否决 高震荡'));fireEvent.change(screen.getByLabelText('高震荡 效率比'),{target:{value:'.1'}});
+ const rule=save();
+ expect(rule.rounds[0].entryVetoes).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:2,ratio:60},{kind:'pullback',enabled:true,atr:2}]);
+ expect(rule.rounds[1].entryVetoes).toEqual([{kind:'volatility',enabled:true,ratio:1.8,er:.1}]);expect(rule.rounds[2].entryVetoes).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+ const bad=additionDraft(rule);bad.otherRounds[0].entryVetoes.volatility.er='3';expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('效率比');
+});

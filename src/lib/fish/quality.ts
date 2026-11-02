@@ -81,7 +81,9 @@ export interface QualityResult {
   /** First and only mirror sale, as a fraction of original coin quantity. */
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
-  additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string; totalInvested?: number;
+  additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string;
+  /** 被「加仓否决」拦下的加仓（时间、第几次、原因与读数）。 */
+  additionVetoes?: { at: number; round: number; kind: string; label: string; reading: string }[]; totalInvested?: number;
   averageEntryPrice?: number; remainingQuantity?: number; remainingCost?: number;
   activeVetoStage?:QualityVetoStageActivation;vetoStageSwitches?:QualityVetoStageActivation[];vetoPath?:import('./qualityVeto').QualityHoldingPath;
   activeSellStage?:QualitySellStageActivation; sellStageSwitches?:QualitySellStageActivation[];
@@ -530,7 +532,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let stopFill = closed && trigger?.fillPrice != null ? trigger.fillPrice : undefined;
     let finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
     let sellStageBoundary=false;
-    let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined;
+    let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined, additionVetoes=prior?.additionVetoes;
     if(group.addition?.enabled && (!additionFill||group.addition.quantityMode==='calculator')) {
       const config=group.addition;
       if(config.quantityMode&&!isPartialMirror(mirrorFill)){
@@ -556,13 +558,14 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         // 「方向」条件（必要不充分）：与时机同一时刻全部满足。自选指标时机沿用「首条触发、其余同时满足」。
         let required=condition.source==='custom'?candidates.splice(1):undefined;
         if(condition.source!=='custom'){const timing=candidates.length;for(const f of qualityAdditionPrerequisites(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);if(candidates.length>timing)required=candidates.splice(timing);}
-        return {candidates,required,structure:condition.source==='structure'?condition.structure:undefined,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr};};
+        return {candidates,required,structure:condition.source==='structure'?condition.structure:undefined,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr,entryVetoes:condition.entryVetoes};};
         const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];
+          if(calculated.vetoed?.length||prior?.additionVetoes?.length){const seen=new Map([...(prior?.additionVetoes??[]),...(calculated.vetoed??[])].map(v=>[`${v.at}:${v.round}`,v]));additionVetoes=[...seen.values()].sort((a,b)=>a.at-b.at);}
           if(calculated.stageBoundary){sellStageBoundary=true;closed=false;finalTime=calculated.stageBoundary.at;finalPrice=calculated.stageBoundary.price;trigger=undefined;exitBar=undefined;stopFill=undefined;}
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);
             trigger={at:stop.at,reading:stop.cause?(stop.price/stop.support-1)*100:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:stop.cause??(stop.confirmCloses?{id:'addition-guard',kind:'addition-support',label:'防守线 K',direction:'<',threshold:stop.support,confirmCloses:stop.confirmCloses}:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support})};
@@ -600,7 +603,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let vetoPath:import('./qualityVeto').QualityHoldingPath|undefined;
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
-    return { ...base,...(vetoPath?{vetoPath}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+    return { ...base,...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(additionFill && position ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
         initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:position.remainingPnl,realizedPnl:position.realizedPnl,

@@ -95,7 +95,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   };
   const closeRecord=(record:string,at:number,exit:number,part:number,profit:number,reason:string):TradeRecord=>({id:record,symbol:sample.source.symbol,side:'LONG',type:reason==='镜像止盈'?'LIMIT':'MARKET',action:'CLOSE',
     entryPrice:price,exitPrice:exit,...(mirror?{positionId:`${id}-position`}:{}),quantity:QUALITY_NOTIONAL/price*part,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl:profit,
-    fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,openTime:entry,closeTime:at,openedRealAt:entry,closedRealAt:at,exit_reason_text:reason});
+    fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,openTime:entry,closeTime:at,openedRealAt:entry,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:reason});
   const tradeRecords:TradeRecord[]=[...(mirror?[closeRecord(mirrorId,mirror.at,mirror.price,fraction,mirrorPnl,'镜像止盈')]:[]),
     ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];
   const data: QualityCampaignData = { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
