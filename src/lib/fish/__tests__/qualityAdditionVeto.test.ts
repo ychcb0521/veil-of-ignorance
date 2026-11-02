@@ -31,3 +31,17 @@ it('validates parameters and only changes the run identity when a veto is enable
   expect(additionIdentity({ ...base, entryVetoes: on('pullback') })).not.toEqual(additionIdentity(base));
   expect(additionVetoIdentity(on('pullback', { atr: 3 }))).not.toEqual(additionVetoIdentity(on('pullback')));
 });
+// 【用户要求】2026-11-02 持仓期间急跌：任意 N 分钟内（首根开盘 → 末根收盘）跌幅达标就不再加仓，与硬性终止同口径
+it('vetoes a fast drop inside any configured minute window since entry, and needs minute bars', async () => {
+  const { fastDropHit, additionVetoesNeedMinutes } = await import('../qualityAdditionVeto');
+  const M = 60000, minutes: VetoBar[] = Array.from({ length: 30 }, (_, i) => ({ openTime: T + i * M, open: 100, high: 100.5, low: 99.5, close: 100 }));
+  // 第 10–14 分钟连跌：开 100 → 收 93.5（5 分钟跌 6.5%）
+  for (let i = 10; i < 15; i++) minutes[i] = { openTime: T + i * M, open: 100 - (i - 10) * 1.3, high: 100 - (i - 10) * 1.3, low: 98.7 - (i - 10) * 1.3, close: 98.7 - (i - 10) * 1.3 };
+  expect(fastDropHit([{ minutes: 5, pct: 7 }], minutes, T)).toBeUndefined();
+  expect(fastDropHit([{ minutes: 5, pct: 6 }], minutes, T)).toMatchObject({ window: { minutes: 5 }, at: T + 10 * M, drop: expect.closeTo(6.5) });
+  expect(fastDropHit([{ minutes: 5, pct: 6 }], minutes, T + 11 * M)).toBeUndefined();
+  expect(evaluateAdditionVetoes([{ kind: 'fast-drop', enabled: true, windows: [{ minutes: 5, pct: 6 }] }], calm(80), atrOf(calm(80)), T, minutes)).toMatchObject({ kind: 'fast-drop', reading: expect.stringContaining('5 分钟内跌 6.5%') });
+  expect(additionVetoesNeedMinutes(on('fast-drop'))).toBe(true); expect(additionVetoesNeedMinutes(on('pullback'))).toBe(false);
+  expect(() => validateAdditionVetoes([{ kind: 'fast-drop', enabled: true, windows: [] }])).toThrow('至少填一组');
+  expect(() => validateAdditionVetoes([{ kind: 'fast-drop', enabled: true, windows: [{ minutes: 1.5, pct: 5 }] }])).toThrow('整数');
+});

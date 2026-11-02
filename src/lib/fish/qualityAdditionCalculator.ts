@@ -5,7 +5,7 @@ import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
 import {isPartialMirror,qualityAdditionAtrSettings,type QualityAdditionFill,type QualityAdditionRoundRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,type StructureAdditionRule} from './qualityAdditionStructure';
-import {evaluateAdditionVetoes,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
+import {additionVetoesNeedMinutes,evaluateAdditionVetoes,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
 import {ADDITION_PROFIT_KIND,activeHoldingVetoes,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
@@ -45,6 +45,17 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const vetoed:AdditionVetoRecord[]=[];
+ // 「持仓期间急跌」要买入以来的 1 分钟线：续算时 o.prices 只从 since 起，前面缺的一段补拉一次（同一笔内复用）
+ let minuteHistory:ResearchBar[]|undefined;
+ const minutePlan=compileFishProgram({id:'add-veto-minutes',name:'加仓否决分钟线',short:'1m',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'1m'},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
+ const minutesUntil=async(until:number):Promise<ResearchBar[]>=>{
+  if(!minuteHistory){
+   const pre:ResearchBar[]=[],start=Math.floor(o.entry/MINUTE)*MINUTE,firstKnown=o.prices[0]?.openTime??o.since;
+   for(let c=start;c<firstKnown;c+=1000*MINUTE){const to=Math.min(firstKnown,c+1000*MINUTE),chunk=await o.load(o.row,c,to,minutePlan,o.signal);validateFishBars(chunk,to,(to-c)/MINUTE,MINUTE);pre.push(...chunk);}
+   minuteHistory=[...pre,...o.prices];
+  }
+  return minuteHistory.filter(b=>b.openTime+MINUTE<=until);
+ };
  const bars=o.prices.filter(b=>b.openTime<o.end);let size=1;while(size<bars.length)size*=2;
  const highTree=new Float64Array(size*2).fill(-Infinity);
  const lowTree=new Float64Array(size*2).fill(Infinity);bars.forEach((b,i)=>{if(!(b.open>0)||!(b.low>0)||!Number.isFinite(b.open)||!Number.isFinite(b.low)||!Number.isFinite(b.high)||b.high<Math.max(b.open,b.low))throw Error('加仓行情读数无效');lowTree[size+i]=b.low;highTree[size+i]=b.high;});for(let i=size-1;i>0;i--){lowTree[i]=Math.min(lowTree[i*2],lowTree[i*2+1]);highTree[i]=Math.max(highTree[i*2],highTree[i*2+1]);}
@@ -114,7 +125,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 【用户要求】2026-11-02 加仓否决：方向满足后，加仓那一刻任一否决条件成立就跳过这一次，记下原因，继续等下一个新 C
   if(round.entryVetoes?.some(v=>v.enabled)){
    await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
-   const veto=evaluateAdditionVetoes(round.entryVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry);
+   const minutes=additionVetoesNeedMinutes(round.entryVetoes)?await minutesUntil(hit.at):undefined;
+   const veto=evaluateAdditionVetoes(round.entryVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
    if(veto){vetoed.push({at:hit.at,round:fills.length+1,...veto});after=hit.at;continue;}
   }
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);

@@ -100,5 +100,7 @@ it('saves per-round addition vetoes with editable parameters and restores them',
  expect(rule.rounds[0].entryVetoes).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:2,ratio:60},{kind:'pullback',enabled:true,atr:2}]);
  expect(rule.rounds[1].entryVetoes).toEqual([{kind:'volatility',enabled:true,ratio:1.8,er:.1}]);expect(rule.rounds[2].entryVetoes).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+ fireEvent.click(screen.getByLabelText('启用加仓否决 持仓期间急跌'));expect(screen.getByLabelText('持仓期间急跌 第1组跌幅')).toHaveValue(5);fireEvent.change(screen.getByLabelText('持仓期间急跌 第2组跌幅'),{target:{value:'4'}});fireEvent.change(screen.getByLabelText('持仓期间急跌 第3组跌幅'),{target:{value:''}});
+ expect(save().rounds[1].entryVetoes.find((v:{kind:string})=>v.kind==='fast-drop')).toEqual({kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5},{minutes:5,pct:4}]});
  const bad=additionDraft(rule);bad.otherRounds[0].entryVetoes.volatility.er='3';expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('效率比');
 });
