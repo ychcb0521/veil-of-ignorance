@@ -597,3 +597,24 @@ it('keeps failed account restoration unready and never persists an empty replace
  expect(h.result.current.ready).toBe(false);expect(h.result.current.error).toContain('原数据仍保留');
  act(()=>window.dispatchEvent(new Event('pagehide')));h.unmount();expect(storage.save).not.toHaveBeenCalled();
 });
+
+// 【用户要求】2026-11-02 组合表「清除」：两边互不影响；监测结果先归档再清，过滤只清当前读数
+it('clears filter readings and monitor results independently without stopping the other task', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(() => {}); }));
+  await flush();
+  const f = makeQualityBuyFilter('state:state', '>', .7);
+  act(() => { h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)); h.result.current.setFilters([f]); void h.result.current.startFilter(); void h.result.current.start(); });
+  await flush(600);
+  const filtering = tasks.find(t => t.task === 'filter')!, monitoring = tasks.find(t => t.task === 'monitor')!;
+  const row = qualityRunSamples(monitoring.study)[0], plan = monitoring.study.sellPlans![0];
+  act(() => { filtering.onFilterReading?.({ key: qualityFilterReadingKey(row, f), value: .9 }); monitoring.onResult({ key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, status: 'closed', evaluatedAt: T, returnPct: 5 }); });
+  expect(h.result.current.study.filterReadings).toHaveLength(1); expect(h.result.current.study.results).toHaveLength(1);
+  act(() => h.result.current.clearFilterResults());
+  expect(h.result.current.study.filterReadings).toEqual([]); expect(h.result.current.study.results).toHaveLength(1);
+  expect(filtering.signal.aborted).toBe(true); expect(monitoring.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
+  act(() => h.result.current.clearMonitorResults());
+  expect(h.result.current.study.results).toEqual([]); expect(monitoring.signal.aborted).toBe(true);
+});

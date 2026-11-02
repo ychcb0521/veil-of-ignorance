@@ -654,7 +654,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '20');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '18');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -795,7 +795,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  // 未启用镜像的方案也保留独立状态列，不能挤入探测标签。
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 10));
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 9));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
@@ -926,4 +926,45 @@ it('shows the sell column as named, aligned parts: additions, geometric position
  const cells=screen.getAllByTestId('quality-sell-relative-gain');expect(cells.length).toBeGreaterThan(0);
  for(const c of cells){const button=c.parentElement!;expect([...button.children].map(x=>x.getAttribute('data-testid'))).toEqual(['quality-sell-additions','quality-sell-geometric','quality-sell-relative-gain']);}
  expect(screen.getByRole('button',{name:`按${s.study.sellPlans![0].label}相对涨幅排序`})).toBeInTheDocument();
+});
+
+// 【用户要求】2026-11-02 组合表：探测值 / 探测算法 / 捕捞过程 / 过滤读数 / 入场读数都归「买前过滤」，「卖出算法」改名「持仓监测」；
+// 两个模块的开始按钮旁有隐形的「隐藏」「清除」，只作用于组合表里已产生的结果
+it('groups detector, filter and entry columns under 买前过滤, renames 持仓监测, and hides or clears each module’s results independently', async () => {
+  localStorage.clear();
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const s = state(), f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
+  s.study = separateQualityFilters({ ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .9 }] });
+  const plan = s.study.sellPlans![0];
+  s.study.results = [{ key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, status: 'closed', evaluatedAt: T, returnPct: 5 }];
+  s.clearFilterResults = vi.fn(); s.clearMonitorResults = vi.fn();
+  render(<FishQuality state={s}/>);
+  const categories = screen.getByTestId('quality-algorithm-categories'), plans = s.study.sellPlans!.length;
+  expect(categories).toHaveTextContent('买前过滤'); expect(categories).toHaveTextContent('持仓监测');
+  expect(categories).not.toHaveTextContent('过滤算法'); expect(categories).not.toHaveTextContent('卖出算法');
+  expect(screen.getByTestId('quality-filter-group')).toHaveAttribute('colspan', String(3 + 1 + plans));
+  const firstSell = screen.getAllByTestId('quality-sell-column')[0];
+  for (const header of [screen.getByTestId('quality-detector-value-column'), screen.getByTestId('quality-detector-column'), ...screen.getAllByTestId('quality-filter-column'), ...screen.getAllByTestId('quality-entry-header')])
+    expect(header.compareDocumentPosition(firstSell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // 隐藏过滤：过滤读数与入场读数收起，探测列照常；监测不受影响
+  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的过滤结果' }));
+  expect(screen.queryAllByTestId('quality-filter-cell')).toHaveLength(0); expect(screen.queryAllByTestId('quality-entry-header')).toHaveLength(0);
+  expect(screen.getByTestId('quality-detector-column')).toBeInTheDocument(); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(plans);
+  expect(screen.getByTestId('quality-filter-group')).toHaveAttribute('colspan', '3');
+  // 隐藏监测：持仓监测整组收起；过滤的隐藏状态保持
+  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的监测结果' }));
+  expect(screen.queryAllByTestId('quality-sell-column')).toHaveLength(0); expect(screen.queryByTestId('quality-monitor-group')).toBeNull();
+  cleanup(); render(<FishQuality state={s}/>);
+  expect(screen.getByRole('button', { name: '显示组合表中的过滤结果' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '显示组合表中的过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '显示组合表中的监测结果' }));
+  expect(screen.getAllByTestId('quality-filter-cell').length).toBeGreaterThan(0); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(plans);
+  // 清除要再确认一次，各清各的
+  fireEvent.click(screen.getByRole('button', { name: '清除组合表中的监测结果' }));
+  expect(s.clearMonitorResults).not.toHaveBeenCalled(); expect(screen.getByText(/交易战役与监测库保留/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '确认清除' }));
+  expect(s.clearMonitorResults).toHaveBeenCalledTimes(1); expect(s.clearFilterResults).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '清除组合表中的过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '确认清除' }));
+  expect(s.clearFilterResults).toHaveBeenCalledTimes(1); expect(s.clearMonitorResults).toHaveBeenCalledTimes(1);
+  localStorage.clear();
 });

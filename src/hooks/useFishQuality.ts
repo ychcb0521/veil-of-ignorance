@@ -331,6 +331,19 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change]);
+  /**
+   * 【用户要求】2026-11-02 清除组合表里已产生的结果，两边互不影响：过滤只清当前读数；监测先归档（交易战役保留）再清当前结果。
+   * 过滤库 / 监测库的历史轮次都不动。
+   */
+  const clearFilterResults = useCallback(() => {
+    cancelFilter(); setFilterProgress(null); setFilterError('');
+    change(s => s.filterReadings?.length ? { ...s, filterReadings: [] } : s);
+  }, [change,cancelFilter]);
+  const clearMonitorResults = useCallback(() => {
+    if (controller.current) cancel('清除了组合表中的监测结果');
+    setProgress(null);
+    change(s => s.results.length ? { ...archiveQualityStudy(s), results: [] } : s);
+  }, [change,cancel]);
   /** Filters have their own catalog and run button; editing never changes or restarts monitoring. */
   const setFilters = useCallback((filters: QualityBuyFilter[]) => {
     cancelFilter(); setFilterProgress(null); setFilterError('');
@@ -365,10 +378,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，
