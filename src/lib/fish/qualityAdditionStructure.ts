@@ -99,18 +99,19 @@ export function structureAdditionK(e:StructureAdditionEvidence,atr:number):{k:nu
 }
 interface ReaderOptions {row:TradeSignal;entry:number;end:number;load:FishReconstructionLoader;signal:AbortSignal}
 /** Fixed entry-relative replay origin, sequential checkpoints across pages; resume replays the same origin. */
+/** 每根已收盘 5 分钟线上的支撑（箱体下轨 / 防守线），供「支撑线下移减仓」判断。 */
+export interface StructureSupportPoint {at:number;boxId:string|null;support:number|null;guard:number|null;close:number}
 export function createStructureAdditionReader(o:ReaderOptions){
- const readers=new Map<string,{read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'})=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
- return async(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'})=>{
+ const readers=new Map<string,{supports:(until:number)=>Promise<readonly StructureSupportPoint[]>;read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'})=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
+ const read=async(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'})=>{
   validateStructureAddition(rule);const key=JSON.stringify(structureAdditionIdentity(rule));let reader=readers.get(key);
   if(!reader){
    const def=rule.definition,compiled=compileFeatureFormula(def.formula),plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
    const from=Math.floor(o.entry/STEP)*STEP-Math.ceil(featureWindowMs(def)/STEP)*STEP;
    if(from<0)throw Error('箱体加仓历史不足');
    let cursor=from,dbl:Dbl5Checkpoint|undefined,sbs:SbsCheckpoint|undefined,lastBox:StructureActiveBox|undefined;
-   const decisions:{e:StructureAdditionEvidence;close:number}[]=[],invalid:number[]=[];
-   reader={read:async(after,until,used,gain)=>{
-    const cut=Math.floor(until/STEP)*STEP;
+   const decisions:{e:StructureAdditionEvidence;close:number}[]=[],invalid:number[]=[],supportPoints:StructureSupportPoint[]=[];
+   const advance=async(cut:number,stop?:()=>boolean)=>{
     while(cursor<cut){
      if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
      const to=Math.min(cut,cursor+500*STEP),bars=await o.load(o.row,cursor,to,plan,o.signal);validateFishBars(bars,to,(to-cursor)/STEP,STEP);
@@ -118,10 +119,14 @@ export function createStructureAdditionReader(o:ReaderOptions){
      dbl=result.DBL5_checkpoint;sbs=result.SBS5M_checkpoint;
      const rows=rule.algorithm==='dbl5'?result.DBL5_details!:result.SBS5M_details!;
      const closes=new Map(bars.map(b=>[b.openTime+STEP,b.close])),sources=new Map(bars.map(b=>[b.openTime+STEP,b.PRS6H_data_source??'binance-usdm']));
-     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
+     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(row.at!=null&&row.at>o.entry){const box=structureActiveBox(rule,row),g=rule.algorithm==='dbl5'?(row as Dbl5Row).darvas_5m_guard??null:null;supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard:g,close:closes.get(row.at)!});}if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
      cursor=to;await fishDelay(0,o.signal);
-     if(decisions.some(({e,close})=>e.at>after&&e.at<until&&!used.has(`${e.algorithm}:${e.boxId}`)&&(!gain||close>=gain.referencePrice*(1+gain.thresholdPct/100))))break;
+     if(stop?.())break;
     }
+   };
+   reader={supports:async until=>{await advance(Math.floor(until/STEP)*STEP);return supportPoints.filter(p=>p.at<=until);},read:async(after,until,used,gain)=>{
+    const cut=Math.floor(until/STEP)*STEP;
+    await advance(cut,()=>decisions.some(({e,close})=>e.at>after&&e.at<until&&!used.has(`${e.algorithm}:${e.boxId}`)&&(!gain||close>=gain.referencePrice*(1+gain.thresholdPct/100))));
     for(const {e,close} of decisions){
      if(e.at<=after||e.at>=until||used.has(`${e.algorithm}:${e.boxId}`))continue;
      let priceGate:QualityAdditionFill['priceGate'];
@@ -134,4 +139,9 @@ export function createStructureAdditionReader(o:ReaderOptions){
   }
   return reader.read(after,end,new Set(previous.flatMap(f=>f.structureEvidence?[`${f.structureEvidence.algorithm}:${f.structureEvidence.boxId}`]:[])),gain);
  };
+ const readerFor=(rule:StructureAdditionRule)=>{validateStructureAddition(rule);return readers.get(JSON.stringify(structureAdditionIdentity(rule)));};
+ return Object.assign(read,{
+  /** 截至 until（含）每根已收盘 5 分钟线的支撑；该规则的读取器须已通过 read 建立。 */
+  supports:async(rule:StructureAdditionRule,until:number):Promise<readonly StructureSupportPoint[]>=>{const r=readerFor(rule);return r?r.supports(until):[];},
+ });
 }

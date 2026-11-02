@@ -1,4 +1,4 @@
-import { qualityAdditionStopOrder } from '@/lib/fish/qualityAdditionStopOrder';
+import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb } from '@/lib/fish/qualityAdditionStopOrder';
 import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
@@ -778,15 +778,12 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         ]
       : [];
     // 【用户要求】2026-11-02 持仓监测加仓的支撑线 K 也是委托（与页面同一函数）
-    const additionStop = qualityAdditionStopOrder(leg, input.campaign);
-    const additionStopLines: CampaignLegsExportCellLine[] = additionStop
-      ? [
-          ...(mirrorTpLines.length > 0 ? [{ text: '', color: '#848E9C' }] : []),
-          { text: `${additionStop.label} ${fmtPrice(additionStop.price)} · ${additionStop.status === 'pending' ? '挂单中' : additionStop.status === 'triggered' ? '已触发' : additionStop.status === 'replaced' ? '已上移' : '已撤'}`, color: '#0E9F6E', bold: true },
-          { text: `委 ${fmtClock(additionStop.placedAt)}`, color: '#5F6B7A' },
-          ...(additionStop.endedAt != null ? [{ text: `${additionStop.status === 'triggered' ? '触' : additionStop.status === 'replaced' ? '换' : '撤'} ${fmtClock(additionStop.endedAt)}`, color: '#5F6B7A' }] : []),
-        ]
-      : [];
+    const additionStopLines: CampaignLegsExportCellLine[] = qualityAdditionStopOrders(leg, input.campaign).flatMap((additionStop, index): CampaignLegsExportCellLine[] => [
+      ...(index > 0 || mirrorTpLines.length > 0 ? [{ text: '', color: '#848E9C' }] : []),
+      { text: `${additionStop.label} ${fmtPrice(additionStop.price)} · ${additionStopStatusText(additionStop.status)}`, color: '#0E9F6E', bold: true },
+      { text: `委 ${fmtClock(additionStop.placedAt)}`, color: '#5F6B7A' },
+      ...(additionStop.endedAt != null ? [{ text: `${additionStopEndVerb(additionStop.status)} ${fmtClock(additionStop.endedAt)}`, color: '#5F6B7A' }] : []),
+    ]);
     const reverseOrderLines: CampaignLegsExportCellLine[] = reverseOrdersForLeg.flatMap((order, index): CampaignLegsExportCellLine[] => {
       const sideColor = order.side === 'SHORT' ? '#6D28D9' : '#002FA7';
       return [

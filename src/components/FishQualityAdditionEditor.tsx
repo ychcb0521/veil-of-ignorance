@@ -1,7 +1,7 @@
 import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { defaultQualityAddition, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
+import { defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
 import { qualityFilterChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { orderedSellStages, type QualitySellStage } from '@/lib/fish/qualitySellStages';
@@ -31,6 +31,8 @@ export type AdditionVetoDraft=Record<AdditionEntryVetoKind,VetoFieldDraft>;
 const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft=>Object.fromEntries(ADDITION_VETO_KINDS.map(kind=>{const v={...ADDITION_VETO_DEFAULTS[kind],...saved?.find(x=>x.kind===kind)},str=(x?:number)=>x==null?'':String(x);const defaults=ADDITION_VETO_DEFAULTS[kind].windows??[],windows=v.windows??defaults;return [kind,{enabled:!!saved?.find(x=>x.kind===kind)?.enabled,lookbackBars:str(v.lookbackBars),atr:str(v.atr),ratio:str(v.ratio),pct:str(v.pct),er:str(v.er),windows:Array.from({length:Math.max(3,windows.length)},(_,i)=>({minutes:str(windows[i]?.minutes??defaults[i]?.minutes),pct:windows[i]?str(windows[i].pct):''}))}];})) as AdditionVetoDraft;
 interface RoundDraft extends ConditionDraft {entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft}
 export interface AdditionDraft extends RoundDraft {enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
+  /** 支撑线下移减仓（各次加仓通用）。 */
+  supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string};
   /** 设在「最多加仓次数」之后的旧切换阶段：原样保留，不在轮次里显示。 */
   laterSellStages?:QualitySellStage[]}
 const conditionDraft=(f?:ReturnType<typeof qualityAdditionConditions>[number]):ConditionDraft=>({choice:f?f.snapshot.featureId+':'+f.metric:'',direction:f?.direction??'>',threshold:f?String(f.threshold):''});
@@ -51,7 +53,7 @@ const copyRound=(d:RoundDraft):RoundDraft=>({source:d.source,structure:structure
 export function additionDraft(rule=defaultQualityAddition(),sellStages?:readonly QualitySellStage[]):AdditionDraft {
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1)),later=stages.filter(s=>s.afterAdditions>count);
- return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2))),...(later.length?{laterSellStages:later}:{})};
+ return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2))),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct)}))(rule.supportReduction??defaultSupportReduction()),...(later.length?{laterSellStages:later}:{})};
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
@@ -72,7 +74,8 @@ export function parseAdditionDraft(d:AdditionDraft,defs:readonly DeepDigFeatureD
  if(d.enabled&&(!Number.isInteger(count)||count<1||count>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
  const n=roundCount(d);
  const rounds=Array.from({length:n},(_,i)=>{try{return parseRound(i?d.otherRounds[i-1]??d:d,d.enabled,defs);}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}});
- const rule:QualityAdditionRule={enabled:d.enabled,quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0]};validateQualityAddition(rule);return rule;
+ const cut=d.supportReduction,num=(x:string)=>x.trim()?Number(x):NaN;
+ const rule:QualityAdditionRule={enabled:d.enabled,quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct)}}:{})};validateQualityAddition(rule);return rule;
 }
 /** 各次加仓「卖出」里设置的改用卖出算法 → 方案的 sellStages；没有任何切换时返回 undefined。 */
 export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFeatureDef[]):QualitySellStage[]|undefined{
@@ -201,9 +204,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <p>碰到 K：本次加仓后价格跌到「位置」里算出的 K 即卖出全部持仓，跳空按开盘价；同一分钟先后不明时优先止损。这一条始终生效。</p>
    <p>否决条件：本次加仓实际成交后开始检查，可添加多条，任一条达标即卖出全部持仓；条件类型与 ④ 硬性终止相同（静态 / 动态回撤、1 / 5 分钟内跌幅、指标、加仓止盈约束）。后面某次加仓没有另设时，继续沿用这里的条件。</p>
    <p>与硬性终止：「同类替换」时，这里的某类条件替换硬性终止里的同类条件（如动态回撤 20% 改为 15%），其他硬性终止条件照常生效；「整组替换」时只用这里的条件。回撤峰值可沿用持仓最高价，或从本次加仓成交价重新记录。这两项对各次加仓通用。</p>
+   <p>支撑线下移时减仓（减仓计算器同一公式）：最近一次加仓所依据的支撑线（选防守线时为防守线）在 5 分钟收盘时下移 ≥ n×ATR，而价格仍在原 K 之上，就把止损 K 挪到新支撑算出的 K′，并在下一分钟开盘价 T 减仓 X＝(S−K′)÷(T−K′)，S 为整笔保本价（扣除镜像止盈与此前减仓已落袋的利润）。这样之后碰到 K′ 时整笔仍约保本。X≤0 时只挪 K′ 不减仓；X≥1 或超过单次上限时不减仓、K 不动。减仓落袋的利润计入之后加仓的可用利润 G。</p>
    <p>改用的卖出算法：本次加仓实际成交后，普通卖出算法换成这里设置的指标，直到下一次加仓另有设置；未设置则沿用之前的卖出算法。半仓镜像与硬性终止继续生效。</p>
   </div>}>
    <label className="flex items-center gap-1.5 text-[11px]" data-testid="addition-sell-k"><input type="checkbox" className="h-3 w-3" checked disabled aria-label="碰到K卖出"/>{d.structure.kSource==='guard'&&d.source==='structure'?'5 分钟收盘跌破 K 即卖出':'碰到 K 即卖出'}<span className="text-[10px] text-muted-foreground">{d.structure.kSource==='guard'&&d.source==='structure'?'（上涨期 1 根、震荡期连续 2 根；影线不算）':'（始终生效）'}</span></label>
+   {(()=>{const cut=all.supportReduction??{enabled:false,minDropAtr:'0.5',maxPct:'80'},set=(next:Partial<typeof cut>)=>setDraft({...all,supportReduction:{...cut,...next}});
+    return <div className="flex flex-wrap items-center gap-1 text-[11px]" data-testid="addition-support-reduction"><label className="flex items-center gap-1.5"><input type="checkbox" className="h-3 w-3" aria-label="支撑线下移时减仓" disabled={!d.enabled} checked={cut.enabled} onChange={e=>set({enabled:e.target.checked})}/>支撑线下移时减仓</label>
+     <span className={`flex flex-wrap items-center gap-1 text-muted-foreground ${cut.enabled?'':'opacity-50'}`}>下移 ≥<input aria-label="支撑下移ATR倍数" type="number" min="0" step="any" disabled={!d.enabled||!cut.enabled} value={cut.minDropAtr} onChange={e=>set({minDropAtr:e.target.value})} className={field+' h-6 w-12'}/>ATR · 单次最多减<input aria-label="单次减仓上限" type="number" min="0" max="100" step="any" disabled={!d.enabled||!cut.enabled} value={cut.maxPct} onChange={e=>set({maxPct:e.target.value})} className={field+' h-6 w-12'}/>%<span className="text-[10px]">（各次通用）</span></span></div>;})()}
    {vetoStages&&setVetoStages&&(()=>{
     const n=index+1,at=vetoStages.stages.findIndex(s=>Number(s.afterAdditions)===n),stage=at<0?undefined:vetoStages.stages[at];
     const put=(conditions:HoldingVetoDraft[])=>{const rest=vetoStages.stages.filter((_,i)=>i!==at);

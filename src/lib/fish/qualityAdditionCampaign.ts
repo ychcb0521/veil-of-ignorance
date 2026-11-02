@@ -8,7 +8,8 @@ const iso=(at:number)=>new Date(at).toISOString();
 export function withQualityAdditionCampaign(data:QualityCampaignData,run:QualityCampaignRun):QualityCampaignData {
  const {result:r,plan}=run,adds=qualityAdditionFills(r);
  const entry=r.entryTime!,closed=r.status==='closed',end=r.endTime!,id=data.campaign.id;
- const summary=additionPosition(100,r.entryPrice!,r.endPrice!,closed,adds,r.mirrorFill);
+ const reductions=adds.length?r.additionReductions??[]:[];
+ const summary=additionPosition(100,r.entryPrice!,r.endPrice!,closed,adds,r.mirrorFill,reductions);
  const lots=[{at:entry,price:r.entryPrice!,notional:100,quantity:100/r.entryPrice!,role:'main_open' as const,id:data.legs[0].id},
    ...adds.map((add,i)=>({at:add.at,price:add.price,notional:add.notional,quantity:add.quantity,role:`main_add_${i+1}` as LegRole,id:id+'-add-'+(i+1)}))];
  const tradeRecords:TradeRecord[]=[],events:CampaignEvent[]=[],legs:TradeJournal[]=[];
@@ -25,22 +26,26 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
    const opening:CampaignEvent={...data.campaign.actual_evolution[0],id:lot.id+'-entry',timestamp:iso(lot.at),event_type:'main_opened',journal_id:lot.id,leg_role:lot.role,leg_sequence:index+1,
      trade_record_id:positionId,price:lot.price,size_usdt:lot.notional,open_time:iso(lot.at),entry_price:lot.price,notes:note};
    events.push(opening);
-   const close=(at:number,price:number,quantity:number,kind:'mirror'|'exit')=>{
-     const pnl=quantity*(price-lot.price),recordId=lot.id+'-'+kind;realized+=pnl;
+   const close=(at:number,price:number,quantity:number,kind:'mirror'|'exit'|'reduce',seq=0)=>{
+     const pnl=quantity*(price-lot.price),recordId=lot.id+'-'+kind+(kind==='reduce'?'-'+seq:'');realized+=pnl;
+     const why=kind==='mirror'?'镜像止盈':kind==='reduce'?'支撑线下移减仓':r.reason??'卖出';
      tradeRecords.push({id:recordId,positionId,symbol:data.campaign.symbol,side:'LONG',type:kind==='mirror'?'LIMIT':'MARKET',action:'CLOSE',entryPrice:lot.price,exitPrice:price,
        quantity,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl,fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,
-       openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:kind==='mirror'?'镜像止盈':r.reason??'卖出'});
-     events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
-       price,size_usdt:quantity*lot.price,realized_pnl:pnl,close_time:iso(at),exit_price:price,notes:kind==='mirror'?'镜像止盈':r.reason??'卖出',recorded_at:iso(r.evaluatedAt)});
+       openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:why});
+     events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:kind==='reduce'||kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
+       price,size_usdt:quantity*lot.price,realized_pnl:pnl,close_time:iso(at),exit_price:price,notes:why,recorded_at:iso(r.evaluatedAt)});
    };
    if(mirror&&mirrorQty>0)close(mirror.at,mirror.price,mirrorQty,'mirror');
-   if(closed&&remaining>0)close(end,r.endPrice!,remaining,'exit');
+   // 支撑线下移减仓：整个持仓按同一比例减，落到每一笔已买入的仓位上（各自按自己的买入价算盈亏，合计与按均价算一致）
+   let left=remaining;
+   for(const [n,cut] of reductions.entries()){if(cut.at<lot.at||!(cut.fraction>0))continue;const q=left*cut.fraction;if(q>0){close(cut.at,cut.price,q,'reduce',n+1);left-=q;}}
+   if(closed&&left>0)close(end,r.endPrice!,left,'exit');
    if(closed){leg.post_realized_pnl=realized;leg.post_outcome=realized>0?'win':realized<0?'loss':'breakeven';}
    legs.push(leg);
  }
- const campaign={...data.campaign,notes:data.campaign.notes+'\n'+additionLabel(plan.addition)+`；累计投入 ${summary.totalInvested} USDT，收益按累计投入计算。`,
+ const campaign={...data.campaign,notes:data.campaign.notes+'\n'+additionLabel(plan.addition)+`；累计投入 ${summary.totalInvested} USDT，收益按累计投入计算。`+(reductions.length?`\n支撑线下移 ${reductions.length} 次：`+reductions.map(c=>c.fraction>0?`减仓 ${+(c.fraction*100).toFixed(2)}% @ ${c.price}，K ${c.previousK}→${c.newK}`:`K ${c.previousK}→${c.newK}（无需减仓）`).join('；'):''),
    actual_evolution:events.sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp)),peak_unrealized_pnl:null,
    comparison:{...data.campaign.comparison!,holdingMetrics:{...data.campaign.comparison!.holdingMetrics!,totalInvested:summary.totalInvested},
-     sellEvidence:{...data.campaign.comparison!.sellEvidence!,addition:plan.addition,additionFill:adds[0],additionFills:[...adds],totalInvested:summary.totalInvested,averageEntryPrice:r.averageEntryPrice}}};
+     sellEvidence:{...data.campaign.comparison!.sellEvidence!,addition:plan.addition,additionFill:adds[0],additionFills:[...adds],...(reductions.length?{additionReductions:[...reductions]}:{}),totalInvested:summary.totalInvested,averageEntryPrice:r.averageEntryPrice}}};
  return {...data,campaign,legs,tradeRecords};
 }

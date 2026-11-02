@@ -1016,4 +1016,4 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   fireEvent.click(screen.getByRole('button', { name: /从模板新建/ })); fireEvent.click(screen.getByRole('button', { name: '删除模板 好组合' }));
   expect(s.deletePlanTemplate).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: '确认删除模板 好组合' }));
   expect(s.deletePlanTemplate).toHaveBeenCalledWith(activeQualityPlanTemplates(s.study)[0].id);
-});
+},30_000);

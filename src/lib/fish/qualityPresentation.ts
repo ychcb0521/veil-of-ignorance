@@ -39,7 +39,10 @@ export function qualityGeometricPosition(result?:QualityResult):number|null{
  const reduction=fills.length?(mirror&&mirror.at<=fills[0].at?mirror.fraction:0):result.status==='closed'&&mirror?mirror.fraction:0;
  if(!(reduction>=0&&reduction<=1))return null;
  let held=initial*(1-reduction),value=1-reduction;
- for(const f of fills){const before=f.sizing?.coinsBefore??held;if(!(before>0)||!(f.quantity>=0))return null;value*=1+f.quantity/before;held=before+f.quantity;}
+ // 支撑线下移减仓：整个持仓按比例缩小，与加仓按时间先后交替
+ const cuts=fills.length?(result.additionReductions??[]).filter(c=>c.fraction>0):[];
+ const steps=[...fills.map(f=>({at:f.at,f})),...cuts.map(c=>({at:c.at,c}))].sort((a,b)=>a.at-b.at);
+ for(const s of steps){if('c' in s){value*=1-s.c.fraction;held*=1-s.c.fraction;continue;}const f=s.f,before=f.sizing?.coinsBefore??held;if(!(before>0)||!(f.quantity>=0))return null;value*=1+f.quantity/before;held=before+f.quantity;}
  return Number.isFinite(value)?value:null;
 }
 export const qualityGeometricPositionText=(value:number|null)=>value==null?'—':`${value.toFixed(2)}x`;

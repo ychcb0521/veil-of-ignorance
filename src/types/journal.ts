@@ -417,6 +417,8 @@ export interface TradeCampaign {
       triggerAtOpen?:boolean;
       mirrorTakeProfit?: {enabled:boolean;gainPct:number;sellPct:number};
       addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; additionFills?: QualityAdditionFill[]; totalInvested?: number; averageEntryPrice?: number;
+      /** 支撑线下移时按减仓计算器执行的减仓（持仓监测）。 */
+      additionReductions?: import('@/lib/fish/qualityAddition').QualityReductionFill[];
       mirrorFill?: {at:number;price:number;fraction:number;gainPct:number;atOpen:boolean};
       triggerCause?: QualityExitCause;
       holdingVetoes?: (Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>&{formula?:string})[];

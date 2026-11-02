@@ -14,6 +14,11 @@ export interface QualityAdditionRule {
   /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
   prerequisites?: QualityBuyFilter[];
   minGainPct?:number;
+  /**
+   * 【用户要求】2026-11-02 支撑线下移减仓（按减仓计算器）：加仓后箱体支撑下移到 K 的支撑基准下方 ≥ minDropAtr×ATR、价格仍高于 K 时，
+   * 在下一分钟开盘按 X＝(S−K′)÷(T−K′) 减仓（S 为当前持仓保本价，K′＝新支撑 − n×ATR），止损随之下移到 K′；X 超过 maxPct 或无法保本时不减。
+   */
+  supportReduction?: QualitySupportReductionRule;
   /** 加仓否决（不再加仓）：任一启用条件在加仓那一刻成立，就跳过这一次（见 qualityAdditionVeto）。 */
   entryVetoes?: import('./qualityAdditionVeto').QualityAdditionEntryVeto[];
   /** K = T - supportOffsetAtr * ATR（非箱体位置）。entryBufferAtr（旧「入场距离 T ≥ S＋n×ATR」）2026-11-01 应用户要求删除：引擎不再检查，只为读旧数据保留字段。 */
@@ -21,6 +26,20 @@ export interface QualityAdditionRule {
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
+export interface QualitySupportReductionRule { enabled: boolean; minDropAtr: number; maxPct: number }
+/**
+ * 减仓计算器同一公式：X＝(S−K′)÷(T−K′)。S＝整笔保本价＝(持仓成本−已落袋利润)÷持仓币数，K′ 新止损，T 减仓价。
+ * 减掉 X 后，价格碰到 K′ 时整笔约保本。X≤0 只挪止损不减仓；X≥1（T 不够高）或超过单次上限则不减仓（返回 undefined）。
+ */
+export function supportDropReduction(p:{held:number;cost:number;realized:number},T:number,K:number,maxPct:number):{fraction:number;breakeven:number}|undefined{
+  if(!(p.held>0)||!(T>K)||![T,K,p.cost,p.realized].every(Number.isFinite))return;
+  const breakeven=(p.cost-p.realized)/p.held,X=(breakeven-K)/(T-K);
+  if(!Number.isFinite(X)||X>=1||X*100>maxPct+1e-9)return;
+  return {fraction:Math.max(0,X),breakeven};
+}
+export const defaultSupportReduction = (): QualitySupportReductionRule => ({ enabled: false, minDropAtr: .5, maxPct: 80 });
+/** 一次支撑下移减仓：减掉当时持仓的 fraction；costRemoved 为按均价移出的成本，realizedPnl＝quantity×price − costRemoved。 */
+export interface QualityReductionFill { at: number; price: number; fraction: number; quantity: number; costRemoved: number; realizedPnl: number; breakeven: number; previousK: number; newK: number; previousSupport: number; newSupport: number; atr: number }
 export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryVetoes'>;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
 const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(rule).supportOffsetAtr;
@@ -70,6 +89,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
   ...(rule.quantityMode==='calculator'?[['addition-k-atr-no-entry-distance-v2',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[]),
+  ...(rule.supportReduction?.enabled?[['support-drop-reduction-v1',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct]]:[]),
   // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
   ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
@@ -83,6 +103,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule.source!=='custom'&&qualityAdditionPrerequisites(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))throw new Error('加仓方向条件的指标须填写有限数字门槛');
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
   validateAdditionVetoes(rule.entryVetoes);
+  if(rule.supportReduction?.enabled){const r=rule.supportReduction;if(!Number.isFinite(r.minDropAtr)||r.minDropAtr<0||r.minDropAtr>20)throw new Error('支撑下移减仓：触发的下移幅度须为 0–20 倍 ATR');if(!Number.isFinite(r.maxPct)||r.maxPct<=0||r.maxPct>100)throw new Error('支撑下移减仓：单次减仓上限须为 0–100%');}
   if(rule.quantityMode==='calculator'){
     const atr=qualityAdditionAtrSettings(rule);
     if(rule.source!=='structure'&&(!Number.isFinite(atr.supportOffsetAtr)||atr.supportOffsetAtr<=0))throw new Error('K 回撤的 ATR 倍数须为大于 0 的有限数字');
@@ -101,25 +122,27 @@ function additionFormulaLabel(rule:QualityAdditionRule){
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
   return rounds.some(r=>qualityAdditionAtrSettings(r).supportOffsetAtr!==first.supportOffsetAtr)?'逐轮 ATR 倍数独立设置':`K=T−${first.supportOffsetAtr}ATR`;
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`镜像止盈后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损`:rule.quantityMode==='entry'?'与镜像止盈后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`镜像止盈后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损${rule.supportReduction?.enabled?` · 支撑下移 ≥ ${rule.supportReduction.minDropAtr} ATR 减仓（单次 ≤ ${rule.supportReduction.maxPct}%）`:''}`:rule.quantityMode==='entry'?'与镜像止盈后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],
-  mirror?: { at:number;price:number;fraction:number }) {
+  mirror?: { at:number;price:number;fraction:number }, reductions: readonly QualityReductionFill[] = []) {
   const fills=Array.isArray(addition)?addition:[addition as QualityAdditionFill];
   const totalInvested = notional + fills.reduce((n,a)=>n+a.notional,0), totalQuantity = notional / entry + fills.reduce((n,a)=>n+a.quantity,0);
   const fullMirror = mirror?.fraction === 1;
   const mirrorQuantity = mirror ? fullMirror ? totalQuantity : notional / entry * mirror.fraction : 0;
   const mirrorCost = mirror ? fullMirror ? totalInvested : notional * mirror.fraction : 0;
   const mirrorPnl = mirror ? mirrorQuantity * mirror.price - mirrorCost : 0;
-  const unsoldQuantity = totalQuantity - mirrorQuantity, unsoldCost = totalInvested - mirrorCost;
-  const remainingPnl = unsoldQuantity * mark - unsoldCost, totalPnl = mirrorPnl + remainingPnl;
+  // 支撑下移减仓：按当时均价移出成本，已实现部分计入；剩余仓位按标记价估值（现金流口径，合计与逐笔一致）
+  const reducedQuantity = reductions.reduce((n, r) => n + r.quantity, 0), reducedCost = reductions.reduce((n, r) => n + r.costRemoved, 0), reductionPnl = reductions.reduce((n, r) => n + r.realizedPnl, 0);
+  const unsoldQuantity = totalQuantity - mirrorQuantity - reducedQuantity, unsoldCost = totalInvested - mirrorCost - reducedCost;
+  const remainingPnl = unsoldQuantity * mark - unsoldCost, totalPnl = mirrorPnl + reductionPnl + remainingPnl;
   const values = [totalInvested,totalQuantity,mirrorPnl,remainingPnl,totalPnl];
   if (!values.every(Number.isFinite) || !(totalInvested > 0) || !fills.every(a=>a.quantity>0&&Number.isFinite(a.quantity)&&a.notional>0&&Number.isFinite(a.notional))) throw new Error('加仓金额或持仓数量超出可计算范围');
-  return { totalInvested,totalQuantity,mirrorQuantity,mirrorCost,mirrorPnl,remainingPnl,totalPnl,
+  return { totalInvested,totalQuantity,mirrorQuantity,mirrorCost,mirrorPnl,remainingPnl,totalPnl,reductionPnl,
     returnPct: totalPnl / totalInvested * 100, averageEntryPrice: unsoldQuantity > 0 ? unsoldCost / unsoldQuantity : totalInvested / totalQuantity,
     remainingQuantity: closed ? 0 : unsoldQuantity, remainingCost: closed ? 0 : unsoldCost,
-    realizedPnl: mirrorPnl + (closed ? remainingPnl : 0), exitQuantity: closed ? unsoldQuantity : 0 };
+    realizedPnl: mirrorPnl + reductionPnl + (closed ? remainingPnl : 0), exitQuantity: closed ? unsoldQuantity : 0 };
 }
 
 /** Both downloads retain the same frozen gate and sizing evidence as the campaign. */

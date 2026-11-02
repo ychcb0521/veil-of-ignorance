@@ -1,4 +1,4 @@
-import { qualityAdditionStopOrder } from '@/lib/fish/qualityAdditionStopOrder';
+import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb } from '@/lib/fish/qualityAdditionStopOrder';
 import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import { LegExecutionWearDialog } from '@/components/journal/LegExecutionWearDialog';
 import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear, type LegExecutionWear } from '@/lib/campaignExecutionWear';
@@ -958,7 +958,7 @@ export function CampaignLegsList({
               const executionMethods = executionMethodsByLeg?.get(leg.id)
                 ?? resolveLegExecutionMethods(leg, record, executionMethodOrders ?? reverseHedgeOrders, tradeRecords, mirrorCloseRatios.get(leg.id));
               const mirrorTpTiming = resolveMirrorTpOrderTiming(leg, record, campaignEvents);
-              const additionStop = qualityAdditionStopOrder(leg, campaign);
+              const additionStops = qualityAdditionStopOrders(leg, campaign);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
                 : null;
@@ -1275,22 +1275,23 @@ export function CampaignLegsList({
                         </div>
                       </div>
                     )}
-                    {additionStop && (
+                    {additionStops.map((additionStop, stopIndex) => (
                       <div
-                        data-testid={`leg-addition-stop-${leg.id}`}
+                        key={additionStop.placedAt}
+                        data-testid={stopIndex === 0 ? `leg-addition-stop-${leg.id}` : `leg-addition-stop-${leg.id}-${stopIndex}`}
                         className="rounded border border-[#0E9F6E]/25 bg-[#0E9F6E]/5 px-2 py-1 leading-tight"
-                        title={`${additionStop.label}：${additionStop.detail}。委 ${fmtClock(additionStop.placedAt)}${additionStop.endedAt != null ? ` · ${additionStop.status === 'triggered' ? '触' : additionStop.status === 'replaced' ? '换' : '撤'} ${fmtClock(additionStop.endedAt)}` : ''}`}
+                        title={`${additionStop.label}：${additionStop.detail}。委 ${fmtClock(additionStop.placedAt)}${additionStop.endedAt != null ? ` · ${additionStopEndVerb(additionStop.status)} ${fmtClock(additionStop.endedAt)}` : ''}`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[10px] font-medium text-[#0E9F6E]">{additionStop.label} {fmtPrice(additionStop.price)}</span>
-                          <span className="text-[10px] text-muted-foreground">{additionStop.status === 'pending' ? '挂单中' : additionStop.status === 'triggered' ? '已触发' : additionStop.status === 'replaced' ? '已上移' : '已撤'}</span>
+                          <span className="text-[10px] text-muted-foreground">{additionStopStatusText(additionStop.status)}</span>
                         </div>
                         <div className="text-[10px] tabular-nums text-muted-foreground">
-                          委 {fmtCardTime(additionStop.placedAt)}{additionStop.endedAt != null && <> · {additionStop.status === 'triggered' ? '触' : additionStop.status === 'replaced' ? '换' : '撤'} {fmtCardTime(additionStop.endedAt, additionStop.placedAt)}</>}
+                          委 {fmtCardTime(additionStop.placedAt)}{additionStop.endedAt != null && <> · {additionStopEndVerb(additionStop.status)} {fmtCardTime(additionStop.endedAt, additionStop.placedAt)}</>}
                         </div>
                       </div>
-                    )}
-                    {reverseOrdersForLeg.length === 0 && !mirrorTpTiming && !additionStop ? (
+                    ))}
+                    {reverseOrdersForLeg.length === 0 && !mirrorTpTiming && additionStops.length === 0 ? (
                       <span className="font-mono text-muted-foreground">—</span>
                     ) : (
                       reverseOrdersForLeg.map(order => (
