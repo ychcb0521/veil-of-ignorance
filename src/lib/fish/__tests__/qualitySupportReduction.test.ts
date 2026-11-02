@@ -47,8 +47,22 @@ describe('support-drop reduction (reduction calculator formula)', () => {
     expect(JSON.stringify(additionIdentity(on))).not.toBe(JSON.stringify(additionIdentity(rule)));
     expect(JSON.stringify(additionIdentity({ ...on, supportReduction: { ...on.supportReduction, enabled: false } }))).toBe(JSON.stringify(additionIdentity(rule)));
     for (const bad of [{ minDropAtr: -1 }, { maxPct: 0 }, { maxPct: 101 }, { minDropAtr: NaN }]) expect(() => validateQualityAddition({ ...on, supportReduction: { ...on.supportReduction, ...bad } })).toThrow();
-    const d = additionDraft(on as never); expect(d.supportReduction).toEqual({ enabled: true, minDropAtr: '0.5', maxPct: '80' });
+    const d = additionDraft(on as never); expect(d.supportReduction).toEqual({ enabled: true, minDropAtr: '0.5', maxPct: '80', exitEnabled: false, exitAfterDrops: '3' });
     expect(parseAdditionDraft({ ...d, supportReduction: { enabled: true, minDropAtr: '1', maxPct: '60' } }, []).supportReduction).toEqual({ enabled: true, minDropAtr: 1, maxPct: 60 });
     expect(parseAdditionDraft({ ...d, supportReduction: { enabled: false, minDropAtr: '1', maxPct: '60' } }, []).supportReduction).toBeUndefined();
+  });
+});
+
+// 【用户要求】2026-11-02 K 连续下移 N 次（次数自设）即全仓卖出，加仓后重新计数
+describe('exit after N consecutive K drops', () => {
+  it('validates the count, adds its own identity and round-trips through the editor', () => {
+    const on = { ...defaultQualityAddition(), enabled: true, supportReduction: { enabled: true, minDropAtr: .5, maxPct: 80 } };
+    const exit = { ...on, supportReduction: { ...on.supportReduction, exitAfterDrops: 3 } };
+    expect(JSON.stringify(additionIdentity(exit))).not.toBe(JSON.stringify(additionIdentity(on)));
+    expect(JSON.stringify(additionIdentity(exit))).toContain('exit-after-support-drops-v1');
+    for (const bad of [0, 2.5, 21]) expect(() => validateQualityAddition({ ...exit, supportReduction: { ...exit.supportReduction, exitAfterDrops: bad } })).toThrow('次数');
+    const d = additionDraft(exit as never); expect(d.supportReduction).toMatchObject({ exitEnabled: true, exitAfterDrops: '3' });
+    expect(parseAdditionDraft({ ...d, supportReduction: { ...d.supportReduction!, exitAfterDrops: '2' } }, []).supportReduction).toEqual({ enabled: true, minDropAtr: .5, maxPct: 80, exitAfterDrops: 2 });
+    expect(parseAdditionDraft({ ...d, supportReduction: { ...d.supportReduction!, exitEnabled: false } }, []).supportReduction).toEqual({ enabled: true, minDropAtr: .5, maxPct: 80 });
   });
 });

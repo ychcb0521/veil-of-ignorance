@@ -34,7 +34,7 @@ const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft
 interface RoundDraft extends ConditionDraft {entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft}
 export interface AdditionDraft extends RoundDraft {enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 支撑线下移减仓（各次加仓通用）。 */
-  supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string};
+  supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string;exitEnabled?:boolean;exitAfterDrops?:string};
   /** 设在「最多加仓次数」之后的旧切换阶段：原样保留，不在轮次里显示。 */
   laterSellStages?:QualitySellStage[]}
 const conditionDraft=(f?:ReturnType<typeof qualityAdditionConditions>[number]):ConditionDraft=>({choice:f?f.snapshot.featureId+':'+f.metric:'',direction:f?.direction??'>',threshold:f?String(f.threshold):''});
@@ -55,7 +55,7 @@ const copyRound=(d:RoundDraft):RoundDraft=>({source:d.source,structure:structure
 export function additionDraft(rule=defaultQualityAddition(),sellStages?:readonly QualitySellStage[]):AdditionDraft {
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1)),later=stages.filter(s=>s.afterAdditions>count);
- return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2))),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct)}))(rule.supportReduction??defaultSupportReduction()),...(later.length?{laterSellStages:later}:{})};
+ return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2))),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct),exitEnabled:r.exitAfterDrops!=null,exitAfterDrops:String(r.exitAfterDrops??3)}))(rule.supportReduction??defaultSupportReduction()),...(later.length?{laterSellStages:later}:{})};
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
@@ -78,7 +78,7 @@ export function parseAdditionDraft(d:AdditionDraft,defs:readonly DeepDigFeatureD
  // 【用户要求】2026-11-02 保存时冻结箱体算法版本（防守线参数写成明确值）
  const rounds=Array.from({length:n},(_,i)=>{try{const r=parseRound(i?d.otherRounds[i-1]??d:d,d.enabled,defs);return r.structure?{...r,structure:freezeStructureVersions(r.structure)}:r;}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}});
  const cut=d.supportReduction,num=(x:string)=>x.trim()?Number(x):NaN;
- const rule:QualityAdditionRule={enabled:d.enabled,quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct)}}:{})};validateQualityAddition(rule);return rule;
+ const rule:QualityAdditionRule={enabled:d.enabled,quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct),...(cut.exitEnabled?{exitAfterDrops:num(cut.exitAfterDrops??'')}:{})}}:{})};validateQualityAddition(rule);return rule;
 }
 /** 各次加仓「卖出」里设置的改用卖出算法 → 方案的 sellStages；没有任何切换时返回 undefined。 */
 export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFeatureDef[]):QualitySellStage[]|undefined{
@@ -208,12 +208,14 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <p>否决条件：本次加仓实际成交后开始检查，可添加多条，任一条达标即卖出全部持仓；条件类型与 ④ 硬性终止相同（静态 / 动态回撤、1 / 5 分钟内跌幅、指标、加仓止盈约束）。后面某次加仓没有另设时，继续沿用这里的条件。</p>
    <p>与硬性终止：「同类替换」时，这里的某类条件替换硬性终止里的同类条件（如动态回撤 20% 改为 15%），其他硬性终止条件照常生效；「整组替换」时只用这里的条件。回撤峰值可沿用持仓最高价，或从本次加仓成交价重新记录。这两项对各次加仓通用。</p>
    <p>支撑线下移时减仓（减仓计算器同一公式）：最近一次加仓所依据的支撑线（选防守线时为防守线）在 5 分钟收盘时下移 ≥ n×ATR，而价格仍在原 K 之上，就把止损 K 挪到新支撑算出的 K′，并在下一分钟开盘价 T 减仓 X＝(S−K′)÷(T−K′)，S 为整笔保本价（扣除镜像止盈与此前减仓已落袋的利润）。这样之后碰到 K′ 时整笔仍约保本。X≤0 时只挪 K′ 不减仓；X≥1 或超过单次上限时不减仓、K 不动。减仓落袋的利润计入之后加仓的可用利润 G。</p>
+   <p>K 连续下移 N 次即全仓卖出：自最近一次加仓起，K 每下移一次计一次（加仓把 K 上移后重新计数）；第 N 次下移确认时不再减仓，按下一分钟开盘价卖出全部持仓。</p>
    <p>改用的卖出算法：本次加仓实际成交后，普通卖出算法换成这里设置的指标，直到下一次加仓另有设置；未设置则沿用之前的卖出算法。半仓镜像与硬性终止继续生效。</p>
   </div>}>
    <label className="flex items-center gap-1.5 text-[11px]" data-testid="addition-sell-k"><input type="checkbox" className="h-3 w-3" checked disabled aria-label="碰到K卖出"/>{d.structure.kSource==='guard'&&d.source==='structure'?'5 分钟收盘跌破 K 即卖出':'碰到 K 即卖出'}<span className="text-[10px] text-muted-foreground">{d.structure.kSource==='guard'&&d.source==='structure'?'（上涨期 1 根、震荡期连续 2 根；影线不算）':'（始终生效）'}</span></label>
-   {(()=>{const cut=all.supportReduction??{enabled:false,minDropAtr:'0.5',maxPct:'80'},set=(next:Partial<typeof cut>)=>setDraft({...all,supportReduction:{...cut,...next}});
+   {(()=>{const cut:NonNullable<AdditionDraft['supportReduction']>=all.supportReduction??{enabled:false,minDropAtr:'0.5',maxPct:'80',exitEnabled:false,exitAfterDrops:'3'},set=(next:Partial<typeof cut>)=>setDraft({...all,supportReduction:{...cut,...next}});
     return <div className="flex flex-wrap items-center gap-1 text-[11px]" data-testid="addition-support-reduction"><label className="flex items-center gap-1.5"><input type="checkbox" className="h-3 w-3" aria-label="支撑线下移时减仓" disabled={!d.enabled} checked={cut.enabled} onChange={e=>set({enabled:e.target.checked})}/>支撑线下移时减仓</label>
-     <span className={`flex flex-wrap items-center gap-1 text-muted-foreground ${cut.enabled?'':'opacity-50'}`}>下移 ≥<input aria-label="支撑下移ATR倍数" type="number" min="0" step="any" disabled={!d.enabled||!cut.enabled} value={cut.minDropAtr} onChange={e=>set({minDropAtr:e.target.value})} className={field+' h-6 w-12'}/>ATR · 单次最多减<input aria-label="单次减仓上限" type="number" min="0" max="100" step="any" disabled={!d.enabled||!cut.enabled} value={cut.maxPct} onChange={e=>set({maxPct:e.target.value})} className={field+' h-6 w-12'}/>%<span className="text-[10px]">（各次通用）</span></span></div>;})()}
+     <span className={`flex flex-wrap items-center gap-1 text-muted-foreground ${cut.enabled?'':'opacity-50'}`}>下移 ≥<input aria-label="支撑下移ATR倍数" type="number" min="0" step="any" disabled={!d.enabled||!cut.enabled} value={cut.minDropAtr} onChange={e=>set({minDropAtr:e.target.value})} className={field+' h-6 w-12'}/>ATR · 单次最多减<input aria-label="单次减仓上限" type="number" min="0" max="100" step="any" disabled={!d.enabled||!cut.enabled} value={cut.maxPct} onChange={e=>set({maxPct:e.target.value})} className={field+' h-6 w-12'}/>%<span className="text-[10px]">（各次通用）</span></span>
+     <label className={`flex w-full items-center gap-1 pl-5 text-muted-foreground ${cut.enabled?'':'opacity-50'}`} data-testid="addition-support-drop-exit"><input type="checkbox" className="h-3 w-3" aria-label="K连续下移全仓卖出" disabled={!d.enabled||!cut.enabled} checked={!!cut.exitEnabled} onChange={e=>set({exitEnabled:e.target.checked})}/>K 连续下移<input aria-label="K连续下移次数" type="number" min="1" max="20" step="1" disabled={!d.enabled||!cut.enabled||!cut.exitEnabled} value={cut.exitAfterDrops??'3'} onChange={e=>set({exitAfterDrops:e.target.value})} className={field+' h-6 w-12'}/>次即全仓卖出<span className="text-[10px]">（加仓后重新计数）</span></label></div>;})()}
    {vetoStages&&setVetoStages&&(()=>{
     const n=index+1,at=vetoStages.stages.findIndex(s=>Number(s.afterAdditions)===n),stage=at<0?undefined:vetoStages.stages[at];
     const put=(conditions:HoldingVetoDraft[])=>{const rest=vetoStages.stages.filter((_,i)=>i!==at);

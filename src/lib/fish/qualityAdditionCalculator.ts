@@ -129,10 +129,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    if(value<basis-dropRule.minDropAtr*atr!)return {at:p.at,support:value,atr:atr!,evidence,basis};
   }
  };
- /** 减仓计算器：X＝(S−K′)÷(T−K′)。S 为整笔保本价，K′＝新支撑−n×ATR，T 为下移确认后下一分钟开盘价。 */
- const applyDrop=async(d:SupportDrop)=>{
+ /** 减仓计算器：X＝(S−K′)÷(T−K′)。S 为整笔保本价，K′＝新支撑−n×ATR，T 为下移确认后下一分钟开盘价。
+  * 【用户要求】2026-11-02 K 自最近一次加仓起连续下移达到设定次数（含这一次）时，不再减仓，而是在 T 全仓卖出（返回卖出点）。 */
+ const applyDrop=async(d:SupportDrop):Promise<SupportStop|undefined>=>{
   const T=priceAt.get(d.at),{k:Kold}=currentK();if(!(T!>0)||!Number.isFinite(T)||Kold==null||!(T!>Kold))return;
   const selected=structureAdditionK({...d.evidence,basePrice:d.support},d.atr);if(!selected||!(selected.k<Kold))return;
+  const limit=dropRule!.exitAfterDrops,lastFill=fills.at(-1)?.at??-Infinity,count=reductions.filter(r=>r.at>lastFill).length+1;
+  if(limit!=null&&count>=limit)return {at:d.at,price:T!,support:selected.k,atOpen:true,cause:{id:'addition-support-drops',kind:'addition-support',label:`K 连续下移 ${count} 次`,direction:'<=',threshold:selected.k,supportDrops:{count,previousK:Kold,newK:selected.k,support:d.support}}};
   const Kn=selected.k,held=holdings(d.at),cut=supportDropReduction(held,T!,Kn,dropRule!.maxPct);if(!cut)return;
   const {fraction,breakeven}=cut,quantity=fraction*held.held,costRemoved=fraction*held.cost;
   reductions.push({at:d.at,price:T!,fraction,quantity,costRemoved,realizedPnl:quantity*T!-costRemoved,breakeven,previousK:Kold,newK:Kn,previousSupport:d.basis,newSupport:d.support,atr:d.atr});
@@ -145,7 +148,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 【用户要求】2026-11-02 支撑线下移减仓：先找下移事件；比它早的加仓照常处理，否则在下移那一刻按减仓计算器减仓
   const drop=await findSupportDrop(Math.max(after,supportAt??after),scanEnd);
   const addsDone=fills.length>=(o.maxRounds??(o.repeat?Infinity:1)),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
-  if(addsDone||addEnd<=after){if(drop){await applyDrop(drop);after=drop.at;continue;}return done(stop);}
+  if(addsDone||addEnd<=after){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   const round=o.roundRules?.[fills.length]??o;
   const soldBefore=o.notional/o.entryPrice*halfMirror.fraction;
   const coinsBefore=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-soldBefore;
@@ -154,7 +157,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const basis='cost-line' as const,referencePrice=support??o.entryPrice;void realAverageBefore;
   const hit=round.structure?await readStructure(round.structure,after,addEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:addEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
-  if(!hit){if(drop){await applyDrop(drop);after=drop.at;continue;}return done(stop);}
+  if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   // 箱体时机的「方向」指标条件（必要不充分）：事件那一刻不全满足，就跳过这个事件、继续等下一个。
   if(hit.structureEvidence&&round.required?.length){
    let read=prerequisiteReaders.get(round.required);if(!read)prerequisiteReaders.set(round.required,read=requiredConditionsReader(round.required,o));
