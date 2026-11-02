@@ -24,11 +24,11 @@ export interface QualityAdditionEntryVeto {
   join?: 'and' | 'or';
 }
 export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditionEntryVeto> = {
-  // 【用户要求】2026-11-02 默认值按 104 场战役的成败对比定（失败的加仓多在长上影、冲高回落 ≥2.5 ATR 之后），可修改
-  'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: .8, ratio: 65 },
+  'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: 1.5, ratio: 60 },
   'lower-spike': { kind: 'lower-spike', enabled: false, lookbackBars: 12, atr: 2, pct: 3 },
   volatility: { kind: 'volatility', enabled: false, ratio: 1.8, er: .25 },
-  pullback: { kind: 'pullback', enabled: false, atr: 2.5 },
+  // 【用户要求】2026-11-03 默认值按「组合算法1」44 场回放定：回落 ≥2.5 ATR 且 ≥4% 只改善不伤大单（单用 2.5 ATR 会把 SAPIEN +3936 砍到 +533）；可修改
+  pullback: { kind: 'pullback', enabled: false, atr: 2.5, pct: 4, join: 'and' },
   // 【用户要求】2026-11-02 持仓期间曾出现任意 1 分钟跌超 5%、5 分钟超 7%、10 分钟超 10% 等，就不再加仓（PENGU 第 3 次加仓前那根长红线）
   'fast-drop': { kind: 'fast-drop', enabled: false, windows: [{ minutes: 1, pct: 5 }, { minutes: 5, pct: 7 }, { minutes: 10, pct: 10 }] },
 };

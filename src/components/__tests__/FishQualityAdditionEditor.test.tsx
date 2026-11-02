@@ -107,7 +107,7 @@ it('saves per-round addition vetoes with editable parameters and restores them',
  fireEvent.click(screen.getByLabelText('启用加仓否决 冲高回落'));
  tab(2);expect(screen.getByLabelText('启用加仓否决 长上影线')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用加仓否决 高震荡'));fireEvent.change(screen.getByLabelText('高震荡 效率比'),{target:{value:'.1'}});
  const rule=save();
- expect(rule.rounds[0].entryVetoes).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:2,ratio:65},{kind:'pullback',enabled:true,atr:2.5}]);
+ expect(rule.rounds[0].entryVetoes).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:2,ratio:60},{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'}]);
  expect(rule.rounds[1].entryVetoes).toEqual([{kind:'volatility',enabled:true,ratio:1.8,er:.1}]);expect(rule.rounds[2].entryVetoes).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
  fireEvent.click(screen.getByLabelText('启用加仓否决 持仓期间急跌'));expect(screen.getByLabelText('持仓期间急跌 第1组跌幅')).toHaveValue(5);fireEvent.change(screen.getByLabelText('持仓期间急跌 第2组跌幅'),{target:{value:'4'}});fireEvent.change(screen.getByLabelText('持仓期间急跌 第3组跌幅'),{target:{value:''}});
