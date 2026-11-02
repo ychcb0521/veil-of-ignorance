@@ -19,13 +19,15 @@ export function FishQualityInfo({ label, children }: { label: string; children: 
 }
 
 /** 鱼质量的三个工作模块共用尺寸、留白和标题层级。 */
-export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, testId, titleTestId }: {
+/** trailing：放在行尾最右侧的次要操作（如组合表结果的隐藏 / 清除），不打乱三行按钮的逐列对齐。 */
+export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, trailing, testId, titleTestId }: {
   title: string;
   icon: LucideIcon;
   summary?: ReactNode;
   children: ReactNode;
   status?: ReactNode;
   progress?: ReactNode;
+  trailing?: ReactNode;
   testId?: string;
   titleTestId?: string;
 }) {
@@ -38,7 +40,7 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
       <div className="flex min-w-0 items-center text-[10px] text-muted-foreground">{summary}</div>
     </div>
     <div id={contentId} hidden={!open} className="min-w-0 flex-1 basis-52">
-      <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-1.5 text-[11px]">{children}{status&&<div className="ml-1 inline-flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-muted-foreground">{status}</div>}</div>
+      <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-1.5 text-[11px]">{children}{status&&<div className="ml-1 inline-flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-muted-foreground">{status}</div>}{trailing&&<div className="ml-auto inline-flex shrink-0 items-center">{trailing}</div>}</div>
       {progress}
     </div>
   </section>;
