@@ -104,6 +104,17 @@ it('offers the DBL-5 guard line as K with editable trend / range buffers and clo
  const rule=save();expect(rule.rounds[0].structure).toMatchObject({kSource:'guard',definition:{DBL5_config:{guard_range_atr:1.5}}});
  fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect([...(screen.getByLabelText('K基准箱体') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['previous','current']);
 });
+// 【用户要求】2026-11-03 防守线分两种：实线和虚线都用（默认）／只用实线；保存后读回不变，换回旧 C 时不留这个选项
+it('chooses solid-only or both guard lines, defaulting to both and round-tripping through save',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+ const pick=screen.getByLabelText('防守线类型') as HTMLSelectElement;expect(pick).toHaveValue('both');expect([...pick.options].map(o=>o.textContent)).toEqual(['实线和虚线','只用实线']);
+ expect(save().rounds[0].structure.guardTrendOnly).toBeUndefined();
+ fireEvent.change(pick,{target:{value:'trend'}});const rule=save();expect(rule.rounds[0].structure).toMatchObject({kSource:'guard',guardTrendOnly:true});expect(rule.structure.guardTrendOnly).toBe(true);
+ const back=additionDraft(rule);expect(back.structure.guardTrendOnly).toBe(true);expect(parseAdditionDraft(back,BUILTIN_FEATURES).rounds![0].structure!.guardTrendOnly).toBe(true);
+ cleanup();render(<GuardLineNotes/>);expect(screen.getByTestId('guard-line-notes')).toHaveTextContent('只用实线');expect(screen.getByTestId('guard-line-notes')).toHaveTextContent('未加仓理由');
+ cleanup();render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});fireEvent.change(screen.getByLabelText('防守线类型'),{target:{value:'trend'}});
+ fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'previous'}});expect(screen.queryByLabelText('防守线类型')).toBeNull();expect(save().rounds[0].structure.guardTrendOnly).toBeUndefined();
+});
 // 【用户要求】2026-11-03 防守线说明：是哪条线、虚线算不算、断掉意味着什么
 it('explains the guard line next to its settings: which line, solid vs dashed, what a break means',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});

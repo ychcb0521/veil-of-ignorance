@@ -23,6 +23,13 @@ describe('plan version manifest', () => {
     expect(by['box-2'].name).toContain('防守线 v1'); expect(by['box-2'].version).toContain('dbl5-guard-v1');
     expect(versionTags(['x', ['holding-veto-v3', 1, ['k-from-current-box-v2']], 'holding-veto-v3'])).toEqual(['holding-veto-v3', 'k-from-current-box-v2']);
   });
+  // 【用户要求】2026-11-03 防守线「只用实线」写进版本清单；默认「实线和虚线」不改旧清单
+  it('names the solid-only guard line and its version in the manifest', () => {
+    const guard = { ...defaultStructureAddition('dbl5'), kSource: 'guard' as const, buffer: 0 };
+    const of = (s: typeof guard & { guardTrendOnly?: boolean }) => Object.fromEntries(qualityPlanVersions({ ...plan, addition: { ...plan.addition!, maxRounds: 1, rounds: [{ source: 'structure', structure: s, stricterPct: 10 }] } } as QualityGroup).map(e => [e.key, e]))['box-1'];
+    expect(of({ ...guard, guardTrendOnly: true })).toMatchObject({ name: expect.stringContaining('K＝防守线（只用实线）'), version: expect.stringContaining('guard-trend-only-v1') });
+    expect(of(guard).version).not.toContain('guard-trend-only'); expect(of(guard).name).not.toContain('只用实线');
+  });
   it('keeps the saved manifest while the plan is unchanged and refreezes when the user edits it', () => {
     const saved = freezeQualityPlan(plan), aged = { ...saved, frozenVersions: saved.frozenVersions!.map(e => e.key === 'hard-stop' ? { ...e, version: 'holding-veto-v2' } : e) };
     // 内容没改：沿用已存清单（模拟代码升级后，旧清单照样能查出差异）

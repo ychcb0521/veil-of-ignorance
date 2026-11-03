@@ -239,6 +239,19 @@ describe('native box decisions for holding additions',()=>{
   expect(r.fills.length).toBeGreaterThan(0);
   for(const f of r.fills){const e=f.structureEvidence!;expect(e.guardPrice).toBe(e.basePrice);expect(['trend','range']).toContain(e.guardRegime);expect(e.guardCloses).toBe(e.guardRegime==='trend'?1:2);expect(f.sizing!.support).toBe(e.k);expect(e.k).toBeLessThanOrEqual(e.guardPrice!);}
  });
+ // 【用户要求】2026-11-03 防守线分两种：实线和虚线都用（默认、旧方案不变）／只用实线（虚线＝震荡期时不加仓，记进未加仓理由）
+ it('can restrict the guard K to the solid (trend) line: range events are skipped with a reason, old plans unchanged',async()=>{
+  const g={...rule('dbl5','confirm'),kSource:'guard' as const},only={...g,guardTrendOnly:true};
+  expect(structureAdditionIdentity(only)).not.toEqual(structureAdditionIdentity(g));expect(JSON.stringify(structureAdditionIdentity(only))).toContain('guard-trend-only-v1');
+  expect(structureAdditionIdentity({...g,guardTrendOnly:false})).toEqual(structureAdditionIdentity(g));
+  expect(structureAdditionIdentity({...rule(),guardTrendOnly:true})).toEqual(structureAdditionIdentity(rule()));
+  expect(structureAdditionLabel(only)).toContain('K＝防守线（只用实线）');expect(structureAdditionLabel(g)).not.toContain('只用实线');
+  expect(()=>validateStructureAddition({...only,guardTrendOnly:'yes' as unknown as boolean})).toThrow('防守线类型');
+  const o=context(sample()),both=await findCalculatorAdditions({...o,structure:g,maxRounds:3}),solid=await findCalculatorAdditions({...o,structure:only,maxRounds:3});
+  expect(both.fills.map(f=>[f.at,f.structureEvidence!.guardRegime])).toEqual([[T+8*STEP,'range'],[T+14*STEP,'trend']]);expect(both.skipped).toBeUndefined();
+  expect(solid.fills.map(f=>[f.at,f.structureEvidence!.guardRegime])).toEqual([[T+14*STEP,'trend']]);
+  expect(solid.skipped).toEqual([{at:T+8*STEP,round:1,support:100,kind:'guard-range',label:'防守线是虚线（震荡期）',reading:'只用实线时，震荡期不加仓'}]);
+ });
  it('a guard K stop ignores wicks and sells at the next minute open after the required closes',async()=>{
   const o=context(sample()),at=o.entry+20*STEP,K=95;
   const fill={at,price:100,quantity:1,notional:100,scanFrom:o.entry,reading:0,threshold:0,direction:'>' as const,metric:'confirmed_support',label:'',barOpenTime:at-STEP,structureEvidence:{...evidence(),guardPrice:K,guardRegime:'range' as const,guardCloses:2,k:K},sizing:{support:K,previousSupport:90,atr:1,atrAt:at,coinsBefore:1,realAverageBefore:90,baseCoins:1,mirrorCoins:0,mirrorUsed:0}};

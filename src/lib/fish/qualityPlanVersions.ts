@@ -15,6 +15,7 @@ import { activeDetectorPrerequisite, additionIdentity, additionMirrorIdentity, q
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
 import { qualitySellStagesIdentity } from './qualitySellStages';
 import { boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
+import { structureKSourceLabel } from './qualityAdditionStructure';
 import type { FishSnapshot } from './algorithm';
 
 export interface PlanVersionEntry {
@@ -70,9 +71,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     rounds.forEach((r, i) => {
       if (r.source === 'structure' && r.structure) {
         const v = structureVersions(r.structure), box = boxAlgorithmVersion(v.box), guard = v.guard ? boxAlgorithmVersion(v.guard) : undefined;
-        const k = r.structure.kSource === 'current' ? '新C' : r.structure.kSource === 'guard' ? '防守线' : '旧C';
+        const k = structureKSourceLabel(r.structure);
         add(`box-${i + 1}`, `第 ${i + 1} 次加仓 · 箱体算法`, join([box?.label ?? v.box, guard?.label, `K＝${k}−${r.structure.buffer}${r.structure.bufferUnit === 'atr' ? 'ATR' : '%'}${r.structure.minDistancePct != null ? `（离现价 ≥ ${r.structure.minDistancePct}%）` : ''}`]),
-          join([v.box, v.guard, ...versionTags(additionIdentity({ ...a, rounds: undefined, source: 'structure', structure: r.structure })).filter(t => t.startsWith('k-from') || t.startsWith('box-addition') || t.startsWith('k-min-distance'))]),
+          join([v.box, v.guard, ...versionTags(additionIdentity({ ...a, rounds: undefined, source: 'structure', structure: r.structure })).filter(t => t.startsWith('k-from') || t.startsWith('box-addition') || t.startsWith('k-min-distance') || t.startsWith('guard-trend-only'))]),
           join([box?.summary, guard?.summary]));
       }
       const dp = activeDetectorPrerequisite(r);
