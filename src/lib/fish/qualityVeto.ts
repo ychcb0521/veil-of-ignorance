@@ -3,7 +3,7 @@ import type { FishSnapshot } from './algorithm';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export type QualityOperator = '<' | '>' | '<=' | '>=';
 export interface QualityHoldingVeto {
-  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator' | 'addition-geometric-profit';
+  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator' | 'addition-geometric-profit' | 'payoff-ratio';
   direction: QualityOperator; threshold: number; enabled: boolean;
   metric?: string; snapshot?: FishSnapshot;
   geometricMultiple?:number;
@@ -13,16 +13,28 @@ export const isHoldingPriceChoice = (choice: string): choice is keyof typeof hol
 export const minuteDropWindow = (kind: QualityHoldingVeto['kind']) => kind === 'drop-1m' ? 1 : kind === 'drop-5m' ? 5 : 0;
 export const ADDITION_PROFIT_KIND='addition-geometric-profit' as const;
 export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
-export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'>&{kind:string})=>v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
-export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number}};
+/** 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏（已落袋＋按当时价格的未实现）÷ 初始最大预期亏损 L₀ ≥ N（R）时立刻卖出全部持仓。L₀＝初始仓位 × 硬性终止静态回撤%。 */
+export const PAYOFF_STOP_KIND='payoff-ratio' as const;
+export const PAYOFF_STOP_LABEL='盈亏比止盈';
+export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'>&{kind:string})=>v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
+export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number};/** 盈亏比止盈：L₀、目标价与成交时的整笔盈亏。 */payoffBasis?:{l0:number;l0Pct:number;targetPrice:number;pnl:number}};
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
-  if (![...Object.keys(holdingPriceLabels),'indicator',ADDITION_PROFIT_KIND].includes(v.kind))throw new Error('未知的持仓否决指标');
+  if (![...Object.keys(holdingPriceLabels),'indicator',ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND].includes(v.kind))throw new Error('未知的持仓否决指标');
+  if (v.kind===PAYOFF_STOP_KIND){if(!(v.threshold>0)||!Number.isFinite(v.threshold)||v.direction!=='>=')throw new Error('盈亏比止盈须填写大于 0 的倍数（R）');return;}
   if (!Number.isFinite(v.threshold) || !['<','>','<=','>='].includes(v.direction)) throw new Error('一票否决条件须设置有效方向和有限数字阈值');
   if (v.kind !== 'indicator' && v.kind!==ADDITION_PROFIT_KIND && (!(v.threshold > 0 && v.threshold <= 100) || v.direction !== '>=')) throw new Error('回撤或跌幅阈值须大于 0 且不超过 100%，达到（≥）即触发');
   if(v.kind===ADDITION_PROFIT_KIND&&(!(v.threshold>=0)||!Number.isFinite(v.geometricMultiple??100)||!((v.geometricMultiple??100)>0)||v.direction!=='>='))throw new Error('加仓止盈须设置大于 0 的几何仓位倍数及不小于 0 的涨幅百分比');
   if (v.kind === 'indicator' && (!v.snapshot || !v.metric)) throw new Error('一票否决指标缺少公式快照');
+}
+/** 盈亏比止盈要用 L₀：方案里须同时启用静态回撤（取最小的那条百分比）。 */
+export function payoffStopL0Pct(vetoes: readonly QualityHoldingVeto[] = []): number | undefined {
+  const stops = activeHoldingVetoes(vetoes).filter(v => v.kind === 'static-drawdown' && (v.direction === '>=' || v.direction === '>') && v.threshold > 0 && v.threshold <= 100).map(v => v.threshold);
+  return stops.length ? Math.min(...stops) : undefined;
+}
+export function validatePayoffStops(vetoes: readonly QualityHoldingVeto[] = []) {
+  if (activeHoldingVetoes(vetoes).some(v => v.kind === PAYOFF_STOP_KIND) && payoffStopL0Pct(vetoes) == null) throw new Error('盈亏比止盈要用初始最大预期亏损 L₀：请在硬性终止里同时启用静态回撤');
 }
 /** No conditions keeps old experiment keys byte-for-byte compatible. IDs/order do not change the outcome. */
 export function holdingVetoIdentity(vetoes: readonly QualityHoldingVeto[] = []): unknown[] {

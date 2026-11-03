@@ -5,6 +5,7 @@ import {sample,T} from './fixtures/dblBars';
 import {sbsComplete,SBS_T} from './fixtures/sbsBars';
 import {defaultStructureAddition,structureAdditionIdentity,structureAdditionLabel,structureAdditionSignal,structureAdditionK,withMinKDistance,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
+import {holdingVetoLabel,validateHoldingVeto,validatePayoffStops} from '../fish/qualityVeto';
 import {additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
 import {definitionKey} from '../deepDig/features';
@@ -74,6 +75,18 @@ describe('native box decisions for holding additions',()=>{
   const longer={...o,end:T+250*STEP,row:{...o.row,timeMs:T+250*STEP}};expect(await createStructureAdditionReader(longer)(r,o.entry,longer.end,[])).toEqual(first);
  });
  // 【用户要求】2026-11-01 加仓可选 K 用旧 C 还是新 C；默认旧 C，身份不变
+ // 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏 ÷ L₀ ≥ N 立刻卖出全部持仓（L₀＝初始仓位 × 静态回撤%）
+ it('sells everything once the whole-trade payoff ratio reaches the threshold, at the exact target or a gapped open',async()=>{
+  const o=context(sample()),stop=(id:string,kind:'static-drawdown'|'payoff-ratio',threshold:number)=>({id,label:kind,kind,direction:'>=' as const,threshold,enabled:true});
+  const plain=await findCalculatorAdditions({...o,structure:{...rule(),kSource:'current'},maxRounds:1,vetoes:[stop('s','static-drawdown',5)]});
+  const paid=await findCalculatorAdditions({...o,structure:{...rule(),kSource:'current'},maxRounds:1,vetoes:[stop('s','static-drawdown',5),stop('p','payoff-ratio',2)]});
+  expect(paid.stop?.cause).toMatchObject({kind:'payoff-ratio',threshold:2,payoffBasis:{l0:5,l0Pct:5}});
+  const basis=paid.stop!.cause!.payoffBasis!;expect(basis.pnl).toBeGreaterThanOrEqual(10-1e-9);if(!paid.stop!.atOpen)expect(basis.pnl).toBeCloseTo(10,6);
+  expect(paid.stop!.at).toBeLessThanOrEqual(plain.stop?.at??Infinity);
+  expect(()=>validatePayoffStops([stop('p','payoff-ratio',5000)])).toThrow('静态回撤');expect(()=>validatePayoffStops([stop('s','static-drawdown',5),stop('p','payoff-ratio',5000)])).not.toThrow();
+  expect(holdingVetoLabel(stop('p','payoff-ratio',5000))).toBe('盈亏比 ≥ 5000R');
+  expect(()=>validateHoldingVeto(stop('p','payoff-ratio',0))).toThrow('盈亏比');
+ });
  // 【用户要求】2026-11-03「方向」探测算法条件：信号没有所选探测算法时这一轮注定不满足，不再加仓；身份与说明各自带上
  it('stops adding when the detector condition cannot be met, and gives the detector condition its own identity',async()=>{
   const o=context(sample());

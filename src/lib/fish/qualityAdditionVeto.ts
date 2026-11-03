@@ -3,7 +3,7 @@
  * 新 C 出现也不加——ONTUSDT 第 3 次、STRKUSDT 第 2、3 次加仓都加在这类形态之后，扫损成了必然。
  * 只看加仓那一刻已收盘的 5 分钟 K 线；ATR 为 5 分钟 ATR(14)（Wilder，与加仓 K 同一序列）。任一条成立即这次不加，继续等下一个新 C。
  */
-export type AdditionEntryVetoKind = 'upper-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'fast-drop';
+export type AdditionEntryVetoKind = 'upper-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop';
 /** 持仓期间急跌：任意 minutes 分钟内跌幅 ≥ pct%（与硬性终止「N 分钟内跌幅」同口径：窗口首根开盘 → 末根收盘）。 */
 export interface FastDropWindow { minutes: number; pct: number }
 export interface QualityAdditionEntryVeto {
@@ -29,17 +29,20 @@ export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditi
   volatility: { kind: 'volatility', enabled: false, ratio: 1.8, er: .25 },
   // 【用户要求】2026-11-03 默认值按「组合算法1」44 场回放定：回落 ≥2.5 ATR 且 ≥4% 只改善不伤大单（单用 2.5 ATR 会把 SAPIEN +3936 砍到 +533）；可修改
   pullback: { kind: 'pullback', enabled: false, atr: 2.5, pct: 4, join: 'and' },
+  // 【用户要求】2026-11-03 另设一条「冲高回落 · 仅 ATR」：回放里胜率明显更高（但会砍掉 SAPIEN 这类大单），与上一条各自勾选
+  'pullback-atr': { kind: 'pullback-atr', enabled: false, atr: 2.5 },
   // 【用户要求】2026-11-02 持仓期间曾出现任意 1 分钟跌超 5%、5 分钟超 7%、10 分钟超 10% 等，就不再加仓（PENGU 第 3 次加仓前那根长红线）
   'fast-drop': { kind: 'fast-drop', enabled: false, windows: [{ minutes: 1, pct: 5 }, { minutes: 5, pct: 7 }, { minutes: 10, pct: 10 }] },
 };
 export const ADDITION_VETO_KINDS = Object.keys(ADDITION_VETO_DEFAULTS) as AdditionEntryVetoKind[];
-export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'fast-drop': '持仓期间急跌' };
+export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌' };
 export const activeAdditionVetoes = (vetoes?: readonly QualityAdditionEntryVeto[]) => (vetoes ?? []).filter(v => v.enabled);
 export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
   const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v };
   return v.kind === 'upper-wick' ? `长上影线：近 ${d.lookbackBars} 根内上影 ≥ ${d.atr} ATR 且占整根 ≥ ${d.ratio}%`
     : v.kind === 'lower-spike' ? `向下大插针：近 ${d.lookbackBars} 根内下影 ≥ ${d.atr} ATR 或低于前收 ≥ ${d.pct}%`
       : v.kind === 'volatility' ? `高震荡：ATR ≥ 6 小时中位 ${d.ratio} 倍 或 ER(24) ≤ ${d.er}`
+        : v.kind === 'pullback-atr' ? `冲高回落（仅 ATR）：距持仓最高点回落 ≥ ${d.atr} ATR`
         : v.kind === 'fast-drop' ? `持仓期间急跌：${(d.windows ?? []).map(w => `${w.minutes} 分钟内跌 ≥ ${w.pct}%`).join(' 或 ')}`
         : `冲高回落：距持仓最高点回落 ${pullbackText(pullbackParams(v))}`;
 }
@@ -115,6 +118,10 @@ export function evaluateAdditionVetoes(vetoes: readonly QualityAdditionEntryVeto
     } else if (v.kind === 'fast-drop') {
       const hit = minutes ? fastDropHit(v.windows ?? [], minutes, entry) : undefined;
       if (hit) return { kind: v.kind, label: additionVetoLabel(v), reading: `${fmtTime(hit.at)} 起 ${hit.window.minutes} 分钟内跌 ${fmt(hit.drop)}%` };
+    } else if (v.kind === 'pullback-atr') {
+      let peak = -Infinity; for (const b of bars) if (b.openTime >= entry) peak = Math.max(peak, b.high);
+      const back = (peak - last.close) / A;
+      if (Number.isFinite(back) && back >= v.atr!) return { kind: v.kind, label: additionVetoLabel(v), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR（${fmt((peak - last.close) / peak * 100)}%）` };
     } else {
       let peak = -Infinity; for (const b of bars) if (b.openTime >= entry) peak = Math.max(peak, b.high);
       const back = (peak - last.close) / A, backPct = (peak - last.close) / peak * 100;

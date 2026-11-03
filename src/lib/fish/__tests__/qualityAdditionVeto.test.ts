@@ -64,3 +64,13 @@ it('pullback accepts a percentage, alone or combined with ATR by and / or, witho
   expect(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2, pct: 3 })))).toContain('pullback-pct-v1');
   expect(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2, pct: 3, join: 'or' })))).not.toBe(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2, pct: 3 }))));
 });
+
+// 【用户要求】2026-11-03「冲高回落·仅ATR」：只按 ATR，不看百分比
+it('pullback-atr vetoes on ATR alone, with its own identity', () => {
+  const fall = [...calm(70), ...Array.from({ length: 10 }, (_, i) => ({ openTime: T + (70 + i) * STEP, open: 169 - i * .5, high: 169.2 - i * .5, low: 168.3 - i * .5, close: 168.5 - i * .5 }))];
+  expect(evaluateAdditionVetoes(on('pullback-atr'), fall, atrOf(fall), T)).toMatchObject({ kind: 'pullback-atr', label: '冲高回落（仅 ATR）：距持仓最高点回落 ≥ 2.5 ATR' });
+  expect(evaluateAdditionVetoes(on('pullback-atr', { atr: 5 }), fall, atrOf(fall), T)).toBeUndefined();
+  expect(evaluateAdditionVetoes(on('pullback'), fall, atrOf(fall), T)).toMatchObject({ kind: 'pullback' });
+  expect(JSON.stringify(additionVetoIdentity(on('pullback-atr')))).not.toBe(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2.5 }))));
+  expect(() => validateAdditionVetoes(on('pullback-atr', { atr: -1 }))).toThrow();
+});

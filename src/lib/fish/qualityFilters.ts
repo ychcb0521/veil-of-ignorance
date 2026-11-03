@@ -5,7 +5,7 @@ import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researc
 import { shortFishHash } from './algorithm';
 import type { QualityBuyFilter } from './quality';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
-import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL } from './qualityVeto';
+import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, PAYOFF_STOP_LABEL } from './qualityVeto';
 export interface QualityFilterChoice { key: string; featureId: string; metric: string; label: string; group: string }
 function build(definitions: readonly DeepDigFeatureDef[]) {
   const choices: QualityFilterChoice[] = [], defs = new Map<string,DeepDigFeatureDef>();
@@ -34,6 +34,7 @@ export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', th
 }
 export const qualityFilterChoiceKey = (f: QualityBuyFilter) => `${f.snapshot.featureId}:${f.metric}`;
 export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {
+  if(choiceKey===PAYOFF_STOP_KIND){const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,'>=',threshold]))}`,label:PAYOFF_STOP_LABEL,kind:PAYOFF_STOP_KIND,direction:'>=',threshold,enabled};validateHoldingVeto(v);return v;}
   const risk=isHoldingPriceChoice(choiceKey),addition=choiceKey===ADDITION_PROFIT_KIND;
   const filter=risk||addition?undefined:makeQualityBuyFilter(choiceKey,direction==='<'||direction==='<='?'<':'>',threshold,enabled,definitions);
   const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,direction,threshold,...(addition?[geometricMultiple]:[])]))}`,label:addition?ADDITION_PROFIT_LABEL:risk?holdingPriceLabels[choiceKey]:filter!.label,

@@ -5,6 +5,7 @@ import { makeQualityBuyFilter } from './qualityFilters';
 import { archiveQualityStudy } from './qualityCampaignArchive';
 import { materializePlanBuyFilters, type FishQualityStudy, type QualityGroup } from './quality';
 import { freezeSavedPlans } from './qualityPlanVersions';
+import { validatePayoffStops } from './qualityVeto';
 
 export const newQualitySellPlanId = () => 'sell-' + (globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
 
@@ -25,7 +26,7 @@ export function replaceQualitySellPlans(study: FishQualityStudy, incoming: reado
   for (const plan of incoming) {
     if (!plan.id || ids.has(plan.id)) throw new Error('卖出算法编号重复');
     ids.add(plan.id);
-    validateQualitySellStages(plan);validateQualityVetoStages(plan);
+    validateQualitySellStages(plan);validateQualityVetoStages(plan);validatePayoffStops(plan.holdingVetoes);
     if (!plan.label.trim()) throw new Error('请填写卖出算法名称');
     if (plan.rule && (!Number.isFinite(plan.rule.threshold) || !['<', '>'].includes(plan.rule.direction))) throw new Error('卖出门槛必须是有限数字');
     if (plan.combo && (!(plan.combo.switchPct > 0) || !Number.isFinite(plan.combo.switchPct) || !Number.isFinite(plan.combo.after.rule.threshold))) throw new Error('分段切换涨幅须大于 0，后段门槛须为有限数字');

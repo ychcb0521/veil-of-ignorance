@@ -102,6 +102,12 @@ export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFea
  return all.length?all.sort((a,b)=>a.afterAdditions-b.afterAdditions):undefined;
 }
 const field='h-8 min-w-0 rounded-md border border-border/60 bg-background px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40';
+/** 回放预设：每组只设这三项，false＝取消勾选。 */
+const VETO_PRESETS:{name:string;detail:string;set:Partial<Record<AdditionEntryVetoKind,Partial<VetoFieldDraft>|false>>}[]=[
+ {name:'保大单',detail:'冲高回落 ≥2.5 ATR 且 ≥4% · +5600.9，4 笔由平转赚、无一变差，SAPIEN 保住 +3936',set:{pullback:{atr:'2.5',pct:'4',join:'and'},'pullback-atr':false,'upper-wick':false}},
+ {name:'高胜率',detail:'冲高回落·仅 ATR ≥2.5 · +2207.0，赚/亏/平 18/3/18，但 SAPIEN +3936 → +533',set:{pullback:false,'pullback-atr':{atr:'2.5'},'upper-wick':false}},
+ {name:'高胜率+长上影',detail:'冲高回落·仅 ATR ≥2.5 + 长上影 近 12 根 ≥1.5 ATR 且占整根 ≥60%',set:{pullback:false,'pullback-atr':{atr:'2.5'},'upper-wick':{lookbackBars:'12',atr:'1.5',ratio:'60'}}},
+];
 /** 数字输入：同高、居中、等宽数字，所有条件行对齐。 */
 const cell=field+' h-7 px-1 text-center tabular-nums';
 /** 说明弹窗里的一小节：短标题 + 正文，替代大段连续文字。 */
@@ -190,16 +196,26 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   {/* 【用户要求】2026-11-03 否决与位置要整齐紧凑：左列条件名 / 标签定宽，右列参数同高同宽、居中对齐；长说明进 ⓘ */}
   <Part title="否决" role="任一成立则这次不加仓 · 等下一个新 C" testId="addition-vetoes" info={<div className="space-y-2">
    <p>方向满足、新 C 出现之后再看这里：任一勾选的条件在加仓那一刻成立，这一次就不加仓，继续等下一个新 C。只用已收盘的 5 分钟 K 线，ATR 为 5 分钟 ATR(14)。</p>
-   <ul className="list-disc space-y-0.5 pl-4"><li>持仓期间急跌：买入后任意 N 分钟内（窗口首根开盘 → 末根收盘）跌幅达到设定值，与硬性终止「N 分钟内跌幅」同口径；跌幅留空即不用这一组。</li><li>长上影线：冲高被砸，上方抛压重。</li><li>向下大插针：有人砸盘、扫止损，K 容易被打到。</li><li>高震荡：波动放大或来回多、净涨少，加仓后被扫几乎必然。</li><li>冲高回落：从持仓最高点已明显回落、还没收复。可按 ATR、按百分比，或两者「且 / 或」组合；两项都填默认「且」；哪一项留空就不用那一项（回放里 ATR 更能分出成败，百分比适合再要求回落的绝对幅度够大）。</li></ul>
+   <ul className="list-disc space-y-0.5 pl-4"><li>持仓期间急跌：买入后任意 N 分钟内（窗口首根开盘 → 末根收盘）跌幅达到设定值，与硬性终止「N 分钟内跌幅」同口径；跌幅留空即不用这一组。</li><li>长上影线：冲高被砸，上方抛压重。</li><li>向下大插针：有人砸盘、扫止损，K 容易被打到。</li><li>高震荡：波动放大或来回多、净涨少，加仓后被扫几乎必然。</li><li>冲高回落·仅ATR：只按 ATR 判断回落、不看百分比。回放里胜率明显更高，但会把 SAPIEN 这类大单也挡掉（+3936 → +533）；与「冲高回落（且 4%）」各自勾选，同时勾上时以先成立的为准，相当于只用这一条。</li><li>冲高回落：从持仓最高点已明显回落、还没收复。可按 ATR、按百分比，或两者「且 / 或」组合；两项都填默认「且」；哪一项留空就不用那一项（回放里 ATR 更能分出成败，百分比适合再要求回落的绝对幅度够大）。</li></ul>
+   <ul className="list-disc space-y-0.5 pl-4">
+    <li>每一次加仓的否决各自独立：第 1、2、3……次各用自己标签页里勾选的条件，某一次没有勾就没有否决，不会沿用前一次的设置。</li>
+    <li>冲高回落的「持仓最高点」从首次买入算起，不是从上一次加仓算起。</li>
+    <li>持仓期间急跌从首次买入一直查到加仓那一刻：只要持仓中出现过一次，之后每一次加仓都会被否决，涨回去也不恢复。</li>
+    <li>数据缺失时不否决：加仓那一刻拿不到 5 分钟 ATR，或「持仓期间急跌」缺 1 分钟线时，这些条件视为不成立，照常加仓。</li>
+   </ul>
    <p>被否决的加仓会记在结果里（悬停卖出列可看时间与原因）。</p></div>}>
+   {/* 【用户要求】2026-11-03 回放里的三组否决做成预设，点一下设好当前这一次加仓（之后仍可手改） */}
+   <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted-foreground" data-testid="addition-veto-presets"><span>回放预设</span>
+    {VETO_PRESETS.map(p=><button key={p.name} type="button" disabled={!d.enabled} title={p.detail} aria-label={`否决预设 ${p.name}`} className="rounded border border-border/60 px-2 py-0.5 hover:bg-muted disabled:opacity-40" onClick={()=>{const base=d.entryVetoes??vetoDraftOf(),next={...base};for(const [kind,v] of Object.entries(p.set) as [AdditionEntryVetoKind,Partial<VetoFieldDraft>|false][])next[kind]={...base[kind],...(v===false?{enabled:false}:{enabled:true,...v})};patch({entryVetoes:next});}}>{p.name}</button>)}
+    <FishQualityInfo label="否决预设说明"><div className="space-y-1.5 text-[11px]"><p>「组合算法1」44 场回放（39 笔可比，基准 +5580.4）：</p><ul className="list-disc space-y-0.5 pl-4">{VETO_PRESETS.map(p=><li key={p.name}><span className="font-medium">{p.name}</span>：{p.detail}</li>)}</ul><p className="text-muted-foreground">预设只改冲高回落、冲高回落·仅ATR、长上影线三项，其他否决保持原样；只作用于当前选中的这一次加仓。</p></div></FishQualityInfo></div>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
    {ADDITION_VETO_KINDS.map(kind=>{const f=d.entryVetoes?.[kind]??vetoDraftOf()[kind],off=!d.enabled||!f.enabled,set=(next:Partial<VetoFieldDraft>)=>patch({entryVetoes:{...(d.entryVetoes??vetoDraftOf()),[kind]:{...f,...next}}}),num=(key:keyof Omit<VetoFieldDraft,'enabled'|'windows'|'join'>,label:string,w='w-14')=><input aria-label={`${ADDITION_VETO_LABELS[kind]} ${label}`} type="number" step="any" disabled={off} value={f[key]} onChange={e=>set({[key]:e.target.value})} className={cell+' '+w}/>;
     return <Fragment key={kind}><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label={`启用加仓否决 ${ADDITION_VETO_LABELS[kind]}`} disabled={!d.enabled} checked={f.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={`font-medium ${f.enabled?'':'text-muted-foreground'}`}>{ADDITION_VETO_LABELS[kind]}</span></label>
      <div className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 text-muted-foreground ${f.enabled?'':'opacity-55'}`} data-testid={`addition-veto-${kind}`}>{kind==='upper-wick'?<>近{num('lookbackBars','回看根数','w-12')}根 · 上影 ≥{num('atr','ATR倍数')}ATR 且占整根 ≥{num('ratio','上影占比','w-12')}%</>
       :kind==='lower-spike'?<>近{num('lookbackBars','回看根数','w-12')}根 · 下影 ≥{num('atr','ATR倍数')}ATR 或低于前收 ≥{num('pct','跌幅','w-12')}%</>
       :kind==='volatility'?<>ATR ≥ 6 小时中位 ×{num('ratio','ATR放大倍数')}或 ER(24) ≤{num('er','效率比')}</>
-      :kind==='fast-drop'?<>{(f.windows??[]).map((w,i)=><span key={i} className="inline-flex items-center gap-1 whitespace-nowrap">{i>0&&<span className="px-0.5 text-muted-foreground/50">·</span>}<input aria-label={`持仓期间急跌 第${i+1}组分钟`} type="number" step="1" min="1" disabled={off} value={w.minutes} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,minutes:e.target.value}:x)})} className={cell+' w-11'}/>分钟跌 ≥<input aria-label={`持仓期间急跌 第${i+1}组跌幅`} type="number" step="any" placeholder="不用" disabled={off} value={w.pct} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,pct:e.target.value}:x)})} className={cell+' w-12'}/>%</span>)}</>
-      :<>距最高点回落 ≥{num('atr','回落ATR倍数')}ATR<select aria-label="冲高回落组合方式" disabled={off} value={f.join??'and'} onChange={e=>set({join:e.target.value as 'and'|'or'})} className={field+' h-7 px-1.5'}><option value="and">且</option><option value="or">或</option></select>≥{num('pct','回落百分比')}%</>}</div></Fragment>;})}
+      :kind==='pullback-atr'?<>距持仓最高点回落 ≥{num('atr','回落ATR倍数')}ATR<span className="text-[10px] text-muted-foreground/70">不看百分比</span></>:kind==='fast-drop'?<>{(f.windows??[]).map((w,i)=><span key={i} className="inline-flex items-center gap-1 whitespace-nowrap">{i>0&&<span className="px-0.5 text-muted-foreground/50">·</span>}<input aria-label={`持仓期间急跌 第${i+1}组分钟`} type="number" step="1" min="1" disabled={off} value={w.minutes} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,minutes:e.target.value}:x)})} className={cell+' w-11'}/>分钟跌 ≥<input aria-label={`持仓期间急跌 第${i+1}组跌幅`} type="number" step="any" placeholder="不用" disabled={off} value={w.pct} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,pct:e.target.value}:x)})} className={cell+' w-12'}/>%</span>)}</>
+      :<>距持仓最高点回落 ≥{num('atr','回落ATR倍数')}ATR<select aria-label="冲高回落组合方式" disabled={off} value={f.join??'and'} onChange={e=>set({join:e.target.value as 'and'|'or'})} className={field+' h-7 px-1.5'}><option value="and">且</option><option value="or">或</option></select>≥{num('pct','回落百分比')}%</>}</div></Fragment>;})}
    </div>
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">

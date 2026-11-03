@@ -1,4 +1,5 @@
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
+import { validatePayoffStops } from '@/lib/fish/qualityVeto';
 import { deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
@@ -364,7 +365,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   /** Save this plan’s holding settings without starting or restarting monitoring. */
   const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[], mirror?: QualityMirrorTakeProfit, addition?: QualityAdditionRule) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
-    validateQualityMirror(mirror); validateQualityAddition(addition);
+    validateQualityMirror(mirror); validateQualityAddition(addition); validatePayoffStops(vetoes);
     const additionChanged = JSON.stringify(additionIdentity(addition ?? plan?.addition)) !== JSON.stringify(additionIdentity(plan?.addition));
     if (!plan || !additionChanged && JSON.stringify([holdingVetoIdentity(plan.holdingVetoes),mirrorIdentity(plan.mirrorTakeProfit)]) === JSON.stringify([holdingVetoIdentity(vetoes),mirrorIdentity(mirror ?? plan.mirrorTakeProfit)])) return;
     pauseForSettings();

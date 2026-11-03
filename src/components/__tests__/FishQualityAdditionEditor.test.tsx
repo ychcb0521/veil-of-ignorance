@@ -20,6 +20,19 @@ it('offers only the box position, with calculator defaults and K = 旧C − n×A
  expect(screen.getByTestId('addition-timing')).toHaveTextContent('K =');expect(screen.getByTestId('addition-k-row')).toHaveTextContent('× ATR');expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
  const rule=save();expect(rule).toMatchObject({enabled:true,quantityMode:'calculator',quantity:1,source:'structure',structure:{algorithm:'dbl5',buffer:0}});expect(rule.rounds.map((r:QualityAdditionRule)=>r.source)).toEqual(['structure','structure','structure']);
 });
+// 【用户要求】2026-11-03 否决加「冲高回落·仅ATR」与三组回放预设（只改冲高回落、仅ATR、长上影线，作用于当前这一次）
+it('offers the ATR-only pullback and three replay presets that set the current round only',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('启用加仓否决 冲高回落·仅ATR')).not.toBeChecked();expect(screen.getByLabelText('冲高回落·仅ATR 回落ATR倍数')).toHaveValue(2.5);
+ const vetoes=()=>save().rounds.map((r:{entryVetoes?:{kind:string}[]})=>r.entryVetoes??[]);
+ fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率'}));
+ expect(vetoes()[0]).toEqual([{kind:'pullback-atr',enabled:true,atr:2.5}]);expect(vetoes()[1]).toEqual([]);
+ fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率+长上影'}));
+ expect(vetoes()[0]).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:1.5,ratio:60},{kind:'pullback-atr',enabled:true,atr:2.5}]);
+ fireEvent.click(screen.getByRole('button',{name:'否决预设 保大单'}));
+ expect(vetoes()[0]).toEqual([{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'}]);
+ tab(2);fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率'}));expect(vetoes()[1]).toEqual([{kind:'pullback-atr',enabled:true,atr:2.5}]);expect(vetoes()[0]).toEqual([{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'}]);
+});
 // 【用户要求】2026-11-03「方向」里可选探测算法与探测值提高百分比
 it('adds a detector condition to 方向 with a chosen detector and percentage, per round',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));

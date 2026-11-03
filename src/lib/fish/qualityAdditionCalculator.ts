@@ -6,7 +6,7 @@ import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandida
 import {isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
 import {additionVetoesNeedMinutes,evaluateAdditionVetoes,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
-import {ADDITION_PROFIT_KIND,activeHoldingVetoes,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
+import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
@@ -87,8 +87,27 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const atOpen=bar.open<=support;return {at:bar.openTime,price:atOpen?bar.open:support,support,atOpen};
  };
  const profitRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===ADDITION_PROFIT_KIND).sort((a,b)=>a.id.localeCompare(b.id));
+ // 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏 ÷ L₀ ≥ N 时卖出全部持仓；L₀＝初始仓位 × 静态回撤%
+ const payoffRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===PAYOFF_STOP_KIND),payoffL0Pct=payoffStopL0Pct(o.vetoes),payoffL0=payoffL0Pct!=null?o.notional*payoffL0Pct/100:undefined;
+ /** 盈亏比止盈：当前持仓不变的这段里，价格涨到 (N×L₀＋持仓成本−已落袋)÷持仓币数 即全部卖出；跳空高开按开盘价。 */
+ const findPayoff=(from:number):SupportStop|undefined=>{
+  if(!payoffRules.length||!(payoffL0!>0))return;
+  const h=holdings(Number.MAX_SAFE_INTEGER);if(!(h.held>0))return;
+  const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));let best:SupportStop|undefined;
+  for(const v of payoffRules){
+   const target=(v.threshold*payoffL0!+h.cost-h.realized)/h.held;if(!(target>0)||!Number.isFinite(target))continue;
+   const search=(node:number,left:number,right:number):number=>{if(right<=first||highTree[node]<target*(1-1e-12))return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
+   const bar=bars[search(1,0,size)];if(!bar)continue;
+   const ordinary=o.ordinaryExit;if(ordinary&&bar.openTime===ordinary.at&&(ordinary.atOpen||!ordinary.mirror||ordinary.price<=target))continue;
+   const atOpen=bar.open>=target*(1-1e-12),price=atOpen?bar.open:target;
+   const hit:SupportStop={at:bar.openTime,price,support:currentK().k??o.entryPrice,atOpen,cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,payoffBasis:{l0:payoffL0!,l0Pct:payoffL0Pct!,targetPrice:target,pnl:h.held*price-h.cost+h.realized}}};
+   if(!best||hit.at<best.at||hit.at===best.at&&hit.price<best.price)best=hit;
+  }
+  return best;
+ };
  const findPositionExit=(support:number|undefined,from:number):SupportStop|undefined=>{
-  const stop=findStop(support,from);if(!fills.length||support==null||!profitRules.length)return stop;
+  const stop0=findStop(support,from),payoffHit=findPayoff(from),stop=payoffHit&&(!stop0||payoffHit.at<stop0.at||payoffHit.at===stop0.at&&payoffHit.atOpen&&!stop0.atOpen)?payoffHit:stop0;
+  if(!fills.length||support==null||!profitRules.length)return stop;
   const initialCoins=o.notional/o.entryPrice,heldCoins=initialCoins*(1-halfMirror.fraction)+fills.reduce((n,a)=>n+a.quantity,0)-reductions.reduce((n,r)=>n+r.quantity,0),multiple=heldCoins/initialCoins;
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
   let profit:SupportStop|undefined;
