@@ -1,6 +1,8 @@
 // 【用户要求】2026-11-02 交易战役「战役元数据」底部「持仓监测」：完整、只读地呈现当时的条件设置，形式与「条件设置」一致
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+const library = vi.hoisted(() => ({ ready: true, activate: vi.fn(), save: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('@/contexts/FishQualityContext', () => ({ useCampaignQualityTemplates: () => library }));
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
@@ -28,3 +30,28 @@ it('shows the frozen monitor settings with the same editors, read-only, with rou
   // 2026-11-02 版本保护：只读视图底部列出这场战役冻结的算法版本
   expect(within(within(view).getByTestId('quality-plan-versions')).getByTestId('plan-version-list')).toBeInTheDocument();
 },20_000);
+
+it('only saves the exact historical snapshot after naming and explicit confirmation; cancelling saves nothing', async () => {
+  library.save.mockClear(); library.activate.mockClear();
+  const frozen = plan(), before = structuredClone(frozen);
+  render(<QualityMonitorSettingsButton plan={frozen}/>);
+  fireEvent.click(screen.getByRole('button', { name: '查看持仓监测设置' }));
+  expect(library.save).not.toHaveBeenCalled(); expect(library.activate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保存为模板' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(library.save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保存为模板' }));
+  fireEvent.change(screen.getByLabelText('模板名称'), { target: { value: 'RAVE 试出的组合' } });
+  fireEvent.click(screen.getByRole('button', { name: '确认保存模板' }));
+  expect(await screen.findByText(/已保存，可在持仓监测设置/)).toBeInTheDocument();
+  expect(library.save).toHaveBeenCalledExactlyOnceWith(frozen, 'RAVE 试出的组合'); expect(frozen).toEqual(before);
+}, 20_000);
+it('keeps the name and error visible when saving fails', async () => {
+  library.save.mockRejectedValueOnce(new Error('版本不同，不能存为模板'));
+  render(<QualityMonitorSettingsButton plan={plan()}/>);
+  fireEvent.click(screen.getByRole('button', { name: '查看持仓监测设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存为模板' }));
+  fireEvent.click(screen.getByRole('button', { name: '确认保存模板' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('版本不同');
+  expect(screen.getByLabelText('模板名称')).toHaveValue('组合算法1');
+}, 20_000);
