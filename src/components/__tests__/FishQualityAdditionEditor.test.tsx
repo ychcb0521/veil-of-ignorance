@@ -26,12 +26,12 @@ it('offers the ATR-only pullback and three replay presets that set the current r
  expect(screen.getByLabelText('启用加仓否决 冲高回落·仅ATR')).not.toBeChecked();expect(screen.getByLabelText('冲高回落·仅ATR 回落ATR倍数')).toHaveValue(2.5);
  const vetoes=()=>save().rounds.map((r:{entryVetoes?:{kind:string}[]})=>r.entryVetoes??[]);
  fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率'}));
- expect(vetoes()[0]).toEqual([{kind:'pullback-atr',enabled:true,atr:2.5}]);expect(vetoes()[1]).toEqual([]);
+ expect(vetoes()[0]).toEqual([{kind:'pullback-atr',enabled:true,atr:2.5,sticky:true}]);expect(vetoes()[1]).toEqual([]);
  fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率+长上影'}));
- expect(vetoes()[0]).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:1.5,ratio:60},{kind:'pullback-atr',enabled:true,atr:2.5}]);
+ expect(vetoes()[0]).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:1.5,ratio:60},{kind:'pullback-atr',enabled:true,atr:2.5,sticky:true}]);
  fireEvent.click(screen.getByRole('button',{name:'否决预设 保大单'}));
- expect(vetoes()[0]).toEqual([{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'}]);
- tab(2);fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率'}));expect(vetoes()[1]).toEqual([{kind:'pullback-atr',enabled:true,atr:2.5}]);expect(vetoes()[0]).toEqual([{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'}]);
+ expect(vetoes()[0]).toEqual([{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and',sticky:true}]);
+ tab(2);fireEvent.click(screen.getByRole('button',{name:'否决预设 高胜率'}));expect(vetoes()[1]).toEqual([{kind:'pullback-atr',enabled:true,atr:2.5,sticky:true}]);expect(vetoes()[0]).toEqual([{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and',sticky:true}]);
 });
 // 【用户要求】2026-11-03「方向」里可选探测算法与探测值提高百分比
 it('adds a detector condition to 方向 with a chosen detector and percentage, per round',()=>{
@@ -141,7 +141,7 @@ it('saves per-round addition vetoes with editable parameters and restores them',
  fireEvent.click(screen.getByLabelText('启用加仓否决 冲高回落'));
  tab(2);expect(screen.getByLabelText('启用加仓否决 长上影线')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用加仓否决 高震荡'));fireEvent.change(screen.getByLabelText('高震荡 效率比'),{target:{value:'.1'}});
  const rule=save();
- expect(rule.rounds[0].entryVetoes).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:2,ratio:60},{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'}]);
+ expect(rule.rounds[0].entryVetoes).toEqual([{kind:'upper-wick',enabled:true,lookbackBars:12,atr:2,ratio:60},{kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and',sticky:true}]);
  expect(rule.rounds[1].entryVetoes).toEqual([{kind:'volatility',enabled:true,ratio:1.8,er:.1}]);expect(rule.rounds[2].entryVetoes).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
  fireEvent.click(screen.getByLabelText('启用加仓否决 持仓期间急跌'));expect(screen.getByLabelText('持仓期间急跌 第1组跌幅')).toHaveValue(5);fireEvent.change(screen.getByLabelText('持仓期间急跌 第2组跌幅'),{target:{value:'4'}});fireEvent.change(screen.getByLabelText('持仓期间急跌 第3组跌幅'),{target:{value:''}});
@@ -149,9 +149,10 @@ it('saves per-round addition vetoes with editable parameters and restores them',
  const bad=additionDraft(rule);bad.otherRounds[0].entryVetoes.volatility.er='3';expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('效率比');
  // 冲高回落加百分比：两项都填默认「且」，可改「或」；清空 ATR 就只按百分比
  tab(1);fireEvent.change(screen.getByLabelText('冲高回落 回落百分比'),{target:{value:'4'}});
- expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and'});
+ expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,atr:2.5,pct:4,join:'and',sticky:true});
  fireEvent.change(screen.getByLabelText('冲高回落组合方式'),{target:{value:'or'}});expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback').join).toBe('or');
  fireEvent.change(screen.getByLabelText('冲高回落 回落ATR倍数'),{target:{value:''}});
- const pctOnly=save();expect(pctOnly.rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,pct:4});
+ const pctOnly=save();expect(pctOnly.rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,pct:4,sticky:true});
+ fireEvent.click(screen.getByLabelText('冲高回落 未收复最高点前不再加'));expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback').sticky).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(pctOnly),BUILTIN_FEATURES).rounds[0].entryVetoes).toEqual(pctOnly.rounds[0].entryVetoes);
 });

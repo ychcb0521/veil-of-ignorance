@@ -22,6 +22,8 @@ export interface QualityAdditionEntryVeto {
   windows?: FastDropWindow[];
   /** 【用户要求】2026-11-02 冲高回落：ATR 倍数与回落百分比（pct）都填时的组合方式，默认「且」。 */
   join?: 'and' | 'or';
+  /** 【用户要求】2026-11-03 冲高回落（含仅 ATR）：触发后锁住——收复当时的持仓最高点（5 分钟收盘 ≥ 该价）之前，之后的新 C 都不加仓。 */
+  sticky?: boolean;
 }
 export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditionEntryVeto> = {
   'upper-wick': { kind: 'upper-wick', enabled: false, lookbackBars: 12, atr: 1.5, ratio: 60 },
@@ -38,6 +40,9 @@ export const ADDITION_VETO_KINDS = Object.keys(ADDITION_VETO_DEFAULTS) as Additi
 export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌' };
 export const activeAdditionVetoes = (vetoes?: readonly QualityAdditionEntryVeto[]) => (vetoes ?? []).filter(v => v.enabled);
 export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
+  return baseVetoLabel(v) + ((v.kind === 'pullback' || v.kind === 'pullback-atr') && v.sticky ? '，未收复最高点前不再加仓' : '');
+}
+function baseVetoLabel(v: QualityAdditionEntryVeto): string {
   const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v };
   return v.kind === 'upper-wick' ? `长上影线：近 ${d.lookbackBars} 根内上影 ≥ ${d.atr} ATR 且占整根 ≥ ${d.ratio}%`
     : v.kind === 'lower-spike' ? `向下大插针：近 ${d.lookbackBars} 根内下影 ≥ ${d.atr} ATR 或低于前收 ≥ ${d.pct}%`
@@ -72,10 +77,12 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
     if (v.kind === 'volatility' && (bad(d.ratio, 0, 50) || bad(d.er, 0, 1))) throw new Error('高震荡：ATR 倍数须为 0–50，效率比须为 0–1');
   }
 }
-export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
 export interface VetoBar { openTime: number; open: number; high: number; low: number; close: number }
-export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string }
+export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string;
+  /** 冲高回落勾选了「未收复前不再加」时：要收复的持仓最高点。 */
+  lockPeak?: number }
 /**
  * bars / atr：截至决策时刻（含）已收盘的 5 分钟 K 线与对应 ATR，按时间升序；entry：首次买入时间（冲高回落从这里起算最高点）。
  */
@@ -121,14 +128,14 @@ export function evaluateAdditionVetoes(vetoes: readonly QualityAdditionEntryVeto
     } else if (v.kind === 'pullback-atr') {
       let peak = -Infinity; for (const b of bars) if (b.openTime >= entry) peak = Math.max(peak, b.high);
       const back = (peak - last.close) / A;
-      if (Number.isFinite(back) && back >= v.atr!) return { kind: v.kind, label: additionVetoLabel(v), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR（${fmt((peak - last.close) / peak * 100)}%）` };
+      if (Number.isFinite(back) && back >= v.atr!) return { kind: v.kind, label: additionVetoLabel(v), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR（${fmt((peak - last.close) / peak * 100)}%）`, ...(raw.sticky ? { lockPeak: peak } : {}) };
     } else {
       let peak = -Infinity; for (const b of bars) if (b.openTime >= entry) peak = Math.max(peak, b.high);
       const back = (peak - last.close) / A, backPct = (peak - last.close) / peak * 100;
       if (!Number.isFinite(back) || !Number.isFinite(backPct)) continue;
       const p = pullbackParams(raw), byAtr = p.atr != null ? back >= p.atr : undefined, byPct = p.pct != null ? backPct >= p.pct - 1e-9 : undefined;
       const hit = byAtr != null && byPct != null ? (p.join === 'or' ? byAtr || byPct : byAtr && byPct) : (byAtr ?? byPct)!;
-      if (hit) return { kind: v.kind, label: additionVetoLabel(raw), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR（${fmt(backPct)}%）` };
+      if (hit) return { kind: v.kind, label: additionVetoLabel(raw), reading: `距持仓最高 ${+peak.toPrecision(8)} 回落 ${fmt(back)} ATR（${fmt(backPct)}%）`, ...(raw.sticky ? { lockPeak: peak } : {}) };
     }
   }
 }

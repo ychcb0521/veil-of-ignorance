@@ -85,7 +85,7 @@ export interface QualityResult {
   mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
   additionFill?: QualityAdditionFill; additionFills?:QualityAdditionFill[]; additionNote?: string;
   /** 被「加仓否决」拦下的加仓（时间、第几次、原因与读数）。 */
-  additionVetoes?: { at: number; round: number; kind: string; label: string; reading: string }[]; totalInvested?: number;
+  additionVetoes?: { at: number; round: number; kind: string; label: string; reading: string; lockPeak?: number; lockAt?: number }[]; totalInvested?: number;
   /** 支撑线下移时按减仓计算器执行的减仓（时间、比例、移出成本、已实现盈亏、K 的前后值）。 */
   additionReductions?: import('./qualityAddition').QualityReductionFill[];
   averageEntryPrice?: number; remainingQuantity?: number; remainingCost?: number;
@@ -572,7 +572,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           if(calculated.vetoed?.length||prior?.additionVetoes?.length){const seen=new Map([...(prior?.additionVetoes??[]),...(calculated.vetoed??[])].map(v=>[`${v.at}:${v.round}`,v]));additionVetoes=[...seen.values()].sort((a,b)=>a.at-b.at);}

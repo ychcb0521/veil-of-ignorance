@@ -74,3 +74,13 @@ it('pullback-atr vetoes on ATR alone, with its own identity', () => {
   expect(JSON.stringify(additionVetoIdentity(on('pullback-atr')))).not.toBe(JSON.stringify(additionVetoIdentity(on('pullback', { atr: 2.5 }))));
   expect(() => validateAdditionVetoes(on('pullback-atr', { atr: -1 }))).toThrow();
 });
+
+// 【用户要求】2026-11-03 冲高回落锁住：触发时带上要收复的持仓最高点；勾选与否身份不同
+it('pullback with the lock returns the holding peak to recover and has its own identity', () => {
+  const fall = [...calm(70), ...Array.from({ length: 10 }, (_, i) => ({ openTime: T + (70 + i) * STEP, open: 169 - i * .5, high: 169.2 - i * .5, low: 168.3 - i * .5, close: 168.5 - i * .5 }))];
+  expect(evaluateAdditionVetoes(on('pullback-atr', { sticky: true }), fall, atrOf(fall), T)).toMatchObject({ kind: 'pullback-atr', lockPeak: 170.2, label: expect.stringContaining('未收复最高点前不再加仓') });
+  expect(evaluateAdditionVetoes(on('pullback-atr'), fall, atrOf(fall), T)?.lockPeak).toBeUndefined();
+  expect(evaluateAdditionVetoes(on('pullback', { atr: 2, sticky: true }), fall, atrOf(fall), T)).toMatchObject({ lockPeak: 170.2 });
+  expect(JSON.stringify(additionVetoIdentity(on('pullback-atr', { sticky: true })))).toContain('pullback-sticky-v1');
+  expect(additionVetoIdentity(on('pullback', { atr: 2 }))).toEqual(additionVetoIdentity(on('pullback')));
+});

@@ -17,6 +17,7 @@ type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAt
 interface Options extends AtrSettings {
  structure?:StructureAdditionRule;
  supportReduction?:QualitySupportReductionRule;previousReductions?:readonly QualityReductionFill[];
+ previousVetoes?:readonly AdditionVetoRecord[];
  vetoes?:readonly QualityHoldingVeto[];pauseAfterAdditionCount?:number;
  candidates:AdditionCandidate[];required?:AdditionCandidate[];
  /** 这一轮的方向条件注定无法满足（如信号没有所选的探测算法）：不再加仓。 */
@@ -42,13 +43,17 @@ function atrReader(o:Options){
  };
  return Object.assign(read,{series:()=>series});
 }
-export interface AdditionVetoRecord {at:number;round:number;kind:string;label:string;reading:string}
+export interface AdditionVetoRecord {at:number;round:number;kind:string;label:string;reading:string;
+ /** 冲高回落锁住时：要收复的最高点与锁住的 5 分钟边界（续算时据此恢复锁）。 */
+ lockPeak?:number;lockAt?:number}
 export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[]}>{
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
  const halfMirror=o.mirror;if(!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
+ // 续算时从上一段最后一条锁住记录恢复（收复判断仍按之后的 5 分钟收盘）
+ let pullbackLock:{peak:number;at:number}|undefined=(()=>{const r=[...(o.previousVetoes??[])].reverse().find(v=>v.lockPeak!=null&&v.lockAt!=null);return r?{peak:r.lockPeak!,at:r.lockAt!}:undefined;})();
  // 「持仓期间急跌」要买入以来的 1 分钟线：续算时 o.prices 只从 since 起，前面缺的一段补拉一次（同一笔内复用）
  let minuteHistory:ResearchBar[]|undefined;
  const minutePlan=compileFishProgram({id:'add-veto-minutes',name:'加仓否决分钟线',short:'1m',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'1m'},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
@@ -187,11 +192,17 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    hit.conditions=confirmed;
   }
   // 【用户要求】2026-11-02 加仓否决：方向满足后，加仓那一刻任一否决条件成立就跳过这一次，记下原因，继续等下一个新 C
+  // 【用户要求】2026-11-03 冲高回落锁住：收复锁住时的持仓最高点（之后某根 5 分钟收盘 ≥ 该价）之前，新 C 一律不加
+  if(pullbackLock){
+   await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,since=readAtr.series().filter(x=>x.bar.openTime>=pullbackLock!.at&&x.bar.openTime+STEP<=cut);
+   if(since.some(x=>x.bar.close>=pullbackLock!.peak))pullbackLock=undefined;
+   else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:fills.length+1,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
+  }
   if(round.entryVetoes?.some(v=>v.enabled)){
    await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
    const minutes=additionVetoesNeedMinutes(round.entryVetoes)?await minutesUntil(hit.at):undefined;
    const veto=evaluateAdditionVetoes(round.entryVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
-   if(veto){vetoed.push({at:hit.at,round:fills.length+1,...veto});after=hit.at;continue;}
+   if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:fills.length+1,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
   }
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
