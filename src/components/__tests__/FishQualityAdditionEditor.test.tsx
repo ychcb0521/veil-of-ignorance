@@ -129,6 +129,7 @@ it('explains the guard line next to its settings: which line, solid vs dashed, w
 it('saves the breakeven floor in 卖出, default off, and explains it',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  expect(screen.getByLabelText('防守线保本底线')).not.toBeChecked();expect(screen.getByLabelText('保本底线ATR倍数')).toBeDisabled();
+ expect(screen.getByLabelText('保本底线ATR倍数')).toHaveValue(0.25);
  expect(save().breakevenFloor).toBeUndefined();
  fireEvent.click(screen.getByLabelText('防守线保本底线'));fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0.3'}});
  const rule=save();expect(rule.breakevenFloor).toEqual({enabled:true,atr:.3});

@@ -40,8 +40,12 @@ export interface QualityGeometricLockRule { enabled: boolean; multiple: number; 
 export const defaultGeometricLock = (): QualityGeometricLockRule => ({ enabled: false, multiple: 10, pct: 1 });
 export interface QualityBreakevenFloorRule { enabled: boolean; atr: number }
 export const defaultBreakevenFloor = (): QualityBreakevenFloorRule => ({ enabled: false, atr: BREAKEVEN_FLOOR_DEFAULT_ATR });
-/** 保本底线 F 离防守线 K 的 ATR 倍数（缺省值，回放后定）。 */
-export const BREAKEVEN_FLOOR_DEFAULT_ATR = 0.5;
+/**
+ * 保本底线 F 离防守线 K 的 ATR 倍数（缺省值）。2026-11-04 按「组合算法1-8」94 笔回放定为 0.25：
+ * 不开 +1823.42（加仓后亏损 7 笔 −13.40）；m＝0.25 +1434.98、去前 2 名 +317.24、加仓后亏损 0；
+ * m＝0.5 +1172.26 / +300.19 / 0；m＝1 +841.46 / +273.54 / 0。0.25 已消除全部加仓后亏损，对大趋势单削弱最小。
+ */
+export const BREAKEVEN_FLOOR_DEFAULT_ATR = 0.25;
 export interface QualitySupportReductionRule { enabled: boolean; minDropAtr: number; maxPct: number;
   /** 【用户要求】2026-11-02 K 连续下移达到这个次数就全仓卖出（中间有加仓则重新计数）；不填＝不启用。 */
   exitAfterDrops?: number;
