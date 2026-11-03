@@ -1,4 +1,4 @@
-import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb } from '@/lib/fish/qualityAdditionStopOrder';
+import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb, additionStopReductionText } from '@/lib/fish/qualityAdditionStopOrder';
 import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import { LegExecutionWearDialog } from '@/components/journal/LegExecutionWearDialog';
 import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear, type LegExecutionWear } from '@/lib/campaignExecutionWear';
@@ -1289,6 +1289,8 @@ export function CampaignLegsList({
                         <div className="text-[10px] tabular-nums text-muted-foreground">
                           委 {fmtCardTime(additionStop.placedAt)}{additionStop.endedAt != null && <> · {additionStopEndVerb(additionStop.status)} {fmtCardTime(additionStop.endedAt, additionStop.placedAt)}</>}
                         </div>
+                        {additionStop.floor != null && <div className="text-[10px] tabular-nums text-[#0E9F6E]" data-testid="leg-addition-stop-floor">保本底线 F {fmtPrice(additionStop.floor)}</div>}
+                        {additionStop.reduction && <div className="text-[10px] tabular-nums text-foreground/80" data-testid="leg-addition-stop-reduction">{additionStopReductionText(additionStop.reduction)}</div>}
                       </div>
                     ))}
                     {reverseOrdersForLeg.length === 0 && !mirrorTpTiming && additionStops.length === 0 ? (

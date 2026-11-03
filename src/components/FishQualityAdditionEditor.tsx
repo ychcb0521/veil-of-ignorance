@@ -1,7 +1,7 @@
 import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
+import { defaultBreakevenFloor, defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
 import { qualityFilterChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { orderedSellStages, type QualitySellStage } from '@/lib/fish/qualitySellStages';
@@ -44,12 +44,22 @@ export function GuardLineNotes(){return <div className="space-y-2 text-[11px] le
  <p><b className="font-medium text-foreground">只在加仓那一刻起作用</b>：K＝当时的防守线 − 冗余×ATR，同时记下当时是实线还是虚线，决定之后要几根收盘确认（实线 1 根，虚线连续 2 根）。K 随后<b className="font-medium text-foreground">冻结</b>，下一次加仓才换成新的 K。</p>
  <p><b className="font-medium text-foreground">卖不卖只看 K</b>：5 分钟收盘按上面的根数确认跌破 K，就在下一分钟开盘卖出全部持仓。防守线之后怎么上移、断开，图上有没有红 ×，都<b className="font-medium text-foreground">不直接触发卖出</b>。</p>
  <p><b className="font-medium text-foreground">唯一的联动</b>：启用「支撑下移减仓」时，防守线下移会按减仓规则把 K 挪到 K′，起作用的仍然是 K。</p>
+ <p><b className="font-medium text-foreground">保本底线（可选）</b>：在「卖出」里勾选后，K 下方 m×ATR 另有一条 F，盘中碰到即按 F 卖出，加仓量也按 F 算，保证整笔不亏。</p>
+</div>;}
+/** 【用户要求】2026-11-03「加仓后，无论如何都不要亏」：保本底线的说明。 */
+export function BreakevenFloorNotes(){return <div className="space-y-2 text-[11px] leading-relaxed" data-testid="breakeven-floor-notes">
+ <p><b className="font-medium text-foreground">为什么需要</b>：平衡公式只保证在 K 价卖出时整笔保本。防守线要等 5 分钟收盘确认、下一分钟开盘才卖，组合卖出与否决也按下一分钟开盘卖，成交价可能低于 K，加仓后就会亏。</p>
+ <p><b className="font-medium text-foreground">怎么做</b>：在防守线 K 下方 m×ATR 再挂一条保本底线 F。加仓量按 F 用平衡公式算；价格盘中碰到 F，立即按 F 卖出全部持仓。防守线 K 照旧收盘确认，两者谁先到算谁。所以不论哪条路径卖出，成交价都不低于 F，整笔不亏。</p>
+ <p><b className="font-medium text-foreground">例外</b>：开盘直接跳空到 F 下方时，按开盘价卖出。</p>
+ <p><b className="font-medium text-foreground">取舍</b>：m 越大，F 离 K 越远，防守线的噪音容忍度保留越多，但加仓量也越小。只对 K 取防守线的那几次生效，各次通用。</p>
 </div>;}
 export interface AdditionDraft extends RoundDraft {enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 支撑线下移减仓（各次加仓通用）。 */
   supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string;exitEnabled?:boolean;exitAfterDrops?:string};
   /** 几何仓位 > 门槛时保住 x% 开仓价有效涨幅（各次通用）。 */
   geometricLock?:{enabled:boolean;multiple:string;pct:string};
+  /** 保本底线（防守线 K 下方 m×ATR，盘中碰到即卖；各次通用）。 */
+  breakevenFloor?:{enabled:boolean;atr:string};
   /** 设在「最多加仓次数」之后的旧切换阶段：原样保留，不在轮次里显示。 */
   laterSellStages?:QualitySellStage[]}
 const conditionDraft=(f?:ReturnType<typeof qualityAdditionConditions>[number]):ConditionDraft=>({choice:f?f.snapshot.featureId+':'+f.metric:'',direction:f?.direction??'>',threshold:f?String(f.threshold):''});
@@ -73,7 +83,7 @@ const copyRound=(d:RoundDraft):RoundDraft=>({source:d.source,structure:structure
 export function additionDraft(rule=defaultQualityAddition(),sellStages?:readonly QualitySellStage[]):AdditionDraft {
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1),rule.enabled),later=stages.filter(s=>s.afterAdditions>count);
- return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled)),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct),exitEnabled:r.exitAfterDrops!=null,exitAfterDrops:String(r.exitAfterDrops??3)}))(rule.supportReduction??defaultSupportReduction()),geometricLock:(g=>({enabled:g.enabled,multiple:String(g.multiple),pct:String(g.pct)}))(rule.geometricLock??defaultGeometricLock()),...(later.length?{laterSellStages:later}:{})};
+ return {...first,enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled)),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct),exitEnabled:r.exitAfterDrops!=null,exitAfterDrops:String(r.exitAfterDrops??3)}))(rule.supportReduction??defaultSupportReduction()),geometricLock:(g=>({enabled:g.enabled,multiple:String(g.multiple),pct:String(g.pct)}))(rule.geometricLock??defaultGeometricLock()),breakevenFloor:(f=>({enabled:f.enabled,atr:String(f.atr)}))(rule.breakevenFloor??defaultBreakevenFloor()),...(later.length?{laterSellStages:later}:{})};
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
@@ -101,7 +111,7 @@ export function parseAdditionDraft(d:AdditionDraft,defs:readonly DeepDigFeatureD
  // 【用户要求】2026-11-02 保存时冻结箱体算法版本（防守线参数写成明确值）
  const rounds=Array.from({length:n},(_,i)=>{try{const r=parseRound(i?d.otherRounds[i-1]??d:d,d.enabled,defs);return r.structure?{...r,structure:freezeStructureVersions(r.structure)}:r;}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}});
  const cut=d.supportReduction,num=(x:string)=>x.trim()?Number(x):NaN;
- const rule:QualityAdditionRule={enabled:d.enabled,quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct),...(cut.exitEnabled?{exitAfterDrops:num(cut.exitAfterDrops??'')}:{})}}:{}),...(d.geometricLock?.enabled?{geometricLock:{enabled:true,multiple:num(d.geometricLock.multiple),pct:num(d.geometricLock.pct)}}:{})};validateQualityAddition(rule);return rule;
+ const rule:QualityAdditionRule={enabled:d.enabled,quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct),...(cut.exitEnabled?{exitAfterDrops:num(cut.exitAfterDrops??'')}:{})}}:{}),...(d.geometricLock?.enabled?{geometricLock:{enabled:true,multiple:num(d.geometricLock.multiple),pct:num(d.geometricLock.pct)}}:{}),...(d.breakevenFloor?.enabled?{breakevenFloor:{enabled:true,atr:num(d.breakevenFloor.atr)}}:{})};validateQualityAddition(rule);return rule;
 }
 /** 各次加仓「卖出」里设置的改用卖出算法 → 方案的 sellStages；没有任何切换时返回 undefined。 */
 export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFeatureDef[]):QualitySellStage[]|undefined{
@@ -280,6 +290,9 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    {(()=>{const g:NonNullable<AdditionDraft['geometricLock']>=all.geometricLock??{enabled:false,multiple:'10',pct:'1'},set=(next:Partial<typeof g>)=>setDraft({...all,geometricLock:{...g,...next}});
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="几何仓位大时保住有效涨幅" disabled={!d.enabled} checked={g.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={g.enabled?'font-medium':'text-muted-foreground'}>保住有效涨幅</span></label>
      <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${g.enabled?'':'opacity-55'}`} data-testid="addition-geometric-lock">几何仓位 &gt;<input aria-label="几何仓位门槛" type="number" min="0" step="any" disabled={!d.enabled||!g.enabled} value={g.multiple} onChange={e=>set({multiple:e.target.value})} className={cell+' w-14'}/>时至少保留<input aria-label="保留开仓价有效涨幅百分比" type="number" min="0" max="100" step="any" disabled={!d.enabled||!g.enabled} value={g.pct} onChange={e=>set({pct:e.target.value})} className={cell+' w-14'}/>% 开仓价有效涨幅<span className="text-[10px] text-muted-foreground/70">止损上移到 Kₘ＋x%×E</span></div></>;})()}
+   {(()=>{const f:NonNullable<AdditionDraft['breakevenFloor']>=all.breakevenFloor??{enabled:false,atr:String(defaultBreakevenFloor().atr)},set=(next:Partial<typeof f>)=>setDraft({...all,breakevenFloor:{...f,...next}});
+    return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="防守线保本底线" disabled={!d.enabled} checked={f.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={f.enabled?'font-medium':'text-muted-foreground'}>保本底线</span><FishQualityInfo label="保本底线说明"><BreakevenFloorNotes/></FishQualityInfo></label>
+     <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${f.enabled?'':'opacity-55'}`} data-testid="addition-breakeven-floor">F＝防守线 K −<input aria-label="保本底线ATR倍数" type="number" min="0" max="20" step="0.1" disabled={!d.enabled||!f.enabled} value={f.atr} onChange={e=>set({atr:e.target.value})} className={cell+' w-14'}/>ATR<span className="text-[10px] text-muted-foreground/70">盘中碰到即卖 · 加仓量按 F 算</span></div></>;})()}
    </div>
    {vetoStages&&setVetoStages&&(()=>{
     const n=index+1,at=vetoStages.stages.findIndex(s=>Number(s.afterAdditions)===n),stage=at<0?undefined:vetoStages.stages[at];

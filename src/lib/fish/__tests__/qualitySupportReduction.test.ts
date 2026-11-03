@@ -1,7 +1,7 @@
 // 【用户要求】2026-11-02 持仓监测加仓：支撑线下移时按减仓计算器减仓，X＝(S−K′)÷(T−K′)
 import { describe, expect, it } from 'vitest';
 import { additionIdentity, additionPosition, defaultQualityAddition, supportDropReduction, validateQualityAddition, type QualityAdditionFill, type QualityReductionFill } from '../qualityAddition';
-import { qualityAdditionStopOrders } from '../qualityAdditionStopOrder';
+import { qualityAdditionStopOrders, additionStopReductionText } from '../qualityAdditionStopOrder';
 import { qualityGeometricPosition } from '../qualityPresentation';
 import { additionDraft, parseAdditionDraft } from '@/components/FishQualityAdditionEditor';
 
@@ -39,6 +39,15 @@ describe('support-drop reduction (reduction calculator formula)', () => {
     const orders = qualityAdditionStopOrders({ quality_addition_fill: add } as never, { closed_at: new Date(4000).toISOString(), comparison: { sellEvidence: { additionFills: [add], additionReductions: [r], triggerCause: { kind: 'addition-support', threshold: 105 } } } } as never);
     expect(orders.map(o => [o.price, o.status, o.endedAt])).toEqual([[110, 'lowered', 3000], [105, 'triggered', 4000]]);
     expect(orders[1].label).toBe('支撑线 K′'); expect(orders[1].detail).toContain('减仓 40%');
+  });
+  // 【用户要求】2026-11-03「K线下移的时候，并未减仓」：K′ 委托上直接写出这一刀；开着保本底线时同时写出 F
+  it('writes the reduction and the breakeven floor on the stop cards', () => {
+    const add = fill(2000, 120, 1, 108, .5), r = { ...cut(3000, 115, .4, 1.5, 170, 108, 103), newGuardK: 105 };
+    add.sizing = { ...add.sizing!, guardK: 110, floorAtr: 2 };
+    const orders = qualityAdditionStopOrders({ quality_addition_fill: add } as never, { closed_at: new Date(4000).toISOString(), comparison: { sellEvidence: { additionFills: [add], additionReductions: [r], triggerCause: { kind: 'addition-support', id: 'addition-floor', threshold: 103 } } } } as never);
+    expect(orders.map(o => [o.price, o.floor, o.status])).toEqual([[110, 108, 'lowered'], [105, 103, 'triggered']]);
+    expect(additionStopReductionText(orders[1].reduction!)).toBe('减仓 40% @ 115'); expect(additionStopReductionText({ fraction: 0, price: 115 })).toBe('无需减仓');
+    expect(orders[0].detail).toContain('保本底线 F 108');
   });
   it('is off by default, has its own run identity and validates its inputs; the editor round-trips it', () => {
     const rule = { ...defaultQualityAddition(), enabled: true };

@@ -263,6 +263,57 @@ describe('native box decisions for holding additions',()=>{
   const trend=await findCalculatorAdditions({...o,since:at,end:at+35*M,prices,previous:[{...fill,structureEvidence:{...fill.structureEvidence,guardRegime:'trend' as const,guardCloses:1}}],maxRounds:1});
   expect(trend.stop).toMatchObject({at:at+10*M,price:96,confirmCloses:1});
  });
+ // 【用户要求】2026-11-03「加仓后，无论如何都不要亏」：保本底线 F＝防守线 K − m×ATR，加仓量按 F 算，盘中碰到 F 即按 F 卖
+ it('sizes a guard-line addition on the breakeven floor F below the guard K, and leaves box K untouched',async()=>{
+  const o=context(sample()),g={...rule(),kSource:'guard' as const};
+  const plain=await findCalculatorAdditions({...o,structure:g,maxRounds:1}),floored=await findCalculatorAdditions({...o,structure:g,maxRounds:1,breakevenFloor:{enabled:true,atr:.5}});
+  const p=plain.fills[0],f=floored.fills[0];expect(f.at).toBe(p.at);
+  expect(f.sizing!.guardK).toBe(p.sizing!.support);expect(f.sizing!.floorAtr).toBe(.5);expect(f.structureEvidence!.k).toBe(p.sizing!.support);
+  expect(f.sizing!.support).toBeLessThan(f.sizing!.guardK!);expect(f.sizing!.support).toBeGreaterThanOrEqual(f.sizing!.guardK!-.5*f.sizing!.atr-1);
+  expect(f.quantity).toBeLessThan(p.quantity);
+  const z=f.sizing!;expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(f.quantity*(f.price-z.support));
+  // K 不取防守线（旧 C / 新 C 碰线即卖）时这个选项不起作用
+  const box=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1}),boxFloor=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,breakevenFloor:{enabled:true,atr:.5}});
+  expect(boxFloor.fills).toEqual(box.fills);
+ });
+ it('sells at F intrabar when price falls through it before the guard close confirms, otherwise keeps the close-confirmed guard stop',async()=>{
+  const o=context(sample()),at=o.entry+20*STEP,G=95,F=93;
+  const fill={at,price:100,quantity:1,notional:100,scanFrom:o.entry,reading:0,threshold:0,direction:'>' as const,metric:'confirmed_support',label:'',barOpenTime:at-STEP,structureEvidence:{...evidence(),guardPrice:G,guardRegime:'range' as const,guardCloses:2,k:G},sizing:{support:F,previousSupport:90,atr:1,atrAt:at,coinsBefore:1,realAverageBefore:90,baseCoins:1,mirrorCoins:0,mirrorUsed:0,guardK:G,floorAtr:2}};
+  const m=(t:number,open:number,low:number,close:number)=>({openTime:t,open,high:Math.max(open,close)+.1,low,close,volume:1,quoteVolume:1,takerBuyVolume:1,takerBuyQuoteVolume:1});
+  // 第 3 分钟一根长下影刺到 92：防守线（收盘确认）不卖，保本底线 F＝93 盘中触到，按 93 卖
+  const wick=Array.from({length:35},(_,i)=>{const t=at+i*M;return m(t,96,i===2?92:95.9,96);});
+  const r=await findCalculatorAdditions({...o,since:at,end:at+35*M,prices:wick,previous:[fill],maxRounds:1});
+  expect(r.stop).toMatchObject({at:at+2*M,price:F,atOpen:false,cause:{id:'addition-floor',label:'保本底线 F',threshold:F}});
+  // 收盘连续 2 根低于防守线 95、却没碰到 93：照旧下一分钟开盘卖
+  const closes=[96,94,94,94],slow=Array.from({length:20},(_,i)=>{const t=at+i*M,c=closes[Math.floor(i/5)]??94;return m(t,c,c-.1,c);});
+  const g=await findCalculatorAdditions({...o,since:at,end:at+20*M,prices:slow,previous:[fill],maxRounds:1});
+  expect(g.stop).toMatchObject({at:at+15*M,price:94,support:G,atOpen:true,confirmCloses:2});expect(g.stop!.cause).toBeUndefined();
+  // 跳空：开盘已在 F 下方，按开盘价
+  const gap=Array.from({length:10},(_,i)=>{const t=at+i*M;return i<3?m(t,96,95.9,96):m(t,90,89.9,90);});
+  expect((await findCalculatorAdditions({...o,since:at,end:at+10*M,prices:gap,previous:[fill],maxRounds:1})).stop).toMatchObject({at:at+3*M,price:90,atOpen:true,cause:{id:'addition-floor'}});
+ });
+ it('adds the floor to the run identity only when enabled and validates m',()=>{
+  const add={...defaultQualityAddition(),enabled:true,source:'structure' as const,structure:{...rule(),kSource:'guard' as const}},on={...add,breakevenFloor:{enabled:true,atr:.5}};
+  expect(JSON.stringify(additionIdentity(on))).toContain('breakeven-floor-v1');
+  expect(JSON.stringify(additionIdentity({...add,breakevenFloor:{enabled:false,atr:.5}}))).toBe(JSON.stringify(additionIdentity(add)));
+  for(const atr of [-1,NaN,21])expect(()=>validateQualityAddition({...on,quantityMode:'calculator',breakevenFloor:{enabled:true,atr}})).toThrow('保本底线');
+ });
+ // 【用户要求】2026-11-03 ORDIUSDT「K 下移时并未减仓，后续的加仓也出了问题」：减仓所得已用来把成本线压到 K′，不能再当可用利润
+ it('after a support-drop reduction, sizes the next addition on the real ledger: remaining lots’ cushion at K plus all banked profit',async()=>{
+  const o=context(sample()),e=o.entryPrice,coins0=o.notional/e,mirror=o.mirror,early=T+9*STEP;
+  // 第 1 次加仓（续算的旧成交）：95 买 0.5 枚、K＝92，用掉全部镜像利润；随后支撑下移在 97 减仓 20%，K 挪到 93
+  const q1=.5,mirrorProfit=coins0*mirror.fraction*(mirror.price-e);
+  const fill1={at:early,price:95,quantity:q1,notional:95*q1,scanFrom:o.entry,reading:0,threshold:0,direction:'>' as const,metric:'confirmed_support',label:'',barOpenTime:early-STEP,sizing:{support:92,previousSupport:e,atr:1,atrAt:early,coinsBefore:coins0*(1-mirror.fraction),realAverageBefore:e,baseCoins:q1,mirrorCoins:0,mirrorUsed:mirrorProfit}};
+  const held=coins0*(1-mirror.fraction)+q1,cost=o.notional*(1-mirror.fraction)+95*q1,x=.2,cut=T+12*STEP;
+  const red={at:cut,price:97,fraction:x,quantity:x*held,costRemoved:x*cost,realizedPnl:x*held*97-x*cost,breakeven:0,previousK:92,newK:93,previousSupport:95,newSupport:94,atr:1};
+  const r=await findCalculatorAdditions({...o,since:cut+M,previous:[fill1],previousReductions:[red],structure:rule(),maxRounds:2});
+  const f=r.fills.at(-1)!;expect(r.fills).toHaveLength(2);const K=f.sizing!.support;
+  // 加仓校验的账：各仓按开仓价在 K 的浮盈垫 + 全部落袋 G ＝ 新增币数 ×（T − K）
+  const lots=coins0*(1-mirror.fraction)*(1-x)*(K-e)+q1*(1-x)*(K-95),G=mirrorProfit+red.realizedPnl;
+  expect(f.quantity*(f.price-K)).toBeCloseTo(lots+G,9);
+  // 成本线取减仓后整笔真实保本价，落袋不再另算可用
+  expect(f.sizing!.previousSupport).toBeCloseTo((cost*(1-x)-G)/(held*(1-x)),9);expect(f.sizing!.mirrorAvailableBefore).toBe(0);
+ });
  it('skips a vetoed addition, records the time and reason, and waits for the next new C (2026-11-02 加仓否决)',async()=>{
   const o=context(sample()),plain=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1});expect(plain.fills).toHaveLength(1);expect(plain.vetoed).toBeUndefined();
   const all=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[{kind:'volatility',enabled:true,ratio:50,er:1}]});

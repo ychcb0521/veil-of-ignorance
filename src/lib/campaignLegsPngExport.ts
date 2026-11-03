@@ -1,4 +1,4 @@
-import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb } from '@/lib/fish/qualityAdditionStopOrder';
+import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb, additionStopReductionText } from '@/lib/fish/qualityAdditionStopOrder';
 import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
@@ -783,6 +783,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       { text: `${additionStop.label} ${fmtPrice(additionStop.price)} · ${additionStopStatusText(additionStop.status)}`, color: '#0E9F6E', bold: true },
       { text: `委 ${fmtClock(additionStop.placedAt)}`, color: '#5F6B7A' },
       ...(additionStop.endedAt != null ? [{ text: `${additionStopEndVerb(additionStop.status)} ${fmtClock(additionStop.endedAt)}`, color: '#5F6B7A' }] : []),
+      ...(additionStop.floor != null ? [{ text: `保本底线 F ${fmtPrice(additionStop.floor)}`, color: '#0E9F6E' }] : []),
+      ...(additionStop.reduction ? [{ text: additionStopReductionText(additionStop.reduction), color: '#1E2329' }] : []),
     ]);
     const reverseOrderLines: CampaignLegsExportCellLine[] = reverseOrdersForLeg.flatMap((order, index): CampaignLegsExportCellLine[] => {
       const sideColor = order.side === 'SHORT' ? '#6D28D9' : '#002FA7';

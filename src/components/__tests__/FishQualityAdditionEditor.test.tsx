@@ -1,7 +1,7 @@
 import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import { afterEach,expect,it } from 'vitest';
 import { useState } from 'react';
-import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor,GuardLineNotes } from '../FishQualityAdditionEditor';
+import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor,GuardLineNotes,BreakevenFloorNotes } from '../FishQualityAdditionEditor';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
@@ -124,6 +124,19 @@ it('explains the guard line next to its settings: which line, solid vs dashed, w
  // 【用户要求】2026-11-03 防守线与是否卖出没有直接关系，只通过 K 起作用
  for(const text of ['只在加仓那一刻起作用','实线 1 根，虚线连续 2 根','卖不卖只看 K','不直接触发卖出','支撑下移减仓','K′'])expect(notes).toHaveTextContent(text);
  for(const gone of ['基本就是卖点','例外','保住有效涨幅','盈亏比'])expect(notes).not.toHaveTextContent(gone);
+});
+// 【用户要求】2026-11-03「加仓后，无论如何都不要亏」：卖出里的保本底线，默认不勾选
+it('saves the breakeven floor in 卖出, default off, and explains it',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('防守线保本底线')).not.toBeChecked();expect(screen.getByLabelText('保本底线ATR倍数')).toBeDisabled();
+ expect(save().breakevenFloor).toBeUndefined();
+ fireEvent.click(screen.getByLabelText('防守线保本底线'));fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0.3'}});
+ const rule=save();expect(rule.breakevenFloor).toEqual({enabled:true,atr:.3});
+ expect(additionDraft(rule).breakevenFloor).toEqual({enabled:true,atr:'0.3'});
+ const bad=additionDraft(rule);bad.breakevenFloor={enabled:true,atr:'-1'};expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('保本底线');
+ expect(screen.getByRole('button',{name:'保本底线说明'})).toBeInTheDocument();
+ cleanup();render(<BreakevenFloorNotes/>);const notes=screen.getByTestId('breakeven-floor-notes');
+ for(const text of ['平衡公式只保证在 K 价卖出时整笔保本','盘中碰到 F','加仓量按 F','跳空','噪音容忍度'])expect(notes).toHaveTextContent(text);
 });
 // 【用户要求】2026-11-03 几何仓位 > 10 时至少保留 x% 开仓价有效涨幅，x 由用户设置、默认 1%
 it('saves the geometric-position lock in 卖出, default off with 10× and 1%',()=>{

@@ -18,6 +18,7 @@ interface Options extends AtrSettings {
  structure?:StructureAdditionRule;
  supportReduction?:QualitySupportReductionRule;previousReductions?:readonly QualityReductionFill[];
  geometricLock?:import('./qualityAddition').QualityGeometricLockRule;
+ breakevenFloor?:import('./qualityAddition').QualityBreakevenFloorRule;
  previousVetoes?:readonly AdditionVetoRecord[];
  vetoes?:readonly QualityHoldingVeto[];pauseAfterAdditionCount?:number;
  candidates:AdditionCandidate[];required?:AdditionCandidate[];
@@ -88,7 +89,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  };
  const findStop=(support:number|undefined,from:number):SupportStop|undefined=>{
   if(support==null)return;
-  const closes=fills.at(-1)?.structureEvidence?.guardCloses;if(closes)return findGuardStop(support,closes,from);
+  const closes=fills.at(-1)?.structureEvidence?.guardCloses;
+  if(closes){
+   // 【用户要求】2026-11-03 保本底线：防守线 K 照旧收盘确认、下一分钟开盘卖；F（＝support，加仓量按它算）盘中碰到即按 F 卖，谁先到算谁
+   const cur=currentK(),guard=cur.k===support?cur.guard:undefined;if(guard==null)return findGuardStop(support,closes,from);
+   const confirmed=findGuardStop(guard,closes,from),touched=findTouchStop(support,from);
+   const floor=touched&&{...touched,cause:{id:'addition-floor',kind:'addition-support' as const,label:'保本底线 F',direction:'<=' as const,threshold:support}};
+   return !floor?confirmed:!confirmed||floor.at<confirmed.at?floor:confirmed;
+  }
   return findTouchStop(support,from);
  };
  /** 价格盘中碰到这条线即卖出（跳空按开盘价）。 */
@@ -146,7 +154,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
 
  const done=(stop?:SupportStop)=>({fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})});
  /** 当前止损线 K：最近一次加仓的 K，或其后支撑下移减仓移到的 K′。 */
- const currentK=():{k?:number;at?:number}=>{const f=fills.at(-1),r=reductions.at(-1);if(r&&(!f||r.at>=f.at))return {k:r.newK,at:r.at};return f?{k:f.sizing?.support,at:f.at}:{};};
+ const currentK=():{k?:number;at?:number;guard?:number}=>{const f=fills.at(-1),r=reductions.at(-1);if(r&&(!f||r.at>=f.at))return {k:r.newK,at:r.at,guard:r.newGuardK};return f?{k:f.sizing?.support,at:f.at,guard:f.sizing?.guardK}:{};};
  /** 某时刻的持仓（含镜像、加仓、此前减仓）：币数、按均价的持仓成本、已实现利润。 */
  const holdings=(at:number)=>{
   const coins0=o.notional/o.entryPrice,m=o.mirror&&(o.mirror.at<at||o.mirror.at===at&&o.mirror.atOpen)?o.mirror:undefined;
@@ -173,13 +181,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  /** 减仓计算器：X＝(S−K′)÷(T−K′)。S 为整笔保本价，K′＝新支撑−n×ATR，T 为下移确认后下一分钟开盘价。
   * 【用户要求】2026-11-02 K 自最近一次加仓起连续下移达到设定次数（含这一次）时，不再减仓，而是在 T 全仓卖出（返回卖出点）。 */
  const applyDrop=async(d:SupportDrop):Promise<SupportStop|undefined>=>{
-  const T=priceAt.get(d.at),{k:Kold}=currentK();if(!(T!>0)||!Number.isFinite(T)||Kold==null||!(T!>Kold))return;
-  const selected=structureAdditionK({...d.evidence,basePrice:d.support},d.atr);if(!selected||!(selected.k<Kold))return;
+  const T=priceAt.get(d.at),{k:Kold,guard:Gold}=currentK();if(!(T!>0)||!Number.isFinite(T)||Kold==null||!(T!>Kold))return;
+  const guardSel=structureAdditionK({...d.evidence,basePrice:d.support},d.atr),floorAtr=Gold!=null?fills.at(-1)?.sizing?.floorAtr:undefined;
+  const selected=guardSel&&floorAtr!=null?structureAdditionK({...d.evidence,basePrice:guardSel.k,buffer:floorAtr,bufferUnit:'atr'},d.atr):guardSel;if(!selected||!(selected.k<Kold))return;
   const limit=dropRule!.exitAfterDrops,lastFill=fills.at(-1)?.at??-Infinity,count=reductions.filter(r=>r.at>lastFill).length+1;
   if(limit!=null&&count>=limit)return {at:d.at,price:T!,support:selected.k,atOpen:true,cause:{id:'addition-support-drops',kind:'addition-support',label:`K 连续下移 ${count} 次`,direction:'<=',threshold:selected.k,supportDrops:{count,previousK:Kold,newK:selected.k,support:d.support}}};
   const Kn=selected.k,held=holdings(d.at),cut=supportDropReduction(held,T!,Kn,dropRule!.maxPct);if(!cut)return;
   const {fraction,breakeven}=cut,quantity=fraction*held.held,costRemoved=fraction*held.cost;
-  reductions.push({at:d.at,price:T!,fraction,quantity,costRemoved,realizedPnl:quantity*T!-costRemoved,breakeven,previousK:Kold,newK:Kn,previousSupport:d.basis,newSupport:d.support,atr:d.atr});
+  reductions.push({at:d.at,price:T!,fraction,quantity,costRemoved,realizedPnl:quantity*T!-costRemoved,breakeven,previousK:Kold,newK:Kn,previousSupport:d.basis,newSupport:d.support,atr:d.atr,...(floorAtr!=null&&guardSel?{newGuardK:guardSel.k}:{})});
  };
  while(after<o.end){
   if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
@@ -226,7 +235,9 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const boxK=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
   // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
   const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,round.structure?.minDistancePct):boxK;
-  const K=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
+  const floorRule=o.breakevenFloor?.enabled&&hit.structureEvidence?.guardCloses&&selected?o.breakevenFloor:undefined;
+  const floorK=floorRule?structureAdditionK({...hit.structureEvidence!,...selected!,basePrice:selected!.k,buffer:floorRule.atr,bufferUnit:'atr'},atr!)?.k??NaN:undefined;
+  const K=floorK??(hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!),S=support??o.entryPrice;after=hit.at;
   if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support)){const ev=hit.structureEvidence;
    skip({at:hit.at,round:roundNo,support:ev.supportPrice,...(!selected?{kind:'k-invalid',label:'K 算不出来',reading:`冗余 ${ev.buffer}${ev.bufferUnit==='atr'?' ATR':'%'} 大于 K 基准 ${p8(ev.basePrice)}`}:hit.price<=ev.supportPrice?{kind:'below-c',label:'价格已回到新 C 之下',reading:`下一分钟开盘 T ${p8(hit.price)} ≤ 新 C ${p8(ev.supportPrice)}`}:{kind:'k-lower',label:'K 低于上一次的 K',reading:`这次 K ${p8(K)} < 现在的 K ${p8(support!)}，加仓会把止损线往下挪`})});continue;}
   if(hit.structureEvidence&&selected)hit.structureEvidence={...hit.structureEvidence,...selected};
@@ -235,13 +246,20 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(!(K>0)){skip({at:hit.at,round:roundNo,kind:'k-invalid',label:'K 算不出来',reading:`K ${p8(K)} ≤ 0`});continue;}
   // 持仓、成本与落袋利润都扣除了此前的支撑下移减仓（G＝本轮全部已实现净盈亏，减仓所得也算）
   const held=holdings(hit.at),Q=held.held,cost=held.cost;
-  const profit=Math.max(0,held.mirrorProfit+held.reductionProfit),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
-  const state={...initialAddPositionState(S,Q,profit,cost/Q),mirrorProfitAllocated:used,mirrorProfitAvailable:Math.max(0,profit-used)};
+  const profit=Math.max(0,held.mirrorProfit+held.reductionProfit);
+  // 【用户要求】2026-11-03 ORDIUSDT「K 下移时并未减仓，后续的加仓也出了问题」：减仓比例 X 正是让余仓保本价落到 K′ 的那一份，
+  // 减仓所得已经花在把成本线压到 K′ 上；再按「成本线 S＝K′、可用＝落袋 − 各次加仓用掉的镜像利润」算，就把这笔所得又算了一遍（多加 8.25%）。
+  // 有过支撑下移减仓时改按实际持仓：成本线取整笔保本价 b＝(持仓成本 − 全部已实现净盈亏)÷Q，可用落袋记 0，
+  // 于是 Q×(K−b)＝各仓按开仓价在 K 的浮盈垫 + G，与加仓校验同一笔账（b 高于或低于 K′ 都成立）。
+  // 没有减仓时两种算法相等（平衡公式保证成本线＝上一次 K），仍用原式，旧结果逐位不变。
+  const reduced=reductions.some(r=>r.at<=hit.at),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
+  const Sb=reduced?(cost-(held.mirrorProfit+held.reductionProfit))/Q:S;
+  const state=reduced?{...initialAddPositionState(Sb,Q,profit,cost/Q),mirrorProfitAllocated:profit,mirrorProfitAvailable:0}:{...initialAddPositionState(S,Q,profit,cost/Q),mirrorProfitAllocated:used,mirrorProfitAvailable:Math.max(0,profit-used)};
   const sized=calculateAddPosition({currentPrice:hit.price,support:K,state});after=hit.at;
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
   if(sized.error||!(sized.addCoins>0)){skip({at:hit.at,round:roundNo,support:hit.structureEvidence?.supportPrice,kind:'sizing',label:sized.error==='mirror_profit_insufficient'?'落袋利润不够':sized.error==='price_not_above_support'?'价格不高于 K':'加仓量为 0',reading:sized.error==='mirror_profit_insufficient'?`K ${p8(K)} 低于成本线 S ${p8(S)}，旧仓碰 K 的亏损比可用落袋利润多 ${p8(sized.oldLossShortfall)} USDT`:sized.error==='price_not_above_support'?`T ${p8(hit.price)} ≤ K ${p8(K)}`:`按平衡公式算出的加仓量 ${p8(sized.addCoins)} 枚`});continue;}
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
-  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),coverageGap:sized.coverageGap}});
+  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),coverageGap:sized.coverageGap,...(floorRule?{guardK:selected!.k,floorAtr:floorRule.atr}:{})}});
   if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }
  return done(findPositionExit(currentK().k,Math.max(o.since,currentK().at??o.since)));
