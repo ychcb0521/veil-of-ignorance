@@ -1,5 +1,5 @@
 import {holdingVetoLabel} from '@/lib/fish/qualityVeto';
-import {qualityAdditionFills} from '@/lib/fish/qualityAddition';
+import {qualityAdditionFills,qualityAdditionRoundLimit} from '@/lib/fish/qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
 import { chartFeatureDef } from '@/lib/featureSource';
 import { definitionKey } from '@/lib/deepDig/features';
@@ -70,11 +70,38 @@ function SellEvidenceBody({ evidence, repair }: { evidence: NonNullable<TradeCam
   </section>;
 }
 
+/**
+ * 【用户要求】2026-11-03「未加仓理由」：放在「监测依据」的「条件加仓」下方，交代支撑线上移（新 C）却没有加仓的每一次——
+ * 否决条件、冲高回落锁住、方向条件、涨幅门槛、没有旧 C / 防守线断开、K 下移、价格跌回新 C、落袋利润不够，
+ * 再加上不逐次记录的整段原因（镜像止盈之前、已加满次数、探测算法缺失）。
+ */
+export function AdditionSkipEvidence({ evidence: e }: { evidence: NonNullable<SellEvidence> }) {
+  const a=e.addition;if(!a?.enabled)return null;
+  const fills=qualityAdditionFills(e),limit=qualityAdditionRoundLimit(a),end=e.executedAt;
+  const rows=[...(e.additionVetoes??[]).map(v=>({...v,support:undefined as number|undefined,veto:true})),...(e.additionSkips??[]).map(v=>({...v,veto:false}))].sort((x,y)=>x.at-y.at||x.round-y.round);
+  const counts=new Map<string,number>();for(const r of rows){const k=r.veto?(r.kind==='pullback'&&r.label.includes('未收复')?'冲高回落锁住':'否决条件'):r.label;counts.set(k,(counts.get(k)??0)+1);}
+  const notes:string[]=[];
+  if(!e.mirrorFill)notes.push('镜像止盈没有成交：首次加仓须在镜像止盈之后，整笔都不加仓。');
+  else notes.push(`镜像止盈（${formatUTC8(e.mirrorFill.at)}）之前的支撑上移不加仓：首次加仓须在镜像止盈成交之后。`);
+  if(Number.isFinite(limit)&&fills.length>=limit)notes.push(`已加满 ${limit} 次（最多加仓次数），${formatUTC8(fills.at(-1)!.at)} 之后支撑线再上移也不加。`);
+  if(end!=null)notes.push(`${formatUTC8(end)} 卖出全部持仓之后不再加仓。`);
+  const from=e.additionSkipsFrom,start=e.mirrorFill?.at??e.confirmedAt;
+  if(from==null)notes.push('这笔结果是旧版本算出来的，当时没有逐次记录「支撑上移却没加仓」的原因（下面只有被否决的几次）；在持仓监测里从头重算即可补全。');
+  else if(start!=null&&from>start)notes.push(`${formatUTC8(from)} 之前的理由没有记录（旧结果续算）；从头重算可补全。`);
+  return <aside className="mx-2 mb-2 space-y-1 rounded border border-border/70 bg-muted/20 px-2 py-2 text-[11px]" data-testid="quality-addition-skips">
+    <b className="font-medium">未加仓理由 · {rows.length?`${rows.length} 次`:'没有逐次记录'}</b>
+    {counts.size>0&&<p className="text-muted-foreground" data-testid="quality-addition-skip-counts">{[...counts].map(([k,n])=>`${k} ${n} 次`).join(' · ')}</p>}
+    {rows.length>0&&<ul className="max-h-72 space-y-0.5 overflow-y-auto">{rows.map(r=><li key={`${r.at}:${r.round}:${r.kind}`} className="grid grid-cols-[8.5rem_4.5rem_minmax(0,1fr)] gap-x-2" data-testid="quality-addition-skip-row">
+      <span className="font-mono text-[10px] text-muted-foreground">{formatUTC8(r.at)}</span><span className="text-muted-foreground">第 {r.round} 次</span>
+      <span><b className={`font-medium ${r.veto?'text-destructive':''}`}>{r.veto?`否决：${r.label}`:r.label}</b><span className="text-muted-foreground">{r.support!=null?` · 新 C ${+r.support.toPrecision(8)}`:''} · {r.reading}</span></span></li>)}</ul>}
+    <ul className="space-y-0.5 text-[10px] text-muted-foreground">{notes.map(n=><li key={n}>{n}</li>)}</ul>
+  </aside>;
+}
 export function QualitySellEvidence(props: { evidence: SellEvidence; repair?: NonNullable<TradeCampaign['comparison']>['repair'] }) {
  const e=props.evidence,fills=qualityAdditionFills(e??{});if(!e)return null;
  const outcome=e.triggerCause?.label??(e.executedAt!=null?'算法卖出':'持仓监测');
  const exitReason=e.exitReason??(e.triggerCause?`${e.triggerCause.label} ${e.triggerCause.direction} ${e.triggerCause.threshold}${['static-drawdown','dynamic-drawdown','drop-1m','drop-5m'].includes(e.triggerCause.kind)?'%':''}`:'历史记录未保存具体卖出原因');
  return <>{e.executedAt!=null&&<div data-testid="quality-sell-reason" className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-border/70 bg-card px-3 py-2 text-[11px]"><span className="shrink-0 font-medium">卖出原因</span><span className="text-foreground/85">{exitReason}</span><span className="ml-auto font-mono text-[10px] text-muted-foreground">{formatUTC8(e.executedAt)}</span></div>}<details data-testid="quality-evidence-details" className="rounded border border-border/70 bg-card text-[11px]"><summary className="flex min-h-9 cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2 text-muted-foreground hover:bg-muted/30"><span className="font-medium text-foreground">监测依据</span><span>{outcome}</span>{fills.length>0&&<span>加仓 {fills.length} 轮</span>}<span className="ml-auto text-[10px]">条件与成交明细 ▾</span></summary><div className="space-y-2 border-t border-border/50 p-2">{e?.addition?.enabled&&<aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-2 text-[11px]" data-testid="quality-addition-evidence"><b className="font-medium">条件加仓 · {fills.length?`已成交 ${fills.length} 轮`:'未触发'}</b>
   {fills.length?<><div className="space-y-2">{fills.map((fill,i)=><div key={fill.at}><p>第 {i+1} 轮 · {formatUTC8(fill.at)} · {fill.label} · 读数 {fill.reading.toPrecision(8)} {fill.direction} {fill.threshold}</p><p>加仓 {fill.quantity.toPrecision(8)} 枚 · 成交价 T {fill.price.toPrecision(8)} · 成交金额 {fill.notional.toPrecision(8)} USDT</p>{fill.sizing&&<p className="text-muted-foreground">计算基准余仓 Q {fill.sizing.coinsBefore.toPrecision(8)} 枚 · 成本线 S {fill.sizing.previousSupport.toPrecision(8)} → 支撑线 K {fill.sizing.support.toPrecision(8)} · 5分钟 ATR(14) {fill.sizing.atr.toPrecision(8)}（截至 {formatUTC8(fill.sizing.atrAt)} 已收盘）· 本轮可用落袋利润 {(fill.sizing.mirrorAvailableBefore??fill.sizing.mirrorUsed).toPrecision(8)} USDT · 已计入 {fill.sizing.mirrorUsed.toPrecision(8)} USDT · 余仓安全垫贡献 {fill.sizing.baseCoins.toPrecision(8)} 枚 ＋ 落袋利润贡献 {fill.sizing.mirrorCoins.toPrecision(8)} 枚</p>}{fill.sizing?.requiredBufferAtr!=null&&<p>T−S＝{fill.sizing.costBufferAtr?.toFixed(4)} ATR ≥ {fill.sizing.requiredBufferAtr} ATR · {fill.structureEvidence?<>K＝{fill.structureEvidence.basePrice}−冗余 {fill.structureEvidence.bufferPrice?.toPrecision(8)}（{fill.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'}）</>:<>K＝T−{fill.sizing.supportOffsetAtr??1.5}×ATR</>} · K 平衡差 {fill.sizing.coverageGap?.toPrecision(8)} USDT</p>}{fill.structureEvidence&&<details className="text-muted-foreground"><summary className="cursor-pointer">箱体加仓依据 · {fill.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'}</summary><p>事件 {fill.structureEvidence.event} · 收盘确认 {formatUTC8(fill.structureEvidence.at)} · 新 C {fill.structureEvidence.supportPrice} · 旧 C {fill.structureEvidence.previousSupportPrice??'—'} · 固定上轨 {fill.structureEvidence.upperPrice} · K 基准 {fill.structureEvidence.basePrice} · 冗余 {fill.structureEvidence.buffer}{fill.structureEvidence.bufferUnit==='atr'?'ATR':'%'} · 报价步长 {fill.structureEvidence.tickSize}</p><p className="break-all">箱体 {fill.structureEvidence.boxId} · 版本 {fill.structureEvidence.algorithmVersion} · 固定回放起点 {formatUTC8(fill.structureEvidence.initializationStart)}</p></details>}{fill.conditions&&<p>同时满足：{fill.conditions.map(c=>`${c.label} ${c.direction} ${c.threshold}（读数 ${c.reading.toPrecision(8)}）`).join('；')}</p>}{fill.prsEvidence?.PRS6H_event&&<p className="text-muted-foreground">PRS-6H 市场事件 {fill.prsEvidence.PRS6H_event.event_id} · 证据分 {fill.prsEvidence.PRS6H} · 固定支撑 {fill.prsEvidence.PRS6H_structure?.support} · 结构失效参考 {fill.prsEvidence.PRS6H_structure?.invalidation}（仓位与实际止损沿用本方案）</p>}{fill.priceGate&&<p>涨幅门槛 ≥ {fill.priceGate.thresholdPct}% · 基准价 {fill.priceGate.referencePrice.toPrecision(8)} → 确认收盘价 {fill.priceGate.observedPrice.toPrecision(8)}（+{fill.priceGate.gainPct.toFixed(2)}%）</p>}</div>)}</div><p>累计投入 {e.totalInvested} USDT · 实际持仓均价 {e.averageEntryPrice?.toPrecision(8)}；收益率按累计投入计算。</p></>:<p>从本笔买入时刻重新探测；没有满足条件且可覆盖风险的加仓成交。</p>}
- </aside>}<QualitySellTiming evidence={e}/><SellEvidenceBody {...props}/></div></details></>;
+ </aside>}<AdditionSkipEvidence evidence={e}/><QualitySellTiming evidence={e}/><SellEvidenceBody {...props}/></div></details></>;
 }

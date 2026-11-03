@@ -419,6 +419,9 @@ export interface TradeCampaign {
       addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; additionFills?: QualityAdditionFill[]; totalInvested?: number; averageEntryPrice?: number;
       /** 支撑线下移时按减仓计算器执行的减仓（持仓监测）。 */
       additionReductions?: import('@/lib/fish/qualityAddition').QualityReductionFill[];
+      /** 未加仓理由：被否决的加仓、以及支撑线上移却没加仓的每一次；additionSkipsFrom＝从这一刻起才有记录。 */
+      additionVetoes?: {at:number;round:number;kind:string;label:string;reading:string}[];
+      additionSkips?: {at:number;round:number;kind:string;label:string;reading:string;support?:number}[]; additionSkipsFrom?: number;
       mirrorFill?: {at:number;price:number;fraction:number;gainPct:number;atOpen:boolean};
       triggerCause?: QualityExitCause;
       holdingVetoes?: (Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>&{formula?:string})[];

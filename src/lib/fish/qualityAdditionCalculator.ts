@@ -44,14 +44,17 @@ function atrReader(o:Options){
  };
  return Object.assign(read,{series:()=>series});
 }
+/** 【用户要求】2026-11-03 未加仓理由：支撑线上移（新 C）却没有加仓的每一次，记下第几次加仓、原因与读数。 */
+export interface AdditionSkipRecord {at:number;round:number;kind:string;label:string;reading:string;support?:number}
 export interface AdditionVetoRecord {at:number;round:number;kind:string;label:string;reading:string;
  /** 冲高回落锁住时：要收复的最高点与锁住的 5 分钟边界（续算时据此恢复锁）。 */
  lockPeak?:number;lockAt?:number}
-export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[]}>{
+export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[]}>{
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
  const halfMirror=o.mirror;if(!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
+ const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
  // 续算时从上一段最后一条锁住记录恢复（收复判断仍按之后的 5 分钟收盘）
  let pullbackLock:{peak:number;at:number}|undefined=(()=>{const r=[...(o.previousVetoes??[])].reverse().find(v=>v.lockPeak!=null&&v.lockAt!=null);return r?{peak:r.lockPeak!,at:r.lockAt!}:undefined;})();
@@ -141,7 +144,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   return profit.at<stop.at||profit.at===stop.at&&profit.atOpen&&!stop.atOpen?profit:stop;
  };
 
- const done=(stop?:SupportStop)=>({fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{})});
+ const done=(stop?:SupportStop)=>({fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})});
  /** 当前止损线 K：最近一次加仓的 K，或其后支撑下移减仓移到的 K′。 */
  const currentK=():{k?:number;at?:number}=>{const f=fills.at(-1),r=reductions.at(-1);if(r&&(!f||r.at>=f.at))return {k:r.newK,at:r.at};return f?{k:f.sizing?.support,at:f.at}:{};};
  /** 某时刻的持仓（含镜像、加仓、此前减仓）：币数、按均价的持仓成本、已实现利润。 */
@@ -193,13 +196,15 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const realAverageBefore=(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror.fraction)/coinsBefore;
   // 【用户要求】2026-11-01 涨幅门槛相对最新成本线 S（首轮为首次买入价，之后为上一次的 K），不是持仓均价、也不是首仓
   const basis='cost-line' as const,referencePrice=support??o.entryPrice;void realAverageBefore;
-  const hit=round.structure?await readStructure(round.structure,after,addEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:addEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
+  const roundNo=fills.length+1,p8=(x:number)=>+x.toPrecision(8);
+  const onSkip=(x:import('./qualityAdditionStructure').StructureSkip)=>skip({at:x.at,round:roundNo,support:x.support,...(x.reason==='gain'?{kind:'gain',label:'涨幅门槛未达',reading:`收盘 ${p8(x.close!)} 比成本线 S ${p8(x.referencePrice!)} 只涨 ${((x.close!/x.referencePrice!-1)*100).toFixed(2)}%，要求 ≥ ${x.thresholdPct}%`}:x.reason==='no-guard'?{kind:'no-guard',label:'防守线断开',reading:'这一刻防守线刚被跌破、尚未重建，没有 K 基准'}:{kind:'no-old-c',label:'没有旧 C',reading:'上一根 5 分钟线上没有不同的有效箱体（首个箱体或中间支撑失效），K 没有旧 C 可用'})});
+  const hit=round.structure?await readStructure(round.structure,after,addEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined,onSkip):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:addEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
   if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   // 箱体时机的「方向」指标条件（必要不充分）：事件那一刻不全满足，就跳过这个事件、继续等下一个。
   if(hit.structureEvidence&&round.required?.length){
    let read=prerequisiteReaders.get(round.required);if(!read)prerequisiteReaders.set(round.required,read=requiredConditionsReader(round.required,o));
-   const confirmed=await read(hit.at);if(!confirmed){after=hit.at;continue;}
+   const confirmed=await read(hit.at);if(!confirmed){skip({at:hit.at,round:roundNo,support:hit.structureEvidence.supportPrice,kind:'direction',label:'方向条件未满足',reading:`需同时满足：${round.required.map(c=>`${c.label} ${c.direction} ${c.threshold}`).join(' 且 ')}`});after=hit.at;continue;}
    hit.conditions=confirmed;
   }
   // 【用户要求】2026-11-02 加仓否决：方向满足后，加仓那一刻任一否决条件成立就跳过这一次，记下原因，继续等下一个新 C
@@ -222,21 +227,22 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
   const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,round.structure?.minDistancePct):boxK;
   const K=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
-  if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support))continue;
+  if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support)){const ev=hit.structureEvidence;
+   skip({at:hit.at,round:roundNo,support:ev.supportPrice,...(!selected?{kind:'k-invalid',label:'K 算不出来',reading:`冗余 ${ev.buffer}${ev.bufferUnit==='atr'?' ATR':'%'} 大于 K 基准 ${p8(ev.basePrice)}`}:hit.price<=ev.supportPrice?{kind:'below-c',label:'价格已回到新 C 之下',reading:`下一分钟开盘 T ${p8(hit.price)} ≤ 新 C ${p8(ev.supportPrice)}`}:{kind:'k-lower',label:'K 低于上一次的 K',reading:`这次 K ${p8(K)} < 现在的 K ${p8(support!)}，加仓会把止损线往下挪`})});continue;}
   if(hit.structureEvidence&&selected)hit.structureEvidence={...hit.structureEvidence,...selected};
   // 2026-11-01 用户删除「入场距离 T ≥ S＋n×ATR」门槛：位置达到即按均衡线 K 定量，不再要求 T 高出 S 多少。
   const buffer=hit.price-S;
-  if(!(K>0))continue;
+  if(!(K>0)){skip({at:hit.at,round:roundNo,kind:'k-invalid',label:'K 算不出来',reading:`K ${p8(K)} ≤ 0`});continue;}
   // 持仓、成本与落袋利润都扣除了此前的支撑下移减仓（G＝本轮全部已实现净盈亏，减仓所得也算）
   const held=holdings(hit.at),Q=held.held,cost=held.cost;
   const profit=Math.max(0,held.mirrorProfit+held.reductionProfit),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
   const state={...initialAddPositionState(S,Q,profit,cost/Q),mirrorProfitAllocated:used,mirrorProfitAvailable:Math.max(0,profit-used)};
   const sized=calculateAddPosition({currentPrice:hit.price,support:K,state});after=hit.at;
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
-  if(sized.error||!(sized.addCoins>0))continue;
+  if(sized.error||!(sized.addCoins>0)){skip({at:hit.at,round:roundNo,support:hit.structureEvidence?.supportPrice,kind:'sizing',label:sized.error==='mirror_profit_insufficient'?'落袋利润不够':sized.error==='price_not_above_support'?'价格不高于 K':'加仓量为 0',reading:sized.error==='mirror_profit_insufficient'?`K ${p8(K)} 低于成本线 S ${p8(S)}，旧仓碰 K 的亏损比可用落袋利润多 ${p8(sized.oldLossShortfall)} USDT`:sized.error==='price_not_above_support'?`T ${p8(hit.price)} ≤ K ${p8(K)}`:`按平衡公式算出的加仓量 ${p8(sized.addCoins)} 枚`});continue;}
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
   fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:S,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),coverageGap:sized.coverageGap}});
-  if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{})};
+  if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }
  return done(findPositionExit(currentK().k,Math.max(o.since,currentK().at??o.since)));
 }
