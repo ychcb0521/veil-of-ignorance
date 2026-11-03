@@ -14,7 +14,11 @@ const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
 // 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
 const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveSourceDeletions(saved,preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming)))));
-const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
+const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => {
+  const next = preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
+  // 旧标签页或后台监测写回总表时，保留新存模板和删除墓碑。
+  return { ...next, planTemplates: mergeQualityPlanTemplates(saved?.planTemplates, next.planTemplates) };
+};
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB unavailable')); return; }

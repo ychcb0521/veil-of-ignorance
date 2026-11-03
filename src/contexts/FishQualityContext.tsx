@@ -6,7 +6,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import {loadMiningLibrary,MINING_LIBRARY_EVENT} from '@/lib/fish/miningLibraryStore';
 
 const EMPTY: readonly TradeSignal[] = [];
-const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[]) => void } | null>(null);
+const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[]) => void; activate: () => void } | null>(null);
 
 /** Owned by the authenticated app shell, outside the route boundary and collapsible panels. */
 export function FishQualityProvider({ owner, children, run = runPageFishQuality }: { owner?: string; children: ReactNode; run?: QualityRunner }) {
@@ -19,8 +19,9 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
     setRequested(true);
     setInput(prior => prior.fish === fish && prior.library === library ? prior : { fish, library });
   }, []);
+  const activate = useCallback(() => setRequested(true), []);
   const location = useLocation();
-  return <FishQualityContext.Provider value={{ state, sources }}>
+  return <FishQualityContext.Provider value={{ state, sources, activate }}>
     {children}
     {(state.running || state.filterRunning || state.postExit?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.filterRunning && <div>过滤后台运行中 · {state.filterProgress?.done ?? 0}/{state.filterProgress?.total ?? 0}</div>}
@@ -36,4 +37,10 @@ export function usePageFishQuality(fish: readonly TradeSignal[], library: readon
   const { sources } = context;
   useEffect(() => { sources(fish, library); }, [sources, fish, library]);
   return context.state;
+}
+
+/** 战役只在用户选择存模板时激活研究存储，平时保持轻量只读。 */
+export function useCampaignQualityTemplates() {
+  const context = useContext(FishQualityContext);
+  return context ? { ready: context.state.ready, activate: context.activate, save: context.state.savePlanSnapshot } : null;
 }

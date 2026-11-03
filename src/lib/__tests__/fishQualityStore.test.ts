@@ -106,3 +106,19 @@ it('preserves ready post-sale windows through stale-tab, fallback and cloud writ
  fail=true;await store.saveQualityStudy('post-owner',base);expect((await store.loadQualityStudy('post-owner')).study.postExitReadings).toHaveLength(1);
  expect((await store.loadQualityStudy('other-post-owner')).study.postExitReadings).toBeUndefined();
 });
+
+it('retains campaign templates and deletion tombstones through stale background saves and reloads', async () => {
+  const store = await import('@/lib/fish/qualityStore');
+  const { saveQualityPlanTemplate, deleteQualityPlanTemplate, activeQualityPlanTemplates } = await import('@/lib/fish/qualityPlanTemplates');
+  const { makeQualitySellPlan } = await import('@/lib/fish/qualitySellPlans');
+  const { BUILTIN_FEATURES } = await import('@/lib/deepDig/features');
+  const old = newQualityStudy(100), plan = makeQualitySellPlan('state:state', '<', .45, BUILTIN_FEATURES, undefined, 'historical');
+  const saved = saveQualityPlanTemplate(old, plan, '战役模板', 200);
+  await store.saveQualityStudy('template-owner', saved);
+  await store.saveQualityStudy('template-owner', old);
+  expect(activeQualityPlanTemplates((await store.loadQualityStudy('template-owner')).study)).toHaveLength(1);
+  await store.saveQualityStudy('template-owner', deleteQualityPlanTemplate(saved, saved.planTemplates![0].id, 300));
+  await store.saveQualityStudy('template-owner', saved);
+  expect(activeQualityPlanTemplates((await store.loadQualityStudy('template-owner')).study)).toHaveLength(0);
+  expect((await store.loadQualityStudy('another-owner')).study.planTemplates).toBeUndefined();
+});

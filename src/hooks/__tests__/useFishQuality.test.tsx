@@ -639,3 +639,22 @@ it('saves and deletes plan templates without pausing a running monitor', async (
   act(() => h.result.current.deletePlanTemplate(t.id));
   expect(activeQualityPlanTemplates(h.result.current.study)).toEqual([]); expect(monitoring.signal.aborted).toBe(false);
 });
+
+it('persists a campaign snapshot absent from current plans and exposes it to the same template library without restarting', async () => {
+  const { activeQualityPlanTemplates } = await import('@/lib/fish/qualityPlanTemplates');
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(() => {}); }));
+  await flush(); chooseAndStart(h); await flush(600);
+  const monitoring = tasks.find(t => t.task === 'monitor')!;
+  const { freezeQualityPlan } = await import('@/lib/fish/qualityPlanVersions');
+  const historical = freezeQualityPlan({ ...structuredClone(h.result.current.study.sellPlans![0]), id: 'historical-only', label: '历史组合', mirrorTakeProfit: { enabled: true, gainPct: 17, sellPct: 63 } });
+  const before = structuredClone(h.result.current.study.sellPlans);
+  await act(async () => { await h.result.current.savePlanSnapshot(historical, '战役好组合'); });
+  const [template] = activeQualityPlanTemplates(h.result.current.study);
+  expect(template.plan).toMatchObject(historical);
+  expect(template.plan).not.toBe(historical);
+  expect(template.plan.frozenVersions?.length).toBeGreaterThan(0);
+  expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ planTemplates: [template] }));
+  expect(h.result.current.study.sellPlans).toEqual(before);
+  expect(monitoring.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
+});

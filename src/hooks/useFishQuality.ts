@@ -12,7 +12,7 @@ import { useFeatureDefinitions } from './useFeatureDefinitions';
 import { mirrorIdentity, validateQualityMirror, type QualityMirrorTakeProfit } from '@/lib/fish/qualityMirror';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualitySellCombo, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type QualityGroup, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualitySellCombo, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, ensureQualitySellCombo, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { loadQualityMonitorArchive, stripStoredQualityArchiveBodies } from '@/lib/fish/qualityArchiveStore';
@@ -355,6 +355,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     saveQualityPlanTemplate(current.current, plan, name); // 先校验名称，出错直接抛给界面
     change(s => { const p = s.sellPlans?.find(x => x.id === planId); return p ? saveQualityPlanTemplate(s, p, name) : s; });
   }, [change]);
+  /** 保存战役冻结快照，不按方案 id 查当前设置，也不触发重算。 */
+  const savePlanSnapshot = useCallback(async (plan: QualityGroup, name: string) => {
+    if (!readyRef.current) throw new Error('账号持仓监测记录尚在恢复，请稍候');
+    const savedOwner = account.current, epoch = generation.current;
+    const next = saveQualityPlanTemplate(current.current, plan, name);
+    change(() => next);
+    if (!await saveQualityStudy(savedOwner, next)) throw new Error('模板尚未保存成功，请保留页面并重试');
+    if (epoch !== generation.current || savedOwner !== account.current) throw new Error('账号已切换，请回到原账号查看模板');
+  }, [change]);
   const deletePlanTemplate = useCallback((id: string) => change(s => deleteQualityPlanTemplate(s, id)), [change]);
   const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); change(s => renameQualityPlanTemplate(s, id, name)); }, [change]);
   /** Filters have their own catalog and run button; editing never changes or restarts monitoring. */
@@ -391,10 +400,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，
