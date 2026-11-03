@@ -10,6 +10,8 @@ export type XlsxSheet = {
   name: string;
   columns: readonly { header: string; width?: number }[];
   rows: readonly (readonly XlsxCell[])[];
+  /** 列名行上方的分组表头（如「入场信息 / 买前过滤 / 持仓监测」）：每格按 span 横向合并，加粗；冻结窗格与筛选都落在列名行。 */
+  headerRows?: readonly (readonly { text: string; span: number }[])[];
 };
 
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
@@ -116,18 +118,29 @@ function sheetXml(sheet: XlsxSheet): string {
     }
     return `<c r="${ref}" t="inlineStr"${header ? ' s="1"' : ''}><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
   };
-  const headerRow = `<row r="1">${sheet.columns.map((column, index) => cell(column.header, `${xlsxColumnName(index)}1`, true)).join('')}</row>`;
+  const top = sheet.headerRows ?? [], offset = top.length, merges: string[] = [];
+  const groupRows = top.map((cells, rowIndex) => {
+    const r = rowIndex + 1;let column = 0;
+    const xml = cells.map(item => {
+      const from = column, span = Math.max(1, item.span);column += span;
+      if (span > 1) merges.push(`${xlsxColumnName(from)}${r}:${xlsxColumnName(from + span - 1)}${r}`);
+      return cell(item.text, `${xlsxColumnName(from)}${r}`, true);
+    }).join('');
+    return `<row r="${r}">${xml}</row>`;
+  }).join('');
+  const headerRow = `<row r="${offset + 1}">${sheet.columns.map((column, index) => cell(column.header, `${xlsxColumnName(index)}${offset + 1}`, true)).join('')}</row>`;
   const bodyRows = sheet.rows.map((row, rowIndex) => {
-    const r = rowIndex + 2;
+    const r = rowIndex + 2 + offset;
     return `<row r="${r}">${row.map((value, index) => cell(value, `${xlsxColumnName(index)}${r}`)).join('')}</row>`;
   }).join('');
-  const lastRef = `${xlsxColumnName(Math.max(0, sheet.columns.length - 1))}${sheet.rows.length + 1}`;
+  const lastRef = `${xlsxColumnName(Math.max(0, sheet.columns.length - 1))}${sheet.rows.length + 1 + offset}`;
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-    + '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+    + `<sheetViews><sheetView workbookViewId="0"><pane ySplit="${offset + 1}" topLeftCell="A${offset + 2}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`
     + `<cols>${cols}</cols>`
-    + `<sheetData>${headerRow}${bodyRows}</sheetData>`
-    + `<autoFilter ref="A1:${lastRef}"/>`
+    + `<sheetData>${groupRows}${headerRow}${bodyRows}</sheetData>`
+    + `<autoFilter ref="A${offset + 1}:${lastRef}"/>`
+    + (merges.length ? `<mergeCells count="${merges.length}">${merges.map(ref => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>` : '')
     + '</worksheet>';
 }
 
@@ -164,7 +177,7 @@ export function buildXlsxBytes(sheets: readonly XlsxSheet[]): Uint8Array {
       data: encoder.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
         + `<sheets>${names.map((name, index) => `<sheet name="${escapeXml(name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('')}</sheets>`
-        + (sheets.length ? `<definedNames>${names.map((name, index) => `<definedName name="_xlnm._FilterDatabase" localSheetId="${index}" hidden="1">'${escapeXml(name).replace(/'/g, "''")}'!$A$1:$${xlsxColumnName(Math.max(0, sheets[index].columns.length - 1))}$${sheets[index].rows.length + 1}</definedName>`).join('')}</definedNames>` : '')
+        + (sheets.length ? `<definedNames>${names.map((name, index) => `<definedName name="_xlnm._FilterDatabase" localSheetId="${index}" hidden="1">'${escapeXml(name).replace(/'/g, "''")}'!$A$${(sheets[index].headerRows?.length ?? 0) + 1}:$${xlsxColumnName(Math.max(0, sheets[index].columns.length - 1))}$${sheets[index].rows.length + 1 + (sheets[index].headerRows?.length ?? 0)}</definedName>`).join('')}</definedNames>` : '')
         + '</workbook>'),
     },
     {

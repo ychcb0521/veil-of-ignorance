@@ -1,5 +1,7 @@
 import { ADDITION_VETO_LABELS, type AdditionEntryVetoKind } from '@/lib/fish/qualityAdditionVeto';
 import { activeQualityPlanTemplates } from '@/lib/fish/qualityPlanTemplates';
+import { readQualityTableSheet } from '@/lib/fish/qualityTableExport';
+import { qualityPlanDetailSheet, qualityTradeDetailSheet } from '@/lib/fish/qualityExportDetails';
 import {validateQualitySellStages} from '@/lib/fish/qualitySellStages';
 import type {VetoStagesDraft} from './FishQualityVetoStagesEditor';
 import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
@@ -552,7 +554,9 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   },[open,rows,rowPx,viewPx,Math.floor(scrollTop/rowPx),rowLayoutKey,study.results,study.entryReadings]);
   const first = Math.max(0, Math.min(rows.length - 1, Math.floor(scrollTop / rowPx) - OVERSCAN));
   const last = Math.min(rows.length, Math.max(first + 1, Math.ceil((scrollTop + viewPx) / rowPx) + OVERSCAN));
-  const visible = rows.slice(first, last), padTop = first * rowPx, padBottom = (rows.length - last) * rowPx;
+  // 【用户要求】2026-11-03 导出时先把组合表的全部行渲染出来，按页面上的样子读取，读完恢复只渲染可见行
+  const [exportAll, setExportAll] = useState(false);
+  const visible = exportAll ? rows : rows.slice(first, last), padTop = exportAll ? 0 : first * rowPx, padBottom = exportAll ? 0 : (rows.length - last) * rowPx;
 
   // 评估先算屏幕上看得见的行，再按表格顺序往下
   const { setPriority } = state;
@@ -574,7 +578,22 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     <button type="button" disabled={!ready || !selectedEntryCount} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40" onClick={() => {state.setSelectedRows([]); selectAnchor.current = null;}}>清空全部勾选</button>
     <p className="text-[10px] leading-relaxed text-muted-foreground">批量选取按当前来源、月份、标的和探测筛选，覆盖全部匹配记录，并替换之前的勾选。已运行指当前条件下有效结果齐全；部分完成或缺数据仍可补算。未配置的步骤单列为“未设置”。</p>
   </PopoverContent></Popover>;
-  const exportRows = () => { try { downloadQualityComparison(study, rows.flatMap(qualityTableMembers)); setError(''); } catch (e) { setError(e instanceof Error ? e.message : '导出失败'); } };
+  const exportRows = () => { setError(''); setExportAll(true); };
+  useLayoutEffect(() => {
+    if (!exportAll) return;
+    try {
+      const table = tableRef.current?.querySelector('table');
+      if (!table) throw new Error('组合表还没显示，无法导出');
+      const anySelected = rows.some(rowSelected), picked = anySelected ? rows.filter(rowSelected) : rows;
+      const members = [...new Map(picked.flatMap(qualityTableMembers).map(m => [m.id, m])).values()], detailPlans = shownPlans.length ? shownPlans : plans;
+      downloadQualityComparison(study, rows.flatMap(qualityTableMembers), Date.now(), [
+        readQualityTableSheet(table, { selectedOnly: anySelected }),
+        qualityPlanDetailSheet(detailPlans),
+        qualityTradeDetailSheet(members, detailPlans, (m, p) => qualityRowResult(study, m, p, resultMap)),
+      ]);
+    } catch (e) { setError(e instanceof Error ? e.message : '导出失败'); }
+    finally { setExportAll(false); }
+  }, [exportAll]); // eslint-disable-line react-hooks/exhaustive-deps
   const body=<section ref={rootRef} className="min-w-0 border-t border-border/50 px-4 py-3" aria-labelledby={titleId} data-testid={archiveView?"quality-archive-board":"fish-quality"}>
     <div className="flex items-center justify-between gap-2">
       <div className="flex items-center gap-0.5"><h3><button id={titleId} type="button" className={fishSectionHeading} aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)}><Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/><span>{archiveView?'归档运行结果':'鱼质量'}</span>{archiveView&&<FishCount n={countSignals(allRows)}/>}<ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button></h3>

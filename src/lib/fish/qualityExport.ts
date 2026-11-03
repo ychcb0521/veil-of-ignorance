@@ -91,10 +91,11 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   }
   return sheets;
 }
-export function downloadQualityComparison(study: FishQualityStudy, rows: QualitySample[], at = Date.now()) {
+/** leading：放在最前面的子表（组合表所见即所得、组合算法、买入·加仓·卖出），其后照旧是全部记录的各子表。 */
+export function downloadQualityComparison(study: FishQualityStudy, rows: QualitySample[], at = Date.now(), leading: readonly XlsxSheet[] = []) {
   if (!rows.length) throw new Error('暂无可导出的鱼质量记录');
   const filename = `鱼质量-${formatUTC8(at).replace(/\D/g, '').slice(0, 14)}.xlsx`;
-  const blob = buildXlsx(buildQualitySheets(study, rows)), url = URL.createObjectURL(blob), link = document.createElement('a');
+  const blob = buildXlsx([...leading, ...buildQualitySheets(study, rows)]), url = URL.createObjectURL(blob), link = document.createElement('a');
   try { link.href = url; link.download = filename; document.body.appendChild(link); link.click(); }
   finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
   return filename;
