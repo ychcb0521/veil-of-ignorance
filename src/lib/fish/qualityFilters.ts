@@ -43,9 +43,15 @@ export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperato
 }
 
 export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;geometricMultiple?:string};
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>saved.length?saved.map(v=>({choice:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
-  [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}];
+/** 【用户要求】2026-11-03 每套卖出算法的硬性终止框都默认带一条「盈亏比止盈」（不勾选、预填 5000R），用不用由用户选。 */
+export const PAYOFF_STOP_DEFAULT_R='5000';
+const withPayoffRow=(rows:HoldingVetoDraft[]):HoldingVetoDraft[]=>rows.some(r=>r.choice===PAYOFF_STOP_KIND)?rows:[...rows,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:PAYOFF_STOP_DEFAULT_R,enabled:false}];
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
+  [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}]);
+/** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
+export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
 export function parseHoldingVetoDraft(draft:HoldingVetoDraft[]):QualityHoldingVeto[] {
   if(draft.some(d=>(d.enabled||d.threshold.trim())&&(!d.threshold.trim()||!Number.isFinite(Number(d.threshold)))))throw new Error('请为启用的否决条件填写有限数字阈值');
-  return [...new Map(draft.filter(d=>d.enabled||d.threshold.trim()).map(d=>{const v=makeQualityHoldingVeto(d.choice,d.direction,Number(d.threshold),d.enabled,undefined,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);return [v.id,v];})).values()];
+  // 没勾选、还是默认 5000R 的那条盈亏比止盈只是预留位，不存进方案（下次打开会自动补上）
+  return [...new Map(draft.filter(d=>(d.enabled||d.threshold.trim())&&!(d.choice===PAYOFF_STOP_KIND&&!d.enabled&&d.threshold.trim()===PAYOFF_STOP_DEFAULT_R)).map(d=>{const v=makeQualityHoldingVeto(d.choice,d.direction,Number(d.threshold),d.enabled,undefined,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);return [v.id,v];})).values()];
 }
