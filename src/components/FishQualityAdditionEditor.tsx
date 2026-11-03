@@ -40,8 +40,10 @@ export function GuardLineNotes(){return <div className="space-y-2 text-[11px] le
  <p><b className="font-medium text-foreground">防守线类型</b>：选「实线和虚线」（默认）时，两种线都能当 K。选「只用实线」时，新 C 产生那一刻如果防守线是虚线（震荡期），这次就不加仓，原因记进战役「未加仓理由」，等到实线（上涨期）时的新 C 再加。</p>
  <p><b className="font-medium text-foreground">怎样算跌破</b>：只看 5 分钟收盘价，影线刺穿不算。上涨期（实线）1 根收盘低于线即跌破；震荡期（虚线）要连续 2 根，中间有一根收回线上就重新计数。</p>
  <p><b className="font-medium text-foreground">断掉意味着什么</b>：跌破确认后，图上画红 ×，这段线到此结束、不再显示，说明原来的箱体结构已经失效。等下一个箱体确认后，才按震荡期（虚线）重新起一条新线。线断开期间没有防守线，<b className="font-medium text-foreground">不会加仓</b>。行情数据中断时线也会断开、重新开始。</p>
- <p><b className="font-medium text-foreground">与 K、卖出的关系</b>：加仓那一刻读取当时的防守线，K＝防守线 − 冗余×ATR，然后<b className="font-medium text-foreground">冻结</b>：之后防守线继续上移，K 也不跟着上移，要等下一次加仓才换成新的 K。卖出时按加仓那一刻的行情状态确认：当时是实线，1 根 5 分钟收盘低于 K 就卖；当时是虚线，要连续 2 根。确认后，按下一分钟开盘价卖出全部持仓。冗余为 0 时，K 就是防守线，图上的红 × 基本就是卖点；冗余大于 0 时，K 在线下方，线断了不一定卖。启用「支撑下移减仓」后，防守线下移（震荡区箱底创新低）会按减仓规则把 K 挪到新的位置。</p>
- <p><b className="font-medium text-foreground">例外</b>：「保住有效涨幅」和盈亏比止盈都不等收盘确认，碰到线就卖。</p>
+ {/* 【用户要求】2026-11-03「防守线与是否卖出没有直接关系，需要通过K才起作用」 */}
+ <p><b className="font-medium text-foreground">只在加仓那一刻起作用</b>：K＝当时的防守线 − 冗余×ATR，同时记下当时是实线还是虚线，决定之后要几根收盘确认（实线 1 根，虚线连续 2 根）。K 随后<b className="font-medium text-foreground">冻结</b>，下一次加仓才换成新的 K。</p>
+ <p><b className="font-medium text-foreground">卖不卖只看 K</b>：5 分钟收盘按上面的根数确认跌破 K，就在下一分钟开盘卖出全部持仓。防守线之后怎么上移、断开，图上有没有红 ×，都<b className="font-medium text-foreground">不直接触发卖出</b>。</p>
+ <p><b className="font-medium text-foreground">唯一的联动</b>：启用「支撑下移减仓」时，防守线下移会按减仓规则把 K 挪到 K′，起作用的仍然是 K。</p>
 </div>;}
 export interface AdditionDraft extends RoundDraft {enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 支撑线下移减仓（各次加仓通用）。 */

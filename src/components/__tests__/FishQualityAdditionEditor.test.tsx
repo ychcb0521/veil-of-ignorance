@@ -121,6 +121,9 @@ it('explains the guard line next to its settings: which line, solid vs dashed, w
  expect(screen.getByRole('button',{name:'防守线说明'})).toBeInTheDocument();
  cleanup();render(<GuardLineNotes/>);const notes=screen.getByTestId('guard-line-notes');
  for(const text of ['蓝色加粗线','实线＝上涨期','虚线＝震荡期','影线刺穿不算','断掉意味着什么','不会加仓','冻结'])expect(notes).toHaveTextContent(text);
+ // 【用户要求】2026-11-03 防守线与是否卖出没有直接关系，只通过 K 起作用
+ for(const text of ['只在加仓那一刻起作用','实线 1 根，虚线连续 2 根','卖不卖只看 K','不直接触发卖出','支撑下移减仓','K′'])expect(notes).toHaveTextContent(text);
+ for(const gone of ['基本就是卖点','例外','保住有效涨幅','盈亏比'])expect(notes).not.toHaveTextContent(gone);
 });
 // 【用户要求】2026-11-03 几何仓位 > 10 时至少保留 x% 开仓价有效涨幅，x 由用户设置、默认 1%
 it('saves the geometric-position lock in 卖出, default off with 10× and 1%',()=>{
