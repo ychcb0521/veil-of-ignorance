@@ -275,5 +275,50 @@ describe('native box decisions for holding additions',()=>{
   }
   expect(()=>validateQualityAddition({...box,prerequisites:[{...filter,threshold:NaN}]})).toThrow('方向条件');
  });
+ // 【用户要求】2026-11-03 未加仓理由：支撑线上移（新 C）却没加仓的每一次都记下第几次加仓、原因与读数
+ it('records why a raised support did not become an addition: gain gate, no old C, gap below C, sizing, direction',async()=>{
+  const o=context(sample()),at=T+14*STEP;
+  expect((await findCalculatorAdditions({...o,structure:rule(),maxRounds:1})).skipped).toBeUndefined();
+  const gain=await findCalculatorAdditions({...o,structure:rule(),minGainPct:500});expect(gain.fills).toEqual([]);
+  expect(gain.skipped).toEqual([{at,round:1,support:102,kind:'gain',label:'涨幅门槛未达',reading:'收盘 105 比成本线 S 90 只涨 16.67%，要求 ≥ 500%'}]);
+  // 首个箱体（BASELINE）没有旧 C：只报一次，之后的新 C 照常加仓
+  const confirm=await findCalculatorAdditions({...o,structure:rule('dbl5','confirm'),maxRounds:3});
+  expect(confirm.fills.map(f=>f.at)).toEqual([at]);expect(confirm.skipped).toEqual([expect.objectContaining({at:T+8*STEP,round:1,support:100,kind:'no-old-c',label:'没有旧 C'})]);
+  const prices=o.prices.map(b=>b.openTime===at?{...b,open:101}:b);
+  expect((await findCalculatorAdditions({...o,prices,structure:rule()})).skipped).toEqual([expect.objectContaining({at,round:1,kind:'below-c',reading:'下一分钟开盘 T 101 ≤ 新 C 102'})]);
+  expect((await findCalculatorAdditions({...o,structure:{...rule(),buffer:10}})).skipped).toEqual([expect.objectContaining({at,round:1,kind:'sizing',label:'落袋利润不够'})]);
+  const price:AdditionCandidate={plan:compileFishProgram({id:'add-dir-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction:'>',threshold:1e9,constraints:[]}),scale:1,threshold:1e9,direction:'>',metric:'结果',label:'收盘价'};
+  const dir=await findCalculatorAdditions({...o,structure:rule(),required:[price],maxRounds:1});expect(dir.fills).toEqual([]);
+  expect(dir.skipped).toEqual([expect.objectContaining({at,round:1,kind:'direction',label:'方向条件未满足',reading:'需同时满足：收盘价 > 1000000000'})]);
+  // 被否决的加仓只进 vetoed，不重复记成跳过
+  const vetoed=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[{kind:'volatility',enabled:true,ratio:50,er:1}]});
+  expect(vetoed.vetoed).toHaveLength(1);expect(vetoed.skipped).toBeUndefined();
+ });
+ it('reports each skipped box event once across paginated reads and never for a box already added on',async()=>{
+  const o=context(sample()),r=rule('dbl5','confirm'),seen:unknown[]=[],read=createStructureAdditionReader(o);
+  const first=await read(r,o.entry,T+14*STEP,[],undefined,s=>seen.push(s));expect(first).toBeUndefined();
+  const hit=await read(r,T+14*STEP-M,o.end,[],undefined,s=>seen.push(s));expect(hit?.at).toBe(T+14*STEP);
+  await read(r,hit!.at,o.end,[],undefined,s=>seen.push(s));
+  expect(seen).toEqual([{at:T+8*STEP,support:100,reason:'no-old-c'}]);
+  // BASELINE 那一箱已加过仓（续算的旧成交）：不再把它记成「没有旧 C」
+  const baseline=(await createStructureAdditionReader(o)({...r,kSource:'current'},o.entry,o.end,[]))!.structureEvidence!;expect(baseline).toMatchObject({at:T+8*STEP,event:'BASELINE'});
+  const used={...hit!,quantity:1,notional:100,structureEvidence:{...hit!.structureEvidence!,boxId:baseline.boxId}},late:unknown[]=[];
+  await createStructureAdditionReader(o)(r,o.entry,o.end,[used],undefined,s=>late.push(s));expect(late).toEqual([]);
+ });
+ it('carries the skip records through evaluateQualitySample and merges them without duplicates on resume',async()=>{
+  const o=context(sample()),def={id:'never-sell',name:'不卖',short:'不卖',definition:'',formula:'raw = C',scale:1,unit:'',positive:'1',control:'0',interval:'1m' as const};
+  const snapshot={featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),statistic:'raw',interval:'1m',scale:1,threshold:0,direction:'<' as const,average:0,cbi2:0,startAverage:0,previousAverage:0,cutoffMs:o.entry};
+  const qualitySample:QualitySample={id:'structure-skips',enteredAt:o.entry,basis:'capture',importedAt:o.entry,groups:[],source:{...o.row,timeMs:o.entry,fish:snapshot}};
+  const group:QualityGroup={id:'g',label:'箱体加仓',snapshot,metric:'raw',rule:{metric:'raw',direction:'<',threshold:0},mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{...defaultQualityAddition(),enabled:true,source:'structure',structure:rule(),entryBufferAtr:0,minGainPct:500}};
+  const full=await evaluateQualitySample(qualitySample,group,0,T+17*STEP,o.load,o.signal);expect(full.status).not.toBe('error');
+  expect(full.additionFills??[]).toEqual([]);expect(full.additionSkipsFrom).toBe(full.entryTime);
+  expect(full.additionSkips).toEqual([expect.objectContaining({at:T+14*STEP,round:1,kind:'gain'})]);
+  const part=await evaluateQualitySample(qualitySample,group,0,T+15*STEP,o.load,o.signal),resumed=await evaluateQualitySample(qualitySample,group,0,T+17*STEP,o.load,o.signal,part);
+  expect(resumed.additionSkips).toEqual(full.additionSkips);expect(resumed.additionSkipsFrom).toBe(full.additionSkipsFrom);
+  // 旧版本结果（没有 additionSkipsFrom）续算：记录只从续算起点开始
+  const legacy={...part};delete legacy.additionSkips;delete legacy.additionSkipsFrom;
+  const fromLegacy=await evaluateQualitySample(qualitySample,group,0,T+17*STEP,o.load,o.signal,legacy);expect(fromLegacy.additionSkipsFrom).toBeGreaterThan(full.entryTime!);
+  const data=buildQualityCampaignData('owner',{sample:qualitySample,plan:group,result:full,detectors:[],observeHours:0,firstEvaluatedAt:o.entry},'sell'),ev=data.campaign.comparison!.sellEvidence!;
+  expect(ev.additionSkips).toEqual(full.additionSkips);expect(ev.additionSkipsFrom).toBe(full.additionSkipsFrom);
+ });
 });
-

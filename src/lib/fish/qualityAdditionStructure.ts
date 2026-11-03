@@ -133,7 +133,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
    let cursor=from,dbl:Dbl5Checkpoint|undefined,sbs:SbsCheckpoint|undefined,lastBox:StructureActiveBox|undefined;
    const decisions:{e:StructureAdditionEvidence;close:number}[]=[],invalid:number[]=[],supportPoints:StructureSupportPoint[]=[];
    /** 【用户要求】2026-11-03 未加仓理由：支撑上移了、但没有旧 C / 防守线，因此不能作为加仓位置的事件。 */
-   const dropped:{at:number;support:number;reason:'no-old-c'|'no-guard'}[]=[];
+   const dropped:{at:number;support:number;key:string;reason:'no-old-c'|'no-guard'}[]=[];
    const advance=async(cut:number,stop?:()=>boolean)=>{
     while(cursor<cut){
      if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
@@ -142,14 +142,14 @@ export function createStructureAdditionReader(o:ReaderOptions){
      dbl=result.DBL5_checkpoint;sbs=result.SBS5M_checkpoint;
      const rows=rule.algorithm==='dbl5'?result.DBL5_details!:result.SBS5M_details!;
      const closes=new Map(bars.map(b=>[b.openTime+STEP,b.close])),sources=new Map(bars.map(b=>[b.openTime+STEP,b.PRS6H_data_source??'binance-usdm']));
-     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(row.at!=null&&row.at>o.entry){const box=structureActiveBox(rule,row),g=rule.algorithm==='dbl5'?(row as Dbl5Row).darvas_5m_guard??null:null;supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard:g,close:closes.get(row.at)!});}if(raw&&!e&&raw.at>o.entry)dropped.push({at:raw.at,support:raw.supportPrice,reason:rule.kSource==='guard'?'no-guard':'no-old-c'});if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
+     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(row.at!=null&&row.at>o.entry){const box=structureActiveBox(rule,row),g=rule.algorithm==='dbl5'?(row as Dbl5Row).darvas_5m_guard??null:null;supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard:g,close:closes.get(row.at)!});}if(raw&&!e&&raw.at>o.entry)dropped.push({at:raw.at,support:raw.supportPrice,key:`${raw.algorithm}:${raw.boxId}`,reason:rule.kSource==='guard'?'no-guard':'no-old-c'});if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
      cursor=to;await fishDelay(0,o.signal);
      if(stop?.())break;
     }
    };
    reader={supports:async until=>{await advance(Math.floor(until/STEP)*STEP);return supportPoints.filter(p=>p.at<=until);},read:async(after,until,used,gain,onSkip)=>{
     const cut=Math.floor(until/STEP)*STEP;
-    const reportDropped=(to:number)=>{if(onSkip)for(const d of dropped)if(d.at>after&&d.at<to)onSkip({at:d.at,support:d.support,reason:d.reason});};
+    const reportDropped=(to:number)=>{if(onSkip)for(const d of dropped)if(d.at>after&&d.at<to&&!used.has(d.key))onSkip({at:d.at,support:d.support,reason:d.reason});};
     await advance(cut,()=>decisions.some(({e,close})=>e.at>after&&e.at<until&&!used.has(`${e.algorithm}:${e.boxId}`)&&(!gain||close>=gain.referencePrice*(1+gain.thresholdPct/100))));
     for(const {e,close} of decisions){
      if(e.at<=after||e.at>=until||used.has(`${e.algorithm}:${e.boxId}`))continue;
