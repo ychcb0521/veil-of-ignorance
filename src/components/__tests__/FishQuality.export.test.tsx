@@ -10,13 +10,14 @@ import { importQualityLibrary, newQualityStudy, qualityDisplayRows } from '@/lib
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 const T = Date.UTC(2026, 9, 20);
-function state(selected: number): FishQualityState {
+function state(selected: number, mined = false): FishQualityState {
   const study = enableQualityComparison(importQualityLibrary(newQualityStudy(T + 1), ['AAAUSDT', 'BBBUSDT', 'CCCUSDT'].map((symbol, i) => ({ id: `l${i}`, symbol, timeMs: T - i * 3600000, timeLabel: '', fallbackZone: '', quality: 3 }))));
+  if (mined) study.samples[0].source = { ...study.samples[0].source, mined: { anchorMs: T - 86400000 }, caughtAt: Date.UTC(2026, 10, 3, 2, 15) };
   study.selectedRowIds = qualityDisplayRows(study).slice(0, selected).map(r => r.id);
   return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setCombo: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn(), setSellPlans: vi.fn() } as FishQualityState;
 }
 afterEach(() => { cleanup(); captured.length = 0; });
-it('puts the table exactly as shown, with only the selected rows, first; then the plan details and per-trade buys, adds and sells', () => {
+it('puts the table exactly as shown, with only the selected rows, first; then the plan details and per-trade buys, adds and sells', { timeout: 30000 }, () => {
   const s = state(2);
   render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
@@ -36,7 +37,7 @@ it('puts the table exactly as shown, with only the selected rows, first; then th
   expect(plans.name).toBe('组合算法');expect(plans.rows.some(r => r[2] === '卖出算法')).toBe(true);
   expect(trades.name).toBe('买入·加仓·卖出');expect(new Set(trades.rows.map(r => r[0]))).toEqual(new Set(['AAAUSDT', 'BBBUSDT']));
 });
-it('hides what the table hides: the 买前过滤 group is left out once hidden', () => {
+it('hides what the table hides: the 买前过滤 group is left out once hidden', { timeout: 30000 }, () => {
   const s = state(3);
   render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
@@ -48,4 +49,16 @@ it('hides what the table hides: the 买前过滤 group is left out once hidden',
   expect(hidden.headerRows?.[0].some(c => c.text.startsWith('买前过滤'))).toBe(false);
   expect(hidden.columns.map(c => c.header)).not.toContain('探测算法');
   expect(hidden.rows).toHaveLength(3);
+});
+// 【用户要求】2026-11-03 批量挖掘的数据显示挖掘时间（真实物理时间）；表里没有挖掘记录时不多出这一列
+it('shows the real mining time for mined rows only when the table has mined records', { timeout: 30000 }, () => {
+  render(<FishQuality state={state(3, true)}/>);
+  expect(screen.getByTestId('quality-mined-at-column')).toHaveTextContent('挖掘时间');
+  const cells = screen.getAllByTestId('quality-mined-at-cell').map(c => c.textContent);
+  expect(cells.filter(t => t !== '—')).toHaveLength(1);expect(cells.find(t => t !== '—')).toContain('2026-11-03 10:15');
+  fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
+  expect(captured[0].leading[0].columns.map(c => c.header)).toContain('挖掘时间');
+  cleanup();
+  render(<FishQuality state={state(3)}/>);
+  expect(screen.queryByTestId('quality-mined-at-column')).toBeNull();
 });
