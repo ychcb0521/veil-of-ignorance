@@ -3,7 +3,7 @@ import {computeDbl5} from '../dbl5m';
 import {computeSbs5m} from '../sbs5m';
 import {sample,T} from './fixtures/dblBars';
 import {sbsComplete,SBS_T} from './fixtures/sbsBars';
-import {defaultStructureAddition,structureAdditionIdentity,structureAdditionLabel,structureAdditionSignal,structureAdditionK,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
+import {defaultStructureAddition,structureAdditionIdentity,structureAdditionLabel,structureAdditionSignal,structureAdditionK,withMinKDistance,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
@@ -74,6 +74,22 @@ describe('native box decisions for holding additions',()=>{
   const longer={...o,end:T+250*STEP,row:{...o.row,timeMs:T+250*STEP}};expect(await createStructureAdditionReader(longer)(r,o.entry,longer.end,[])).toEqual(first);
  });
  // 【用户要求】2026-11-01 加仓可选 K 用旧 C 还是新 C；默认旧 C，身份不变
+ // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足 x% 时按 T×(1−x%) 当 K，加仓量与止损都用它
+ it('widens K to T×(1−x%) when it sits closer than the minimum distance, sizing and stopping on the wider K',async()=>{
+  const e={...evidence(),tickSize:'1'},sel={k:99,bufferPrice:1};
+  expect(withMinKDistance(e,sel,100,2,2)).toEqual({k:98,bufferPrice:2,widenedFrom:99,minDistancePct:2});
+  expect(withMinKDistance(e,sel,100,2,1)).toBe(sel);expect(withMinKDistance(e,sel,100,2,undefined)).toBe(sel);
+  const o=context(sample()),base={...rule(),buffer:.5,kSource:'current' as const};
+  const plain=await findCalculatorAdditions({...o,structure:base,maxRounds:1}),wide=await findCalculatorAdditions({...o,structure:{...base,minDistancePct:10},maxRounds:1});
+  const p=plain.fills[0],w=wide.fills[0];expect(w.at).toBe(p.at);
+  expect(w.sizing!.support).toBe(Math.floor(w.price*.9));expect(w.sizing!.support).toBeLessThan(p.sizing!.support);
+  expect(w.structureEvidence).toMatchObject({widenedFrom:p.sizing!.support,minDistancePct:10,k:w.sizing!.support});
+  expect(w.quantity).toBeLessThan(p.quantity);
+  const z=w.sizing!;expect(z.coinsBefore*(z.support-z.previousSupport)+z.mirrorUsed).toBeCloseTo(w.quantity*(w.price-z.support));
+  expect(structureAdditionIdentity({...base,minDistancePct:10})).not.toEqual(structureAdditionIdentity(base));
+  expect(structureAdditionLabel({...base,minDistancePct:10})).toContain('离现价 ≥ 10%');
+  for(const bad of [0,-1,50,NaN])expect(()=>validateStructureAddition({...base,minDistancePct:bad})).toThrow('最小距离');
+ });
  it('lets K use the new C instead: the first box qualifies and K = new C − n×ATR, with its own identity',async()=>{
   const o=context(sample()),r={...rule('dbl5','confirm'),kSource:'current' as const};
   const first=await createStructureAdditionReader(o)(r,o.entry,o.end,[]);expect(first).toMatchObject({at:T+8*STEP,structureEvidence:{event:'BASELINE',supportPrice:100,basePrice:100}});expect(first!.structureEvidence!.previousSupportPrice).toBeUndefined();

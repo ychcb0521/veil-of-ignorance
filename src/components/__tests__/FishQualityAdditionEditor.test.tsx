@@ -20,6 +20,15 @@ it('offers only the box position, with calculator defaults and K = 旧C − n×A
  expect(screen.getByTestId('addition-k-row')).toHaveTextContent(/^K =/);expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
  const rule=save();expect(rule).toMatchObject({enabled:true,quantityMode:'calculator',quantity:1,source:'structure',structure:{algorithm:'dbl5',buffer:0}});expect(rule.rounds.map((r:QualityAdditionRule)=>r.source)).toEqual(['structure','structure','structure']);
 });
+// 【用户要求】2026-11-03 K 最小距离：每次加仓可设，留空＝不限
+it('saves the K minimum distance per round and clears it when left empty',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('K最小距离')).toHaveValue(null);
+ fireEvent.change(screen.getByLabelText('K最小距离'),{target:{value:'2'}});
+ let rule=save();expect(rule.rounds[0].structure.minDistancePct).toBe(2);expect(rule.rounds[1].structure.minDistancePct).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES).rounds[0].structure.minDistancePct).toBe(2);
+ fireEvent.change(screen.getByLabelText('K最小距离'),{target:{value:''}});rule=save();expect(rule.rounds[0].structure.minDistancePct).toBeUndefined();
+});
 // 【用户要求】2026-11-02 加仓设置的「位置」显示箱体算法版本，ⓘ 里写每个版本的逻辑；保存时冻结版本
 it('shows the box algorithm version in 位置, explains every version, and freezes it on save',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));

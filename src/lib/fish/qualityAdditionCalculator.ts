@@ -4,7 +4,7 @@ import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
 import {isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
-import {createStructureAdditionReader,structureAdditionK,type StructureAdditionRule} from './qualityAdditionStructure';
+import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
 import {additionVetoesNeedMinutes,evaluateAdditionVetoes,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
 import {ADDITION_PROFIT_KIND,activeHoldingVetoes,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
@@ -174,7 +174,9 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
   const {supportOffsetAtr}=qualityAdditionAtrSettings(round);
-  const selected=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
+  const boxK=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
+  // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
+  const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,round.structure?.minDistancePct):boxK;
   const K=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!,S=support??o.entryPrice;after=hit.at;
   if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support))continue;
   if(hit.structureEvidence&&selected)hit.structureEvidence={...hit.structureEvidence,...selected};

@@ -15,7 +15,8 @@ export function qualityAdditionStopOrders(leg: Pick<TradeJournal, 'quality_addit
   const fill = leg.quality_addition_fill, K = fill?.sizing?.support;
   if (!fill || K == null || !(K > 0) || !Number.isFinite(K)) return [];
   const evidence = campaign?.comparison?.sellEvidence, guard = fill.structureEvidence?.guardCloses;
-  const label = guard ? '防守线 K' : '支撑线 K', detail = guard ? `5 分钟收盘连续 ${guard} 根低于 K 才卖出` : '价格碰到 K 即卖出全部持仓';
+  const widened = fill.structureEvidence?.widenedFrom != null ? `；箱体算出的 K ${fill.structureEvidence.widenedFrom} 离加仓价不足 ${fill.structureEvidence.minDistancePct}%，已放宽到此` : '';
+  const label = guard ? '防守线 K' : '支撑线 K', detail = (guard ? `5 分钟收盘连续 ${guard} 根低于 K 才卖出` : '价格碰到 K 即卖出全部持仓') + widened;
   const fills = evidence?.additionFills ?? [], index = fills.findIndex(f => f.at === fill.at), next = index >= 0 ? fills[index + 1] : undefined;
   const moves = (evidence?.additionReductions ?? []).filter(r => r.at > fill.at && (!next || r.at < next.at) && r.newK > 0 && Number.isFinite(r.newK));
   const chain: Omit<AdditionStopOrder, 'status' | 'endedAt'>[] = [{ price: K, placedAt: fill.at, label, detail },

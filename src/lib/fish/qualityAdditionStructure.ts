@@ -19,6 +19,8 @@ export interface StructureAdditionRule {
  definition:DeepDigFeatureDef;
  /** 【用户要求】2026-11-02 保存时冻结的箱体算法版本（如 dbl-5-v2、dbl5-guard-v1）；缺省按定义公式第一行认出。 */
  versions?:StructureVersions;
+ /** 【用户要求】2026-11-03 K 最小距离：K 离加仓价 T 不足这个百分比时，按 T×(1−x%) 当 K（加仓量与止损都用它）；不填＝不限。 */
+ minDistancePct?:number;
 }
 export interface StructureAdditionEvidence {
  algorithm:StructureAdditionRule['algorithm'];trigger:StructureAdditionRule['trigger'];event:string;eventId:string;
@@ -31,6 +33,8 @@ export interface StructureAdditionEvidence {
  guardPrice?:number;guardRegime?:'trend'|'range';guardCloses?:number;
  /** Set only when sizing accepts a fill; no subsequent candle can move this K. */
  bufferPrice?:number;k?:number;
+ /** K 因「最小距离」被放宽时：原本按箱体算出的 K 与所用的最小距离 %。 */
+ widenedFrom?:number;minDistancePct?:number;
 }
 /**
  * 【用户要求】2026-11-01 加仓的位置与均衡线：箱体算法产生新 C 的那一刻加仓，但计算加仓量的 K 取上一轮的旧 C——
@@ -66,15 +70,16 @@ export function validateStructureAddition(rule?:StructureAdditionRule):asserts r
  if(rule.kSource!=null&&!['previous','current','guard'].includes(rule.kSource))throw Error('K 基准须为旧 C、新 C 或防守线');
  if(rule.kSource==='guard'&&(rule.algorithm!=='dbl5'||rule.kBasis!=='support'))throw Error('防守线目前只用于 DBL-5 的已确认下轨');
  if(!Number.isFinite(rule.buffer)||rule.buffer<0||rule.bufferUnit==='percent'&&rule.buffer>=100)throw Error('支撑冗余须为不小于 0 的有限数字；百分比须小于 100');
+ if(rule.minDistancePct!=null&&(!Number.isFinite(rule.minDistancePct)||rule.minDistancePct<=0||rule.minDistancePct>=50))throw Error('K 最小距离须为大于 0、小于 50 的百分比');
  const def=rule.definition,builtin=rule.algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
  if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!=='5m'||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
  if(rule.algorithm==='dbl5')dbl5Parameters(def.DBL5_config);else sbsParameters(def.SBS5M_config);
  assertStructureVersionsAvailable(rule);
 }
-export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${DBL5_GUARD_VERSION}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION];
+export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${DBL5_GUARD_VERSION}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[])];
 export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
-export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureVersionLabel(r)} · ${structureTriggerLabel(r)} · K＝${r.kSource==='current'?'新C':r.kSource==='guard'?'防守线':'旧C'}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}`;
+export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureVersionLabel(r)} · ${structureTriggerLabel(r)} · K＝${r.kSource==='current'?'新C':r.kSource==='guard'?'防守线':'旧C'}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}${r.minDistancePct!=null?`（离现价 ≥ ${r.minDistancePct}%）`:''}`;
 /** Only selected, still-active confirmed structures may emit a decision. Pending boxes never qualify. */
 export function structureAdditionSignal(rule:StructureAdditionRule,row:Dbl5Row|SbsRow,initializationStart:number):StructureAdditionEvidence|undefined {
  if(!row.data_valid)throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');
@@ -90,6 +95,15 @@ export function structureAdditionSignal(rule:StructureAdditionRule,row:Dbl5Row|S
  return {algorithm:rule.algorithm,trigger:rule.trigger,event:event.type,eventId:event.id,boxId:a.box_id,episodeId:a.episode_id,at:r.at,confirmedAt:a.confirmed_at,supportPrice:a.s,upperPrice:a.u,nativeInvalidation:a.K,tickSize:dbl5TickRule(a.tick),algorithmVersion:r.feature_version,definitionKey:definitionKey(rule.definition),parameters:sbsParameters(rule.definition.SBS5M_config),initializationStart,dataChecksum:r.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,basePrice:rule.kBasis==='invalidation'?a.K:a.s,bufferUnit:rule.bufferUnit,buffer:rule.buffer};
 }
 /** Floor a derived stop to the venue tick using decimal integers, never infer tick from price digits. */
+/**
+ * 【用户要求】2026-11-03 K 最小距离：K 离加仓价 T 不足 x% 时，改用 T×(1−x%)（按报价步长向下取整）当 K。
+ * 回放中失败的加仓 K 多只离现价 1–2%，正常抖动就碰到，平衡公式又把加仓放大 5–9 倍；放宽后加得更少、也不易被扫。
+ */
+export function withMinKDistance(e:StructureAdditionEvidence,selected:{k:number;bufferPrice:number},T:number,atr:number,minPct?:number):{k:number;bufferPrice:number;widenedFrom?:number;minDistancePct?:number}{
+ if(minPct==null||!(minPct>0)||!(T>0)||(T-selected.k)/T*100>=minPct-1e-9)return selected;
+ const w=structureAdditionK({...e,basePrice:T*(1-minPct/100),buffer:0},atr);
+ return w&&w.k<selected.k?{k:w.k,bufferPrice:e.basePrice-w.k,widenedFrom:selected.k,minDistancePct:minPct}:selected;
+}
 export function structureAdditionK(e:StructureAdditionEvidence,atr:number):{k:number;bufferPrice:number}|undefined {
  if(!(atr>0)||!Number.isFinite(atr)||!(e.basePrice>0)||!Number.isFinite(e.basePrice)||!Number.isFinite(e.buffer)||e.buffer<0)return;
  const decimal=(v:number|string)=>{const m=/^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(String(v));if(!m)throw Error('箱体K价格无效');let n=BigInt(m[1]+(m[2]??'')),s=(m[2]?.length??0)-Number(m[3]??0);if(s<0){n*=10n**BigInt(-s);s=0;}return {n,d:10n**BigInt(s)};};

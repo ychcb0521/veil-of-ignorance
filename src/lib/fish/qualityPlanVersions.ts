@@ -71,8 +71,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
       if (r.source === 'structure' && r.structure) {
         const v = structureVersions(r.structure), box = boxAlgorithmVersion(v.box), guard = v.guard ? boxAlgorithmVersion(v.guard) : undefined;
         const k = r.structure.kSource === 'current' ? '新C' : r.structure.kSource === 'guard' ? '防守线' : '旧C';
-        add(`box-${i + 1}`, `第 ${i + 1} 次加仓 · 箱体算法`, join([box?.label ?? v.box, guard?.label, `K＝${k}−${r.structure.buffer}${r.structure.bufferUnit === 'atr' ? 'ATR' : '%'}`]),
-          join([v.box, v.guard, ...versionTags(additionIdentity({ ...a, rounds: undefined, source: 'structure', structure: r.structure })).filter(t => t.startsWith('k-from') || t.startsWith('box-addition'))]),
+        add(`box-${i + 1}`, `第 ${i + 1} 次加仓 · 箱体算法`, join([box?.label ?? v.box, guard?.label, `K＝${k}−${r.structure.buffer}${r.structure.bufferUnit === 'atr' ? 'ATR' : '%'}${r.structure.minDistancePct != null ? `（离现价 ≥ ${r.structure.minDistancePct}%）` : ''}`]),
+          join([v.box, v.guard, ...versionTags(additionIdentity({ ...a, rounds: undefined, source: 'structure', structure: r.structure })).filter(t => t.startsWith('k-from') || t.startsWith('box-addition') || t.startsWith('k-min-distance'))]),
           join([box?.summary, guard?.summary]));
       }
       qualityAdditionPrerequisites(r).forEach((f, j) => add(`direction-${i + 1}-${j + 1}`, `第 ${i + 1} 次加仓 · 方向`, `${f.label} ${f.direction} ${f.threshold}`, formulaFingerprint(f.snapshot), '加仓那一刻须满足（只读最后一根已收盘 K 线）'));
