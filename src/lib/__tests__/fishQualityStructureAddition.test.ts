@@ -306,13 +306,17 @@ describe('native box decisions for holding additions',()=>{
   const fill1={at:early,price:95,quantity:q1,notional:95*q1,scanFrom:o.entry,reading:0,threshold:0,direction:'>' as const,metric:'confirmed_support',label:'',barOpenTime:early-STEP,sizing:{support:92,previousSupport:e,atr:1,atrAt:early,coinsBefore:coins0*(1-mirror.fraction),realAverageBefore:e,baseCoins:q1,mirrorCoins:0,mirrorUsed:mirrorProfit}};
   const held=coins0*(1-mirror.fraction)+q1,cost=o.notional*(1-mirror.fraction)+95*q1,x=.2,cut=T+12*STEP;
   const red={at:cut,price:97,fraction:x,quantity:x*held,costRemoved:x*cost,realizedPnl:x*held*97-x*cost,breakeven:0,previousK:92,newK:93,previousSupport:95,newSupport:94,atr:1};
-  const r=await findCalculatorAdditions({...o,since:cut+M,previous:[fill1],previousReductions:[red],structure:rule(),maxRounds:2});
+  const v2={enabled:false,minDropAtr:.5,maxPct:80,version:2 as const};
+  const r=await findCalculatorAdditions({...o,since:cut+M,previous:[fill1],previousReductions:[red],structure:rule(),maxRounds:2,supportReduction:v2});
   const f=r.fills.at(-1)!;expect(r.fills).toHaveLength(2);const K=f.sizing!.support;
   // 加仓校验的账：各仓按开仓价在 K 的浮盈垫 + 全部落袋 G ＝ 新增币数 ×（T − K）
   const lots=coins0*(1-mirror.fraction)*(1-x)*(K-e)+q1*(1-x)*(K-95),G=mirrorProfit+red.realizedPnl;
   expect(f.quantity*(f.price-K)).toBeCloseTo(lots+G,9);
   // 成本线取减仓后整笔真实保本价，落袋不再另算可用
   expect(f.sizing!.previousSupport).toBeCloseTo((cost*(1-x)-G)/(held*(1-x)),9);expect(f.sizing!.mirrorAvailableBefore).toBe(0);
+  // 【用户要求】2026-11-03 模板必须原样复原：没写版本（11-02 存的方案与模板）照旧按 v1——成本线取 K′，减仓所得另算可用
+  const v1=await findCalculatorAdditions({...o,since:cut+M,previous:[fill1],previousReductions:[red],structure:rule(),maxRounds:2,supportReduction:{...v2,version:undefined}});
+  const g=v1.fills.at(-1)!;expect(g.at).toBe(f.at);expect(g.sizing!.previousSupport).toBe(93);expect(g.quantity).not.toBeCloseTo(f.quantity,6);
  });
  it('skips a vetoed addition, records the time and reason, and waits for the next new C (2026-11-02 加仓否决)',async()=>{
   const o=context(sample()),plain=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1});expect(plain.fills).toHaveLength(1);expect(plain.vetoed).toBeUndefined();

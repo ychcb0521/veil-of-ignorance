@@ -44,7 +44,12 @@ export const defaultBreakevenFloor = (): QualityBreakevenFloorRule => ({ enabled
 export const BREAKEVEN_FLOOR_DEFAULT_ATR = 0.5;
 export interface QualitySupportReductionRule { enabled: boolean; minDropAtr: number; maxPct: number;
   /** 【用户要求】2026-11-02 K 连续下移达到这个次数就全仓卖出（中间有加仓则重新计数）；不填＝不启用。 */
-  exitAfterDrops?: number }
+  exitAfterDrops?: number;
+  /**
+   * 2＝11-03 修正（support-drop-reduction-v2）：有过减仓后，加仓的成本线取整笔真实保本价、可用落袋记 0，减仓所得不再重复计入（ORDI 加仓2多加 8.25%）。
+   * 缺省＝v1（11-02 原版）：已存的方案与模板照旧按 v1 计算，结果逐位不变（【用户要求】2026-11-03 模板必须能原样复原）。
+   */
+  version?: 2 }
 /**
  * 减仓计算器同一公式：X＝(S−K′)÷(T−K′)。S＝整笔保本价＝(持仓成本−已落袋利润)÷持仓币数，K′ 新止损，T 减仓价。
  * 减掉 X 后，价格碰到 K′ 时整笔约保本。X≤0 只挪止损不减仓；X≥1（T 不够高）或超过单次上限则不减仓（返回 undefined）。
@@ -55,7 +60,7 @@ export function supportDropReduction(p:{held:number;cost:number;realized:number}
   if(!Number.isFinite(X)||X>=1||X*100>maxPct+1e-9)return;
   return {fraction:Math.max(0,X),breakeven};
 }
-export const defaultSupportReduction = (): QualitySupportReductionRule => ({ enabled: false, minDropAtr: .5, maxPct: 80 });
+export const defaultSupportReduction = (): QualitySupportReductionRule => ({ enabled: false, minDropAtr: .5, maxPct: 80, version: 2 });
 /** 一次支撑下移减仓：减掉当时持仓的 fraction；costRemoved 为按均价移出的成本，realizedPnl＝quantity×price − costRemoved。 */
 export interface QualityReductionFill { at: number; price: number; fraction: number; quantity: number; costRemoved: number; realizedPnl: number; breakeven: number; previousK: number; newK: number; previousSupport: number; newSupport: number; atr: number;
   /** 开着保本底线时：挪到的防守线 K′（newK 是它下方的保本底线 F′）。 */
@@ -117,7 +122,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...(rule.geometricLock?.enabled?[['geometric-lock-v1',rule.geometricLock.multiple,rule.geometricLock.pct]]:[]),
   ...(rule.breakevenFloor?.enabled?[['breakeven-floor-v1',rule.breakevenFloor.atr]]:[]),
   // v2（2026-11-03）：减仓后再加仓时，减仓所得不再当成额外可用利润重复计入（v1 会多加）；开了减仓的方案须重算
-  ...(rule.supportReduction?.enabled?[['support-drop-reduction-v2',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct,...(rule.supportReduction.exitAfterDrops!=null?[['exit-after-support-drops-v1',rule.supportReduction.exitAfterDrops]]:[])]]:[]),
+  ...(rule.supportReduction?.enabled?[[rule.supportReduction.version===2?'support-drop-reduction-v2':'support-drop-reduction-v1',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct,...(rule.supportReduction.exitAfterDrops!=null?[['exit-after-support-drops-v1',rule.supportReduction.exitAfterDrops]]:[])]]:[]),
   // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
   ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {

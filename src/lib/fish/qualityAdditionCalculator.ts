@@ -252,7 +252,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 有过支撑下移减仓时改按实际持仓：成本线取整笔保本价 b＝(持仓成本 − 全部已实现净盈亏)÷Q，可用落袋记 0，
   // 于是 Q×(K−b)＝各仓按开仓价在 K 的浮盈垫 + G，与加仓校验同一笔账（b 高于或低于 K′ 都成立）。
   // 没有减仓时两种算法相等（平衡公式保证成本线＝上一次 K），仍用原式，旧结果逐位不变。
-  const reduced=reductions.some(r=>r.at<=hit.at),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
+  // 只有 v2（version＝2）这样算；v1 的方案与模板照旧（2026-11-03 用户要求模板必须原样复原）。
+  const reduced=o.supportReduction?.version===2&&reductions.some(r=>r.at<=hit.at),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
   const Sb=reduced?(cost-(held.mirrorProfit+held.reductionProfit))/Q:S;
   const state=reduced?{...initialAddPositionState(Sb,Q,profit,cost/Q),mirrorProfitAllocated:profit,mirrorProfitAvailable:0}:{...initialAddPositionState(S,Q,profit,cost/Q),mirrorProfitAllocated:used,mirrorProfitAvailable:Math.max(0,profit-used)};
   const sized=calculateAddPosition({currentPrice:hit.price,support:K,state});after=hit.at;
