@@ -615,8 +615,14 @@ it('clears filter readings and monitor results independently without stopping th
   act(() => h.result.current.clearFilterResults());
   expect(h.result.current.study.filterReadings).toEqual([]); expect(h.result.current.study.results).toHaveLength(1);
   expect(filtering.signal.aborted).toBe(true); expect(monitoring.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
+  // 【用户要求】2026-11-03 清除组合表的数据不影响监测库：监测库存的是独立副本，清除前后逐条相同
+  const library = h.result.current.study.monitorLibrary!;expect(library.records.some(r => r.result?.returnPct === 5)).toBe(true);
   act(() => h.result.current.clearMonitorResults());
   expect(h.result.current.study.results).toEqual([]); expect(monitoring.signal.aborted).toBe(true);
+  // 清除会把这一轮记成暂停，只有 updatedAt 变；记录内容逐条不变
+  const content = (rs: typeof library.records) => rs.map(({ updatedAt: _u, ...r }) => r);
+  expect(content(h.result.current.study.monitorLibrary!.records)).toEqual(content(library.records));
+  expect(h.result.current.study.monitorLibrary!.records.some(r => r.result?.returnPct === 5)).toBe(true);
 });
 
 // 【用户要求】2026-11-02 方案模板：存 / 删模板只改模板库，不暂停、不重算正在运行的监测
