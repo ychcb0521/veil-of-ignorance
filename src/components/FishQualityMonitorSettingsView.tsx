@@ -37,7 +37,7 @@ export function QualityMonitorSettingsButton({ plan }: { plan: QualityGroup }) {
   const [open, setOpen] = useState(false);
   return <Popover open={open} onOpenChange={setOpen}><PopoverTrigger asChild>
     <button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="查看持仓监测设置" title="查看这场战役当时的持仓监测条件设置"><Activity aria-hidden className="h-3.5 w-3.5"/>持仓监测</button>
-  </PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain">
+  </PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain">
     <p className="mb-2 text-xs font-medium">持仓监测 · {plan.label}</p>
     <FishQualityMonitorSettingsView plan={plan}/>
   </PopoverContent></Popover>;

@@ -1,7 +1,7 @@
 import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
 import {orderedSellStages,qualitySellStagesIdentity,qualityStagePlan,validateQualitySellStages,qualitySellStagesLabel,type QualitySellStage,type QualitySellStageActivation} from './qualitySellStages';
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
-import { additionIdentity, additionMirrorIdentity, isPartialMirror, qualityAdditionConditions, qualityAdditionPrerequisites, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
+import { additionIdentity, additionMirrorIdentity, isPartialMirror, qualityAdditionConditions, qualityAdditionPrerequisites, qualityAdditionRoundLimit, type QualityAdditionRoundRule, additionPosition, qualityAdditionFills, stricterAdditionThreshold, activeDetectorPrerequisite, validateQualityAddition, type QualityAdditionRule, type QualityAdditionFill } from './qualityAddition';
 import { findQualityAddition, type AdditionCandidate } from './qualityAdditionScan';
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -543,7 +543,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         additionNote=!group.mirrorTakeProfit?.enabled?'首次加仓须先启用镜像止盈':group.mirrorTakeProfit.sellPct>=100?'镜像止盈卖出 100% 后没有余仓，不能加仓':'等待镜像止盈实际成交后再加仓';
       }else{
         const buildAdditionCandidates=(condition:QualityAdditionRoundRule)=>{
-        const candidates: AdditionCandidate[]=[];
+        const candidates: AdditionCandidate[]=[];let unavailable:string|undefined;
         const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
           const base=qualityMetricPlan(snapshot,metric);
           const plan=compileFishProgram(base.plan.def,{...base.plan.settings,direction,constraints:constraints.filter(text=>text!==FISH_STATE_HOLD_TEXT).map((text,i)=>({id:'add-'+i,text,enabled:true}))});
@@ -561,14 +561,20 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         }
         // 「方向」条件（必要不充分）：与时机同一时刻全部满足。自选指标时机沿用「首条触发、其余同时满足」。
         let required=condition.source==='custom'?candidates.splice(1):undefined;
-        if(condition.source!=='custom'){const timing=candidates.length;for(const f of qualityAdditionPrerequisites(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);if(candidates.length>timing)required=candidates.splice(timing);}
-        return {candidates,required,structure:condition.source==='structure'?condition.structure:undefined,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr,entryVetoes:condition.entryVetoes};};
-        const {candidates,required}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
+        if(condition.source!=='custom'){const timing=candidates.length;for(const f of qualityAdditionPrerequisites(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
+          // 【用户要求】2026-11-03「方向」里的探测算法：这条信号的原探测算法（或所选的那一个）读数须达到原门槛再提高 x%，与其他方向条件同时满足
+          const dp=activeDetectorPrerequisite(condition);
+          if(dp){const all=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f]))),pick=all.filter(f=>!dp.featureId||f.featureId===dp.featureId);
+            if(!pick.length)unavailable=dp.featureId?`这条信号没有所选的探测算法，方向条件无法满足，不加仓`:'这条信号没有原探测算法，方向条件无法满足，不加仓';
+            for(const f of pick){const direction=f.direction??'>';addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,dp.stricterPct),`${f.featureShort??f.featureName??'原探测算法'} 探测值`,f.constraints);}}
+          if(candidates.length>timing)required=candidates.splice(timing);}
+        return {candidates,required,...(unavailable?{unavailable}:{}),structure:condition.source==='structure'?condition.structure:undefined,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr,entryVetoes:condition.entryVetoes};};
+        const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map(buildAdditionCandidates);
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
-          additionFills=calculated.fills;additionFill=additionFills[0];additionReductions=calculated.reductions;
+          additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           if(calculated.vetoed?.length||prior?.additionVetoes?.length){const seen=new Map([...(prior?.additionVetoes??[]),...(calculated.vetoed??[])].map(v=>[`${v.at}:${v.round}`,v]));additionVetoes=[...seen.values()].sort((a,b)=>a.at-b.at);}
           if(calculated.stageBoundary){sellStageBoundary=true;closed=false;finalTime=calculated.stageBoundary.at;finalPrice=calculated.stageBoundary.price;trigger=undefined;exitBar=undefined;stopFill=undefined;}
           if(calculated.stop){const stop=calculated.stop;closed=true;finalTime=stop.at;finalPrice=stop.price;stopFill=stop.price;exitBar=prices.find(b=>b.openTime===stop.at);

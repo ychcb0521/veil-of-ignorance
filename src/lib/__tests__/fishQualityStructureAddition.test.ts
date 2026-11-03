@@ -74,6 +74,15 @@ describe('native box decisions for holding additions',()=>{
   const longer={...o,end:T+250*STEP,row:{...o.row,timeMs:T+250*STEP}};expect(await createStructureAdditionReader(longer)(r,o.entry,longer.end,[])).toEqual(first);
  });
  // 【用户要求】2026-11-01 加仓可选 K 用旧 C 还是新 C；默认旧 C，身份不变
+ // 【用户要求】2026-11-03「方向」探测算法条件：信号没有所选探测算法时这一轮注定不满足，不再加仓；身份与说明各自带上
+ it('stops adding when the detector condition cannot be met, and gives the detector condition its own identity',async()=>{
+  const o=context(sample());
+  expect((await findCalculatorAdditions({...o,structure:rule(),maxRounds:1})).fills.length).toBe(1);
+  expect((await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,unavailable:'这条信号没有所选的探测算法'})).fills).toEqual([]);
+  const base={...defaultQualityAddition(),enabled:true,source:'structure' as const,structure:rule()},dp={...base,detectorPrerequisite:{enabled:true,stricterPct:10}};
+  expect(JSON.stringify(additionIdentity(dp))).toContain('detector-prerequisite-v1');expect(additionIdentity({...dp,detectorPrerequisite:{enabled:false,stricterPct:10}})).toEqual(additionIdentity(base));
+  expect(()=>validateQualityAddition({...dp,detectorPrerequisite:{enabled:true,stricterPct:NaN}})).toThrow('探测算法');
+ });
  // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足 x% 时按 T×(1−x%) 当 K，加仓量与止损都用它
  it('widens K to T×(1−x%) when it sits closer than the minimum distance, sizing and stopping on the wider K',async()=>{
   const e={...evidence(),tickSize:'1'},sel={k:99,bufferPrice:1};

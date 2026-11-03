@@ -17,8 +17,19 @@ it('offers only the box position, with calculator defaults and K = 旧C − n×A
  expect([...(screen.getByLabelText('加仓条件来源') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['structure']);
  for(const gone of ['加仓特征值','加仓门槛提高幅度','K回撤ATR倍数','T高于S的ATR倍数','箱体K基准','箱体冗余单位'])expect(screen.queryByLabelText(gone)).toBeNull();
  expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(0);
- expect(screen.getByTestId('addition-k-row')).toHaveTextContent(/^K =/);expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
+ expect(screen.getByTestId('addition-timing')).toHaveTextContent('K =');expect(screen.getByTestId('addition-k-row')).toHaveTextContent('× ATR');expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
  const rule=save();expect(rule).toMatchObject({enabled:true,quantityMode:'calculator',quantity:1,source:'structure',structure:{algorithm:'dbl5',buffer:0}});expect(rule.rounds.map((r:QualityAdditionRule)=>r.source)).toEqual(['structure','structure','structure']);
+});
+// 【用户要求】2026-11-03「方向」里可选探测算法与探测值提高百分比
+it('adds a detector condition to 方向 with a chosen detector and percentage, per round',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('启用探测算法方向条件')).not.toBeChecked();expect(screen.getByLabelText('探测值提高百分比')).toBeDisabled();
+ fireEvent.click(screen.getByLabelText('启用探测算法方向条件'));fireEvent.change(screen.getByLabelText('探测值提高百分比'),{target:{value:'15'}});
+ let rule=save();expect(rule.rounds[0].detectorPrerequisite).toEqual({enabled:true,stricterPct:15});expect(rule.rounds[1].detectorPrerequisite).toBeUndefined();
+ const select=screen.getByLabelText('方向探测算法') as HTMLSelectElement,option=[...select.options].find(o=>o.value)!;
+ fireEvent.change(select,{target:{value:option.value}});rule=save();expect(rule.rounds[0].detectorPrerequisite).toEqual({enabled:true,stricterPct:15,featureId:option.value});
+ expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES).rounds[0].detectorPrerequisite).toEqual(rule.rounds[0].detectorPrerequisite);
+ const bad=additionDraft(rule);bad.detectorPre={...bad.detectorPre,stricterPct:'-1'};expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('探测算法');
 });
 // 【用户要求】2026-11-03 K 最小距离：每次加仓可设，留空＝不限
 it('saves the K minimum distance per round and clears it when left empty',()=>{
@@ -44,7 +55,8 @@ it('converts legacy rounds: a custom indicator moves into 方向, an original-de
  const legacy:QualityAdditionRule={...defaultQualityAddition(),enabled:true,maxRounds:2,rounds:[{source:'custom',stricterPct:10,condition:mbi,conditions:[mbi,bear],minGainPct:5,supportOffsetAtr:2},{source:'detector',stricterPct:10}]};
  const saved=parseAdditionDraft(additionDraft(legacy),BUILTIN_FEATURES);
  expect(saved.rounds![0]).toMatchObject({source:'structure',structure:{buffer:0},minGainPct:5,prerequisites:[{metric:'MBI',direction:'>',threshold:.8},{metric:'MBI_bear',direction:'<',threshold:-.7}]});expect(saved.rounds![0].conditions).toBeUndefined();
- expect(saved.rounds![1]).toMatchObject({source:'structure'});expect(saved.rounds![1].prerequisites).toBeUndefined();
+ // 2026-11-03 起旧的「原探测算法再次命中」找回到「方向」：全部原探测算法、门槛提高沿用原百分比
+ expect(saved.rounds![1]).toMatchObject({source:'structure',detectorPrerequisite:{enabled:true,stricterPct:10}});expect(saved.rounds![1].prerequisites).toBeUndefined();expect(saved.rounds![0].detectorPrerequisite).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
 });
 it('persists calculator defaults and the chosen number of rounds with no cash input',()=>{

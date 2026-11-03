@@ -11,7 +11,7 @@ import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
-import { additionIdentity, additionMirrorIdentity, qualityAdditionPrerequisites } from './qualityAddition';
+import { activeDetectorPrerequisite, additionIdentity, additionMirrorIdentity, qualityAdditionPrerequisites } from './qualityAddition';
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
 import { qualitySellStagesIdentity } from './qualitySellStages';
 import { boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
@@ -75,6 +75,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
           join([v.box, v.guard, ...versionTags(additionIdentity({ ...a, rounds: undefined, source: 'structure', structure: r.structure })).filter(t => t.startsWith('k-from') || t.startsWith('box-addition') || t.startsWith('k-min-distance'))]),
           join([box?.summary, guard?.summary]));
       }
+      const dp = activeDetectorPrerequisite(r);
+      if (dp) add(`detector-${i + 1}`, `第 ${i + 1} 次加仓 · 方向`, `${dp.featureId ?? '原探测算法（全部）'} 探测值提高 ≥ ${dp.stricterPct}%`, 'detector-prerequisite-v1', '加仓那一刻，探测读数须达到原门槛再提高这个百分比');
       qualityAdditionPrerequisites(r).forEach((f, j) => add(`direction-${i + 1}-${j + 1}`, `第 ${i + 1} 次加仓 · 方向`, `${f.label} ${f.direction} ${f.threshold}`, formulaFingerprint(f.snapshot), '加仓那一刻须满足（只读最后一根已收盘 K 线）'));
     });
   }
