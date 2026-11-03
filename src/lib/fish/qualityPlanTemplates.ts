@@ -6,6 +6,7 @@
 import type { FishQualityStudy, QualityGroup } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { freezeQualityPlan, planVersionChanges } from './qualityPlanVersions';
+import { hasPreBoxAdditionShape, withLegacyEngine } from './qualityLegacyEngine';
 
 export interface QualityPlanTemplate {
   id: string; name: string; savedAt: number; updatedAt: number;
@@ -23,7 +24,9 @@ export function saveQualityPlanTemplate(study: FishQualityStudy, plan: QualityGr
   if (!trimmed) throw new Error('请填写模板名称');
   // 模板存的是这套方案实际冻结的版本；方案本身的版本已与代码不符时不能存（否则会把新版本当成旧版本存档）
   if (plan.frozenVersions && planVersionChanges(plan).length) throw new Error('这套方案冻结的算法版本与当前代码不同，不能存为模板；请先在条件设置里重新保存');
-  const template: QualityPlanTemplate = { id: newTemplateId(), name: trimmed, savedAt: now, updatedAt: now, plan: structuredClone(plan.frozenVersions ? plan : freezeQualityPlan(plan)) };
+  // 没冻结过、又是 11-01 之前形态的方案（10-31 及更早的战役）：按旧引擎冻结，不能按当前代码记版本
+  const frozen = plan.frozenVersions ? plan : !plan.engine && hasPreBoxAdditionShape(plan) ? withLegacyEngine(plan) : freezeQualityPlan(plan);
+  const template: QualityPlanTemplate = { id: newTemplateId(), name: trimmed, savedAt: now, updatedAt: now, plan: structuredClone(frozen) };
   return { ...study, planTemplates: [...(study.planTemplates ?? []), template] };
 }
 export function deleteQualityPlanTemplate(study: FishQualityStudy, id: string, now = Date.now()): FishQualityStudy {
@@ -35,6 +38,16 @@ export function renameQualityPlanTemplate(study: FishQualityStudy, id: string, n
   if (!trimmed) throw new Error('请填写模板名称');
   if (!study.planTemplates?.some(t => t.id === id && !t.deleted)) return study;
   return { ...study, planTemplates: study.planTemplates.map(t => t.id === id ? { ...t, name: trimmed, updatedAt: now } : t) };
+}
+/**
+ * 【用户要求】2026-11-03 从交易战役存模板：只存能原样复算的方案。
+ * 战役没冻结版本清单＝算于 11-02 版本保护之前。11-01 之前形态的交给旧引擎（见 qualityLegacyEngine.ts）；
+ * 其余（11-01～11-02 之间算的）当时用的算法版本没有记录，当前代码不能保证算出同样的结果，不存。
+ */
+export function campaignPlanForTemplate(plan: QualityGroup): QualityGroup {
+  if (plan.frozenVersions || plan.engine) return plan;
+  if (hasPreBoxAdditionShape(plan)) return withLegacyEngine(plan);
+  throw new Error('这场战役算于 2026-11-02 版本保护之前，当时的算法版本没有记录，用现在的代码重跑不能保证得到同样的结果，所以不能存为模板');
 }
 /** 两台设备合并：同一模板取 updatedAt 较新的一份（含删除墓碑）。 */
 export function mergeQualityPlanTemplates(left?: readonly QualityPlanTemplate[], right?: readonly QualityPlanTemplate[]): QualityPlanTemplate[] | undefined {

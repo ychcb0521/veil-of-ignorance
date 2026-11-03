@@ -13,21 +13,28 @@ import { holdingVetoDraft, planHoldingVetoDraft } from '@/lib/fish/qualityFilter
 import { defaultQualityAddition } from '@/lib/fish/qualityAddition';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
+import { LegacyAdditionView, LegacyEngineNote } from '@/components/FishQualityLegacyAddition';
+import { hasPreBoxAdditionShape, isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
 
 import { useCampaignQualityTemplates } from '@/contexts/FishQualityContext';
 
 const ignore = () => {};
-export function FishQualityMonitorSettingsView({ plan }: { plan: QualityGroup }) {
+/** holdingOnly：只显示镜像、加仓、硬性终止与版本（持仓监测条件设置里选中旧引擎方案时用，方案卡片已在上方）。 */
+export function FishQualityMonitorSettingsView({ plan, holdingOnly = false }: { plan: QualityGroup; holdingOnly?: boolean }) {
+  // 11-01 之前形态的方案（10-31 及更早的战役）也只可能是旧引擎算的，同样按原始参数显示
+  const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
   const plans = useMemo(() => [plan], [plan]);
   const mirror = mirrorDraft(plan.mirrorTakeProfit ?? { enabled: false, gainPct: 5, sellPct: 50 });
   const addition = additionDraft(plan.addition ?? defaultQualityAddition(), plan.sellStages);
   const vetoStages = { enabled: !!plan.vetoStages?.length, mode: plan.vetoStageMode ?? 'overlay', peakBasis: plan.vetoPeakBasis ?? 'stage', stages: (plan.vetoStages ?? []).map(s => ({ afterAdditions: String(s.afterAdditions), conditions: holdingVetoDraft(s.conditions) })) };
   // 输入框、下拉、勾选一律不可操作；按钮（加仓轮次标签、ⓘ 说明）可点，改动回调为空操作
   return <div className="space-y-3 text-[11px] [&_input]:pointer-events-none [&_select]:pointer-events-none [&_textarea]:pointer-events-none" data-testid="quality-monitor-settings-view">
-    <p className="text-[10.5px] text-muted-foreground">这场战役运行时冻结的设置 · 只读</p>
-    <FishQualitySellPlansEditor plans={plans} ready={false} readOnly onSave={ignore}/>
+    {!holdingOnly && <p className="text-[10.5px] text-muted-foreground">这场战役运行时冻结的设置 · 只读</p>}
+    {legacy && <LegacyEngineNote/>}
+    {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly onSave={ignore}/>}
     <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled}/>
-    <FishQualityAdditionEditor draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>
+    {/* 旧引擎方案的加仓按 10-31 原始参数显示：新版编辑器会把它换算成箱体，显示的就不是当时的规则了 */}
+    {legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span></div>
       <FishQualityHoldingVetoEditor draft={planHoldingVetoDraft(plan.holdingVetoes)} setDraft={ignore}/>
     </section>

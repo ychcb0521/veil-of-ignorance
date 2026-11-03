@@ -17,6 +17,7 @@ import { qualitySellStagesIdentity } from './qualitySellStages';
 import { boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
 import { structureKSourceLabel } from './qualityAdditionStructure';
 import type { FishSnapshot } from './algorithm';
+import { hasPreBoxAdditionShape, isLegacyQualityPlan, legacyPlanVersions, withLegacyEngine } from './qualityLegacyEngine';
 
 export interface PlanVersionEntry {
   /** 稳定键：同一方案前后比较时按它对齐。 */
@@ -44,6 +45,8 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 
 /** 方案涉及的全部算法及其版本（顺序：卖出 → 组合切换 → 执行 → 镜像 → 硬性终止 → 加仓 → 各次加仓的箱体与方向 → 加仓后切换）。 */
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
+  // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
+  if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [];
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;
@@ -118,19 +121,27 @@ export function freezeSavedPlans(previous: readonly QualityGroup[] | undefined, 
   const prior = new Map((previous ?? []).map(p => [p.id, p]));
   return plans.map(p => {
     const b = body(p), prev = prior.get(p.id);
+    // 旧引擎方案只读：始终沿用已冻结的清单（来自模板或上次保存），参数若被改动，运行时按版本不符拦下，不因「保存」而认可
+    if (isLegacyQualityPlan(p)) return { ...b, frozenVersions: prev?.frozenVersions ?? p.frozenVersions ?? qualityPlanVersions(b) };
     if (prev?.frozenVersions && JSON.stringify(body(prev)) === JSON.stringify(b)) return { ...b, frozenVersions: prev.frozenVersions };
     return { ...b, frozenVersions: qualityPlanVersions(b) };
   });
 }
 /** 方案冻结的版本与当前代码的差异；没冻结过的旧方案视为当前版本。 */
 export const planVersionChanges = (plan: QualityGroup): PlanVersionChange[] => plan.frozenVersions ? comparePlanVersions(plan.frozenVersions, qualityPlanVersions(body(plan))) : [];
-/** 打开时补记：还没冻结的方案与模板，按当前代码补一份清单（之后代码再变就能查出来）。 */
+/**
+ * 【用户要求】2026-11-03 模板里 11-01 之前形态的方案（带入场距离）只可能是旧引擎算的：标上旧引擎，
+ * 换掉 11-03「从战役存模板」按当前代码误记的版本清单。这样新建出来的方案按 10-31 引擎算，结果与原战役一致。
+ */
+const needsLegacyEngine = (plan: QualityGroup) => !plan.engine && hasPreBoxAdditionShape(plan);
+/** 打开时补记：还没冻结的方案与模板，按当前代码补一份清单（之后代码再变就能查出来）；旧形态的模板标为旧引擎。 */
 export function backfillPlanVersions<S extends { sellPlans?: QualityGroup[]; planTemplates?: import('./qualityPlanTemplates').QualityPlanTemplate[] }>(study: S): S {
-  const plans = study.sellPlans?.some(p => !p.frozenVersions), templates = study.planTemplates?.some(t => !t.deleted && t.plan && !t.plan.frozenVersions);
+  const plans = study.sellPlans?.some(p => !p.frozenVersions), templates = study.planTemplates?.some(t => !t.deleted && t.plan && (!t.plan.frozenVersions || needsLegacyEngine(t.plan)));
   if (!plans && !templates) return study;
   return { ...study,
     ...(plans ? { sellPlans: study.sellPlans!.map(p => p.frozenVersions ? p : freezeQualityPlan(p)) } : {}),
-    ...(templates ? { planTemplates: study.planTemplates!.map(t => !t.deleted && t.plan && !t.plan.frozenVersions ? { ...t, plan: freezeQualityPlan(t.plan), versionsBackfilledAt: Date.now() } : t) } : {}) };
+    ...(templates ? { planTemplates: study.planTemplates!.map(t => !t.deleted && t.plan && needsLegacyEngine(t.plan) ? { ...t, plan: withLegacyEngine(t.plan) }
+      : !t.deleted && t.plan && !t.plan.frozenVersions ? { ...t, plan: freezeQualityPlan(t.plan), versionsBackfilledAt: Date.now() } : t) } : {}) };
 }
 /**
  * 方案会静默跟随账号里的公式（用户 2026-10-26 的要求，改公式＝本人认可）。只因公式跟随而变的指纹按当前重新冻结；

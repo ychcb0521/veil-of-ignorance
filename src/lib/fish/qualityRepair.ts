@@ -2,6 +2,7 @@ import { mirrorWeightedReturn } from './qualityMirror';
 /** Rebuild derived comparison trades only. Original versions stay in the same account's archive. */
 import { BUILTIN_FEATURES, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { shortFishHash } from './algorithm';
+import { evaluateLegacyQualitySample, isLegacyQualityPlan } from './qualityLegacyEngine';
 import { hasQualityExit, evaluateQualitySample, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult } from './quality';
 import { hasQualityCampaign, type QualityCampaignRun } from './qualityCampaignArchive';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -151,6 +152,7 @@ export async function collectQualityRepair(options: { tasks: readonly QualityRep
       if (options.signal.aborted) throw new DOMException('已暂停','AbortError');
       const task = options.tasks[cursor++]; if (!task) return;
       const result = task.error ? { key:task.key,sampleId:task.sample.id,groupId:task.plan.id,evaluatedAt:now,status:'error' as const,reason:task.error }
+        : isLegacyQualityPlan(task.plan) ? await evaluateLegacyQualitySample(task.sample,task.plan,task.observeHours,now,load,options.signal,task.key)
         : await evaluateQualitySample(task.sample,task.plan,task.observeHours,now,load,options.signal);
       if (options.signal.aborted) throw new DOMException('已暂停','AbortError');
       await options.onResult(task,result);

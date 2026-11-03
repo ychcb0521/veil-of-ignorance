@@ -1,3 +1,5 @@
+import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
+import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
 import { ADDITION_VETO_LABELS, type AdditionEntryVetoKind } from '@/lib/fish/qualityAdditionVeto';
 import { activeQualityPlanTemplates } from '@/lib/fish/qualityPlanTemplates';
 import { readQualityTableSheet } from '@/lib/fish/qualityTableExport';
@@ -217,7 +219,8 @@ function HoldingMonitorSettings({state,activeId,onSelect,done}:{state:FishQualit
   const changed=(p:QualityGroup)=>JSON.stringify(forPlan(p))!==JSON.stringify(monitorDraftOf(p));
   const extraDirty=plans.some(changed);
   const merge=(next:QualityGroup[])=>next.map(p=>{
-    if(!changed(p))return p;
+    // 【用户要求】2026-11-03 旧引擎方案不经过新版监测表单（表单会把加仓改写成箱体），原样保存
+    if(!changed(p)||isLegacyQualityPlan(p))return p;
     try { return {...p,...parseMonitorDraft(forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
   });
   return <FishQualitySellPlansEditor plans={plans} ready={state.ready} onSave={state.setSellPlans} onSelectPlan={onSelect} templates={state.savePlanTemplate&&state.deletePlanTemplate?{templates:activeQualityPlanTemplates(state.study),save:state.savePlanTemplate,remove:state.deletePlanTemplate}:undefined} onCopyPlan={(source,copy)=>setDrafts(current=>({...current,[copy.id]:{base:monitorBaseKey(copy),draft:structuredClone(forPlan(source))}}))} extraDirty={extraDirty} prepare={merge} renderHolding={view=>{
@@ -228,10 +231,15 @@ function HoldingMonitorSettings({state,activeId,onSelect,done}:{state:FishQualit
         const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+[d.addition,...d.addition.otherRounds].slice(0,Math.max(1,Number(d.addition.maxRounds)||1)).filter(r=>r.sellSwitch?.enabled).length+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
         return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>onSelect(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{p.label}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
-      {active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
+      {active&&isLegacyQualityPlan(active)?<div className="space-y-3" data-testid="quality-monitor-legacy" data-plan-id={active.id}>
+        <p className="text-xs font-medium">持仓监测 · {active.label}</p>
+        <FishQualityMonitorSettingsView plan={active} holdingOnly/>
+        <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
+        {view.error&&<p role="alert" className="text-[11px] text-destructive">{view.error}</p>}
+      </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
         allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{
           const saved=view.save(next=>next.map(p=>{
-            if(p.id!==active.id)return p;
+            if(p.id!==active.id||isLegacyQualityPlan(p))return p;
             try { return {...p,...parseMonitorDraft(forPlan(active),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
           }));
           if(saved)done();

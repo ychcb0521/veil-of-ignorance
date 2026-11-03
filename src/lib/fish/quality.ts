@@ -17,6 +17,7 @@ import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import {qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
 import type { FishReconstructionLoader } from './reconstruction';
+import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
 import { validateFishBars } from './shared';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
@@ -51,6 +52,8 @@ export interface QualityGroup {
   vetoStages?:QualityVetoStage[];vetoStageMode?:'overlay'|'replace';vetoPeakBasis?:'holding'|'stage';
   /** 【用户要求】2026-11-02 保存时冻结的版本清单（所有算法的引擎版本号与公式指纹）；与当前代码不符时拒绝运行。 */
   frozenVersions?: import('./qualityPlanVersions').PlanVersionEntry[];
+  /** 【用户要求】2026-11-03 复原旧模板：标了旧引擎的方案用冻结的 10-31 引擎计算（见 qualityLegacyEngine.ts）；缺省＝当前引擎。 */
+  engine?: import('./qualityLegacyEngine').QualityEngineId;
 }
 export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
 /** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
@@ -266,6 +269,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  if (isLegacyQualityPlan(g)) identity.push(LEGACY_QUALITY_ENGINE);
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
   const vetoStages=qualityVetoStagesIdentity(g);if(vetoStages)identity.push(vetoStages);
   const sellStages=qualitySellStagesIdentity(g);if(sellStages)identity.push(sellStages);
@@ -749,7 +753,10 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
         if (filtersOnly || options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
         const finished = cached?.complete || cached?.status === 'closed' && Number.isFinite(cached.returnPct);
         if (!finished && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) {
-          const t = performance.now(), result = await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached);
+          // 【用户要求】2026-11-03 旧模板复原：标了旧引擎的方案交给冻结的 10-31 引擎
+          const t = performance.now(), result = isLegacyQualityPlan(g)
+            ? await evaluateLegacyQualitySample(s, g, study.observeHours, now, load, signal, qualityResultKey(s, g, study.observeHours))
+            : await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached);
           options.onTiming?.({ sampleId: s.id, groupId: g.id, symbol: s.source.symbol, ms: performance.now() - t });
           options.onResult(result);
         }

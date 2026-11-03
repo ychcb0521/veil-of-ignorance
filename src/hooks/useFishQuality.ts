@@ -1,6 +1,6 @@
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
-import { deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
+import { campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
 import {preserveSourceDeletions,markSourceDeletions,type DeleteTarget} from '@/lib/fish/libraryDeletion';
@@ -359,7 +359,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const savePlanSnapshot = useCallback(async (plan: QualityGroup, name: string) => {
     if (!readyRef.current) throw new Error('账号持仓监测记录尚在恢复，请稍候');
     const savedOwner = account.current, epoch = generation.current;
-    const next = saveQualityPlanTemplate(current.current, plan, name);
+    const next = saveQualityPlanTemplate(current.current, campaignPlanForTemplate(plan), name);
     change(() => next);
     if (!await saveQualityStudy(savedOwner, next)) throw new Error('模板尚未保存成功，请保留页面并重试');
     if (epoch !== generation.current || savedOwner !== account.current) throw new Error('账号已切换，请回到原账号查看模板');
