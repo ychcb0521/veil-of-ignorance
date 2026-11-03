@@ -105,8 +105,8 @@ const field='h-8 min-w-0 rounded-md border border-border/60 bg-background px-2 t
 /** 回放预设：每组只设这三项，false＝取消勾选。 */
 const VETO_PRESETS:{name:string;detail:string;set:Partial<Record<AdditionEntryVetoKind,Partial<VetoFieldDraft>|false>>}[]=[
  {name:'保大单',detail:'冲高回落 ≥2.5 ATR 且 ≥4% · +5600.9，4 笔由平转赚、无一变差，SAPIEN 保住 +3936',set:{pullback:{atr:'2.5',pct:'4',join:'and'},'pullback-atr':false,'upper-wick':false}},
- {name:'高胜率',detail:'冲高回落·仅 ATR ≥2.5 · +2207.0，赚/亏/平 18/3/18，但 SAPIEN +3936 → +533',set:{pullback:false,'pullback-atr':{atr:'2.5'},'upper-wick':false}},
- {name:'高胜率+长上影',detail:'冲高回落·仅 ATR ≥2.5 + 长上影 近 12 根 ≥1.5 ATR 且占整根 ≥60%',set:{pullback:false,'pullback-atr':{atr:'2.5'},'upper-wick':{lookbackBars:'12',atr:'1.5',ratio:'60'}}},
+ {name:'高胜率',detail:'冲高回落·仅 ATR ≥2.5 · 44 场 +2512.9（基准 +5592.2），赚/亏/平 21/3/20，COOKIE 0 → +304，但 SAPIEN +3936 → +533',set:{pullback:false,'pullback-atr':{atr:'2.5'},'upper-wick':false}},
+ {name:'高胜率+长上影',detail:'冲高回落·仅 ATR ≥2.5 + 长上影 近 12 根 ≥1.5 ATR 且占整根 ≥60% · 44 场 +2541.2，赚/亏/平 22/3/19（比「高胜率」多救回 ONT +28.4），SAPIEN 同样 +3936 → +533',set:{pullback:false,'pullback-atr':{atr:'2.5'},'upper-wick':{lookbackBars:'12',atr:'1.5',ratio:'60'}}},
 ];
 /** 数字输入：同高、居中、等宽数字，所有条件行对齐。 */
 const cell=field+' h-7 px-1 text-center tabular-nums';
@@ -207,7 +207,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    {/* 【用户要求】2026-11-03 回放里的三组否决做成预设，点一下设好当前这一次加仓（之后仍可手改） */}
    <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted-foreground" data-testid="addition-veto-presets"><span>回放预设</span>
     {VETO_PRESETS.map(p=><button key={p.name} type="button" disabled={!d.enabled} title={p.detail} aria-label={`否决预设 ${p.name}`} className="rounded border border-border/60 px-2 py-0.5 hover:bg-muted disabled:opacity-40" onClick={()=>{const base=d.entryVetoes??vetoDraftOf(),next={...base};for(const [kind,v] of Object.entries(p.set) as [AdditionEntryVetoKind,Partial<VetoFieldDraft>|false][])next[kind]={...base[kind],...(v===false?{enabled:false}:{enabled:true,...v})};patch({entryVetoes:next});}}>{p.name}</button>)}
-    <FishQualityInfo label="否决预设说明"><div className="space-y-1.5 text-[11px]"><p>「组合算法1」44 场回放（39 笔可比，基准 +5580.4）：</p><ul className="list-disc space-y-0.5 pl-4">{VETO_PRESETS.map(p=><li key={p.name}><span className="font-medium">{p.name}</span>：{p.detail}</li>)}</ul><p className="text-muted-foreground">预设只改冲高回落、冲高回落·仅ATR、长上影线三项，其他否决保持原样；只作用于当前选中的这一次加仓。</p></div></FishQualityInfo></div>
+    <FishQualityInfo label="否决预设说明"><div className="space-y-1.5 text-[11px]"><p>「组合算法1」44 场回放（基准约 +5590；去掉最赚 2 笔后基准约 +230）：</p><ul className="list-disc space-y-0.5 pl-4">{VETO_PRESETS.map(p=><li key={p.name}><span className="font-medium">{p.name}</span>：{p.detail}</li>)}</ul><p className="text-muted-foreground">预设只改冲高回落、冲高回落·仅ATR、长上影线三项，其他否决保持原样；只作用于当前选中的这一次加仓。</p></div></FishQualityInfo></div>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
    {ADDITION_VETO_KINDS.map(kind=>{const f=d.entryVetoes?.[kind]??vetoDraftOf()[kind],off=!d.enabled||!f.enabled,set=(next:Partial<VetoFieldDraft>)=>patch({entryVetoes:{...(d.entryVetoes??vetoDraftOf()),[kind]:{...f,...next}}}),num=(key:keyof Omit<VetoFieldDraft,'enabled'|'windows'|'join'>,label:string,w='w-14')=><input aria-label={`${ADDITION_VETO_LABELS[kind]} ${label}`} type="number" step="any" disabled={off} value={f[key]} onChange={e=>set({[key]:e.target.value})} className={cell+' '+w}/>;
     return <Fragment key={kind}><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label={`启用加仓否决 ${ADDITION_VETO_LABELS[kind]}`} disabled={!d.enabled} checked={f.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={`font-medium ${f.enabled?'':'text-muted-foreground'}`}>{ADDITION_VETO_LABELS[kind]}</span></label>
