@@ -87,6 +87,24 @@ describe('native box decisions for holding additions',()=>{
   expect(holdingVetoLabel(stop('p','payoff-ratio',5000))).toBe('盈亏比 ≥ 5000R');
   expect(()=>validateHoldingVeto(stop('p','payoff-ratio',0))).toThrow('盈亏比');
  });
+ // 【用户要求】2026-11-03 几何仓位 > 门槛时至少保留 x% 开仓价有效涨幅：止损从 Kₘ 上移到 Kₘ＋x%×首次开仓价，盘中碰线卖出
+ it('raises the stop to K + x% of the first entry price once the geometric position exceeds the threshold',async()=>{
+  const o=context(sample()),base={...o,structure:{...rule(),kSource:'current' as const},maxRounds:1};
+  const plain=await findCalculatorAdditions(base);expect(plain.fills).toHaveLength(1);
+  const k=plain.fills[0].sizing!.support;
+  const locked=await findCalculatorAdditions({...base,geometricLock:{enabled:true,multiple:.01,pct:1}});
+  expect(locked.fills).toEqual(plain.fills);
+  expect(locked.stop?.cause).toMatchObject({id:'geometric-lock',kind:'addition-support',geometricLock:{threshold:.01,pct:1,k}});
+  expect(locked.stop!.cause!.threshold).toBeCloseTo(k+.9,9);expect(locked.stop!.price).toBeGreaterThanOrEqual(locked.stop!.atOpen?0:k+.9-1e-9);
+  if(plain.stop)expect(locked.stop!.at).toBeLessThanOrEqual(plain.stop.at);
+  // 几何仓位没超过门槛、或未启用：照旧碰 K
+  expect((await findCalculatorAdditions({...base,geometricLock:{enabled:true,multiple:1e5,pct:1}})).stop).toEqual(plain.stop);
+  expect((await findCalculatorAdditions({...base,geometricLock:{enabled:false,multiple:.01,pct:1}})).stop).toEqual(plain.stop);
+  const add={...defaultQualityAddition(),enabled:true,source:'structure' as const,structure:rule()},on={...add,geometricLock:{enabled:true,multiple:10,pct:1}};
+  expect(JSON.stringify(additionIdentity(on))).not.toBe(JSON.stringify(additionIdentity(add)));
+  expect(JSON.stringify(additionIdentity({...add,geometricLock:{enabled:false,multiple:10,pct:1}}))).toBe(JSON.stringify(additionIdentity(add)));
+  expect(()=>validateQualityAddition({...on,quantityMode:'calculator',geometricLock:{enabled:true,multiple:10,pct:101}})).toThrow('保住有效涨幅');
+ });
  // 【用户要求】2026-11-03「方向」探测算法条件：信号没有所选探测算法时这一轮注定不满足，不再加仓；身份与说明各自带上
  it('stops adding when the detector condition cannot be met, and gives the detector condition its own identity',async()=>{
   const o=context(sample());

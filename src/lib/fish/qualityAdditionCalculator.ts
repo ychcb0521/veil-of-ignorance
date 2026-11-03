@@ -17,6 +17,7 @@ type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAt
 interface Options extends AtrSettings {
  structure?:StructureAdditionRule;
  supportReduction?:QualitySupportReductionRule;previousReductions?:readonly QualityReductionFill[];
+ geometricLock?:import('./qualityAddition').QualityGeometricLockRule;
  previousVetoes?:readonly AdditionVetoRecord[];
  vetoes?:readonly QualityHoldingVeto[];pauseAfterAdditionCount?:number;
  candidates:AdditionCandidate[];required?:AdditionCandidate[];
@@ -85,6 +86,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const findStop=(support:number|undefined,from:number):SupportStop|undefined=>{
   if(support==null)return;
   const closes=fills.at(-1)?.structureEvidence?.guardCloses;if(closes)return findGuardStop(support,closes,from);
+  return findTouchStop(support,from);
+ };
+ /** 价格盘中碰到这条线即卖出（跳空按开盘价）。 */
+ const findTouchStop=(support:number,from:number):SupportStop|undefined=>{
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
   const search=(node:number,left:number,right:number):number=>{if(right<=first||lowTree[node]>support)return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
   const index=search(1,0,size),bar=bars[index];if(!bar)return;
@@ -111,7 +116,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   return best;
  };
  const findPositionExit=(support:number|undefined,from:number):SupportStop|undefined=>{
-  const stop0=findStop(support,from),payoffHit=findPayoff(from),stop=payoffHit&&(!stop0||payoffHit.at<stop0.at||payoffHit.at===stop0.at&&payoffHit.atOpen&&!stop0.atOpen)?payoffHit:stop0;
+  // 【用户要求】2026-11-03 几何仓位 > 门槛时，止损从 Kₘ 上移到 Kₘ＋x%×首次开仓价，至少保住 x% 的开仓价有效涨幅
+  const lockRule=o.geometricLock?.enabled?o.geometricLock:undefined;let lockStop:SupportStop|undefined,locked=false;
+  if(lockRule&&support!=null&&fills.length){
+   const h=holdings(Number.MAX_SAFE_INTEGER),M=h.held/(o.notional/o.entryPrice),line=support+lockRule.pct/100*o.entryPrice;
+   if(M>lockRule.multiple&&line>support){locked=true;const hit=findTouchStop(line,from);if(hit)lockStop={...hit,cause:{id:'geometric-lock',kind:'addition-support',label:`几何仓位 > ${lockRule.multiple} 保住有效涨幅`,direction:'<=',threshold:line,geometricLock:{multiple:M,threshold:lockRule.multiple,pct:lockRule.pct,line,k:support}}};}
+  }
+  const stop0=locked?lockStop:findStop(support,from),payoffHit=findPayoff(from),stop=payoffHit&&(!stop0||payoffHit.at<stop0.at||payoffHit.at===stop0.at&&payoffHit.atOpen&&!stop0.atOpen)?payoffHit:stop0;
   if(!fills.length||support==null||!profitRules.length)return stop;
   const initialCoins=o.notional/o.entryPrice,heldCoins=initialCoins*(1-halfMirror.fraction)+fills.reduce((n,a)=>n+a.quantity,0)-reductions.reduce((n,r)=>n+r.quantity,0),multiple=heldCoins/initialCoins;
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));

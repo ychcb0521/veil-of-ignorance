@@ -19,6 +19,8 @@ export interface QualityAdditionRule {
    * 在下一分钟开盘按 X＝(S−K′)÷(T−K′) 减仓（S 为当前持仓保本价，K′＝新支撑 − n×ATR），止损随之下移到 K′；X 超过 maxPct 或无法保本时不减。
    */
   supportReduction?: QualitySupportReductionRule;
+  /** 【用户要求】2026-11-03 几何仓位 > multiple 时，止损从 Kₘ 上移到 Kₘ＋pct%×首次开仓价，至少保住 pct% 的开仓价有效涨幅（各次通用）。 */
+  geometricLock?: QualityGeometricLockRule;
   /** 加仓否决（不再加仓）：任一启用条件在加仓那一刻成立，就跳过这一次（见 qualityAdditionVeto）。 */
   /** 【用户要求】2026-11-03「方向」里的探测算法条件：加仓那一刻所选探测算法的读数须达到原门槛再提高 stricterPct%（调整量＝原门槛绝对值 × 百分比）。featureId 不填＝这条信号的全部原探测算法同时满足。 */
   detectorPrerequisite?: QualityDetectorPrerequisite;
@@ -28,6 +30,8 @@ export interface QualityAdditionRule {
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
+export interface QualityGeometricLockRule { enabled: boolean; multiple: number; pct: number }
+export const defaultGeometricLock = (): QualityGeometricLockRule => ({ enabled: false, multiple: 10, pct: 1 });
 export interface QualitySupportReductionRule { enabled: boolean; minDropAtr: number; maxPct: number;
   /** 【用户要求】2026-11-02 K 连续下移达到这个次数就全仓卖出（中间有加仓则重新计数）；不填＝不启用。 */
   exitAfterDrops?: number }
@@ -96,6 +100,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
   ...(rule.quantityMode==='calculator'?[['addition-k-atr-no-entry-distance-v2',atrIdentity(rule),rule.rounds?.map(atrIdentity)??null]]:[]),
+  ...(rule.geometricLock?.enabled?[['geometric-lock-v1',rule.geometricLock.multiple,rule.geometricLock.pct]]:[]),
   ...(rule.supportReduction?.enabled?[['support-drop-reduction-v1',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct,...(rule.supportReduction.exitAfterDrops!=null?[['exit-after-support-drops-v1',rule.supportReduction.exitAfterDrops]]:[])]]:[]),
   // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
   ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[])];
@@ -111,6 +116,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
   validateAdditionVetoes(rule.entryVetoes);
   for(const r of [rule,...(rule.rounds??[])]){const dp=activeDetectorPrerequisite(r);if(dp&&(!Number.isFinite(dp.stricterPct)||dp.stricterPct<0||dp.stricterPct>1000))throw new Error('方向 · 探测算法：门槛提高幅度须为 0–1000%');}
+  if(rule.geometricLock?.enabled){const g=rule.geometricLock;if(!Number.isFinite(g.multiple)||g.multiple<=0||g.multiple>1e6)throw new Error('保住有效涨幅：几何仓位门槛须为大于 0 的数字');if(!Number.isFinite(g.pct)||g.pct<0||g.pct>100)throw new Error('保住有效涨幅：百分比须为 0–100%');}
   if(rule.supportReduction?.enabled){const r=rule.supportReduction;if(!Number.isFinite(r.minDropAtr)||r.minDropAtr<0||r.minDropAtr>20)throw new Error('支撑下移减仓：触发的下移幅度须为 0–20 倍 ATR');if(!Number.isFinite(r.maxPct)||r.maxPct<=0||r.maxPct>100)throw new Error('支撑下移减仓：单次减仓上限须为 0–100%');if(r.exitAfterDrops!=null&&(!Number.isInteger(r.exitAfterDrops)||r.exitAfterDrops<1||r.exitAfterDrops>20))throw new Error('K 连续下移全仓卖出：次数须为 1–20 的整数');}
   if(rule.quantityMode==='calculator'){
     const atr=qualityAdditionAtrSettings(rule);
@@ -130,7 +136,7 @@ function additionFormulaLabel(rule:QualityAdditionRule){
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
   return rounds.some(r=>qualityAdditionAtrSettings(r).supportOffsetAtr!==first.supportOffsetAtr)?'逐轮 ATR 倍数独立设置':`K=T−${first.supportOffsetAtr}ATR`;
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${activeDetectorPrerequisite(rule)?` 且 ${activeDetectorPrerequisite(rule)!.featureId??'原探测算法'} 探测值达原门槛再提高 ${activeDetectorPrerequisite(rule)!.stricterPct}%`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`镜像止盈后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损${rule.supportReduction?.enabled?` · 支撑下移 ≥ ${rule.supportReduction.minDropAtr} ATR 减仓（单次 ≤ ${rule.supportReduction.maxPct}%）${rule.supportReduction.exitAfterDrops!=null?`，连续下移 ${rule.supportReduction.exitAfterDrops} 次全仓卖出`:''}`:''}`:rule.quantityMode==='entry'?'与镜像止盈后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${activeDetectorPrerequisite(rule)?` 且 ${activeDetectorPrerequisite(rule)!.featureId??'原探测算法'} 探测值达原门槛再提高 ${activeDetectorPrerequisite(rule)!.stricterPct}%`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`镜像止盈后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损${rule.geometricLock?.enabled?` · 几何仓位 > ${rule.geometricLock.multiple} 保住有效涨幅 ${rule.geometricLock.pct}%`:''}${rule.supportReduction?.enabled?` · 支撑下移 ≥ ${rule.supportReduction.minDropAtr} ATR 减仓（单次 ≤ ${rule.supportReduction.maxPct}%）${rule.supportReduction.exitAfterDrops!=null?`，连续下移 ${rule.supportReduction.exitAfterDrops} 次全仓卖出`:''}`:''}`:rule.quantityMode==='entry'?'与镜像止盈后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],

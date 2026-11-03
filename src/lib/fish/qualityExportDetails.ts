@@ -37,6 +37,7 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
     else {
       add(plan, '加仓', '总设置', additionLabel(a), versions.get('addition')?.version ?? '');
       if (a.supportReduction?.enabled) add(plan, '加仓', '支撑线下移减仓', `下移 ≥ ${a.supportReduction.minDropAtr} ATR · 单次最多减 ${a.supportReduction.maxPct}%${a.supportReduction.exitAfterDrops != null ? ` · K 连续下移 ${a.supportReduction.exitAfterDrops} 次全仓卖出` : ''}`);
+      if (a.geometricLock?.enabled) add(plan, '加仓', '保住有效涨幅', `几何仓位 > ${a.geometricLock.multiple} 时止损上移到 Kₘ＋${a.geometricLock.pct}%×首次开仓价，盘中碰线卖出全部持仓`);
       (a.rounds?.length ? a.rounds : [a]).forEach((r, i) => {
         const n = `第 ${i + 1} 次加仓`, dp = activeDetectorPrerequisite(r);
         const direction = [...qualityAdditionPrerequisites(r).map(f => `${f.label} ${f.direction} ${f.threshold}`), ...(dp ? [`${dp.featureId ?? '原探测算法（全部）'} 探测值比原门槛提高 ≥ ${dp.stricterPct}%`] : []), ...(r.minGainPct != null ? [`相对最新成本线 S 上涨 ≥ ${r.minGainPct}%`] : [])];

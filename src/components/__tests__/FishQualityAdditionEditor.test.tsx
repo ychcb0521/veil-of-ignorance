@@ -1,7 +1,7 @@
 import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import { afterEach,expect,it } from 'vitest';
 import { useState } from 'react';
-import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor } from '../FishQualityAdditionEditor';
+import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor,GuardLineNotes } from '../FishQualityAdditionEditor';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
@@ -103,6 +103,23 @@ it('offers the DBL-5 guard line as K with editable trend / range buffers and clo
  fireEvent.change(screen.getByLabelText('震荡期防守冗余'),{target:{value:'1.5'}});expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('5 分钟收盘跌破 K 即卖出');
  const rule=save();expect(rule.rounds[0].structure).toMatchObject({kSource:'guard',definition:{DBL5_config:{guard_range_atr:1.5}}});
  fireEvent.change(screen.getByLabelText('箱体加仓算法'),{target:{value:'sbs5m'}});expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect([...(screen.getByLabelText('K基准箱体') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['previous','current']);
+});
+// 【用户要求】2026-11-03 防守线说明：是哪条线、虚线算不算、断掉意味着什么
+it('explains the guard line next to its settings: which line, solid vs dashed, what a break means',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+ expect(screen.getByRole('button',{name:'防守线说明'})).toBeInTheDocument();
+ cleanup();render(<GuardLineNotes/>);const notes=screen.getByTestId('guard-line-notes');
+ for(const text of ['蓝色加粗线','实线＝上涨期','虚线＝震荡期','影线刺穿不算','断掉意味着什么','不会加仓','冻结'])expect(notes).toHaveTextContent(text);
+});
+// 【用户要求】2026-11-03 几何仓位 > 10 时至少保留 x% 开仓价有效涨幅，x 由用户设置、默认 1%
+it('saves the geometric-position lock in 卖出, default off with 10× and 1%',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('几何仓位大时保住有效涨幅')).not.toBeChecked();expect(screen.getByLabelText('几何仓位门槛')).toHaveValue(10);expect(screen.getByLabelText('保留开仓价有效涨幅百分比')).toHaveValue(1);
+ expect(save().geometricLock).toBeUndefined();
+ fireEvent.click(screen.getByLabelText('几何仓位大时保住有效涨幅'));fireEvent.change(screen.getByLabelText('保留开仓价有效涨幅百分比'),{target:{value:'2.5'}});
+ const rule=save();expect(rule.geometricLock).toEqual({enabled:true,multiple:10,pct:2.5});
+ expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+ const bad=additionDraft(rule);bad.geometricLock={...bad.geometricLock!,pct:''};expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('保住有效涨幅');
 });
 it('rejects a blank, negative or non-finite n and names the round',()=>{
  const draft={...additionDraft(),enabled:true};
