@@ -9,6 +9,13 @@ export const FISH_THRESHOLD = 0.3;
 export class FishError extends Error { constructor(message: string, readonly kind: 'gap' | 'readings' | 'failed' | 'banned' | 'history' | 'skipped', readonly detail?: { path?: string; status?: number }) { super(message); } }
 const check = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 export const FISH_REQUEST_TIMEOUT_MS = 30_000;
+/** 单次行情请求超时（与其它失败区分开：只有超时才自动重试）。 */
+export class FishTimeoutError extends FishError {}
+/**
+ * 【用户要求】2026-11-04「按照模版选的算法，运行不出来」：经代理访问币安时，偶尔有一次请求卡住几十秒（实测 6 次里 1 次 54 秒、1 次 60 秒未回），
+ * 一笔要取十几段 K 线，只要一段卡住整笔就报超时。卡住的请求换一个新请求通常立刻返回，所以超时后自动再试，最多再试这么多次。
+ */
+export const FISH_TIMEOUT_RETRIES = 2;
 /** Bound both fetch and response-body reads, and release the shared slot even if a request ignores abort. */
 export function withFishRequestDeadline<T>(task: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, timeoutMs = FISH_REQUEST_TIMEOUT_MS): Promise<T> {
   check(signal);
@@ -20,7 +27,7 @@ export function withFishRequestDeadline<T>(task: (signal: AbortSignal) => Promis
       if (success) resolve(value as T); else reject(value);
     };
     const cancel = () => { finish(false, new DOMException('已取消', 'AbortError')); controller.abort(); };
-    const timer = setTimeout(() => { finish(false, new FishError(`行情请求超过 ${timeoutMs / 1000} 秒未返回，请重试`, 'failed')); controller.abort(); }, timeoutMs);
+    const timer = setTimeout(() => { finish(false, new FishTimeoutError(`行情请求超过 ${timeoutMs / 1000} 秒未返回，请重试`, 'failed')); controller.abort(); }, timeoutMs);
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) { cancel(); return; }
     Promise.resolve().then(() => { check(controller.signal); return task(controller.signal); }).then(value => finish(true, value), error => finish(false, error));

@@ -5,7 +5,7 @@ import {nativeFishInterval,fishBarLabel} from './periods';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { parseBinanceKlineRow } from '@/lib/deepRsa/window';
-import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, withFishRequestDeadline, validateFishBars } from './shared';
+import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, withFishRequestDeadline, validateFishBars, FishTimeoutError, FISH_TIMEOUT_RETRIES, FISH_REQUEST_TIMEOUT_MS, fishDelay } from './shared';
 /** 只读代理（Supabase Edge Function fish-market-proxy）没部署时的说明。 */
 export const PROXY_MISSING='只读代理未部署（Supabase 上没有 fish-market-proxy 函数），需要在 Lovable 里部署这个 Edge Function';
 import { EXCHANGE_NAMES, AUDITED_EXCHANGES, type FishExchange, type FishMarket } from './exchanges';
@@ -238,8 +238,9 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
     if(/[一-鿿]/.test(text))return text.slice(0,240);
     return body?.label?`上游错误代码 ${body.label}`:body?.code?`上游业务代码 ${body.code}`:'上游请求未成功（可检查代理是否已随站点发布）';
   };
-  async function read(url:string,path:string,weight:number,signal:AbortSignal):Promise<unknown>{
-    const result=await pool.run(async()=>{
+  async function read(url:string,path:string,weight:number,signal:AbortSignal,attempt=0):Promise<unknown>{
+    let result:{data:unknown}|{wait:number};
+    try{result=await pool.run(async()=>{
       abort(signal);if(exchange==='binance')assertBinancePublicAllowed();const wait=budget.tryTake(weight);if(wait)return {wait};
       return withFishRequestDeadline(async requestSignal => {
       const response=await fetcher.call(globalThis,url,{signal:requestSignal});
@@ -252,9 +253,15 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
       if((exchange==='okx'&&j?.code!==undefined&&j.code!=='0')||(exchange==='bitget'&&j?.code!==undefined&&j.code!=='00000')||(exchange==='gate'&&j?.label))throw context(path,`HTTP ${response.status}：${explain(j)}`,response.status);
       return {data:body};
       }, signal);
-    },signal);
+    },signal);}
+    catch(error){
+      // 卡住的请求换一个新请求再试（照常计入限频额度）；连续超时才报错
+      if(!(error instanceof FishTimeoutError)||signal.aborted)throw error;
+      if(attempt>=FISH_TIMEOUT_RETRIES)throw new FishError(`行情请求连续 ${attempt+1} 次超过 ${FISH_REQUEST_TIMEOUT_MS/1000} 秒未返回（网络不稳），请重试`,'failed',{path});
+      await fishDelay(1000*(attempt+1),signal);return read(url,path,weight,signal,attempt+1);
+    }
     if('data' in result)return result.data;
-    await budget.wait(result.wait,signal);return read(url,path,weight,signal);
+    await budget.wait(result.wait,signal);return read(url,path,weight,signal,attempt);
   }
   // 只读代理没部署（404）就别一直走代理：后续请求恢复直连，并把原因说清楚
   const proxyMissing=(error:unknown)=>error instanceof FishError&&error.message.includes(PROXY_MISSING);
