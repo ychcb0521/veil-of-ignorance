@@ -110,3 +110,31 @@ describe('当前引擎 · 指标 S/T/K', () => {
     expect(JSON.stringify(additionIdentity(sttk().addition))).toContain('gain-basis-average-v1');
   });
 });
+
+/** 【用户要求】2026-11-04 持仓监测战役「导出详细信息」：跨币种分析要的距离一律另给 ATR 倍数与百分比。 */
+describe('导出详细信息', () => {
+  it('RAVE 战役：概要、组合算法、加仓逐次（S / K / ATR 与跨币种口径）、方案参数原文', async () => {
+    const { buildQualityCampaignData } = await import('@/lib/fish/qualityCampaigns');
+    const { qualityCampaignSheets, qualityCampaignExportName } = await import('@/lib/fish/qualityCampaignExport');
+    const { buildXlsxBytes } = await import('@/lib/xlsxWorkbook');
+    const result = await evaluateLegacyQualitySample(fixture.sample, fixture.plan, fixture.observeHours, now, loader(), signal(), 'k');
+    const { campaign } = buildQualityCampaignData('u', { sample: fixture.sample, plan: fixture.plan, result, detectors: [], observeHours: 0, firstEvaluatedAt: now }, 'sell');
+    const sheets = qualityCampaignSheets(campaign), by = (n: string) => sheets.find(s => s.name === n)!;
+    expect(sheets.map(s => s.name)).toEqual(['概要', '组合算法', '加仓逐次', '未加仓与否决', '减仓', '交易事件', '方案参数（原文）']);
+    const summary = new Map(by('概要').rows.map(r => [r[0], r[1]]));
+    expect(summary.get('标的')).toBe('RAVEUSDT'); expect(summary.get('加仓次数')).toBe(7); expect(summary.get('已实现盈亏 USDT')).toBe(10027.3816);
+    expect(String(summary.get('卖出原因'))).toContain('持仓过程动态最大回撤');
+    const head = by('加仓逐次').columns.map(c => c.header), rows = by('加仓逐次').rows, col = (h: string) => head.indexOf(h);
+    expect(rows).toHaveLength(7);
+    expect(rows[0][col('加仓价 T')]).toBe(0.48254); expect(rows[0][col('成本线 S')]).toBe(0.397);
+    expect(rows[1][col('成本线 S')]).toBe(rows[0][col('K')]);
+    expect(rows[0][col('T−S（ATR）')]).toBeCloseTo(6.22, 1); expect(rows[0][col('要求入场距离 ATR')]).toBe(2); expect(rows[0][col('位置')]).toBe('指标 · S / T / K');
+    expect(String(rows[0][col('加仓条件读数')])).toContain('状态 S 原始值 > 0.7');
+    const plan = by('组合算法').rows.map(r => r.join(' | '));
+    expect(plan.some(r => r.includes('第 1 次加仓') && r.includes('入场距离 T ≥ S＋2×ATR') && r.includes('K＝T−1.5×ATR'))).toBe(true);
+    expect(plan.some(r => r.includes('相对持仓均价 上涨 ≥ 10%'))).toBe(true);
+    expect(by('方案参数（原文）').rows).toContainEqual(['addition.rounds[0].entryBufferAtr', 2]);
+    expect(qualityCampaignExportName(campaign, Date.UTC(2026, 10, 4))).toMatch(/^持仓监测-RAVEUSDT-.+\.xlsx$/);
+    expect(buildXlsxBytes(sheets).length).toBeGreaterThan(1000);
+  }, 120_000);
+});

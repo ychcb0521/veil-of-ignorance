@@ -2837,7 +2837,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             title="战役元数据"
             testId="campaign-metadata"
             items={buildCampaignMetadataItems(campaign, objectiveOperationTime, campaignMetadataMetrics)}
-            footer={campaign.comparison?.monitorPlan ? <QualityMonitorSettingsButton plan={campaign.comparison.monitorPlan}/> : undefined}
+            footer={campaign.comparison?.monitorPlan ? <QualityMonitorSettingsButton plan={campaign.comparison.monitorPlan} campaign={campaign}/> : undefined}
           />
 
           <CampaignPnlOverviewPanel

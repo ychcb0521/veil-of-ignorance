@@ -15,6 +15,8 @@ import { qualitySellStagesLabel } from './qualitySellStages';
 import { qualityVetoStagesLabel } from './qualityVetoStages';
 import { qualityPlanVersions } from './qualityPlanVersions';
 import { qualityGeometricPosition, qualityPayoffRatio, qualityRelativeGain } from './qualityPresentation';
+import { hasPreBoxAdditionShape, isLegacyQualityPlan, LEGACY_ENGINE_LABEL } from './qualityLegacyEngine';
+import type { QualityAdditionRoundRule } from './qualityAddition';
 
 const time = (t?: number | null) => t ? new Date(t + 8 * 3600000).toISOString().slice(0, 19).replace('T', ' ') : '';
 const price = (x?: number | null) => x != null && Number.isFinite(x) ? +x.toPrecision(8) : null;
@@ -26,6 +28,15 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
   const add = (plan: QualityGroup, part: string, item: string, value: string, version = '') => rows.push([plan.label, part, item, value, version]);
   for (const plan of plans) {
     const versions = new Map(qualityPlanVersions(plan).map(v => [v.key, v]));
+    // 【用户要求】2026-11-04 10-31 旧方案（旧引擎或旧形态）：入场距离存在 entryBufferAtr、涨幅门槛相对持仓均价
+    const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
+    if (legacy) add(plan, '计算引擎', '引擎', isLegacyQualityPlan(plan) ? `${LEGACY_ENGINE_LABEL}（冻结，与原战役逐位一致）` : '10-31 时的方案形态（指标＋入场距离）', versions.get('engine')?.version ?? '');
+    const entryDistance = (r: QualityAdditionRoundRule) => legacy ? r.entryBufferAtr ?? 2 : r.entryDistanceAtr;
+    const position = (r: QualityAdditionRoundRule) => r.structure ? structureAdditionLabel(r.structure)
+      : r.source === 'custom' ? (() => { const t = (r.conditions?.length ? r.conditions : r.condition ? [r.condition] : [])[0], d = entryDistance(r);
+        return `指标 · S / T / K：${t ? `${t.label} ${t.direction} ${t.threshold}` : '未设加仓条件'}${d != null ? ` · 入场距离 T ≥ S＋${d}×ATR` : ' · 不查入场距离'} · K＝T−${r.supportOffsetAtr ?? 1.5}×ATR（S＝成本线：首次加仓为首次买入价，之后为上一次的 K）`; })()
+      : '—';
+    const gainText = (r: QualityAdditionRoundRule) => `${legacy || r.gainBasis === 'average' ? '相对持仓均价' : '相对最新成本线 S'} 上涨 ≥ ${r.minGainPct}%`;
     add(plan, '卖出', '卖出算法', qualityRuleText(plan), versions.get('sell')?.version ?? '');
     if (plan.combo) add(plan, '卖出', '组合切换', `涨幅 ≥ ${plan.combo.switchPct}% 后改用 ${plan.combo.after.label} ${plan.combo.after.rule.direction} ${plan.combo.after.rule.threshold}`, versions.get('combo')?.version ?? '');
     add(plan, '卖出', '执行方式', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : '5 分钟收盘确认', versions.get('execution')?.version ?? '');
@@ -41,11 +52,11 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
       if (a.geometricLock?.enabled) add(plan, '加仓', '保住有效涨幅', `几何仓位 > ${a.geometricLock.multiple} 时止损上移到 Kₘ＋${a.geometricLock.pct}%×首次开仓价，盘中碰线卖出全部持仓`);
       (a.rounds?.length ? a.rounds : [a]).forEach((r, i) => {
         const n = `第 ${i + 1} 次加仓`, dp = activeDetectorPrerequisite(r);
-        const direction = [...qualityAdditionPrerequisites(r).map(f => `${f.label} ${f.direction} ${f.threshold}`), ...(dp ? [`${dp.featureId ?? '原探测算法（全部）'} 探测值比原门槛提高 ≥ ${dp.stricterPct}%`] : []), ...(r.minGainPct != null ? [`相对最新成本线 S 上涨 ≥ ${r.minGainPct}%`] : [])];
+        const direction = [...qualityAdditionPrerequisites(r).map(f => `${f.label} ${f.direction} ${f.threshold}`), ...(dp ? [`${dp.featureId ?? '原探测算法（全部）'} 探测值比原门槛提高 ≥ ${dp.stricterPct}%`] : []), ...(r.minGainPct != null ? [gainText(r)] : [])];
         add(plan, n, '方向', direction.length ? direction.join(' 且 ') : '无');
         const vetoes = activeAdditionVetoes(r.entryVetoes);
         add(plan, n, '否决', vetoes.length ? vetoes.map(additionVetoLabel).join('；') : '无');
-        add(plan, n, '位置', r.structure ? structureAdditionLabel(r.structure) : '—', versions.get(`box-${i + 1}`)?.version ?? '');
+        add(plan, n, '位置', position(r), versions.get(`box-${i + 1}`)?.version ?? versions.get(`trigger-${i + 1}`)?.version ?? '');
         const stage = plan.vetoStages?.find(s => s.afterAdditions === i + 1), sell = plan.sellStages?.find(s => s.afterAdditions === i + 1);
         add(plan, n, '卖出', ['碰到 K 卖出全部持仓', ...(stage ? [`否决：${stage.conditions.filter(c => c.enabled).map(c => holdingVetoLabel(c)).join(' 或 ')}`] : []), ...(sell ? [`改用 ${sell.label} ${sell.rule.direction} ${sell.rule.threshold}`] : [])].join('；'));
       });

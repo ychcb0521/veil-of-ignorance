@@ -2,7 +2,8 @@
  * 【用户要求】2026-11-02 交易战役「战役元数据」底部的「持仓监测」：点开后在卡片上完整呈现这场战役当时的条件设置，
  * 形式与内容跟「持仓监测 · 条件设置」一致——直接复用同一套编辑器，只是任何修改都不生效（只读），加仓轮次的标签页仍可切换查看。
  */
-import { Activity, BookmarkPlus } from 'lucide-react';
+import { Activity, BookmarkPlus, Download } from 'lucide-react';
+import type { TradeCampaign } from '@/types/journal';
 import { useMemo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { FishQualitySellPlansEditor } from '@/components/FishQualitySellPlansEditor';
@@ -42,7 +43,15 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false }: { 
   </div>;
 }
 /** 战役元数据底部的入口按钮。 */
-export function QualityMonitorSettingsButton({ plan }: { plan: QualityGroup }) {
+export function QualityMonitorSettingsButton({ plan, campaign }: { plan: QualityGroup; campaign?: TradeCampaign }) {
+  // 【用户要求】2026-11-04 持仓监测战役可导出详细信息，用于跨币种的适配性分析和泛化应用
+  const [exported, setExported] = useState(''), [exportError, setExportError] = useState('');
+  const exportDetail = async () => {
+    if (!campaign) return;
+    setExportError(''); setExported('');
+    try { const { downloadQualityCampaignDetail } = await import('@/lib/fish/qualityCampaignExport'); setExported(downloadQualityCampaignDetail(campaign)); }
+    catch (cause) { setExportError(cause instanceof Error ? cause.message : '导出失败，请重试'); }
+  };
   const [open, setOpen] = useState(false), [savingForm, setSavingForm] = useState(false);
   const [name, setName] = useState(plan.label), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
   const templates = useCampaignQualityTemplates();
@@ -57,6 +66,11 @@ export function QualityMonitorSettingsButton({ plan }: { plan: QualityGroup }) {
     <button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="查看持仓监测设置" title="查看这场战役当时的持仓监测条件设置"><Activity aria-hidden className="h-3.5 w-3.5"/>持仓监测</button>
   </PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain">
     <p className="mb-2 text-xs font-medium">持仓监测 · {plan.label}</p>
+    {campaign && <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px]">
+      <button type="button" className="inline-flex items-center gap-1 rounded border border-border/60 px-2 py-1 hover:bg-muted" title="导出这场战役的整套方案、买入、每次加仓（含 S / K / ATR 及跨币种可比的 ATR 倍数与百分比）、未加仓理由、卖出与各项结果" onClick={() => void exportDetail()}><Download className="h-3.5 w-3.5"/>导出详细信息</button>
+      {exported && <span role="status" className="text-primary">已导出 {exported}</span>}
+      {exportError && <span role="alert" className="text-destructive">{exportError}</span>}
+    </div>}
     {templates?.save && <div className="mb-3 space-y-2 rounded border border-border/60 p-2 text-[11px]">
       {!savingForm ? <button type="button" className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-muted" onClick={() => { templates.activate(); setName(plan.label); setError(''); setMessage(''); setSavingForm(true); }}><BookmarkPlus className="h-3.5 w-3.5"/>保存为模板</button> : <form className="space-y-2" onSubmit={event => { event.preventDefault(); void save(); }}>
         <p>保存这场战役当时的整套组合策略，之后可从模板新建方案。</p>
