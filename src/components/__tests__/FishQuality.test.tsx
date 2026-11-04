@@ -1027,7 +1027,7 @@ it('creates a frozen routed plan from the template library without flattening it
  s.study.planTemplates=[{id:'hybrid-tpl',name:'结构为底·强势进攻',savedAt:1,updatedAt:1,plan:p}];s.savePlanTemplate=vi.fn();s.deletePlanTemplate=vi.fn();
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));
  fireEvent.click(screen.getByRole('button',{name:'用模板 结构为底·强势进攻 新建方案'}));
- expect(screen.getByTestId('quality-router-view')).toHaveTextContent('此前已收盘');
+ expect(screen.getByTestId('quality-router-editor')).toHaveTextContent('此前已收盘');
  fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0].at(-1)!;expect(saved.router).toEqual(p.router);expect(saved.id).not.toBe(p.id);expect(s.start).not.toHaveBeenCalled();
 },60000);
@@ -1045,5 +1045,39 @@ it.each([true,false])('saves a routed template and explicitly starts selected si
  const run=screen.getByRole('button',{name:'保存并开始监测'});expect(screen.getByRole('button',{name:'保存方案'})).toBeEnabled();expect(s.start).not.toHaveBeenCalled();
  if(!selected){expect(run).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'保存方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();}
  else{expect(run).toBeEnabled();fireEvent.click(run);expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(s.start).mock.invocationCallOrder[0]);}
- expect(screen.queryByTestId('quality-router-view')).toBeNull();
+ expect(screen.queryByTestId('quality-router-editor')).toBeNull();
+},60000);
+
+it('edits a copied routed plan, saves and runs its new version, and saves it as a separate template',async()=>{
+ const {freezeQualityPlan,planVersionChanges}=await import('@/lib/fish/qualityPlanVersions');
+ const {replaceQualitySellPlans}=await import('@/lib/fish/qualitySellPlans');
+ const {saveQualityPlanTemplate}=await import('@/lib/fish/qualityPlanTemplates');
+ const {defaultStructureAddition}=await import('@/lib/fish/qualityAdditionStructure');
+ const {makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters');
+ const {BUILTIN_FEATURES}=await import('@/lib/deepDig/features');
+ const prerequisite=makeQualityBuyFilter('state:state','>',.65,true,BUILTIN_FEATURES);
+ const s=state(),structure={...s.study.sellPlans![0],mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{enabled:true,source:'structure' as const,stricterPct:10,quantityMode:'calculator' as const,maxRounds:3,repeat:true,structure:defaultStructureAddition(),rounds:[0,1,2].map(()=>({source:'structure' as const,stricterPct:10,structure:defaultStructureAddition(),prerequisites:[prerequisite]}))}};
+ const original=freezeQualityPlan({...structure,router:{version:'second-structural-addition-state-router-v1',afterAdditions:2,threshold:.9,structure,attack:{...structuredClone(structure),id:'attack'}}});
+ const preserved=structuredClone(original);s.study.sellPlans=[original];s.study.planTemplates=[{id:'original',name:'原模板',savedAt:1,updatedAt:1,plan:structuredClone(original)}];
+ s.setSellPlans=vi.fn(plans=>{s.study=replaceQualitySellPlans(s.study,plans);});
+ s.savePlanTemplate=vi.fn((id,name)=>{s.study=saveQualityPlanTemplate(s.study,s.study.sellPlans!.find(p=>p.id===id)!,name);});s.deletePlanTemplate=vi.fn();
+ const view=render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:'复制卖出算法 1'}));
+ const copyEditor=screen.getAllByTestId('quality-router-editor').at(-1)!,shared=within(copyEditor).getByTestId('router-branch-structure');
+ fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));expect(s.start).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('请填写分支状态 S 门槛');
+ fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:'.8'}});
+ fireEvent.change(within(shared).getByLabelText('镜像止盈卖出百分比'),{target:{value:'23'}});
+ fireEvent.change(within(shared).getByLabelText('卖出算法 1 门槛'),{target:{value:'.45'}});
+ fireEvent.click(within(copyEditor).getByRole('tab',{name:'进攻分支'}));
+ fireEvent.change(within(copyEditor).getByTestId('router-branch-attack').querySelector('[aria-label="最多加仓次数"]')!,{target:{value:'4'}});
+ // Switching back keeps unfinished edits; the root action builds both branch forms without an inner save.
+ fireEvent.click(within(copyEditor).getByRole('tab',{name:'结构分支'}));expect(within(shared).getByLabelText('镜像止盈卖出百分比')).toHaveValue(23);
+ fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));expect(s.start).toHaveBeenCalledOnce();
+ const copied=s.study.sellPlans![1];expect(planVersionChanges(copied)).toEqual([]);expect(copied.router!.threshold).toBe(.8);
+ expect(copied.router!.structure.rule!.threshold).toBe(.45);expect(copied.router!.attack.rule!.threshold).toBe(.45);
+ expect(copied.router!.structure.mirrorTakeProfit!.sellPct).toBe(23);expect(copied.router!.attack.mirrorTakeProfit!.sellPct).toBe(23);
+ expect(copied.router!.attack.addition!.maxRounds).toBe(4);expect(copied.router!.structure.addition!.maxRounds).toBe(3);
+ expect(s.study.sellPlans![0]).toEqual(preserved);expect(s.study.planTemplates![0].plan).toEqual(preserved);
+ s.study=JSON.parse(JSON.stringify(s.study));view.rerender(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:'把卖出算法 2 存为模板'}));fireEvent.change(screen.getByLabelText('模板名称'),{target:{value:'副本新组合'}});fireEvent.click(screen.getByRole('button',{name:'保存模板'}));
+ expect(s.savePlanTemplate).toHaveBeenCalledWith(copied.id,'副本新组合');expect(s.study.planTemplates).toHaveLength(2);expect(s.study.planTemplates![1].plan!.router!.threshold).toBe(.8);expect(planVersionChanges(s.study.planTemplates![1].plan!)).toEqual([]);
 },60000);
