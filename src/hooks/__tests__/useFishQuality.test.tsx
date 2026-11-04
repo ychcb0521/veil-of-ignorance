@@ -658,3 +658,16 @@ it('persists a campaign snapshot absent from current plans and exposes it to the
   expect(h.result.current.study.sellPlans).toEqual(before);
   expect(monitoring.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
 });
+
+it('backfills existing study templates into the independent system-archived catalog on load',async()=>{
+ const {saveQualityPlanTemplate}=await import('@/lib/fish/qualityPlanTemplates');
+ const {makeQualitySellPlan}=await import('@/lib/fish/qualitySellPlans');
+ const {BUILTIN_FEATURES}=await import('@/lib/deepDig/features');
+ const {readPersistedStateRaw,clearPersistedStateMemoryForTests}=await import('@/lib/persistedStateStorage');
+ clearPersistedStateMemoryForTests();localStorage.removeItem('sim_a_quality_plan_templates_v1');
+ const plan=makeQualitySellPlan('state:state','<',.5,BUILTIN_FEATURES,undefined,'old-plan');
+ const archived=saveQualityPlanTemplate(newQualityStudy(),plan,'已有模板',100);storage.load.mockResolvedValue({study:archived});
+ const h=renderHook(()=>useFishQuality('a',[],vi.fn(async()=>{})));await flush();
+ const catalog=JSON.parse(readPersistedStateRaw('sim_a_quality_plan_templates_v1')!);
+ expect(catalog.some((t:any)=>t.name==='已有模板')).toBe(true);expect(h.result.current.study.planTemplates?.[0].plan?.frozenVersions).toEqual(archived.planTemplates![0].plan!.frozenVersions);
+});

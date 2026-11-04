@@ -29,6 +29,13 @@ export function saveQualityPlanTemplate(study: FishQualityStudy, plan: QualityGr
   const template: QualityPlanTemplate = { id: newTemplateId(), name: trimmed, savedAt: now, updatedAt: now, plan: structuredClone(frozen) };
   return { ...study, planTemplates: [...(study.planTemplates ?? []), template] };
 }
+/** Restore into a new catalog entry; original frozen versions and current active entries remain intact. */
+export function restoreQualityPlanTemplate(study:FishQualityStudy,archived:QualityPlanTemplate,now=Date.now()):FishQualityStudy{
+  if(!archived.plan||archived.deleted)throw Error('归档不包含完整方案');
+  const name=activeQualityPlanTemplates(study).some(t=>t.name===archived.name)?archived.name+'（恢复）':archived.name;
+  const template:QualityPlanTemplate={id:newTemplateId(),name,savedAt:now,updatedAt:now,plan:structuredClone(archived.plan)};
+  return {...study,planTemplates:[...(study.planTemplates??[]),template]};
+}
 export function deleteQualityPlanTemplate(study: FishQualityStudy, id: string, now = Date.now()): FishQualityStudy {
   if (!study.planTemplates?.some(t => t.id === id && !t.deleted)) return study;
   return { ...study, planTemplates: study.planTemplates.map(t => t.id === id ? { id: t.id, name: t.name, savedAt: t.savedAt, updatedAt: now, deleted: true as const } : t) };

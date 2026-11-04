@@ -1,7 +1,8 @@
+import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useQualityPlanCatalog } from './useQualityPlanCatalog';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
-import { mergeQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
+import { restoreQualityPlanTemplate, mergeQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
 import {preserveSourceDeletions,markSourceDeletions,type DeleteTarget} from '@/lib/fish/libraryDeletion';
@@ -74,12 +75,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     channel.onmessage=({data})=>{if(data?.owner!==account.current||!data.deletedSources)return;selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;markPause('另一个标签页删除了信号来源');controller.current?.abort();filterController.current?.abort();change(s=>preserveSourceDeletions({...s,deletedSources:data.deletedSources,deletedReadings:data.deletedReadings},s));};
     return()=>channel.close();
   },[owner,change]);
-  // Small account-synced template catalog; historical study templates remain compatible.
+  // Backfill legacy study templates into the independent catalog. The server archives every revision.
   useEffect(()=>{
-    if(!readyRef.current||account.current!==owner||!templateCatalog.length)return;
-    const merged=mergeQualityPlanTemplates(current.current.planTemplates,templateCatalog);
-    if(JSON.stringify(merged)!==JSON.stringify(current.current.planTemplates))change(s=>({...s,planTemplates:mergeQualityPlanTemplates(s.planTemplates,templateCatalog)}));
-  },[templateCatalog,owner,ready,change]);
+    if(!readyRef.current||account.current!==owner)return;
+    const merged=mergeQualityPlanTemplates(current.current.planTemplates,templateCatalog)??[];
+    if(JSON.stringify(merged)!==JSON.stringify(current.current.planTemplates??[]))change(s=>({...s,planTemplates:mergeQualityPlanTemplates(s.planTemplates,templateCatalog)}));
+    if(merged.length&&JSON.stringify(merged)!==JSON.stringify(templateCatalog))setTemplateCatalog(merged);
+  },[templateCatalog,owner,ready,change,setTemplateCatalog]);
   const changeTemplates=useCallback((apply:(s:FishQualityStudy)=>FishQualityStudy)=>change(s=>{
     const next=apply(s);setTemplateCatalog(next.planTemplates??[]);return next;
   }),[change,setTemplateCatalog]);
@@ -375,6 +377,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!await saveQualityStudy(savedOwner, next)) throw new Error('模板尚未保存成功，请保留页面并重试');
     if (epoch !== generation.current || savedOwner !== account.current) throw new Error('账号已切换，请回到原账号查看模板');
   }, [changeTemplates]);
+  const restorePlanTemplate=useCallback((template:QualityPlanTemplate)=>changeTemplates(s=>restoreQualityPlanTemplate(s,template)),[changeTemplates]);
   const deletePlanTemplate = useCallback((id: string) => changeTemplates(s => deleteQualityPlanTemplate(s, id)), [changeTemplates]);
   const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); changeTemplates(s => renameQualityPlanTemplate(s, id, name)); }, [changeTemplates]);
   /** Filters have their own catalog and run button; editing never changes or restarts monitoring. */
@@ -411,10 +414,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
+  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，

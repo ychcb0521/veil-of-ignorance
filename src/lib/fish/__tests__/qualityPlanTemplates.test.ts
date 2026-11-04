@@ -31,3 +31,11 @@ it('renames and deletes with tombstones that win a merge, so another device cann
   expect(activeQualityPlanTemplates(mergeRemoteQualityStudy(renamed, other)).map(t => t.name).sort()).toEqual(['另一台设备', '新名字']);
   expect(activeQualityPlanTemplates(mergeRemoteQualityStudy(deleted, renamed))).toEqual([]);
 });
+
+it('restores archived versions into a new entry without overwriting current or re-freezing history',async()=>{
+ const {restoreQualityPlanTemplate}=await import('../qualityPlanTemplates');
+ const initial=saveQualityPlanTemplate(newQualityStudy(1),plan,'好组合',100),archived=structuredClone(initial.planTemplates![0]);
+ archived.plan!.frozenVersions![0].version='historical-v0';
+ const restored=restoreQualityPlanTemplate(initial,archived,300),t=restored.planTemplates!.at(-1)!;
+ expect(restored.planTemplates![0]).toEqual(initial.planTemplates![0]);expect(t.id).not.toBe(archived.id);expect(t.name).toBe('好组合（恢复）');expect(t.plan).toEqual(archived.plan);expect(t.plan).not.toBe(archived.plan);
+});
