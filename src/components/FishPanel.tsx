@@ -1,4 +1,5 @@
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
+import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
 import { downloadFishCabin } from '@/lib/fish/export';
 import { toast } from 'sonner';
@@ -82,9 +83,12 @@ export interface FishPanelProps {
 export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
-type FishOpen = { scope: boolean; detail: boolean; probe: boolean; notify: boolean; catching: boolean; algorithms: boolean };
+type FishOpen = { scope: boolean; detail: boolean; probe: boolean; notify: boolean; catching: boolean; cabin: boolean; algorithms: boolean };
+// 【用户要求】2026-11-04「捕捞和鱼舱要默认折叠起来」：默认收起（FISH_PANEL_DEFAULTS），本次浏览里手动展开过才保持展开
 function readOpen(): FishOpen {
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe, notify: !!v.notify, catching: v.catching !== false, algorithms: v.algorithms !== false }; } catch { return { scope: false, detail: false, probe: false, notify: false, catching: true, algorithms: true }; }
+  const pick = (v: unknown, fallback: boolean) => typeof v === 'boolean' ? v : fallback;
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe, notify: !!v.notify, catching: pick(v.catching, FISH_PANEL_DEFAULTS.catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: v.algorithms !== false }; }
+  catch { return { scope: false, detail: false, probe: false, notify: false, catching: FISH_PANEL_DEFAULTS.catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: true }; }
 }
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
 
@@ -404,7 +408,7 @@ export function FishPanel(p: FishPanelProps) {
       </div>
     </section>
     <section className="min-w-0 border-t border-border/50 px-4 py-3" aria-label="鱼舱模块" data-testid="fish-cabin">
-    <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen info={<><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
+    <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} info={<><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
     {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onJump={source => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id)} canJump={source => !p.jumpingSignalId && !!signalChartSymbol(source) && (!!p.onJumpQuality || p.signals.some(s => s.id === source.id))}/></ModuleErrorBoundary>}

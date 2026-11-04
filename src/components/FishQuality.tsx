@@ -297,7 +297,7 @@ function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
 }
 
 /** The tab list and algorithm cards are projections of the same draft IDs and order. */
-function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number}) {
+function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outsideHint}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number;outsideHint?:ReactNode}) {
   const definitions=useFeatureDefinitions(),plans=state.study.sellPlans??[];
   const [drafts,setDrafts]=useState<Record<string,{base:string;draft:MonitorDraft}>>({});
   const forPlan=(p:QualityGroup)=>drafts[p.id]?.base===monitorBaseKey(p)?drafts[p.id].draft:monitorDraftOf(p);
@@ -337,7 +337,7 @@ function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount}:{st
       </div>:active?.router?<div className="contents" data-testid="quality-monitor-router-settings">
         <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5">
           {view.error&&<p role="alert" className="w-full text-[11px] text-destructive">{view.error}</p>}
-          <span className="mr-auto text-[10.5px] text-muted-foreground">{view.dirty?'方案尚未保存':'当前方案已保存'} · 本轮已勾选 {selectedCount} 条</span>
+          <span className="mr-auto text-[10.5px] text-muted-foreground">{view.dirty?'方案尚未保存':'当前方案已保存'} · 本轮已勾选 {selectedCount} 条{outsideHint&&<> · {outsideHint}</>}</span>
           <button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md border border-primary/30 px-2.5 text-[11px] text-primary disabled:opacity-40">保存方案</button>
           <button type="button" disabled={!state.ready||!selectedCount} title={selectedCount?'保存完整方案，然后监测当前筛选下已勾选的信号':'请先在组合表中勾选本轮要监测的信号'} onClick={()=>{if(view.save()){done();void state.start();}}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存并开始监测</button>
         </div>
@@ -605,6 +605,26 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   // 【用户要求】2026-10-27 买前过滤、持仓监测只处理「当前筛选下可见、且已勾选」的行；筛选外勾着的不动
   const selectedBatch = batch.filter(r => selectedIds.has(r.id)), scopedSelected = sortedRows.filter(r => selectedIds.has(r.id));
   const selectedCount = countSignals(scopedSelected), selectedTotal = countSignals(selectedBatch);
+  // 【用户要求】2026-11-04「开始监测点不了」：勾选的信号都在筛选外时，写明在哪几个来源、各多少条，并能一键切过去
+  const outsideSelection = useMemo(() => {
+    if (selectedTotal <= selectedCount) return null;
+    const inside = new Set(scopedSelected.map(qualityTableSignalKey)), rows = selectedBatch.filter(r => !inside.has(qualityTableSignalKey(r)));
+    const bySource = (['mined', 'fish', 'library'] as const).map(o => ({ o, n: countSignals(rows.filter(r => hasSource(r, o))) })).filter(x => x.n);
+    const names = { mined: '挖掘库', fish: '鱼舱', library: '信号库' } as const;
+    return { count: selectedTotal - selectedCount, text: bySource.map(x => `${names[x.o]} ${x.n}`).join('、') };
+  }, [selectedBatch, scopedSelected, selectedTotal, selectedCount]);
+  /** 只改挡住已勾选信号的筛选：来源优先换成能包含全部勾选的那一个，否则全部来源；月份、标的、探测算法、运行状态挡住了才清空。 */
+  const revealSelected = () => {
+    const sel = selectedBatch;
+    if (origin && sel.some(r => !hasSource(r, origin))) setOrigin((['mined', 'fish', 'library'] as const).find(o => sel.every(r => hasSource(r, o))) ?? '');
+    if (month && sel.some(r => signalMonthKey(r.source.timeMs) !== month)) setMonth('');
+    if (query.trim() && sel.some(r => !r.source.symbol.toUpperCase().includes(query.trim().toUpperCase()))) setQuery('');
+    if (activeAlgorithms.length && sel.some(r => !activeAlgorithms.includes(r.detectorId ?? ''))) setAlgorithmsState([]);
+    if (runState) setRunState('');
+    resetScroll();
+  };
+  const outsideHint = outsideSelection && <span className="inline-flex flex-wrap items-center gap-1" data-testid="quality-outside-selection">{selectedCount === 0 ? <>勾选的 {outsideSelection.count} 条都在当前筛选外</> : <>筛选外另有 {outsideSelection.count} 条已勾选</>}（{outsideSelection.text}）
+    <button type="button" className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20" onClick={revealSelected}>切到包含勾选的筛选</button></span>;
   const { setScope } = state;
   useLayoutEffect(() => { setScope?.(sortedRows.map(r => r.id)); }, [setScope, sortedRows]);
   const selectedEntryCount = new Set(scopedSelected.map(r => r.signalId ?? r.id)).size;
@@ -742,12 +762,12 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <div role="group" aria-label="监测运行" className="inline-flex h-6 shrink-0 items-stretch">
             {running
               ? <button type="button" className={qualitySplitPauseAction} onClick={state.cancel}><Pause aria-hidden className="h-3 w-3"/>暂停监测</button>
-              : <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !!state.archiving || !selectedCount || !plans.length} title={selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号在后台运行，切换选项或收起模块不会中断；已算完且条件没变的结果直接沿用` : '当前筛选下没有已勾选的信号'} onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
+              : <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !!state.archiving || !selectedCount || !plans.length} title={!selectedCount && outsideSelection ? `勾选的 ${outsideSelection.count} 条都在当前筛选外（${outsideSelection.text}）：点筛选栏右侧「切到包含勾选的筛选」` : selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号在后台运行，切换选项或收起模块不会中断；已算完且条件没变的结果直接沿用` : '当前筛选下没有已勾选的信号'} onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
             <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !!state.archiving || !selectedCount || !plans.length} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" disabled={!!state.archiving} onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">先将当前全部结果独立归档到监测库，再按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。归档按时间排列，后续重算不会覆盖本次快照</span></button></PopoverContent></Popover>
           </div>
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} w-[5.5rem] shrink-0 whitespace-nowrap justify-center ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
-            <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount}/>
+            <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/>
           </PopoverContent></Popover>
           <FishMonitorLibrary study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>
@@ -757,7 +777,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
         <span className="relative shrink-0"><select aria-label="鱼质量的月份" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         {/* 【用户要求】2026-11-02 「探测算法」与「监测 · 状态」筛选在表头（探测算法列、运行状态列）已有，筛选栏不再重复 */}
         <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
-        <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · 筛选外另有 {selectedTotal - selectedCount} 条已勾选</>}</span><FishQualityInfo label="处理范围说明"><p>开始过滤、开始监测只处理当前筛选（来源、月份、探测算法、标的）下已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · </>}</span>{outsideHint}<FishQualityInfo label="处理范围说明"><p>开始过滤、开始监测只处理当前筛选（来源、月份、探测算法、标的）下已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>
       </div>
       {state.archiving&&<p role="status" className="text-[11px] text-primary" data-testid="quality-archive-saving">正在归档全部运行结果到监测库…保存完成后开始重算。</p>}
       {state.entry&&(state.entry.running||state.entry.error)&&<div className="flex items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-entry-progress"><span>入场读数 {state.entry.progress?.done??0}/{state.entry.progress?.total??0}</span>{state.entry.running?<button type="button" className="text-primary hover:underline" onClick={state.entry.cancel}>暂停入场补算</button>:<button type="button" className="text-primary hover:underline" onClick={()=>state.entry?.request(plans.map(p=>p.id),visible.flatMap(qualityTableMembers).map(r=>r.signalId??r.id),true)}>重试入场读数</button>}{state.entry.error&&<span className="text-destructive">{state.entry.error}</span>}</div>}

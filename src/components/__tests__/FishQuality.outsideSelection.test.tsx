@@ -1,0 +1,39 @@
+/** 【用户要求】2026-11-04「开始监测点不了」：勾选的信号都在筛选外时写明在哪、各多少条，并能一键切过去。 */
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { FishQuality } from '@/components/FishQuality';
+import { importQualityFish, newQualityStudy, qualityDisplayRows } from '@/lib/fish/quality';
+import { enableQualityComparison } from '@/lib/fish/qualityComparison';
+import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
+import type { FishQualityState } from '@/hooks/useFishQuality';
+
+afterEach(cleanup);
+const T = Date.UTC(2026, 9, 20);
+function state(): FishQualityState {
+  const signals = ['AAAUSDT', 'BBBUSDT', 'CCCUSDT'].map((symbol, i) => ({ id: String(i), symbol, timeMs: T + i * 60000, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold: 1, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
+  const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
+  study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
+  return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setCombo: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn(), setSellPlans: vi.fn() };
+}
+it('勾选的都在筛选外：写明来源与条数，开始监测是灰的；点「切到包含勾选的筛选」后可以开始', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  const start = () => screen.getByRole('button', { name: '开始监测' });
+  expect(start()).not.toBeDisabled();
+  fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'library' } });
+  const hint = screen.getByTestId('quality-outside-selection');
+  expect(hint).toHaveTextContent('勾选的 3 条都在当前筛选外（鱼舱 3）');
+  expect(start()).toBeDisabled(); expect(start()).toHaveAttribute('title', expect.stringContaining('切到包含勾选的筛选'));
+  fireEvent.click(within(hint).getByRole('button', { name: '切到包含勾选的筛选' }));
+  expect(screen.getByLabelText('鱼质量的来源')).toHaveValue('fish');
+  expect(screen.queryByTestId('quality-outside-selection')).toBeNull();
+  expect(screen.getByTestId('quality-run-scope')).toHaveTextContent('本轮处理已勾选 3 条');
+  expect(start()).not.toBeDisabled();
+});
+it('只清挡住勾选的标的搜索，不动别的筛选', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'AAA' } });
+  expect(screen.getByTestId('quality-outside-selection')).toHaveTextContent('筛选外另有 2 条已勾选（鱼舱 2）');
+  fireEvent.click(screen.getByRole('button', { name: '切到包含勾选的筛选' }));
+  expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('');
+  expect(screen.getByLabelText('鱼质量的来源')).toHaveValue('');
+});

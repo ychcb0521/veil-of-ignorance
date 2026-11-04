@@ -715,9 +715,10 @@ it('tells the hook which rows are in view and shows how many checked signals thi
   expect(vi.mocked(s.setScope).mock.calls.at(-1)![0]).toHaveLength(qualityDisplayRows(s.study).length);
   fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'ZZZ' } });
   expect(vi.mocked(s.setScope).mock.calls.at(-1)![0]).toEqual([]);
-  expect(screen.getByTestId('quality-run-scope')).toHaveTextContent('本轮处理 0 条 · 筛选外另有 1 条已勾选');
+  // 2026-11-04 勾选都在筛选外时写明在哪，并给「切到包含勾选的筛选」
+  expect(screen.getByTestId('quality-selection-scope')).toHaveTextContent(/本轮处理 0 条 · 勾选的 1 条都在当前筛选外（.+ 1）切到包含勾选的筛选/);
   expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: '开始监测' })).toHaveAttribute('title', '当前筛选下没有已勾选的信号');
+  expect(screen.getByRole('button', { name: '开始监测' })).toHaveAttribute('title', expect.stringContaining('切到包含勾选的筛选'));
 });
 
 
