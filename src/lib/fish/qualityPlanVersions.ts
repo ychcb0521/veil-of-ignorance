@@ -1,4 +1,4 @@
-import { QUALITY_ROUTER_VERSION, routerFingerprint, validateQualityRouter } from './qualityPlanRouter';
+import { QUALITY_ROUTER_VERSION, routerFingerprint, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -104,7 +104,7 @@ export interface PlanVersionChange { key: string; part: string; name: string; fr
 /** 冻结清单与按当前代码重算的清单逐项比较；返回变了的项（空数组＝版本一致）。 */
 export function comparePlanVersions(frozen: readonly PlanVersionEntry[], current: readonly PlanVersionEntry[]): PlanVersionChange[] {
   const now = new Map(current.map(e => [e.key, e])), was = new Map(frozen.map(e => [e.key, e])), out: PlanVersionChange[] = [];
-  for (const e of frozen) { const c = now.get(e.key); if (!c || c.version !== e.version) out.push({ key: e.key, part: e.part, name: e.name, from: e.version, to: c?.version ?? null }); }
+  for (const e of frozen) { const c = now.get(e.key); if (!c || c.version !== e.version && !(e.key==='router'&&equivalentRouterVersion(e.version,c.version))) out.push({ key: e.key, part: e.part, name: e.name, from: e.version, to: c?.version ?? null }); }
   for (const c of current) if (!was.has(c.key)) out.push({ key: c.key, part: c.part, name: c.name, from: null, to: c.version });
   return out;
 }

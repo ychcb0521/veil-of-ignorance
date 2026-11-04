@@ -2,7 +2,7 @@ import {expect,it,vi} from 'vitest';
 import {makeQualitySellPlan} from '../qualitySellPlans';
 import {BUILTIN_FEATURES} from '@/lib/deepDig/features';
 import {defaultStructureAddition} from '../qualityAdditionStructure';
-import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,type QualityPlanRouter} from '../qualityPlanRouter';
+import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,routerFingerprint,equivalentRouterVersion,type QualityPlanRouter} from '../qualityPlanRouter';
 import {freezeQualityPlan,planVersionChanges,comparePlanVersions} from '../qualityPlanVersions';
 import {qualityResultKey,newQualityStudy,type QualityGroup} from '../quality';
 import {qualityPlanFromTemplate} from '../qualityPlanTemplates';
@@ -30,4 +30,14 @@ it('separates identity and versions, preserves copying and account formulas',()=
  const mutated={...p,router:{...p.router!,threshold:.8}};expect(planVersionChanges(mutated).length).toBeGreaterThan(0);
  const sample={id:'s',source:{},groups:[],enteredAt:1} as any;expect(qualityResultKey(sample,p,0)).not.toBe(qualityResultKey(sample,mutated,0));
  const study={...newQualityStudy(),sellPlans:[p]};expect(syncQualitySellDefinitions(study).sellPlans![0]).toEqual(p);
+});
+
+it('ignores JSONB field ordering but rejects actual parameter changes',()=>{
+ const p=freezeQualityPlan({...base(),router:router()});
+ const reorder=(v:any):any=>Array.isArray(v)?v.map(reorder):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).reverse().map(k=>[k,reorder(v[k])])):v;
+ const restored=reorder(JSON.parse(JSON.stringify(p)));
+ expect(routerFingerprint(restored.router)).toBe(routerFingerprint(p.router!));expect(planVersionChanges(restored)).toEqual([]);
+ restored.router.threshold=.8;expect(planVersionChanges(restored).length).toBeGreaterThan(0);
+ const prefix=QUALITY_ROUTER_VERSION+' · 参数 #';expect(equivalentRouterVersion(prefix+'1cmjlqy15r0lzq',prefix+'1er917g1rq0q7q')).toBe(true);
+ expect(equivalentRouterVersion(prefix+'1cmjlqy15r0lzq',prefix+'changed')).toBe(false);
 });
