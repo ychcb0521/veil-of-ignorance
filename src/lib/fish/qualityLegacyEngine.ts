@@ -84,3 +84,18 @@ export function legacyAdditionRows(rule?: QualityAdditionRule): LegacyAdditionRo
     return { round: i + 1, trigger, entryBufferAtr: r.entryBufferAtr ?? 2, supportOffsetAtr: r.supportOffsetAtr ?? 1.5, ...(r.minGainPct != null ? { minGainPct: r.minGainPct } : {}) };
   });
 }
+
+/**
+ * 【用户要求】2026-11-04「有 S、有 T、有 K 的那个还挺好的」：把旧引擎方案转成当前引擎可编辑的「指标 · S / T / K」方案。
+ * 入场距离沿用原值（entryBufferAtr → entryDistanceAtr），涨幅门槛按持仓均价（10-31 口径）。去掉旧引擎标记与版本清单，保存时按当前代码冻结。
+ * 「卖出算法组合2」10-31 方案在 94 笔样本上验证：转换后当前引擎与冻结的 10-31 引擎盈亏逐位相同。
+ */
+export function legacyToEditablePlan(plan: QualityGroup): QualityGroup {
+  const { engine: _engine, frozenVersions: _frozen, ...rest } = structuredClone(plan);
+  const fix = <R extends Pick<QualityAdditionRule, 'source' | 'entryBufferAtr' | 'minGainPct' | 'entryDistanceAtr' | 'gainBasis'>>(r: R): R => {
+    const { entryBufferAtr, ...x } = r;
+    return { ...x, ...(x.source === 'custom' ? { entryDistanceAtr: entryBufferAtr ?? 2 } : {}), ...(x.minGainPct != null ? { gainBasis: 'average' as const } : {}) } as R;
+  };
+  const a = rest.addition;
+  return a ? { ...rest, addition: { ...fix(a), ...(a.rounds ? { rounds: a.rounds.map(fix) } : {}) } } : rest;
+}

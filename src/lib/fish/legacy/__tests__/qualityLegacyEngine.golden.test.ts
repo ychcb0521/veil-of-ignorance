@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest';
 import { FishAdapter, fishTransport } from '@/lib/fish/adapters';
 import { FishWeightBudget } from '@/lib/fish/shared';
 import { createFishReconstructionLoader } from '@/lib/fish/reconstructionLoader';
-import { collectFishQuality, newQualityStudy, qualityResultKey, type QualityGroup, type QualityResult, type QualitySample } from '@/lib/fish/quality';
-import { qualityAdditionFills } from '@/lib/fish/qualityAddition';
-import { evaluateLegacyQualitySample, LEGACY_ENGINE_SHA256, LEGACY_QUALITY_ENGINE } from '@/lib/fish/qualityLegacyEngine';
+import { collectFishQuality, evaluateQualitySample, newQualityStudy, qualityResultKey, type QualityGroup, type QualityResult, type QualitySample } from '@/lib/fish/quality';
+import { additionIdentity, qualityAdditionFills } from '@/lib/fish/qualityAddition';
+import { evaluateLegacyQualitySample, LEGACY_ENGINE_SHA256, LEGACY_QUALITY_ENGINE, legacyToEditablePlan, withLegacyEngine } from '@/lib/fish/qualityLegacyEngine';
 import { activeQualityPlanTemplates, qualityPlanFromTemplate, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import { backfillPlanVersions, freezeQualityPlan, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
@@ -77,4 +77,36 @@ describe('2026-10-31 旧引擎', () => {
     expectOriginal(results[0]);
     expect(results[0].key).toBe(qualityResultKey(fixture.sample, plan, fixture.observeHours));
   }, 180_000);
+});
+
+/** 【用户要求】2026-11-04 恢复「指标＋入场距离（S/T/K）」到当前引擎：同一套参数与 10-31 引擎结果一致。 */
+describe('当前引擎 · 指标 S/T/K', () => {
+  const sttk = (entryDistance?: number): QualityGroup => {
+    const a = structuredClone(fixture.plan.addition!);
+    const fix = <R extends { entryBufferAtr?: number }>(r: R) => ({ ...r, entryDistanceAtr: entryDistance ?? r.entryBufferAtr ?? 2, gainBasis: 'average' as const });
+    return { ...fixture.plan, addition: { ...fix(a), rounds: a.rounds!.map(fix) } };
+  };
+  it('入场距离＋相对持仓均价：RAVE 与 10-31 原结果盈亏逐位相同', async () => {
+    const r = await evaluateQualitySample(fixture.sample, sttk(), fixture.observeHours, now, loader(), signal());
+    expect(r.pnl).toBe(fixture.original.pnl);
+    qualityAdditionFills(r).forEach((a, i) => expect(a.quantity).toBeCloseTo(fixture.original.additionQuantities[i], 9));
+    expect(qualityAdditionFills(r).map(a => a.sizing?.requiredBufferAtr)).toEqual([2, 2, 2, 2, 2, 3, 3]);
+  }, 120_000);
+  it('入场距离不够就不加，并记下原因', async () => {
+    const r = await evaluateQualitySample(fixture.sample, sttk(50), fixture.observeHours, now, loader(), signal());
+    expect(qualityAdditionFills(r)).toEqual([]);
+    expect(r.additionSkips?.[0]).toMatchObject({ kind: 'entry-distance', label: '入场距离不足', reading: expect.stringContaining('要求 ≥ 50 ATR') });
+  }, 120_000);
+  it('旧引擎方案「转为可编辑」后交给当前引擎：RAVE 盈亏与原结果逐位相同', async () => {
+    const editable = legacyToEditablePlan(withLegacyEngine(fixture.plan));
+    expect(editable.engine).toBeUndefined();
+    const r = await evaluateQualitySample(fixture.sample, editable, fixture.observeHours, now, loader(), signal());
+    expect(r.pnl).toBe(fixture.original.pnl);
+  }, 120_000);
+  it('只有设了入场距离或「相对持仓均价」，方案身份才变', () => {
+    const plain = JSON.stringify(additionIdentity(fixture.plan.addition));
+    expect(plain).not.toContain('entry-distance-v1');
+    expect(JSON.stringify(additionIdentity(sttk().addition))).toContain('entry-distance-v1');
+    expect(JSON.stringify(additionIdentity(sttk().addition))).toContain('gain-basis-average-v1');
+  });
 });

@@ -10,11 +10,11 @@ function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <>
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
 // 【用户要求】2026-11-01 位置只用箱体算法（DBL / SBS），下方一行 K = 旧C − n×ATR，n 由用户自己填（新方案先填 0）。
-it('offers only the box position, with calculator defaults and K = 旧C − n×ATR',()=>{
+it('defaults to the box position (S/T/K also offered), with calculator defaults and K = 旧C − n×ATR',()=>{
  render(<Editor/>);expect(screen.getByLabelText('启用条件加仓')).not.toBeChecked();expect(screen.getByLabelText('加仓条件来源')).toBeDisabled();
  for(const part of ['addition-prerequisites','addition-timing','addition-sell'])expect(screen.getByTestId(part)).toBeInTheDocument();expect(screen.getAllByRole('heading',{level:5}).map(h=>h.textContent)).toEqual(['方向','否决','位置','卖出']);expect(screen.getByLabelText('最多加仓次数')).toHaveValue(3);
  fireEvent.click(screen.getByLabelText('启用条件加仓'));
- expect([...(screen.getByLabelText('加仓条件来源') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['structure']);
+ expect([...(screen.getByLabelText('加仓条件来源') as HTMLSelectElement).options].map(o=>o.value)).toEqual(['structure','custom']);expect(screen.getByLabelText('加仓条件来源')).toHaveValue('structure');
  for(const gone of ['加仓特征值','加仓门槛提高幅度','K回撤ATR倍数','T高于S的ATR倍数','箱体K基准','箱体冗余单位'])expect(screen.queryByLabelText(gone)).toBeNull();
  expect(screen.getByLabelText('箱体加仓算法')).toHaveValue('dbl5');expect(screen.getByLabelText('箱体加仓时机')).toHaveValue('raise');expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(0);
  expect(screen.getByTestId('addition-timing')).toHaveTextContent('K =');expect(screen.getByTestId('addition-k-row')).toHaveTextContent('× ATR');expect(screen.getByLabelText('K基准箱体')).toHaveValue('previous');expect(screen.getByTestId('addition-timing')).not.toHaveTextContent('K ≤');
@@ -63,11 +63,13 @@ it('shows the box algorithm version in 位置, explains every version, and freez
  fireEvent.click(screen.getByLabelText('箱体算法版本说明'));expect(screen.getByTestId('box-algorithm-versions')).toHaveTextContent('dbl5-guard-v1');
  const rule=save();expect(rule.rounds[0].structure.versions).toEqual({box:'dbl-5-v2',guard:'dbl5-guard-v1'});
 });
-it('converts legacy rounds: a custom indicator moves into 方向, an original-detector round becomes a box',()=>{
+// 【用户要求】2026-11-04 恢复 S/T/K：自选指标的轮次原样打开、原样保存（11-01～11-03 会改成箱体，保存后就换了算法）
+it('keeps custom-indicator rounds as S/T/K on open and save; an original-detector round still becomes a box',()=>{
  const mbi=makeQualityBuyFilter('mbi:MBI','>',.8,true,BUILTIN_FEATURES),bear=makeQualityBuyFilter('mbi-bear:MBI_bear','<',-.7,true,BUILTIN_FEATURES);
  const legacy:QualityAdditionRule={...defaultQualityAddition(),enabled:true,maxRounds:2,rounds:[{source:'custom',stricterPct:10,condition:mbi,conditions:[mbi,bear],minGainPct:5,supportOffsetAtr:2},{source:'detector',stricterPct:10}]};
  const saved=parseAdditionDraft(additionDraft(legacy),BUILTIN_FEATURES);
- expect(saved.rounds![0]).toMatchObject({source:'structure',structure:{buffer:0},minGainPct:5,prerequisites:[{metric:'MBI',direction:'>',threshold:.8},{metric:'MBI_bear',direction:'<',threshold:-.7}]});expect(saved.rounds![0].conditions).toBeUndefined();
+ expect(saved.rounds![0]).toMatchObject({source:'custom',minGainPct:5,supportOffsetAtr:2,condition:{metric:'MBI',direction:'>',threshold:.8},conditions:[{metric:'MBI'},{metric:'MBI_bear',direction:'<',threshold:-.7}]});
+ expect(saved.rounds![0].structure).toBeUndefined();expect(saved.rounds![0].entryDistanceAtr).toBeUndefined();expect(saved.rounds![0].gainBasis).toBeUndefined();
  // 2026-11-03 起旧的「原探测算法再次命中」找回到「方向」：全部原探测算法、门槛提高沿用原百分比
  expect(saved.rounds![1]).toMatchObject({source:'structure',detectorPrerequisite:{enabled:true,stricterPct:10}});expect(saved.rounds![1].prerequisites).toBeUndefined();expect(saved.rounds![0].detectorPrerequisite).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
@@ -200,4 +202,20 @@ it('saves per-round addition vetoes with editable parameters and restores them',
  const pctOnly=save();expect(pctOnly.rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback')).toEqual({kind:'pullback',enabled:true,pct:4,sticky:true});
  fireEvent.click(screen.getByLabelText('冲高回落 未收复最高点前不再加'));expect(save().rounds[0].entryVetoes.find((v:{kind:string})=>v.kind==='pullback').sticky).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(pctOnly),BUILTIN_FEATURES).rounds[0].entryVetoes).toEqual(pctOnly.rounds[0].entryVetoes);
+});
+
+// 【用户要求】2026-11-04「有 S、有 T、有 K 的那个还挺好的」：位置可选「指标 · S / T / K」
+it('restores the S/T/K position: indicator trigger, entry distance T ≥ S + n ATR, K = T − m ATR and gain against the holding average',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ fireEvent.change(screen.getByLabelText('加仓条件来源'),{target:{value:'custom'}});
+ expect(screen.queryByLabelText('箱体加仓算法')).toBeNull();expect(screen.queryByTestId('addition-k-row')).toBeNull();expect(screen.queryByLabelText('启用探测算法方向条件')).toBeNull();
+ expect(screen.getByLabelText('入场距离ATR倍数')).toHaveValue(2);expect(screen.getByLabelText('K回撤ATR倍数')).toHaveValue(1.5);
+ fireEvent.change(screen.getByLabelText('加仓条件 特征值'),{target:{value:'state'}});fireEvent.change(screen.getByLabelText('加仓条件 指标门槛'),{target:{value:'.7'}});
+ fireEvent.change(screen.getByLabelText('入场距离ATR倍数'),{target:{value:'3'}});fireEvent.change(screen.getByLabelText('K回撤ATR倍数'),{target:{value:'2'}});
+ fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('涨幅门槛基准'),{target:{value:'average'}});fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'10'}});
+ const rule=save(),r=rule.rounds[0];
+ expect(r).toMatchObject({source:'custom',condition:{direction:'>',threshold:.7},entryDistanceAtr:3,supportOffsetAtr:2,minGainPct:10,gainBasis:'average'});expect(r.structure).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+ // 入场距离留空＝不检查；不写字段，方案身份与 11-01 以来的自选指标方案相同
+ fireEvent.change(screen.getByLabelText('入场距离ATR倍数'),{target:{value:''}});expect(save().rounds[0].entryDistanceAtr).toBeUndefined();
 });

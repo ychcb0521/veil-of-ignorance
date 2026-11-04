@@ -11,7 +11,7 @@ import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
-import { activeDetectorPrerequisite, additionIdentity, additionMirrorIdentity, qualityAdditionPrerequisites } from './qualityAddition';
+import { activeDetectorPrerequisite, additionIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
 import { qualitySellStagesIdentity } from './qualitySellStages';
 import { boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
@@ -79,6 +79,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
           join([v.box, v.guard, ...versionTags(additionIdentity({ ...a, rounds: undefined, source: 'structure', structure: r.structure })).filter(t => t.startsWith('k-from') || t.startsWith('box-addition') || t.startsWith('k-min-distance') || t.startsWith('guard-trend-only'))]),
           join([box?.summary, guard?.summary]));
       }
+      // 2026-11-04 指标 S/T/K：触发指标的公式也进版本清单（之前只登记了同时满足的其它指标）
+      if (r.source === 'custom') { const t = qualityAdditionConditions(r)[0]; if (t) add(`trigger-${i + 1}`, `第 ${i + 1} 次加仓 · 位置`, `${t.label} ${t.direction} ${t.threshold}${r.entryDistanceAtr != null ? ` · T≥S+${r.entryDistanceAtr}ATR` : ''} · K=T−${r.supportOffsetAtr ?? 1.5}ATR`, formulaFingerprint(t.snapshot), '指标 · S / T / K：指标达标且入场距离够时加仓'); }
       const dp = activeDetectorPrerequisite(r);
       if (dp) add(`detector-${i + 1}`, `第 ${i + 1} 次加仓 · 方向`, `${dp.featureId ?? '原探测算法（全部）'} 探测值提高 ≥ ${dp.stricterPct}%`, 'detector-prerequisite-v1', '加仓那一刻，探测读数须达到原门槛再提高这个百分比');
       qualityAdditionPrerequisites(r).forEach((f, j) => add(`direction-${i + 1}-${j + 1}`, `第 ${i + 1} 次加仓 · 方向`, `${f.label} ${f.direction} ${f.threshold}`, formulaFingerprint(f.snapshot), '加仓那一刻须满足（只读最后一根已收盘 K 线）'));

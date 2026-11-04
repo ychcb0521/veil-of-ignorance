@@ -65,3 +65,19 @@ it('交易战役里的「持仓监测」：10-31 的方案（没有旧引擎标�
   expect(screen.getByTestId('quality-legacy-engine-note')).toBeInTheDocument();
   expect(screen.getByTestId('quality-legacy-round-6')).toHaveTextContent('T ≥ S＋3 ATRK＝T−2 ATR相对持仓均价 ≥ 15%');
 });
+
+// 【用户要求】2026-11-04「有 S、有 T、有 K 的那个还挺好的」：旧引擎方案可转成当前引擎可编辑的 S/T/K 方案，原方案保留
+it('「转为可编辑」复制出当前引擎的 S/T/K 方案（入场距离沿用、涨幅按持仓均价），旧方案原样保留', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '持仓监测条件' }));
+  fireEvent.click(screen.getByRole('button', { name: '转为可编辑 1' }));
+  expect(screen.getByLabelText('卖出算法 2 名称')).toHaveValue('算法组合3-0（b=2005.48）（可编辑）');
+  expect(screen.getByLabelText('卖出算法 2 门槛')).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /^保存全部 \d+ 套方案$/ }));
+  const plans = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0] as QualityGroup[];
+  expect(plans.find(p => p.id === legacy.id)).toEqual(legacy);
+  const copy = plans[1];
+  expect(copy.engine).toBeUndefined(); expect(copy.label).toBe('算法组合3-0（b=2005.48）（可编辑）');
+  expect(copy.addition!.rounds!.map(r => [r.source, r.entryDistanceAtr, r.supportOffsetAtr, r.minGainPct, r.gainBasis, r.entryBufferAtr]))
+    .toEqual(original.addition!.rounds!.map(r => ['custom', r.entryBufferAtr, r.supportOffsetAtr, r.minGainPct, 'average', undefined]));
+});

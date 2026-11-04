@@ -32,7 +32,9 @@ type VetoFieldDraft={enabled:boolean;lookbackBars:string;atr:string;ratio:string
 export type AdditionVetoDraft=Record<AdditionEntryVetoKind,VetoFieldDraft>;
 const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft=>Object.fromEntries(ADDITION_VETO_KINDS.map(kind=>{const found=saved?.find(x=>x.kind===kind),v=kind==='pullback'?(found?pullbackParams(found):ADDITION_VETO_DEFAULTS.pullback):{...ADDITION_VETO_DEFAULTS[kind],...found},str=(x?:number)=>x==null?'':String(x);const defaults=ADDITION_VETO_DEFAULTS[kind].windows??[],windows=v.windows??defaults;return [kind,{enabled:!!saved?.find(x=>x.kind===kind)?.enabled,lookbackBars:str(v.lookbackBars),atr:str(v.atr),ratio:str(v.ratio),pct:str(v.pct),er:str(v.er),join:v.join??'and',sticky:found?!!found.sticky:(kind==='pullback'||kind==='pullback-atr'),windows:Array.from({length:Math.max(3,windows.length)},(_,i)=>({minutes:str(windows[i]?.minutes??defaults[i]?.minutes),pct:windows[i]?str(windows[i].pct):''}))}];})) as AdditionVetoDraft;
 interface DetectorPreDraft {enabled:boolean;featureId:string;stricterPct:string}
-interface RoundDraft extends ConditionDraft {detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft}
+interface RoundDraft extends ConditionDraft {detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
+ /** 【用户要求】2026-11-04 恢复 S/T/K 位置：入场距离 T ≥ S＋n×ATR（空＝不检查）；涨幅门槛基准。 */
+ entryDistanceAtr?:string;gainBasis?:'average'|'cost-line'}
 /** 【用户要求】2026-11-03 防守线要说明是哪条线、虚线算不算、断掉意味着什么等细节。 */
 export function GuardLineNotes(){return <div className="space-y-2 text-[11px] leading-relaxed" data-testid="guard-line-notes">
  <p><b className="font-medium text-foreground">是哪条线</b>：K 线图上 DBL-5 那条<b className="font-medium text-foreground">蓝色加粗线</b>，就是防守线，只有这一条。淡绿色细线是箱底（下轨），淡灰色细线是固定上轨，都不是防守线。红色 × 表示防守线被收盘确认跌破。</p>
@@ -72,14 +74,17 @@ const sellSwitchDraft=(stage?:QualitySellStage):SellSwitchDraft=>stage?{enabled:
 /** legacy：这套加仓是用户启用过的旧方案时，才把「原探测算法」轮次找回为方向条件（默认空设置的 source 也是 detector）。 */
 const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=false):RoundDraft=>{
  const custom=rule.source==='custom',conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);
- const trigger=custom&&conditions[0]?[conditionDraft(conditions[0])]:[];
- return {source:'structure',structure:structuredClone(rule.source==='structure'&&rule.structure?rule.structure:defaultStructureAddition()),structureBuffer:String(rule.source==='structure'?rule.structure?.buffer??0:0),stricterPct:String(rule.stricterPct),
-  ...conditionDraft(undefined),extraConditions:[...trigger,...qualityAdditionPrerequisites(rule).map(conditionDraft)],
-  gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage),entryVetoes:vetoDraftOf(rule.entryVetoes),
+ const common={stricterPct:String(rule.stricterPct),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage),entryVetoes:vetoDraftOf(rule.entryVetoes),
+  entryDistanceAtr:rule.entryDistanceAtr!=null?String(rule.entryDistanceAtr):'',gainBasis:rule.gainBasis==='average'?'average' as const:'cost-line' as const,
   // 旧的「原探测算法再次命中」轮次：打开时把它作为「方向」里的探测算法条件找回来（保存后才写入）
   detectorPre:rule.detectorPrerequisite?{enabled:rule.detectorPrerequisite.enabled,featureId:rule.detectorPrerequisite.featureId??'',stricterPct:String(rule.detectorPrerequisite.stricterPct)}:legacy&&rule.source==='detector'?{enabled:true,featureId:'',stricterPct:String(rule.stricterPct)}:{enabled:false,featureId:'',stricterPct:'10'}};
+ // 【用户要求】2026-11-04 恢复「指标＋入场距离（S/T/K）」位置：自选指标的轮次保持原样打开，首条指标是加仓条件、其余为同时满足的指标条件
+ // （11-01～11-03 这里会把它改成箱体，保存后就换了算法——11-03 旧模板重跑结果不同就是这个原因）
+ if(custom)return {source:'custom',structure:defaultStructureAddition(),structureBuffer:'0',...conditionDraft(conditions[0]),extraConditions:conditions.slice(1).map(conditionDraft),...common};
+ return {source:'structure',structure:structuredClone(rule.source==='structure'&&rule.structure?rule.structure:defaultStructureAddition()),structureBuffer:String(rule.source==='structure'?rule.structure?.buffer??0:0),
+  ...conditionDraft(undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),...common};
 };
-const copyRound=(d:RoundDraft):RoundDraft=>({source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
+const copyRound=(d:RoundDraft):RoundDraft=>({entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
 export function additionDraft(rule=defaultQualityAddition(),sellStages?:readonly QualitySellStage[]):AdditionDraft {
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1),rule.enabled),later=stages.filter(s=>s.afterAdditions>count);
@@ -94,6 +99,8 @@ function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef
   rule.condition=conditions[0];if(conditions.length>1)rule.conditions=conditions;
  }else{const prerequisites=build(d.extraConditions);if(prerequisites.length)rule.prerequisites=prerequisites;}
  if(d.gainEnabled)rule.minGainPct=d.minGainPct.trim()?Number(d.minGainPct):NaN;
+ if(d.gainEnabled&&d.gainBasis==='average')rule.gainBasis='average';
+ if(d.source==='custom'&&d.entryDistanceAtr?.trim())rule.entryDistanceAtr=Number(d.entryDistanceAtr);
  if(d.source!=='custom'&&d.detectorPre?.enabled)rule.detectorPrerequisite={enabled:true,stricterPct:d.detectorPre.stricterPct.trim()?Number(d.detectorPre.stricterPct):NaN,...(d.detectorPre.featureId?{featureId:d.detectorPre.featureId}:{})};
  const num=(x:string)=>x.trim()?Number(x):NaN,vetoes=ADDITION_VETO_KINDS.filter(k=>d.entryVetoes?.[k]?.enabled).map(kind=>{const f=d.entryVetoes[kind],base=ADDITION_VETO_DEFAULTS[kind];
   // 冲高回落：ATR 与百分比各自可留空（留空＝不用这一项），两项都填时带上「且 / 或」
@@ -208,11 +215,11 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
 
   <Part title="方向" role="必要不充分 · 位置那一刻须全部满足" testId="addition-prerequisites" info={<p>方向条件本身不会触发加仓：只有在「位置」达到的那一刻，下列指标和涨幅门槛全部满足，这次加仓才成立；不满足就等下一个位置。指标只读当时最后一根已收盘 K 线。涨幅门槛＝那一刻收盘价相对最新成本线 S 的涨幅（首轮 S 为首次买入价，之后为上一次加仓的 K）。探测算法：这条信号的原探测算法（或只选其中一个）在那一刻的读数，须沿原探测方向达到原门槛再提高 x%（调整量＝原门槛绝对值 × x%，原门槛为 0 时按 1 个单位）；信号没有所选的探测算法就不加仓。</p>}>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
-   {(()=>{const dp=d.detectorPre??{enabled:false,featureId:'',stricterPct:'10'},setDp=(next:Partial<DetectorPreDraft>)=>patch({detectorPre:{...dp,...next}});
+   {d.source!=='custom'&&(()=>{const dp=d.detectorPre??{enabled:false,featureId:'',stricterPct:'10'},setDp=(next:Partial<DetectorPreDraft>)=>patch({detectorPre:{...dp,...next}});
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="启用探测算法方向条件" disabled={!d.enabled} checked={dp.enabled} onChange={e=>setDp({enabled:e.target.checked})}/><span className={dp.enabled?'font-medium':'text-muted-foreground'}>探测算法</span></label>
      <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${dp.enabled?'':'opacity-55'}`} data-testid="addition-detector-prerequisite"><select aria-label="方向探测算法" disabled={!d.enabled||!dp.enabled} value={dp.featureId} onChange={e=>setDp({featureId:e.target.value})} className={field+' h-7 w-52'}><option value="">全部原探测算法（同时满足）</option>{features.map(([id,group])=><option key={id} value={id}>{group}</option>)}</select>探测值比原门槛提高 ≥<input aria-label="探测值提高百分比" type="number" min="0" step="any" disabled={!d.enabled||!dp.enabled} value={dp.stricterPct} onChange={e=>setDp({stricterPct:e.target.value})} className={cell+' w-14'}/>%</div></>;})()}
     <label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="启用加仓涨幅门槛" disabled={!d.enabled} checked={d.gainEnabled} onChange={e=>patch({gainEnabled:e.target.checked})}/><span className={d.gainEnabled?'font-medium':'text-muted-foreground'}>涨幅门槛</span></label>
-    <div className={`flex items-center gap-1.5 text-muted-foreground ${d.gainEnabled?'':'opacity-55'}`}>相对最新成本线 S 上涨 ≥<input aria-label="加仓涨幅门槛" type="number" min="0" step="any" disabled={!d.enabled||!d.gainEnabled} className={cell+' w-14'} value={d.minGainPct} onChange={e=>patch({minGainPct:e.target.value})}/>%</div>
+    <div className={`flex items-center gap-1.5 text-muted-foreground ${d.gainEnabled?'':'opacity-55'}`}>{/* 2026-11-04 涨幅门槛基准可选：相对成本线 S（11-01 起）或相对持仓均价（10-31 版） */}<select aria-label="涨幅门槛基准" disabled={!d.enabled||!d.gainEnabled} value={d.gainBasis??'cost-line'} onChange={e=>patch({gainBasis:e.target.value as 'average'|'cost-line'})} className={field+' h-7 px-1.5'}><option value="cost-line">相对最新成本线 S</option><option value="average">相对持仓均价</option></select>上涨 ≥<input aria-label="加仓涨幅门槛" type="number" min="0" step="any" disabled={!d.enabled||!d.gainEnabled} className={cell+' w-14'} value={d.minGainPct} onChange={e=>patch({minGainPct:e.target.value})}/>%</div>
     <span className="self-start pt-1.5 text-muted-foreground">指标条件</span>
     <div className="space-y-1.5">{d.extraConditions.map(prerequisiteRow)}<button type="button" disabled={!d.enabled} className="text-[11px] text-primary disabled:opacity-40" onClick={()=>patch({extraConditions:[...d.extraConditions,{choice:choices[0]?.key??'',direction:'>',threshold:'0'}]})}>＋ 添加方向条件</button></div>
    </div>
@@ -244,6 +251,10 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </div>
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
+   <InfoBlock title="指标 · S / T / K">
+    <p>加仓条件（自选指标）在 5 分钟收盘达标、且加仓价 T 比最新成本线 S 至少高出 n 个 5 分钟 ATR(14) 时加仓（入场距离留空＝不检查）；K＝T − m × ATR，碰到 K 卖出全部持仓。S：首次加仓为首次买入价，之后为上一次加仓的 K。「方向」里的其它指标条件须在同一时刻同时满足。</p>
+    <p>这是 10-31 时的加仓方式（11-01 改成箱体位置后一度取消，11-04 应用户要求恢复）；涨幅门槛选「相对持仓均价」即与 10-31 版同一口径。</p>
+   </InfoBlock>
    <InfoBlock title="箱体位置（5 分钟线）">
     <p>新 C（{d.structure.algorithm==='dbl5'?'DBL-5 支撑抬高含完整台阶与内部箱底抬高':'SBS-5M 确认已含冻结后的独立测试；回踩只用正式支撑的再次测试成功'}）收盘确认后，下一分钟开盘加仓；每个箱体最多加仓一次，候选箱体不参与。</p>
    </InfoBlock>
@@ -255,17 +266,24 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </div>}>
    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-[11px]">
     <span className="text-muted-foreground">位置算法</span>
-    <select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{})})}><option value="structure">箱体 · DBL / SBS</option></select>
+    <select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{entryDistanceAtr:d.entryDistanceAtr||'2',supportOffsetAtr:d.supportOffsetAtr||'1.5'})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">指标 · S / T / K</option></select>
+    {/* 【用户要求】2026-11-04 恢复「指标＋入场距离（S/T/K）」：指标达标、且 T 高出成本线 S 足够时加仓，K＝T−m×ATR */}
+    {d.source==='custom'&&<><span className="text-muted-foreground">加仓条件</span>
+    <div data-testid="addition-sttk-trigger">{indicator(d,'加仓条件 {x}',change=>patch(change))}</div>
+    <span className="text-muted-foreground">入场距离</span>
+    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-entry-distance">T ≥ S ＋<input aria-label="入场距离ATR倍数" type="number" min="0" step="any" placeholder="不限" disabled={!d.enabled} value={d.entryDistanceAtr??''} onChange={e=>patch({entryDistanceAtr:e.target.value})} className={cell+' w-14'}/>ATR<span className="text-[10px] text-muted-foreground/70">T 加仓价 · S 成本线</span></div>
+    <span className="text-muted-foreground">K =</span>
+    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-sttk-k">T −<input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={cell+' w-14'}/>× ATR</div></>}
     {box&&<><span className="text-muted-foreground">箱体算法</span>
     <div className="flex min-w-0 items-center gap-2"><select aria-label="箱体加仓算法" className={field+' h-7 min-w-0 flex-1'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:e.target.value==='sbs5m'&&d.structure.kSource==='guard'?'previous':d.structure.kSource}})}><option value="dbl5">{boxAlgorithmVersion(CURRENT_BOX_VERSION.dbl5)!.label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select><span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-primary" data-testid="addition-box-version" title="保存时冻结的版本">{structureVersionLabel(d.structure)}</span><FishQualityInfo label="箱体算法版本说明"><BoxAlgorithmVersionNotes/></FishQualityInfo></div>
     <span className="text-muted-foreground">触发事件</span>
     <select aria-label="箱体加仓时机" className={field+' h-7 w-full'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></>}
-    <span className="text-muted-foreground">K =</span>
+    {box&&<><span className="text-muted-foreground">K =</span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-row"><select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-36'} disabled={!d.enabled} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）</option>}</select>−<input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={cell+' w-14'}/>{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</div>
     {d.structure.kSource==='guard'&&<><span className="flex items-center gap-1 text-muted-foreground">防守线<FishQualityInfo label="防守线说明"><GuardLineNotes/></FishQualityInfo></span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-guard-row"><select aria-label="防守线类型" className={field+' h-7 w-28'} disabled={!d.enabled} value={d.structure.guardTrendOnly?'trend':'both'} onChange={e=>patch({structure:{...d.structure,guardTrendOnly:e.target.value==='trend'?true:undefined}})}><option value="both">实线和虚线</option><option value="trend">只用实线</option></select><span className="px-0.5 text-muted-foreground/50">·</span>上涨期 箱底 −<input aria-label="上涨期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_trend_atr:v}}}});}} className={cell+' w-14'}/>ATR<span className="px-0.5 text-muted-foreground/50">·</span>震荡期 区间底 −<input aria-label="震荡期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_range_atr:v}}}});}} className={cell+' w-14'}/>ATR</div></>}
     <span className="text-muted-foreground">最小距离</span>
-    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div>
+    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div></>}
    </div>
   </Part>
 
