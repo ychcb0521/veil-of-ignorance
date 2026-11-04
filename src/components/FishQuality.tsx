@@ -213,7 +213,7 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
   </div>;
 }
 /** The tab list and algorithm cards are projections of the same draft IDs and order. */
-function HoldingMonitorSettings({state,activeId,onSelect,done}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void}) {
+function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number}) {
   const definitions=useFeatureDefinitions(),plans=state.study.sellPlans??[];
   const [drafts,setDrafts]=useState<Record<string,{base:string;draft:MonitorDraft}>>({});
   const forPlan=(p:QualityGroup)=>drafts[p.id]?.base===monitorBaseKey(p)?drafts[p.id].draft:monitorDraftOf(p);
@@ -237,7 +237,15 @@ function HoldingMonitorSettings({state,activeId,onSelect,done}:{state:FishQualit
         <FishQualityMonitorSettingsView plan={active} holdingOnly/>
         <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
         {view.error&&<p role="alert" className="text-[11px] text-destructive">{view.error}</p>}
-      </div>:active?.router?<FishQualityRouterView plan={active}/>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
+      </div>:active?.router?<div className="space-y-3" data-testid="quality-monitor-router-settings">
+        <FishQualityRouterView plan={active}/>
+        <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5">
+          <span className="mr-auto text-[10.5px] text-muted-foreground">{view.dirty?'方案尚未保存':'当前方案已保存'} · 本轮已勾选 {selectedCount} 条</span>
+          <button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md border border-primary/30 px-2.5 text-[11px] text-primary disabled:opacity-40">保存方案</button>
+          <button type="button" disabled={!state.ready||!selectedCount} title={selectedCount?'保存完整方案，然后监测当前筛选下已勾选的信号':'请先在组合表中勾选本轮要监测的信号'} onClick={()=>{if(view.save()){done();void state.start();}}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存并开始监测</button>
+        </div>
+        {view.error&&<p role="alert" className="text-[11px] text-destructive">{view.error}</p>}
+      </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
         allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{
           const saved=view.save(next=>next.map(p=>{
             if(p.id!==active.id||isLegacyQualityPlan(p)||p.router)return p;
@@ -643,7 +651,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" disabled={!!state.archiving} onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">先将当前全部结果独立归档到监测库，再按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。归档按时间排列，后续重算不会覆盖本次快照</span></button></PopoverContent></Popover>
           </div>
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} w-[5.5rem] shrink-0 whitespace-nowrap justify-center ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
-            <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)}/>
+            <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount}/>
           </PopoverContent></Popover>
           <FishMonitorLibrary study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>

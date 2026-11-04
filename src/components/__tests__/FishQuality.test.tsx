@@ -1031,3 +1031,19 @@ it('creates a frozen routed plan from the template library without flattening it
  fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0].at(-1)!;expect(saved.router).toEqual(p.router);expect(saved.id).not.toBe(p.id);expect(s.start).not.toHaveBeenCalled();
 },60000);
+
+it.each([true,false])('saves a routed template and explicitly starts selected signals: selected=%s',async(selected)=>{
+ const {freezeQualityPlan,planVersionChanges}=await import('@/lib/fish/qualityPlanVersions');
+ const {replaceQualitySellPlans}=await import('@/lib/fish/qualitySellPlans');
+ const {defaultStructureAddition}=await import('@/lib/fish/qualityAdditionStructure');
+ const s=state(),structure={...s.study.sellPlans![0],addition:{enabled:true,source:'structure' as const,stricterPct:10,quantityMode:'calculator' as const,maxRounds:2,structure:defaultStructureAddition(),rounds:[0,1].map(()=>({source:'structure' as const,stricterPct:10,structure:defaultStructureAddition()}))}};
+ const p=freezeQualityPlan({...structure,router:{version:'second-structural-addition-state-router-v1',afterAdditions:2,threshold:.9,structure,attack:{...structuredClone(structure),id:'attack'}}});
+ s.study.planTemplates=[{id:'route-tpl',name:'条件分支',savedAt:1,updatedAt:1,plan:p}];s.savePlanTemplate=vi.fn();s.deletePlanTemplate=vi.fn();if(!selected)s.study.selectedRowIds=[];
+ s.setSellPlans=vi.fn(plans=>{s.study=replaceQualitySellPlans(s.study,plans);});
+ s.start=vi.fn(async()=>{const saved=s.study.sellPlans!.at(-1)!;expect(saved.router).toEqual(p.router);expect(planVersionChanges(saved)).toEqual([]);});
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));fireEvent.click(screen.getByRole('button',{name:'用模板 条件分支 新建方案'}));
+ const run=screen.getByRole('button',{name:'保存并开始监测'});expect(screen.getByRole('button',{name:'保存方案'})).toBeEnabled();expect(s.start).not.toHaveBeenCalled();
+ if(!selected){expect(run).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'保存方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();}
+ else{expect(run).toBeEnabled();fireEvent.click(run);expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(s.start).mock.invocationCallOrder[0]);}
+ expect(screen.queryByTestId('quality-router-view')).toBeNull();
+},60000);
