@@ -1017,3 +1017,17 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   expect(s.deletePlanTemplate).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: '确认删除模板 好组合' }));
   expect(s.deletePlanTemplate).toHaveBeenCalledWith(activeQualityPlanTemplates(s.study)[0].id);
 },30_000);
+
+it('creates a frozen routed plan from the template library without flattening it or starting a run',async()=>{
+ const {freezeQualityPlan}=await import('@/lib/fish/qualityPlanVersions');
+ const {defaultStructureAddition}=await import('@/lib/fish/qualityAdditionStructure');
+ const s=state(),structure={...s.study.sellPlans![0],addition:{enabled:true,source:'structure' as const,stricterPct:10,quantityMode:'calculator' as const,maxRounds:2,structure:defaultStructureAddition(),rounds:[0,1].map(()=>({source:'structure' as const,stricterPct:10,structure:defaultStructureAddition()}))}};
+ const attack={...structuredClone(structure),id:'attack'};
+ const p=freezeQualityPlan({...structure,router:{version:'second-structural-addition-state-router-v1',afterAdditions:2,threshold:.9,structure,attack}});
+ s.study.planTemplates=[{id:'hybrid-tpl',name:'结构为底·强势进攻',savedAt:1,updatedAt:1,plan:p}];s.savePlanTemplate=vi.fn();s.deletePlanTemplate=vi.fn();
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));
+ fireEvent.click(screen.getByRole('button',{name:'用模板 结构为底·强势进攻 新建方案'}));
+ expect(screen.getByTestId('quality-router-view')).toHaveTextContent('此前已收盘');
+ fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
+ expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0].at(-1)!;expect(saved.router).toEqual(p.router);expect(saved.id).not.toBe(p.id);expect(s.start).not.toHaveBeenCalled();
+},60000);

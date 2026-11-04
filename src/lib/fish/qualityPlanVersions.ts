@@ -1,3 +1,4 @@
+import { QUALITY_ROUTER_VERSION, routerFingerprint, validateQualityRouter } from './qualityPlanRouter';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -45,6 +46,10 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 
 /** 方案涉及的全部算法及其版本（顺序：卖出 → 组合切换 → 执行 → 镜像 → 硬性终止 → 加仓 → 各次加仓的箱体与方向 → 加仓后切换）。 */
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
+  if(plan.router){
+    validateQualityRouter(plan.router);
+    return [{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:QUALITY_ROUTER_VERSION+' · 参数 #'+routerFingerprint(plan.router),summary:'第二次结构加仓时，已收盘状态 S > '+plan.router.threshold+' 切进攻，否则本场保持结构分支；只选择一次'},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];
+  }
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [];
@@ -107,6 +112,7 @@ export const planVersionChangeText = (changes: readonly PlanVersionChange[]) => 
 
 /** 方案里每个箱体规则写下所用版本（防守线参数写成明确值）。 */
 export function withFrozenStructures(plan: QualityGroup): QualityGroup {
+  if(plan.router)return {...plan,router:{...plan.router,structure:withFrozenStructures(plan.router.structure),attack:withFrozenStructures(plan.router.attack)}};
   const a = plan.addition;
   if (!a) return plan;
   const fix = <R extends { structure?: import('./qualityAdditionStructure').StructureAdditionRule }>(r: R): R => r.structure ? { ...r, structure: freezeStructureVersions(r.structure) } : r;

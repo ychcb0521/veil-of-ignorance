@@ -108,6 +108,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     try {
       const next = drafts.map(d => {
         const base = baseOf(d);
+        if(base?.router)return {...base,id:d.id,label:labelOf(d,base)};
         // 旧引擎方案只改名称，其余原样保存
         if (base && isLegacyQualityPlan(base)) return { ...structuredClone(base), label: labelOf(d,base) };
         if (base && d.original && algorithmFields(d) === algorithmFields(draftOf(d.original))) return { ...structuredClone(base), label: labelOf(d,base) };
@@ -156,11 +157,11 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         {/* 【用户要求】2026-11-03 旧引擎方案只读（除名称）：改了参数就不是原来那套了 */}
         {isLegacyQualityPlan(baseOf(d)) && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300" title="按 10-31 的引擎原样复算；除名称外不能修改" data-testid={'sell-plan-legacy-' + i}>{LEGACY_ENGINE_LABEL} · 只读</span>}
         {!readOnly && isLegacyQualityPlan(baseOf(d)) && <button type="button" disabled={!ready} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/20 disabled:opacity-40" title="复制成当前引擎的「指标 · S / T / K」方案，可以改参数；入场距离沿用原值、涨幅门槛按持仓均价。原方案保留。" aria-label={'转为可编辑 ' + (i + 1)} onClick={() => editableCopy(d, i)}>转为可编辑</button>}
-        <select aria-label={'卖出算法 ' + (i + 1) + ' 类型'} disabled={isLegacyQualityPlan(baseOf(d))} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>
+        <select aria-label={'卖出算法 ' + (i + 1) + ' 类型'} disabled={isLegacyQualityPlan(baseOf(d)) || !!baseOf(d)?.router} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>
         {!readOnly && templates && <SaveTemplateButton index={i} defaultName={labelOf(d, baseOf(d))} disabledReason={!ready ? '尚未加载完成' : !plans.some(p => p.id === d.id) ? '新方案先点「保存全部方案」，再存为模板' : dirty || extraDirty ? '有未保存的修改：先点「保存全部方案」，模板保存的是已保存的设置' : undefined} onSave={name => templates.save(d.id, name)}/>}
         {!readOnly && <><button type="button" disabled={!ready} aria-label={'复制卖出算法 ' + (i + 1)} title="复制整套方案：含当前填写的组合算法、加仓、镜像止盈和一票条件" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" aria-label={'删除卖出算法 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></>}</div>
-      <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents"><div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
+      <fieldset disabled={isLegacyQualityPlan(baseOf(d)) || !!baseOf(d)?.router} className="contents"><div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
         {select(d.choice, '卖出算法 ' + (i + 1) + ' 指标', choice => patch(d.id, { choice }))}
         <select aria-label={'卖出算法 ' + (i + 1) + ' 方向'} className={field} value={d.direction} onChange={e => patch(d.id, { direction: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
         <input aria-label={'卖出算法 ' + (i + 1) + ' 门槛'} className={field + ' w-full'} type="number" step="any" placeholder="未设置" value={d.threshold} onChange={e => patch(d.id, { threshold: e.target.value })} />

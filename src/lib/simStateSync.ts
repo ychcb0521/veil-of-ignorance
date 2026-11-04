@@ -1,3 +1,4 @@
+import {mergeQualityPlanCatalogValues} from './qualityPlanCatalogMerge';
 /**
  * 模拟交易引擎状态的云端同步层。
  *
@@ -49,6 +50,7 @@ const EXCLUDED_KEYS = new Set(['price_map', 'symbol_settlement_mode', 'fish-mini
  * 直到先推的那台下一次水化再把自己的节点并回去。
  */
 const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unknown> = {
+  quality_plan_templates_v1: mergeQualityPlanCatalogValues,
   // 并集之后再修剪：本机修掉的老节点不能借远端的副本一次次长回来。
   [REPLAY_TIMELINES_STORAGE_KEY]: (local, remote) =>
     pruneReplayTimelineRegistry(mergeReplayTimelineRegistries(local, remote), { now: Date.now() }),

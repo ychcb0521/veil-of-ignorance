@@ -66,6 +66,7 @@ export const qualityPlanFromTemplate = (template: QualityPlanTemplate & { plan: 
 
 /** 模板列表里的一行摘要（各项参数仍以新建后的设置界面为准）。 */
 export function qualityPlanTemplateSummary(plan: QualityGroup): string {
+  if(plan.router)return `前两次结构加仓 · 第二次已收盘 S > ${plan.router.threshold} 后走进攻，否则保持结构 · 一次选择 · 版本冻结`;
   const sell = plan.combo && plan.rule ? `${plan.combo.beforeLabel} ${plan.rule.direction} ${plan.rule.threshold} → 涨 ${plan.combo.switchPct}% 后 ${plan.combo.after.label} ${plan.combo.after.rule.direction} ${plan.combo.after.rule.threshold}`
     : plan.rule ? `${plan.snapshot.featureShort ?? plan.label} ${plan.rule.direction} ${plan.rule.threshold}` : '无普通卖出门槛';
   const mirror = plan.mirrorTakeProfit?.enabled ? `镜像 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%` : '镜像关';

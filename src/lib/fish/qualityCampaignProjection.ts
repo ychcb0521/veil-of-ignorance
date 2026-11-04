@@ -1,3 +1,4 @@
+import {routedQualityPlan} from './qualityPlanRouter';
 import {effectiveQualitySellPlan} from './qualitySellStages';
 import {withQualityMirrorLegs} from './qualityMirrorLegs';
 import { withQualityAdditionCampaign } from './qualityAdditionCampaign';
@@ -32,7 +33,7 @@ const iso = (time: number) => new Date(time).toISOString();
 // 加仓前的镜像卖出被排到加仓之后，几何仓位漏乘 (1 − αf)（2026-11-01 用户要求与组合表一致）。
 /** Adapt the frozen paper trade into the exact inputs of existing campaign charts/metrics/exports. */
 export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string): QualityCampaignData {
-  const { sample, plan, result: r } = run, id = campaignId ?? qualityCampaignId(r.key, section), closed = r.status === 'closed';
+  const { sample, plan: storedPlan, result: r } = run, plan=routedQualityPlan(storedPlan,r), id = campaignId ?? qualityCampaignId(r.key, section), closed = r.status === 'closed';
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
   const legId = `${id}-main`, recordId = r.mirrorFill?.fraction === 1 ? `${id}-mirror-close` : `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
   const detectorLabels = run.detectors.map(d => ({ id: d.id, label: `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}` }));
@@ -64,7 +65,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     actual_evolution: [opening, ...exits],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     // 【用户要求】2026-11-02 战役元数据底部「持仓监测」：完整显示这场战役运行时冻结的整套条件设置
-    comparison: { section, planLabel:plan.label, monitorPlan: structuredClone(plan), runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
+    comparison: { section, planLabel:storedPlan.label, monitorPlan: structuredClone(storedPlan), runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
       holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??QUALITY_NOTIONAL,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
       sellEvidence: { exitReason:closed?r.reason:undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
         ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: definition.formula, definitionKey: effective.snapshot.definitionKey!, featureId: effective.snapshot.featureId!,
@@ -100,7 +101,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];
   const data: QualityCampaignData = { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
-  return withQualityMirrorLegs(r.additionFill ? withQualityAdditionCampaign(data, run) : data);
+  return withQualityMirrorLegs(r.additionFill ? withQualityAdditionCampaign(data, {...run,plan}) : data);
 }
 /** 各卖出方案的买入过滤，一行写完：「状态 S 原始值：状态 S 原始值 > 0.7；CDA 原始值：不过滤」。都没开过滤时为空。 */
 export function qualityBuyFilterSummary(study: FishQualityStudy): string {

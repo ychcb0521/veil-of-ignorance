@@ -71,9 +71,9 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
     changed = true;
     return { ...plan, combo: { ...plan.combo, after: { ...after, snapshot: { ...after.snapshot, definitionKey: key, interval: '5m', scale: 1, statistic: after.metric, H: undefined, featureName: def.name, featureShort: def.short } } } };
   };
-  const sellPlans = study.sellPlans?.map(plan => isLegacyQualityPlan(plan) ? plan : syncAfter(plan)).map(plan => {
+  const sellPlans = study.sellPlans?.map(plan => (isLegacyQualityPlan(plan) || plan.router) ? plan : syncAfter(plan)).map(plan => {
     // 【用户要求】2026-11-03 旧引擎方案用 10-31 冻结的公式全文，不跟随账号公式
-    if (isLegacyQualityPlan(plan)) return plan;
+    if (isLegacyQualityPlan(plan) || plan.router) return plan;
     // 回撤否决改为止损价成交（2026-10-26）：同步时给方案打上新版本，旧试验已在调用方先归档
     if (plan.vetoFill !== 'stop') { changed = true; plan = { ...plan, vetoFill: 'stop' as const }; }
     const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.snapshot.featureId);
@@ -129,7 +129,7 @@ export function syncQualityThresholdDefinitions(study: FishQualityStudy, definit
     return { ...p, snapshot: own, buyFilters, holdingVetoes, addition,...(stagesChanged?{sellStages}:{}),...(vetoStagesChanged?{vetoStages}:{}), ...(p.combo ? { combo: { ...p.combo, after: { ...p.combo.after, snapshot: after! } } } : {}) };
   };
   const buyFilters = filters(study.buyFilters);
-  const sellPlans = study.sellPlans?.map(p => isLegacyQualityPlan(p) ? p : plan(p, true));
+  const sellPlans = study.sellPlans?.map(p => (isLegacyQualityPlan(p) || p.router) ? p : plan(p, true));
   const groups = study.groups.map(p => plan(p, false));
   return changed ? { ...study, buyFilters, sellPlans, groups: groups.some((p, i) => p !== study.groups[i]) ? groups : study.groups } : study;
 }

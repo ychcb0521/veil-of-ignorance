@@ -1,6 +1,7 @@
+import { useQualityPlanCatalog } from './useQualityPlanCatalog';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
-import { campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
+import { mergeQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
 import {preserveSourceDeletions,markSourceDeletions,type DeleteTarget} from '@/lib/fish/libraryDeletion';
@@ -29,6 +30,7 @@ export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 const NO_SIGNALS: readonly TradeSignal[] = [];
 export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true) {
   const definitions = useFeatureDefinitions();
+  const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [archiving,setArchiving]=useState(false),archiveLock=useRef(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
@@ -72,6 +74,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     channel.onmessage=({data})=>{if(data?.owner!==account.current||!data.deletedSources)return;selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;markPause('另一个标签页删除了信号来源');controller.current?.abort();filterController.current?.abort();change(s=>preserveSourceDeletions({...s,deletedSources:data.deletedSources,deletedReadings:data.deletedReadings},s));};
     return()=>channel.close();
   },[owner,change]);
+  // Small account-synced template catalog; historical study templates remain compatible.
+  useEffect(()=>{
+    if(!readyRef.current||account.current!==owner||!templateCatalog.length)return;
+    const merged=mergeQualityPlanTemplates(current.current.planTemplates,templateCatalog);
+    if(JSON.stringify(merged)!==JSON.stringify(current.current.planTemplates))change(s=>({...s,planTemplates:mergeQualityPlanTemplates(s.planTemplates,templateCatalog)}));
+  },[templateCatalog,owner,ready,change]);
+  const changeTemplates=useCallback((apply:(s:FishQualityStudy)=>FishQualityStudy)=>change(s=>{
+    const next=apply(s);setTemplateCatalog(next.planTemplates??[]);return next;
+  }),[change,setTemplateCatalog]);
   const postExit=useQualityPostExit(owner,ready && readyRef.current,study,run,change);
   const entry=useQualityEntryReadings(owner,ready && readyRef.current,study,run,change);
   const acceptReading = useCallback((reading: QualityFilterReading) => change(s => {
@@ -353,19 +364,19 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const plan = current.current.sellPlans?.find(p => p.id === planId);
     if (!plan) throw new Error('请先保存这套方案，再存为模板');
     saveQualityPlanTemplate(current.current, plan, name); // 先校验名称，出错直接抛给界面
-    change(s => { const p = s.sellPlans?.find(x => x.id === planId); return p ? saveQualityPlanTemplate(s, p, name) : s; });
-  }, [change]);
+    changeTemplates(s => { const p = s.sellPlans?.find(x => x.id === planId); return p ? saveQualityPlanTemplate(s, p, name) : s; });
+  }, [changeTemplates]);
   /** 保存战役冻结快照，不按方案 id 查当前设置，也不触发重算。 */
   const savePlanSnapshot = useCallback(async (plan: QualityGroup, name: string) => {
     if (!readyRef.current) throw new Error('账号持仓监测记录尚在恢复，请稍候');
     const savedOwner = account.current, epoch = generation.current;
     const next = saveQualityPlanTemplate(current.current, campaignPlanForTemplate(plan), name);
-    change(() => next);
+    changeTemplates(() => next);
     if (!await saveQualityStudy(savedOwner, next)) throw new Error('模板尚未保存成功，请保留页面并重试');
     if (epoch !== generation.current || savedOwner !== account.current) throw new Error('账号已切换，请回到原账号查看模板');
-  }, [change]);
-  const deletePlanTemplate = useCallback((id: string) => change(s => deleteQualityPlanTemplate(s, id)), [change]);
-  const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); change(s => renameQualityPlanTemplate(s, id, name)); }, [change]);
+  }, [changeTemplates]);
+  const deletePlanTemplate = useCallback((id: string) => changeTemplates(s => deleteQualityPlanTemplate(s, id)), [changeTemplates]);
+  const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); changeTemplates(s => renameQualityPlanTemplate(s, id, name)); }, [changeTemplates]);
   /** Filters have their own catalog and run button; editing never changes or restarts monitoring. */
   const setFilters = useCallback((filters: QualityBuyFilter[]) => {
     cancelFilter(); setFilterProgress(null); setFilterError('');

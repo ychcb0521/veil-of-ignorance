@@ -1,3 +1,4 @@
+import { FishQualityRouterView } from './FishQualityRouterView';
 /**
  * 【用户要求】2026-11-02 交易战役「战役元数据」底部的「持仓监测」：点开后在卡片上完整呈现这场战役当时的条件设置，
  * 形式与内容跟「持仓监测 · 条件设置」一致——直接复用同一套编辑器，只是任何修改都不生效（只读），加仓轮次的标签页仍可切换查看。
@@ -25,6 +26,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false }: { 
   // 11-01 之前形态的方案（10-31 及更早的战役）也只可能是旧引擎算的，同样按原始参数显示
   const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
   const plans = useMemo(() => [plan], [plan]);
+  if(plan.router)return <FishQualityRouterView plan={plan}/>;
   const mirror = mirrorDraft(plan.mirrorTakeProfit ?? { enabled: false, gainPct: 5, sellPct: 50 });
   const addition = additionDraft(plan.addition ?? defaultQualityAddition(), plan.sellStages);
   const vetoStages = { enabled: !!plan.vetoStages?.length, mode: plan.vetoStageMode ?? 'overlay', peakBasis: plan.vetoPeakBasis ?? 'stage', stages: (plan.vetoStages ?? []).map(s => ({ afterAdditions: String(s.afterAdditions), conditions: holdingVetoDraft(s.conditions) })) };

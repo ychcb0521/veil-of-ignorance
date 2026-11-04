@@ -1,3 +1,4 @@
+import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
 import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
 import {orderedSellStages,qualitySellStagesIdentity,qualityStagePlan,validateQualitySellStages,qualitySellStagesLabel,type QualitySellStage,type QualitySellStageActivation} from './qualitySellStages';
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
@@ -34,6 +35,7 @@ export interface QualityGroup {
   execution?: 'intrabar-1m';
   /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
   definitionSource?: 'account';
+  router?: import('./qualityPlanRouter').QualityPlanRouter;
   holdingVetoes?: QualityHoldingVeto[];
   mirrorTakeProfit?: QualityMirrorTakeProfit;
   addition?: QualityAdditionRule;
@@ -66,7 +68,7 @@ export function qualityRuleText(g: QualityGroup): string {
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
 // An addition-only plan still needs a valued holding path, even without an exit threshold.
-export const hasQualityExit = (group: QualityGroup) => !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
+export const hasQualityExit = (group: QualityGroup) => !!group.router || !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
@@ -79,6 +81,7 @@ export interface QualitySample {
 }
 export interface QualityResult {
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
+  routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
   status: 'open' | 'closed' | 'waiting' | 'error'; reason?: string;
   entryTime?: number; entryPrice?: number; endTime?: number; endPrice?: number;
   returnPct?: number; pnl?: number; peakPct?: number; adversePct?: number;
@@ -269,6 +272,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  if (g.router) identity.push(routerResultFingerprint(g.router));
   if (isLegacyQualityPlan(g)) identity.push(LEGACY_QUALITY_ENGINE);
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
   const vetoStages=qualityVetoStagesIdentity(g);if(vetoStages)identity.push(vetoStages);
@@ -428,6 +432,12 @@ const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMExcept
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 /** Replay each selected seller only until the next actual addition boundary. */
 export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult):Promise<QualityResult>{
+ if(group.router){
+  const key=qualityResultKey(sample,group,observeHours);
+  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id};}
+  catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
+ }
+
  if(!group.sellStages?.length&&!group.vetoStages?.length)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous);
  const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
  try{
