@@ -125,3 +125,13 @@ it('mining library: keeps old union snapshots separate from the replacement four
  expect(lib.runs).toHaveLength(2);expect(lib.runs[1].combination).toBe('and');expect(lib.runs[1].rules).toEqual(currentDefaultRules());
  expect(lib.records[0].signal.fish!.featureId).toBe('bss');
 });
+
+it('mining library: restarting identical settings preserves the previous results at the same anchor', () => {
+  const library = recordMinedAnchor(emptyMiningLibrary(), state, T, 1, [mined(1, T)], T + 1, 'or');
+  const restarted = { ...state, round: { id: 'restart', startedAt: T + 2 } };
+  const next = recordMinedAnchor(library, restarted, T, 1, [mined(1, T)], T + 3, 'or');
+  expect(next.anchors).toHaveLength(2);
+  expect(next.anchors).toContain(library.anchors[0]);
+  expect(next.records).toHaveLength(2);
+  expect(next.records).toContain(library.records[0]);
+});

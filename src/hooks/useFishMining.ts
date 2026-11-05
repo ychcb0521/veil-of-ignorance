@@ -19,12 +19,14 @@ import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
+type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules'>;
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
   start: () => void; pause: () => void; setTarget: (target: number) => void;
+  restart: (settings: MiningRestart) => void;
   /** 挖掘库按账号独立保存。 */
   ruleChoices?: {featureId:string;label:string;statistics:{name:string;label:string}[]}[];
   configure?: (rules:FishMiningState['rules'])=>void;
@@ -33,7 +35,7 @@ export interface FishMiningApi {
 }
 export function useFishMining(o: {
   account?: string; selection: FishScanSelection; defs: readonly DeepDigFeatureDef[];
-  mine: (settings: FishScanSettings, onProgress?: (p: FishProgress) => void) => Promise<TradeSignal[]>;
+  mine: (settings: FishScanSettings, onProgress?: (p: FishProgress) => void, roundId?: string) => Promise<TradeSignal[]>;
   busy: () => boolean; stop: () => void; signalsRef: { current: TradeSignal[] }; commit: (list: TradeSignal[]) => void;
   /** 每档入舱后通知（鱼质量据此把挖到的鱼加进评估）。 */
   onMined?: (added: TradeSignal[]) => void;
@@ -61,8 +63,15 @@ export function useFishMining(o: {
     return ()=>{generation.current++;if(runningRef.current){cancelTask.current?.();latest.current.stop();}runningRef.current=false;releaseMiningLease(owner.current);};
   }, [o.account]);
 
+  const cancelScan = useCallback(() => {
+    cancelTask.current?.();
+    runningStop.current?.();
+  }, []);
   const tick = useCallback(async (): Promise<void> => {
-    if (runningRef.current) return;
+    if (runningRef.current) {
+      if (readMiningState().round?.id !== stateRef.current.round?.id) cancelScan();
+      return;
+    }
     const now = Date.now();let s = load(latest.current.signalsRef.current);
     const resolved=resolveMiningRuleAliases(s.rules,latest.current.defs);
     if(resolved.repairs.length){s={...s,rules:resolved.rules,ruleRepairs:[...(s.ruleRepairs??[]),...resolved.repairs],lastError:'',retryAt:null,errorKind:undefined};setState(s);}
@@ -88,6 +97,7 @@ export function useFishMining(o: {
     runningRef.current = true; runningStop.current=latest.current.stop; setRunning(true); setAnchorMs(anchor); setProgress(null); setWaiting('');
     const who = account.current, epoch=generation.current, token=++runId.current;
     const active=()=>epoch===generation.current&&token===runId.current&&account.current===who;
+    const ownsAnchor = (fresh: FishMiningState) => fresh.enabled && fresh.cursorMs === anchor && fresh.round?.id === s.round?.id;
     const renew = setInterval(() => takeMiningLease(owner.current, Date.now()), TICK_MS);
     let cancelThis:(()=>void)|undefined;
     let advanced = false, lastActivity=Date.now(), watchdog:ReturnType<typeof setInterval> | undefined;
@@ -98,11 +108,11 @@ export function useFishMining(o: {
       },TICK_MS);});
       const found = await Promise.race([latest.current.mine({ ...built.settings, anchorMs: anchor }, p => {
         if(!active())return;lastActivity=Date.now();setProgress({done:p.done,total:p.total});
-      }),stalled,cancelled]);
+      }, s.round?.id),stalled,cancelled]);
       if (!active()) return;
       const fresh = readMiningState();
-      // 期间被暂停 / 换了档位（别的标签页挖过）就不收这一档
-      if (!fresh.enabled || fresh.cursorMs !== anchor) return;
+      // 暂停、换轮或其他标签页已经扫完这一档时，丢弃迟到的结果。
+      if (!ownsAnchor(fresh)) return;
       const { state: next, added } = acceptMinedAnchor(fresh, found, anchor, Date.now());
       if (added.length) latest.current.commit(mergeFishSignals(latest.current.signalsRef.current, added));
       setState(next); advanced = true;
@@ -114,7 +124,9 @@ export function useFishMining(o: {
       if(!active())return;
       if (e instanceof DOMException && e.name === 'AbortError') return; // 让路给捕捞，空闲后原地重扫
       if (e instanceof Error && e.message === '取数器正忙') return;
-      const at=Date.now(),cooldown=readBinanceCooldown(at),failure=miningFailureState(readMiningState(),e instanceof Error?e.message:String(e),at,'transient');
+      const fresh = readMiningState();
+      if (!ownsAnchor(fresh)) return;
+      const at=Date.now(),cooldown=readBinanceCooldown(at),failure=miningFailureState(fresh,e instanceof Error?e.message:String(e),at,'transient');
       const failed=cooldown?{...failure,retryAt:cooldown.until}:failure;
       setState(failed);
       void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at, MINING_COMBINATION));
@@ -123,17 +135,28 @@ export function useFishMining(o: {
       if(active()){
         runId.current++;runningStop.current=null;releaseMiningLease(owner.current);runningRef.current = false; setRunning(false); setAnchorMs(null); setProgress(null);
         // 补历史时一档接一档连着挖
-        if (advanced) setTimeout(() => {if(epoch===generation.current)void tickRef.current();}, 0);
+        if (advanced || readMiningState().round?.id !== s.round?.id) setTimeout(() => {if(epoch===generation.current)void tickRef.current();}, 0);
       }
     }
-  }, [setState]);
+  }, [cancelScan, setState]);
   const tickRef = useRef(tick); tickRef.current = tick;
   useEffect(() => {
     const run = () => { void tickRef.current(); };
     const timer = setInterval(run, TICK_MS);
-    window.addEventListener('online', run); window.addEventListener('focus', run);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === miningKey() && readMiningState().round?.id !== stateRef.current.round?.id) run();
+    };
+    window.addEventListener('online', run);
+    window.addEventListener('focus', run);
+    window.addEventListener('storage', onStorage);
     run();
-    return () => { clearInterval(timer); window.removeEventListener('online', run); window.removeEventListener('focus', run); releaseMiningLease(owner.current); };
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', run);
+      window.removeEventListener('focus', run);
+      window.removeEventListener('storage', onStorage);
+      releaseMiningLease(owner.current);
+    };
   }, [o.account]);
 
   const start = useCallback(() => {
@@ -141,7 +164,19 @@ export function useFishMining(o: {
     // 第一次开始时冻结当前默认算法与阈值
     setState({ ...s, enabled: true, rules: s.rules.length ? s.rules : currentDefaultRules(), selection: s.selection ?? { ...latest.current.selection, exchanges: [...latest.current.selection.exchanges] }, retryAt:null,errorKind:undefined }); setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
-  const pause = useCallback(() => { setState({ ...readMiningState(), enabled: false }); cancelTask.current?.();latest.current.stop(); }, [setState]);
+  const pause = useCallback(() => { setState({ ...readMiningState(), enabled: false }); cancelScan(); }, [cancelScan, setState]);
+  const restart = useCallback(({ startMs, target, rules }: MiningRestart) => {
+    const previous = readMiningState();
+    const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
+    cancelScan();
+    setState({
+      ...newMiningState(), enabled: true, startMs, cursorMs: startMs, target,
+      rules: structuredClone(rules), selection: structuredClone(latest.current.selection),
+      round: { id: crypto.randomUUID(), startedAt },
+    });
+    setWaiting('');
+    setTimeout(() => void tickRef.current(), 0);
+  }, [cancelScan, setState]);
   const setTarget = useCallback((target: number) => {
     if (!Number.isInteger(target) || target <= 0) return;
     setState({ ...readMiningState(), target }); setTimeout(() => void tickRef.current(), 0);
@@ -166,5 +201,5 @@ export function useFishMining(o: {
   const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{return {featureId:def.id,label,statistics:fishStatistics(def)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
   // 算法编号修过别名后同一条鱼的键会变：再按整行内容（标的、时间、命中算法）认一次
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).flatMap(s => [fishCatchKey(s), fishVisibleCatchKey(s)])), []);
-  return { state, running, anchorMs, progress, waiting, start, pause, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys };
+  return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys };
 }

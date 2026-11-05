@@ -9,6 +9,8 @@ export const MINING_DEFAULT_TARGET = 1000;
 export interface FishMiningRule { id: string; featureId: string; statistic: string; threshold: string }
 export interface FishMiningState {
   version: 1; enabled: boolean; startMs: number; stepMs: number;
+  /** Absent on rounds created before explicit restarts were supported. */
+  round?: { id: string; startedAt: number };
   /** 下一档要扫的锚点（扫完才前进；被打断或出错就原地重试）。 */
   cursorMs: number;
   target: number; mined: number; anchorsDone: number;
@@ -40,6 +42,7 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
   const base = newMiningState();
   const upgrade = (v.presetRevision ?? 0) < MINING_PRESET_REVISION;
   const normalized = { ...base, ...v, version: 1, enabled: !!v.enabled, target: Number.isInteger(v.target) && v.target! > 0 ? v.target! : base.target,
+    round: typeof v.round?.id === 'string' && v.round.id && Number.isFinite(v.round.startedAt) ? v.round : undefined,
     minedKeys: v.minedKeys.filter((k): k is string => typeof k === 'string'),
     rules: Array.isArray(v.rules) ? v.rules : [], lastError: typeof v.lastError === 'string' ? v.lastError : '',
     retryAt: Number.isFinite(v.retryAt) && v.retryAt! > 0 ? v.retryAt : null,
@@ -52,12 +55,18 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
     ...(normalized.errorKind === 'configuration' ? { lastError:'', errorKind:undefined, retryAt:null, retryCount:0, lastErrorAt:null } : {}) };
 }
 /**
- * 两份挖掘状态合并（本机与云端、两台设备）：进度只进不退。
+ * 两份挖掘状态合并（本机与云端、两台设备）：先选最新一轮，同一轮内进度只进不退。
  * 游标、已扫档数、最后一档取挖得更远的那份；挖过的信号取并集；开关、目标、冻结的算法取较新保存的那份。
  */
 export function mergeMiningStates(localRaw: unknown, remoteRaw: unknown): FishMiningState | unknown {
   const a = normalizeMiningState(localRaw), b = normalizeMiningState(remoteRaw);
   if (!a || !b) return a ?? b ?? localRaw ?? remoteRaw;
+  if (a.round?.id !== b.round?.id) {
+    if (!a.round) return b;
+    if (!b.round) return a;
+    if (a.round.startedAt !== b.round.startedAt) return a.round.startedAt > b.round.startedAt ? a : b;
+    return a.round.id > b.round.id ? a : b;
+  }
   const settings = (b.savedAt ?? 0) > (a.savedAt ?? 0) ? b : a;
   const far = b.cursorMs > a.cursorMs ? b : a;
   const failure = a.cursorMs === b.cursorMs ? settings : far;

@@ -53,9 +53,9 @@ it('returns the anchor hits without touching the fish list, and refuses to start
 it('keeps the same mining checkpoint after interruption and clears it after completion or changed settings', async () => {
   vi.useFakeTimers();
   const { result } = renderHook(() => useFish(undefined));
-  const interrupted = async (anchorMs: number) => {
+  const interrupted = async (anchorMs: number, roundId?: string) => {
     let pending!: Promise<unknown>;
-    await act(async () => { pending = result.current.mine({ anchorMs }).catch(e => e); result.current.stopMining(); await pending; });
+    await act(async () => { pending = result.current.mine({ anchorMs }, undefined, roundId).catch(e => e); result.current.stopMining(); await pending; });
     return calls.at(-1)!.checkpoint;
   };
   const checkpoint = await interrupted(123);
@@ -65,7 +65,11 @@ it('keeps the same mining checkpoint after interruption and clears it after comp
   const second = calls.at(-1)!.checkpoint;
   await act(async () => { const pending = result.current.mine({ anchorMs: 456 }); await vi.advanceTimersByTimeAsync(10_000); await pending; });
   expect(calls.at(-1)!.checkpoint).toBe(second);
-  expect(await interrupted(456)).not.toBe(second);
+  const previousRound = await interrupted(456);
+  expect(previousRound).not.toBe(second);
+  const newRound = await interrupted(456, 'restart');
+  expect(newRound).not.toBe(previousRound);
+  expect(await interrupted(456, 'restart')).toBe(newRound);
   vi.useRealTimers();
 });
 

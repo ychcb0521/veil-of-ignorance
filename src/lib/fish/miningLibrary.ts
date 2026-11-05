@@ -3,7 +3,7 @@ import {pruneMiningDeletions,mergeSourceDeletions} from './libraryDeletion';
  * 挖掘库：批量挖掘每一档的扫描记录与挖到的信号，独立于鱼舱保存（在鱼舱里删掉鱼，挖掘库里仍在，并标出「已从鱼舱删除」）。
  * 【用户要求】2026-10-27「批量挖掘、买前过滤、持仓监测的逻辑和运行是独立的，因此需要有各自的数据库」。
  *
- *   挖掘方案（run）= 冻结的默认算法与阈值 + 捕捞范围 + 起点与档距；方案相同的多次挖掘共用一个；
+ *   挖掘方案（run）= 冻结的默认算法与阈值 + 捕捞范围 + 起点与档距；重新开始的轮次各自保留；
  *   档（anchor）   = 一次扫描：扫到几条、新增几条、出错原因（出错原地重试，次数累加）；
  *   记录（record） = 挖到的一条信号（同一方案下同一信号合并为一条），保存当时的读数快照（去掉逐点曲线）。
  * 体积可能上 MB，存 IndexedDB 并跟账号同步（见 miningLibraryStore），不进 localStorage。
@@ -11,7 +11,7 @@ import {pruneMiningDeletions,mergeSourceDeletions} from './libraryDeletion';
 import { shortFishHash } from './algorithm';
 import { fishCatchKey } from './records';
 import { mergeLibraryRecords, type LibraryRecordBase } from './libraryRounds';
-import type { FishMiningRule, FishMiningState } from './miningState';
+import { newMiningState, type FishMiningRule, type FishMiningState } from './miningState';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 export interface FishMiningRun {
@@ -48,8 +48,9 @@ const runSignature = (s: Pick<FishMiningState, 'rules' | 'selection' | 'startMs'
   s.selection ? [[...s.selection.exchanges].sort(), !!s.selection.includeDuplicates, !!s.selection.includeUsStocks] : null, s.startMs, s.stepMs,
 ]);
 function withRun(library: FishMiningLibrary, state: FishMiningState, at: number, combination: 'and'|'or' = 'and'): { library: FishMiningLibrary; run: FishMiningRun } {
-  // Keep legacy union signatures stable and never merge an intersection into a union run.
-  const signature = runSignature(state) + (combination === 'and' ? '|and' : ''), existing = library.runs.find(r => r.signature === signature);
+  // Keep legacy signatures stable and preserve each explicit restart, even with identical settings.
+  const signature = runSignature(state) + (combination === 'and' ? '|and' : '') + (state.round ? `|round:${state.round.id}` : '');
+  const existing = library.runs.find(r => r.signature === signature);
   if (existing) {
     const run = { ...existing, updatedAt: Math.max(existing.updatedAt, at) };
     return { run, library: { ...library, runs: library.runs.map(r => r.id === run.id ? run : r) } };
@@ -87,7 +88,7 @@ export function recordMiningError(input: FishMiningLibrary, state: FishMiningSta
  */
 export function adoptMinedFish(library: FishMiningLibrary, state: FishMiningState, signals: readonly TradeSignal[], at: number): FishMiningLibrary {
   if (library.adoptedHold || !state.rules.length) return library;
-  const mined = signals.filter(s => s.mined && Number.isFinite(s.mined.anchorMs));
+  const mined = signals.filter(s => s.mined && !s.mined.roundId && Number.isFinite(s.mined.anchorMs));
   let next: FishMiningLibrary = { ...library, adoptedHold: true };
   if (!mined.length) return next;
   const byAnchor = new Map<string, {anchorMs:number;rules:FishMiningRule[];combination:'and'|'or';list:TradeSignal[]}>();
@@ -98,9 +99,10 @@ export function adoptMinedFish(library: FishMiningLibrary, state: FishMiningStat
     const combination=s.fish?.combination??(s.fish?.algorithms?.length?'and':'or'),anchorMs=s.mined!.anchorMs,key=JSON.stringify([anchorMs,rules,combination]);
     const group=byAnchor.get(key)??{anchorMs,rules,combination,list:[]};group.list.push(s);byAnchor.set(key,group);
   }
+  const historicalState = state.round ? newMiningState() : state;
   for (const {anchorMs,rules,combination,list} of [...byAnchor.values()].sort((a,b)=>a.anchorMs-b.anchorMs)) {
     const when = list.reduce((t, s) => Math.max(t, s.caughtAt ?? 0), 0) || at;
-    const historical={...state,rules};
+    const historical = { ...historicalState, rules };
     const { library: withAnchor, run } = withRun(next, historical, when, combination);
     if (withAnchor.anchors.some(a => a.id === anchorId(run.id, anchorMs))) { next = withAnchor; continue; }
     next = recordMinedAnchor(withAnchor, historical, anchorMs, list.length, list, when, combination);

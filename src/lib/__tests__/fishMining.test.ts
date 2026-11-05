@@ -114,3 +114,19 @@ it('does not drop a network cooldown while upgrading old requirements',()=>{
  const state=normalizeMiningState({...newMiningState(),presetRevision:undefined,errorKind:'transient',lastError:'网络中断',retryAt:12345,retryCount:3})!;
  expect(state.rules).toEqual(currentDefaultRules());expect(state).toMatchObject({lastError:'网络中断',retryAt:12345,retryCount:3});
 });
+
+it('recovers progress only from fish and snapshots of the active mining round', () => {
+  const startMs = MINING_START_MS, far = startMs + 9 * MINING_STEP_MS;
+  const older = acceptMinedAnchor(newMiningState(), [fish('OLDUSDT', far - 1000)], far, far + 1);
+  const current = { ...newMiningState(), enabled: true, savedAt: 10, round: { id: 'new', startedAt: 10 } };
+  const oldSnapshot = { ...older.state, savedAt: 100, round: { id: 'old', startedAt: 9 } };
+  expect(mergeMiningStates(oldSnapshot, current)).toMatchObject({ round: current.round, cursorMs: startMs, mined: 0 });
+  expect(mergeMiningStates(current, older.state)).toMatchObject({ round: current.round, cursorMs: startMs, mined: 0 });
+  expect(reconcileMiningWithFish(current, older.added)).toBe(current);
+
+  const fresh = acceptMinedAnchor(current, [fish('NEWUSDT', startMs - 1000)], startMs, startMs + 1);
+  expect(reconcileMiningWithFish(current, [...older.added, ...fresh.added])).toMatchObject({
+    round: current.round, cursorMs: startMs + MINING_STEP_MS, mined: 1,
+  });
+  expect(mergeMiningStates(current, fresh.state)).toMatchObject({ cursorMs: startMs + MINING_STEP_MS, mined: 1 });
+});

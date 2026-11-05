@@ -169,11 +169,11 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
    */
   const mineController = useRef<AbortController | null>(null), minePromise = useRef<Promise<unknown> | null>(null);
   const miningCheckpoint = pageMiningCheckpoint;
-  const mine = useCallback(async (settings: FishScanSettings, onProgress?: (p: FishProgress) => void): Promise<TradeSignal[]> => {
+  const mine = useCallback(async (settings: FishScanSettings, onProgress?: (p: FishProgress) => void, roundId?: string): Promise<TradeSignal[]> => {
     const sc = (scanner.current ??= pageScanner ??= new FishScanner());
     if (controller.current || mineController.current || sc.isBusy()) throw new Error('取数器正忙');
     const mine = new AbortController(); mineController.current = mine;
-    const checkpointKey = JSON.stringify([ownerRef.current, settings]);
+    const checkpointKey = JSON.stringify([ownerRef.current, roundId, settings]);
     if (miningCheckpoint.current?.key !== checkpointKey) miningCheckpoint.current = { key: checkpointKey, results: new Map() };
     const checkpoint = miningCheckpoint.current;
     const found: TradeSignal[] = [];

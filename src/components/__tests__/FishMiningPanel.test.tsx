@@ -91,3 +91,37 @@ it('lets an invalid saved statistic be repaired locally and explicitly resumed w
  fireEvent.change(screen.getByLabelText('挖掘算法 1 统计量'),{target:{value:'avg_a'}});fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
  expect(configure).toHaveBeenCalledWith([{id:'az',featureId:'drift-speed-z',statistic:'avg_a',threshold:'0.15'}]);expect(m.state.mined).toBe(220);
 });
+
+it('edits a new round while a scan is running and waits for explicit confirmation', () => {
+  const restart = vi.fn();
+  const rules = [currentDefaultRules()[0]];
+  const m = api({ running: true, restart, ruleChoices: [
+    { featureId: 'cbi2', label: 'CBI-2', statistics: [{ name: rules[0].statistic, label: 'avg₂' }] },
+    { featureId: 'cba', label: 'CBA', statistics: [{ name: '结果', label: '结果' }] },
+  ] }, { enabled: true, rules });
+  render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
+  const open = () => fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+  open();
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(restart).not.toHaveBeenCalled();
+  expect(m.pause).not.toHaveBeenCalled();
+
+  open();
+  const form = within(screen.getByRole('dialog', { name: '重新开始批量挖掘' }));
+  const date = form.getByLabelText('挖掘起点（北京时间）');
+  const submit = form.getByRole('button', { name: '开始新一轮' });
+  fireEvent.change(date, { target: { value: '' } });
+  fireEvent.click(submit);
+  expect(form.getByRole('alert')).toHaveTextContent('挖掘起点');
+  expect(restart).not.toHaveBeenCalled();
+
+  fireEvent.change(date, { target: { value: '2026-01-15T07:30' } });
+  fireEvent.change(form.getByLabelText('挖掘目标条数'), { target: { value: '80' } });
+  fireEvent.change(form.getByLabelText('挖掘算法 1 特征值'), { target: { value: 'cba' } });
+  fireEvent.change(form.getByLabelText('挖掘算法 1 门槛'), { target: { value: '9' } });
+  fireEvent.click(submit);
+  expect(restart).toHaveBeenCalledWith({
+    startMs: Date.parse('2026-01-15T07:30:00+08:00'), target: 80,
+    rules: [{ ...rules[0], featureId: 'cba', statistic: '结果', threshold: '9' }],
+  });
+});
