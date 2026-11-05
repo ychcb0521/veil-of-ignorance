@@ -63,7 +63,7 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
     return mergeFishLists(local, remote, tombstones);
   },
   fish_deleted_v1: (local, remote) => mergeFishTombstones(local, remote),
-  // 持续挖掘的进度只进不退：取挖得更远的那份（以前登录时补推的旧快照会把本机进度盖回去）。
+  // 持续挖掘采用最新轮次，同一轮内取挖得更远的进度。
   'fish-mining.v1': (local, remote) => mergeMiningStates(local, remote),
 };
 

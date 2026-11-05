@@ -3,7 +3,7 @@
  * 挖到的鱼直接入「鱼舱」并进「鱼质量」。先挖到目标条数（默认 1000）为止；追上现在之后，每过半天自动再扫一档。
  * 【用户要求】2026-10-26「先用当前默认算法和对应阈值挖掘信号（先挖掘1000个）……设置成能够动态持续挖掘的流程。
  * 时间就从2026年4月1号0点开始，半天挖掘一次。挖掘出的信号同时归入鱼舱和鱼质量中。」
- * 状态按账号存本机，并推一份到云端（进度只进不退：两边合并取挖得更远的那份，见 mergeMiningStates）。
+ * 状态按账号存本机，并推一份到云端（同一轮内合并取挖得更远的那份，见 mergeMiningStates）。
  * 【用户要求】2026-10-26「自动挖掘可以记住上次挖掘到那个时间点了。下次点开时，能够按照时间顺序接上」——
  * 以前只存本机，登录时云端补推的旧快照会在下次打开时把本机进度盖回去；现在每次保存都推云，
  * 并且鱼舱里已挖到的鱼（带 mined.anchorMs）也能反推进度，状态丢了也从最后挖到的那一档往后接。
@@ -44,7 +44,7 @@ export function saveMiningState(state: FishMiningState, now = Date.now()): void 
  * 没有更远的鱼就原样返回同一个对象。
  */
 export function reconcileMiningWithFish(state: FishMiningState, signals: readonly TradeSignal[]): FishMiningState {
-  const mined = signals.filter(s => s.mined && Number.isFinite(s.mined.anchorMs));
+  const mined = signals.filter(s => s.mined && s.mined.roundId === state.round?.id && Number.isFinite(s.mined.anchorMs));
   if (!mined.length) return state;
   const lastAnchor = Math.max(...mined.map(s => s.mined!.anchorMs));
   const seen = new Set(state.minedKeys), fresh = mined.map(fishCatchKey).filter(k => !seen.has(k) && (seen.add(k), true));
@@ -74,7 +74,9 @@ export function acceptMinedAnchor(state: FishMiningState, found: readonly TradeS
     if (seen.has(key)) continue;
     seen.add(key);
     const { freshCatch: _fresh, ...signal } = raw;
-    added.push({ ...signal, id: `${raw.id}|mine:${anchorMs}`, fishArchive: { id: `mine-${anchorMs}`, at: now }, caughtAt: now, mined: { anchorMs } });
+    const occurrence = state.round ? `${state.round.id}-${anchorMs}` : String(anchorMs);
+    const mined = state.round ? { anchorMs, roundId: state.round.id } : { anchorMs };
+    added.push({ ...signal, id: `${raw.id}|mine:${occurrence}`, fishArchive: { id: `mine-${occurrence}`, at: now }, caughtAt: now, mined });
   }
   return { added, state: { ...state, cursorMs: anchorMs + state.stepMs, mined: state.mined + added.length, anchorsDone: state.anchorsDone + 1,
     minedKeys: [...state.minedKeys, ...added.map(fishCatchKey)], lastAnchorMs: anchorMs, lastRunAt: now, lastError: '', retryAt:null,retryCount:0,lastErrorAt:null,errorKind:undefined } };

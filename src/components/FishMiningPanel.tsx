@@ -1,50 +1,73 @@
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 /**
- * 「比较探测」的持续挖掘面板：默认探测算法（开始时冻结）从 2026-04-01 00:00 起每半天扫一档，
+ * 「比较探测」的持续挖掘面板：从所选起点每半天扫一档，
  * 挖到的鱼入鱼舱、进鱼质量，按固定的卖出方案评估后生成「探测比较」交易战役。
  */
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Pause, Pickaxe, Play, Plus, Settings2, X } from 'lucide-react';
+import { ArrowUpRight, Pause, Pickaxe, Play, Plus, RotateCcw, Settings2, X } from 'lucide-react';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from '@/components/FishQualityModule';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { currentDefaultRules, type FishMiningRule } from '@/lib/fish/mining';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { parseFishSettings } from '@/lib/fishScanner';
 import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
 const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} > ${r.threshold}`;
-function MiningRuleEditor({mining,close}:{mining:FishMiningApi;close:()=>void}){
+function MiningRuleEditor({ mining, close, restart = false }: { mining: FishMiningApi; close: () => void; restart?: boolean }) {
   const [draft,setDraft]=useState(()=>structuredClone(mining.state.rules.length?mining.state.rules:currentDefaultRules())),[target,setTarget]=useState(String(mining.state.target)),[error,setError]=useState('');
+  const [startTime, setStartTime] = useState(() => short(mining.state.startMs).replace(' ', 'T'));
+  const locked = mining.running && !restart;
   const choices=(mining.ruleChoices??[]).filter(c=>c.statistics.length>0);
   const save=()=>{
     const count=Number(target);if(!Number.isSafeInteger(count)||count<=0){setError('目标条数必须是正整数');return;}
-    if(mining.configure){
-    if(!draft.length||draft.length>FISH_MAX_ALGORITHMS){setError(`请选择 1 至 ${FISH_MAX_ALGORITHMS} 个算法`);return;}
-    const invalid=draft.findIndex(rule=>!rule.threshold.trim()||!Number.isFinite(Number(rule.threshold))||!mining.ruleChoices?.find(c=>c.featureId===rule.featureId)?.statistics.some(s=>s.name===rule.statistic));
-    if(invalid>=0){setError(`算法 ${invalid+1}：请选择有效统计量，并填写有限数字门槛`);return;}
+    if(restart || mining.configure){
+      if(!draft.length||draft.length>FISH_MAX_ALGORITHMS){setError(`请选择 1 至 ${FISH_MAX_ALGORITHMS} 个算法`);return;}
+      const invalid=draft.findIndex(rule=>!rule.threshold.trim()||!Number.isFinite(Number(rule.threshold))||!choices.find(c=>c.featureId===rule.featureId)?.statistics.some(s=>s.name===rule.statistic));
+      if(invalid>=0){setError(`算法 ${invalid+1}：请选择有效统计量，并填写有限数字门槛`);return;}
     }
-    if(count!==mining.state.target)mining.setTarget(count);mining.configure?.(draft);close();
+    if (restart) {
+      let startMs: number | undefined;
+      try { startMs = parseFishSettings(startTime, '0').anchorMs; } catch { /* Show the error beside the form. */ }
+      if (startMs === undefined || startMs > Date.now()) {
+        setError('请选择有效且不晚于现在的挖掘起点（北京时间）');
+        return;
+      }
+      mining.restart({ startMs, target: count, rules: draft });
+    } else {
+      if (count !== mining.state.target) mining.setTarget(count);
+      mining.configure?.(draft);
+    }
+    close();
   };
-  return <div className="flex min-h-0 flex-1 flex-col text-[11px]" data-testid="mining-rule-editor"><div className="shrink-0 space-y-3 px-4 pb-3 pt-4"><div className="flex items-center justify-between gap-2"><p className="font-medium">挖掘条件</p><FishQualityInfo label="挖掘条件说明"><p>多个算法按并集合并，任一满足即挖到。</p><p>修改后从当前档继续，已挖进度和历史结果保留。命名序列读取原值；「结果」使用显示倍率，切换统计量时请核对门槛。</p><p>目标为累计挖掘条数，调高后可继续；保存条件后按当前进度重试。</p></FishQualityInfo></div><label className="flex items-center justify-between gap-3 text-muted-foreground">目标条数<span className="inline-flex items-center gap-2"><input aria-label="挖掘目标条数" type="number" min="1" step="100" value={target} onChange={e=>setTarget(e.target.value)} className="h-7 w-24 rounded-md border border-border/60 bg-muted/50 px-2 font-mono tabular-nums outline-none focus-visible:border-ring"/>条</span></label></div>
+  return <div className="flex min-h-0 flex-1 flex-col text-[11px]" data-testid="mining-rule-editor"><div className="shrink-0 space-y-3 px-4 pb-3 pt-4"><div className="flex items-center justify-between gap-2"><p className="font-medium">挖掘条件</p><FishQualityInfo label="挖掘条件说明"><p>多个算法按并集合并，任一满足即挖到。</p><p>命名序列读取原值；「结果」使用显示倍率，切换统计量时请核对门槛。</p>{!restart && <p>修改后从当前档继续。目标为本轮累计挖掘条数，调高后可继续。</p>}</FishQualityInfo></div>{restart && <label className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
+      挖掘起点（北京时间）
+      <input type="datetime-local" value={startTime} max={short(Date.now()).replace(' ', 'T')} onChange={e=>setStartTime(e.target.value)} className="h-7 max-w-full rounded-md border border-border/60 bg-muted/50 px-2 font-mono"/>
+    </label>}<label className="flex items-center justify-between gap-3 text-muted-foreground">目标条数<span className="inline-flex items-center gap-2"><input aria-label="挖掘目标条数" type="number" min="1" step="100" value={target} onChange={e=>setTarget(e.target.value)} className="h-7 w-24 rounded-md border border-border/60 bg-muted/50 px-2 font-mono tabular-nums outline-none focus-visible:border-ring"/>条</span></label></div>
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pb-3" data-testid="mining-rule-scroll">{draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic);return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
       <select aria-label={`挖掘算法 ${i+1} 特征值`} className="h-7 w-28 min-w-0 rounded bg-muted px-2" value={rule.featureId} onChange={e=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,featureId:e.target.value,statistic:'结果',threshold:''}:r));}}>
         {!choices.some(c=>c.featureId===rule.featureId)&&<option value={rule.featureId}>{rule.featureId}（已失效）</option>}{choices.map(c=><option key={c.featureId} value={c.featureId}>{c.label}</option>)}
       </select>
       <select aria-label={`挖掘算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value}:r))}>{!valid&&<option value={rule.statistic}>{rule.statistic}（已失效）</option>}{choice?.statistics.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><span>&gt;</span><input aria-label={`挖掘算法 ${i+1} 门槛`} className="h-7 w-20 rounded bg-muted px-2 font-mono" type="number" step="any" value={rule.threshold} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,threshold:e.target.value}:r))}/>
-      <button type="button" aria-label={`移除挖掘算法 ${i+1}`} disabled={draft.length<=1||mining.running} onClick={()=>setDraft(draft.filter((_,j)=>j!==i))} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground disabled:opacity-30"><X aria-hidden className="h-3 w-3"/></button>
+      <button type="button" aria-label={`移除挖掘算法 ${i+1}`} disabled={draft.length<=1||locked} onClick={()=>setDraft(draft.filter((_,j)=>j!==i))} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground disabled:opacity-30"><X aria-hidden className="h-3 w-3"/></button>
     </div>;})}</div>
     <div className="shrink-0 space-y-2 border-t border-border/50 bg-popover px-4 py-3" data-testid="mining-rule-actions">{error&&<p role="alert" className="text-destructive">{error}</p>}<div className="flex flex-wrap items-center justify-between gap-2">
-    <button type="button" disabled={draft.length>=FISH_MAX_ALGORITHMS||!choices.length||mining.running} onClick={()=>setDraft([...draft,{id:`mining-rule-${crypto.randomUUID()}`,featureId:choices[0].featureId,statistic:'结果',threshold:''}])} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"><Plus aria-hidden className="h-3 w-3"/>新增挖掘算法</button>
-    <button type="button" disabled={mining.running} onClick={save} className={qualityPrimaryAction}>保存并重试</button></div></div>
+    <button type="button" disabled={draft.length>=FISH_MAX_ALGORITHMS||!choices.length||locked} onClick={()=>setDraft([...draft,{id:`mining-rule-${crypto.randomUUID()}`,featureId:choices[0].featureId,statistic:'结果',threshold:''}])} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"><Plus aria-hidden className="h-3 w-3"/>新增挖掘算法</button>
+    {restart && <button type="button" onClick={()=>{setDraft(currentDefaultRules());setError('');}} className="rounded px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground">恢复默认算法</button>}
+    <div className="ml-auto flex gap-2">
+      {restart && <button type="button" onClick={close} className={qualityPauseAction}>取消</button>}
+      <button type="button" disabled={locked} onClick={save} className={qualityPrimaryAction}>{restart ? '开始新一轮' : '保存并重试'}</button>
+    </div></div></div>
   </div>;
 }
 export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump }: { mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
   const { state: s, running, anchorMs, progress, waiting } = mining;
-  const [clock,setClock]=useState(Date.now),[settingsOpen,setSettingsOpen]=useState(false);
+  const [clock,setClock]=useState(Date.now),[settingsOpen,setSettingsOpen]=useState(false),[restartOpen,setRestartOpen]=useState(false);
   useEffect(()=>{if(!s.enabled||running||!s.retryAt||s.retryAt<=Date.now())return;const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[s.enabled,s.retryAt,running]);
   const rules = s.rules.length ? s.rules : currentDefaultRules(), reached = s.mined >= s.target, now = Date.now();
   const caughtUp = !reached && s.cursorMs > now, share = Math.min(1, s.mined / s.target);
@@ -73,6 +96,16 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           ? <button type="button" onClick={mining.pause} className={qualityPauseAction}><Pause className="h-3 w-3"/>暂停</button>
           : <button type="button" onClick={mining.start} className={qualityPrimaryAction}><Play className="h-3 w-3"/>{s.anchorsDone ? '继续挖掘' : '开始挖掘'}</button>}
         <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" disabled={running} className="inline-flex h-7 w-[5.5rem] shrink-0 whitespace-nowrap items-center justify-center gap-1 rounded px-2 text-[10.5px] text-muted-foreground hover:bg-muted disabled:opacity-40"><Settings2 className="h-3 w-3"/>挖掘条件</button></PopoverTrigger><PopoverContent align="start" className="flex w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(75dvh,var(--radix-popover-content-available-height))] flex-col overflow-hidden p-0" data-testid="mining-rule-popover"><MiningRuleEditor key={JSON.stringify(s.rules)} mining={mining} close={()=>setSettingsOpen(false)}/></PopoverContent></Popover>
+        <Dialog open={restartOpen} onOpenChange={setRestartOpen}>
+          <DialogTrigger asChild><button type="button" className={qualityPauseAction}><RotateCcw aria-hidden className="h-3 w-3"/>重新开始</button></DialogTrigger>
+          <DialogContent className="flex max-h-[80dvh] w-[calc(100%-2rem)] max-w-[34rem] flex-col gap-0 overflow-hidden p-0">
+            <DialogHeader className="shrink-0 border-b border-border/50 px-4 pb-3 pt-4 pr-10 text-left">
+              <DialogTitle className="text-sm">重新开始批量挖掘</DialogTitle>
+              <DialogDescription className="text-xs">开始后会结束当前轮次，从所选起点按当前捕捞范围每 12 小时扫一档。本轮计数归零，历史结果保留在挖掘库。</DialogDescription>
+            </DialogHeader>
+            <MiningRuleEditor mining={mining} close={()=>setRestartOpen(false)} restart/>
+          </DialogContent>
+        </Dialog>
         <FishMiningLibrary account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump}/>
         {(running||hasError||s.enabled||hasStarted)&&<span role="status" aria-label={status} title={status} className={`ml-1 inline-flex items-center gap-2 whitespace-nowrap text-[10px] ${hasError?'text-destructive':'text-muted-foreground'}`}><span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${running?'animate-pulse bg-primary':hasError?'bg-destructive':'bg-muted-foreground/40'}`}/>{statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>{running&&progress&&progress.total>0&&<span className="font-mono tabular-nums" aria-label={`本档已扫 ${progress.done} / ${progress.total} 个标的`}>{progress.done}/{progress.total}</span>}</span>}
 

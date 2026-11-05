@@ -175,3 +175,61 @@ it('waits through a persisted Binance cooldown even after manual retry, then res
  await flush(150000);expect(mine).not.toHaveBeenCalled();expect(readMiningState().mined).toBe(105);
  await flush(60000);expect(mine.mock.calls[0][0].anchorMs).toBe(MINING_START_MS+MINING_STEP_MS);expect(readMiningState().mined).toBeGreaterThanOrEqual(105);expect(readMiningState().retryCount).toBe(0);
 });
+
+it('restarts from the selected time with fresh counters even when old fish and a failed cursor are ahead', async () => {
+  const { h, list, mine } = setup();
+  act(() => h.result.current.start());
+  await flush(10);
+  const previous = [...list.current];
+  saveMiningState({ ...readMiningState(), selection: { exchanges: ['bybit'], includeDuplicates: false }, lastError: '旧轮失败', retryCount: 3 });
+
+  const startMs = MINING_START_MS - 5 * 3_600_000;
+  const rules = [{ id: 'new', featureId: 'cbi2', statistic: '结果', threshold: '0.2' }];
+  act(() => h.result.current.restart({ startMs, target: 1, rules }));
+  expect(readMiningState()).toMatchObject({ startMs, cursorMs: startMs, mined: 0, anchorsDone: 0, retryCount: 0, lastError: '' });
+  await flush(10);
+  expect(mine.mock.calls.at(-1)?.[0]).toMatchObject({
+    anchorMs: startMs, exchanges: ['binance'], algorithms: [{ algorithm: { threshold: 0.2 } }],
+  });
+  const state = readMiningState();
+  expect(state).toMatchObject({ target: 1, mined: 1, anchorsDone: 1, cursorMs: startMs + MINING_STEP_MS });
+  expect(list.current).toEqual(expect.arrayContaining(previous));
+  expect(list.current.at(-1)?.mined).toEqual({ anchorMs: startMs, roundId: state.round?.id });
+});
+
+it.each(['result', 'error'])('discards a previous round’s late %s even if another tab restarts at the same anchor', async outcome => {
+  let resolve!: (fish: TradeSignal[]) => void;
+  let reject!: (error: Error) => void;
+  const oldScan = new Promise<TradeSignal[]>((accept, fail) => { resolve = accept; reject = fail; });
+  const { h, mine, commit } = setup({ mine: () => oldScan });
+  act(() => h.result.current.start());
+  await flush(10);
+  expect(h.result.current.running).toBe(true);
+  const rules = readMiningState().rules;
+  saveMiningState({ ...newMiningState(), enabled: true, rules, round: { id: 'other-tab', startedAt: Date.now() } });
+  mine.mockImplementation(() => new Promise(() => {}));
+
+  if (outcome === 'result') resolve([sig('OLDUSDT', MINING_START_MS)]);
+  else reject(new Error('旧轮失败'));
+  await flush(10);
+  expect(commit).not.toHaveBeenCalled();
+  expect(readMiningState()).toMatchObject({ cursorMs: MINING_START_MS, mined: 0, lastError: '', round: { id: 'other-tab' } });
+  expect(mine).toHaveBeenCalledTimes(2);
+});
+
+it('cancels the running scan when restarting locally and starts the new round without waiting for its old result', async () => {
+  let resolveOld!: (fish: TradeSignal[]) => void;
+  const oldScan = new Promise<TradeSignal[]>(resolve => { resolveOld = resolve; });
+  const { h, mine, stop, list } = setup({ mine: () => oldScan });
+  act(() => h.result.current.start());
+  await flush(10);
+  const startMs = MINING_START_MS;
+  mine.mockImplementation(async () => [sig('NEWUSDT', startMs)]);
+  act(() => h.result.current.restart({ startMs, target: 1, rules: readMiningState().rules }));
+  expect(stop).toHaveBeenCalledOnce();
+  await flush(10);
+  resolveOld([sig('OLDUSDT', startMs)]);
+  await flush(10);
+  expect(mine).toHaveBeenCalledTimes(2);
+  expect(list.current.map(signal => signal.symbol)).toEqual(['NEWUSDT']);
+});
