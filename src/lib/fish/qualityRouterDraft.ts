@@ -1,5 +1,5 @@
 import type { QualityGroup } from './quality';
-import { canonicalRouterJson, routerOrdinal, routerPrefixText, validateQualityRouter, type QualityPlanRouter } from './qualityPlanRouter';
+import { canonicalRouterJson, isRaceRouter, RACE_ROUND_KEYS, routerOrdinal, routerPrefixText, validateQualityRouter, type QualityPlanRouter } from './qualityPlanRouter';
 import { freezeQualityPlan } from './qualityPlanVersions';
 import { qualityAdditionPrerequisites, validateQualityAddition } from './qualityAddition';
 import { validateQualityMirror } from './qualityMirror';
@@ -24,31 +24,32 @@ export function prepareQualityRouterDraft(original: QualityPlanRouter, structure
   }
   // Copy actual edits field by field. Existing branch-specific protection must not be
   // overwritten merely because another global field or the first addition was edited.
+  // 分流前的加仓（第一次或前两次）是公共历史；每轮分流（n＝0）没有公共轮，各轮条件两边各自独立
+  const n = original.afterAdditions, race = isRaceRouter(original);
   const additionKeys = new Set([original.structure, original.attack, structure, attack].flatMap(p => Object.keys(p.addition ?? {})));
   for (const key of additionKeys) {
-    if (key === 'rounds' || key === 'maxRounds') continue;
+    if (key === 'rounds' || key === 'maxRounds' || race && (RACE_ROUND_KEYS as readonly string[]).includes(key)) continue;
     const [oldA, oldB, a, b] = [original.structure, original.attack, structure, attack].map(p => p.addition?.[key]);
     if (same(oldA, a) && same(oldB, b)) continue;
     const value = reconcile('加仓通用设置', oldA, oldB, a, b);
     for (const branch of branches) { if (value === undefined) delete branch.addition![key]; else branch.addition![key] = structuredClone(value); }
   }
-  // 分流前的加仓（第一次或前两次）是公共历史
-  const n = original.afterAdditions;
   const shared = Array.from({ length: n }, (_, i) => reconcile(`第 ${i + 1} 次加仓`, original.structure.addition?.rounds?.[i], original.attack.addition?.rounds?.[i], structure.addition?.rounds?.[i], attack.addition?.rounds?.[i]));
   for (const branch of branches) {
     const rounds = [...shared.map(r => structuredClone(r)), ...(branch.addition?.rounds?.slice(n) ?? [])];
     branch.addition = { ...branch.addition, rounds } as QualityGroup['addition'];
   }
   for (const key of ['sellStages', 'vetoStages'] as const) {
-    const early = (p: QualityGroup) => (p[key] ?? []).filter(s => s.afterAdditions <= n);
-    const common = reconcile(`${routerPrefixText(original)}加仓后的${key === 'sellStages' ? '卖出' : '否决'}`, early(original.structure), early(original.attack), early(structure), early(attack));
+    const cut = race ? Infinity : n, early = (p: QualityGroup) => (p[key] ?? []).filter(s => s.afterAdditions <= cut);
+    const common = reconcile(`${race ? '' : routerPrefixText(original)}加仓后的${key === 'sellStages' ? '卖出' : '否决'}`, early(original.structure), early(original.attack), early(structure), early(attack));
     for (const branch of branches) {
-      const stages = [...structuredClone(common), ...(branch[key] ?? []).filter(s => s.afterAdditions > n)];
+      const stages = [...structuredClone(common), ...(branch[key] ?? []).filter(s => s.afterAdditions > cut)];
       (branch as any)[key] = stages.length ? stages : undefined;
     }
   }
   for (const branch of branches) {
     validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes);
+    if (race) { if (!branch.addition?.enabled || !branch.addition.rounds?.length) throw Error('每轮分流的两条分支都须有逐轮加仓条件'); continue; }
     if (!branch.addition?.enabled || (branch.addition.maxRounds ?? branch.addition.rounds?.length ?? 0) < n) throw Error(n === 1 ? '条件分支需要至少一次结构加仓，才能在第一次成交时选择分支' : '条件分支需要至少两次结构加仓，才能在第二次成交时选择分支');
     if (!qualityAdditionPrerequisites(branch.addition.rounds![n - 1]).some(c => c.metric === 'state')) throw Error(`第${routerOrdinal(original)}次结构加仓须保留状态 S 方向条件，以取得分支选择时的已收盘读数`);
   }

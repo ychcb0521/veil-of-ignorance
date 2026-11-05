@@ -4,7 +4,7 @@ import { makeQualitySellPlan } from '../qualitySellPlans';
 import { makeQualityBuyFilter } from '../qualityFilters';
 import { defaultStructureAddition } from '../qualityAdditionStructure';
 import { prepareQualityRouterDraft } from '../qualityRouterDraft';
-import { QUALITY_ROUTER_VERSION, type QualityPlanRouter } from '../qualityPlanRouter';
+import { QUALITY_ROUTER_RACE_VERSION, QUALITY_ROUTER_VERSION, type QualityPlanRouter } from '../qualityPlanRouter';
 import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
 import { newQualityStudy } from '../quality';
 import { saveQualityPlanTemplate, qualityPlanFromTemplate } from '../qualityPlanTemplates';
@@ -68,4 +68,19 @@ it('does not copy unrelated protection while synchronizing a changed first-round
   expect(edited.attack.addition!.rounds![0].structure!.buffer).toBe(1.25);
   expect(edited.attack.addition!.supportReduction).toBeUndefined();
   expect(edited.structure.addition!.supportReduction).toEqual(old.structure.addition!.supportReduction);
+});
+
+// 【用户要求】2026-11-05 版本 3 每轮分流：各轮条件两边独立，其余设置同步；进攻分支各次状态 S 门槛不低于分支门槛
+it('race mode keeps each branch\'s rounds, syncs every other setting, and enforces the attack S floor', () => {
+  const old = fixture(), attack = structuredClone(old.attack);
+  attack.addition!.rounds = attack.addition!.rounds!.map(() => ({ source: 'custom' as const, stricterPct: 10, condition: makeQualityBuyFilter('state:state', '>', .9, true, BUILTIN_FEATURES), minGainPct: 10, gainBasis: 'average' as const, entryDistanceAtr: 2, supportOffsetAtr: 1.5 }));
+  Object.assign(attack.addition!, attack.addition!.rounds![0]);
+  const race: QualityPlanRouter = { version: QUALITY_ROUTER_RACE_VERSION, afterAdditions: 0, threshold: .85, structure: old.structure, attack };
+  const structure = structuredClone(race.structure); structure.mirrorTakeProfit!.sellPct = 23; structure.addition!.rounds![0].structure!.buffer = 1.25;
+  const edited = prepareQualityRouterDraft(race, structure, race.attack, .85);
+  expect(edited.afterAdditions).toBe(0); expect(edited.attack.mirrorTakeProfit!.sellPct).toBe(23);
+  expect(edited.attack.addition!.rounds!.map(r => r.source)).toEqual(['custom', 'custom', 'custom']);
+  expect(edited.structure.addition!.rounds![0].structure!.buffer).toBe(1.25); expect(edited.attack.addition!.rounds![0]).toEqual(race.attack.addition!.rounds![0]);
+  expect(planVersionChanges(freezeQualityPlan({ ...edited.structure, router: edited }))).toEqual([]);
+  expect(() => prepareQualityRouterDraft(race, race.structure, race.attack, .95)).toThrow('不低于分支门槛');
 });

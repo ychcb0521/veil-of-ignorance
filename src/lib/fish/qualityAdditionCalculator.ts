@@ -14,6 +14,7 @@ import type {ResearchBar} from '@/lib/deepRsa/window';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'>&{entryVetoes?:QualityAdditionEntryVeto[]};
+type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
  structure?:StructureAdditionRule;
  supportReduction?:QualitySupportReductionRule;previousReductions?:readonly QualityReductionFill[];
@@ -24,7 +25,8 @@ interface Options extends AtrSettings {
  candidates:AdditionCandidate[];required?:AdditionCandidate[];
  /** 这一轮的方向条件注定无法满足（如信号没有所选的探测算法）：不再加仓。 */
  unavailable?:string;
- roundRules?:({candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings)[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
+ /** 每轮的扫描规则；alternative＝这一轮的进攻备选（【用户要求】2026-11-05 每轮分流：两条同时等候，先满足者成交，同一分钟先保守）。 */
+ roundRules?:(RoundScan&{alternative?:RoundScan})[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -197,9 +199,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(scanEnd<=after)return done(stop);
   // 【用户要求】2026-11-02 支撑线下移减仓：先找下移事件；比它早的加仓照常处理，否则在下移那一刻按减仓计算器减仓
   const drop=await findSupportDrop(Math.max(after,supportAt??after),scanEnd);
-  const addsDone=fills.length>=(o.maxRounds??(o.repeat?Infinity:1))||!!(o.roundRules?.[fills.length]??o).unavailable,addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
+  const roundEntry=o.roundRules?.[fills.length],alternative=roundEntry?.alternative,primaryRule=roundEntry??o;
+  const addsDone=fills.length>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
   if(addsDone||addEnd<=after){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
-  const round=o.roundRules?.[fills.length]??o;
+  let round:RoundScan|Options=primaryRule;
   const soldBefore=o.notional/o.entryPrice*halfMirror.fraction;
   const coinsBefore=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-soldBefore;
   const realAverageBefore=(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror.fraction)/coinsBefore;
@@ -208,8 +211,18 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const basis=round.gainBasis==='average'?'real-average' as const:'cost-line' as const,referencePrice=basis==='real-average'?realAverageBefore:support??o.entryPrice;
   const roundNo=fills.length+1,p8=(x:number)=>+x.toPrecision(8);
   const onSkip=(x:import('./qualityAdditionStructure').StructureSkip)=>skip({at:x.at,round:roundNo,support:x.support,...(x.reason==='gain'?{kind:'gain',label:'涨幅门槛未达',reading:`收盘 ${p8(x.close!)} 比${basis==='real-average'?'持仓均价':'成本线 S'} ${p8(x.referencePrice!)} 只涨 ${((x.close!/x.referencePrice!-1)*100).toFixed(2)}%，要求 ≥ ${x.thresholdPct}%`}:x.reason==='no-guard'?{kind:'no-guard',label:'防守线断开',reading:'这一刻防守线刚被跌破、尚未重建，没有 K 基准'}:x.reason==='guard-range'?{kind:'guard-range',label:'防守线是虚线（震荡期）',reading:'只用实线时，震荡期不加仓'}:{kind:'no-old-c',label:'没有旧 C',reading:'上一根 5 分钟线上没有不同的有效箱体（首个箱体或中间支撑失效），K 没有旧 C 可用'})});
-  const hit=round.structure?await readStructure(round.structure,after,addEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined,onSkip):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:addEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
+  const skipMark=skipped.length;
+  let hit=round.unavailable?undefined:round.structure?await readStructure(round.structure,after,addEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined,onSkip):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:addEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
+  // 【用户要求】2026-11-05 每轮分流：这一轮的进攻备选同时等候，只在保守成交之前找；更早成交就走进攻，同一分钟先保守。
+  // 进攻赢了时，保守那边在它之后记下的「未加仓理由」作废（下一轮会从成交之后重新扫到）。
+  if(alternative&&!alternative.unavailable){
+   const altBasis=alternative.gainBasis==='average'?'real-average' as const:'cost-line' as const,altReference=altBasis==='real-average'?realAverageBefore:support??o.entryPrice,altEnd=hit?hit.at:addEnd;
+   const alt=altEnd<=after?undefined:alternative.structure?await readStructure(alternative.structure,after,altEnd,fills,alternative.minGainPct!=null?{referencePrice:altReference,thresholdPct:alternative.minGainPct,basis:altBasis}:undefined,onSkip):await findQualityAdditionTrigger({...o,candidates:alternative.candidates,required:alternative.required,after,end:altEnd,priceAt,...(alternative.minGainPct!=null?{priceGate:{referencePrice:altReference,thresholdPct:alternative.minGainPct,basis:altBasis}}:{})});
+   if(alt?.structureEvidence){const price=priceAt.get(alt.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');alt.price=price!;}
+   if(alt&&(!hit||alt.at<hit.at)){for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>alt.at)skipped.splice(i,1);hit=alt;round=alternative;hit.lane='attack';}
+   else if(hit)hit.lane='structure';
+  }
   if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   // 箱体时机的「方向」指标条件（必要不充分）：事件那一刻不全满足，就跳过这个事件、继续等下一个。
   if(hit.structureEvidence&&round.required?.length){

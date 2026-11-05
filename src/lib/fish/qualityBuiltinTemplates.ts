@@ -55,13 +55,15 @@ export const FUSION_TEMPLATE_NAME = '结构为底·强势进攻（RAVE×SAPIEN �
 export const FUSION_ROUTER_THRESHOLD = 0.85;
 export const FUSION_V2_TEMPLATE_ID = 'builtin-structure-attack-fusion-v2-2026-11-05';
 export const FUSION_V2_TEMPLATE_NAME = '结构为底·强势进攻 v2（首次加仓即分流）';
+export const FUSION_V3_TEMPLATE_ID = 'builtin-structure-attack-race-v3-2026-11-05';
+export const FUSION_V3_TEMPLATE_NAME = '结构为底·强势进攻 v3（每轮分流·先到先得）';
 
 const needs = (definitions: readonly DeepDigFeatureDef[], featureId: string, name: string) => {
   if (!definitions.some(d => d.id === featureId)) throw new Error(`内置模板需要账号公式「${name}」（${featureId}），请先在特征值里恢复它`);
 };
 
-/** 两版共用的配方；decideAt＝分流发生在第几次结构加仓（v1＝2，v2＝1）。 */
-function buildFusionPlan(definitions: readonly DeepDigFeatureDef[], id: string, label: string, decideAt: 1 | 2): QualityGroup {
+/** 三版共用的配方；decideAt＝分流发生在第几次结构加仓（v1＝2，v2＝1），0＝每轮分流（v3）。 */
+function buildFusionPlan(definitions: readonly DeepDigFeatureDef[], id: string, label: string, decideAt: 0 | 1 | 2): QualityGroup {
   needs(definitions, 'cda', 'CDA 买方阻力'); needs(definitions, 'state', '多空状态 S');
   // 同一门槛的方向条件只编译一次（每次 makeQualityBuyFilter 都会编译全部账号公式）
   const gates = new Map<number, QualityBuyFilter>();
@@ -87,15 +89,17 @@ function buildFusionPlan(definitions: readonly DeepDigFeatureDef[], id: string, 
     mirrorTakeProfit: { enabled: true, gainPct: 5, sellPct: 0.01 },
     holdingVetoes: [stop('static-drawdown', 5), stop('dynamic-drawdown', 15)],
     vetoStages: [stage(2), stage(3)], vetoStageMode: 'overlay', vetoPeakBasis: 'stage' };
-  // 公共历史：分流前的箱体加仓两条分支逐位相同（v1 前两次、v2 第一次）
-  const sapienBoxes = () => [box('raise', 0.1), box('confirm', 0.3), box('confirm', 0.5), box('raise', 0.7), box('raise', 0.9), box('raise', 1.1), box('raise', 1.3)];
-  // RAVE 组合2 的第 2–8 次（S 0.75→0.9、涨幅 11%→15%→10%、入场距离 2→3.5 ATR、K 1.5→2.5 ATR）；分流后的每一次按同一次序取用
-  const raveRounds = () => [stk(0.75, 11, 2, 1.5), stk(0.8, 12, 2, 1.5), stk(0.85, 13, 2, 1.5), stk(0.9, 14, 2, 1.5), stk(0.9, 15, 3, 2), stk(0.9, 10, 3, 2), stk(0.9, 10, 3.5, 2.5)];
+  // 公共历史：分流前的箱体加仓两条分支逐位相同（v1 前两次、v2 第一次）；v3 每轮分流时结构分支补第 8 次箱体（K＝新 C−1.5ATR），与进攻分支同为 8 轮
+  const sapienBoxes = () => [box('raise', 0.1), box('confirm', 0.3), box('confirm', 0.5), box('raise', 0.7), box('raise', 0.9), box('raise', 1.1), box('raise', 1.3), ...(decideAt === 0 ? [box('raise', 1.5)] : [])];
+  // RAVE 组合2 的第 1–8 次（S 0.7→0.9、涨幅 10%→15%→10%、入场距离 2→3.5 ATR、K 1.5→2.5 ATR）；一次选定的两版按同一次序取分流后的那几次，
+  // v3 每轮分流把前四次的状态 S 门槛抬到分支门槛 0.85（进攻＝强势，与 v1 / v2 的分流读数同一口径），第 5 次起本就是 0.9
+  const raveRounds = () => [stk(decideAt === 0 ? FUSION_ROUTER_THRESHOLD : 0.7, 10, 2, 1.5), stk(decideAt === 0 ? FUSION_ROUTER_THRESHOLD : 0.75, 11, 2, 1.5), stk(decideAt === 0 ? FUSION_ROUTER_THRESHOLD : 0.8, 12, 2, 1.5), stk(0.85, 13, 2, 1.5), stk(0.9, 14, 2, 1.5), stk(0.9, 15, 3, 2), stk(0.9, 10, 3, 2), stk(0.9, 10, 3.5, 2.5)];
+  const sellStages = (): QualityGroup['sellStages'] => [{ afterAdditions: 3, label: sell.label, metric: sell.metric, snapshot: structuredClone(sell.snapshot), rule: { metric: sell.metric, direction: '<', threshold: 0.5 } }];
   const structure: QualityGroup = { ...structuredClone(shared), id: `${id}:structure`, label: '结构分支（SAPIEN 5069）',
-    addition: addition(sapienBoxes()),
-    sellStages: [{ afterAdditions: 3, label: sell.label, metric: sell.metric, snapshot: structuredClone(sell.snapshot), rule: { metric: sell.metric, direction: '<', threshold: 0.5 } }] };
-  const attack: QualityGroup = { ...structuredClone(shared), id: `${id}:attack`, label: decideAt === 2 ? '进攻分支（RAVE 组合2）' : '进攻分支（RAVE 组合2 第 2–8 次）',
-    addition: addition([...sapienBoxes().slice(0, decideAt), ...raveRounds().slice(decideAt - 1)]) };
+    addition: addition(sapienBoxes()), sellStages: sellStages() };
+  // 每轮分流时两条分支除各轮条件外必须完全相同：进攻分支也带第 3 次后改用 CDA 的卖出切换
+  const attack: QualityGroup = { ...structuredClone(shared), id: `${id}:attack`, label: decideAt === 2 ? '进攻分支（RAVE 组合2）' : decideAt === 1 ? '进攻分支（RAVE 组合2 第 2–8 次）' : '进攻分支（RAVE 组合2 · S ≥ 0.85）',
+    addition: addition(decideAt === 0 ? raveRounds() : [...sapienBoxes().slice(0, decideAt), ...raveRounds().slice(decideAt)]), ...(decideAt === 0 ? { sellStages: sellStages() } : {}) };
   for (const branch of [structure, attack]) {
     validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes);
     validateQualitySellStages(branch); validateQualityVetoStages(branch);
@@ -113,8 +117,16 @@ export function buildFusionTemplatePlan(definitions: readonly DeepDigFeatureDef[
 export function buildFusionV2TemplatePlan(definitions: readonly DeepDigFeatureDef[], id = newQualitySellPlanId(), label = FUSION_V2_TEMPLATE_NAME): QualityGroup {
   return buildFusionPlan(definitions, id, label, 1);
 }
+/** v3：每一次加仓前都分流——这一轮的箱体规则与 S/T/K 规则同时等候，先满足者成交。 */
+export function buildFusionV3TemplatePlan(definitions: readonly DeepDigFeatureDef[], id = newQualitySellPlanId(), label = FUSION_V3_TEMPLATE_NAME): QualityGroup {
+  return buildFusionPlan(definitions, id, label, 0);
+}
 
 export const BUILTIN_QUALITY_TEMPLATES: readonly QualityBuiltinTemplate[] = [{
+  id: FUSION_V3_TEMPLATE_ID, name: FUSION_V3_TEMPLATE_NAME,
+  summary: `进攻与保守每一次加仓前都重新分流：第 1–8 次里 SAPIEN 5069 的箱体规则（保守，状态 S > 0.65）与 RAVE 组合2 同一次序的指标 S/T/K 规则（进攻，状态 S ≥ ${FUSION_ROUTER_THRESHOLD}，第 5 次起 0.9）同时等候，先满足者成交，同一分钟先箱体。买卖、止损、否决与 v1 / v2 相同。直线拉升不必等箱体，结构慢牛照旧走箱体；成交记录写明每一次走的是哪一边。`,
+  build: buildFusionV3TemplatePlan,
+}, {
   id: FUSION_V2_TEMPLATE_ID, name: FUSION_V2_TEMPLATE_NAME,
   summary: `与 v1 同一套买卖、止损与箱体参数，只把分流提前到第一次结构加仓成交时：已收盘状态 S > ${FUSION_ROUTER_THRESHOLD} 则第 2–8 次改用 RAVE 组合2 的第 2–8 次指标 S/T/K 进攻，否则第 2–7 次继续箱体。依据 2026-11-05 的 1081 信号回放：v1 只有 3/510 场到达进攻分支，直线拉升的币最多只形成一个箱体。`,
   build: buildFusionV2TemplatePlan,

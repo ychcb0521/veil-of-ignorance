@@ -2,7 +2,8 @@ import {expect,it,vi} from 'vitest';
 import {makeQualitySellPlan} from '../qualitySellPlans';
 import {BUILTIN_FEATURES} from '@/lib/deepDig/features';
 import {defaultStructureAddition} from '../qualityAdditionStructure';
-import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,QUALITY_ROUTER_FIRST_VERSION,routerFingerprint,equivalentRouterVersion,routerOrdinal,type QualityPlanRouter} from '../qualityPlanRouter';
+import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,QUALITY_ROUTER_FIRST_VERSION,QUALITY_ROUTER_RACE_VERSION,routerFingerprint,equivalentRouterVersion,routerOrdinal,mergedRacePlan,routedQualityPlan,type QualityPlanRouter} from '../qualityPlanRouter';
+import {makeQualityBuyFilter} from '../qualityFilters';
 import {freezeQualityPlan,planVersionChanges,comparePlanVersions} from '../qualityPlanVersions';
 import {qualityResultKey,newQualityStudy,type QualityGroup} from '../quality';
 import {qualityPlanFromTemplate} from '../qualityPlanTemplates';
@@ -65,4 +66,27 @@ it('v2 decides at the first structural addition, shares only the first round, an
  expect(frozen.frozenVersions!.find(e=>e.key==='router')!.summary).toContain('第一次结构加仓时');
  expect(planVersionChanges(frozen)).toEqual([]);
  expect(freezeQualityPlan({...base(),router:router()} as QualityGroup).frozenVersions!.find(e=>e.key==='router')!.version.startsWith(QUALITY_ROUTER_VERSION+' · 参数 #')).toBe(true);
+});
+
+// 【用户要求】2026-11-05 版本 3 每轮分流：两条分支除各轮条件外必须相同；运行时合成一套方案，进攻分支各轮成为进攻备选
+it('v3 race mode merges the attack rounds as per-round alternatives and shares everything else',async()=>{
+ const structure=base();const attack={...structuredClone(structure),id:'attack'};
+ const stk=(t:number)=>({source:'custom' as const,stricterPct:10,condition:makeQualityBuyFilter('state:state','>',t,true,BUILTIN_FEATURES),minGainPct:10,gainBasis:'average' as const,entryDistanceAtr:2,supportOffsetAtr:1.5});
+ attack.addition.rounds=[stk(.9),stk(.9)] as any;
+ const r:QualityPlanRouter={version:QUALITY_ROUTER_RACE_VERSION,afterAdditions:0,threshold:.85,structure,attack};
+ validateQualityRouter(r);
+ expect(()=>validateQualityRouter({...r,version:QUALITY_ROUTER_VERSION})).toThrow('版本');
+ expect(()=>validateQualityRouter({...r,threshold:.95})).toThrow('不低于分支门槛');
+ expect(()=>validateQualityRouter({...r,attack:{...attack,addition:{...attack.addition,maxRounds:3,rounds:[stk(.9),stk(.9),stk(.9)]} as any}})).toThrow('不能多于');
+ expect(()=>validateQualityRouter({...r,attack:{...attack,mirrorTakeProfit:{enabled:true,gainPct:6,sellPct:50}}})).toThrow('完全相同');
+ const merged=mergedRacePlan(r);expect(merged.addition!.rounds).toEqual(structure.addition.rounds);expect(merged.addition!.alternativeRounds).toEqual(attack.addition.rounds);
+ const run=vi.fn(async()=>({...result(.5),additionFills:[{at:1,lane:'attack'},{at:2,lane:'structure'}] as any}));
+ const out=await evaluateQualityRouter(r,run,p=>p.id);
+ expect(run).toHaveBeenCalledTimes(1);expect((run.mock.calls[0] as unknown as [QualityGroup])[0].addition!.alternativeRounds).toEqual(attack.addition.rounds);
+ expect(out.routeDecision).toEqual({branch:'race',threshold:.85});
+ expect(routedQualityPlan({...structure,router:r} as QualityGroup,out).addition!.alternativeRounds).toEqual(attack.addition.rounds);
+ const frozen=freezeQualityPlan({...structure,router:r} as QualityGroup);expect(planVersionChanges(frozen)).toEqual([]);
+ const entry=frozen.frozenVersions!.find(e=>e.key==='router')!;
+ expect(entry.version.startsWith(QUALITY_ROUTER_RACE_VERSION+' · 参数 #')).toBe(true);expect(entry.summary).toContain('每一次加仓前都分流');
+ expect(routerFingerprint(r)).not.toBe(routerFingerprint({...r,threshold:.9}));
 });

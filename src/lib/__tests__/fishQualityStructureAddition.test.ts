@@ -390,3 +390,29 @@ describe('native box decisions for holding additions',()=>{
   expect(ev.additionSkips).toEqual(full.additionSkips);expect(ev.additionSkipsFrom).toBe(full.additionSkipsFrom);
  });
 });
+
+// 【用户要求】2026-11-05 每轮分流（版本 3）：这一轮的保守（箱体）与进攻（指标 S/T/K）规则同时等候，先满足者成交，同一分钟先箱体；成交记下 lane
+describe('per-round race between the conservative box rule and the attack alternative',()=>{
+ const price=(threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'race-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction:'>',threshold,constraints:[]}),scale:1,threshold,direction:'>',metric:'结果',label:'收盘价'});
+ it('lets the earlier rule win, records the lane, and leaves rounds without an alternative untouched',async()=>{
+  const o=context(sample()),structure={...rule(),buffer:.5};
+  const plain=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure}]});
+  expect(plain.fills).toHaveLength(1);expect(plain.fills[0].lane).toBeUndefined();
+  const attack=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure,alternative:{candidates:[price(0)],supportOffsetAtr:1.5}}]});
+  expect(attack.fills).toHaveLength(1);const f=attack.fills[0];
+  expect(f.lane).toBe('attack');expect(f.structureEvidence).toBeUndefined();expect(f.at).toBeLessThan(plain.fills[0].at);
+  expect(f.sizing!.support).toBeCloseTo(f.price-1.5*f.sizing!.atr);
+  expect((attack.skipped??[]).every(s=>s.at<=f.at)).toBe(true);
+  const conservative=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure,alternative:{candidates:[price(1e9)],supportOffsetAtr:1.5}}]});
+  expect(conservative.fills).toHaveLength(1);expect(conservative.fills[0]).toEqual({...plain.fills[0],lane:'structure'});
+ });
+ it('gives alternative rounds their own identity and validation',()=>{
+  const base={...defaultQualityAddition(),enabled:true,source:'structure' as const,structure:rule(),maxRounds:1,rounds:[{source:'structure' as const,stricterPct:10,structure:rule()}]};
+  const alt={source:'custom' as const,stricterPct:10,condition:makeQualityBuyFilter('state:state','>',.85,true,BUILTIN_FEATURES),minGainPct:10,gainBasis:'average' as const,entryDistanceAtr:2,supportOffsetAtr:1.5};
+  const raced={...base,alternativeRounds:[alt]};
+  validateQualityAddition(raced);
+  expect(JSON.stringify(additionIdentity(raced))).toContain('addition-round-race-v1');expect(additionIdentity({...raced,alternativeRounds:[]})).toEqual(additionIdentity(base));
+  expect(()=>validateQualityAddition({...raced,alternativeRounds:[alt,alt]})).toThrow('不能多于');
+  expect(()=>validateQualityAddition({...raced,alternativeRounds:[{...alt,supportOffsetAtr:0}]})).toThrow('进攻备选');
+ });
+});

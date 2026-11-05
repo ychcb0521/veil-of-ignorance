@@ -9,6 +9,11 @@ export interface QualityAdditionRule {
   repeat?:boolean;
   maxRounds?:number;
   rounds?:QualityAdditionRoundRule[];
+  /**
+   * 【用户要求】2026-11-05 每轮分流（版本 3）：与 rounds 按序号对齐的「进攻备选」。每一轮里 rounds[i]（保守）与 alternativeRounds[i]（进攻）
+   * 同时等候，先满足者成交（同一分钟先保守）；成交记录 lane 写明走的是哪一边。缺省＝没有备选，旧方案结果逐位不变。
+   */
+  alternativeRounds?:QualityAdditionRoundRule[];
   /** Custom indicators are conjunctive; condition remains the legacy first indicator. */
   conditions?: QualityBuyFilter[];
   /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
@@ -84,6 +89,8 @@ const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(ru
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
+  /** 每轮分流时这一次成交走的是保守（rounds）还是进攻（alternativeRounds）；没有备选的轮次不写。 */
+  lane?:'structure'|'attack';
   structureEvidence?:StructureAdditionEvidence;
   prsEvidence?:import('../prs6h').PrsRow;
   at: number; price: number; notional: number; quantity: number; scanFrom: number;
@@ -138,7 +145,9 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   // v2（2026-11-03）：减仓后再加仓时，减仓所得不再当成额外可用利润重复计入（v1 会多加）；开了减仓的方案须重算
   ...(rule.supportReduction?.enabled?[[rule.supportReduction.version===2?'support-drop-reduction-v2':'support-drop-reduction-v1',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct,...(rule.supportReduction.exitAfterDrops!=null?[['exit-after-support-drops-v1',rule.supportReduction.exitAfterDrops]]:[])]]:[]),
   // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
-  ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[])];
+  ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[]),
+  // 2026-11-05 每轮分流：进攻备选的全部参数进身份；没有备选的方案身份不变
+  ...(rule.alternativeRounds?.length?[['addition-round-race-v1',rule.alternativeRounds.map(r=>[r.source,timingIdentity(r),r.minGainPct??null,atrIdentity(r),r.entryDistanceAtr??null,r.gainBasis??null,additionVetoIdentity(r.entryVetoes)])]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
@@ -163,7 +172,12 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
     }
   }
   if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
-  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
+  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
+  if(rule.alternativeRounds?.length){
+    if(!rule.rounds?.length||rule.quantityMode!=='calculator')throw new Error('每轮分流的进攻备选须配合逐轮独立条件与按平衡公式定量');
+    if(rule.alternativeRounds.length>rule.rounds.length)throw new Error('进攻备选的轮数不能多于保守轮数');
+    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
+  }
 }
 export function stricterAdditionThreshold(threshold: number, direction: '<' | '>', pct: number): number {
   // Zero has no percentage scale: use one raw unit as its reference, and show this convention in the editor.
@@ -202,5 +216,5 @@ export function additionPosition(notional: number, entry: number, mark: number, 
 }
 
 /** Both downloads retain the same frozen gate and sizing evidence as the campaign. */
-export const additionEvidenceHeaders=['本轮可用落袋利润 USDT','安全垫贡献币数','落袋利润贡献币数','同时满足的指标 JSON','涨幅门槛 %','涨幅基准价','确认收盘价','确认涨幅 %','T高于S的ATR倍数','最低ATR距离','K平衡差 USDT','K回撤ATR倍数','箱体加仓依据 JSON'];
-export function additionEvidenceValues(a?:QualityAdditionFill){return [a?.sizing?.mirrorAvailableBefore??null,a?.sizing?.baseCoins??null,a?.sizing?.mirrorCoins??null,a?.conditions?JSON.stringify(a.conditions):null,a?.priceGate?.thresholdPct??null,a?.priceGate?.referencePrice??null,a?.priceGate?.observedPrice??null,a?.priceGate?.gainPct??null,a?.sizing?.costBufferAtr??null,a?.sizing?.requiredBufferAtr??null,a?.sizing?.coverageGap??null,a?.structureEvidence?null:a?.sizing?(a.sizing.supportOffsetAtr??1.5):null,a?.structureEvidence?JSON.stringify(a.structureEvidence):null];}
+export const additionEvidenceHeaders=['本轮可用落袋利润 USDT','安全垫贡献币数','落袋利润贡献币数','同时满足的指标 JSON','涨幅门槛 %','涨幅基准价','确认收盘价','确认涨幅 %','T高于S的ATR倍数','最低ATR距离','K平衡差 USDT','K回撤ATR倍数','分流','箱体加仓依据 JSON'];
+export function additionEvidenceValues(a?:QualityAdditionFill){return [a?.sizing?.mirrorAvailableBefore??null,a?.sizing?.baseCoins??null,a?.sizing?.mirrorCoins??null,a?.conditions?JSON.stringify(a.conditions):null,a?.priceGate?.thresholdPct??null,a?.priceGate?.referencePrice??null,a?.priceGate?.observedPrice??null,a?.priceGate?.gainPct??null,a?.sizing?.costBufferAtr??null,a?.sizing?.requiredBufferAtr??null,a?.sizing?.coverageGap??null,a?.structureEvidence?null:a?.sizing?(a.sizing.supportOffsetAtr??1.5):null,a?.lane==='attack'?'进攻':a?.lane==='structure'?'保守':null,a?.structureEvidence?JSON.stringify(a.structureEvidence):null];}

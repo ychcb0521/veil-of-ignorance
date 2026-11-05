@@ -1,4 +1,4 @@
-import { routerFingerprint, routerOrdinal, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
+import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -48,7 +48,7 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if(plan.router){
     validateQualityRouter(plan.router);
-    return [{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:plan.router.version+' · 参数 #'+routerFingerprint(plan.router),summary:'第'+routerOrdinal(plan.router)+'次结构加仓时，已收盘状态 S > '+plan.router.threshold+' 切进攻，否则本场保持结构分支；只选择一次'},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];
+    return [{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:plan.router.version+' · 参数 #'+routerFingerprint(plan.router),summary:routerVersionSummary(plan.router)},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];
   }
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);

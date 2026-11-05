@@ -1,5 +1,5 @@
 import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
-import { routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
+import { isRaceRouter, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
 import type { SellPlansDraftView } from './FishQualitySellPlansEditor';
 import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
 import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
@@ -277,11 +277,15 @@ function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
   } };
   return <section className="space-y-3 rounded border border-primary/25 bg-primary/5 p-3 text-[11px]" data-testid="quality-router-editor">
     <p className="font-medium">条件分支 · 编辑工作副本</p>
-    <label className="flex flex-wrap items-center gap-2">第{routerOrdinal(router)}次结构加仓时，此前已收盘状态 S 大于
+    {isRaceRouter(router) ? <label className="flex flex-wrap items-center gap-2">每一次加仓前都分流：结构分支与进攻分支这一次的加仓规则同时等候，先满足者成交（同一分钟先结构）。进攻分支各次的状态 S 门槛不低于
+      <input aria-label="分支状态 S 门槛" type="number" step="any" min="0" max="1" value={threshold} onChange={e => setThreshold(e.target.value)} className={field + ' w-20'}/>
+    </label> : <label className="flex flex-wrap items-center gap-2">第{routerOrdinal(router)}次结构加仓时，此前已收盘状态 S 大于
       <input aria-label="分支状态 S 门槛" type="number" step="any" min="0" max="1" value={threshold} onChange={e => setThreshold(e.target.value)} className={field + ' w-20'}/>
       则从第{routerNextOrdinal(router)}次起使用进攻分支，否则保持结构分支。只选择一次。
-    </label>
-    <p className="text-muted-foreground">这是独立工作副本，修改后可保存、运行，再存为新模板。初始卖出、镜像、止损、加仓通用设置和{routerPrefixText(router)}加仓为公共设置；修改一边后，保存时同步到另一边。第{routerNextOrdinal(router)}次及之后的加仓、卖出切换和否决阶段可分别修改。</p>
+    </label>}
+    <p className="text-muted-foreground">{isRaceRouter(router)
+      ? '这是独立工作副本，修改后可保存、运行，再存为新模板。初始卖出、镜像、止损、加仓通用设置、卖出切换和否决阶段为公共设置；修改一边后，保存时同步到另一边。两个分支各次加仓条件分别修改，进攻分支的轮数不多于结构分支。'
+      : `这是独立工作副本，修改后可保存、运行，再存为新模板。初始卖出、镜像、止损、加仓通用设置和${routerPrefixText(router)}加仓为公共设置；修改一边后，保存时同步到另一边。第${routerNextOrdinal(router)}次及之后的加仓、卖出切换和否决阶段可分别修改。`}</p>
     <div role="tablist" aria-label="编辑条件分支" className="flex gap-2">{(['structure', 'attack'] as const).map(key => <button type="button" role="tab" aria-selected={branch === key} key={key} onClick={() => { setBranch(key); setVisited(old => ({ ...old, [key]: true })); }} className={`rounded px-2 py-1 ${branch === key ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{key === 'structure' ? '结构分支' : '进攻分支'}</button>)}</div>
     {(['structure', 'attack'] as const).map(key => {
       if (!visited[key]) return null;
