@@ -1,5 +1,5 @@
 import type { QualityGroup } from './quality';
-import { canonicalRouterJson, validateQualityRouter, type QualityPlanRouter } from './qualityPlanRouter';
+import { canonicalRouterJson, routerOrdinal, routerPrefixText, validateQualityRouter, type QualityPlanRouter } from './qualityPlanRouter';
 import { freezeQualityPlan } from './qualityPlanVersions';
 import { qualityAdditionPrerequisites, validateQualityAddition } from './qualityAddition';
 import { validateQualityMirror } from './qualityMirror';
@@ -32,23 +32,25 @@ export function prepareQualityRouterDraft(original: QualityPlanRouter, structure
     const value = reconcile('加仓通用设置', oldA, oldB, a, b);
     for (const branch of branches) { if (value === undefined) delete branch.addition![key]; else branch.addition![key] = structuredClone(value); }
   }
-  const firstTwo = [0, 1].map(i => reconcile(`第 ${i + 1} 次加仓`, original.structure.addition?.rounds?.[i], original.attack.addition?.rounds?.[i], structure.addition?.rounds?.[i], attack.addition?.rounds?.[i]));
+  // 分流前的加仓（第一次或前两次）是公共历史
+  const n = original.afterAdditions;
+  const shared = Array.from({ length: n }, (_, i) => reconcile(`第 ${i + 1} 次加仓`, original.structure.addition?.rounds?.[i], original.attack.addition?.rounds?.[i], structure.addition?.rounds?.[i], attack.addition?.rounds?.[i]));
   for (const branch of branches) {
-    const rounds = [...firstTwo.map(r => structuredClone(r)), ...(branch.addition?.rounds?.slice(2) ?? [])];
+    const rounds = [...shared.map(r => structuredClone(r)), ...(branch.addition?.rounds?.slice(n) ?? [])];
     branch.addition = { ...branch.addition, rounds } as QualityGroup['addition'];
   }
   for (const key of ['sellStages', 'vetoStages'] as const) {
-    const early = (p: QualityGroup) => (p[key] ?? []).filter(s => s.afterAdditions <= 2);
-    const common = reconcile(key === 'sellStages' ? '前两次加仓后的卖出' : '前两次加仓后的否决', early(original.structure), early(original.attack), early(structure), early(attack));
+    const early = (p: QualityGroup) => (p[key] ?? []).filter(s => s.afterAdditions <= n);
+    const common = reconcile(`${routerPrefixText(original)}加仓后的${key === 'sellStages' ? '卖出' : '否决'}`, early(original.structure), early(original.attack), early(structure), early(attack));
     for (const branch of branches) {
-      const stages = [...structuredClone(common), ...(branch[key] ?? []).filter(s => s.afterAdditions > 2)];
+      const stages = [...structuredClone(common), ...(branch[key] ?? []).filter(s => s.afterAdditions > n)];
       (branch as any)[key] = stages.length ? stages : undefined;
     }
   }
   for (const branch of branches) {
     validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes);
-    if (!branch.addition?.enabled || (branch.addition.maxRounds ?? branch.addition.rounds?.length ?? 0) < 2) throw Error('条件分支需要至少两次结构加仓，才能在第二次成交时选择分支');
-    if (!qualityAdditionPrerequisites(branch.addition.rounds![1]).some(c => c.metric === 'state')) throw Error('第二次结构加仓须保留状态 S 方向条件，以取得分支选择时的已收盘读数');
+    if (!branch.addition?.enabled || (branch.addition.maxRounds ?? branch.addition.rounds?.length ?? 0) < n) throw Error(n === 1 ? '条件分支需要至少一次结构加仓，才能在第一次成交时选择分支' : '条件分支需要至少两次结构加仓，才能在第二次成交时选择分支');
+    if (!qualityAdditionPrerequisites(branch.addition.rounds![n - 1]).some(c => c.metric === 'state')) throw Error(`第${routerOrdinal(original)}次结构加仓须保留状态 S 方向条件，以取得分支选择时的已收盘读数`);
   }
   const router = { ...original, threshold, structure: branches[0], attack: branches[1] };
   validateQualityRouter(router);

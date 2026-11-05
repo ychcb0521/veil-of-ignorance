@@ -2,7 +2,7 @@ import {expect,it,vi} from 'vitest';
 import {makeQualitySellPlan} from '../qualitySellPlans';
 import {BUILTIN_FEATURES} from '@/lib/deepDig/features';
 import {defaultStructureAddition} from '../qualityAdditionStructure';
-import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,routerFingerprint,equivalentRouterVersion,type QualityPlanRouter} from '../qualityPlanRouter';
+import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,QUALITY_ROUTER_FIRST_VERSION,routerFingerprint,equivalentRouterVersion,routerOrdinal,type QualityPlanRouter} from '../qualityPlanRouter';
 import {freezeQualityPlan,planVersionChanges,comparePlanVersions} from '../qualityPlanVersions';
 import {qualityResultKey,newQualityStudy,type QualityGroup} from '../quality';
 import {qualityPlanFromTemplate} from '../qualityPlanTemplates';
@@ -40,4 +40,29 @@ it('ignores JSONB field ordering but rejects actual parameter changes',()=>{
  restored.router.threshold=.8;expect(planVersionChanges(restored).length).toBeGreaterThan(0);
  const prefix=QUALITY_ROUTER_VERSION+' · 参数 #';expect(equivalentRouterVersion(prefix+'1cmjlqy15r0lzq',prefix+'1er917g1rq0q7q')).toBe(true);
  expect(equivalentRouterVersion(prefix+'1cmjlqy15r0lzq',prefix+'changed')).toBe(false);
+});
+
+// 【用户要求】2026-11-05 版本 2：第一次结构加仓成交时就分流；旧版本号仍按第二次分流
+it('v2 decides at the first structural addition, shares only the first round, and keeps the versions paired',async()=>{
+ const structure=base();const attack={...structuredClone(structure),id:'attack'};
+ attack.addition.rounds[1]={source:'custom',stricterPct:10,minGainPct:11} as any;
+ const r:QualityPlanRouter={version:QUALITY_ROUTER_FIRST_VERSION,afterAdditions:1,threshold:.85,structure,attack};
+ validateQualityRouter(r);expect(routerOrdinal(r)).toBe('一');
+ expect(()=>validateQualityRouter({...r,version:QUALITY_ROUTER_VERSION})).toThrow('版本');
+ expect(()=>validateQualityRouter({...router(),afterAdditions:1})).toThrow('版本');
+ expect(()=>validateQualityRouter({...router(),attack})).toThrow('前两次必须使用结构加仓');
+ const first=(s:number)=>({...result(s),additionFills:[{at:600000,conditions:[{at:600000,barOpenTime:300000,metric:'state',reading:s}]}] as any});
+ for(const [s,branch,calls] of [[.9,'attack',2],[.85,'structure',1]] as const){
+  const run=vi.fn(async()=>first(s));const out=await evaluateQualityRouter(r,run,p=>p.id);
+  expect(out.routeDecision).toMatchObject({branch,at:600000,reading:s,threshold:.85});expect(run).toHaveBeenCalledTimes(calls);
+ }
+ const stale=first(.9);stale.additionFills[0].conditions[0].barOpenTime=600000;await expect(evaluateQualityRouter(r,async()=>stale,p=>p.id)).rejects.toThrow('第一次结构加仓缺少此前已收盘');
+ expect((await evaluateQualityRouter(r,async()=>({...result(.9),additionFills:[]}),p=>p.id)).routeDecision?.branch).toBe('structure');
+ // 同一套分支、不同分流次数＝不同参数指纹，旧方案的版本字符串不变
+ expect(routerFingerprint(r)).not.toBe(routerFingerprint({...r,afterAdditions:2,version:QUALITY_ROUTER_VERSION}));
+ const frozen=freezeQualityPlan({...structure,router:r} as QualityGroup);
+ expect(frozen.frozenVersions!.find(e=>e.key==='router')!.version.startsWith(QUALITY_ROUTER_FIRST_VERSION+' · 参数 #')).toBe(true);
+ expect(frozen.frozenVersions!.find(e=>e.key==='router')!.summary).toContain('第一次结构加仓时');
+ expect(planVersionChanges(frozen)).toEqual([]);
+ expect(freezeQualityPlan({...base(),router:router()} as QualityGroup).frozenVersions!.find(e=>e.key==='router')!.version.startsWith(QUALITY_ROUTER_VERSION+' · 参数 #')).toBe(true);
 });

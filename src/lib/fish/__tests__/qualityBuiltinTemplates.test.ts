@@ -1,10 +1,11 @@
 // 【用户要求】2026-11-04 内置模板「结构为底·强势进攻（RAVE×SAPIEN 融合）」：两场赢单的参数原样合成，按账号公式生成、能冻结版本、能保存
 import { expect, it, vi } from 'vitest';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
-import { BUILTIN_QUALITY_TEMPLATES, buildFusionTemplatePlan, FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_NAME } from '../qualityBuiltinTemplates';
+import { BUILTIN_QUALITY_TEMPLATES, buildFusionTemplatePlan, buildFusionV2TemplatePlan, FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_ID, FUSION_TEMPLATE_NAME, FUSION_V2_TEMPLATE_ID, FUSION_V2_TEMPLATE_NAME } from '../qualityBuiltinTemplates';
 import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary } from '../qualityPlanTemplates';
-import { evaluateQualityRouter } from '../qualityPlanRouter';
+import { evaluateQualityRouter, QUALITY_ROUTER_FIRST_VERSION } from '../qualityPlanRouter';
+import type { QualityGroup } from '../quality';
 import { replaceQualitySellPlans } from '../qualitySellPlans';
 import { newQualityStudy } from '../quality';
 
@@ -68,4 +69,35 @@ it('routes a RAVE-like second addition to attack and a SAPIEN-like one to struct
 it('refuses to build when the account lacks the CDA or state formula', () => {
   expect(() => buildFusionTemplatePlan(BUILTIN_FEATURES.filter(d => d.id !== 'cda'))).toThrow('CDA');
   expect(() => buildFusionTemplatePlan(BUILTIN_FEATURES.filter(d => d.id !== 'state'))).toThrow('状态 S');
+}, 60000);
+
+// 【用户要求】2026-11-05 版本 2：与 v1 同一套参数，只把分流提前到第一次结构加仓成交时；进攻分支第 2–8 次＝RAVE 组合2 的第 2–8 次
+it('v2 keeps every v1 setting and only moves the decision to the first structural addition', async () => {
+  const v1 = buildFusionTemplatePlan(BUILTIN_FEATURES, 'a'), v2 = buildFusionV2TemplatePlan(BUILTIN_FEATURES, 'b', 'v2');
+  const r = v2.router!, r1 = v1.router!;
+  expect(v2.id).toBe('b'); expect(v2.label).toBe('v2'); expect(r.afterAdditions).toBe(1); expect(r.version).toBe(QUALITY_ROUTER_FIRST_VERSION); expect(r.threshold).toBe(FUSION_ROUTER_THRESHOLD);
+  // 编号与标签之外逐位相同（买入过滤、否决等条目的随机编号剔除后比较）
+  const noIds = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => k === 'id' || k === 'label' ? undefined : x));
+  const shared = ({ addition, router, sellStages, ...rest }: QualityGroup) => ({ rest, sellStages });
+  expect(noIds(shared(r.structure))).toEqual(noIds(shared(r1.structure))); expect(noIds(shared(r.attack))).toEqual(noIds(shared(r1.attack)));
+  expect(noIds(r.structure.addition)).toEqual(noIds(r1.structure.addition));
+  const a = r.attack.addition!.rounds!;
+  expect(a).toHaveLength(8); expect(r.attack.addition!.maxRounds).toBe(8); expect(r.structure.addition!.maxRounds).toBe(7);
+  expect(noIds(a[0])).toEqual(noIds(r.structure.addition!.rounds![0])); expect(a[0].source).toBe('structure');
+  expect(a.slice(1).map(x => [x.source, x.condition?.metric, x.condition?.threshold, x.minGainPct, x.gainBasis, x.entryDistanceAtr, x.supportOffsetAtr]))
+    .toEqual([[.75, 11, 2, 1.5], [.8, 12, 2, 1.5], [.85, 13, 2, 1.5], [.9, 14, 2, 1.5], [.9, 15, 3, 2], [.9, 10, 3, 2], [.9, 10, 3.5, 2.5]].map(([t, g, d, k]) => ['custom', 'state', t, g, 'average', d, k]));
+  expect(noIds(a.slice(2))).toEqual(noIds(r1.attack.addition!.rounds!.slice(2)));
+  for (const x of a) expect(x.entryVetoes).toEqual([{ kind: 'pullback', enabled: true, atr: 2.5, pct: 4, join: 'and' }]);
+  expect(planVersionChanges(freezeQualityPlan(v2))).toEqual([]);
+  expect(qualityPlanTemplateSummary(v2)).toBe(`第一次结构加仓 · 第一次已收盘 S > ${FUSION_ROUTER_THRESHOLD} 后走进攻，否则保持结构 · 一次选择 · 版本冻结`);
+  expect(qualityPlanTemplateSummary(v1)).toBe(`前两次结构加仓 · 第二次已收盘 S > ${FUSION_ROUTER_THRESHOLD} 后走进攻，否则保持结构 · 一次选择 · 版本冻结`);
+  // 第一次结构加仓成交时读已收盘 S：JELLYJELLY 2025-10-03 读数 0.956 → 进攻；SAPIEN 0.655 → 结构
+  const first = (s: number) => ({ key: 'x', sampleId: 's', groupId: 'g', evaluatedAt: 1, status: 'closed' as const, additionFills: [{ at: 600000, conditions: [{ at: 600000, barOpenTime: 300000, metric: 'state', reading: s }] }] as never, pnl: 1 });
+  for (const [reading, branch, calls] of [[.956, 'attack', 2], [.655, 'structure', 1]] as const) {
+    const run = vi.fn(async () => first(reading));
+    expect((await evaluateQualityRouter(r, run, p => p.id)).routeDecision?.branch).toBe(branch); expect(run).toHaveBeenCalledTimes(calls);
+  }
+  expect(BUILTIN_QUALITY_TEMPLATES.map(t => t.id)).toEqual([FUSION_V2_TEMPLATE_ID, FUSION_TEMPLATE_ID]);
+  expect(BUILTIN_QUALITY_TEMPLATES[0].name).toBe(FUSION_V2_TEMPLATE_NAME);
+  expect(buildFusionV2TemplatePlan(BUILTIN_FEATURES).label).toBe(FUSION_V2_TEMPLATE_NAME);
 }, 60000);
