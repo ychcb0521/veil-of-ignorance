@@ -414,5 +414,21 @@ describe('per-round race between the conservative box rule and the attack altern
   expect(JSON.stringify(additionIdentity(raced))).toContain('addition-round-race-v1');expect(additionIdentity({...raced,alternativeRounds:[]})).toEqual(additionIdentity(base));
   expect(()=>validateQualityAddition({...raced,alternativeRounds:[alt,alt]})).toThrow('不能多于');
   expect(()=>validateQualityAddition({...raced,alternativeRounds:[{...alt,supportOffsetAtr:0}]})).toThrow('进攻备选');
+  // 【用户要求】2026-11-06 结构开局：attackFromRound＝1 身份不变；>1 身份加 addition-round-race-from-v1；不能超过备选轮数、须配合备选
+  expect(additionIdentity({...raced,attackFromRound:1})).toEqual(additionIdentity(raced));
+  const two={...raced,maxRounds:2,rounds:[raced.rounds[0],raced.rounds[0]],alternativeRounds:[alt,alt],attackFromRound:2};
+  validateQualityAddition(two);expect(JSON.stringify(additionIdentity(two))).toContain('["addition-round-race-from-v1",2]');
+  expect(()=>validateQualityAddition({...two,attackFromRound:3})).toThrow('1 至 2');
+  expect(()=>validateQualityAddition({...base,attackFromRound:2})).toThrow('须配合进攻备选');
+ });
+ // 【用户要求】2026-11-06 结构开局：进攻备选从第 n 次起才参与竞速，之前的轮次只扫保守规则
+ it('keeps the attack lane out of the rounds before attackFromRound',async()=>{
+  const o=context(sample()),structure={...rule(),buffer:.5};
+  const roundRules=[{candidates:[],structure,alternative:{candidates:[price(0)],supportOffsetAtr:1.5}}];
+  const plain=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure}]});
+  const gated=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules,attackFromRound:2});
+  expect(gated.fills).toHaveLength(1);expect(gated.fills[0]).toEqual(plain.fills[0]);expect(gated.fills[0].lane).toBeUndefined();
+  const open=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules,attackFromRound:1});
+  expect(open.fills[0].lane).toBe('attack');
  });
 });

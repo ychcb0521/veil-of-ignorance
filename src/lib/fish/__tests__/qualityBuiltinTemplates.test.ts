@@ -1,10 +1,10 @@
 // 【用户要求】2026-11-04 内置模板「结构为底·强势进攻（RAVE×SAPIEN 融合）」：两场赢单的参数原样合成，按账号公式生成、能冻结版本、能保存
 import { expect, it, vi } from 'vitest';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
-import { BUILTIN_QUALITY_TEMPLATES, buildFusionTemplatePlan, buildFusionV2TemplatePlan, buildFusionV3TemplatePlan, FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_ID, FUSION_TEMPLATE_NAME, FUSION_V2_TEMPLATE_ID, FUSION_V2_TEMPLATE_NAME, FUSION_V3_TEMPLATE_ID } from '../qualityBuiltinTemplates';
+import { BUILTIN_QUALITY_TEMPLATES, buildFusionTemplatePlan, buildFusionV2TemplatePlan, buildFusionV3TemplatePlan, buildFusionV4TemplatePlan, FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_ID, FUSION_TEMPLATE_NAME, FUSION_V2_TEMPLATE_ID, FUSION_V2_TEMPLATE_NAME, FUSION_V3_TEMPLATE_ID, FUSION_V4_ATTACK_FROM_ROUND, FUSION_V4_TEMPLATE_ID, FUSION_V4_TEMPLATE_NAME } from '../qualityBuiltinTemplates';
 import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary } from '../qualityPlanTemplates';
-import { evaluateQualityRouter, mergedRacePlan, QUALITY_ROUTER_FIRST_VERSION, QUALITY_ROUTER_RACE_VERSION, raceSharedAddition } from '../qualityPlanRouter';
+import { evaluateQualityRouter, mergedRacePlan, QUALITY_ROUTER_FIRST_VERSION, QUALITY_ROUTER_RACE_FROM_VERSION, QUALITY_ROUTER_RACE_VERSION, raceSharedAddition } from '../qualityPlanRouter';
 import type { QualityGroup } from '../quality';
 import { replaceQualitySellPlans } from '../qualitySellPlans';
 import { newQualityStudy } from '../quality';
@@ -97,8 +97,9 @@ it('v2 keeps every v1 setting and only moves the decision to the first structura
     const run = vi.fn(async () => first(reading));
     expect((await evaluateQualityRouter(r, run, p => p.id)).routeDecision?.branch).toBe(branch); expect(run).toHaveBeenCalledTimes(calls);
   }
-  expect(BUILTIN_QUALITY_TEMPLATES.map(t => t.id)).toEqual([FUSION_V3_TEMPLATE_ID, FUSION_V2_TEMPLATE_ID, FUSION_TEMPLATE_ID]);
-  expect(BUILTIN_QUALITY_TEMPLATES[1].name).toBe(FUSION_V2_TEMPLATE_NAME);
+  // 2026-11-06：v4 最新在前，v1 是 89 个信号上实际最好的路径排第二
+  expect(BUILTIN_QUALITY_TEMPLATES.map(t => t.id)).toEqual([FUSION_V4_TEMPLATE_ID, FUSION_TEMPLATE_ID, FUSION_V3_TEMPLATE_ID, FUSION_V2_TEMPLATE_ID]);
+  expect(BUILTIN_QUALITY_TEMPLATES[3].name).toBe(FUSION_V2_TEMPLATE_NAME);
   expect(buildFusionV2TemplatePlan(BUILTIN_FEATURES).label).toBe(FUSION_V2_TEMPLATE_NAME);
 }, 60000);
 
@@ -129,4 +130,29 @@ it('v3 races the SAPIEN box lane against the RAVE S/T/K lane every round and kee
   expect(planVersionChanges(freezeQualityPlan(v3))).toEqual([]);
   expect(qualityPlanTemplateSummary(v3)).toContain('每轮分流');
   expect(buildFusionV3TemplatePlan(BUILTIN_FEATURES).id).toMatch(/^sell-/);
+}, 60000);
+
+// 【用户要求】2026-11-06 版本 4「结构开局 · 进攻接力」：与 v3 同一套分支，只加闸门——前两次只走箱体，进攻分支从第 3 次起参与竞速；v3 不变
+it('v4 is v3 with the attack lane gated until the third addition', async () => {
+  const v3 = buildFusionV3TemplatePlan(BUILTIN_FEATURES, 'c'), v4 = buildFusionV4TemplatePlan(BUILTIN_FEATURES, 'd', 'v4');
+  const r = v4.router!;
+  expect(v4.label).toBe('v4'); expect(r.afterAdditions).toBe(0); expect(r.version).toBe(QUALITY_ROUTER_RACE_FROM_VERSION); expect(r.threshold).toBe(FUSION_ROUTER_THRESHOLD);
+  expect(r.attackFromRound).toBe(FUSION_V4_ATTACK_FROM_ROUND); expect(FUSION_V4_ATTACK_FROM_ROUND).toBe(3);
+  expect(v3.router!.attackFromRound).toBeUndefined(); expect(v3.router!.version).toBe(QUALITY_ROUTER_RACE_VERSION);
+  const noIds = (v: unknown) => JSON.parse(JSON.stringify(v, (k, x) => k === 'id' || k === 'label' ? undefined : x));
+  expect(noIds(r.structure)).toEqual(noIds(v3.router!.structure)); expect(noIds(r.attack)).toEqual(noIds(v3.router!.attack));
+  expect(r.structure.addition!.attackFromRound).toBeUndefined(); expect(v4.addition!.attackFromRound).toBeUndefined();
+  const merged = mergedRacePlan(r);
+  expect(merged.addition!.attackFromRound).toBe(3); expect(merged.addition!.alternativeRounds).toEqual(r.attack.addition!.rounds); expect(mergedRacePlan(v3.router!).addition!.attackFromRound).toBeUndefined();
+  const run = vi.fn(async () => ({ key: 'x', sampleId: 's', groupId: 'g', evaluatedAt: 1, status: 'closed' as const, additionFills: [] as never, pnl: 1 }));
+  const out = await evaluateQualityRouter(r, run, p => p.id);
+  expect((run.mock.calls[0] as unknown as [QualityGroup])[0].addition!.attackFromRound).toBe(3); expect(out.routeDecision).toEqual({ branch: 'race', threshold: FUSION_ROUTER_THRESHOLD });
+  const frozen = freezeQualityPlan(v4);
+  expect(planVersionChanges(frozen)).toEqual([]);
+  expect(frozen.frozenVersions!.find(e => e.key === 'router')!.version).toContain(QUALITY_ROUTER_RACE_FROM_VERSION);
+  expect(frozen.frozenVersions!.find(e => e.key === 'router')!.summary).toContain('前 2 次只走结构分支，进攻分支从第 3 次加仓起参与竞速');
+  expect(qualityPlanTemplateSummary(v4)).toContain('进攻从第 3 次起');
+  const copy = qualityPlanFromTemplate({ id: 't', name: '存成模板', savedAt: 1, updatedAt: 1, plan: frozen }, 'e');
+  expect(copy.router!.attackFromRound).toBe(3);
+  expect(BUILTIN_QUALITY_TEMPLATES[0].name).toBe(FUSION_V4_TEMPLATE_NAME); expect(buildFusionV4TemplatePlan(BUILTIN_FEATURES).id).toMatch(/^sell-/);
 }, 60000);

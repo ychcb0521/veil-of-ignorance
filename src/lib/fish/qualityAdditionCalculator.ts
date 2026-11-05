@@ -26,7 +26,9 @@ interface Options extends AtrSettings {
  /** 这一轮的方向条件注定无法满足（如信号没有所选的探测算法）：不再加仓。 */
  unavailable?:string;
  /** 每轮的扫描规则；alternative＝这一轮的进攻备选（【用户要求】2026-11-05 每轮分流：两条同时等候，先满足者成交，同一分钟先保守）。 */
- roundRules?:(RoundScan&{alternative?:RoundScan})[];maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
+ roundRules?:(RoundScan&{alternative?:RoundScan})[];
+ /** 【用户要求】2026-11-06 结构开局：进攻备选从第几次加仓起才参与竞速（缺省 1＝每一次）。 */
+ attackFromRound?:number;maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -199,7 +201,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(scanEnd<=after)return done(stop);
   // 【用户要求】2026-11-02 支撑线下移减仓：先找下移事件；比它早的加仓照常处理，否则在下移那一刻按减仓计算器减仓
   const drop=await findSupportDrop(Math.max(after,supportAt??after),scanEnd);
-  const roundEntry=o.roundRules?.[fills.length],alternative=roundEntry?.alternative,primaryRule=roundEntry??o;
+  const roundEntry=o.roundRules?.[fills.length],alternative=fills.length+1>=(o.attackFromRound??1)?roundEntry?.alternative:undefined,primaryRule=roundEntry??o;
   const addsDone=fills.length>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
   if(addsDone||addEnd<=after){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   let round:RoundScan|Options=primaryRule;

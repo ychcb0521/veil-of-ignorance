@@ -1,5 +1,5 @@
 import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
-import { isRaceRouter, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
+import { isRaceRouter, raceAttackFromRound, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
 import type { SellPlansDraftView } from './FishQualitySellPlansEditor';
 import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
 import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
@@ -261,25 +261,31 @@ function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
     attack: (value: boolean) => setDirtyBranches(old => old.attack === value ? old : { ...old, attack: value }),
   }), []);
   const [threshold, setThreshold] = useState(String(router.threshold));
+  // 【用户要求】2026-11-06 结构开局：每轮分流时进攻分支从第几次加仓起参与竞速（1＝每一次）
+  const [attackFrom, setAttackFrom] = useState(String(raceAttackFromRound(router)));
   const [drafts, setDrafts] = useState(() => ({ structure: monitorDraftOf(router.structure), attack: monitorDraftOf(router.attack) }));
   const [dirtyBranches, setDirtyBranches] = useState({ structure: false, attack: false });
   const views = useRef<Partial<Record<'structure' | 'attack', SellPlansDraftView>>>({});
-  const dirty = threshold !== String(router.threshold) || dirtyBranches.structure || dirtyBranches.attack;
+  const dirty = threshold !== String(router.threshold) || isRaceRouter(router) && attackFrom !== String(raceAttackFromRound(router)) || dirtyBranches.structure || dirtyBranches.attack;
   useEffect(() => { onDirtyChange(plan.id, dirty); }, [plan.id, dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(plan.id, false), [plan.id, onDirtyChange]);
   controller.current = { build: () => {
     if (!threshold.trim()) throw Error('请填写分支状态 S 门槛');
+    if (isRaceRouter(router) && !attackFrom.trim()) throw Error('请填写进攻分支从第几次加仓起参与');
     const buildBranch = (key: 'structure' | 'attack') => {
       const view = views.current[key]; if (!view) return router[key];
       try { return view.build()[0]; } catch (cause) { throw Error(`${key === 'structure' ? '结构' : '进攻'}分支：${cause instanceof Error ? cause.message : '参数无效'}`); }
     };
-    return prepareQualityRouterDraft(router, buildBranch('structure'), buildBranch('attack'), Number(threshold));
+    return prepareQualityRouterDraft(router, buildBranch('structure'), buildBranch('attack'), Number(threshold), isRaceRouter(router) ? Number(attackFrom) : undefined);
   } };
   return <section className="space-y-3 rounded border border-primary/25 bg-primary/5 p-3 text-[11px]" data-testid="quality-router-editor">
     <p className="font-medium">条件分支 · 编辑工作副本</p>
-    {isRaceRouter(router) ? <label className="flex flex-wrap items-center gap-2">每一次加仓前都分流：结构分支与进攻分支这一次的加仓规则同时等候，先满足者成交（同一分钟先结构）。进攻分支各次的状态 S 门槛不低于
+    {isRaceRouter(router) ? <div className="flex flex-wrap items-center gap-2">每一次加仓前都分流：结构分支与进攻分支这一次的加仓规则同时等候，先满足者成交（同一分钟先结构）。进攻分支各次的状态 S 门槛不低于
       <input aria-label="分支状态 S 门槛" type="number" step="any" min="0" max="1" value={threshold} onChange={e => setThreshold(e.target.value)} className={field + ' w-20'}/>
-    </label> : <label className="flex flex-wrap items-center gap-2">第{routerOrdinal(router)}次结构加仓时，此前已收盘状态 S 大于
+      ；进攻分支从第
+      <input aria-label="进攻分支从第几次加仓起参与" type="number" step="1" min="1" max="100" value={attackFrom} onChange={e => setAttackFrom(e.target.value)} className={field + ' w-16'}/>
+      次加仓起参与竞速（1＝每一次；填 3 则前两次只走结构分支）。
+    </div> : <label className="flex flex-wrap items-center gap-2">第{routerOrdinal(router)}次结构加仓时，此前已收盘状态 S 大于
       <input aria-label="分支状态 S 门槛" type="number" step="any" min="0" max="1" value={threshold} onChange={e => setThreshold(e.target.value)} className={field + ' w-20'}/>
       则从第{routerNextOrdinal(router)}次起使用进攻分支，否则保持结构分支。只选择一次。
     </label>}

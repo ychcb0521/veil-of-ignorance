@@ -26,6 +26,19 @@
  *  - 首仓止损 4%–8%、动态回撤 10%–30%、+8% 后保本等对照，在 474 场无加仓里最多只差 ±73 USDT，维持 5% / 15%。
  *  因此 v2 只改一处：分流提前到第一次结构加仓成交时（已收盘状态 S > 0.85 走进攻，第 2–8 次用 RAVE 组合2 的第 2–8 次 S/T/K），
  *  其余与 v1 完全相同。两版同时保留，供同一批信号对照。
+ *
+ * 【用户要求】2026-11-06 版本 4「结构开局 · 进攻接力」（同一批 89 个信号的两份回放：鱼质量-20261105225743 / 225757，含 v3 的 66 场）：
+ *  - v1 路径（前两次箱体、第二次读 S 一次选定）是实际最好的路径：SAPIEN 6 次箱体 +26,441、RAVE 两次箱体后 S/T/K 接力 +9,825。
+ *  - v3 每轮竞速里进攻先手成交的 7 场只有 JELLYJELLY 10-03 一场更好（+7.5）；RAVE 被进攻抢在首个箱体之前加仓（02:05 vs 02:20），
+ *    首轮倍数 (K−S)/(T−K) 3.1× 取代箱体的 8.0×，之后每一轮都在更小的底数上滚，全场 9,825 → 3,720；RED / PHA / DASH 本来没加仓的小赢
+ *    （+12 / +5 / +3，状态 S < 0.5 卖出）被进攻首加变成碰 K 归零。进攻接力（LIGHT 第 3 次、STRK 第 2 次）也各归零一场。
+ *  - 原因在平衡公式：新增币数＝(Q×(K−S)+P)÷(T−K)。箱体 K 贴着 T（T−K≈0.1–0.3 ATR）开局倍数 8–26×，进攻 K＝T−1.5ATR 只有 1–3×；
+ *    「越往上加得越多」只有箱体开局才成立，进攻只能接力。
+ *  - 同一批数据里两项方案设置的差价更大：镜像 2.5% 卖 67% 把安全垫 Q 砍掉三分之二，SAPIEN 57,025 → 26,441、RAVE 24,423 → 9,825
+ *    （15 场有加仓合计 82,003 → 36,528，43 场无加仓 +85 → +30，镜像没有换来保护）；第 2 / 3 次箱体用「支撑抬高」代替「新箱体确认」晚进 1 小时 45 分，
+ *    SAPIEN 少一轮、26,441 → 14,366。模板因此保持镜像 5% 卖 0.01% 与第 2 / 3 次「新箱体确认」不变。
+ *  v4＝v3 加一道闸门 attackFromRound＝3：前两次只走箱体（与 v1 的开局逐位相同），第 3 次起每一轮结构 / 进攻同时等候、先满足者成交，
+ *  不再像 v1 那样一次锁定进攻。其余与 v3 相同。
  */
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { QualityBuyFilter, QualityGroup } from './quality';
@@ -57,13 +70,17 @@ export const FUSION_V2_TEMPLATE_ID = 'builtin-structure-attack-fusion-v2-2026-11
 export const FUSION_V2_TEMPLATE_NAME = '结构为底·强势进攻 v2（首次加仓即分流）';
 export const FUSION_V3_TEMPLATE_ID = 'builtin-structure-attack-race-v3-2026-11-05';
 export const FUSION_V3_TEMPLATE_NAME = '结构为底·强势进攻 v3（每轮分流·先到先得）';
+export const FUSION_V4_TEMPLATE_ID = 'builtin-structure-attack-race-from-3-v4-2026-11-06';
+export const FUSION_V4_TEMPLATE_NAME = '结构为底·强势进攻 v4（结构开局·第 3 次起分流）';
+/** v4：进攻分支从第几次加仓起参与竞速（前两次只走箱体，与 v1 的开局相同）。 */
+export const FUSION_V4_ATTACK_FROM_ROUND = 3;
 
 const needs = (definitions: readonly DeepDigFeatureDef[], featureId: string, name: string) => {
   if (!definitions.some(d => d.id === featureId)) throw new Error(`内置模板需要账号公式「${name}」（${featureId}），请先在特征值里恢复它`);
 };
 
-/** 三版共用的配方；decideAt＝分流发生在第几次结构加仓（v1＝2，v2＝1），0＝每轮分流（v3）。 */
-function buildFusionPlan(definitions: readonly DeepDigFeatureDef[], id: string, label: string, decideAt: 0 | 1 | 2): QualityGroup {
+/** 四版共用的配方；decideAt＝分流发生在第几次结构加仓（v1＝2，v2＝1），0＝每轮分流（v3；v4 另带 attackFromRound＝进攻从第几次起参与）。 */
+function buildFusionPlan(definitions: readonly DeepDigFeatureDef[], id: string, label: string, decideAt: 0 | 1 | 2, attackFromRound = 1): QualityGroup {
   needs(definitions, 'cda', 'CDA 买方阻力'); needs(definitions, 'state', '多空状态 S');
   // 同一门槛的方向条件只编译一次（每次 makeQualityBuyFilter 都会编译全部账号公式）
   const gates = new Map<number, QualityBuyFilter>();
@@ -104,7 +121,7 @@ function buildFusionPlan(definitions: readonly DeepDigFeatureDef[], id: string, 
     validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes);
     validateQualitySellStages(branch); validateQualityVetoStages(branch);
   }
-  const plan: QualityGroup = { ...structuredClone(structure), id, label, router: { version: routerVersionFor(decideAt), afterAdditions: decideAt, threshold: FUSION_ROUTER_THRESHOLD, structure, attack } };
+  const plan: QualityGroup = { ...structuredClone(structure), id, label, router: { version: routerVersionFor(decideAt, attackFromRound), afterAdditions: decideAt, threshold: FUSION_ROUTER_THRESHOLD, ...(decideAt === 0 && attackFromRound > 1 ? { attackFromRound } : {}), structure, attack } };
   validateQualityRouter(plan.router!);
   return plan;
 }
@@ -121,17 +138,25 @@ export function buildFusionV2TemplatePlan(definitions: readonly DeepDigFeatureDe
 export function buildFusionV3TemplatePlan(definitions: readonly DeepDigFeatureDef[], id = newQualitySellPlanId(), label = FUSION_V3_TEMPLATE_NAME): QualityGroup {
   return buildFusionPlan(definitions, id, label, 0);
 }
+/** v4：v3 的每轮分流加闸门——前两次只走箱体，进攻分支从第 3 次加仓起参与竞速。 */
+export function buildFusionV4TemplatePlan(definitions: readonly DeepDigFeatureDef[], id = newQualitySellPlanId(), label = FUSION_V4_TEMPLATE_NAME): QualityGroup {
+  return buildFusionPlan(definitions, id, label, 0, FUSION_V4_ATTACK_FROM_ROUND);
+}
 
 export const BUILTIN_QUALITY_TEMPLATES: readonly QualityBuiltinTemplate[] = [{
+  id: FUSION_V4_TEMPLATE_ID, name: FUSION_V4_TEMPLATE_NAME,
+  summary: `v3 的修正：前两次只走 SAPIEN 5069 的箱体（与 v1 开局相同），第 3 次起每一轮箱体与 RAVE 组合2 的 S/T/K（状态 S ≥ ${FUSION_ROUTER_THRESHOLD}）同时等候、先满足者成交，不再一次锁定。依据 2026-11-06 同一批 89 个信号的回放：v3 里进攻先手的 7 场只有 1 场更好，RAVE 被进攻抢在首个箱体之前加仓、首轮倍数 3.1× 取代箱体的 8.0×，9,825 → 3,720；开局只能交给箱体。镜像仍为 5% 卖 0.01%（同一批数据里 2.5% 卖 67% 把 SAPIEN 57,025 砍到 26,441）。`,
+  build: buildFusionV4TemplatePlan,
+}, {
+  id: FUSION_TEMPLATE_ID, name: FUSION_TEMPLATE_NAME,
+  summary: `前两次按 SAPIEN 5069 的 DBL-5 箱体加仓；第二次成交时已收盘状态 S > ${FUSION_ROUTER_THRESHOLD} 则第 3–8 次改用 RAVE 组合2 的指标 S/T/K 进攻（补冲高回落否决），否则第 3–7 次继续箱体。基础止损 5% / 15%；第 2、3 次加仓后加 1 分钟 5%、5 分钟 7% 急跌否决。2026-11-06 同一批 89 个信号上实际最好的路径（SAPIEN 走箱体、RAVE 两次箱体后接力）。`,
+  build: buildFusionTemplatePlan,
+}, {
   id: FUSION_V3_TEMPLATE_ID, name: FUSION_V3_TEMPLATE_NAME,
-  summary: `进攻与保守每一次加仓前都重新分流：第 1–8 次里 SAPIEN 5069 的箱体规则（保守，状态 S > 0.65）与 RAVE 组合2 同一次序的指标 S/T/K 规则（进攻，状态 S ≥ ${FUSION_ROUTER_THRESHOLD}，第 5 次起 0.9）同时等候，先满足者成交，同一分钟先箱体。买卖、止损、否决与 v1 / v2 相同。直线拉升不必等箱体，结构慢牛照旧走箱体；成交记录写明每一次走的是哪一边。`,
+  summary: `进攻与保守每一次加仓前都重新分流：第 1–8 次里 SAPIEN 5069 的箱体规则（保守，状态 S > 0.65）与 RAVE 组合2 同一次序的指标 S/T/K 规则（进攻，状态 S ≥ ${FUSION_ROUTER_THRESHOLD}，第 5 次起 0.9）同时等候，先满足者成交，同一分钟先箱体。买卖、止损、否决与 v1 / v2 相同；成交记录写明每一次走的是哪一边。2026-11-06 回放：进攻先手抢走箱体开局（RAVE 9,825 → 3,720），已由 v4 加闸门修正。`,
   build: buildFusionV3TemplatePlan,
 }, {
   id: FUSION_V2_TEMPLATE_ID, name: FUSION_V2_TEMPLATE_NAME,
   summary: `与 v1 同一套买卖、止损与箱体参数，只把分流提前到第一次结构加仓成交时：已收盘状态 S > ${FUSION_ROUTER_THRESHOLD} 则第 2–8 次改用 RAVE 组合2 的第 2–8 次指标 S/T/K 进攻，否则第 2–7 次继续箱体。依据 2026-11-05 的 1081 信号回放：v1 只有 3/510 场到达进攻分支，直线拉升的币最多只形成一个箱体。`,
   build: buildFusionV2TemplatePlan,
-}, {
-  id: FUSION_TEMPLATE_ID, name: FUSION_TEMPLATE_NAME,
-  summary: `前两次按 SAPIEN 5069 的 DBL-5 箱体加仓；第二次成交时已收盘状态 S > ${FUSION_ROUTER_THRESHOLD} 则第 3–8 次改用 RAVE 组合2 的指标 S/T/K 进攻（补冲高回落否决），否则第 3–7 次继续箱体。基础止损 5% / 15%；第 2、3 次加仓后加 1 分钟 5%、5 分钟 7% 急跌否决。`,
-  build: buildFusionTemplatePlan,
 }];

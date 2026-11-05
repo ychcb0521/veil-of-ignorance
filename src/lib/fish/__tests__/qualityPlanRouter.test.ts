@@ -2,7 +2,7 @@ import {expect,it,vi} from 'vitest';
 import {makeQualitySellPlan} from '../qualitySellPlans';
 import {BUILTIN_FEATURES} from '@/lib/deepDig/features';
 import {defaultStructureAddition} from '../qualityAdditionStructure';
-import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,QUALITY_ROUTER_FIRST_VERSION,QUALITY_ROUTER_RACE_VERSION,routerFingerprint,equivalentRouterVersion,routerOrdinal,mergedRacePlan,routedQualityPlan,type QualityPlanRouter} from '../qualityPlanRouter';
+import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,QUALITY_ROUTER_FIRST_VERSION,QUALITY_ROUTER_RACE_VERSION,QUALITY_ROUTER_RACE_FROM_VERSION,routerFingerprint,equivalentRouterVersion,routerOrdinal,mergedRacePlan,routedQualityPlan,routerVersionFor,routerVersionSummary,routerTemplateSummary,routerRuleLabel,type QualityPlanRouter} from '../qualityPlanRouter';
 import {makeQualityBuyFilter} from '../qualityFilters';
 import {freezeQualityPlan,planVersionChanges,comparePlanVersions} from '../qualityPlanVersions';
 import {qualityResultKey,newQualityStudy,type QualityGroup} from '../quality';
@@ -89,4 +89,26 @@ it('v3 race mode merges the attack rounds as per-round alternatives and shares e
  const entry=frozen.frozenVersions!.find(e=>e.key==='router')!;
  expect(entry.version.startsWith(QUALITY_ROUTER_RACE_VERSION+' · 参数 #')).toBe(true);expect(entry.summary).toContain('每一次加仓前都分流');
  expect(routerFingerprint(r)).not.toBe(routerFingerprint({...r,threshold:.9}));
+});
+
+// 【用户要求】2026-11-06 版本 4「结构开局 · 进攻接力」：每轮分流加闸门 attackFromRound——前 n−1 次只走结构分支；缺省 1＝v3 原样
+it('v4 gates the attack lane until the given round, pairs the version with the gate, and leaves v3 untouched',()=>{
+ const structure=base();const attack={...structuredClone(structure),id:'attack'};
+ const v3:QualityPlanRouter={version:QUALITY_ROUTER_RACE_VERSION,afterAdditions:0,threshold:.85,structure,attack};
+ validateQualityRouter(v3);expect(mergedRacePlan(v3).addition!.attackFromRound).toBeUndefined();
+ expect(routerVersionFor(0)).toBe(QUALITY_ROUTER_RACE_VERSION);expect(routerVersionFor(0,1)).toBe(QUALITY_ROUTER_RACE_VERSION);expect(routerVersionFor(0,2)).toBe(QUALITY_ROUTER_RACE_FROM_VERSION);
+ const v4:QualityPlanRouter={...v3,version:QUALITY_ROUTER_RACE_FROM_VERSION,attackFromRound:2};
+ validateQualityRouter(v4);
+ const merged=mergedRacePlan(v4);expect(merged.addition!.attackFromRound).toBe(2);expect(merged.addition!.alternativeRounds).toEqual(attack.addition.rounds);
+ expect(routerFingerprint(v4)).not.toBe(routerFingerprint(v3));
+ expect(routerVersionSummary(v4)).toContain('前 1 次只走结构分支，进攻分支从第 2 次加仓起参与竞速');expect(routerVersionSummary(v3)).not.toContain('只走结构分支');
+ expect(routerTemplateSummary(v4)).toContain('进攻从第 2 次起');expect(routerRuleLabel(v4)).toBe('每轮分流（进攻 S ≥ 0.85，第 2 次起）');expect(routerRuleLabel(v3)).toBe('每轮分流（进攻 S ≥ 0.85）');
+ // 版本号与闸门成对；闸门不能超过进攻分支轮数；一次选定的分流方式不带闸门
+ expect(()=>validateQualityRouter({...v4,version:QUALITY_ROUTER_RACE_VERSION})).toThrow('版本');
+ expect(()=>validateQualityRouter({...v3,version:QUALITY_ROUTER_RACE_FROM_VERSION})).toThrow('版本');
+ expect(()=>validateQualityRouter({...v4,attackFromRound:1,version:QUALITY_ROUTER_RACE_VERSION})).not.toThrow();
+ expect(()=>validateQualityRouter({...v4,attackFromRound:3})).toThrow('只有 2 次加仓');
+ expect(()=>validateQualityRouter({...v4,attackFromRound:1.5})).toThrow('整数');
+ expect(()=>validateQualityRouter({...router(),attackFromRound:2})).toThrow('只用于每轮分流');
+ expect(routedQualityPlan({...structure,router:v4} as QualityGroup,{}).addition!.attackFromRound).toBe(2);
 });

@@ -84,3 +84,19 @@ it('race mode keeps each branch\'s rounds, syncs every other setting, and enforc
   expect(planVersionChanges(freezeQualityPlan({ ...edited.structure, router: edited }))).toEqual([]);
   expect(() => prepareQualityRouterDraft(race, race.structure, race.attack, .95)).toThrow('不低于分支门槛');
 });
+
+// 【用户要求】2026-11-06 结构开局：每轮分流的「进攻从第几次起」随版本号成对改动；一次选定的分流方式忽略它
+it('moves the race gate together with its version and ignores it for one-time routers', async () => {
+  const { QUALITY_ROUTER_RACE_VERSION, QUALITY_ROUTER_RACE_FROM_VERSION, mergedRacePlan } = await import('../qualityPlanRouter');
+  const one = fixture();
+  expect(prepareQualityRouterDraft(one, one.structure, one.attack, one.threshold, 2)).toBe(one);
+  const base = fixture();
+  const race: QualityPlanRouter = { ...base, version: QUALITY_ROUTER_RACE_VERSION, afterAdditions: 0, attack: { ...structuredClone(base.structure), id: 'attack' } };
+  expect(prepareQualityRouterDraft(race, race.structure, race.attack, race.threshold)).toBe(race);
+  const gated = prepareQualityRouterDraft(race, race.structure, race.attack, race.threshold, 2);
+  expect(gated.version).toBe(QUALITY_ROUTER_RACE_FROM_VERSION); expect(gated.attackFromRound).toBe(2); expect(mergedRacePlan(gated).addition!.attackFromRound).toBe(2);
+  const back = prepareQualityRouterDraft(gated, gated.structure, gated.attack, gated.threshold, 1);
+  expect(back.version).toBe(QUALITY_ROUTER_RACE_VERSION); expect(back.attackFromRound).toBeUndefined();
+  expect(() => prepareQualityRouterDraft(race, race.structure, race.attack, race.threshold, 0)).toThrow('整数');
+  expect(() => prepareQualityRouterDraft(race, race.structure, race.attack, race.threshold, 9)).toThrow('不能从第 9 次起');
+});

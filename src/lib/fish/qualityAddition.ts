@@ -14,6 +14,11 @@ export interface QualityAdditionRule {
    * 同时等候，先满足者成交（同一分钟先保守）；成交记录 lane 写明走的是哪一边。缺省＝没有备选，旧方案结果逐位不变。
    */
   alternativeRounds?:QualityAdditionRoundRule[];
+  /**
+   * 【用户要求】2026-11-06 版本 4「结构开局 · 进攻接力」：进攻备选从第几次加仓起才参与竞速，前几次只扫保守规则。
+   * 缺省 / 1＝每一次都参与（v3 原样，身份不变）；大于 1 时身份加 addition-round-race-from-v1。
+   */
+  attackFromRound?:number;
   /** Custom indicators are conjunctive; condition remains the legacy first indicator. */
   conditions?: QualityBuyFilter[];
   /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
@@ -147,7 +152,9 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
   ...([rule,...(rule.rounds??[])].some(r=>activeAdditionVetoes(r.entryVetoes).length)?[['addition-entry-vetoes-v1',additionVetoIdentity(rule.entryVetoes),rule.rounds?.map(r=>additionVetoIdentity(r.entryVetoes))??null]]:[]),
   // 2026-11-05 每轮分流：进攻备选的全部参数进身份；没有备选的方案身份不变
-  ...(rule.alternativeRounds?.length?[['addition-round-race-v1',rule.alternativeRounds.map(r=>[r.source,timingIdentity(r),r.minGainPct??null,atrIdentity(r),r.entryDistanceAtr??null,r.gainBasis??null,additionVetoIdentity(r.entryVetoes)])]]:[])];
+  ...(rule.alternativeRounds?.length?[['addition-round-race-v1',rule.alternativeRounds.map(r=>[r.source,timingIdentity(r),r.minGainPct??null,atrIdentity(r),r.entryDistanceAtr??null,r.gainBasis??null,additionVetoIdentity(r.entryVetoes)])]]:[]),
+  // 2026-11-06 结构开局：进攻备选从第 n 次起才参与；n＝1 或没有备选时身份不变
+  ...(rule.alternativeRounds?.length&&(rule.attackFromRound??1)>1?[['addition-round-race-from-v1',rule.attackFromRound]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
@@ -172,12 +179,13 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
     }
   }
   if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
-  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
+  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
   if(rule.alternativeRounds?.length){
     if(!rule.rounds?.length||rule.quantityMode!=='calculator')throw new Error('每轮分流的进攻备选须配合逐轮独立条件与按平衡公式定量');
     if(rule.alternativeRounds.length>rule.rounds.length)throw new Error('进攻备选的轮数不能多于保守轮数');
-    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
-  }
+    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
+    if(rule.attackFromRound!=null&&(!Number.isInteger(rule.attackFromRound)||rule.attackFromRound<1||rule.attackFromRound>rule.alternativeRounds.length))throw new Error(`进攻备选参与竞速的起始次数须为 1 至 ${rule.alternativeRounds.length} 的整数`);
+  }else if(rule.attackFromRound!=null)throw new Error('「进攻从第几次起」须配合进攻备选');
 }
 export function stricterAdditionThreshold(threshold: number, direction: '<' | '>', pct: number): number {
   // Zero has no percentage scale: use one raw unit as its reference, and show this convention in the editor.
