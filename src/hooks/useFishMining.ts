@@ -19,7 +19,7 @@ import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
 type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules'>;
@@ -144,7 +144,7 @@ export function useFishMining(o: {
     const run = () => { void tickRef.current(); };
     const timer = setInterval(run, TICK_MS);
     const onStorage = (event: StorageEvent) => {
-      if (event.key === miningKey() && readMiningState().round?.id !== stateRef.current.round?.id) run();
+      if (event.key === miningKey(MINING_ROUND_LOGICAL_KEY) && readMiningState().round?.id !== stateRef.current.round?.id) run();
     };
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
@@ -169,6 +169,7 @@ export function useFishMining(o: {
     const previous = readMiningState();
     const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
     cancelScan();
+    if (!previous.round && previous.enabled) saveMiningState({ ...previous, enabled: false });
     setState({
       ...newMiningState(), enabled: true, startMs, cursorMs: startMs, target,
       rules: structuredClone(rules), selection: structuredClone(latest.current.selection),

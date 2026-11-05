@@ -18,26 +18,31 @@ import { queueSimStatePush } from '@/lib/simStateSync';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { FISH_DEFAULT_RULES } from './defaultRules';
 import { fishCatchKey } from './records';
-import { MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, normalizeMiningState, newMiningState, type FishMiningRule, type FishMiningState } from './miningState';
+import { MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, normalizeMiningState, newMiningState, type FishMiningRule, type FishMiningState } from './miningState';
 export * from './miningState';
 
-export const miningKey = () => `${getUserPrefix()}${MINING_LOGICAL_KEY}`;
+export const miningKey = (logicalKey = MINING_LOGICAL_KEY) => `${getUserPrefix()}${logicalKey}`;
 const leaseKey = () => `${getUserPrefix()}${MINING_LEASE_LOGICAL_KEY}`;
 export const currentDefaultRules = (): FishMiningRule[] => FISH_DEFAULT_RULES.map(r => ({ ...r }));
 
 export function readMiningState(): FishMiningState {
-  try {
-    const raw = JSON.parse(readPersistedStateRaw(miningKey()) ?? 'null');
-    const state = normalizeMiningState(raw) ?? newMiningState();
-    // Persist and sync the one-time replacement; otherwise old saved configuration errors return on refresh.
-    if (raw && raw.presetRevision !== state.presetRevision) saveMiningState(state);
-    return state;
-  } catch { return newMiningState(); }
+  for (const logicalKey of [MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]) {
+    try {
+      const raw = JSON.parse(readPersistedStateRaw(miningKey(logicalKey)) ?? 'null');
+      const state = normalizeMiningState(raw);
+      if (!state || (logicalKey === MINING_ROUND_LOGICAL_KEY && !state.round)) continue;
+      // Persist and sync the one-time replacement; otherwise old saved configuration errors return on refresh.
+      if (raw.presetRevision !== state.presetRevision) saveMiningState(state);
+      return state;
+    } catch { /* Try the next slot. */ }
+  }
+  return newMiningState();
 }
 export function saveMiningState(state: FishMiningState, now = Date.now()): void {
   const value = { ...state, savedAt: now };
-  try { writePersistedStateRaw(miningKey(), JSON.stringify(value)); } catch { /* 本机写不进时云端那份仍会更新 */ }
-  try { const uid = getUserId(); if (uid) queueSimStatePush(uid, MINING_LOGICAL_KEY, value); } catch { /* 同步失败只是换设备时接不上，本机照常 */ }
+  const logicalKey = state.round ? MINING_ROUND_LOGICAL_KEY : MINING_LOGICAL_KEY;
+  try { writePersistedStateRaw(miningKey(logicalKey), JSON.stringify(value)); } catch { /* 本机写不进时云端那份仍会更新 */ }
+  try { const uid = getUserId(); if (uid) queueSimStatePush(uid, logicalKey, value); } catch { /* 同步失败只是换设备时接不上，本机照常 */ }
 }
 /**
  * 用鱼舱里已挖到的鱼校正进度：状态丢了、或被旧快照盖回去时，从最后挖到鱼的那一档往后接（按时间顺序，不重挖前面的档）。

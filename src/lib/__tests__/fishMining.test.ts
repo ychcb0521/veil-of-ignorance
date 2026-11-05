@@ -1,6 +1,6 @@
 // 【用户要求】2026-10-26 比较探测：默认算法从 2026-04-01 00:00 起每半天挖一档，先挖 1000 条，持续挖掘；入鱼舱与鱼质量
 import { beforeEach, expect, it } from 'vitest';
-import { acceptMinedAnchor, currentDefaultRules, mergeMiningStates, miningCards, miningDueAnchor, newMiningState, readMiningState, reconcileMiningWithFish, saveMiningState, MINING_START_MS, MINING_STEP_MS, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, currentDefaultRules, mergeMiningStates, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, saveMiningState, MINING_START_MS, MINING_STEP_MS, type FishMiningState } from '@/lib/fish/mining';
 import { LEGACY_FISH_DEFAULT_RULES } from '@/lib/fish/cards';
 import { normalizeMiningState } from '@/lib/fish/miningState';
 import { fishCatchKey } from '@/lib/fish/records';
@@ -129,4 +129,16 @@ it('recovers progress only from fish and snapshots of the active mining round', 
     round: current.round, cursorMs: startMs + MINING_STEP_MS, mined: 1,
   });
   expect(mergeMiningStates(current, fresh.state)).toMatchObject({ cursorMs: startMs + MINING_STEP_MS, mined: 1 });
+});
+
+it('keeps a restarted round isolated from subsequent writes by an older app build', () => {
+  const legacy = { ...newMiningState(), enabled: true, cursorMs: MINING_START_MS + 10 * MINING_STEP_MS, mined: 100 };
+  saveMiningState(legacy);
+  expect(readMiningState().cursorMs).toBe(legacy.cursorMs);
+
+  const restart = { ...newMiningState(), enabled: true, round: { id: 'new', startedAt: 10 } };
+  saveMiningState(restart);
+  expect(JSON.parse(localStorage.getItem(miningKey())!).cursorMs).toBe(legacy.cursorMs);
+  saveMiningState({ ...legacy, cursorMs: legacy.cursorMs + MINING_STEP_MS, mined: 150 });
+  expect(readMiningState()).toMatchObject({ round: restart.round, cursorMs: restart.startMs, mined: 0 });
 });

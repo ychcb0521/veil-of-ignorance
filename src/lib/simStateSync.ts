@@ -19,7 +19,7 @@ import {mergeQualityPlanCatalogValues} from './qualityPlanCatalogMerge';
 import { supabase } from '@/integrations/supabase/client';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
-import { mergeMiningStates } from '@/lib/fish/miningState';
+import { mergeMiningStates, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
 import {
   clearPersistedStateMemoryForTests,
@@ -64,7 +64,8 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
   },
   fish_deleted_v1: (local, remote) => mergeFishTombstones(local, remote),
   // 持续挖掘采用最新轮次，同一轮内取挖得更远的进度。
-  'fish-mining.v1': (local, remote) => mergeMiningStates(local, remote),
+  [MINING_LOGICAL_KEY]: mergeMiningStates,
+  [MINING_ROUND_LOGICAL_KEY]: mergeMiningStates,
 };
 
 /**

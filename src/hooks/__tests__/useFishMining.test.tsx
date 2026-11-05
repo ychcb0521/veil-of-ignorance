@@ -3,7 +3,7 @@ import { noteBinanceRateLimit } from '@/lib/binanceRateLimit';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useFishMining } from '@/hooks/useFishMining';
-import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
+import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -227,6 +227,7 @@ it('cancels the running scan when restarting locally and starts the new round wi
   mine.mockImplementation(async () => [sig('NEWUSDT', startMs)]);
   act(() => h.result.current.restart({ startMs, target: 1, rules: readMiningState().rules }));
   expect(stop).toHaveBeenCalledOnce();
+  expect(JSON.parse(localStorage.getItem(miningKey())!)).toMatchObject({ enabled: false, cursorMs: startMs });
   await flush(10);
   resolveOld([sig('OLDUSDT', startMs)]);
   await flush(10);

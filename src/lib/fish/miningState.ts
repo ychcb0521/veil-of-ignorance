@@ -32,6 +32,8 @@ export interface FishMiningState {
 }
 /** 云端同步用的逻辑键（实际存储键是 sim_<uid>_fish-mining.v1）。 */
 export const MINING_LOGICAL_KEY = 'fish-mining.v1';
+// Explicit restarts use a separate slot so open older builds cannot advance a new round.
+export const MINING_ROUND_LOGICAL_KEY = 'fish-mining.v2';
 export const MINING_LEASE_LOGICAL_KEY = 'fish-mining-lease.v1';
 export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
   target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], presetRevision: MINING_PRESET_REVISION, lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });
