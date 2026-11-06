@@ -5,7 +5,7 @@ import { definitionKey } from '@/lib/deepDig/features';
 import { FishScanner } from '@/lib/fishScanner';
 import { loadTuringReplayArchive, parseTuringReplayArchive, readArchiveKlines } from '@/lib/turingCupReplayArchive';
 import { turingReplaySamples } from '@/lib/turingReplaySamples';
-import { importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityMetricPlan, type QualityBuyFilter, type QualityResult } from '@/lib/fish/quality';
+import { importQualityLibrary, migrateQualityCaptureEntries, newQualityStudy, qualityComparisonRows, qualityMetricPlan, type QualityBuyFilter, type QualityResult } from '@/lib/fish/quality';
 import { preEntrySignal, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 
 vi.mock('@/lib/turingCupReplayArchive', async original => ({ ...await original<typeof import('@/lib/turingCupReplayArchive')>(), loadTuringReplayArchive: vi.fn() }));
@@ -17,7 +17,8 @@ it.skipIf(!process.env.TURING_REPLAY_FIXTURE)('real Turing 50: explains initial 
   const def = { id: 'real-pipeline-check', name: 'pipeline', short: 'pipeline', definition: '', formula: 'raw = C', scale: 1, unit: '', positive: '1', control: '0', interval: '5m' as const };
   const f: QualityBuyFilter = { id: 'positive-close', label: '正价格链路验证', enabled: true, metric: 'raw', direction: '>', threshold: 0,
     snapshot: { featureId: def.id, featureShort: def.short, definitionKey: definitionKey(def), statistic: 'raw', interval: '5m', scale: 1, direction: '>', threshold: 0, cutoffMs: 0, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 } };
-  const study = importQualityLibrary(newQualityStudy(), [source], Date.now(), 'turing');
+  const study = migrateQualityCaptureEntries(structuredClone(importQualityLibrary(newQualityStudy(), [source], Date.now(), 'turing')));
+  expect(study.samples[0].enteredAt).toBe(archive.anchorMs);
   study.sellPlans = [{ id: 'sell', label: '链路验证', metric: 'raw', snapshot: f.snapshot, rule: { metric: 'raw', direction: '>', threshold: 0 } }];
   study.selectedRowIds = qualityComparisonRows(study).map(r => r.id);
   const network = vi.fn(async () => { throw Error('Offline pipeline reached an exchange'); });
@@ -32,7 +33,8 @@ it.skipIf(!process.env.TURING_REPLAY_FIXTURE)('real Turing 50: explains initial 
   const { plan } = qualityMetricPlan(f.snapshot, f.metric);
   expect(record.status).toBe('matched'); expect(record.matchedAt).toBe(archive.anchorMs + (plan.warm + 1) * plan.step);
   const signal = preEntrySignal(record)!;
-  const follow = importQualityLibrary({ ...study, selectedRowIds: [] }, [signal], at, 'pre-entry');
+  const follow = migrateQualityCaptureEntries(structuredClone(importQualityLibrary({ ...study, selectedRowIds: [] }, [signal], at, 'pre-entry')));
+  expect(follow.samples.find(r => r.origin === 'pre-entry')!.enteredAt).toBe(record.matchedAt);
   follow.selectedRowIds = qualityComparisonRows(follow).filter(r => r.origin === 'pre-entry').map(r => r.id);
   let held!: QualityResult;
   await scanner.quality({ study: follow, task: 'monitor', signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => { held = r; } });

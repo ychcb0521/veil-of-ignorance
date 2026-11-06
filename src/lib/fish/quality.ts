@@ -17,7 +17,7 @@ import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD_TEXT, type FishSnapshot, type FishProgram } from './algorithm';
 import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey } from '@/lib/signalLibrary';
-import {miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
+import {isSignalLibraryOrigin,miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
 import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import type { FishReconstructionLoader } from './reconstruction';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
@@ -166,8 +166,21 @@ export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ versio
 export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQualityStudy {
   let changed = study.entryMode !== 'capture';
   const reset = new Set<string>();
+  const repairedRows = new Map<string, string>();
   const samples = study.samples.map(sample => {
-    if (sample.basis === 'detected' || qualityOrigins(sample).includes('library')) return sample;
+    if (sample.basis === 'detected') return sample;
+    // Library signals already carry an absolute entry timestamp, including the Turing replay
+    // timeline and pre-entry matches. They do not require a fish capture snapshot.
+    if (qualityOrigins(sample).some(isSignalLibraryOrigin)) {
+      if ((Number.isFinite(sample.enteredAt) && sample.enteredAt! > 0)
+        || !Number.isFinite(sample.source.timeMs) || sample.source.timeMs <= 0) return sample;
+      // Repair copies cleared by the old capture migration using only their recorded timestamp.
+      const enteredAt = sample.source.timeMs;
+      repairedRows.set(`row-${shortFishHash(qualityEntryIdentity(sample.source, sample.enteredAt))}`,
+        `row-${shortFishHash(qualityEntryIdentity(sample.source, enteredAt))}`);
+      changed = true;
+      return { ...sample, enteredAt, basis: 'signal' as const };
+    }
     const cutoff = qualityOrigins(sample).includes('mined') ? qualityMiningEntryAt(sample.source) : sample.source.fish?.cutoffMs;
     const enteredAt = cutoff != null && Number.isFinite(cutoff) && cutoff > 0 ? cutoff : null;
     const basis = enteredAt == null ? 'missing' : 'capture';
@@ -176,7 +189,12 @@ export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQuali
     if (sample.enteredAt !== enteredAt) reset.add(sample.id);
     return { ...sample, enteredAt, basis } as QualitySample;
   });
-  return changed ? { ...study, entryMode: 'capture', samples, results: study.results.filter(r => !reset.has(r.sampleId)) } : study;
+  if (!changed) return study;
+  const selectedRowIds = repairedRows.size ? study.selectedRowIds?.map(id => {
+    const [base, ...tail] = id.split('/detector/');
+    return (repairedRows.get(base) ?? base) + (tail.length ? `/detector/${tail.join('/detector/')}` : '');
+  }) : study.selectedRowIds;
+  return { ...study, entryMode: 'capture', samples, selectedRowIds, results: study.results.filter(r => !reset.has(r.sampleId)) };
 }
 export function qualityMembers(s: TradeSignal): FishSnapshot[] {
   const f = s.fish;

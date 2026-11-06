@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useFishQuality } from '@/hooks/useFishQuality';
-import { newQualityStudy, importQualityFish, qualityResultKey, qualityComparisonRows, qualityDisplayRows, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
+import { newQualityStudy, importQualityFish, importQualityLibrary, qualityResultKey, qualityComparisonRows, qualityDisplayRows, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
 import { definitionKey, BSS_DEF, STATE_DEF, FEATURES_KEY } from '@/lib/deepDig/features';
 import { __resetNotificationCenterForTests, isNotificationHistoryOnly } from '@/lib/notificationCenter';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -118,6 +118,31 @@ it('imports signal-library signals as library rows, separately from fish, and ke
   expect(h.result.current.study.samples.map(s => [s.source.symbol, s.origin ?? 'fish'])).toEqual([['AAAUSDT', 'fish'], ['ZZZUSDT', 'library']]);
   h.rerender({ library: [] }); await flush();
   expect(h.result.current.study.samples).toHaveLength(2);
+});
+it.each(['turing', 'pre-entry'] as const)('restores damaged %s entries before running and preserves their time on the next reload', async origin => {
+  const timeMs = Date.UTC(2026, 2, 29, 5) + (origin === 'pre-entry' ? 2 * 86400_000 : 0);
+  const source: TradeSignal = { id: `${origin}-time-regression`, symbol: 'TURING:TURING 50', timeMs, timeLabel: '', fallbackZone: '' };
+  const saved = importQualityLibrary(newQualityStudy(), [source], T, origin);
+  saved.samples = saved.samples.map(s => ({ ...s, enteredAt: null, basis: 'missing' }));
+  saved.selectedRowIds = qualityDisplayRows(saved).map(r => r.id);
+  storage.load.mockResolvedValue({ study: saved });
+  const empty: TradeSignal[] = [], tasks: QualityRunOptions[] = [];
+  const run = async (options: QualityRunOptions) => { tasks.push(options); };
+  const h = renderHook(() => useFishQuality('a', empty, run));
+  await flush();
+  expect(qualityRunSamples(h.result.current.study)).toHaveLength(1);
+  expect(h.result.current.study.samples[0]).toMatchObject({ enteredAt: timeMs, basis: 'signal' });
+  act(() => { void h.result.current.start(); }); await flush(1100);
+  expect(tasks).toHaveLength(1);
+  expect(qualityRunSamples(tasks[0].study)[0].enteredAt).toBe(timeMs);
+  h.unmount();
+  const persisted = storage.save.mock.calls.at(-1)![1];
+  expect(persisted.samples[0].enteredAt).toBe(timeMs);
+  storage.load.mockResolvedValue({ study: structuredClone(persisted) });
+  const reopened = renderHook(() => useFishQuality('a', empty, run)); await flush();
+  expect(reopened.result.current.study.samples[0]).toMatchObject({ enteredAt: timeMs, basis: 'signal' });
+  expect(qualityRunSamples(reopened.result.current.study)).toHaveLength(1);
+  reopened.unmount();
 });
 it('accepts mining-library signals directly without requiring a copy in the cabin',async()=>{
  const run=vi.fn(async(_o:QualityRunOptions)=>{}),empty:TradeSignal[]=[],mined=[{...signal,id:'mining-only'}];const h=renderHook(()=>useFishQuality('a',empty,run,empty,mined));await flush();expect(h.result.current.study.samples).toHaveLength(1);expect(qualityComparisonRows(h.result.current.study)[0].origins).toEqual(['mined']);chooseAndStart(h);await flush();expect(run).toHaveBeenCalledTimes(1);h.unmount();
