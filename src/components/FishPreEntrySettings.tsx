@@ -27,6 +27,7 @@ export function FishPreEntrySettings({state, selectedCount, done}: {state: FishQ
     onSave={next=>{if(!hours.trim())throw Error('请填写筛选时长');monitor.configure(next,Number(hours));}} renderHolding={view=>{
       const active=view.plans.find(p=>p.id===activeId)??view.plans[0];
       return <div className="space-y-3" data-testid="pre-entry-plan-settings">
+        <p className="text-[10.5px] text-muted-foreground">新轮次：图灵杯零成交时暂不判定入选，等读数有效后继续；缺 K 线仍停止。继续旧轮次会沿用旧规则。</p>
         <p className="text-[10.5px] text-muted-foreground">筛选方案 {view.plans.length} 套 · 与上方按编号一一对应{view.dirty?' · 有待保存设置':''}</p>
         {!!view.plans.length&&<div role="tablist" aria-label="选择要设置动态筛选的买入方案" className="flex flex-wrap gap-1 rounded-md bg-muted/60 p-1 text-[10.5px]">{view.plans.map((p,i)=><button type="button" role="tab" key={p.id} aria-selected={active?.id===p.id} onClick={()=>setActiveId(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span>{i+1}.</span>{p.label}<span className="rounded bg-primary/15 px-1 text-[9px] text-primary">{forPlan(p).filter(f=>f.enabled).length} 项确认</span></button>)}</div>}
         {active&&<section className="space-y-2 rounded-md border border-border/60 p-3">

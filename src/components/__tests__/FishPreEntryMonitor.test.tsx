@@ -2,11 +2,41 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishPreEntryMonitor } from '../FishPreEntryMonitor';
 import { TooltipProvider } from '../ui/tooltip';
-import { emptyPreEntryLibrary } from '@/lib/fish/preEntryMonitor';
+import { emptyPreEntryLibrary, PRE_ENTRY_INTRABAR_VERSION, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQualityModule';
 
 afterEach(cleanup);
+it('admits only matched records and keeps errors and pending work in separate scan records', async () => {
+  const time=Date.UTC(2026,2,29,5), statuses=['matched','unmatched','warming','error','paused','queued','scanning'] as const;
+  const records:PreEntryRecord[]=statuses.map((status,i)=>({id:status,roundId:'r',status,startTime:time,cursor:time,matchedAt:status==='matched'?time+60000:undefined,updatedAt:i,readings:[],detail:status==='error'?'真实行情缺口':undefined,
+    sample:{id:status,source:{id:status,symbol:`TURING:TURING ${i+1}`,timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time}}));
+  const state={ready:true,selectPreEntryRecords:vi.fn(()=>1),preEntry:{library:{...emptyPreEntryLibrary(),records,rounds:[{id:'r',engine:PRE_ENTRY_ZERO_TRADE_VERSION,state:'paused',filters:[],hours:0,startedAt:1,updatedAt:1}]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn()}} as unknown as FishQualityState;
+  render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+  fireEvent.click(screen.getByLabelText('打开入选库'));
+  const admitted=screen.getByRole('dialog');
+  expect(within(admitted).getAllByTestId('pre-entry-library-row')).toHaveLength(1);
+  expect(within(admitted).getByText('TURING:TURING 1')).toBeInTheDocument();
+  expect(within(admitted).queryByText('缺数据')).not.toBeInTheDocument();
+  fireEvent.click(within(admitted).getByLabelText('全选当前筛选的入选库记录'));
+  fireEvent.click(within(admitted).getByText('在组合表中勾选'));
+  expect(state.selectPreEntryRecords).toHaveBeenCalledWith(['matched']);
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  fireEvent.click(screen.getByLabelText('打开筛选记录'));
+  const audit=screen.getByRole('dialog');
+  expect(within(audit).getAllByTestId('pre-entry-scan-row')).toHaveLength(7);
+  expect(within(audit).getByText('真实行情缺口')).toBeInTheDocument();
+  expect(within(audit).queryByText('在组合表中勾选')).not.toBeInTheDocument();
+  expect(records).toHaveLength(7);
+});
+
+it('offers an explicit new round for an old failed scan instead of silently changing its rules', () => {
+  const restart=vi.fn(), time=Date.UTC(2026,2,29,5);
+  const state={ready:true,preEntry:{library:{...emptyPreEntryLibrary(),rounds:[{id:'old',engine:PRE_ENTRY_INTRABAR_VERSION,state:'paused',filters:[],hours:0,startedAt:1,updatedAt:1}],records:[{id:'error',roundId:'old',status:'error',startTime:time,cursor:time,updatedAt:1,readings:[],sample:{source:{symbol:'TURING:TURING 50',timeMs:time}}}]},ready:true,running:false,error:'',progress:null,restart,resume:vi.fn()}} as unknown as FishQualityState;
+  render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+  fireEvent.click(screen.getByText('保留旧轮次，用新版重新筛选'));
+  expect(restart).toHaveBeenCalledWith(0); expect(state.preEntry!.resume).not.toHaveBeenCalled();
+});
 it('orders start, conditions and selected library like holding monitoring, with duration inside settings', async () => {
   const start = vi.fn(), pause = vi.fn();
   const state = { ready: true, preEntry: { library: {...emptyPreEntryLibrary(),settings:{updatedAt:1,hours:48,plans:[]}}, ready: true, running: false, error: '', progress: null, start, pause, resume: vi.fn(), retry: vi.fn() } } as unknown as FishQualityState;
@@ -20,7 +50,7 @@ it('orders start, conditions and selected library like holding monitoring, with 
   expect(start).toHaveBeenCalledWith(48);
   fireEvent.click(screen.getByLabelText('打开入选库'));
   await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-  expect(screen.getByText('暂无入选记录。设置条件、勾选信号后开始筛选。')).toBeInTheDocument();
+  expect(screen.getByText('暂无入选记录。满足全部条件后才会进入入选库。')).toBeInTheDocument();
   view.unmount();
   render(<TooltipProvider><FishPreEntryMonitor state={{ ...state, preEntry: { ...state.preEntry!, running: true } }} selectedCount={2} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   expect(screen.getByText('暂停筛选').className).toBe(qualitySplitPauseAction);
