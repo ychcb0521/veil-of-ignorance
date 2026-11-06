@@ -13,6 +13,7 @@ afterEach(() => { cleanup(); localStorage.clear(); });
 
 it('creates the advantage template from the selected saved baseline and saves its independent controls',()=>{
   const original=buildFusionTemplatePlan(BUILTIN_FEATURES,'baseline','原 2.5% 方案');
+  for (const plan of [original, original.router!.structure, original.router!.attack]) plan.mirrorTakeProfit = { enabled: true, gainPct: 2.5, sellPct: 67 };
   const save=vi.fn(),copy=vi.fn();
   render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save} onCopyPlan={copy} templates={{templates:[],save:vi.fn(),remove:vi.fn()}}/>);
   fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));
@@ -30,6 +31,60 @@ it('creates the advantage template from the selected saved baseline and saves it
   expect(made.router!.structure.addition).toEqual(original.router!.structure.addition);
   expect(original.advantage).toBeUndefined();
 },90000);
+
+it('can create and save the advantage template without any saved source', () => {
+  const save = vi.fn(), copy = vi.fn();
+  render(<FishQualitySellPlansEditor plans={[]} ready onSave={save} onCopyPlan={copy} templates={{ templates: [], save: vi.fn(), remove: vi.fn() }}/>);
+  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
+  expect(screen.getByLabelText('优势模板沿用原方案')).toHaveValue('builtin');
+  const create = screen.getByRole('button', { name: `用内置模板 ${ADVANTAGE_TEMPLATE_NAME} 新建方案` });
+  expect(create).toBeEnabled();
+  fireEvent.click(create);
+  expect(screen.queryByTestId('plan-template-list')).not.toBeInTheDocument();
+  const made = copy.mock.calls[0][1] as QualityGroup;
+  expect(made.advantage).toBeDefined();
+  expect(made.router!.afterAdditions).toBe(2);
+  expect(made.router!.structure.addition).toMatchObject({ quantityMode: 'calculator', maxRounds: 7 });
+  expect(made.router!.attack.addition).toMatchObject({ quantityMode: 'calculator', maxRounds: 8 });
+  expect(made.mirrorTakeProfit).toEqual({ enabled: true, gainPct: 5, sellPct: .01 });
+  expect(planVersionChanges(made)).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
+  expect(save.mock.calls[0][0]).toEqual([made]);
+}, 90000);
+
+it('keeps New enabled with multiple sources and asks in place instead of silently choosing one', () => {
+  const first = buildFusionTemplatePlan(BUILTIN_FEATURES, 'first', '原方案甲');
+  const second = { ...structuredClone(first), id: 'second', label: '原方案乙' };
+  const copy = vi.fn();
+  render(<FishQualitySellPlansEditor plans={[first, second]} ready onSave={vi.fn()} onCopyPlan={copy} templates={{ templates: [], save: vi.fn(), remove: vi.fn() }}/>);
+  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
+  const create = screen.getByRole('button', { name: `用内置模板 ${ADVANTAGE_TEMPLATE_NAME} 新建方案` });
+  expect(create).toBeEnabled();
+  fireEvent.click(create);
+  expect(within(screen.getByTestId('plan-template-list')).getByRole('alert')).toHaveTextContent('请先选择要沿用的原方案');
+  expect(copy).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('优势模板沿用原方案'), { target: { value: 'plan:second' } });
+  fireEvent.click(create);
+  expect(copy).toHaveBeenCalledOnce();
+  expect(copy.mock.calls[0][1].addition).toEqual(second.addition);
+  expect(screen.queryByTestId('plan-template-list')).not.toBeInTheDocument();
+}, 90000);
+
+it('shows an incompatible source error inside the picker and lets the user choose the built-in source', () => {
+  const original = buildFusionTemplatePlan(BUILTIN_FEATURES, 'outdated');
+  original.frozenVersions = [{ key: 'router', part: '条件分支', name: '旧版本', version: 'unknown-v0', summary: '' }];
+  const copy = vi.fn();
+  render(<FishQualitySellPlansEditor plans={[original]} ready onSave={vi.fn()} onCopyPlan={copy} templates={{ templates: [], save: vi.fn(), remove: vi.fn() }}/>);
+  fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
+  const create = screen.getByRole('button', { name: `用内置模板 ${ADVANTAGE_TEMPLATE_NAME} 新建方案` });
+  fireEvent.click(create);
+  expect(within(screen.getByTestId('plan-template-list')).getByRole('alert')).toHaveTextContent('原方案的冻结版本已变');
+  expect(copy).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('优势模板沿用原方案'), { target: { value: 'builtin' } });
+  fireEvent.click(create);
+  expect(copy).toHaveBeenCalledOnce();
+  expect(screen.queryByTestId('plan-template-list')).not.toBeInTheDocument();
+}, 90000);
 
 it('lists the built-in fusion template next to saved templates and creates a routed plan from it', () => {
   const save = vi.fn(), copy = vi.fn(), plans = enableQualityComparison(newQualityStudy()).sellPlans!;

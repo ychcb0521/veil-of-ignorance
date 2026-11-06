@@ -1044,6 +1044,31 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   expect(s.deletePlanTemplate).toHaveBeenCalledWith(activeQualityPlanTemplates(s.study)[0].id);
 },30_000);
 
+it('creates and saves the advantage built-in from monitor settings without an existing addition plan',async()=>{
+ const {ADVANTAGE_TEMPLATE_NAME}=await import('@/lib/fish/qualityAdvantageTemplate');
+ const {planVersionChanges}=await import('@/lib/fish/qualityPlanVersions');
+ const {replaceQualitySellPlans}=await import('@/lib/fish/qualitySellPlans');
+ const s=state();s.savePlanTemplate=vi.fn();s.deletePlanTemplate=vi.fn();
+ s.setSellPlans=vi.fn(plans=>{s.study=replaceQualitySellPlans(s.study,plans);});
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));
+ expect(screen.getByLabelText('优势模板沿用原方案')).toHaveValue('builtin');
+ const create=screen.getByRole('button',{name:`用内置模板 ${ADVANTAGE_TEMPLATE_NAME} 新建方案`});
+ expect(create).toBeEnabled();fireEvent.click(create);
+ expect(screen.getByTestId('quality-router-editor')).toBeInTheDocument();
+ expect(screen.getByTestId('quality-advantage-settings')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'保存方案'}));
+ expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();
+ const saved=s.study.sellPlans!.at(-1)!;
+ expect(saved.label).toBe(ADVANTAGE_TEMPLATE_NAME);expect(planVersionChanges(saved)).toEqual([]);
+ expect(saved.router!.structure.addition).toMatchObject({quantityMode:'calculator',maxRounds:7});
+ expect(saved.router!.attack.addition).toMatchObject({quantityMode:'calculator',maxRounds:8});
+ for(const p of [saved,saved.router!.structure,saved.router!.attack]){
+  expect(p.advantage).toMatchObject({screenWeak:true,beforeFirst:true,afterAddition:true,confirmations:2});
+  expect(p.mirrorTakeProfit).toEqual({enabled:true,gainPct:5,sellPct:.01});
+ }
+},60000);
+
 it('keeps branch edits when changing advantage controls and saves the overlay to both branches',async()=>{
  const {buildFusionTemplatePlan}=await import('@/lib/fish/qualityBuiltinTemplates');
  const {buildQualityAdvantageTemplate}=await import('@/lib/fish/qualityAdvantageTemplate');

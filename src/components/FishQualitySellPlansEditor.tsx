@@ -48,19 +48,37 @@ function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin }: { act
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
   const bases = [...plans.map(p=>({key:'plan:'+p.id,label:'方案 · '+p.label,plan:p})), ...actions.templates.map(t=>({key:'template:'+t.id,label:'模板 · '+t.name,plan:t.plan}))].filter(x=>x.plan.addition?.enabled||x.plan.router);
   const [baseKey,setBaseKey] = useState('');
-  const base = bases.find(b=>b.key===baseKey) ?? (bases.length===1?bases[0]:undefined);
+  const [creationError, setCreationError] = useState<{ id: string; message: string }>();
+  const selectedBaseKey = baseKey || (bases.length === 1 ? bases[0].key : bases.length === 0 ? 'builtin' : '');
+  const base = bases.find(b=>b.key===selectedBaseKey);
+  const createFromBuiltin = (template: QualityBuiltinTemplate) => {
+    if (template.defaultBaseName && selectedBaseKey !== 'builtin' && !base) {
+      setCreationError({ id: template.id, message: '请先选择要沿用的原方案，或选择「内置原方案」直接新建。' });
+      return;
+    }
+    try {
+      onUseBuiltin(template, template.defaultBaseName ? base?.plan : undefined);
+      setCreationError(undefined); setOpen(false);
+    } catch (cause) {
+      setCreationError({ id: template.id, message: cause instanceof Error ? cause.message : '内置模板生成失败' });
+    }
+  };
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
-  return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); }}><PopoverTrigger asChild>
-    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={actions.templates.length ? `已有 ${actions.templates.length} 个模板` : '还没有模板：在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>从模板新建{actions.templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{actions.templates.length}</span>}</button>
+  return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); setCreationError(undefined); }}><PopoverTrigger asChild>
+    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={actions.templates.length ? `已有 ${actions.templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>从模板新建{actions.templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{actions.templates.length}</span>}</button>
   </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-1 text-[11px]" data-testid="plan-template-list">
     {/* 【用户要求】2026-11-04 内置模板：代码里的配方，新建时按账号当前公式生成，保存时冻结版本；不占账号模板目录 */}
     {BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
       <p className="px-2 pb-0.5 pt-1 text-[10px] text-muted-foreground">内置模板 · 新建时按账号当前公式生成，保存时冻结版本</p>
       <ul>{BUILTIN_QUALITY_TEMPLATES.map(t => <li key={t.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-builtin">
         <div className="min-w-0 flex-1"><p className="font-medium">{t.name}</p><p className="text-[10px] leading-snug text-muted-foreground">{t.summary}</p>
-          {t.requiresBase&&<label className="mt-2 block">沿用原方案<select aria-label="优势模板沿用原方案" value={base?.key??''} onChange={e=>setBaseKey(e.target.value)} className="mt-1 w-full rounded border bg-background p-1"><option value="">选择原方案或账号模板</option>{bases.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}</select></label>}
+          {t.defaultBaseName&&<>
+            <label className="mt-2 block">沿用原方案<select aria-label="优势模板沿用原方案" value={selectedBaseKey} onChange={e=>{setBaseKey(e.target.value);setCreationError(undefined);}} className="mt-1 w-full rounded border bg-background p-1"><option value="">选择原方案或账号模板</option><option value="builtin">内置原方案 · {t.defaultBaseName}</option>{bases.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}</select></label>
+            <p className="mt-1 text-[10px] text-muted-foreground">{selectedBaseKey === 'builtin' ? '按上述内置原方案新建，保留它的全部加仓参数，再附加优势筛选与退出确认。沿用你自己的参数时，请改选对应方案。' : '完整沿用所选方案已保存的参数。也可选择内置原方案直接新建，无需提前保存账号模板。'}</p>
+          </>}
+          {creationError?.id === t.id && <p role="alert" className="mt-1 text-destructive">{creationError.message}</p>}
         </div>
-        <button type="button" disabled={disabled||t.requiresBase&&!base} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => { onUseBuiltin(t,t.requiresBase?base?.plan:undefined); setOpen(false); }}>新建</button>
+        <button type="button" disabled={disabled} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => createFromBuiltin(t)}>新建</button>
       </li>)}</ul>
     </div>}
     {!actions.templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。</p>
@@ -128,9 +146,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   /** 内置模板：按账号当前公式生成方案，之后与「从模板新建」同一条路（复制监测草稿、加入列表、保存时冻结版本）。 */
   const fromBuiltin = (template: QualityBuiltinTemplate, base?:QualityGroup) => {
-    let copyBase: QualityGroup;
-    try { copyBase = template.build(definitions, newQualitySellPlanId(), uniqueLabel(template.name),base); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '内置模板生成失败'); return; }
+    const copyBase = template.build(definitions, newQualitySellPlanId(), uniqueLabel(template.name),base);
     onCopyPlan?.({ ...copyBase, id: `builtin:${template.id}` }, copyBase);
     change([...drafts, draftOf(copyBase)]);
     onSelectPlan?.(copyBase.id);
