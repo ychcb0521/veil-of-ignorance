@@ -382,10 +382,10 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
 }
 
 /** 本机存储每次保存成功后调用：记下「改过未上传」，几秒后上传（连续保存只传最后一版）。 */
-export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: string | null | undefined): void {
-  if (!owner) return;
+export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: string | null | undefined): Promise<void> {
+  if (!owner) return Promise.resolve();
   adapters.set(adapter.name, adapter);
-  void enqueue(idOf(adapter.name, owner), async () => {
+  return enqueue(idOf(adapter.name, owner), async () => {
     if (!(await signedInAs(owner))) return false;
     const meta = await readMeta(adapter.name, owner);
     const savedAt = Math.max(Date.now(), (meta?.savedAt ?? 0) + 1);
@@ -397,10 +397,13 @@ export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: st
 /** 对账，并等它排下的上传也做完。供要逐个处理的大存档用：一次只编码一份，内存峰值不叠加。 */
 export async function syncAccountBlobFully(adapter: AccountBlobAdapter<any>, owner: string): Promise<AccountBlobSyncStatus> {
   const status = await syncAccountBlobOnLoad(adapter, owner, 600_000);
-  const id = idOf(adapter.name, owner), pending = pushTimers.get(id);
-  if (pending) { clearTimeout(pending.timer); pushTimers.delete(id); await runPush(pending.adapter, pending.owner, pending.settled); }
+  const id = idOf(adapter.name, owner);
   await queues.get(id);
-  return status;
+  const pending = pushTimers.get(id);
+  if (!pending) return status;
+  clearTimeout(pending.timer);
+  pushTimers.delete(id);
+  return await runPush(pending.adapter, pending.owner, pending.settled) ? 'pushed' : 'failed';
 }
 
 /** 测试用：立刻执行所有排队的上传并等它们完成。 */

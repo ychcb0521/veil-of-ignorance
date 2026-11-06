@@ -7,9 +7,12 @@ import { installNoNativeTooltips } from "./lib/noNativeTooltips";
 import { ensureCriticalStorageHeadroom, ensureStorageReserve, installAuthTokenWriteGuard } from "./lib/persistedStateStorage";
 import { storageUsageBreakdown } from "./lib/authBootRecovery";
 import { connectTuringCupMarket } from "./lib/turingCupMarketData";
+import { connectTuringReplayArchiveSync } from "./lib/turingCupReplayArchive";
+import { noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad } from "./lib/accountBlobSync";
 import { supabase } from "./integrations/supabase/client";
 
 connectTuringCupMarket(supabase);
+connectTuringReplayArchiveSync({ noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad });
 installLovableBadgeSuppression();
 // 用户要求：浏览器自带的黑框悬停提示一律不要
 installNoNativeTooltips();

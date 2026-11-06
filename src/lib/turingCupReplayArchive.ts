@@ -1,3 +1,4 @@
+import type { AccountBlobAdapter } from './accountBlobSync';
 import { getUserId } from './userStoragePrefix';
 
 export const TURING_REPLAY_MINUTE_MS = 60_000;
@@ -38,7 +39,11 @@ function isMinute(row: unknown): row is Minute {
 }
 
 export function parseTuringReplayArchive(json: string): TuringReplayArchive {
-  const input = JSON.parse(json);
+  return validateTuringReplayArchive(JSON.parse(json));
+}
+
+function validateTuringReplayArchive(value: unknown): TuringReplayArchive {
+  const input = value as TuringReplayArchive;
   if (!input || input.version !== 1 || !Number.isSafeInteger(input.anchorMs) || input.anchorMs <= 0
     || input.anchorMs % TURING_REPLAY_MINUTE_MS || !Number.isInteger(input.minutes)
     || input.minutes <= 0 || input.minutes > MAX_MINUTES
@@ -141,6 +146,14 @@ export function readArchiveKlines(
   return rows.slice(-limit);
 }
 
+type ArchiveSync = Pick<typeof import('./accountBlobSync'), 'syncAccountBlobOnLoad' | 'noteAccountBlobSaved' | 'syncAccountBlobFully'>;
+let accountSync: ArchiveSync | undefined;
+
+// Workers share the archive parsers. Only the signed-in app initializes cloud storage.
+export function connectTuringReplayArchiveSync(sync: ArchiveSync): void {
+  accountSync = sync;
+}
+
 const databaseName = 'veil-turing-replay-v1';
 const storeName = 'archives';
 let cached: { accountId: string; archive: Promise<TuringReplayArchive | undefined> } | undefined;
@@ -167,21 +180,9 @@ async function readStorage(accountId: string): Promise<TuringReplayArchive | und
   }
 }
 
-export function loadTuringReplayArchive(accountId = getUserId()): Promise<TuringReplayArchive | undefined> {
-  if (!accountId || accountId !== getUserId() || typeof indexedDB === 'undefined') return Promise.resolve(undefined);
-  if (cached?.accountId === accountId) return cached.archive;
-  const archive = readStorage(accountId).catch(error => {
-    if (cached?.archive === archive) cached = undefined;
-    throw error;
-  });
-  cached = { accountId, archive };
-  return archive;
-}
+export const TURING_REPLAY_ARCHIVE_CHANGED = 'veil-turing-replay-archive-changed';
 
-export async function importTuringReplayArchive(accountId: string, file: File): Promise<TuringReplayArchive> {
-  if (!accountId || accountId !== getUserId()) throw Error('请先登录图灵杯');
-  if (file.size > 100 * 1024 * 1024) throw Error('图灵杯行情文件超过 100 MB');
-  const archive = parseTuringReplayArchive(await file.text());
+async function writeStorage(accountId: string, archive: TuringReplayArchive): Promise<void> {
   const db = await openStorage();
   try {
     if (accountId !== getUserId()) throw Error('账号已切换，请重新选择行情文件');
@@ -195,6 +196,54 @@ export async function importTuringReplayArchive(accountId: string, file: File): 
   } finally {
     db.close();
   }
-  if (accountId === getUserId()) cached = { accountId, archive: Promise.resolve(archive) };
+  if (accountId === getUserId()) {
+    cached = { accountId, archive: Promise.resolve(archive) };
+    window.dispatchEvent(new CustomEvent(TURING_REPLAY_ARCHIVE_CHANGED, { detail: accountId }));
+  }
+}
+
+const accountArchive: AccountBlobAdapter<TuringReplayArchive> = {
+  name: 'turing-replay-archive-v1',
+  read: readStorage,
+  async write(owner, archive) {
+    if (archive) await writeStorage(owner, validateTuringReplayArchive(archive));
+  },
+  weight: archive => archive ? Object.keys(archive.markets).length * archive.minutes : 0,
+};
+
+export function loadTuringReplayArchive(accountId = getUserId()): Promise<TuringReplayArchive | undefined> {
+  if (!accountId || accountId !== getUserId() || typeof indexedDB === 'undefined') return Promise.resolve(undefined);
+  if (cached?.accountId === accountId) return cached.archive;
+  const archive = readStorage(accountId).then(async local => {
+    if (!accountSync) return local;
+    const status = await accountSync.syncAccountBlobOnLoad(accountArchive, accountId, 45_000);
+    if (accountId !== getUserId()) return undefined;
+    if (status === 'adopted') return readStorage(accountId);
+    if (status === 'failed' || status === 'timed_out') {
+      if (!local) throw Error('暂时无法读取账号行情，请重试');
+      if (cached?.archive === archive) cached = undefined;
+    }
+    return local;
+  }).catch(error => {
+    if (cached?.archive === archive) cached = undefined;
+    throw error;
+  });
+  cached = { accountId, archive };
   return archive;
+}
+
+export async function importTuringReplayArchive(accountId: string, file: File): Promise<TuringReplayArchive> {
+  if (!accountId || accountId !== getUserId()) throw Error('请先登录图灵杯');
+  if (file.size > 100 * 1024 * 1024) throw Error('图灵杯行情文件超过 100 MB');
+  const archive = parseTuringReplayArchive(await file.text());
+  await cached?.archive.catch(() => undefined);
+  await writeStorage(accountId, archive);
+  return archive;
+}
+
+export async function saveTuringReplayArchiveToAccount(accountId: string): Promise<boolean> {
+  if (!accountSync || accountId !== getUserId()) return false;
+  await accountSync.noteAccountBlobSaved(accountArchive, accountId);
+  const status = await accountSync.syncAccountBlobFully(accountArchive, accountId);
+  return accountId === getUserId() && (status === 'pushed' || status === 'unchanged');
 }

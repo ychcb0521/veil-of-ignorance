@@ -42,6 +42,9 @@ import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { TuringCupReplayPanel } from '@/components/TuringCupReplayPanel';
+import { useTuringReplayArchive } from '@/hooks/useTuringReplayArchive';
+import { turingReplaySamples } from '@/lib/turingReplaySamples';
+import { sourceDeletionMatcher } from '@/lib/fish/libraryDeletion';
 import { listAllCampaigns } from '@/lib/journalApi';
 import { buildCampaignDayIndex, buildTradedDayIndex } from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
@@ -129,15 +132,35 @@ export function TimeControl({
   const fish = useFish(user?.id, { onCaught: fishNotify.send });
   mailFishRef.current = fish.unionFish;
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
-  const [savedTuringSignals, setTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
-  const turingSignals = useMemo(() => Array.isArray(savedTuringSignals) ? savedTuringSignals.filter(signal =>
-    signal && typeof signal.id === 'string' && typeof signal.symbol === 'string' && isTuringCupSymbol(signal.symbol)
-    && Number.isFinite(signal.timeMs) && typeof signal.timeLabel === 'string' && typeof signal.fallbackZone === 'string'
-  ) : EMPTY_TURING_SIGNALS, [savedTuringSignals]);
+  const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
+  const turingArchive = useTuringReplayArchive(user?.id);
+  const replaySamples = useMemo(() => turingArchive.archive ? turingReplaySamples(turingArchive.archive) : EMPTY_TURING_SIGNALS, [turingArchive.archive]);
+  const replayIds = useMemo(() => new Set(replaySamples.map(signal => signal.id)), [replaySamples]);
+  const turingInputs = useMemo(() => {
+    const saved = Array.isArray(savedTuringSignals) ? savedTuringSignals.filter(signal =>
+      signal && typeof signal.id === 'string' && typeof signal.symbol === 'string' && isTuringCupSymbol(signal.symbol)
+      && Number.isFinite(signal.timeMs) && typeof signal.timeLabel === 'string' && typeof signal.fallbackZone === 'string'
+      && (!signal.turingReplaySample || replayIds.has(signal.id))
+    ) : EMPTY_TURING_SIGNALS;
+    return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
+  }, [savedTuringSignals, replaySamples, replayIds]);
+  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs);
+  const { deletedSources, resolvedLegacySources } = fishQuality.study;
+  const turingSignals = useMemo(() => {
+    const deleted = sourceDeletionMatcher(deletedSources, resolvedLegacySources);
+    return turingInputs.filter(signal => !signal.turingReplaySample || !deleted(signal, signal.timeMs, 'turing'));
+  }, [turingInputs, deletedSources, resolvedLegacySources]);
+  const visibleReplaySamples = useMemo(() => turingSignals.filter(signal => signal.turingReplaySample), [turingSignals]);
+  const setTuringSignals = useCallback((value: TradeSignal[] | ((previous: TradeSignal[]) => TradeSignal[])) => {
+    setSavedTuringSignals(previous => {
+      const saved = Array.isArray(previous) ? previous.filter(signal => signal && typeof signal.symbol === 'string') : [];
+      const next = typeof value === 'function' ? value(mergeSignals(saved, visibleReplaySamples)) : value;
+      // The archive regenerates sample rows. Persist only signals and user edits to those samples.
+      return next.filter(signal => !signal.turingReplaySample || signal.quality !== undefined || signal.jumpIssue !== undefined);
+    });
+  }, [setSavedTuringSignals, visibleReplaySamples]);
   const [signals, setSignals] = turing ? [turingSignals, setTuringSignals] : [onlineSignals, setOnlineSignals];
   const libraryName = turing ? '图灵杯' : '信号库';
-  // 信号库的信号也进鱼质量，只参加卖出比较（与鱼舱的鱼分开）
-  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingSignals);
   const onlineReconstruction = useFishReconstruction(user?.id, onlineSignals, fish.reconstruct);
   const turingReconstruction = useFishReconstruction(user?.id, turingSignals, fish.reconstruct, true);
   const reconstruction = turing ? turingReconstruction : onlineReconstruction;
@@ -423,12 +446,25 @@ export function TimeControl({
     });
     setSignals(prev => setSignalQuality(prev, id, next));
   }, [setSignals]);
-  const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message(`${libraryName}已清空`); };
+  const handleClearSignals = async () => {
+    try {
+      if (turing && visibleReplaySamples.length) {
+        await fishQuality.deleteSources?.(visibleReplaySamples.map(source => ({ source, entry: null, origin: 'turing' })));
+      }
+      setSignals([]);
+      setImportErrors([]);
+      toast.message(`${libraryName}已清空`);
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
+  };
 
   // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。
   const handleExportSignals = () => {
     if (signals.length === 0) return;
-    const text = serializeSignals(turing ? signals.map(signal => ({ ...signal, symbol: turingCupTicker(signal.symbol) })) : signals);
+    const text = turing ? signals.map(signal =>
+      `${turingCupTicker(signal.symbol)}, ${formatUTC8(signal.timeMs)}, ${signal.fallbackZone}`
+    ).join('\n') + '\n' : serializeSignals(signals);
     const stamp = formatUTC8(Date.now()).replace(/[^\d]/g, '').slice(0, 12);
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -638,8 +674,7 @@ export function TimeControl({
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
         <div key={libraryName} data-testid={turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2">
-          {turing && user && <TuringCupReplayPanel key={user.id} accountId={user.id}
-            interval={signalJumpInterval} onOpen={onJumpToSignal} />}
+
           {/* 统一工具条：筛选 + 导入 / 导出 / 预检。
               原先「只放两个 12px 图标」的独立一行已并入这里——横向本来就过剩，
               纵向才是稀缺的，这是把过剩的横向兑换成纵向的一次交易。 */}
@@ -686,6 +721,7 @@ export function TimeControl({
               {signals.length > 0 && (
                 <SignalTurnoverButton turing={turing} signals={signals} run={fish.turnover} busyReason={fish.progress?.status === 'running' || reconstructionRunning.current ? '捕捞或复原进行中，结束后再统计' : undefined} />
               )}
+              {turing && user && <TuringCupReplayPanel key={user.id} accountId={user.id} source={turingArchive} />}
               {signalAuditProgress && (
                 <span
                   className="flex shrink-0 items-center gap-1 font-mono text-[10px] leading-4 text-muted-foreground/70"
@@ -746,7 +782,7 @@ export function TimeControl({
             {sortedFiltered.length === 0 ? (
               <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">
                 {signals.length === 0
-                  ? turing ? '图灵杯暂无信号。离线行情和信号导入后，可在这里查看盘面、战役，并在「鱼质量」筛选图灵杯。' : '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
+                  ? turing ? '图灵杯暂无信号。导入行情文件后，回放样本会出现在这里，也可以上传或粘贴信号。' : '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
                   : '没有匹配的标的。'}
               </div>
             ) : (

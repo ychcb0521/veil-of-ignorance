@@ -15,7 +15,7 @@
  */
 
 import { stockCode } from './signalMarket';
-import { isTuringCupSymbol } from './turingCupSymbol';
+import { isTuringCupSymbol, turingCupSymbol } from './turingCupSymbol';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
 import { queueSimStatePush } from './simStateSync';
@@ -52,6 +52,8 @@ export interface TradeSignal {
   timeMs: number;
   /** 原始时间串，用于展示（保留用户输入的样子） */
   timeLabel: string;
+  /** 由图灵杯行情生成的固定回放入场点。 */
+  turingReplaySample?: true;
   /** 兜底区：价格位 / 区间 / 备注，纯文本 */
   fallbackZone: string;
   /** 已确认的致命跳转问题；瞬时网络 / 限流错误不会写入。 */
@@ -165,6 +167,8 @@ function parseSymbolLine(line: string, normalize: (symbol: string) => string): {
     symbolPart = s.slice(0, lm.index);
     zonePart = s.slice(lm.index + lm[0].length);
   } else {
+    const turingNumber = normalize === turingCupSymbol ? /^(TURING\s+\d+)(?:\s+(.*))?$/i.exec(s) : null;
+    if (turingNumber) return { symbol: normalize(turingNumber[1]), zone: turingNumber[2]?.trim() ?? '' };
     const m = /^(\S+)\s+([\s\S]*)$/.exec(s);
     if (m) {
       symbolPart = m[1];

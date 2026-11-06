@@ -9,6 +9,8 @@ import { archiveQualityResult } from '@/lib/fish/qualityCampaignArchive';
 import { buildQualityCampaignData } from '@/lib/fish/qualityCampaignProjection';
 import { buildCampaignDayIndex, hasCampaignOnSignalDay } from '@/lib/signalCampaignIndex';
 import { turingCupSymbol } from '@/lib/turingCupSymbol';
+import { turingReplaySamples } from '@/lib/turingReplaySamples';
+import { parseSignalText } from '@/lib/signalLibrary';
 import { connectTuringCupMarket } from '@/lib/turingCupMarketData';
 import { loadTuringReplayArchive, parseTuringReplayArchive, readArchiveKlines } from '@/lib/turingCupReplayArchive';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -83,9 +85,25 @@ describe('图灵杯离线来源', () => {
     expect(readArchiveKlines(archive, ticker, '1m', { limit: 1 })[0][0]).toBe(time + 9 * minute);
   });
 
+  it('generates one comparison row per archived symbol and preserves a manually entered Turing ticker', () => {
+    const bar = [10000, 10000, 10000, 10000, 1, 100, .5, 50];
+    const archive = parseTuringReplayArchive(JSON.stringify({
+      version: 1, anchorMs: time, minutes: 3_000,
+      markets: { 'TURING 1': Array(3_000).fill(bar), 'TURING 2': Array(3_000).fill(bar) }, reopens: [],
+    }));
+    const signals = turingReplaySamples(archive);
+    expect(signals.map(signal => [signal.symbol, signal.timeMs, signal.turingReplaySample])).toEqual([
+      ['TURING:TURING 1', time + 2885 * minute, true],
+      ['TURING:TURING 2', time + 2885 * minute, true],
+    ]);
+    const manual = parseSignalText('2026-10-01 08:00\nTuring 1 98', turingCupSymbol);
+    expect(manual.signals[0]).toMatchObject({ symbol: 'TURING:TURING 1', fallbackZone: '98' });
+  });
+
   it.each(['rpc', 'continuous archive'])('uses the same filter and sell engine with %s, and preserves the source in the campaign', async source => {
+    let runSignal = offline;
     if (source === 'continuous archive') {
-      const history = 3_000;
+      const history = 2885;
       const candles = Array.from({ length: history + 15 }, (_, slot) => {
         const open = slot === history + 5 ? 9_200 : slot > history ? 9_000 : 10_000;
         return [open, 10_100, 8_900, slot >= history ? 9_000 : 10_000, 1, 100, 0.5, 50];
@@ -94,6 +112,8 @@ describe('图灵杯离线来源', () => {
         minutes: candles.length, markets: { [ticker]: candles }, reopens: [[history + 5, 'session-gap']],
       }));
       vi.mocked(loadTuringReplayArchive).mockResolvedValue(archive);
+      runSignal = turingReplaySamples(archive)[0];
+      expect(runSignal).toMatchObject({ symbol: offline.symbol, timeMs: time, turingReplaySample: true });
       const reopen = await fetchReplayKlineRange(offline.symbol, '1m', time + 5 * minute, time + 6 * minute);
       expect(reopen[0]).toMatchObject({ open: 92, turingReopen: 'session-gap' });
     }
@@ -105,7 +125,7 @@ describe('图灵杯离线来源', () => {
       id: 'sell-fixture', label: 'Fixture', metric: 'raw', snapshot, rule: { metric: 'raw', direction: '<', threshold: 95 },
       buyFilters: [{ id: 'buy-fixture', label: 'Fixture', metric: 'raw', direction: '>', threshold: 95, enabled: true, snapshot }],
     };
-    const original = importQualityLibrary(importQualityLibrary(newQualityStudy(), [online]), [offline], time, 'turing');
+    const original = importQualityLibrary(importQualityLibrary(newQualityStudy(), [online]), [runSignal], time, 'turing');
     const rows = qualityComparisonRows(original);
     expect(rows.map(row => row.origin)).toEqual(['library', 'turing']);
     expect(rows[0].id).not.toBe(rows[1].id);

@@ -206,6 +206,7 @@ interface RowProps {
   symbol: string;
   timeLabel: string;
   fallbackZone: string;
+  turingReplaySample?: true;
   /** 已归一化的评分；undefined = 未评分。 */
   quality: number | undefined;
   jumpIssue: SignalJumpIssue | undefined;
@@ -232,7 +233,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
+  id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
@@ -288,7 +289,7 @@ function SignalLibraryRowImpl({
         {algorithmTypes
           ? <span className="whitespace-nowrap font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
           : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
-              {fallbackZone ? `兜底 ${fallbackZone}` : ''}
+              {fallbackZone ? `兜底 ${fallbackZone}` : turingReplaySample ? '回放样本' : ''}
             </span>}
         <span className="min-w-0">{market==='us_stock'&&<span className="rounded bg-primary/10 px-1 py-px text-[9px] text-primary">美股</span>}</span>
       </button>
@@ -595,6 +596,7 @@ function SignalLibraryListImpl({
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
         fallbackZone={sig.fallbackZone}
+        turingReplaySample={sig.turingReplaySample}
         quality={normalizeSignalQuality(sig.quality)}
         jumpIssue={sig.jumpIssue}
         traded={hasTradeOnSignalDay(tradedDayIndex, sig)}
