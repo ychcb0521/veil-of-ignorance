@@ -6,6 +6,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { compileFishProgram, type FishProgram } from './algorithm';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
+import { loadQualityScanChunk } from './qualityScanChunk';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
@@ -157,8 +158,7 @@ export async function findQualityIntrabarExit(o: {
   transport.compiled={...transport.compiled,usesBtc:streams.some(s=>s.plan.compiled.usesBtc),usesAmounts:streams.some(s=>s.plan.compiled.usesAmounts)};
   for(let cursor=start;cursor<o.end;) {
     if(signal.aborted)throw new DOMException('已暂停','AbortError');
-    const cut=Math.min(o.end,cursor+500*MINUTE),minutes=await o.load(o.row,cursor,cut,transport,signal);
-    validateFishBars(minutes,cut,(cut-cursor)/MINUTE,MINUTE);
+    const {cut,bars:minutes}=await loadQualityScanChunk(o.load,o.row,cursor,cursor,Math.min(o.end,cursor+500*MINUTE),transport,signal);
     for(let i=0;i<minutes.length;i++) {
       if(signal.aborted)throw new DOMException('已暂停','AbortError');
       const minute=minutes[i];

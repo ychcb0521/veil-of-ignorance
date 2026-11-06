@@ -22,6 +22,7 @@ import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import type { FishReconstructionLoader } from './reconstruction';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
 import { validateFishBars } from './shared';
+import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
@@ -599,10 +600,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const stop = Math.floor(end / plan.step) * plan.step;
         while (cursor < stop && !trigger) {
           abort(signal);
-          const cut = Math.min(stop, cursor + 500 * plan.step), from = cursor - plan.warm * plan.step;
+          const requestedCut = Math.min(stop, cursor + 500 * plan.step), from = cursor - plan.warm * plan.step;
           if (from < 0) throw new Error('公式预热所需历史不足');
-          const bars = await load(row, from, cut, plan, signal);
-          validateFishBars(bars, cut, (cut - from) / plan.step, plan.step);
+          const { bars, cut } = await loadQualityScanChunk(load, row, from, cursor, requestedCut, plan, signal);
           const readings = evaluateFishProgram(bars, plan).average;
           for (let i = 0; i < bars.length; i++) {
             const at = bars[i].openTime + plan.step;

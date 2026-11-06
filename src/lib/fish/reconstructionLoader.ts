@@ -8,8 +8,22 @@ import { FishError, validateFishBars } from './shared';
 import { fetchResearchKlines } from '@/lib/deepRsa/marketData';
 import { readTuringCupTickSize } from '@/lib/turingCupMarketData';
 import { isTuringCupSymbol, turingCupSymbol } from '@/lib/turingCupSymbol';
+import { loadTuringReplayArchive } from '@/lib/turingCupReplayArchive';
+import { turingCupTicker } from '@/lib/turingCupSymbol';
+import { formatUTC8 } from '@/lib/timeFormat';
 
 const loadTuringWindow: FishReconstructionLoader = async (row, from, cut, plan, signal) => {
+  const archive = await loadTuringReplayArchive();
+  if (signal.aborted) throw new DOMException('已取消', 'AbortError');
+  const series = archive?.markets[turingCupTicker(row.symbol)];
+  if (archive && series) {
+    if (plan.compiled.usesBtc && !archive.markets.BTCUSDT) {
+      throw new FishError('当前条件依赖 BTC，但图灵杯行情没有 BTCUSDT。请另选“无 BTC”版本；不会替换原版公式。', 'readings');
+    }
+    const first = series.findIndex(bar => bar !== null);
+    const available = archive.anchorMs + first * 60_000;
+    if (first >= 0 && from < available) throw new FishError(`图灵杯历史不足：此条件需要从 ${formatUTC8(from)} 开始的 K 线，现有行情始于 ${formatUTC8(available)}。可先运行买前监测，待预热后生成新的入场节点。`, 'history');
+  }
   const interval = intervalOf(plan.def);
   const count = (cut - from) / plan.step;
   const read = (symbol: string) => fetchResearchKlines(symbol, from, cut, undefined, signal, interval, true);

@@ -385,6 +385,7 @@ function ResultCell({ plan, result, onClick, section, onOpenCampaign }: { plan: 
     const href = qualityCampaignPath(result.key, section), title = `${summary}\n打开交易战役`;
     return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title={title}>{content}</Link> : <a href={href} className={className} title={title}>{content}</a>;
   }
+  if (result?.status === 'error') return <button type="button" onClick={onClick} className={className} title={result.reason}>{content}<span className="col-span-4 max-w-80 whitespace-normal text-[10px] text-destructive" data-testid="quality-monitor-error">未完成：{result.reason || '行情读取失败，请重试'}</span></button>;
   return <button type="button" className={className} onClick={onClick} title={result?.reason ? `${result.reason}\n${summary}` : summary}>{content}</button>;
 }
 
