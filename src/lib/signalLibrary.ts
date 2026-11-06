@@ -54,6 +54,8 @@ export interface TradeSignal {
   timeLabel: string;
   /** 由图灵杯行情生成的固定回放入场点。 */
   turingReplaySample?: true;
+  /** First closed-candle match produced by the independent pre-entry monitoring library. */
+  preEntryMonitor?: { recordId: string; roundId: string; sourceId: string; sourceTime: number };
   /** 兜底区：价格位 / 区间 / 备注，纯文本 */
   fallbackZone: string;
   /** 已确认的致命跳转问题；瞬时网络 / 限流错误不会写入。 */

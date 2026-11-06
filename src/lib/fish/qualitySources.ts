@@ -2,9 +2,9 @@ import type {TradeSignal} from '@/lib/signalLibrary';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {librarySignalIdentity} from './libraryRounds';
 
-export const QUALITY_SOURCE_NAMES = { fish: '鱼舱', mined: '挖掘库', library: '信号库', turing: '图灵杯' } as const;
+export const QUALITY_SOURCE_NAMES = { fish: '鱼舱', mined: '挖掘库', library: '信号库', turing: '图灵杯', 'pre-entry': '买前监测' } as const;
 export type QualityOrigin = keyof typeof QUALITY_SOURCE_NAMES;
-export const isSignalLibraryOrigin = (origin?: string): origin is 'library' | 'turing' => origin === 'library' || origin === 'turing';
+export const isSignalLibraryOrigin = (origin?: string): origin is 'library' | 'turing' | 'pre-entry' => origin === 'library' || origin === 'turing' || origin === 'pre-entry';
 export interface QualityProvenance {origins?:QualityOrigin[];origin?:QualityOrigin;source?:Pick<TradeSignal,'mined'> & Partial<Pick<TradeSignal, 'symbol'>>}
 /** A merged row can belong to several independent upstream libraries. */
 export function qualityOrigins(value:QualityProvenance):QualityOrigin[]{

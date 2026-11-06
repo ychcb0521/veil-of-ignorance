@@ -194,10 +194,11 @@ export class FishScanner {
   isBusy(): boolean { return this.running; }
   /** Paper quality studies share the public-data cache and request pool, without stopping live catches. */
   async quality(options: QualityRunOptions): Promise<void> {
-    const rows = options.task === 'entry' ? options.entryTargets ?? []
+    const rows = options.task === 'pre-entry' ? options.preEntry?.records.map(r => r.sample) ?? []
+      : options.task === 'entry' ? options.entryTargets ?? []
       : options.task === 'post-exit' ? options.postExitTargets ?? [] : qualityRunSamples(options.study);
-    const { now, load, marketEnd } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal);
-    await collectFishQuality(marketEnd ? { ...options, marketEnd } : options, load, now);
+    const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal);
+    await collectFishQuality(marketEnd ? { ...options, marketEnd, marketStart } : options, load, now);
   }
 
   private async qualityMarket(symbols: readonly string[], signal: AbortSignal) {
@@ -221,7 +222,13 @@ export class FishScanner {
       }
       return end;
     }
-    return { now, load, marketEnd };
+    async function marketStart(symbol: string) {
+      if (!isTuringCupSymbol(symbol)) return undefined;
+      const [first] = await readTuringCupKlines(symbol, '1m', { startTime: 0, limit: 1 }, signal);
+      if (!first) throw Error('图灵杯没有可读取的连续行情，请先导入行情文件');
+      return Number(first[0]);
+    }
+    return { now, load, marketEnd, marketStart };
   }
   private latestServerTime = 0;
   private pool = new FishRequestPool();

@@ -305,8 +305,8 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
  * 信号库的信号复制一份进来，按信号时间买入；没有探测算法（groups 为空），只参加第一步卖出比较。
  * 三个来源独立保存；同一信号和入场时刻合并显示，删除只清理对应来源。
  */
-export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(signalDedupKey(source))}`;
-export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' = 'library'): FishQualityStudy {
+export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(source.preEntryMonitor ? source.id : signalDedupKey(source))}`;
+export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' | 'pre-entry' = 'library'): FishQualityStudy {
   study=resolveLegacySourceMemberships(study,signals,origin);
   // A first-candle sample can share the exact timestamp of a legacy sample in a short archive.
   // Keep its row identity and attach the current source so it stays visible and runnable.
@@ -738,6 +738,8 @@ export interface QualityRunTiming { sampleId: string; groupId: string; symbol: s
 export interface QualityRunOptions {
   /** A finite offline series ends at its last available candle rather than at wall-clock time. */
   marketEnd?: (symbol: string) => Promise<number>;
+  marketStart?: (symbol: string) => Promise<number | undefined>;
+  preEntry?: import('./preEntryMonitor').PreEntryRun;
   /** 同时计算的行数（默认 QUALITY_CONCURRENCY）。 */
   concurrency?: number;
   /** 每笔评估的用时（调试与耗时统计用）。 */
@@ -746,7 +748,7 @@ export interface QualityRunOptions {
   /** Filter modes reuse saved trades; restart replays selected sell experiments from entry, including completed results. */
   mode?: 'filter' | 'filter-only' | 'restart';
   /** Independent UI tasks; filtering never evaluates exits. Legacy callers retain automatic filter-only behavior. */
-  task?: 'filter' | 'monitor' | 'post-exit' | 'entry';
+  task?: 'filter' | 'monitor' | 'post-exit' | 'entry' | 'pre-entry';
   entryTargets?: readonly import('./qualityEntry').QualityEntryTarget[];
   onEntryReading?: (r: import('./qualityEntry').QualityEntryReading) => void;
   postExitTargets?: readonly import('./qualityPostExit').QualityPostExitTarget[];
@@ -773,6 +775,12 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
+  if (options.task === 'pre-entry') {
+    if (!options.preEntry) throw new Error('缺少买前监测任务');
+    const { collectPreEntryMonitor } = await import('./preEntryMonitor');
+    await collectPreEntryMonitor(options.preEntry, load, now, options.signal, options.onProgress, { start: options.marketStart, end: options.marketEnd });
+    return;
+  }
   if(options.task==='entry'){const {collectQualityEntry}=await import('./qualityEntry');await collectQualityEntry(options.entryTargets??[],load,now,options.signal,r=>options.onEntryReading?.(r),options.onProgress);return;}
   if(options.task==='post-exit'){const {collectQualityPostExit}=await import('./qualityPostExit');await collectQualityPostExit(options.postExitTargets??[],load,now,options.signal,r=>options.onPostExitReading?.(r),options.onProgress,options.study.postExitReadings);return;}
   if (options.study.independentFilters && (options.task === 'filter' || options.mode === 'filter-only' || options.task !== 'monitor' && onlyQualityFilters(options.study))) {
