@@ -10,6 +10,7 @@
  * 两者同处一条市场时间轴才可比。
  */
 import type { TradeCampaign } from '@/types/journal';
+import { isTuringCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import type { Position, TradeRecord } from '@/types/trading';
 
 const UTC8_OFFSET_MS = 8 * 3600_000;
@@ -24,7 +25,8 @@ export function utc8DateKey(timeMs: number): string | null {
 
 /** 归一化标的：大写并去掉分隔符，让 rune/usdt、RUNE/USDT、RUNEUSDT 都能对上。 */
 export function normalizeSymbolKey(symbol: string | null | undefined): string {
-  return (symbol ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const normalized = (symbol ?? '').toUpperCase();
+  return isTuringCupSymbol(normalized) ? `TURING:${turingCupTicker(normalized)}` : normalized.replace(/[^A-Z0-9]/g, '');
 }
 
 function indexKey(symbol: string, dateKey: string): string {

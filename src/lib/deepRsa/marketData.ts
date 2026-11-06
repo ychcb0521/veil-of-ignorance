@@ -1,4 +1,6 @@
 import { assertBinancePublicAllowed, noteBinanceRateLimit, BinanceRateLimitError } from '@/lib/binanceRateLimit';
+import { readTuringCupKlines } from '@/lib/turingCupMarketData';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 /**
  * Deep RSA：在用户自己的浏览器里取币安 U 本位永续行情（与主图同一个公开接口，不需要登录币安、不需要密钥）。
  *
@@ -93,15 +95,18 @@ export async function fetchResearchKlines(
 ): Promise<ResearchBar[]> {
   const barMs = intervalMs(interval);
   const from = Math.floor(fromMs / barMs) * barMs;
+  const offline = isTuringCupSymbol(symbol);
   const key = `${symbol}|${interval}|${from}|${toMs}${strictAmounts?'|strict':''}`;
-  const hit = klineCache.get(key);
+  const hit = offline ? undefined : klineCache.get(key);
   if (hit) return hit;
   const out: ResearchBar[] = [];
   let cursor = from;
   while (cursor < toMs) {
     const limit = Math.max(1, Math.min(KLINE_LIMIT, Math.ceil((toMs - cursor) / barMs)));
     const qs = new URLSearchParams({ symbol, interval, startTime: String(cursor), endTime: String(toMs - 1), limit: String(limit) });
-    const raw = await getJson(`/fapi/v1/klines?${qs}`, fetchFn, signal);
+    const raw = offline
+      ? await readTuringCupKlines(symbol, interval, { startTime: cursor, endTime: toMs - 1, limit }, signal)
+      : await getJson(`/fapi/v1/klines?${qs}`, fetchFn, signal);
     if (!Array.isArray(raw)) throw new MarketDataError('K 线响应格式无效', 'invalid');
     if (raw.length === 0) break;
     let lastOpen = cursor;
@@ -116,7 +121,7 @@ export async function fetchResearchKlines(
     if (raw.length < limit) break;
     cursor = lastOpen + barMs;
   }
-  klineCache.set(key, out);
+  if (!offline) klineCache.set(key, out);
   return out;
 }
 
@@ -124,6 +129,7 @@ export async function fetchResearchKlines(
 export async function fetchFundingHistory(
   symbol: string, fromMs: number, toMs: number, fetchFn: FetchFn = fetch as unknown as FetchFn, signal?: AbortSignal,
 ): Promise<FundingEvent[]> {
+  if (isTuringCupSymbol(symbol)) throw new MarketDataError('图灵杯未提供离线资金费记录', 'invalid');
   const key = `${symbol}|${fromMs}|${toMs}`;
   const hit = fundingCache.get(key);
   if (hit) return hit;

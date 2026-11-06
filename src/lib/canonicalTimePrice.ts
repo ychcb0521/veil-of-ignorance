@@ -1,4 +1,5 @@
 import type { KlineData } from "@/hooks/useBinanceData";
+import { fetchSignalMarketKlines } from './turingCupMarketData';
 
 export interface CanonicalTimePrice {
   high: number;
@@ -50,7 +51,7 @@ export async function fetchCanonicalTimePriceAt(
     endTime: String(candleOpenTime + CANONICAL_PRICE_INTERVAL_MS - 1),
   });
 
-  const res = await fetchFn(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
+  const res = await fetchSignalMarketKlines(`https://fapi.binance.com/fapi/v1/klines?${qs}`, fetchFn);
   // 非 2xx（限流 429 / 5xx）是**拉取失败**，不是「这一分钟没有 K 线」。
   // 返回 null 会让两者混成一回事，平仓价校正据此判成「无需校正」并回写落库——
   // 抛出去，让上层区分「没数据」与「没拿到」。已有调用方都自带 .catch(() => null)。

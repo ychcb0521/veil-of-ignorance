@@ -12,7 +12,7 @@ import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } 
 
 export interface ReconstructionCard { id: string; featureId: string; enabled: boolean; pref: FishPreference }
 export interface ReconstructionCache { version: 1; key: string; result: FishReconstructionResult }
-export const reconstructionStorageKey = (account: string | undefined) => `veil:fish-reconstruction:v1:${encodeURIComponent(account ?? 'anonymous')}`;
+export const reconstructionStorageKey = (account: string | undefined, turing = false) => `veil:fish-reconstruction:v1:${encodeURIComponent(account ?? 'anonymous')}${turing ? ':turing-cup' : ''}`;
 export function reconstructionCacheKey(account: string | undefined, cards: readonly ReconstructionCard[], defs: readonly DeepDigFeatureDef[], signals: readonly TradeSignal[]): string {
   const algorithms = cards.map(c => {
     const d = defs.find(d => d.id === c.featureId);
@@ -24,22 +24,22 @@ export function reconstructionCacheKey(account: string | undefined, cards: reado
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return shortFishHash(JSON.stringify([1, account ?? 'anonymous', algorithms, samples]));
 }
-export function readReconstructionCache(account: string | undefined, key?: string): ReconstructionCache | null {
+export function readReconstructionCache(account: string | undefined, key?: string, turing = false): ReconstructionCache | null {
   try {
-    const entries: unknown = JSON.parse(localStorage.getItem(reconstructionStorageKey(account)) ?? '[]');
+    const entries: unknown = JSON.parse(localStorage.getItem(reconstructionStorageKey(account, turing)) ?? '[]');
     if (!Array.isArray(entries)) return null;
     return entries.find(v => v?.version === 1 && typeof v.key === 'string' && (!key || v.key === key)
       && Number.isFinite(v.result?.createdAt) && Array.isArray(v.result?.algorithms)) ?? null;
   } catch { return null; }
 }
-export function saveReconstructionCache(account: string | undefined, key: string, result: FishReconstructionResult): boolean {
+export function saveReconstructionCache(account: string | undefined, key: string, result: FishReconstructionResult, turing = false): boolean {
   const entry: ReconstructionCache = { version: 1, key, result };
   // Keep the latest result plus one previous setting for an explicit, useful stale state.
-  const previous = readReconstructionCache(account);
+  const previous = readReconstructionCache(account, undefined, turing);
   const entries = previous && previous.key !== key ? [entry, previous] : [entry];
-  try { localStorage.setItem(reconstructionStorageKey(account), JSON.stringify(entries)); noteAccountBlobSaved(reconstructionAccountBlob, account); return true; }
+  try { localStorage.setItem(reconstructionStorageKey(account, turing), JSON.stringify(entries)); noteAccountBlobSaved(turing ? turingReconstructionAccountBlob : reconstructionAccountBlob, account); return true; }
   catch {
-    try { localStorage.setItem(reconstructionStorageKey(account), JSON.stringify([entry])); noteAccountBlobSaved(reconstructionAccountBlob, account); return true; }
+    try { localStorage.setItem(reconstructionStorageKey(account, turing), JSON.stringify([entry])); noteAccountBlobSaved(turing ? turingReconstructionAccountBlob : reconstructionAccountBlob, account); return true; }
     catch { return false; }
   }
 }
@@ -59,52 +59,52 @@ const validEntry = (v: unknown, key?: string): v is ReconstructionCache => {
   const x = v as ReconstructionCache | null;
   return !!x && x.version === 1 && typeof x.key === 'string' && (!key || x.key === key) && Number.isFinite(x.result?.createdAt) && Array.isArray(x.result?.algorithms);
 };
-async function readDbEntries(account: string | undefined): Promise<ReconstructionCache[]> {
+async function readDbEntries(account: string | undefined, turing = false): Promise<ReconstructionCache[]> {
   const db = await openReconstructionDb();
   try {
     return await new Promise((resolve, reject) => {
-      const request = db.transaction(STORE).objectStore(STORE).get(reconstructionStorageKey(account));
+      const request = db.transaction(STORE).objectStore(STORE).get(reconstructionStorageKey(account, turing));
       request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result.filter(v => validEntry(v)) : []);
       request.onerror = () => reject(request.error);
     });
   } finally { db.close(); }
 }
 /** 从 IndexedDB 读（给了 key 只认同一套设置的那份）；读不了返回 null。 */
-export async function loadReconstructionCacheDb(account: string | undefined, key?: string): Promise<ReconstructionCache | null> {
+export async function loadReconstructionCacheDb(account: string | undefined, key?: string, turing = false): Promise<ReconstructionCache | null> {
   // 【用户要求】2026-10-27 复原扫描结果跟账号走：先和云端对一次账，再读本机。
-  await syncAccountBlobOnLoad(reconstructionAccountBlob, account);
-  try { return (await readDbEntries(account)).find(v => validEntry(v, key)) ?? null; } catch { return null; }
+  await syncAccountBlobOnLoad(turing ? turingReconstructionAccountBlob : reconstructionAccountBlob, account);
+  try { return (await readDbEntries(account, turing)).find(v => validEntry(v, key)) ?? null; } catch { return null; }
 }
 /** 存进 IndexedDB（最新一份 + 上一套设置的一份）；成功后删掉 localStorage 里的旧副本，腾出整站共用的空间。 */
-export async function saveReconstructionCacheDb(account: string | undefined, key: string, result: FishReconstructionResult): Promise<boolean> {
+export async function saveReconstructionCacheDb(account: string | undefined, key: string, result: FishReconstructionResult, turing = false): Promise<boolean> {
   try {
     const entry: ReconstructionCache = { version: 1, key, result };
-    const previous = (await readDbEntries(account))[0] ?? readReconstructionCache(account);
+    const previous = (await readDbEntries(account, turing))[0] ?? readReconstructionCache(account, undefined, turing);
     const entries = previous && previous.key !== key ? [entry, previous] : [entry];
     const db = await openReconstructionDb();
     try {
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(entries, reconstructionStorageKey(account));
+        tx.objectStore(STORE).put(entries, reconstructionStorageKey(account, turing));
         tx.oncomplete = () => resolve();
         tx.onerror = tx.onabort = () => reject(tx.error);
       });
     } finally { db.close(); }
-    try { localStorage.removeItem(reconstructionStorageKey(account)); } catch { /* 删不掉只是多占点空间 */ }
-    noteAccountBlobSaved(reconstructionAccountBlob, account);
+    try { localStorage.removeItem(reconstructionStorageKey(account, turing)); } catch { /* 删不掉只是多占点空间 */ }
+    noteAccountBlobSaved(turing ? turingReconstructionAccountBlob : reconstructionAccountBlob, account);
     return true;
   } catch { return false; }
 }
 
 /** 账号云端存档：本机 IndexedDB 那份（读不到退回 localStorage 旧副本）；取回时写进 IndexedDB 并删掉旧副本。 */
-export const reconstructionAccountBlob: AccountBlobAdapter<ReconstructionCache[]> = {
-  name: 'fish-reconstruction',
+const reconstructionBlob = (turing: boolean): AccountBlobAdapter<ReconstructionCache[]> => ({
+  name: turing ? 'turing-cup-reconstruction' : 'fish-reconstruction',
   async read(account) {
     let entries: ReconstructionCache[] = [];
-    try { entries = await readDbEntries(account); } catch { /* 退回 localStorage */ }
+    try { entries = await readDbEntries(account, turing); } catch { /* 退回 localStorage */ }
     if (!entries.length) {
       try {
-        const raw: unknown = JSON.parse(localStorage.getItem(reconstructionStorageKey(account)) ?? '[]');
+        const raw: unknown = JSON.parse(localStorage.getItem(reconstructionStorageKey(account, turing)) ?? '[]');
         if (Array.isArray(raw)) entries = raw.filter(v => validEntry(v));
       } catch { /* 没有旧副本 */ }
     }
@@ -116,12 +116,14 @@ export const reconstructionAccountBlob: AccountBlobAdapter<ReconstructionCache[]
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
         const valid = (entries ?? []).filter(v => validEntry(v));
-        if (valid.length) store.put(valid, reconstructionStorageKey(account)); else store.delete(reconstructionStorageKey(account));
+        if (valid.length) store.put(valid, reconstructionStorageKey(account, turing)); else store.delete(reconstructionStorageKey(account, turing));
         tx.oncomplete = () => resolve();
         tx.onerror = tx.onabort = () => reject(tx.error);
       });
     } finally { db.close(); }
-    try { localStorage.removeItem(reconstructionStorageKey(account)); } catch { /* 删不掉只是多占点空间 */ }
+    try { localStorage.removeItem(reconstructionStorageKey(account, turing)); } catch { /* 删不掉只是多占点空间 */ }
   },
   weight: entries => entries?.length ?? 0,
-};
+});
+export const reconstructionAccountBlob = reconstructionBlob(false);
+const turingReconstructionAccountBlob = reconstructionBlob(true);

@@ -14,6 +14,8 @@ import { normalizeSignalQuality, signalDedupKey, type TradeSignal } from '@/lib/
 import { FishError, fishDelay } from '@/lib/fish/shared';
 import { fishSignalFingerprint, type FishSampleRow } from '@/lib/fish/suggestions';
 
+import { isTuringCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
+
 export const TURNOVER_STEP = 5 * 60_000;
 export const TURNOVER_BARS = 288;
 export const TURNOVER_WINDOW_MS = TURNOVER_BARS * TURNOVER_STEP;
@@ -105,7 +107,7 @@ export async function collectSignalTurnover(options: SignalTurnoverOptions, load
       const index = next++; if (index >= list.length) return;
       const s = list[index], base = { symbol: s.symbol, exchange: s.exchange, market: s.market, underlying: s.underlying, timeMs: s.timeMs, quality: normalizeSignalQuality(s.quality) };
       progress.current = s.symbol; publish();
-      if (!Number.isFinite(s.timeMs) || s.timeMs <= 0 || !/^[A-Z0-9]{1,40}USDT$/.test(s.symbol)) rows[index] = { ...base, windows: null, hours: 0, reason: '标的或时间无效' };
+      if (!Number.isFinite(s.timeMs) || s.timeMs <= 0 || (!isTuringCupSymbol(s.symbol) && !/^[A-Z0-9]{1,40}USDT$/.test(s.symbol))) rows[index] = { ...base, windows: null, hours: 0, reason: '标的或时间无效' };
       else {
         const cut = Math.floor(s.timeMs / TURNOVER_STEP) * TURNOVER_STEP;
         try { const bars = await load({ symbol: s.symbol, timeMs: s.timeMs, exchange: s.exchange, market: s.market, underlying: s.underlying }, cut, signal); if (signal.aborted) return; rows[index] = { ...base, ...turnoverFromBars(bars, cut) }; }
@@ -124,7 +126,7 @@ export async function collectSignalTurnover(options: SignalTurnoverOptions, load
     const done = rows.filter(Boolean), per = <T,>(f: (h: TurnoverWindow) => T) => Object.fromEntries(TURNOVER_WINDOWS.map(h => [h, f(h)])) as TurnoverByWindow<T>;
     const result: SignalTurnoverResult = { version: 2, fingerprint: fishSignalFingerprint(options.signals), createdAt: Date.now(), total: list.length, rows: done, stats: per(h => summarizeTurnover(turnoverValues(done, h))), partial: per(h => done.filter(r => r.windows && r.hours < h - 1e-9).length), complete: !options.signal.aborted && done.length === list.length };
     progress.status = result.complete ? 'complete' : 'cancelled'; progress.current = ''; publish();
-    if (done.length) saveSignalTurnover(result);
+    if (done.length) saveSignalTurnover(result, list.every(s => isTuringCupSymbol(s.symbol)));
     return result;
   } catch (error) { progress.status = options.signal.aborted ? 'cancelled' : 'aborted'; progress.current = ''; publish(); throw error; }
   finally { options.signal.removeEventListener('abort', cancel); }
@@ -160,15 +162,15 @@ export function turnoverRatingSummary(rows: readonly SignalTurnoverRow[], h: Tur
 export function signalTurnoverCsv(result: SignalTurnoverResult, signals?: readonly TradeSignal[]): string {
   const esc = (v: string) => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   const head = ['标的', '交易所', '信号时间(UTC+8)', ...TURNOVER_WINDOWS.map(h => `${h}h成交额(USDT)`), '覆盖小时', '说明', '评分'];
-  const lines = [head.join(','), ...rateTurnoverRows(result.rows, signals).sort((a, b) => a.timeMs - b.timeMs).map(r => [r.symbol, r.exchange ?? 'binance', formatUTC8(r.timeMs), ...TURNOVER_WINDOWS.map(h => r.windows ? r.windows[h].toFixed(2) : ''), r.windows ? String(Number(r.hours.toFixed(2))) : '', r.reason ?? (r.windows && r.hours < 24 ? `上市不足24小时（覆盖 ${Number(r.hours.toFixed(2))} 小时），更长的时长按上市以来计` : ''), r.quality === undefined ? '' : String(r.quality)].map(esc).join(','))];
+  const lines = [head.join(','), ...rateTurnoverRows(result.rows, signals).sort((a, b) => a.timeMs - b.timeMs).map(r => [turingCupTicker(r.symbol), isTuringCupSymbol(r.symbol) ? '图灵杯' : r.exchange ?? 'binance', formatUTC8(r.timeMs), ...TURNOVER_WINDOWS.map(h => r.windows ? r.windows[h].toFixed(2) : ''), r.windows ? String(Number(r.hours.toFixed(2))) : '', r.reason ?? (r.windows && r.hours < 24 ? `上市不足24小时（覆盖 ${Number(r.hours.toFixed(2))} 小时），更长的时长按上市以来计` : ''), r.quality === undefined ? '' : String(r.quality)].map(esc).join(','))];
   return '\uFEFF' + lines.join('\n');
 }
 
 // v2：各时长一起存；v1（只有 24 小时）的旧结果不再读，重新统计一次即可
-const storageKey = () => `veil:signal-turnover:v2:${getUserPrefix()}`;
-export function saveSignalTurnover(result: SignalTurnoverResult): void {
-  try { localStorage.setItem(storageKey(), JSON.stringify(result)); } catch { /* 存不下只是下次要重算 */ }
+const storageKey = (turing: boolean) => `veil:signal-turnover:v2:${getUserPrefix()}${turing ? ':turing-cup' : ''}`;
+export function saveSignalTurnover(result: SignalTurnoverResult, turing = false): void {
+  try { localStorage.setItem(storageKey(turing), JSON.stringify(result)); } catch { /* 存不下只是下次要重算 */ }
 }
-export function readSignalTurnover(): SignalTurnoverResult | null {
-  try { const x = JSON.parse(localStorage.getItem(storageKey()) ?? 'null'); return x && x.version === 2 && Array.isArray(x.rows) && x.stats && typeof x.stats === 'object' ? x as SignalTurnoverResult : null; } catch { return null; }
+export function readSignalTurnover(turing = false): SignalTurnoverResult | null {
+  try { const x = JSON.parse(localStorage.getItem(storageKey(turing)) ?? 'null'); return x && x.version === 2 && Array.isArray(x.rows) && x.stats && typeof x.stats === 'object' ? x as SignalTurnoverResult : null; } catch { return null; }
 }

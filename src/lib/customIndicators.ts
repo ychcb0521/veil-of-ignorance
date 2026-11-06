@@ -1,3 +1,4 @@
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {registerDbl5Indicator} from '@/lib/dbl5mChart';
 import {registerSbsPriceIndicator} from '@/lib/sbs5mChart';
 import {PRS6H_STATES} from '@/lib/prs6h';
@@ -234,8 +235,12 @@ export function cbi2Points(dataList: KLineData[], baseHours: number | undefined,
   const h = Number(baseHours);
   const times = dataList.map(d => d.timestamp);
   const intervalMs = inferIntervalMs(times.map(time => ({ time }))) ?? DSP_BASE_INTERVAL_MS;
-  if (options.fetchReference !== false && times.length) requestBtcReference(times[0], times[times.length - 1] + intervalMs, intervalMs);
-  const ref = btcClosesAt(times, intervalMs);
+  const symbol = dataList[0]?.researchSymbol as string | undefined;
+  if (options.fetchReference !== false && times.length) {
+    if (isTuringCupSymbol(symbol ?? '')) requestBtcReference(times[0], times[times.length - 1] + intervalMs, intervalMs, undefined, symbol);
+    else requestBtcReference(times[0], times[times.length - 1] + intervalMs, intervalMs);
+  }
+  const ref = btcClosesAt(times, intervalMs, symbol);
   return computeCbi2(dataList.map((d, i) => ({
     open: d.open, high: d.high, low: d.low, close: d.close,
     volume: typeof d.volume === 'number' ? d.volume : null,
