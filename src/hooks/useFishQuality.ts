@@ -30,7 +30,7 @@ import {migrateQualitySourceRows,type QualityRunTiming} from '@/lib/fish/quality
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
 const NO_SIGNALS: readonly TradeSignal[] = [];
-export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true) {
+export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true, turing: readonly TradeSignal[] = NO_SIGNALS) {
   const definitions = useFeatureDefinitions();
   const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
@@ -129,6 +129,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [definitions, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, change]);
+  useEffect(() => { if (ready && readyRef.current && turing.length) change(s => importQualityLibrary(s, turing, Date.now(), 'turing')); }, [turing, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s,mined,Date.now(),'mined')); }, [mined, ready, change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;

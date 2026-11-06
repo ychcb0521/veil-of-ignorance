@@ -1,6 +1,7 @@
 import { activeBuyFilters, qualityComparisonRows, qualityDrawdownPct, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityStatisticsSeries, type QualityStatisticTrade } from './qualityStatistics';
 import { qualityLevelText, qualityVariableKey, qualityVariables } from './qualityVariables';
+import { isSignalLibraryOrigin, QUALITY_SOURCE_NAMES } from './qualitySources';
 
 export const QUALITY_RETURN_CUTS = [100, 50, 40, 30, 20, 10] as const;
 export type QualityReturnClassification = 'variable' | 'level';
@@ -20,7 +21,7 @@ export function qualityReturnTrades(study: FishQualityStudy, rows: readonly Qual
   const plans = new Map((study.sellPlans ?? []).map(p => [p.id, p]));
   // A detector selector narrows eligible entries; it does not rewrite their original multi-hit attribution.
   const original = new Map(qualityComparisonRows(study).map(row => [row.id, row]));
-  const libraryIds = new Set(rows.filter(r => r.origin === 'library').map(r => r.signalId ?? r.id));
+  const librarySources = new Map(rows.filter(r => isSignalLibraryOrigin(r.origin)).map(r => [r.signalId ?? r.id, r.origin]));
   const groupMap = new Map(study.groups.map(g => [g.id, g]));
   const fallback = new Map<string, Set<string>>();
   for (const row of rows) { const id = row.signalId ?? row.id, ids = fallback.get(id) ?? new Set<string>(); row.groups.forEach(g => ids.add(g)); fallback.set(id, ids); }
@@ -36,7 +37,9 @@ export function qualityReturnTrades(study: FishQualityStudy, rows: readonly Qual
     for (const trade of series.trades) {
       const ids = original.get(trade.id)?.groups ?? [...(fallback.get(trade.id) ?? [])];
       const groups = ids.map(id => groupMap.get(id)).filter(g => g != null);
-      const missing = original.get(trade.id)?.origin === 'library' || libraryIds.has(trade.id) ? '无探测算法（信号库）' : '探测归属未记录';
+      const canonicalOrigin = original.get(trade.id)?.origin;
+      const origin = isSignalLibraryOrigin(canonicalOrigin) ? canonicalOrigin : librarySources.get(trade.id);
+      const missing = isSignalLibraryOrigin(origin) ? `无探测算法（${QUALITY_SOURCE_NAMES[origin]}）` : '探测归属未记录';
       const unknown: Category[] = ids.some(id => !groupMap.has(id)) ? [{ id: 'unknown-detector', label: '部分探测归属未记录' }] : [];
       const detector = {
         variable: combination([...groups.map(g => detectorVariables.get(g.id)!), ...unknown], missing),

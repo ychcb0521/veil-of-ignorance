@@ -145,17 +145,18 @@ export function preserveQualityRepairs(saved: FishQualityStudy | undefined, inco
     results: [...incoming.results.filter(r => !keys.has(r.key)),...protectedResults],
   };
 }
-export async function collectQualityRepair(options: { tasks: readonly QualityRepairTask[]; signal: AbortSignal; onResult: (task: QualityRepairTask, result: QualityResult) => Promise<void> }, load: FishReconstructionLoader, now: number) {
+export async function collectQualityRepair(options: { tasks: readonly QualityRepairTask[]; signal: AbortSignal; onResult: (task: QualityRepairTask, result: QualityResult) => Promise<void>; marketEnd?: (symbol: string) => Promise<number> }, load: FishReconstructionLoader, now: number) {
   let cursor = 0;
   const worker = async () => {
     for (;;) {
       if (options.signal.aborted) throw new DOMException('已暂停','AbortError');
       const task = options.tasks[cursor++]; if (!task) return;
+      const end = task.error ? now : await options.marketEnd?.(task.sample.source.symbol).catch(() => now) ?? now;
       const result = task.error ? { key:task.key,sampleId:task.sample.id,groupId:task.plan.id,evaluatedAt:now,status:'error' as const,reason:task.error }
-        : isLegacyQualityPlan(task.plan) ? await evaluateLegacyQualitySample(task.sample,task.plan,task.observeHours,now,load,options.signal,task.key)
-        : await evaluateQualitySample(task.sample,task.plan,task.observeHours,now,load,options.signal);
+        : isLegacyQualityPlan(task.plan) ? await evaluateLegacyQualitySample(task.sample,task.plan,task.observeHours,end,load,options.signal,task.key)
+        : await evaluateQualitySample(task.sample,task.plan,task.observeHours,end,load,options.signal);
       if (options.signal.aborted) throw new DOMException('已暂停','AbortError');
-      await options.onResult(task,result);
+      await options.onResult(task,end === now ? result : { ...result, evaluatedAt: now });
     }
   };
   // Each evaluation scans chronologically; concurrency only spans independent trades.

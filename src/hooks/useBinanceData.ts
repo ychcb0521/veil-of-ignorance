@@ -1,6 +1,8 @@
 import { assertBinancePublicAllowed, noteBinanceRateLimit, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import { useState, useCallback, useRef } from "react";
 import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
+import { fetchSignalMarketKlines } from '@/lib/turingCupMarketData';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 
 export interface KlineData {
   DBL5_prices?:{open:string;high:string;low:string;close:string};DBL5_initialization_start?:number;DBL5_data_version?:string;
@@ -92,7 +94,7 @@ async function fetchBatch(
   params: { startTime?: number; endTime?: number; limit?: number },
   attempt = 0,
 ): Promise<KlineData[]> {
-  assertBinancePublicAllowed();
+  if (!isTuringCupSymbol(symbol)) assertBinancePublicAllowed();
   const qs = new URLSearchParams({
     symbol,
     interval,
@@ -105,7 +107,7 @@ async function fetchBatch(
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`, { signal: controller.signal });
+    res = await fetchSignalMarketKlines(`https://fapi.binance.com/fapi/v1/klines?${qs}`, fetch, controller.signal);
   } catch (e: any) {
     // 挂死（AbortError）与网络抖动同样按「瞬时错误」重试
     if (attempt < MAX_FETCH_RETRIES) {

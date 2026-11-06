@@ -1,4 +1,6 @@
 import { formatUTC8 } from "@/lib/timeFormat";
+import { readTuringCupKlines } from './turingCupMarketData';
+import { isTuringCupSymbol } from './turingCupSymbol';
 
 export type SignalJumpIssueCode =
   | "invalid_symbol"
@@ -88,6 +90,10 @@ async function queryKlines(
   if (params.endTime != null) query.set("endTime", String(params.endTime));
 
   try {
+    if (isTuringCupSymbol(symbol)) {
+      const bars = await readTuringCupKlines(symbol, interval, params, signal);
+      return { status: 'ok', openTimes: bars.map(row => Number(row[0])).filter(Number.isFinite) };
+    }
     const response = await fetchImpl(`${KLINE_ENDPOINT}?${query}`, signal ? { signal } : undefined);
     let body: unknown;
     try {
@@ -245,7 +251,8 @@ export async function preflightSignalJumpIssues(
 
   for (const candidate of candidates) {
     if (candidate.market === 'us_stock') continue;
-    const symbol = candidate.symbol.toUpperCase().replace(/[\s/]+/g, "");
+    const upper = candidate.symbol.toUpperCase();
+    const symbol = isTuringCupSymbol(upper) ? upper : upper.replace(/[\s/]+/g, "");
     if (!candidate.id || !symbol || !Number.isFinite(candidate.timeMs)) continue;
     const group = grouped.get(symbol) ?? [];
     group.push({ ...candidate, symbol });
@@ -262,7 +269,8 @@ export async function preflightSignalJumpIssues(
     };
   }
 
-  const exchangeInfo = await queryExchangeInfo(fetchImpl, options.signal);
+  const exchangeInfo: ExchangeInfoQueryResult = [...grouped.keys()].every(isTuringCupSymbol)
+    ? { status: 'ok', symbols: new Map() } : await queryExchangeInfo(fetchImpl, options.signal);
   if (exchangeInfo.status === "retryable") {
     return {
       checkedSymbols: 0,
@@ -324,7 +332,11 @@ export async function preflightSignalJumpIssues(
         const bounds = await querySymbolBounds(symbol, interval, fetchImpl, options.signal);
         const fatalIssues: Array<{ id: string; issue: SignalJumpIssue }> = [];
 
-        if (bounds.status === "invalid-symbol") {
+        if (isTuringCupSymbol(symbol)) {
+          // A later import can fill these gaps. Avoid saving a permanent mark.
+          if (bounds.status !== 'ok' || bounds.firstOpen == null || bounds.lastOpen == null ||
+              group.some(row => row.timeMs < bounds.firstOpen! || row.timeMs >= bounds.lastOpen! + span)) retryableSymbols += 1;
+        } else if (bounds.status === "invalid-symbol") {
           for (const candidate of group) {
             fatalIssues.push({
               id: candidate.id,
@@ -423,6 +435,16 @@ export async function diagnoseSignalJump(
   intervalMs: number,
   options: { fetchImpl?: FetchLike; now?: number } = {},
 ): Promise<SignalJumpDiagnostic> {
+  if (isTuringCupSymbol(symbol)) {
+    try {
+      const [bar] = await readTuringCupKlines(symbol, interval, { endTime: signalTimeMs, limit: 1 });
+      const openTime = Number(bar?.[0]);
+      if (openTime <= signalTimeMs && openTime + intervalMs > signalTimeMs) return { status: 'available' };
+      return { status: 'retryable', reason: '图灵杯离线数据未覆盖该信号的时间或当前 K 线周期' };
+    } catch (error) {
+      return { status: 'retryable', reason: error instanceof Error ? error.message : '图灵杯离线行情暂不可读' };
+    }
+  }
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now();
   const span = Math.max(1, intervalMs);

@@ -73,7 +73,10 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 }
 
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
-import { collectFishQuality, type QualityRunOptions } from '@/lib/fish/quality';
+import { collectFishQuality, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
+import { fetchResearchKlines } from '@/lib/deepRsa/marketData';
+import { readTuringCupKlines } from '@/lib/turingCupMarketData';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { collectQualityRepair } from '@/lib/fish/qualityRepair';
 import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, isFishStablecoin, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
@@ -183,21 +186,42 @@ type ScanOptions = FishScanSettings & {
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
   async repairQuality(options: Parameters<typeof collectQualityRepair>[0]): Promise<void> {
-    const response = await this.requests.get('binance')!('time',1,options.signal) as { serverTime?: number };
-    if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效','failed');
-    const now = response.serverTime!;
-    await collectQualityRepair(options,createFishReconstructionLoader(this.adapters,async () => now),now);
+    const { now, load, marketEnd } = await this.qualityMarket(options.tasks.map(task => task.sample.source.symbol), options.signal);
+    await collectQualityRepair({ ...options, marketEnd }, load, now);
   }
   private running = false;
   /** 捕捞、建议、复原、成交额统计都共用这一个取数器；正在跑时自动捕捞要等它结束。 */
   isBusy(): boolean { return this.running; }
   /** Paper quality studies share the public-data cache and request pool, without stopping live catches. */
   async quality(options: QualityRunOptions): Promise<void> {
-    const response = await this.requests.get('binance')!('time', 1, options.signal) as { serverTime?: number };
-    if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效', 'failed');
-    const now = response.serverTime!;
-    const load = createFishReconstructionLoader(this.adapters, async () => now);
-    await collectFishQuality(options, load, now);
+    const rows = options.task === 'entry' ? options.entryTargets ?? []
+      : options.task === 'post-exit' ? options.postExitTargets ?? [] : qualityRunSamples(options.study);
+    const { now, load, marketEnd } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal);
+    await collectFishQuality(marketEnd ? { ...options, marketEnd } : options, load, now);
+  }
+
+  private async qualityMarket(symbols: readonly string[], signal: AbortSignal) {
+    const hasOffline = symbols.some(isTuringCupSymbol);
+    const onlineClock = async () => {
+      const response = await this.requests.get('binance')!('time', 1, signal) as { serverTime?: number };
+      if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效', 'failed');
+      return response.serverTime!;
+    };
+    const now = hasOffline ? Date.now() : await onlineClock();
+    const load = createFishReconstructionLoader(this.adapters, hasOffline ? onlineClock : async () => now);
+    if (!hasOffline) return { now, load };
+    const ends = new Map<string, Promise<number>>();
+    async function marketEnd(symbol: string) {
+      if (!isTuringCupSymbol(symbol)) return now;
+      let end = ends.get(symbol);
+      if (!end) {
+        end = readTuringCupKlines(symbol, '1m', { limit: 1 }, signal)
+          .then(([last]) => last ? Math.min(now, Number(last[0]) + 60_000) : now);
+        ends.set(symbol, end);
+      }
+      return end;
+    }
+    return { now, load, marketEnd };
   }
   private latestServerTime = 0;
   private pool = new FishRequestPool();
@@ -258,6 +282,7 @@ export class FishScanner {
     let clock:Promise<unknown>|undefined;
     const lists=new Map<FishExchange,Promise<FishMarket[]>>();
     try{return await collectSignalTurnover(options,async(row,cut,signal)=>{
+      if (isTuringCupSymbol(row.symbol)) return fetchResearchKlines(row.symbol, cut - TURNOVER_BARS * TURNOVER_STEP, cut, undefined, signal, '5m', true);
       if(!this.latestServerTime||cut>this.latestServerTime){
         clock??=this.requests.get('binance')!('time',1,signal);
         const response=await clock as {serverTime?:number};

@@ -1,7 +1,7 @@
 import { renderFishQuality as render } from '@/test/renderFishQuality';
 // @vitest-environment jsdom
 import { saveFishAuto } from '@/lib/fish/autoScan';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TimeControl } from '../TimeControl';
@@ -38,12 +38,13 @@ const SIGNALS = [
   { id: 's4', symbol: 'AAVEUSDT', timeMs: Date.parse('2025-07-20T02:00:00.000Z'), timeLabel: '2025-07-20 10:00', fallbackZone: '3' },
 ];
 
-function renderControl() {
+function renderControl(onJumpToSignal?: React.ComponentProps<typeof TimeControl>['onJumpToSignal']) {
   return render(
     <TimeControl
       status="paused" currentSimulatedTime={Date.parse('2025-11-08T06:43:41.000Z')} speed={1}
       onStart={() => {}} onPause={() => {}} onResume={() => {}} onStop={() => {}} onSetSpeed={() => {}}
       activeSymbol="0GUSDT"
+      onJumpToSignal={onJumpToSignal}
     />,
   );
 }
@@ -58,6 +59,25 @@ beforeEach(() => {
 });
 
 describe('信号库展开面板', () => {
+  it('keeps the 图灵杯 library separate and sends its ticker to the offline chart source', async () => {
+    const jump = vi.fn(async () => ({ ok: true as const }));
+    renderControl(jump);
+    fireEvent.click(screen.getByRole('button', { name: '图灵杯' }));
+    const turing = screen.getByTestId('turing-cup-panel');
+    expect(within(turing).getByText(/图灵杯暂无信号/)).toBeInTheDocument();
+    fireEvent.change(within(turing).getAllByRole('textbox').at(-1)!, {
+      target: { value: '2025-07-11 14:42\nACEUSDT 99' },
+    });
+    fireEvent.click(within(turing).getByRole('button', { name: '导入' }));
+    expect(within(turing).getByText(/99/)).toBeInTheDocument();
+    fireEvent.click(within(turing).getByTitle(/跳转到 ACEUSDT/));
+    await waitFor(() => expect(jump).toHaveBeenCalledWith('TURING:ACEUSDT', SIGNALS[1].timeMs));
+    await waitFor(() => expect(screen.queryByTestId('turing-cup-panel')).not.toBeInTheDocument());
+    openLibrary();
+    expect(within(libraryRoot()).getByText(/0\.56/)).toBeInTheDocument();
+    expect(within(libraryRoot()).queryByText(/99/)).not.toBeInTheDocument();
+  });
+
   it('每条信号的标的、时间、兜底区一个都不能少', () => {
     // 紧凑化改版的护栏：压缩高度可以，丢字段不行。
     renderControl();

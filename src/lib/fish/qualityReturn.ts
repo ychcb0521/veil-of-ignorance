@@ -6,10 +6,12 @@
  * 存在本标签页（sessionStorage）。回到**同一条浏览记录**时（战役页左上角返回或浏览器后退）才恢复一次：
  * 交易页据此自动展开「渔」，鱼质量按记下的状态打开并滚回原处。从别处另开一次交易页（新的浏览记录）不受影响。
  */
+import type { QualityOrigin } from './qualitySources';
+
 export interface QualityReturnUi {
   open: boolean; query: string; month: string; algorithms?: string[];
   /** 旧版本记下的单选探测算法。 */
-  algorithm?: string; origin: '' | 'fish' | 'library' | 'mined';
+  algorithm?: string; origin: '' | QualityOrigin;
   /** 旧版本的分页（已合并为一个视图）。 */
   phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;

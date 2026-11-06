@@ -1,4 +1,4 @@
-import {mergeLegacySourceResolutions,type LegacySourceResolutions} from './qualitySources';
+import {mergeLegacySourceResolutions,QUALITY_SOURCE_NAMES,type LegacySourceResolutions} from './qualitySources';
 import {applySourceDeletions,mergeSourceDeletions,pruneMiningDeletions,type SourceDeletions} from './libraryDeletion';
 import {newQualityStudy} from './quality';
 /** Lossless, account-independent library packages. Import never executes a formula or replaces live settings. */
@@ -22,7 +22,7 @@ const fail=(what:string):never=>{throw Error('数据包无效：'+what);};
 function list(v:unknown,name:string):any[]{if(!Array.isArray(v)||v.length>500000)fail(name+'不是有效记录列表');return v as any[];}
 function ids(values:any[],name:string){const seen=new Set<string>();for(const v of values){if(!object(v)||typeof v.id!=='string'||!v.id||seen.has(v.id))fail(name+'编号缺失或重复');seen.add(v.id);}return seen;}
 function source(v:unknown){if(!object(v)||typeof v.symbol!=='string'||!v.symbol||!finite(v.timeMs))fail('信号缺少标的或有效时间');}
-function provenance(v:{origin?:unknown;origins?:unknown}){const kinds=['fish','mined','library'];if(v.origin!==undefined&&!kinds.includes(v.origin as string))fail('记录来源无效');if(v.origins!==undefined&&(!Array.isArray(v.origins)||!v.origins.length||v.origins.length>3||v.origins.some(o=>!kinds.includes(o))))fail('记录来源列表无效');}
+function provenance(v:{origin?:unknown;origins?:unknown}){const kinds=Object.keys(QUALITY_SOURCE_NAMES);if(v.origin!==undefined&&!kinds.includes(v.origin as string))fail('记录来源无效');if(v.origins!==undefined&&(!Array.isArray(v.origins)||!v.origins.length||v.origins.length>kinds.length||v.origins.some(o=>!kinds.includes(o))))fail('记录来源列表无效');}
 function plan(v:unknown){if(!object(v)||typeof v.metric!=='string'||!object(v.snapshot)||v.snapshot.definitionKey!==undefined&&typeof v.snapshot.definitionKey!=='string')fail('卖出方案缺少完整公式快照');}
 function rounds(values:any[],records:Set<string>){
  const all=ids(values,'轮次'),byId=new Map(values.map(r=>[r.id,r])),done=new Set<string>();
@@ -33,7 +33,7 @@ function rounds(values:any[],records:Set<string>){
 /** Validate complete references before presenting a file for confirmation. Unknown fields are retained. */
 export function validateLibraryPayload(input:unknown):asserts input is LibraryPayload {
  if(!object(input))fail('缺少库内容');const v=input as LibraryPayload;if(!v.mining&&!v.filter&&!v.monitor)fail('没有三个库中的任何一个');
- if(v.resolvedLegacySources){if(!object(v.resolvedLegacySources))fail('旧来源兼容记录无效');for(const origins of Object.values(v.resolvedLegacySources))if(!Array.isArray(origins)||origins.some(o=>!['fish','mined','library'].includes(o)))fail('旧来源兼容记录无效');}
+ if(v.resolvedLegacySources){if(!object(v.resolvedLegacySources))fail('旧来源兼容记录无效');for(const origins of Object.values(v.resolvedLegacySources))if(!Array.isArray(origins)||origins.some(o=>!Object.prototype.hasOwnProperty.call(QUALITY_SOURCE_NAMES,o)))fail('旧来源兼容记录无效');}
  if(v.mining){const l=v.mining;if(l.version!==1)fail('挖掘库版本不支持');const runs=list(l.runs,'挖掘方案'),anchors=list(l.anchors,'挖掘档位'),records=list(l.records,'挖掘记录');const runIds=ids(runs,'挖掘方案'),recordIds=ids(records,'挖掘记录');ids(anchors,'挖掘档位');
   for(const r of runs)if(typeof r.signature!=='string'||!Array.isArray(r.rules))fail('挖掘方案缺少参数');
   for(const r of records){if(!runIds.has(r.runId)||!finite(r.anchorMs)||!finite(r.updatedAt))fail('挖掘记录引用或时间无效');source(r.signal);}

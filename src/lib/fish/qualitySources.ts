@@ -1,13 +1,18 @@
 import type {TradeSignal} from '@/lib/signalLibrary';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {librarySignalIdentity} from './libraryRounds';
 
-export type QualityOrigin='fish'|'mined'|'library';
-export interface QualityProvenance {origins?:QualityOrigin[];origin?:QualityOrigin;source?:Pick<TradeSignal,'mined'>}
+export const QUALITY_SOURCE_NAMES = { fish: '鱼舱', mined: '挖掘库', library: '信号库', turing: '图灵杯' } as const;
+export type QualityOrigin = keyof typeof QUALITY_SOURCE_NAMES;
+export const isSignalLibraryOrigin = (origin?: string): origin is 'library' | 'turing' => origin === 'library' || origin === 'turing';
+export interface QualityProvenance {origins?:QualityOrigin[];origin?:QualityOrigin;source?:Pick<TradeSignal,'mined'> & Partial<Pick<TradeSignal, 'symbol'>>}
 /** A merged row can belong to several independent upstream libraries. */
 export function qualityOrigins(value:QualityProvenance):QualityOrigin[]{
- return value.origins?.length?[...new Set(value.origins)]:[value.origin??(value.source?.mined?'mined':'fish')];
+ return value.origins?.length ? [...new Set(value.origins)] : [
+   value.origin ?? (isTuringCupSymbol(value.source?.symbol ?? '') ? 'turing' : value.source?.mined ? 'mined' : 'fish'),
+ ];
 }
-export const qualitySourceLabel=(value:QualityProvenance)=>qualityOrigins(value).map(o=>({fish:'鱼舱',mined:'挖掘库',library:'信号库'})[o]).join('、');
+export const qualitySourceLabel=(value:QualityProvenance)=>qualityOrigins(value).map(o=>QUALITY_SOURCE_NAMES[o]).join('、');
 export type LegacySourceResolutions=Record<string,QualityOrigin[]>;
 export function mergeLegacySourceResolutions(...maps:(LegacySourceResolutions|undefined)[]):LegacySourceResolutions{const out:LegacySourceResolutions={};for(const map of maps)for(const [k,v]of Object.entries(map??{}))out[k]=[...new Set([...(out[k]??[]),...v])];return out;}
 /** Before source-specific deletes existed, an unscoped mark could hide a different, still-existing library. Only actual upstream inputs can resolve it. */

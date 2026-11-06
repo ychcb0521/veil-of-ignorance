@@ -1,3 +1,4 @@
+import { fetchSignalMarketKlines } from '@/lib/turingCupMarketData';
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   X,
@@ -123,7 +124,7 @@ async function fetchKlines(symbol: string, interval: string, startTime: number, 
       endTime: String(endTime),
       limit: String(limit),
     });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
+    const res = await fetchSignalMarketKlines(`https://fapi.binance.com/fapi/v1/klines?${qs}`, fetch);
     if (!res.ok) break;
     const raw: any[][] = await res.json();
     if (raw.length === 0) break;

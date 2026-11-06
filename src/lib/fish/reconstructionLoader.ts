@@ -5,6 +5,34 @@ import { EXCHANGE_NAMES, type FishExchange, type FishMarket } from './exchanges'
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishRetentionReason } from './retention';
 import { FishError, validateFishBars } from './shared';
+import { fetchResearchKlines } from '@/lib/deepRsa/marketData';
+import { readTuringCupTickSize } from '@/lib/turingCupMarketData';
+import { isTuringCupSymbol, turingCupSymbol } from '@/lib/turingCupSymbol';
+
+const loadTuringWindow: FishReconstructionLoader = async (row, from, cut, plan, signal) => {
+  const interval = intervalOf(plan.def);
+  const count = (cut - from) / plan.step;
+  const read = (symbol: string) => fetchResearchKlines(symbol, from, cut, undefined, signal, interval, true);
+  const bars = await read(row.symbol);
+  validateFishBars(bars, cut, count, plan.step);
+  if (bars.some(bar => (plan.compiled.usesAmounts && !Number.isFinite(bar.quoteVolume)) ||
+      (plan.usesTaker && !Number.isFinite(bar.takerBuyQuoteVolume)))) {
+    throw new FishError('图灵杯离线数据缺少本指标所需的成交额或主动买入额', 'readings');
+  }
+  const marketEvidence = plan.compiled.usesDbl5 || plan.compiled.usesSbs5m || plan.compiled.usesPrs6h || plan.compiled.usesAti6h;
+  const tick = marketEvidence ? await readTuringCupTickSize(row.symbol, signal) : null;
+  const btc = plan.compiled.usesBtc ? await read(turingCupSymbol('BTCUSDT')) : null;
+  if (btc) validateFishBars(btc, cut, count, plan.step);
+  return bars.map((bar, index) => ({
+    ...bar,
+    ...(marketEvidence ? {
+      DBL5_tick_size: tick, SBS5M_tick_size: tick, ATI6H_tick_size: tick, PRS6H_tick_size: tick,
+      ATI6H_quoteVolume: bar.quoteVolume, ATI6H_takerBuyQuoteVolume: bar.takerBuyQuoteVolume,
+      PRS6H_symbol: row.symbol, PRS6H_data_source: 'turing-cup',
+    } : {}),
+    ...(btc ? { refClose: btc[index].close } : {}),
+  }));
+};
 
 /** Per-run historical loader. It shares the scanner's adapters, candle cache and rate limits. */
 export function createFishReconstructionLoader(
@@ -22,6 +50,7 @@ export function createFishReconstructionLoader(
         cut > Math.floor(row.timeMs / plan.step) * plan.step) {
       throw new FishError('复原取数必须止于信号时刻之前已收盘的 K 线', 'readings');
     }
+    if (isTuringCupSymbol(row.symbol)) return loadTuringWindow(row, from, cut, plan, signal);
     // Retention is relative to a freshly sampled clock, including when all signals are historical.
     clock ??= serverClock(signal);
     const now = await clock;
@@ -68,7 +97,7 @@ export function createFishReconstructionLoader(
   return async (...args) => {
     const [row, , , , signal] = args, exchange = row.exchange ?? 'binance';
     if (signal.aborted) throw new DOMException('已取消', 'AbortError');
-    const blocked = banned.get(exchange);
+    const blocked = isTuringCupSymbol(row.symbol) ? undefined : banned.get(exchange);
     if (blocked) throw blocked;
     try { return await fetchWindow(...args); }
     catch (error) {
