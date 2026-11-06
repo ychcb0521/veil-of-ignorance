@@ -1,3 +1,4 @@
+import { qualityHistoryFrom } from './qualityInitialization';
 /** Optional, versioned overlay. It never writes the sizing inputs or changes K. */
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { evaluateFishProgram, shortFishHash, type FishSnapshot } from './algorithm';
@@ -74,7 +75,7 @@ export function classifyQualityAdvantage(at: number, bars: readonly ResearchBar[
 export function createQualityAdvantageReader(rule: QualityAdvantageRule, o: { row: TradeSignal; entry: number; end: number; load: FishReconstructionLoader; signal: AbortSignal }) {
   const { plan, scale } = qualityMetricPlan(rule.state.snapshot, rule.state.metric);
   const structure = createStructureAdditionReader(o);
-  let cursor = Math.floor(o.entry / STEP) * STEP - (plan.warm + 3) * STEP;
+  let cursor = qualityHistoryFrom(o.load, Math.floor(o.entry / STEP) * STEP - (plan.warm + 3) * STEP, STEP);
   const history: ResearchBar[] = [];
   const observations = new Map<number, QualityAdvantageObservation>();
   return async (at: number): Promise<QualityAdvantageObservation> => {

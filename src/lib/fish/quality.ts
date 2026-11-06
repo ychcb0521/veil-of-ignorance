@@ -1,3 +1,4 @@
+import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
 import { createQualityAdvantageReader, advanceQualitySoftConfirmation, requiredSoftConfirmations, qualityAdvantageIdentity, validateQualityAdvantage, type QualityAdvantageState } from './qualityAdvantage';
 import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
@@ -33,6 +34,7 @@ export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
 export interface QualityGroup {
+  initialization?: import('./qualityInitialization').QualityInitialization;
   advantage?: import('./qualityAdvantage').QualityAdvantageRule;
   id: string; label: string; metric: string; snapshot: FishSnapshot; rule?: QualityExitRule;
   /** Absent on historical close-confirmation experiments. */
@@ -86,6 +88,7 @@ export interface QualitySample {
   signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
+  initialization?: NonNullable<FishReconstructionLoader['turingInitialization']>;
   advantageState?: QualityAdvantageState;
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
   routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
@@ -349,6 +352,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  if (g.initialization) identity.push(g.initialization);
   if (g.router) identity.push(routerResultFingerprint(g.router));
   const advantage=qualityAdvantageIdentity(g);if(advantage)identity.push(advantage);
   if (isLegacyQualityPlan(g)) identity.push(LEGACY_QUALITY_ENGINE);
@@ -495,7 +499,7 @@ export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFil
   if (!row.enteredAt) return { key, error: '缺少有效买入时间' };
   try {
     const { plan, scale } = qualityMetricPlan(f.snapshot, f.metric);
-    const cut = Math.floor(row.enteredAt / plan.step) * plan.step, from = cut - (plan.warm + 1) * plan.step;
+    const cut = Math.floor(row.enteredAt / plan.step) * plan.step, from = qualityHistoryFrom(load, cut - (plan.warm + 1) * plan.step, plan.step);
     if (from < 0) return { key, error: '公式预热所需历史不足' };
     const bars = await load({ ...row.source, timeMs: now }, from, cut, plan, signal);
     validateFishBars(bars, cut, (cut - from) / plan.step, plan.step);
@@ -618,7 +622,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const stop = Math.floor(end / plan.step) * plan.step;
         while (cursor < stop && !trigger) {
           abort(signal);
-          const requestedCut = Math.min(stop, cursor + 500 * plan.step), from = cursor - plan.warm * plan.step;
+          const requestedCut = Math.min(stop, cursor + 500 * plan.step), from = qualityHistoryFrom(load, cursor - plan.warm * plan.step, plan.step);
           if (from < 0) throw new Error('公式预热所需历史不足');
           const { bars, cut } = await loadQualityScanChunk(load, row, from, cursor, requestedCut, plan, signal);
           const readings = evaluateFishProgram(bars, plan).average;
@@ -626,7 +630,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
             const at = bars[i].openTime + plan.step;
             if (at <= entry || at <= cursor || at > end) continue;
             const reading = readings[i] * scale;
-            if (!Number.isFinite(reading)) throw new Error('卖出指标存在缺失读数，不能越过缺口判断成交');
+            if (!Number.isFinite(reading)) { if (qualityInitializationPending(load, readings, i)) continue; throw new Error('卖出指标存在缺失读数，不能越过缺口判断成交'); }
             if (rule.direction === '<' ? reading < rule.threshold : reading > rule.threshold) { trigger = { at, reading }; break; }
           }
           cursor = cut;
@@ -874,9 +878,17 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
           const t = performance.now();
           // The loader reports availability errors on the affected row, rather than ending the whole batch.
           const marketEnd = await options.marketEnd?.(s.source.symbol).catch(() => now) ?? now;
-          const result = isLegacyQualityPlan(g)
-            ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, load, signal, qualityResultKey(s, g, study.observeHours))
-            : await evaluateQualitySample(s, g, study.observeHours, marketEnd, load, signal, cached);
+          let result: QualityResult;
+          try {
+            const initializedLoad = g.initialization ? withTuringInitialization(load, s.source.symbol, await options.marketStart?.(s.source.symbol) ?? NaN) : load;
+            result = isLegacyQualityPlan(g)
+              ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, load, signal, qualityResultKey(s, g, study.observeHours))
+              : await evaluateQualitySample(s, g, study.observeHours, marketEnd, initializedLoad, signal, cached);
+            if (initializedLoad.turingInitialization) result = {...result, initialization: initializedLoad.turingInitialization};
+          } catch (cause) {
+            abort(signal);
+            result = {key:qualityResultKey(s,g,study.observeHours),sampleId:s.id,groupId:g.id,evaluatedAt:now,status:'error',reason:cause instanceof Error?cause.message:'行情初始化失败'};
+          }
           options.onTiming?.({ sampleId: s.id, groupId: g.id, symbol: s.source.symbol, ms: performance.now() - t });
           options.onResult(marketEnd === now ? result : { ...result, evaluatedAt: now });
         }

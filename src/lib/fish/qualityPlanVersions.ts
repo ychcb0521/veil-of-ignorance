@@ -1,3 +1,4 @@
+import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 /**
@@ -48,13 +49,14 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 /** 方案涉及的全部算法及其版本（顺序：卖出 → 组合切换 → 执行 → 镜像 → 硬性终止 → 加仓 → 各次加仓的箱体与方向 → 加仓后切换）。 */
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   validateQualityAdvantage(plan);
+  const initialization: PlanVersionEntry[] = plan.initialization ? [{ key: 'initialization', part: '历史初始化', name: '图灵杯首根行情初始化', version: TURING_INITIALIZATION_VERSION, summary: '从已有首根完整 K 线初始化；初期无定义的指标等待，不补造历史。与完整历史预热读数不同，原方案保留。' }] : [];
   if(plan.router){
     validateQualityRouter(plan.router);
-    return [{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:plan.router.version+' · 参数 #'+routerFingerprint(plan.router),summary:routerVersionSummary(plan.router)},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];
+    return [...initialization,{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:plan.router.version+' · 参数 #'+routerFingerprint(plan.router),summary:routerVersionSummary(plan.router)},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];
   }
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
-  const out: PlanVersionEntry[] = [];
+  const out: PlanVersionEntry[] = [...initialization];
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;
   if(plan.advantage)add('advantage','优势筛选与退出灵敏度','逐次筛选 · 软退出动态确认',QUALITY_ADVANTAGE_VERSION+' · 参数 #'+qualityAdvantageFingerprint(plan),

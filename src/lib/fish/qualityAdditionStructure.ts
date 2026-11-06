@@ -1,3 +1,4 @@
+import { qualityHistoryFrom } from './qualityInitialization';
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {assertStructureVersionsAvailable,structureVersionLabel,type StructureVersions} from './boxAlgorithmVersions';
@@ -135,7 +136,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
   validateStructureAddition(rule);const key=JSON.stringify(structureAdditionIdentity(rule));let reader=readers.get(key);
   if(!reader){
    const def=rule.definition,compiled=compileFeatureFormula(def.formula),plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
-   const from=Math.floor(o.entry/STEP)*STEP-Math.ceil(featureWindowMs(def)/STEP)*STEP;
+   const from=qualityHistoryFrom(o.load,Math.floor(o.entry/STEP)*STEP-Math.ceil(featureWindowMs(def)/STEP)*STEP,STEP);
    if(from<0)throw Error('箱体加仓历史不足');
    let cursor=from,dbl:Dbl5Checkpoint|undefined,sbs:SbsCheckpoint|undefined,lastBox:StructureActiveBox|undefined;
    const decisions:{e:StructureAdditionEvidence;close:number}[]=[],invalid:number[]=[],supportPoints:StructureSupportPoint[]=[];

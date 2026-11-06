@@ -2,21 +2,25 @@
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { evaluateFishProgram } from './algorithm';
-import { qualityMetricPlan, type QualityBuyFilter, type QualityFilterReading, type QualitySample, type QualityProgress } from './quality';
+import { qualityMetricPlan, type QualityBuyFilter, type QualityFilterReading, type QualitySample, type QualityProgress, type QualityGroup } from './quality';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
+  planId?: string;
   id: string; roundId: string; sample: QualitySample; status: PreEntryStatus;
   startTime: number; cursor: number; endTime?: number; matchedAt?: number;
   readings: QualityFilterReading[]; detail?: string; updatedAt: number;
 }
+export const PRE_ENTRY_INTRABAR_VERSION = 'pre-entry-intrabar-v2' as const;
+export interface PreEntrySettings { updatedAt: number; plans: QualityGroup[]; hours: number }
 export interface PreEntryRound {
+  engine?: typeof PRE_ENTRY_INTRABAR_VERSION; plans?: QualityGroup[];
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
 }
-export interface PreEntryLibrary { version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
+export interface PreEntryLibrary { settings?: PreEntrySettings; version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
 export const emptyPreEntryLibrary = (): PreEntryLibrary => ({ version: 1, rounds: [], records: [] });
 export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): PreEntryLibrary {
   const merge = <T extends { id: string; updatedAt: number }>(left: T[], right: T[]) => {
@@ -24,7 +28,8 @@ export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): 
     for (const item of right) if (!all.has(item.id) || item.updatedAt >= all.get(item.id)!.updatedAt) all.set(item.id, item);
     return [...all.values()];
   };
-  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records) };
+  const settings = !a.settings || (b.settings?.updatedAt ?? 0) >= a.settings.updatedAt ? b.settings : a.settings;
+  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records), ...(settings ? {settings} : {}) };
 }
 export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   if (record.status !== 'matched' || !record.matchedAt) return null;
@@ -46,6 +51,10 @@ export async function collectPreEntryMonitor(
   onProgress: (progress: QualityProgress) => void,
   bounds?: { start?: (symbol: string) => Promise<number | undefined>; end?: (symbol: string) => Promise<number> },
 ): Promise<void> {
+  if (task.round.engine === PRE_ENTRY_INTRABAR_VERSION) {
+    const { collectPreEntryIntrabar } = await import('./preEntryIntrabar');
+    return collectPreEntryIntrabar(task, load, now, signal, onProgress, bounds);
+  }
   const filters = task.round.filters.filter(f => f.enabled);
   if (!filters.length) throw new Error('请先设置并启用买前过滤条件');
   if (!Number.isFinite(task.round.hours) || task.round.hours < 0 || task.round.hours > 8784) throw new Error('监测时长须为 0～8784 小时，0 表示扫描至当前可用行情末尾');

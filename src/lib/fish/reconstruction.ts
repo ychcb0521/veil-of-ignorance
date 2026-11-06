@@ -39,7 +39,9 @@ export interface FishReconstructionOptions {
   plans:readonly FishProgram[]; signals:readonly TradeSignal[]; signal:AbortSignal;
   onProgress:(progress:FishReconstructionProgress)=>void;
 }
-export type FishReconstructionLoader = (row:TradeSignal,from:number,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>;
+export type FishReconstructionLoader = ((row:TradeSignal,from:number,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>) & {
+  turingInitialization?: { version: import('./qualityInitialization').QualityInitialization; startMs: number };
+};
 const coinKey = (row:TradeSignal) => `${row.exchange??'binance'}|${row.market??'crypto'}|${row.symbol}`;
 export const reconstructionSignalKey = (row:TradeSignal) => `${coinKey(row)}@${row.timeMs}`;
 export const reconstructionDirection = (id:string):'>'|'<' => isSellerFeature(id)?'<':'>';

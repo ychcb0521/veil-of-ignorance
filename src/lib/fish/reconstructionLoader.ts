@@ -22,7 +22,7 @@ const loadTuringWindow: FishReconstructionLoader = async (row, from, cut, plan, 
     }
     const first = series.findIndex(bar => bar !== null);
     const available = archive.anchorMs + first * 60_000;
-    if (first >= 0 && from < available) throw new FishError(`图灵杯历史不足：此条件需要从 ${formatUTC8(from)} 开始的 K 线，现有行情始于 ${formatUTC8(available)}。可先运行买前监测，待预热后生成新的入场节点。`, 'history');
+    if (first >= 0 && from < available) throw new FishError(`图灵杯历史不足：此条件需要从 ${formatUTC8(from)} 开始的 K 线，现有行情始于 ${formatUTC8(available)}。原方案不能用不存在的历史预热；请补充更长行情，或在条件设置中另建“图灵杯专用版”。动态筛选仅在其自身条件历史足够时可用。`, 'history');
   }
   const interval = intervalOf(plan.def);
   const count = (cut - from) / plan.step;

@@ -1,3 +1,4 @@
+import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
 /** Causal, one-minute replay of a forming indicator candle. */
 import { evaluateOnBars } from '@/lib/deepDig/features';
 import { createFormulaEvaluationCache } from '@/lib/deepDig/formula';
@@ -14,6 +15,7 @@ import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
+  readings?: { id: string; at: number; value: number }[];
   advantage?: import('./qualityAdvantage').QualityAdvantageState;
   at: number; reading: number; cause?: QualityExitCause; atOpen?:boolean;
   /** 回撤止损在这一分钟盘中触及：按止损价成交（不是下一分钟开盘价）；fillPeak 是算止损价用的峰值。 */
@@ -52,6 +54,8 @@ export interface QualityIntrabarCondition {
   closeOnly?: boolean;
 }
 export async function findQualityIntrabarExit(o: {
+  matchMode?: 'all';
+  onObservation?: (at: number) => void;
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
@@ -74,10 +78,10 @@ export async function findQualityIntrabarExit(o: {
   const streams=[];
   for(const c of inputs) {
     if (!(c.plan.step>=MINUTE) || c.plan.step%MINUTE!==0) throw new Error('盘中复原要求指标周期为整数分钟');
-    const start=Math.floor(o.since/c.plan.step)*c.plan.step,from=start-c.plan.warm*c.plan.step;
+    const start=Math.floor(o.since/c.plan.step)*c.plan.step,from=qualityHistoryFrom(o.load,start-c.plan.warm*c.plan.step,c.plan.step);
     if(from<0) throw new Error('盘中复原的公式预热历史不足');
-    const history=[...await o.load(o.row,from,start,c.plan,signal)];
-    validateFishBars(history,start,c.plan.warm,c.plan.step);
+    const history=from<start?[...await o.load(o.row,from,start,c.plan,signal)]:[];
+    if(from<start)validateFishBars(history,start,(start-from)/c.plan.step,c.plan.step);
     streams.push({...c,start,history,cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
   }
   let holding=o.holding, mirrorFill=o.mirrorFill,sellerPeak=o.sellerPeak??holding?.peak??0;
@@ -118,6 +122,7 @@ export async function findQualityIntrabarExit(o: {
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
     if(drop)return drop;
     let error:string|undefined;
+    const matches: QualityTrigger[] = [], readings: NonNullable<QualityTrigger['readings']> = [];
     const after=switched();
     for(const s of streams) {
       if(o.conditionsUntil!=null&&at>o.conditionsUntil)continue;
@@ -127,15 +132,22 @@ export async function findQualityIntrabarExit(o: {
       const bars=s.partial?[...s.history,s.partial]:s.history;
       const out=evaluateOnBars(bars,s.plan.compiled,s.plan.def,s.cache).vars.get(s.plan.averageName);
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;
-      if(!Number.isFinite(reading)) {error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;}
+      if(!Number.isFinite(reading)) {if(!s.previous&&qualityInitializationPending(o.load,typeof out==='number'?[out]:out??[],typeof out==='number'?0:bars.length-1))continue;error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;}
       // A confirmed veto closes immediately; later conditions need not also qualify or finish evaluating.
       const met=qualityConditionMet(reading,s.rule.direction,s.rule.threshold);
       const confirmation=!s.cause&&o.confirmOrdinary&&at>=checkFrom
         ? await o.confirmOrdinary(at,JSON.stringify([s.plan.def,s.rule,s.stage]),met) : undefined;
-      if(at>=checkFrom&&met&&(!confirmation||confirmation.confirmed))return {at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
+      readings.push({id:s.cause?.id??'primary',at,value:reading});
+      if(at>=checkFrom&&met&&(!confirmation||confirmation.confirmed)) {
+        const trigger:QualityTrigger={at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
+        if(o.matchMode!=='all')return trigger;
+        matches.push(trigger);
+      }
       s.previous={at,reading};
     }
     if(error)throw new Error(error);
+    if(o.matchMode==='all'&&streams.length&&matches.length===streams.length)return {...matches.at(-1)!,readings};
+    if(at>=checkFrom)o.onObservation?.(at);
   };
   const replayStart=streams.length?Math.min(...streams.map(s=>s.start)):o.since;
   // Re-read at most five past minutes on resume, solely to restore the rolling window and previous reading.
@@ -192,7 +204,7 @@ export async function findQualityIntrabarExit(o: {
       if(i%20===19)await fishDelay(0,signal);
     }
     cursor=cut;
-    for(const s of streams)if(s.history.length>s.plan.warm+500) {s.history=s.history.slice(-s.plan.warm);s.cache=createFormulaEvaluationCache();}
+    for(const s of streams)if(!o.load.turingInitialization&&s.history.length>s.plan.warm+500) {s.history=s.history.slice(-s.plan.warm);s.cache=createFormulaEvaluationCache();}
     await fishDelay(0,signal);
   }
   return {prices,mirrorFill};

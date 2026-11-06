@@ -1,3 +1,4 @@
+import { qualityHistoryFrom } from './qualityInitialization';
 import {advanceChartAtr,type ChartAtrState} from '@/lib/atr';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
 import {compileFishProgram} from './algorithm';
@@ -36,7 +37,7 @@ interface Options extends AtrSettings {
 }
 /** Causal five-minute ATR values; a resumed run uses the same seed anchor as the original run. */
 function atrReader(o:Options){
- let cursor=Math.floor(o.entry/STEP)*STEP-WARM*STEP,state:ChartAtrState|undefined;
+ let cursor=qualityHistoryFrom(o.load,Math.floor(o.entry/STEP)*STEP-WARM*STEP,STEP),state:ChartAtrState|undefined;
  if(cursor<0)throw Error('加仓支撑线的5分钟ATR历史不足');
  const values=new Map<number,number>(),series:{bar:VetoBar;atr:number}[]=[];
  const plan=compileFishProgram({id:'add-atr-prices',name:'加仓ATR',short:'ATR',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction:'>',threshold:0,constraints:[]});

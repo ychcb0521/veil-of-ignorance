@@ -1,3 +1,4 @@
+import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
 /** Re-scan closed observations. All custom constraints must hold at one decision time. */
 import { compileFishProgram, evaluateFishProgram, type FishProgram } from './algorithm';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -12,9 +13,10 @@ interface ScanOptions {
  priceAt?:ReadonlyMap<number,number>;priceGate?:{referencePrice:number;thresholdPct:number;basis:'real-average'|'cost-line'};
  load:FishReconstructionLoader;signal:AbortSignal;
 }
-function observation(candidate:AdditionCandidate,bars:readonly ResearchBar[],values:ReturnType<typeof evaluateFishProgram>,i:number,entry:number):QualityAdditionObservation|undefined{
+function observation(candidate:AdditionCandidate,bars:readonly ResearchBar[],values:ReturnType<typeof evaluateFishProgram>,i:number,entry:number,load:FishReconstructionLoader):QualityAdditionObservation|undefined{
  const {plan}=candidate,at=bars[i].openTime+plan.step,first=Math.floor(entry/plan.step)*plan.step+plan.step,reading=values.average[i]*candidate.scale;
- if(!Number.isFinite(reading)||values.constraints.some(c=>!Number.isFinite(c[i])))throw Error('加仓探测存在缺失读数，不能越过缺口判断加仓');
+ const missing=[...(!Number.isFinite(reading)?[values.average]:[]),...values.constraints.filter(c=>!Number.isFinite(c[i]))];
+ if(missing.length){if(missing.every(v=>qualityInitializationPending(load,v,i)))return;throw Error('加仓探测存在缺失读数，不能越过缺口判断加仓');}
  const prsEvidence=values.PRS6H_details?.find(r=>r.PRS6H_at===at);
  if(plan.compiled.usesPrs6h&&!prsEvidence?.PRS6H_event)return;
  if(!(candidate.direction==='>'?reading>candidate.threshold:reading<candidate.threshold)||values.constraints.some(c=>!c[i]))return;
@@ -29,12 +31,12 @@ function constraintReader(candidate:AdditionCandidate,o:ScanOptions){
   if(closedAt<=o.entry)return;
   if(plan.unavailable)throw Error(plan.unavailable);
   if(!cache||barAt<cache.from||barAt>=cache.to){
-   const from=barAt-plan.warm*plan.step,to=Math.min(Math.floor(o.end/plan.step)*plan.step,barAt+500*plan.step);
+   const from=qualityHistoryFrom(o.load,barAt-plan.warm*plan.step,plan.step),to=Math.min(Math.floor(o.end/plan.step)*plan.step,barAt+500*plan.step);
    if(from<0)throw Error('加仓探测公式预热历史不足');
    const bars=await o.load(o.row,from,to,plan,o.signal);validateFishBars(bars,to,(to-from)/plan.step,plan.step);
    cache={from,to,bars,values:evaluateFishProgram(bars,plan)};
   }
-  return observation(candidate,cache.bars,cache.values,Math.round((barAt-cache.from)/plan.step),o.entry);
+  return observation(candidate,cache.bars,cache.values,Math.round((barAt-cache.from)/plan.step),o.entry,o.load);
  };
 }
 /**
@@ -58,14 +60,14 @@ export async function findQualityAdditionTrigger(o:ScanOptions):Promise<Omit<Qua
   let cursor=start;const stop=Math.floor(Math.min(o.end,best?.at??Infinity)/plan.step)*plan.step;
   while(cursor<stop){
    if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
-   const cut=Math.min(stop,cursor+500*plan.step),from=cursor-plan.warm*plan.step;
+   const cut=Math.min(stop,cursor+500*plan.step),from=qualityHistoryFrom(o.load,cursor-plan.warm*plan.step,plan.step);
    if(from<0)throw Error('加仓探测公式预热历史不足');
    const bars=await o.load(o.row,from,cut,plan,o.signal);validateFishBars(bars,cut,(cut-from)/plan.step,plan.step);
    const values=evaluateFishProgram(bars,plan);
    for(let i=0;i<bars.length;i++){
     const at=bars[i].openTime+plan.step;
     if(at<=o.entry||at<=(o.after??-Infinity)||at<=cursor||at>=o.end||best&&at>=best.at)continue;
-    const primary=observation(candidate,bars,values,i,o.entry);if(!primary)continue;
+    const primary=observation(candidate,bars,values,i,o.entry,o.load);if(!primary)continue;
     const conditions=[primary];let qualified=true;
     for(const read of required){const confirmed=await read(at);if(!confirmed){qualified=false;break;}conditions.push(confirmed);}
     if(!qualified)continue;
