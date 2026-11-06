@@ -7,6 +7,7 @@ import { definitionKey } from '@/lib/deepDig/features';
 
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: storage.load, savePreEntryLibrary: storage.save }));
+vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: storage.load, savePreEntryLibraryV2: storage.save }));
 const t = Date.UTC(2026, 2, 29, 5);
 function study() {
   const s = importQualityLibrary(newQualityStudy(), [{ id: 's', symbol: 'TURING:TURING 1', timeMs: t, timeLabel: '', fallbackZone: '' }], t, 'turing');
@@ -68,7 +69,10 @@ describe('买前监测独立任务', () => {
     let first!: Promise<void>, restarted!: Promise<void>;
     act(() => { first = result.current.start(study(), 12); });
     await waitFor(() => expect(tasks).toHaveLength(1));
-    const next = study(); next.buyFilters[0].threshold = 200;
+    const next = study();
+    const plan = structuredClone(tasks[0].preEntry!.round.plans![0]);
+    plan.rule!.threshold = 200;
+    act(() => result.current.configure([plan], 24));
     act(() => { restarted = result.current.restart(next, 24); });
     expect(tasks[0].signal.aborted).toBe(true); expect(tasks).toHaveLength(1);
     await act(async () => { finishFirst(); await first; await restarted; });
@@ -78,4 +82,23 @@ describe('买前监测独立任务', () => {
     expect(result.current.library.rounds.map(r => [r.hours, r.state])).toEqual([[12, 'paused'], [24, 'complete']]);
     expect(result.current.library.records).toHaveLength(2);
   });
+});
+
+it('stores dynamic plans independently and freezes every plan before running',async()=>{
+ const tasks:QualityRunOptions[]=[];
+ const {result}=renderHook(()=>usePreEntryMonitor('separate-settings',true,async o=>{tasks.push(o);}));
+ await waitFor(()=>expect(result.current.ready).toBe(true));
+ const input=study();
+ await act(()=>result.current.start(input,6));
+ input.buyFilters[0].threshold=999;
+ await act(()=>result.current.start(input,12));
+ expect(tasks[1].preEntry!.round.filters[0].threshold).toBe(100);
+ const first=tasks[1].preEntry!.round.plans![0];
+ const second={...structuredClone(first),id:'second',label:'另一个买入方案',rule:{...first.rule!,threshold:200}};
+ act(()=>result.current.configure([first,second],24));
+ second.rule.threshold=300;
+ await act(()=>result.current.start(input,24));
+ expect(tasks[2].preEntry!.records).toHaveLength(2);
+ expect(tasks[2].preEntry!.round.plans![1].rule!.threshold).toBe(200);
+ expect(input.buyFilters[0].threshold).toBe(999);
 });

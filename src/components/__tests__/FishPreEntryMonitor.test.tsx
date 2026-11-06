@@ -9,13 +9,12 @@ import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQuali
 afterEach(cleanup);
 it('orders start, conditions and selected library like holding monitoring, with duration inside settings', async () => {
   const start = vi.fn(), pause = vi.fn();
-  const state = { ready: true, preEntry: { library: emptyPreEntryLibrary(), ready: true, running: false, error: '', progress: null, start, pause, resume: vi.fn(), retry: vi.fn() } } as unknown as FishQualityState;
+  const state = { ready: true, preEntry: { library: {...emptyPreEntryLibrary(),settings:{updatedAt:1,hours:48,plans:[]}}, ready: true, running: false, error: '', progress: null, start, pause, resume: vi.fn(), retry: vi.fn() } } as unknown as FishQualityState;
   const view = render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()} renderConditions={done => <button onClick={done}>保存条件</button>}/></TooltipProvider>);
-  expect(within(screen.getByTestId('pre-entry-controls')).getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['开始筛选', '开始筛选的其他方式', '买入过滤条件', '打开入选库']);
+  expect(within(screen.getByTestId('pre-entry-controls')).getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['开始筛选', '开始筛选的其他方式', '动态筛选条件', '打开入选库']);
   expect(screen.getByText('开始筛选').className).toBe(qualitySplitPrimaryAction);
   expect(screen.queryByLabelText('筛选时长（小时）')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText('买入过滤条件'));
-  fireEvent.change(screen.getByLabelText('筛选时长（小时）'), { target: { value: '48' } });
+  fireEvent.click(screen.getByLabelText('动态筛选条件'));
   fireEvent.click(screen.getByText('保存条件'));
   fireEvent.click(screen.getByText('开始筛选'));
   expect(start).toHaveBeenCalledWith(48);

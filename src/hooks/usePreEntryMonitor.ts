@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
-import { loadPreEntryLibrary, savePreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
-import { activeStandaloneBuyFilters, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress } from '@/lib/fish/quality';
+import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
+import { loadPreEntryLibraryV2, savePreEntryLibraryV2 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV2Store';
+import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
+import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
+import { PRE_ENTRY_INTRABAR_VERSION } from '@/lib/fish/preEntryMonitor';
+import { activeStandaloneBuyFilters, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
 export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
@@ -19,7 +23,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
-    void loadPreEntryLibrary(owner).then(value => {
+    void Promise.all([loadPreEntryLibraryV2(owner), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, legacy]) => {
+      const value = legacy ? mergePreEntryLibraries(legacy, newLibrary) : newLibrary;
       if (epoch.current !== generation) return;
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
@@ -83,14 +88,17 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   }, [owner, commit]);
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
     if (!readyRef.current || controller.current) return;
-    const filters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
+    const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
+    const plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
+    let filters;
+    try { filters = plans.flatMap(preEntryPlanFilters); } catch (cause) { setError(cause instanceof Error ? cause.message : '买入条件无效'); return; }
     if (!filters.length || !samples.length) { setError('请启用买前过滤条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running' };
-    const records: PreEntryRecord[] = samples.map((sample, i) => ({ id: `${id}:${i}`, roundId: id, sample: structuredClone(sample),
-      status: 'queued', startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at }));
-    commit(mergePreEntryLibraries(current.current, { version: 1, rounds: [round], records }));
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: PRE_ENTRY_INTRABAR_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
+    const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => ({ id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
+      status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
+    commit({...mergePreEntryLibraries(current.current, { version: 1, rounds: [round], records }), settings: current.current.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
     await execute(round, structuredClone(study));
   }, [execute, commit]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
@@ -103,6 +111,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     await pending;
     if (epoch.current === generation) await start(study, hours);
   }, [start]);
-  return { library, ready, running, error, progress, start, resume, restart,
+  const configure = useCallback((plans: QualityGroup[], hours: number) => {
+    if (!readyRef.current) throw Error('入选库尚未恢复完成');
+    if (!Number.isFinite(hours) || hours < 0 || hours > 8784) throw Error('筛选时长须为 0～8784 小时');
+    plans.forEach(preEntryPlanFilters);
+    const next = {...current.current, settings: {plans: structuredClone(plans.map(freezeQualityPlan)), hours, updatedAt:Date.now()}};
+    commit(next);
+    void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));
+  }, [commit,owner]);
+  return { library, ready, running, error, progress, start, resume, restart, configure,
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

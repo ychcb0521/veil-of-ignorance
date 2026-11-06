@@ -1,3 +1,4 @@
+import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
 import {FishQualityTemplateArchive} from './FishQualityTemplateArchive';
 import { FishQualityAdvantageSettings } from './FishQualityAdvantageSettings';
 import { withQualityAdvantageOptions, type QualityAdvantageOptions } from '@/lib/fish/qualityAdvantage';
@@ -93,7 +94,8 @@ function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin }: { act
     <FishQualityTemplateArchive owner={actions.owner} restore={actions.restore}/>
   </PopoverContent></Popover>;
 }
-export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, readOnly = false, embedded = false, onDirtyChange }: {
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, readOnly = false, embedded = false, onDirtyChange, purpose = 'sell' }: {
+  purpose?: 'sell' | 'entry';
   plans: readonly QualityGroup[]; ready: boolean; onSave: (plans: QualityGroup[]) => void;
   onCopyPlan?: (source: QualityGroup, copy: QualityGroup) => void;
   templates?: PlanTemplateActions;
@@ -103,6 +105,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   embedded?: boolean; onDirtyChange?: (dirty: boolean) => void;
   onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderHolding?: (view: SellPlansDraftView) => ReactNode;
 }) {
+  const action = purpose === 'entry' ? '买入' : '卖出';
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => qualityFilterChoices(definitions), [definitions]);
   const [drafts, setDrafts] = useState(() => plans.map(draftOf)), [dirty, setDirty] = useState(false), [error, setError] = useState('');
@@ -117,10 +120,10 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   const baseOf = (d: Draft) => plans.find(p => p.id === d.id) ?? d.original;
   const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.switchPct]:[])]);
-  const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || choices.find(c=>c.key===d.choice)?.label || base?.label || '新卖出算法';
+  const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || choices.find(c=>c.key===d.choice)?.label || base?.label || `新${action}算法`;
   const duplicate = (source: Draft, index: number) => {
     const base = structuredClone(baseOf(source)!);
-    const rootLabel = labelOf(source, base).replace(/（副本(?: \d+)?）$/, '').trim() || '卖出算法';
+    const rootLabel = labelOf(source, base).replace(/（副本(?: \d+)?）$/, '').trim() || `${action}算法`;
     const labels = new Set(drafts.map(d => labelOf(d, baseOf(d))));
     let label = `${rootLabel}（副本）`, suffix = 2;
     while (labels.has(label)) label = `${rootLabel}（副本 ${suffix++}）`;
@@ -138,6 +141,16 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     onSelectPlan?.(copyBase.id);
   };
   const uniqueLabel = (root: string) => { const labels = new Set(drafts.map(d => labelOf(d, baseOf(d)))); let label = root, n = 2; while (labels.has(label)) label = `${root}（${n++}）`; return label; };
+  const turingCopy = (source: Draft) => {
+    try {
+      const copy = createTuringQualityPlan(baseOf(source)!, definitions);
+      copy.label = uniqueLabel(copy.label);
+      // Seed editor drafts from the converted copy, never from the BTC-dependent source.
+      onCopyPlan?.({ ...copy, id: `turing:${copy.id}` }, copy);
+      change([...drafts, draftOf(copy)]);
+      onSelectPlan?.(copy.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '创建图灵杯副本失败'); }
+  };
   const fromTemplate = (template: PlanTemplateActions['templates'][number]) => {
     const copyBase = qualityPlanFromTemplate(template, newQualitySellPlanId(), uniqueLabel(template.name));
     onCopyPlan?.({ ...template.plan, id: `template:${template.id}` }, copyBase);
@@ -183,7 +196,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const apply = (after?: (plans: QualityGroup[]) => QualityGroup[]) => {
     try {
       onSave(build(after)); setDirty(false); setError(''); return true;
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '卖出算法设置无效'); return false; }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : `${action}算法设置无效`); return false; }
   };
   // Keep router editor keys stable while global overlay controls are edited; apply to both branches at save.
   const preview = drafts.map(d => ({ ...baseOf(d)!, id: d.id, label: labelOf(d,baseOf(d)), ...(baseOf(d)?.advantage&&d.advantageOptions?{advantage:{...baseOf(d)!.advantage!,...d.advantageOptions}}:{}) }));
@@ -202,33 +215,35 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     </div>;
   };
   return <><fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
-    <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? '① 组合算法' : '卖出算法'} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
-      {!readOnly && !embedded && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增卖出算法</button>{templates && <TemplatePicker actions={templates} plans={plans} disabled={!ready} onUse={fromTemplate} onUseBuiltin={fromBuiltin}/>}</>}</div>
-    {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。</p>}
-    {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无卖出算法，点击上方新增。</p>}
+    <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? (purpose === 'entry' ? '① 买入算法' : '① 组合算法') : `${action}算法`} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
+      {!readOnly && !embedded && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} plans={plans} disabled={!ready} onUse={fromTemplate} onUseBuiltin={fromBuiltin}/>}</>}</div>
+    {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">{purpose === 'entry' ? '每套方案独立寻找买入时机。与持仓监测共用分钟盘中复原流程；买入算法和启用的确认条件首次同时满足时停止，保存到入选库。' : '每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。'}</p>}
+    {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无{action}算法，点击上方新增。</p>}
     {drafts.map((d, i) => <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
-      <div className="flex items-center gap-1.5"><span className="text-[10px] tabular-nums text-muted-foreground">{i + 1}.</span><input aria-label={'卖出算法 ' + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
+      <div className="flex items-center gap-1.5"><span className="text-[10px] tabular-nums text-muted-foreground">{i + 1}.</span><input aria-label={`${action}算法 ` + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
         {/* 【用户要求】2026-11-03 旧引擎方案只读（除名称）：改了参数就不是原来那套了 */}
         {isLegacyQualityPlan(baseOf(d)) && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300" title="按 10-31 的引擎原样复算；除名称外不能修改" data-testid={'sell-plan-legacy-' + i}>{LEGACY_ENGINE_LABEL} · 只读</span>}
         {!readOnly && !embedded && isLegacyQualityPlan(baseOf(d)) && <button type="button" disabled={!ready} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/20 disabled:opacity-40" title="复制成当前引擎的「指标 · S / T / K」方案，可以改参数；入场距离沿用原值、涨幅门槛按持仓均价。原方案保留。" aria-label={'转为可编辑 ' + (i + 1)} onClick={() => editableCopy(d, i)}>转为可编辑</button>}
-        <select aria-label={'卖出算法 ' + (i + 1) + ' 类型'} disabled={isLegacyQualityPlan(baseOf(d)) || !!baseOf(d)?.router} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>
+        {purpose !== 'entry' && <select aria-label={`${action}算法 ` + (i + 1) + ' 类型'} disabled={isLegacyQualityPlan(baseOf(d)) || !!baseOf(d)?.router} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>}
         {!readOnly && !embedded && templates && <SaveTemplateButton index={i} defaultName={labelOf(d, baseOf(d))} disabledReason={!ready ? '尚未加载完成' : !plans.some(p => p.id === d.id) ? '新方案先点「保存全部方案」，再存为模板' : dirty || extraDirty ? '有未保存的修改：先点「保存全部方案」，模板保存的是已保存的设置' : undefined} onSave={name => templates.save(d.id, name)}/>}
-        {!readOnly && !embedded && <><button type="button" disabled={!ready} aria-label={'复制卖出算法 ' + (i + 1)} title="复制整套方案：含当前填写的组合算法、加仓、镜像止盈和一票条件" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
-        <button type="button" aria-label={'删除卖出算法 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></>}</div>
+        {!readOnly && !embedded && !baseOf(d)?.initialization && <button type="button" className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40" disabled={!ready || dirty || extraDirty || !plans.some(p=>p.id===d.id)} title="原方案保留；新副本从图灵杯首根行情初始化，BTC 依赖改用已有独立无 BTC 版本。请先保存当前修改。" aria-label={'新建图灵杯专用副本 ' + (i + 1)} onClick={()=>turingCopy(d)}>图灵杯副本</button>}
+      {baseOf(d)?.initialization && <span className="text-[10px] text-amber-600" title="从实际首根行情初始化；初期读数与完整历史预热不同。原方案另行保留。">首根初始化 v1</span>}
+      {!readOnly && !embedded && <><button type="button" disabled={!ready} aria-label={`复制${action}算法 ` + (i + 1)} title={purpose==='entry'?'复制整套买入算法和确认条件':'复制整套方案：含当前填写的组合算法、加仓、镜像止盈和一票条件'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
+        <button type="button" aria-label={`删除${action}算法 ` + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></>}</div>
       {baseOf(d)?.router ? <p className="text-[10.5px] text-muted-foreground">条件分支方案：在下方修改两个分支的卖出、镜像、加仓与止损设置。</p> : <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents"><div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
-        {select(d.choice, '卖出算法 ' + (i + 1) + ' 指标', choice => patch(d.id, { choice }))}
-        <select aria-label={'卖出算法 ' + (i + 1) + ' 方向'} className={field} value={d.direction} onChange={e => patch(d.id, { direction: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
-        <input aria-label={'卖出算法 ' + (i + 1) + ' 门槛'} className={field + ' w-full'} type="number" step="any" placeholder="未设置" value={d.threshold} onChange={e => patch(d.id, { threshold: e.target.value })} />
+        {select(d.choice, `${action}算法 ` + (i + 1) + ' 指标', choice => patch(d.id, { choice }))}
+        <select aria-label={`${action}算法 ` + (i + 1) + ' 方向'} className={field} value={d.direction} onChange={e => patch(d.id, { direction: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
+        <input aria-label={`${action}算法 ` + (i + 1) + ' 门槛'} className={field + ' w-full'} type="number" step="any" placeholder="未设置" value={d.threshold} onChange={e => patch(d.id, { threshold: e.target.value })} />
       </div>
-      {d.combo && <div className="space-y-1.5 border-t border-border/40 pt-1.5"><label className="flex items-center gap-1 text-[11px] text-muted-foreground">相对买入价上涨<input aria-label={'卖出算法 ' + (i + 1) + ' 切换涨幅'} type="number" step="any" className={field + ' w-20'} value={d.switchPct} onChange={e => patch(d.id, { switchPct: e.target.value })} />% 后切换为</label>
-        <div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">{select(d.afterChoice, '卖出算法 ' + (i + 1) + ' 后段指标', afterChoice => patch(d.id, { afterChoice }))}
-          <select aria-label={'卖出算法 ' + (i + 1) + ' 后段方向'} className={field} value={d.afterDirection} onChange={e => patch(d.id, { afterDirection: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
-          <input aria-label={'卖出算法 ' + (i + 1) + ' 后段门槛'} type="number" step="any" className={field + ' w-full'} value={d.afterThreshold} onChange={e => patch(d.id, { afterThreshold: e.target.value })} />
+      {d.combo && <div className="space-y-1.5 border-t border-border/40 pt-1.5"><label className="flex items-center gap-1 text-[11px] text-muted-foreground">相对买入价上涨<input aria-label={`${action}算法 ` + (i + 1) + ' 切换涨幅'} type="number" step="any" className={field + ' w-20'} value={d.switchPct} onChange={e => patch(d.id, { switchPct: e.target.value })} />% 后切换为</label>
+        <div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">{select(d.afterChoice, `${action}算法 ` + (i + 1) + ' 后段指标', afterChoice => patch(d.id, { afterChoice }))}
+          <select aria-label={`${action}算法 ` + (i + 1) + ' 后段方向'} className={field} value={d.afterDirection} onChange={e => patch(d.id, { afterDirection: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
+          <input aria-label={`${action}算法 ` + (i + 1) + ' 后段门槛'} type="number" step="any" className={field + ' w-full'} value={d.afterThreshold} onChange={e => patch(d.id, { afterThreshold: e.target.value })} />
         </div></div>}</fieldset>}
       {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
     </div>)}
-    {!readOnly && !embedded && <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : '保存卖出算法'}</button>
-      <span className="text-[10px] text-muted-foreground">未填普通门槛时，可单独使用该方案的加仓、镜像止盈或持仓否决。</span></div>}
+    {!readOnly && !embedded && <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : `保存${action}算法`}</button>
+      <span className="text-[10px] text-muted-foreground">{purpose === 'entry' ? '每套买入方案须填写门槛；确认条件可选，启用后须与买入算法同时满足。' : '未填普通门槛时，可单独使用该方案的加仓、镜像止盈或持仓否决。'}</span></div>}
     {error && !renderHolding && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </section></fieldset>{renderHolding?.({ plans: preview, dirty: dirty || extraDirty, algorithmsDirty: dirty, error, build, save: apply })}</>;
 }

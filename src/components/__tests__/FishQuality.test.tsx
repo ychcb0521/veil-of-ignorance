@@ -23,21 +23,36 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
-it('aligns the live pre-entry toolbar with holding monitoring and opens the existing condition editor', () => {
- const s=state();
- s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn()};
+it('saves a Turing copy without enabling default holding conditions or changing the original', () => {
+ const s=state(), original=structuredClone(s.study.sellPlans![0]);
+ delete original.mirrorTakeProfit; delete original.addition;
+ s.study.sellPlans=[original];
  render(<FishQuality state={s}/>);
- const before=within(screen.getByTestId('quality-filter-controls')),holding=within(screen.getByTestId('quality-run-controls'));
- expect(before.queryByText('开始过滤')).not.toBeInTheDocument();
- expect(before.queryByText('动态买前监测')).not.toBeInTheDocument();
- expect(before.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
- expect(before.getByLabelText('买入过滤条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
- expect(before.getByRole('button',{name:'打开入选库'})).toBeInTheDocument();
- fireEvent.click(before.getByLabelText('买入过滤条件'));
+ fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ fireEvent.click(screen.getByLabelText('新建图灵杯专用副本 1'));
+ fireEvent.click(screen.getByRole('button',{name:'保存全部 2 套方案'}));
+ const saved=vi.mocked(s.setSellPlans).mock.calls[0][0];
+ expect(saved[0]).toEqual(original);
+ expect(saved[1].initialization).toBe('turing-origin-v1');
+ expect(saved[1].mirrorTakeProfit).toBeUndefined(); expect(saved[1].addition).toBeUndefined();
+ expect(saved[1].rule).toEqual(original.rule);
+},30000);
+it('keeps static and dynamic modules separate and shares plan editing with holding monitoring', () => {
+ const s=state();
+ s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn()};
+ render(<FishQuality state={s}/>);
+ const fixed=within(screen.getByTestId('quality-static-controls')),dynamic=within(screen.getByTestId('quality-dynamic-controls')),holding=within(screen.getByTestId('quality-run-controls'));
+ expect(fixed.getByRole('button',{name:'开始过滤'})).toBeInTheDocument();
+ expect(dynamic.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
+ expect(dynamic.getByLabelText('动态筛选条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
+ expect(dynamic.getByRole('button',{name:'打开入选库'})).toBeInTheDocument();
+ fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
  expect(screen.getByLabelText('筛选时长（小时）')).toBeInTheDocument();
- expect(screen.getByText('保存过滤条件')).toBeInTheDocument();
- fireEvent.click(screen.getByText('保存过滤条件'));
- expect(s.setFilters).toHaveBeenCalled();
+ expect(screen.getByText('新增买入算法')).toBeInTheDocument();
+ expect(screen.getByText('保存并开始筛选')).toBeInTheDocument();
+ fireEvent.click(screen.getByText('保存方案'));
+ expect(s.preEntry.configure).toHaveBeenCalled();
+ expect(s.setFilters).not.toHaveBeenCalled();
 });
 it('does not crash the route when monitoring starts and live results arrive in a scrolled table with rows of different measured heights',()=>{
  const s=state();
@@ -675,7 +690,7 @@ it('starts and pauses filtering and monitoring independently while bulk mining i
   s.filterRunning = true; s.filterProgress = { done: 1, total: 2, current: '' }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
   const start = within(monitor()).getByRole('button', { name: '开始监测' }); expect(start).toBeEnabled(); fireEvent.click(start); expect(s.start).toHaveBeenCalledOnce();
   s.running = true; s.progress = { done: 0, total: 2, current: '' }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
-  expect(within(filter()).getByRole('status')).toHaveTextContent('过滤中1 / 2'); expect(within(monitor()).getByRole('status')).toHaveTextContent('监测中0 / 2');
+  expect(within(filter()).getByRole('status')).toHaveTextContent(/过滤中\s*1\s*\/\s*2/); expect(within(monitor()).getByRole('status')).toHaveTextContent(/监测中\s*0\s*\/\s*2/);
   fireEvent.click(within(filter()).getByRole('button', { name: '暂停过滤' })); expect(s.cancelFilter).toHaveBeenCalledOnce(); expect(s.cancel).not.toHaveBeenCalled(); expect(mining.pause).not.toHaveBeenCalled();
   fireEvent.click(within(monitor()).getByRole('button', { name: '暂停监测' })); expect(s.cancel).toHaveBeenCalledOnce(); expect(mining.pause).not.toHaveBeenCalled();
 });

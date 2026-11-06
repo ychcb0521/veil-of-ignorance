@@ -48,7 +48,7 @@ import { FishMiningPanel } from '@/components/FishMiningPanel';
 import { FishMonitorLibrary } from '@/components/FishMonitorLibrary';
 import { FishFilterLibrary } from '@/components/FishFilterLibrary';
 import { fishInfoTrigger, fishRail, fishSectionHeading, FishCount } from './FishSection';
-import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySplitPauseAction, qualitySplitPrimaryAction, qualitySplitMenuAction, qualitySettingsAction } from '@/components/FishQualityModule';
+import { FishQualityInfo, FishQualityModule, FishQualityModuleGroup, qualityPauseAction, qualityPrimaryAction, qualitySplitPauseAction, qualitySplitPrimaryAction, qualitySplitMenuAction, qualitySettingsAction } from '@/components/FishQualityModule';
 import { FishProcessButton } from '@/components/FishProcess';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -358,7 +358,7 @@ function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outs
       </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
         allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{
           const saved=view.save(next=>next.map(p=>{
-            if(p.id!==active.id||isLegacyQualityPlan(p)||p.router)return p;
+            if(p.id!==active.id||isLegacyQualityPlan(p)||p.router||(p.initialization&&!changed(active)))return p;
             try { return {...p,...parseMonitorDraft(forPlan(active),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
           }));
           if(saved)done();
@@ -766,23 +766,25 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           setError(result.selected < result.requested ? `有 ${result.requested - result.selected} 个入场记录暂未在组合表找到。` : '');
           return true;
         } : undefined} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
-        <FishQualityModule title="买前过滤" icon={Filter} testId="quality-filter-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={() => toggleHidden('filter')} count={study.filterReadings?.length ?? 0} onClear={state.clearFilterResults} disabled={!ready}/>} summary={<FishQualityInfo label="买前过滤说明"><p>{filterCount ? `${filterCount} 条买入条件` : '未设买入条件'}</p><p className="text-muted-foreground">{state.preEntry ? '从已勾选信号起点向后筛选；全部条件首次同时满足时停止并保存到入选库。点击开始筛选可继续暂停的轮次，右侧 ▾ 可从头重新筛选。读数只使用已收盘 K 线，沿用设置的方向和阈值。' : '对已勾选信号独立判断买入条件；读数取买入时刻前最后一根已收盘 K 线。修改门槛复用已有读数。'}</p></FishQualityInfo>} status={!state.preEntry && state.filterProgress && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${state.filterRunning ? 'animate-pulse bg-primary' : 'bg-muted-foreground/50'}`}/>{state.filterRunning ? '过滤中' : state.filterError ? '过滤未完成' : state.filterProgress.done === state.filterProgress.total ? '过滤完成' : '上轮已暂停'}</span><span className="font-mono tabular-nums">{state.filterProgress.done} / {state.filterProgress.total}</span></p>}>
-          {state.preEntry ? <FishPreEntryMonitor state={state} selectedCount={selectedCount} filtersOn={filtersOn} onJump={onJump}
-            renderConditions={done => <BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={done} scan/>}
-            legacyActions={<><button type="button" className={button} disabled={!state.filterRunning && (!ready || !selectedCount || !filtersOn)} onClick={() => state.filterRunning ? state.cancelFilter() : void state.startFilter()}>{state.filterRunning ? '暂停原时点过滤' : '仅检查原买入时点'}</button><FishFilterLibrary study={study}/>{state.filterError && <p role="alert" className="text-[10px] text-destructive">{state.filterError}</p>}</>}
-            onSelected={() => { setOrigin('pre-entry'); setQuery(''); setMonth(''); setAlgorithmsState([]); setRunState(''); setOpen(true); resetScroll(); }}/>
-            : <>
+        <FishQualityModuleGroup>
+          <FishQualityModule title="静态过滤" icon={Filter} testId="quality-static-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={()=>toggleHidden('filter')} count={study.filterReadings?.length??0} onClear={state.clearFilterResults} disabled={!ready}/>}
+            summary={<FishQualityInfo label="静态过滤说明"><p>只检查原买入时点之前最后一根已收盘 K 线，不移动买入时间。条件和过滤库独立保留。</p></FishQualityInfo>}
+            status={state.filterProgress&&<span role="status">{state.filterRunning?'过滤中':state.filterError?'过滤未完成':state.filterProgress.done===state.filterProgress.total?'过滤完成':'已暂停'} {state.filterProgress.done}/{state.filterProgress.total}</span>}>
           {state.filterRunning
             ? <button type="button" className={qualityPauseAction} onClick={state.cancelFilter}><Pause aria-hidden className="h-3 w-3"/>暂停过滤</button>
             : <button type="button" className={qualityPrimaryAction} disabled={!ready || !selectedCount || !filtersOn} title={!filtersOn ? '先设置并启用买入过滤条件' : selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号计算买入条件，不运行卖出监测；已完成的有效读数直接复用，只补算缺的` : '当前筛选下没有已勾选的信号'} onClick={() => void state.startFilter()}><Filter aria-hidden className="h-3 w-3"/>{state.filterError?'重试缺数据':state.filterProgress&&state.filterProgress.done<state.filterProgress.total?'继续过滤':'开始过滤'}</button>}
           {/* 【用户要求】2026-10-28 旁边已有「条件设置」，原「未设置过滤条件 · 点此设置」等行内提示纯属重复，已删除；为何不能开始见按钮悬停 */}
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} w-[5.5rem] shrink-0 whitespace-nowrap justify-center ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={() => setFilterOpen(false)}/>
           </PopoverContent></Popover>
           <FishFilterLibrary study={study}/>
-          </>}
-        </FishQualityModule>
+          </FishQualityModule>
+          {state.preEntry&&<FishQualityModule title="动态筛选" icon={Activity} testId="quality-dynamic-controls" summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套买入方案独立筛选，买入算法和启用的确认条件首次同时满足时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
+            <FishPreEntryMonitor state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
+              onSelected={()=>{setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}}/>
+          </FishQualityModule>}
+        </FishQualityModuleGroup>
         <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" trailing={<QualityResultTools kind="monitor" hidden={hideMonitor} onToggle={() => toggleHidden('monitor')} count={study.results.length} onClear={state.clearMonitorResults} disabled={!ready || !!state.archiving}/>} titleTestId="quality-mode" summary={<FishQualityInfo label="持仓监测说明"><p>100 USDT · 1 倍</p>{vetoCount > 0 && <p>{vetoCount} 项监测条件</p>}<p className="text-muted-foreground">按已勾选信号和当前卖出规则独立监测，支持后台运行；已算完且条件没变的结果直接沿用；要全部重算，点「开始监测」右侧的 ▾。归档按时间排列，后续重算不会覆盖本次快照。</p></FishQualityInfo>} status={running ? <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"/>监测中</span><span className="font-mono tabular-nums">{progress?.done ?? 0} / {progress?.total ?? 0}</span></p> : lastPause && <p className="max-w-[22rem] truncate text-muted-foreground" data-testid="quality-last-pause" title={`上一轮于 ${formatUTC8(lastPause.at)}（UTC+8）暂停：${lastPause.reason}`}>已暂停：{lastPause.reason}</p>}>
           {/* 【用户要求】2026-10-27 把「重新开始」做进「开始监测」：主按钮照常开始 / 暂停，右侧 ▾ 里「从头重新计算」 */}
           <div role="group" aria-label="监测运行" className="inline-flex h-6 shrink-0 items-stretch">
