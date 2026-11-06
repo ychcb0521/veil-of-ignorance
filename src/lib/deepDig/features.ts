@@ -88,6 +88,8 @@ export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
   createdAt?: number;
   /** Fixed chart semantics copied at creation; formulas and parameters never read the original feature. */
   chartTemplate?: string;
+  /** Built-in formula that this separately selectable no-BTC version is based on. */
+  btcFreeSourceId?: string;
   /** The independent raw series, including seller-sensitive variants. */
   chartCore?: string;
   /** Independent closed-bar research/display window; computation additionally loads formula prehistory. */
@@ -105,7 +107,14 @@ export const FEATURES_KEY = 'deep_dig_features_v1';
 const ORIGINAL_SELLER_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear', 'mbi2-bear':'MBI2_bear', 'ctba_12h-bear':'CTBA_12H_bear', ...Object.fromEntries(SELLER_RETENTION_SPECS.map(s=>[s.id,s.core])) };
 // S is included by request in the recent-focus group; its 0–1 scale is not a negative seller score.
 const FOCUS_SOURCE_CORES:Readonly<Record<string,string>>={...ORIGINAL_SELLER_CORES,state:'state'};
-export const SELLER_FEATURE_CORES:Readonly<Record<string,string>>={...ORIGINAL_SELLER_CORES,...Object.fromEntries(Object.entries(ORIGINAL_SELLER_CORES).map(([id,core])=>[id+'-v2',core]))};
+const btcFreeId = (id: string) => `${id}-no-btc-v1`;
+const BTC_ADJUSTED_SELLER_IDS = ['cdi2', 'cdi2-retain'];
+export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = {
+  ...ORIGINAL_SELLER_CORES,
+  ...Object.fromEntries(Object.entries(ORIGINAL_SELLER_CORES).map(([id, core]) => [id + '-v2', core])),
+  ...Object.fromEntries(BTC_ADJUSTED_SELLER_IDS.flatMap(id =>
+    [id, `${id}-v2`].map(sourceId => [btcFreeId(sourceId), ORIGINAL_SELLER_CORES[id]]))),
+};
 // Retired built-ins must not return as saved custom definitions. Historical results remain stored.
 export const isRetiredFeature = (id: string) => id === 'drift-speed-down-z' || id === 'seller-push';
 export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id)||id.startsWith('seller-focus-v2--');
@@ -1004,7 +1013,30 @@ export function createSellerFocusCopy(source:DeepDigFeatureDef,id=source.id+'-v2
     definition:source.definition+'\n版本2：独立复制创建时的账号公式和参数，保留原窗口、周期、半衰期及预热；历史聚合核中最近2小时的相对权重为更早数据的3倍。可在本副本公式顶部修改 '+prefix+'_h 和 '+prefix+'_weight；权重1恢复复制时原计算。重加权均值、波动尺度、递推/成交核；极值与时间滞后保持原义，不直接放大最终分数。'+(state?'状态S保持0–1刻度，0.5为均衡，越低越偏卖方；图表沿用原S的0.6参考线。':'零仍为均衡，卖方仍为负值。')+'原阈值不自动沿用。'};
 }
 export const SELLER_FOCUS_FEATURES:DeepDigFeatureDef[]=Object.keys(FOCUS_SOURCE_CORES).map(id=>({...createSellerFocusCopy(ORIGINAL_BUILTIN_FEATURES.find(d=>d.id===id)!,id+'-v2',id==='state'?Date.parse('2026-10-30T06:26:11Z'):SELLER_FOCUS_CREATED_AT),builtin:true}));
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES,...SELLER_FOCUS_FEATURES];
+const BTC_ADJUSTED_FEATURES = [
+  CBI2_DEF, CDI2_DEF, STATE_DEF, STATE2_DEF,
+  ...SELLER_RETENTION_FEATURES.filter(def => def.retentionSourceId === CDI2_DEF.id),
+  ...SELLER_FOCUS_FEATURES.filter(def => ['state', 'cdi2', 'cdi2-retain'].includes(def.focusSourceId ?? '')),
+];
+
+export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEATURES.map(source => ({
+  ...source,
+  id: btcFreeId(source.id),
+  name: `${source.name}｜无 BTC`,
+  short: `${source.short}·无BTC`,
+  chartTemplate: featureTemplateId(source),
+  btcFreeSourceId: source.id,
+  focusSourceId: source.focusSourceId ? btcFreeId(source.focusSourceId) : undefined,
+  retentionSourceId: source.retentionSourceId ? btcFreeId(source.retentionSourceId) : undefined,
+  definition: `独立版本 v1，源指标为「${source.name}」。短期动量直接使用标的自身收益。其余公式、窗口和权重沿用源指标。筛选阈值需单独验证。`,
+  formula: '# no-btc-v1 · 标的自身动量\n' + source.formula.split('\n')
+    .filter(line => !/^\s*(?:rb|phi)\s*=/.test(line) && !/^\s*#.*\bBTC(?:USDT)?\b/.test(line))
+    .map(line => line.replace(/rho\s*-\s*nz\(\s*\(?phi\s*\*\s*rb\)?\s*\)(?:\s*#.*)?/, 'rho')
+      .replace(/\s+#.*\bBTC\b.*$/, ''))
+    .join('\n'),
+}));
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -1054,7 +1086,7 @@ export function ensureFeatureCopies(saved:readonly DeepDigFeatureDef[]):DeepDigF
   let next=ensureSellerRetentionCopies(saved);
   const byId=new Map(next.map(d=>[d.id,d]));
   const sources=[...ORIGINAL_BUILTIN_FEATURES.map(d=>byId.get(d.id)??d),...next.filter(d=>!ORIGINAL_BUILTIN_FEATURES.some(b=>b.id===d.id))]
-    .filter(d=>!d.focusVersion&&!d.focusSourceId&&(d.id==='state'||Object.prototype.hasOwnProperty.call(ORIGINAL_SELLER_CORES,d.id)||Object.values(ORIGINAL_SELLER_CORES).includes(d.chartCore??'')||Object.prototype.hasOwnProperty.call(ORIGINAL_SELLER_CORES,featureTemplateId(d)??'')));
+    .filter(d=>!d.btcFreeSourceId&&!d.focusVersion&&!d.focusSourceId&&(d.id==='state'||Object.prototype.hasOwnProperty.call(ORIGINAL_SELLER_CORES,d.id)||Object.values(ORIGINAL_SELLER_CORES).includes(d.chartCore??'')||Object.prototype.hasOwnProperty.call(ORIGINAL_SELLER_CORES,featureTemplateId(d)??'')));
   for(const source of sources){
     const id=Object.prototype.hasOwnProperty.call(FOCUS_SOURCE_CORES,source.id)?source.id+'-v2':'seller-focus-v2--'+source.id;
     if(next.some(d=>d.id===id||d.focusSourceId===source.id))continue;

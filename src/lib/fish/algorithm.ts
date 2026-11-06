@@ -12,9 +12,9 @@ export interface FishConstraint { id: string; text: string; enabled: boolean }
 export const FISH_STATE_HOLD = { threshold: 0.55, hours: 6 } as const;
 export const FISH_STATE_HOLD_ROUTES = [FISH_STATE_HOLD, { threshold: 0.66, hours: 3 }] as const;
 export const FISH_STATE_HOLD_TEXT = 'S > 0.55 连续至少 6 小时，或 S > 0.66 连续至少 3 小时';
-/** Only the original S series has this admission rule; averages and S2 keep their own rules. */
+/** Apply S's admission rule to its raw series in both BTC modes. */
 export const fishStateHold = (featureId: string, statistic: string | undefined, direction: string) =>
-  featureId === 'state' && statistic === 'state' && direction === '>' ? FISH_STATE_HOLD : undefined;
+  (featureId === 'state' || featureId === 'state-no-btc-v1') && statistic === 'state' && direction === '>' ? FISH_STATE_HOLD : undefined;
 /**
  * 一套捕捞算法：所选序列 statistic 直接与阈值比较（不再在外面套 avg）。
  * 【用户要求】2026-10-19：「去除最外层的 avg」——要均值就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它，
