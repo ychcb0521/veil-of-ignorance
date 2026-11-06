@@ -1,4 +1,5 @@
 import { isTuringCupSymbol, turingCupTicker } from './turingCupSymbol';
+import { loadTuringReplayArchive, readArchiveKlines, TURING_REPLAY_TICK_SIZE } from './turingCupReplayArchive';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -21,8 +22,12 @@ function clientFor(signal?: AbortSignal): MarketClient {
 export async function readTuringCupKlines(
   symbol: string, interval: string, query: KlineQuery, signal?: AbortSignal,
 ): Promise<unknown[][]> {
+  const ticker = turingCupTicker(symbol);
+  const archive = await loadTuringReplayArchive();
+  if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+  if (archive?.markets[ticker]) return readArchiveKlines(archive, ticker, interval, query);
   const request = clientFor(signal).rpc('read_turing_cup_klines', {
-    p_symbol: turingCupTicker(symbol), p_interval: interval,
+    p_symbol: ticker, p_interval: interval,
     p_start: query.startTime == null ? null : Math.ceil(query.startTime),
     p_end: query.endTime == null ? null : Math.floor(query.endTime),
     p_limit: query.limit ?? 1000,
@@ -35,7 +40,11 @@ export async function readTuringCupKlines(
 }
 
 export async function readTuringCupTickSize(symbol: string, signal?: AbortSignal): Promise<number | null> {
-  const request = clientFor(signal).rpc('read_turing_cup_tick_size', { p_symbol: turingCupTicker(symbol) });
+  const ticker = turingCupTicker(symbol);
+  const archive = await loadTuringReplayArchive();
+  if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+  if (archive?.markets[ticker]) return TURING_REPLAY_TICK_SIZE;
+  const request = clientFor(signal).rpc('read_turing_cup_tick_size', { p_symbol: ticker });
   const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
   const size = Number(data);

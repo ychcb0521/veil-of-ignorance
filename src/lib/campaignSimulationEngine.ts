@@ -464,16 +464,18 @@ function triggerMirrorTp(state: SimulationState, mirrorLeg: SimulationLeg, times
   transitionState(state, 'state_1_lockin', timestampMs);
 }
 
-function fillHedgePosition(state: SimulationState, hedgeLeg: SimulationLeg, timestampMs: number) {
+function fillHedgePosition(
+  state: SimulationState, hedgeLeg: SimulationLeg, timestampMs: number, fillPrice: number, reopened: boolean,
+) {
   if (!state.activeMain) return;
   hedgeLeg.status = 'filled';
   hedgeLeg.triggeredAt = toIso(timestampMs);
-  hedgeLeg.fillPrice = hedgeLeg.triggerPrice;
+  hedgeLeg.fillPrice = fillPrice;
   state.activeHedges.push({
     role: 'hedge',
     legId: hedgeLeg.id,
     side: oppositeDirection(state.activeMain.side),
-    entryPrice: hedgeLeg.triggerPrice,
+    entryPrice: fillPrice,
     sizeUsdt: hedgeLeg.sizeUsdt,
     leverage: state.activeMain.leverage,
     openedAt: toIso(timestampMs),
@@ -482,26 +484,30 @@ function fillHedgePosition(state: SimulationState, hedgeLeg: SimulationLeg, time
     timestamp: toIso(timestampMs),
     event_type: 'hedge_triggered',
     leg_role: hedgeLeg.role,
-    price: hedgeLeg.triggerPrice,
+    price: fillPrice,
     size_usdt: hedgeLeg.sizeUsdt,
-    notes: '对冲成交',
+    notes: reopened ? '图灵杯连续回放 v1：重开跳空，按首个可见成交价估算' : '对冲成交',
   });
 }
 
-function processHedgeTrigger(state: SimulationState, hedgeLeg: SimulationLeg, timestampMs: number) {
+function processHedgeTrigger(state: SimulationState, hedgeLeg: SimulationLeg, candle: KlineData) {
   if (!state.activeMain) return;
-  fillHedgePosition(state, hedgeLeg, timestampMs);
+  const timestampMs = candle.time;
+  const crossedAtReopen = candle.turingReopen !== undefined && (state.activeMain.side === 'long'
+    ? candle.open < hedgeLeg.triggerPrice : candle.open > hedgeLeg.triggerPrice);
+  const fillPrice = crossedAtReopen ? candle.open : hedgeLeg.triggerPrice;
+  fillHedgePosition(state, hedgeLeg, timestampMs, fillPrice, crossedAtReopen);
   const exitRule: ExitRule = state.params.exit_rule;
   if (exitRule === 'manual_only') return;
 
   const currentMainSize = state.activeMain.sizeUsdt;
-  closeMain(state, hedgeLeg.triggerPrice, timestampMs, 'hedge 触发后按 exit_rule 平主仓');
+  closeMain(state, fillPrice, timestampMs, 'hedge 触发后按 exit_rule 平主仓');
 
   const pendingOthers = state.legs.filter(leg => leg.kind !== 'main' && leg.id !== hedgeLeg.id && leg.status === 'pending');
   for (const otherLeg of pendingOthers) {
     cancelPendingLeg(state, otherLeg, timestampMs, 'hedge 触发后取消其余挂单');
   }
-  closeAllActiveHedges(state, hedgeLeg.triggerPrice, timestampMs, 'exit_rule 触发，清掉活跃对冲');
+  closeAllActiveHedges(state, fillPrice, timestampMs, 'exit_rule 触发，清掉活跃对冲');
   transitionState(state, 'state_3_exit', timestampMs);
 
   if (exitRule === 'reenter_after_hedge_trigger' && state.params.reentry) {
@@ -1011,7 +1017,7 @@ export function simulateCampaign(
     for (const hedgeLeg of pendingHedges) {
       if (!state.activeMain) break;
       if (!triggerMatches(state.activeMain.side, 'hedge', kline, hedgeLeg.triggerPrice)) continue;
-      processHedgeTrigger(state, hedgeLeg, kline.time);
+      processHedgeTrigger(state, hedgeLeg, kline);
       hedgeConsumedCandle = true;
       break;
     }

@@ -676,7 +676,7 @@ describe('加载与错误：显示用失败不影响读数；计算用失败单�
     expect(klineReadings()).toEqual({ 峰值涨幅: '加载中…', 涨幅未兑现: '加载中…', 动态最大回撤: '加载中…' });
     // 不读 K 线的项照常显示
     expect(metricValue('已实现 P&L')).toMatch(/USDT$/);
-    expect(metricValue('涨跌幅')).toMatch(/%$/);
+    expect(metricValue('首仓涨跌幅')).toMatch(/%$/);
     synth.releaseHeld();
     await waitComputeLoaded();
     const { interval, klines: reference } = legacyDefaultKlines('tut-1h');

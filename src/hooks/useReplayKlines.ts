@@ -2,6 +2,7 @@
  * useReplayKlines — 拉取指定时间范围 + 周期的历史 K 线（只读，不挂在主 useBinanceData 上）
  */
 import { fetchSignalMarketKlines } from '@/lib/turingCupMarketData';
+import { turingReplayFields } from '@/lib/turingCupReplayArchive';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { useEffect, useRef, useState } from 'react';
 import { intervalToMs, klineAmountFields, type KlineData } from '@/hooks/useBinanceData';
@@ -180,7 +181,7 @@ async function fetchKlinePage(url: string, signal?: AbortSignal): Promise<KlineD
             throw new ReplayKlineRequestError('K 线数据不完整', 'invalid-response', true);
           }
           const [time, open, high, low, close, volume] = values;
-          return { time, open, high, low, close, volume, ...klineAmountFields(row),DBL5_prices:{open:String(row[1]),high:String(row[2]),low:String(row[3]),close:String(row[4])} };
+          return { time, open, high, low, close, volume, ...klineAmountFields(row), ...turingReplayFields(row), DBL5_prices:{open:String(row[1]),high:String(row[2]),low:String(row[3]),close:String(row[4])} };
         });
       })(),
     ]);

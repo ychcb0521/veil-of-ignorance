@@ -41,6 +41,7 @@ import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
 import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { TuringCupReplayPanel } from '@/components/TuringCupReplayPanel';
 import { listAllCampaigns } from '@/lib/journalApi';
 import { buildCampaignDayIndex, buildTradedDayIndex } from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
@@ -637,6 +638,8 @@ export function TimeControl({
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
         <div key={libraryName} data-testid={turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2">
+          {turing && user && <TuringCupReplayPanel key={user.id} accountId={user.id}
+            interval={signalJumpInterval} onOpen={onJumpToSignal} />}
           {/* 统一工具条：筛选 + 导入 / 导出 / 预检。
               原先「只放两个 12px 图标」的独立一行已并入这里——横向本来就过剩，
               纵向才是稀缺的，这是把过剩的横向兑换成纵向的一次交易。 */}

@@ -116,6 +116,26 @@ describe('simulateCampaign', () => {
     expect(result.legs_summary.find(leg => leg.leg_role === 'hedge_initial_a')?.status).toBe('filled');
   });
 
+  it.each([
+    ['long', 95, 98],
+    ['short', 105, 102],
+  ] as const)('uses the first visible reopen price for a %s stop and keeps the prior ordinary candle fill', (direction, reopen, trigger) => {
+    const sign = direction === 'long' ? -1 : 1;
+    const params = baseParams({
+      entry: { ...baseParams().entry, direction },
+      hedge_a: { offset_pct: 2 * sign, size_pct: 50 },
+      hedge_b: { offset_pct: 4 * sign, size_pct: 50 },
+      mirror_tp: { offset_pct: -2 * sign, size_pct: 50 },
+    });
+    const first = k(0, 100, 100, 100, 100);
+    const second = k(1, reopen, reopen, reopen, reopen);
+    const ordinary = simulateCampaign(params, [first, second], 'main_dual_hedge_mirror_tp');
+    const continuous = simulateCampaign(params, [first, { ...second, turingReopen: 'lunch' }], 'main_dual_hedge_mirror_tp');
+    expect(ordinary.events.find(event => event.event_type === 'hedge_triggered')?.price).toBe(trigger);
+    expect(continuous.events.find(event => event.event_type === 'hedge_triggered')?.price).toBe(reopen);
+    expect(continuous.final_realized_pnl).toBeCloseTo(-50, 4);
+  });
+
   it('long: mirror_tp then rolling hedge trigger exits with profit', () => {
     const result = simulateCampaign(
       baseParams({

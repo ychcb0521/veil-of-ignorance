@@ -2,9 +2,11 @@ import { assertBinancePublicAllowed, noteBinanceRateLimit, BinanceRateLimitError
 import { useState, useCallback, useRef } from "react";
 import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
 import { fetchSignalMarketKlines } from '@/lib/turingCupMarketData';
+import { turingReplayFields, type TuringReopen } from '@/lib/turingCupReplayArchive';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 
 export interface KlineData {
+  turingReopen?: TuringReopen;
   DBL5_prices?:{open:string;high:string;low:string;close:string};DBL5_initialization_start?:number;DBL5_data_version?:string;
   /** Market-evidence-only raw quote amounts; never alter existing indicators’ normalized fields. */
   ATI6H_quoteVolume?:number; ATI6H_takerBuyQuoteVolume?:number; ATI6H_tick_size?:number; PRS6H_tick_size?:number;
@@ -138,6 +140,7 @@ async function fetchBatch(
     close: parseFloat(k[4]),
     volume: parseFloat(k[5]),
     ...klineAmountFields(k),
+    ...turingReplayFields(k),
     DBL5_prices:{open:String(k[1]),high:String(k[2]),low:String(k[3]),close:String(k[4])},
   }));
 }

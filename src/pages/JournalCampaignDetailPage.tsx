@@ -6,6 +6,7 @@ import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignC
 import { isQualityCampaignId } from '@/lib/campaignSections';
 import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
@@ -1442,8 +1443,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
    * runCustomCounterfactual 的输入跟着变粒度——点一下周期按钮，峰值浮盈就换了一个数。
    */
   const computeInterval = useMemo<Interval>(
-    () => pickCampaignComputeInterval({ startMs: campaignKlineBaseWindow.fromTime, endMs: campaignKlineBaseWindow.toTime }),
-    [campaignKlineBaseWindow.fromTime, campaignKlineBaseWindow.toTime],
+    () => isTuringCupSymbol(campaign?.symbol ?? '') ? '1m'
+      : pickCampaignComputeInterval({ startMs: campaignKlineBaseWindow.fromTime, endMs: campaignKlineBaseWindow.toTime }),
+    [campaign?.symbol, campaignKlineBaseWindow.fromTime, campaignKlineBaseWindow.toTime],
   );
   // 显示用周期只管盘面。自动挡直接派生，不走 state 往返：旧写法在 effect 里 setInterval，
   // 「点预设」的那一帧窗口已经是 30 天、周期还停在 1m，先跑起来就是 43200 根 / 29 个串行请求。

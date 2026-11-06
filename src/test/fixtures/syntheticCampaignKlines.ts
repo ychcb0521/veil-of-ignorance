@@ -106,6 +106,7 @@ function toKline(raw: ReturnType<typeof synthRawCandle>): KlineData {
     low: parseFloat(raw[3]),
     close: parseFloat(raw[4]),
     volume: parseFloat(raw[5]),
+    DBL5_prices: { open: raw[1], high: raw[2], low: raw[3], close: raw[4] },
   };
 }
 

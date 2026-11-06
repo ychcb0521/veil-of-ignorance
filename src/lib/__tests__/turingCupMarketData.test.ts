@@ -10,7 +10,13 @@ import { buildQualityCampaignData } from '@/lib/fish/qualityCampaignProjection';
 import { buildCampaignDayIndex, hasCampaignOnSignalDay } from '@/lib/signalCampaignIndex';
 import { turingCupSymbol } from '@/lib/turingCupSymbol';
 import { connectTuringCupMarket } from '@/lib/turingCupMarketData';
+import { loadTuringReplayArchive, parseTuringReplayArchive, readArchiveKlines } from '@/lib/turingCupReplayArchive';
 import type { TradeSignal } from '@/lib/signalLibrary';
+
+vi.mock('@/lib/turingCupReplayArchive', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/turingCupReplayArchive')>(),
+  loadTuringReplayArchive: vi.fn(),
+}));
 
 const rpc = vi.fn();
 
@@ -24,6 +30,7 @@ type Query = { p_symbol: string; p_interval: string; p_start: number | null; p_e
 
 beforeEach(() => {
   connectTuringCupMarket({ rpc });
+  vi.mocked(loadTuringReplayArchive).mockReset().mockResolvedValue(undefined);
   network.mockClear();
   vi.stubGlobal('fetch', network);
   rpc.mockReset().mockImplementation((fn: string, query: Query) => {
@@ -59,7 +66,37 @@ describe('图灵杯离线来源', () => {
     expect(network).not.toHaveBeenCalled();
   });
 
-  it('uses the same filter and sell engine, then preserves the offline source in the campaign', async () => {
+  it('aggregates full buckets, preserves a missing minute and marks the first traded reopen', () => {
+    const first = [10000, 10100, 9900, 10050, 10, 1000, 2, 200];
+    const second = [10050, 10300, 9700, 10150, 5, 505, 3, 303];
+    const empty = [10150, 10150, 10150, 10150, 0, 0, 0, 0];
+    const archive = parseTuringReplayArchive(JSON.stringify({ version: 1, anchorMs: time, minutes: 10,
+      markets: { [ticker]: [first, first, second, second, first, null, empty, second, first, first] },
+      reopens: [[5, 'lunch']],
+    }));
+    const bars = readArchiveKlines(archive, ticker, '5m', { startTime: time });
+    expect(bars).toEqual([[time, '100.00', '103.00', '97.00', '100.50', 40, time + 5 * minute - 1, 4010, null, 12, 1206, null]]);
+    const resumed = readArchiveKlines(archive, ticker, '1m', { startTime: time + 5 * minute, limit: 2 });
+    expect(resumed.map(row => row[0])).toEqual([time + 6 * minute, time + 7 * minute]);
+    expect(resumed[0][11]).toBeNull();
+    expect(resumed[1][11]).toEqual({ turingReplayVersion: 1, reopen: 'lunch' });
+    expect(readArchiveKlines(archive, ticker, '1m', { limit: 1 })[0][0]).toBe(time + 9 * minute);
+  });
+
+  it.each(['rpc', 'continuous archive'])('uses the same filter and sell engine with %s, and preserves the source in the campaign', async source => {
+    if (source === 'continuous archive') {
+      const history = 3_000;
+      const candles = Array.from({ length: history + 15 }, (_, slot) => {
+        const open = slot === history + 5 ? 9_200 : slot > history ? 9_000 : 10_000;
+        return [open, 10_100, 8_900, slot >= history ? 9_000 : 10_000, 1, 100, 0.5, 50];
+      });
+      const archive = parseTuringReplayArchive(JSON.stringify({ version: 1, anchorMs: time - history * minute,
+        minutes: candles.length, markets: { [ticker]: candles }, reopens: [[history + 5, 'session-gap']],
+      }));
+      vi.mocked(loadTuringReplayArchive).mockResolvedValue(archive);
+      const reopen = await fetchReplayKlineRange(offline.symbol, '1m', time + 5 * minute, time + 6 * minute);
+      expect(reopen[0]).toMatchObject({ open: 92, turingReopen: 'session-gap' });
+    }
     const def = { id: 'fixture', name: 'Fixture', short: 'F', definition: '', formula: 'raw = C',
       scale: 1, unit: '', positive: '1', control: '0', interval: '5m' as const, halfLifeHours: 3, avgHours: 12 };
     const snapshot = { featureId: def.id, featureShort: 'F', definitionKey: definitionKey(def), statistic: 'raw', interval: '5m' as const,
@@ -87,5 +124,6 @@ describe('图灵杯离线来源', () => {
     expect(hasCampaignOnSignalDay(index, offline)).toBe(true);
     expect(hasCampaignOnSignalDay(index, online)).toBe(false);
     expect(network).not.toHaveBeenCalled();
+    if (source === 'continuous archive') expect(rpc).not.toHaveBeenCalled();
   });
 });

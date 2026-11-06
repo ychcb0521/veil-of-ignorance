@@ -7,6 +7,7 @@
  * 防未来数据：一根 5m K 线只有在 openTime + 5m ≤ t₀（已收盘）时才进窗口；
  * 窗口下界含、上界不含：[t₀ − 48h, t₀)。
  */
+import { turingReplayFields, type TuringReopen } from '@/lib/turingCupReplayArchive';
 import { WINDOW_MS } from '@/lib/deepRsa/grouping';
 
 export const BAR_MS = 5 * 60_000;
@@ -17,6 +18,7 @@ export const HALF_LIFE_CANDIDATES_H = [2, 6, 12] as const;
 export type HalfLifeHours = (typeof HALF_LIFE_CANDIDATES_H)[number];
 
 export interface ResearchBar {
+  turingReopen?: TuringReopen;
   /** Exact exchange price increment, supplied only by ATI6H research adapter. */
   ATI6H_tick_size?:number|null;
   /** Strict native evidence amounts alongside the unchanged legacy normalized columns. */
@@ -64,6 +66,7 @@ export function parseBinanceKlineRow(row: readonly unknown[]): ResearchBar | nul
   const amountsOk = Number.isFinite(qv) && qv >= 0 && Number.isFinite(tbq) && tbq >= 0 && tbq <= qv * (1 + 1e-9);
   return {
     ...bar,
+    ...turingReplayFields(row),
     DBL5_prices:{open:String(row[1]),high:String(row[2]),low:String(row[3]),close:String(row[4])},
     takerBuyVolume: Number.isFinite(tb) && tb >= 0 && tb <= bar.volume * (1 + 1e-9) ? tb : null,
     quoteVolume: amountsOk ? qv : null,
