@@ -10,6 +10,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const [reload, setReload] = useState(0);
   const current = useRef(library), runner = useRef(run), controller = useRef<AbortController | null>(null);
   const epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout>>();
+  const execution = useRef<Promise<void> | null>(null);
   const readyRef = useRef(false); runner.current = run;
   const commit = useCallback((value: PreEntryLibrary) => { current.current = value; setLibrary(value); }, []);
   useEffect(() => {
@@ -38,6 +39,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy) => {
     if (!readyRef.current || controller.current) return;
     const generation = epoch.current, aborter = new AbortController(); controller.current = aborter;
+    let finish!: () => void;
+    const finished = new Promise<void>(resolve => { finish = resolve; }); execution.current = finished;
     let lastRecordPaint = 0, lastProgressPaint = 0;
     const live = () => epoch.current === generation;
     const save = async () => {
@@ -74,6 +77,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         await save(); setRunning(false);
       }
       if (controller.current === aborter) controller.current = null;
+      if (execution.current === finished) execution.current = null;
+      finish();
     }
   }, [owner, commit]);
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
@@ -92,6 +97,12 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const round = current.current.rounds.find(r => r.id === roundId);
     if (round) await execute(round, structuredClone(study));
   }, [execute]);
-  return { library, ready, running, error, progress, start, resume,
+  const restart = useCallback(async (study: FishQualityStudy, hours: number) => {
+    const generation = epoch.current, pending = execution.current;
+    controller.current?.abort();
+    await pending;
+    if (epoch.current === generation) await start(study, hours);
+  }, [start]);
+  return { library, ready, running, error, progress, start, resume, restart,
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

@@ -13,6 +13,7 @@ export const qualityPauseAction = `${shape} w-[5.5rem] rounded-md ${pause}`;
 export const qualitySplitPrimaryAction = `${shape} w-[4.5rem] rounded-l-md border-r-0 ${primary}`;
 export const qualitySplitPauseAction = `${shape} w-[4.5rem] rounded-l-md border-r-0 ${pause}`;
 export const qualitySplitMenuAction = 'inline-flex w-4 shrink-0 items-center justify-center rounded-r-md border outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40';
+export const qualitySettingsAction = 'inline-flex h-7 w-[5.5rem] shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
 
 export function FishQualityInfo({ label, children }: { label: string; children: ReactNode }) {
   return <Popover><PopoverTrigger asChild><button type="button" aria-label={label} title={label} className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} aria-label={label} className="w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(80dvh,var(--radix-popover-content-available-height))] space-y-2 overflow-y-auto overscroll-contain p-3 text-[11px] leading-relaxed">{children}</PopoverContent></Popover>;

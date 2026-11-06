@@ -56,4 +56,26 @@ describe('买前监测独立任务', () => {
     expect(run).not.toHaveBeenCalled(); expect(result.current.error).toContain('磁盘写入失败');
     expect(result.current.library.rounds[0].state).toBe('paused');
   });
+  it('waits for a running round to stop before restarting and retains both frozen rounds', async () => {
+    const tasks: QualityRunOptions[] = []; let finishFirst!: () => void;
+    const run = async (task: QualityRunOptions) => {
+      tasks.push(task);
+      if (tasks.length === 1) await new Promise<void>(resolve => { finishFirst = resolve; });
+      else task.preEntry!.onRecord({ ...task.preEntry!.records[0], status: 'matched', matchedAt: t + 60000, updatedAt: Date.now() });
+    };
+    const { result } = renderHook(() => usePreEntryMonitor('alice', true, run));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    let first!: Promise<void>, restarted!: Promise<void>;
+    act(() => { first = result.current.start(study(), 12); });
+    await waitFor(() => expect(tasks).toHaveLength(1));
+    const next = study(); next.buyFilters[0].threshold = 200;
+    act(() => { restarted = result.current.restart(next, 24); });
+    expect(tasks[0].signal.aborted).toBe(true); expect(tasks).toHaveLength(1);
+    await act(async () => { finishFirst(); await first; await restarted; });
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0].preEntry!.round.filters[0].threshold).toBe(100);
+    expect(tasks[1].preEntry!.round.filters[0].threshold).toBe(200);
+    expect(result.current.library.rounds.map(r => [r.hours, r.state])).toEqual([[12, 'paused'], [24, 'complete']]);
+    expect(result.current.library.records).toHaveLength(2);
+  });
 });

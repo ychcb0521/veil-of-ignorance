@@ -23,6 +23,22 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('aligns the live pre-entry toolbar with holding monitoring and opens the existing condition editor', () => {
+ const s=state();
+ s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn()};
+ render(<FishQuality state={s}/>);
+ const before=within(screen.getByTestId('quality-filter-controls')),holding=within(screen.getByTestId('quality-run-controls'));
+ expect(before.queryByText('开始过滤')).not.toBeInTheDocument();
+ expect(before.queryByText('动态买前监测')).not.toBeInTheDocument();
+ expect(before.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
+ expect(before.getByLabelText('买入过滤条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
+ expect(before.getByRole('button',{name:'打开入选库'})).toBeInTheDocument();
+ fireEvent.click(before.getByLabelText('买入过滤条件'));
+ expect(screen.getByLabelText('筛选时长（小时）')).toBeInTheDocument();
+ expect(screen.getByText('保存过滤条件')).toBeInTheDocument();
+ fireEvent.click(screen.getByText('保存过滤条件'));
+ expect(s.setFilters).toHaveBeenCalled();
+});
 it('does not crash the route when monitoring starts and live results arrive in a scrolled table with rows of different measured heights',()=>{
  const s=state();
  s.study=importQualityLibrary(s.study,Array.from({length:350},(_,i)=>({id:`live-${i}`,symbol:`LIVE${String(i).padStart(3,'0')}USDT`,timeMs:T-(i+1)*3600000,timeLabel:'',fallbackZone:''})));

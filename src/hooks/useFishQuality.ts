@@ -442,12 +442,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const entries = new Set(signals.map(s => qualityEntryIdentity(s, s.timeMs)));
     change(s => {
       const next = importQualityLibrary(s, signals, Date.now(), 'pre-entry');
-      return { ...next, selectedRowIds: qualityComparisonRows(next).filter(r => entries.has(qualityEntryIdentity(r.source, r.enteredAt))).map(r => r.id) };
+      return { ...next, selectedRowIds: qualityDisplayRows(next).filter(r => entries.has(qualityEntryIdentity(r.source, r.enteredAt))).map(r => r.id) };
     });
     return signals.length;
   }, [preEntry.library.records, change]);
   const preEntryState = { ...preEntry,
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
+    restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
     resume: (roundId: string) => preEntry.resume(roundId, current.current) };
   return { preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }

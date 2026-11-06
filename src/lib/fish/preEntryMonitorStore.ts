@@ -11,20 +11,20 @@ function valid(value: unknown): value is PreEntryLibrary {
 }
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') { reject(Error('买前监测存储不可用')); return; }
+    if (typeof indexedDB === 'undefined') { reject(Error('入选库存储不可用')); return; }
     const request = indexedDB.open(DATABASE, 1);
     let expired = false;
-    const timer = setTimeout(() => { expired = true; reject(Error('买前监测存储超时')); }, 8000);
+    const timer = setTimeout(() => { expired = true; reject(Error('入选库存储超时')); }, 8000);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
     request.onsuccess = () => { clearTimeout(timer); if (expired) request.result.close(); else resolve(request.result); };
-    request.onerror = request.onblocked = () => { expired = true; clearTimeout(timer); reject(Error('买前监测存储不可用')); };
+    request.onerror = request.onblocked = () => { expired = true; clearTimeout(timer); reject(Error('入选库存储不可用')); };
   });
 }
 async function read(owner?: string): Promise<PreEntryLibrary | undefined> {
   const db = await open();
   try { return await new Promise((resolve, reject) => {
     const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(keyOf(owner));
-    request.onsuccess = () => { if (request.result == null) resolve(undefined); else if (valid(request.result)) resolve(request.result); else reject(Error('买前监测存档格式无效')); };
+    request.onsuccess = () => { if (request.result == null) resolve(undefined); else if (valid(request.result)) resolve(request.result); else reject(Error('入选库存档格式无效')); };
     request.onerror = () => reject(request.error);
   }); } finally { db.close(); }
 }
@@ -38,7 +38,7 @@ function write(owner: string | undefined, library: PreEntryLibrary): Promise<voi
         if (request.result != null && !valid(request.result)) { tx.abort(); return; }
         store.put(mergePreEntryLibraries(request.result ?? emptyPreEntryLibrary(), copy), key);
       };
-      tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error ?? Error('买前监测保存失败'));
+      tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error ?? Error('入选库保存失败'));
     }); } finally { db.close(); }
   };
   const pending = (queues.get(key) ?? Promise.resolve()).then(task, task);
@@ -48,7 +48,7 @@ function write(owner: string | undefined, library: PreEntryLibrary): Promise<voi
 export const preEntryAccountBlob: AccountBlobAdapter<PreEntryLibrary> = {
   name: 'pre-entry-monitor-v1',
   async read(owner) { await queues.get(keyOf(owner)); return read(owner); },
-  async write(owner, value) { if (value) { if (!valid(value)) throw Error('买前监测云端存档格式无效'); await write(owner, value); } },
+  async write(owner, value) { if (value) { if (!valid(value)) throw Error('入选库云端存档格式无效'); await write(owner, value); } },
   async mergeRemote(owner, value) { if (value) await preEntryAccountBlob.write(owner, value); },
   weight: library => library ? library.records.length + library.rounds.length : 0,
 };
@@ -56,7 +56,7 @@ export async function loadPreEntryLibrary(owner?: string): Promise<PreEntryLibra
   const status = await syncAccountBlobOnLoad(preEntryAccountBlob, owner);
   await queues.get(keyOf(owner));
   const local = await read(owner);
-  if (!local && (status === 'failed' || status === 'timed_out')) throw Error('无法读取账号买前监测库，请重试');
+  if (!local && (status === 'failed' || status === 'timed_out')) throw Error('无法读取账号入选库，请重试');
   return local ?? emptyPreEntryLibrary();
 }
 export async function savePreEntryLibrary(owner: string | undefined, library: PreEntryLibrary): Promise<void> {
