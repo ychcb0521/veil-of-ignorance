@@ -3,6 +3,7 @@
  * - 「组合算法」：每套方案一段，逐项写出卖出、组合切换、镜像、硬性终止、加仓（每一次的方向 / 否决 / 位置 / 卖出）与版本；
  * - 「买入·加仓·卖出」：选中的每条信号 × 每套方案一行，写明买入、镜像止盈、每次加仓、卖出及原因与各项结果。
  */
+import { QUALITY_ADVANTAGE_EXPLANATION, qualityAdvantageFingerprint } from './qualityAdvantage';
 import type { XlsxCell, XlsxSheet } from '@/lib/xlsxWorkbook';
 import type { QualityGroup, QualityResult, QualitySample } from './quality';
 import { qualityRuleText } from './quality';
@@ -28,6 +29,10 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
   const add = (plan: QualityGroup, part: string, item: string, value: string, version = '') => rows.push([plan.label, part, item, value, version]);
   for (const plan of plans) {
     const versions = new Map(qualityPlanVersions(plan).map(v => [v.key, v]));
+    if(plan.advantage){
+      add(plan,'优势筛选与退出灵敏度','开关与参数',JSON.stringify({screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations}),plan.advantage.version+' #'+qualityAdvantageFingerprint(plan));
+      QUALITY_ADVANTAGE_EXPLANATION.forEach((text,i)=>add(plan,'优势筛选与退出灵敏度','规则与依据 '+(i+1),text));
+    }
     // 【用户要求】2026-11-04 10-31 旧方案（旧引擎或旧形态）：入场距离存在 entryBufferAtr、涨幅门槛相对持仓均价
     const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
     if (legacy) add(plan, '计算引擎', '引擎', isLegacyQualityPlan(plan) ? `${LEGACY_ENGINE_LABEL}（冻结，与原战役逐位一致）` : '10-31 时的方案形态（指标＋入场距离）', versions.get('engine')?.version ?? '');

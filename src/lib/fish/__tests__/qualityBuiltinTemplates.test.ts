@@ -1,5 +1,6 @@
 // 【用户要求】2026-11-04 内置模板「结构为底·强势进攻（RAVE×SAPIEN 融合）」：两场赢单的参数原样合成，按账号公式生成、能冻结版本、能保存
 import { expect, it, vi } from 'vitest';
+import { ADVANTAGE_TEMPLATE_ID } from '../qualityAdvantageTemplate';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { BUILTIN_QUALITY_TEMPLATES, buildFusionTemplatePlan, buildFusionV2TemplatePlan, buildFusionV3TemplatePlan, buildFusionV4TemplatePlan, FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_ID, FUSION_TEMPLATE_NAME, FUSION_V2_TEMPLATE_ID, FUSION_V2_TEMPLATE_NAME, FUSION_V3_TEMPLATE_ID, FUSION_V4_ATTACK_FROM_ROUND, FUSION_V4_TEMPLATE_ID, FUSION_V4_TEMPLATE_NAME } from '../qualityBuiltinTemplates';
 import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
@@ -97,9 +98,9 @@ it('v2 keeps every v1 setting and only moves the decision to the first structura
     const run = vi.fn(async () => first(reading));
     expect((await evaluateQualityRouter(r, run, p => p.id)).routeDecision?.branch).toBe(branch); expect(run).toHaveBeenCalledTimes(calls);
   }
-  // 2026-11-06：v4 最新在前，v1 是 89 个信号上实际最好的路径排第二
-  expect(BUILTIN_QUALITY_TEMPLATES.map(t => t.id)).toEqual([FUSION_V4_TEMPLATE_ID, FUSION_TEMPLATE_ID, FUSION_V3_TEMPLATE_ID, FUSION_V2_TEMPLATE_ID]);
-  expect(BUILTIN_QUALITY_TEMPLATES[3].name).toBe(FUSION_V2_TEMPLATE_NAME);
+  // New overlay first; historical recipes keep their relative order and exact parameters.
+  expect(BUILTIN_QUALITY_TEMPLATES.map(t => t.id)).toEqual([ADVANTAGE_TEMPLATE_ID, FUSION_V4_TEMPLATE_ID, FUSION_TEMPLATE_ID, FUSION_V3_TEMPLATE_ID, FUSION_V2_TEMPLATE_ID]);
+  expect(BUILTIN_QUALITY_TEMPLATES.find(t=>t.id===FUSION_V2_TEMPLATE_ID)!.name).toBe(FUSION_V2_TEMPLATE_NAME);
   expect(buildFusionV2TemplatePlan(BUILTIN_FEATURES).label).toBe(FUSION_V2_TEMPLATE_NAME);
 }, 60000);
 
@@ -154,5 +155,5 @@ it('v4 is v3 with the attack lane gated until the third addition', async () => {
   expect(qualityPlanTemplateSummary(v4)).toContain('进攻从第 3 次起');
   const copy = qualityPlanFromTemplate({ id: 't', name: '存成模板', savedAt: 1, updatedAt: 1, plan: frozen }, 'e');
   expect(copy.router!.attackFromRound).toBe(3);
-  expect(BUILTIN_QUALITY_TEMPLATES[0].name).toBe(FUSION_V4_TEMPLATE_NAME); expect(buildFusionV4TemplatePlan(BUILTIN_FEATURES).id).toMatch(/^sell-/);
+  expect(BUILTIN_QUALITY_TEMPLATES.find(t=>t.id===FUSION_V4_TEMPLATE_ID)!.name).toBe(FUSION_V4_TEMPLATE_NAME); expect(buildFusionV4TemplatePlan(BUILTIN_FEATURES).id).toMatch(/^sell-/);
 }, 60000);

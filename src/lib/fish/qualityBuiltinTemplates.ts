@@ -41,6 +41,7 @@
  *  不再像 v1 那样一次锁定进攻。其余与 v3 相同。
  */
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { ADVANTAGE_TEMPLATE_ID, ADVANTAGE_TEMPLATE_NAME, buildQualityAdvantageTemplate } from './qualityAdvantageTemplate';
 import type { QualityBuyFilter, QualityGroup } from './quality';
 import { freezeStructureVersions } from './boxAlgorithmVersions';
 import { defaultStructureAddition } from './qualityAdditionStructure';
@@ -55,11 +56,12 @@ import { validatePayoffStops, type QualityHoldingVeto } from './qualityVeto';
 import { validateQualityVetoStages } from './qualityVetoStages';
 
 export interface QualityBuiltinTemplate {
+  requiresBase?: boolean;
   id: string; name: string;
   /** 模板列表里的一段说明。 */
   summary: string;
   /** 用账号当前公式生成一套完整方案（新编号、新名称）；缺公式时抛出可读错误。 */
-  build: (definitions: readonly DeepDigFeatureDef[], id?: string, label?: string) => QualityGroup;
+  build: (definitions: readonly DeepDigFeatureDef[], id?: string, label?: string, base?: QualityGroup) => QualityGroup;
 }
 
 export const FUSION_TEMPLATE_ID = 'builtin-structure-attack-fusion-2026-11-04';
@@ -144,6 +146,13 @@ export function buildFusionV4TemplatePlan(definitions: readonly DeepDigFeatureDe
 }
 
 export const BUILTIN_QUALITY_TEMPLATES: readonly QualityBuiltinTemplate[] = [{
+  id: ADVANTAGE_TEMPLATE_ID, name: ADVANTAGE_TEMPLATE_NAME, requiresBase: true,
+  summary: '完整沿用所选原方案的放大公式、K、镜像、轮数和分支。只筛掉价格与状态 S 连续同步走弱的加仓机会；优势延续时软退出两根 1 分钟确认，走弱时恢复单次，硬止损照旧。研究候选，尚未验证收益改善。',
+  build: (_definitions, id = newQualitySellPlanId(), label = ADVANTAGE_TEMPLATE_NAME, base) => {
+    if (!base) throw Error('请先选择要沿用的原方案或账号模板');
+    return buildQualityAdvantageTemplate(base, id, label);
+  },
+}, {
   id: FUSION_V4_TEMPLATE_ID, name: FUSION_V4_TEMPLATE_NAME,
   summary: `v3 的修正：前两次只走 SAPIEN 5069 的箱体（与 v1 开局相同），第 3 次起每一轮箱体与 RAVE 组合2 的 S/T/K（状态 S ≥ ${FUSION_ROUTER_THRESHOLD}）同时等候、先满足者成交，不再一次锁定。依据 2026-11-06 同一批 89 个信号的回放：v3 里进攻先手的 7 场只有 1 场更好，RAVE 被进攻抢在首个箱体之前加仓、首轮倍数 3.1× 取代箱体的 8.0×，9,825 → 3,720；开局只能交给箱体。镜像仍为 5% 卖 0.01%（同一批数据里 2.5% 卖 67% 把 SAPIEN 57,025 砍到 26,441）。`,
   build: buildFusionV4TemplatePlan,

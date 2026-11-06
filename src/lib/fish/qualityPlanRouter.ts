@@ -80,6 +80,7 @@ export function routerResultFingerprint(r:QualityPlanRouter):string{
 }
 export function validateQualityRouter(r: QualityPlanRouter) {
   const n = r.afterAdditions, from = raceAttackFromRound(r);
+  if (canonicalRouterJson(r.structure?.advantage) !== canonicalRouterJson(r.attack?.advantage)) throw Error('两个分支的优势筛选与退出灵敏度设置须一致');
   if (n !== 0 && r.attackFromRound != null) throw Error('「进攻从第几次起」只用于每轮分流');
   if (!Number.isInteger(from) || from < 1 || from > 100) throw Error('进攻分支参与竞速的起始次数须为 1 至 100 的整数');
   if ((n !== 0 && n !== 1 && n !== 2) || r.version !== routerVersionFor(n, from) || !Number.isFinite(r.threshold) || r.threshold < 0 || r.threshold > 1) throw Error('条件分支版本或门槛无效');

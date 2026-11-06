@@ -16,6 +16,8 @@ interface SupportStop {at:number;price:number;support:number;atOpen:boolean;caus
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
+ advantage?: import('./qualityAdvantage').QualityAdvantageRule;
+ readAdvantage?: (at:number)=>Promise<import('./qualityAdvantage').QualityAdvantageObservation>;
  structure?:StructureAdditionRule;
  supportReduction?:QualitySupportReductionRule;previousReductions?:readonly QualityReductionFill[];
  geometricLock?:import('./qualityAddition').QualityGeometricLockRule;
@@ -279,6 +281,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
   if(sized.error||!(sized.addCoins>0)){skip({at:hit.at,round:roundNo,support:hit.structureEvidence?.supportPrice,kind:'sizing',label:sized.error==='mirror_profit_insufficient'?'落袋利润不够':sized.error==='price_not_above_support'?'价格不高于 K':'加仓量为 0',reading:sized.error==='mirror_profit_insufficient'?`K ${p8(K)} 低于成本线 S ${p8(S)}，旧仓碰 K 的亏损比可用落袋利润多 ${p8(sized.oldLossShortfall)} USDT`:sized.error==='price_not_above_support'?`T ${p8(hit.price)} ≤ K ${p8(K)}`:`按平衡公式算出的加仓量 ${p8(sized.addCoins)} 枚`});continue;}
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
+  // Reject only the opportunity; original sizing inputs, successful rounds and mirror allocations stay intact.
+  const advantage=o.readAdvantage?await o.readAdvantage(hit.at):undefined;
+  if(o.advantage?.screenWeak&&advantage?.grade==='W'){
+   vetoed.push({at:hit.at,round:roundNo,kind:'advantage-weak',label:'价格与状态 S 连续同步走弱',reading:JSON.stringify({...advantage,originalQuantity:sized.addCoins})});continue;
+  }
+  if(advantage?.grade==='U')skip({at:hit.at,round:roundNo,kind:'advantage-unavailable',label:'优势辅助数据缺失，沿用原规则',reading:advantage.reason??'缺辅助数据'});
+  if(advantage)hit={...hit,advantage};
   fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(floorRule?{guardK:selected!.k,floorAtr:floorRule.atr}:{})}});
   if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }

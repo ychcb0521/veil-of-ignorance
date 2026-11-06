@@ -13,6 +13,7 @@ import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
+  advantage?: import('./qualityAdvantage').QualityAdvantageState;
   at: number; reading: number; cause?: QualityExitCause; atOpen?:boolean;
   /** 回撤止损在这一分钟盘中触及：按止损价成交（不是下一分钟开盘价）；fillPeak 是算止损价用的峰值。 */
   fillPrice?: number; fillPeak?: number;
@@ -62,6 +63,8 @@ export async function findQualityIntrabarExit(o: {
   conditionsUntil?:number;
   /** Ordinary gain-based seller keeps the full holding peak when veto peaks reset. */
   sellerPeak?:number;
+  /** Ordinary sellers only: hard vetoes never wait for this overlay. */
+  confirmOrdinary?: (at:number, seller:string, met:boolean) => Promise<{ confirmed:boolean; evidence:import('./qualityAdvantage').QualityAdvantageState }>;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill }> {
   const {signal}=o;
   // Check all conditions on the SAME chronological observations. Never search one
@@ -108,7 +111,7 @@ export async function findQualityIntrabarExit(o: {
       dropPrevious.set(v.id,{at,reading});
     }
   };
-  const check=(at:number):QualityTrigger|undefined=>{
+  const check=async(at:number):Promise<QualityTrigger|undefined>=>{
     const drop=checkDrop(at);
     if(at<(o.resumed?o.since:o.entry))return;
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
@@ -125,7 +128,10 @@ export async function findQualityIntrabarExit(o: {
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;
       if(!Number.isFinite(reading)) {error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;}
       // A confirmed veto closes immediately; later conditions need not also qualify or finish evaluating.
-      if(at>=checkFrom&&qualityConditionMet(reading,s.rule.direction,s.rule.threshold))return {at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause,...(s.stage?{stage:s.stage}:{})};
+      const met=qualityConditionMet(reading,s.rule.direction,s.rule.threshold);
+      const confirmation=!s.cause&&o.confirmOrdinary&&at>=checkFrom
+        ? await o.confirmOrdinary(at,JSON.stringify([s.plan.def,s.rule,s.stage]),met) : undefined;
+      if(at>=checkFrom&&met&&(!confirmation||confirmation.confirmed))return {at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
       s.previous={at,reading};
     }
     if(error)throw new Error(error);
@@ -134,7 +140,7 @@ export async function findQualityIntrabarExit(o: {
   // Re-read at most five past minutes on resume, solely to restore the rolling window and previous reading.
   const start=maxDropWindow?Math.min(replayStart,Math.max(o.entry,o.since-maxDropWindow*MINUTE)):replayStart,prices:ResearchBar[]=[];
   if(start===(o.resumed?o.since:o.entry)) {
-    const trigger=check(start);if(trigger)return {trigger,prices,mirrorFill};
+    const trigger=await check(start);if(trigger)return {trigger,prices,mirrorFill};
   }
   const mirrorAt=(minute:ResearchBar,openingOnly:boolean):QualityTrigger|undefined=>{
     if(!o.mirror?.enabled || mirrorFill || !holding || minute.openTime<o.since)return;
@@ -180,7 +186,7 @@ export async function findQualityIntrabarExit(o: {
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding){holding=advanceQualityHolding(holding,minute);sellerPeak=Math.max(sellerPeak,minute.high);}}
       if(drops.length&&minute.openTime>=o.entry) {dropMinutes.push(minute);while(dropMinutes.length>maxDropWindow)dropMinutes.shift();}
-      const at=minute.openTime+MINUTE,trigger=check(at);
+      const at=minute.openTime+MINUTE,trigger=await check(at);
       if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices,mirrorFill};}
       for(const s of streams)if(s.partial&&at%s.plan.step===0) {s.history.push(s.partial);s.partial=undefined;}
       if(i%20===19)await fishDelay(0,signal);

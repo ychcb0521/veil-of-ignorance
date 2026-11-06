@@ -6,7 +6,30 @@ import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { newQualityStudy, type QualityGroup } from '@/lib/fish/quality';
 import { FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_ID, FUSION_TEMPLATE_NAME } from '@/lib/fish/qualityBuiltinTemplates';
 import { planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { ADVANTAGE_TEMPLATE_NAME } from '@/lib/fish/qualityAdvantageTemplate';
+import { buildFusionTemplatePlan } from '@/lib/fish/qualityBuiltinTemplates';
+import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 afterEach(() => { cleanup(); localStorage.clear(); });
+
+it('creates the advantage template from the selected saved baseline and saves its independent controls',()=>{
+  const original=buildFusionTemplatePlan(BUILTIN_FEATURES,'baseline','原 2.5% 方案');
+  const save=vi.fn(),copy=vi.fn();
+  render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save} onCopyPlan={copy} templates={{templates:[],save:vi.fn(),remove:vi.fn()}}/>);
+  fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));
+  expect(screen.getByLabelText('优势模板沿用原方案')).toHaveValue('plan:baseline');
+  fireEvent.click(screen.getByRole('button',{name:`用内置模板 ${ADVANTAGE_TEMPLATE_NAME} 新建方案`}));
+  const created=copy.mock.calls[0][1] as QualityGroup;
+  expect(created.addition).toEqual(original.addition);expect(created.mirrorTakeProfit).toEqual(original.mirrorTakeProfit);
+  expect(screen.getByTestId('quality-advantage-settings')).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('筛掉同步走弱的加仓机会'));
+  fireEvent.change(screen.getByLabelText('优势状态软退出确认次数'),{target:{value:'1'}});
+  fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+  const made=(save.mock.calls[0][0] as QualityGroup[]).at(-1)!;
+  expect(made.advantage).toMatchObject({screenWeak:false,confirmations:1});
+  expect(made.router!.attack.advantage).toMatchObject({screenWeak:false,confirmations:1});
+  expect(made.router!.structure.addition).toEqual(original.router!.structure.addition);
+  expect(original.advantage).toBeUndefined();
+},90000);
 
 it('lists the built-in fusion template next to saved templates and creates a routed plan from it', () => {
   const save = vi.fn(), copy = vi.fn(), plans = enableQualityComparison(newQualityStudy()).sellPlans!;

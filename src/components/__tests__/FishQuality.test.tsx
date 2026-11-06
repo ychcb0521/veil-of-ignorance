@@ -1044,6 +1044,27 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   expect(s.deletePlanTemplate).toHaveBeenCalledWith(activeQualityPlanTemplates(s.study)[0].id);
 },30_000);
 
+it('keeps branch edits when changing advantage controls and saves the overlay to both branches',async()=>{
+ const {buildFusionTemplatePlan}=await import('@/lib/fish/qualityBuiltinTemplates');
+ const {buildQualityAdvantageTemplate}=await import('@/lib/fish/qualityAdvantageTemplate');
+ const {BUILTIN_FEATURES}=await import('@/lib/deepDig/features');
+ const s=state(),p=buildQualityAdvantageTemplate(buildFusionTemplatePlan(BUILTIN_FEATURES),'advantage');
+ s.study.sellPlans=[p];s.study.selectedSellId=p.id;
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ const branch=screen.getByTestId('router-branch-structure');
+ fireEvent.change(within(branch).getByLabelText('镜像止盈卖出百分比'),{target:{value:'12'}});
+ fireEvent.click(screen.getByLabelText('筛掉同步走弱的加仓机会'));
+ fireEvent.change(screen.getByLabelText('优势状态软退出确认次数'),{target:{value:'1'}});
+ expect(within(screen.getByTestId('router-branch-structure')).getByLabelText('镜像止盈卖出百分比')).toHaveValue(12);
+ fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
+ expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0][0];
+ for(const plan of [saved,saved.router!.structure,saved.router!.attack]){
+  expect(plan.advantage).toMatchObject({screenWeak:false,confirmations:1});expect(plan.mirrorTakeProfit?.sellPct).toBe(12);
+ }
+ expect(saved.router!.structure.addition).toEqual(p.router!.structure.addition);
+ expect(s.start).not.toHaveBeenCalled();
+},60000);
+
 it('creates a frozen routed plan from the template library without flattening it or starting a run',async()=>{
  const {freezeQualityPlan}=await import('@/lib/fish/qualityPlanVersions');
  const {defaultStructureAddition}=await import('@/lib/fish/qualityAdditionStructure');

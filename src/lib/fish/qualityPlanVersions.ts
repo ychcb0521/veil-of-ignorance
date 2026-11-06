@@ -1,4 +1,5 @@
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
+import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -46,6 +47,7 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 
 /** 方案涉及的全部算法及其版本（顺序：卖出 → 组合切换 → 执行 → 镜像 → 硬性终止 → 加仓 → 各次加仓的箱体与方向 → 加仓后切换）。 */
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
+  validateQualityAdvantage(plan);
   if(plan.router){
     validateQualityRouter(plan.router);
     return [{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:plan.router.version+' · 参数 #'+routerFingerprint(plan.router),summary:routerVersionSummary(plan.router)},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];
@@ -55,6 +57,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   const out: PlanVersionEntry[] = [];
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;
+  if(plan.advantage)add('advantage','优势筛选与退出灵敏度','逐次筛选 · 软退出动态确认',QUALITY_ADVANTAGE_VERSION+' · 参数 #'+qualityAdvantageFingerprint(plan),
+    `W 同步走弱筛选${plan.advantage.screenWeak?'开':'关'}；首加前确认${plan.advantage.beforeFirst?'开':'关'}，加仓后 A 级确认${plan.advantage.afterAddition?'开':'关'}，${plan.advantage.confirmations} 根已完成 1 分钟；其余单次，原定量/K/硬止损不变；候选未验证收益。`);
   if (plan.rule || plan.combo) add('sell', '卖出算法', `${s.featureShort ?? plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : ''}`.trim(), formulaFingerprint(s),
     `${plan.definitionSource === 'account' ? '账号公式（保存时冻结全文）' : '历史公式'} · ${s.interval ?? '5m'}`);
   if (plan.combo) {

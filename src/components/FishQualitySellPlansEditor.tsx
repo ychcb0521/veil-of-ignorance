@@ -1,4 +1,6 @@
 import {FishQualityTemplateArchive} from './FishQualityTemplateArchive';
+import { FishQualityAdvantageSettings } from './FishQualityAdvantageSettings';
+import { withQualityAdvantageOptions, type QualityAdvantageOptions } from '@/lib/fish/qualityAdvantage';
 import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
 import {validateQualitySellStages} from '@/lib/fish/qualitySellStages';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -16,10 +18,11 @@ import { isLegacyQualityPlan, LEGACY_ENGINE_LABEL, legacyToEditablePlan } from '
 
 const field = 'h-7 min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
 interface Draft {
+  advantageOptions?: QualityAdvantageOptions;
   id: string; original?: QualityGroup; label: string; choice: string; direction: '<' | '>'; threshold: string;
   combo: boolean; afterChoice: string; afterDirection: '<' | '>'; afterThreshold: string; switchPct: string;
 }
-const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, label: plan.label,
+const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, label: plan.label, advantageOptions: plan.advantage ? { screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations } : undefined,
   choice: plan.snapshot.featureId + ':' + plan.metric, direction: plan.rule?.direction ?? plan.snapshot.direction ?? '<',
   threshold: plan.rule ? String(plan.rule.threshold) : '', combo: !!plan.combo,
   afterChoice: plan.combo ? plan.combo.after.snapshot.featureId + ':' + plan.combo.after.metric : 'state:state',
@@ -41,8 +44,11 @@ function SaveTemplateButton({ index, defaultName, disabledReason, onSave }: { in
       <button type="button" className="rounded bg-primary px-2 py-1 text-primary-foreground" onClick={submit}>保存模板</button></div>
   </PopoverContent></Popover>;
 }
-function TemplatePicker({ actions, disabled, onUse, onUseBuiltin }: { actions: PlanTemplateActions; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin: (template: QualityBuiltinTemplate) => void }) {
+function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin }: { actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin: (template: QualityBuiltinTemplate, base?:QualityGroup) => void }) {
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
+  const bases = [...plans.map(p=>({key:'plan:'+p.id,label:'方案 · '+p.label,plan:p})), ...actions.templates.map(t=>({key:'template:'+t.id,label:'模板 · '+t.name,plan:t.plan}))].filter(x=>x.plan.addition?.enabled||x.plan.router);
+  const [baseKey,setBaseKey] = useState('');
+  const base = bases.find(b=>b.key===baseKey) ?? (bases.length===1?bases[0]:undefined);
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
   return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); }}><PopoverTrigger asChild>
     <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={actions.templates.length ? `已有 ${actions.templates.length} 个模板` : '还没有模板：在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>从模板新建{actions.templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{actions.templates.length}</span>}</button>
@@ -51,8 +57,10 @@ function TemplatePicker({ actions, disabled, onUse, onUseBuiltin }: { actions: P
     {BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
       <p className="px-2 pb-0.5 pt-1 text-[10px] text-muted-foreground">内置模板 · 新建时按账号当前公式生成，保存时冻结版本</p>
       <ul>{BUILTIN_QUALITY_TEMPLATES.map(t => <li key={t.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-builtin">
-        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="text-[10px] leading-snug text-muted-foreground">{t.summary}</p></div>
-        <button type="button" disabled={disabled} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => { onUseBuiltin(t); setOpen(false); }}>新建</button>
+        <div className="min-w-0 flex-1"><p className="font-medium">{t.name}</p><p className="text-[10px] leading-snug text-muted-foreground">{t.summary}</p>
+          {t.requiresBase&&<label className="mt-2 block">沿用原方案<select aria-label="优势模板沿用原方案" value={base?.key??''} onChange={e=>setBaseKey(e.target.value)} className="mt-1 w-full rounded border bg-background p-1"><option value="">选择原方案或账号模板</option>{bases.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}</select></label>}
+        </div>
+        <button type="button" disabled={disabled||t.requiresBase&&!base} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => { onUseBuiltin(t,t.requiresBase?base?.plan:undefined); setOpen(false); }}>新建</button>
       </li>)}</ul>
     </div>}
     {!actions.templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。</p>
@@ -119,9 +127,9 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     onSelectPlan?.(copyBase.id);
   };
   /** 内置模板：按账号当前公式生成方案，之后与「从模板新建」同一条路（复制监测草稿、加入列表、保存时冻结版本）。 */
-  const fromBuiltin = (template: QualityBuiltinTemplate) => {
+  const fromBuiltin = (template: QualityBuiltinTemplate, base?:QualityGroup) => {
     let copyBase: QualityGroup;
-    try { copyBase = template.build(definitions, newQualitySellPlanId(), uniqueLabel(template.name)); }
+    try { copyBase = template.build(definitions, newQualitySellPlanId(), uniqueLabel(template.name),base); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '内置模板生成失败'); return; }
     onCopyPlan?.({ ...copyBase, id: `builtin:${template.id}` }, copyBase);
     change([...drafts, draftOf(copyBase)]);
@@ -150,7 +158,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
 
         return plan;
       });
-      const prepared = prepare ? prepare(next) : next;
+      const withAdvantage = next.map(p=>withQualityAdvantageOptions(p,drafts.find(d=>d.id===p.id)?.advantageOptions));
+      const prepared = (prepare ? prepare(withAdvantage) : withAdvantage).map(p=>withQualityAdvantageOptions(p,drafts.find(d=>d.id===p.id)?.advantageOptions));
       const saved=after?after(prepared):prepared;
       saved.forEach(p=>{validateQualitySellStages(p);validateQualityVetoStages(p);});
       return saved;
@@ -160,7 +169,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       onSave(build(after)); setDirty(false); setError(''); return true;
     } catch (cause) { setError(cause instanceof Error ? cause.message : '卖出算法设置无效'); return false; }
   };
-  const preview = drafts.map(d => ({ ...baseOf(d)!, id: d.id, label: labelOf(d,baseOf(d)) }));
+  // Keep router editor keys stable while global overlay controls are edited; apply to both branches at save.
+  const preview = drafts.map(d => ({ ...baseOf(d)!, id: d.id, label: labelOf(d,baseOf(d)), ...(baseOf(d)?.advantage&&d.advantageOptions?{advantage:{...baseOf(d)!.advantage!,...d.advantageOptions}}:{}) }));
   const select = (value: string, label: string, onChange: (value: string) => void) => {
     const featureId = choices.find(c => c.key === value)?.featureId ?? value.split(':')[0];
     const features = [...new Map(choices.map(c => [c.featureId, c.group])).entries()];
@@ -177,7 +187,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   return <><fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
     <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? '① 组合算法' : '卖出算法'} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
-      {!readOnly && !embedded && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增卖出算法</button>{templates && <TemplatePicker actions={templates} disabled={!ready} onUse={fromTemplate} onUseBuiltin={fromBuiltin}/>}</>}</div>
+      {!readOnly && !embedded && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增卖出算法</button>{templates && <TemplatePicker actions={templates} plans={plans} disabled={!ready} onUse={fromTemplate} onUseBuiltin={fromBuiltin}/>}</>}</div>
     {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。</p>}
     {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无卖出算法，点击上方新增。</p>}
     {drafts.map((d, i) => <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
@@ -199,6 +209,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
           <select aria-label={'卖出算法 ' + (i + 1) + ' 后段方向'} className={field} value={d.afterDirection} onChange={e => patch(d.id, { afterDirection: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
           <input aria-label={'卖出算法 ' + (i + 1) + ' 后段门槛'} type="number" step="any" className={field + ' w-full'} value={d.afterThreshold} onChange={e => patch(d.id, { afterThreshold: e.target.value })} />
         </div></div>}</fieldset>}
+      {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
     </div>)}
     {!readOnly && !embedded && <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : '保存卖出算法'}</button>
       <span className="text-[10px] text-muted-foreground">未填普通门槛时，可单独使用该方案的加仓、镜像止盈或持仓否决。</span></div>}

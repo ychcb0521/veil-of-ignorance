@@ -94,6 +94,7 @@ const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(ru
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
+ advantage?: import('./qualityAdvantage').QualityAdvantageObservation;
   /** 每轮分流时这一次成交走的是保守（rounds）还是进攻（alternativeRounds）；没有备选的轮次不写。 */
   lane?:'structure'|'attack';
   structureEvidence?:StructureAdditionEvidence;

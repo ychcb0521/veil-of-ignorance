@@ -1,4 +1,5 @@
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
+import { createQualityAdvantageReader, advanceQualitySoftConfirmation, requiredSoftConfirmations, qualityAdvantageIdentity, validateQualityAdvantage, type QualityAdvantageState } from './qualityAdvantage';
 import {orderedVetoStages,qualityVetoStagesIdentity,validateQualityVetoStages,stagedHoldingVetoes,beginVetoStagePath,type QualityVetoStage,type QualityVetoStageActivation} from './qualityVetoStages';
 import {orderedSellStages,qualitySellStagesIdentity,qualityStagePlan,validateQualitySellStages,qualitySellStagesLabel,type QualitySellStage,type QualitySellStageActivation} from './qualitySellStages';
 import {findCalculatorAdditions} from './qualityAdditionCalculator';
@@ -30,6 +31,7 @@ export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
 export interface QualityGroup {
+  advantage?: import('./qualityAdvantage').QualityAdvantageRule;
   id: string; label: string; metric: string; snapshot: FishSnapshot; rule?: QualityExitRule;
   /** Absent on historical close-confirmation experiments. */
   execution?: 'intrabar-1m';
@@ -82,6 +84,7 @@ export interface QualitySample {
   signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
+  advantageState?: QualityAdvantageState;
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
   routeDecision?: import('./qualityPlanRouter').QualityRouteDecision;
   status: 'open' | 'closed' | 'waiting' | 'error'; reason?: string;
@@ -103,7 +106,7 @@ export interface QualityResult {
   activeSellStage?:QualitySellStageActivation; sellStageSwitches?:QualitySellStageActivation[];
   exitReading?: number;
   pendingExit?: QualityTrigger;
-  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean; stage?: 'before' | 'after' };
+  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean; stage?: 'before' | 'after'; advantage?:QualityAdvantageState };
 }
 /** Drawdowns are nonnegative losses; an absent measurement is never a measured zero. */
 /** 持仓否决试验的版本号：同步过的方案为 v3（止损价成交），旧试验保持 v2。 */
@@ -316,6 +319,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.router) identity.push(routerResultFingerprint(g.router));
+  const advantage=qualityAdvantageIdentity(g);if(advantage)identity.push(advantage);
   if (isLegacyQualityPlan(g)) identity.push(LEGACY_QUALITY_ENGINE);
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
   const vetoStages=qualityVetoStagesIdentity(g);if(vetoStages)identity.push(vetoStages);
@@ -482,14 +486,17 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
- if(!group.sellStages?.length&&!group.vetoStages?.length)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous);
+ if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous);
  const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
  try{
-  validateQualitySellStages(group);validateQualityVetoStages(group);
+  validateQualitySellStages(group);validateQualityVetoStages(group);validateQualityAdvantage(group);
   const stages=orderedSellStages(group),vetoStages=orderedVetoStages(group),boundaries=[...new Set([...stages,...vetoStages].map(s=>s.afterAdditions))].sort((a,b)=>a-b),trackVetoPath=!!vetoStages.length,entry=sample.enteredAt==null?NaN:Math.ceil(sample.enteredAt/QUALITY_MINUTE)*QUALITY_MINUTE,end=Math.min(Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE,observeHours===0?Infinity:entry+Math.ceil(observeHours*60)*QUALITY_MINUTE);
   let state=previous?.key===key&&previous.status==='open'&&previous.entryPrice!>0&&previous.endTime!>=entry&&previous.endTime!<=end?previous:undefined;
   const switches=[...(state?.sellStageSwitches??[])],vetoSwitches=[...(state?.vetoStageSwitches??[])];
   for(let i=0;i<=boundaries.length;i++){
+   // Add only the next actual boundary, including plans without a round limit.
+   // Future positions cannot change earlier exits; no new cap is introduced.
+   if(group.advantage){const next=qualityAdditionFills(state??{}).length+1;if(next<=qualityAdditionRoundLimit(group.addition!)&&!boundaries.includes(next)){boundaries.push(next);boundaries.sort((a,b)=>a-b);}}
    const count=qualityAdditionFills(state??{}).length,selected=stages.filter(s=>s.afterAdditions<=count).at(-1),selectedVeto=vetoStages.filter(s=>s.afterAdditions<=count).at(-1),nextCount=boundaries.find(n=>n>count),phase={...qualityStagePlan(group,selected),holdingVetoes:stagedHoldingVetoes(group,count)};
    const prior=state?{...state,key:qualityResultKey(sample,phase,observeHours)}:undefined;
    let replay=await evaluateQualityPhase(sample,phase,observeHours,now,load,signal,prior,{pauseAfterAdditionCount:nextCount,trackVetoPath});
@@ -534,8 +541,21 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     }
     validateQualityMirror(group.mirrorTakeProfit);
     validateQualityAddition(group.addition);
+    validateQualityAdvantage(group);
     const prior = previous?.key === key && previous.status === 'open' && previous.entryPrice! > 0 && previous.endTime! >= entry && previous.endTime! <= end ? previous : undefined;
     const since = prior?.endTime ?? entry;
+    const readAdvantage=group.advantage?createQualityAdvantageReader(group.advantage,{row,entry,end,load,signal}):undefined;
+    let advantageState=prior?.advantageState;
+    const advantageChecks:QualityAdvantageState[]=[];
+    const confirmOrdinary=group.advantage&&readAdvantage?async(at:number,seller:string,met:boolean)=>{
+      // A false soft reading needs only to reset its streak. Never delay a hard stop
+      // to fetch auxiliary history, and never count the pre-entry candle as a new minute.
+      const observation=met&&at>entry?await readAdvantage(at):{at:Math.floor(at/(5*QUALITY_MINUTE))*5*QUALITY_MINUTE,grade:'U' as const};
+      const required=requiredSoftConfirmations(group.advantage!,qualityAdditionFills(prior??{}).length,observation);
+      advantageState=advanceQualitySoftConfirmation(advantageState,at,seller,met,required,observation);
+      advantageChecks.push(advantageState);
+      return {confirmed:met&&advantageState.count>=required,evidence:advantageState};
+    }:undefined;
     if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
     let trigger: QualityTrigger | undefined = prior?.pendingExit;
     let replayedPrices: ResearchBar[] | undefined;
@@ -558,7 +578,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
         if (combo) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (rule) {
@@ -633,7 +653,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
           const calculated=await findCalculatorAdditions({candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
-            ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
+            advantage:group.advantage,readAdvantage,ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           additionSkipsFrom=prior?(prior.additionSkipsFrom??since):entry;
           if(calculated.skipped?.length||prior?.additionSkips?.length){const seen=new Map([...(prior?.additionSkips??[]),...(calculated.skipped??[])].map(v=>[`${v.at}:${v.round}`,v]));additionSkips=[...seen.values()].sort((a,b)=>a.at-b.at);}
@@ -647,6 +667,8 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       }
     }
     const held = prices.filter(b => b.openTime < finalTime);
+    // Truncate speculative soft confirmations at the actual earlier addition/K/hard exit.
+    const savedAdvantage=advantageChecks.filter(s=>s.at<=finalTime).at(-1)??prior?.advantageState;
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
     const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
@@ -680,14 +702,14 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       ...(additionFill && position ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
         initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
-      ...(additionNote?{additionNote}:{}),
+      ...(additionNote?{additionNote}:{}),...(savedAdvantage?{advantageState:savedAdvantage}:{}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: !sellStageBoundary&&(closed || end >= limit && !trigger),
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
-      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen,...(trigger.stage ? { stage: trigger.stage } : {})} : undefined,
-      reason: closed&&trigger?.cause?.geometricLock?`保住有效涨幅：几何仓位 ${trigger.cause.geometricLock.multiple.toFixed(2)} > ${trigger.cause.geometricLock.threshold}，止损从 Kₘ ${+trigger.cause.geometricLock.k.toPrecision(8)} 上移到 ${+trigger.cause.geometricLock.line.toPrecision(8)}（＋${trigger.cause.geometricLock.pct}% × 首次开仓价）；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按该价卖出全部持仓'}`:closed&&trigger?.cause?.payoffBasis?`盈亏比止盈：整笔盈亏 ${trigger.cause.payoffBasis.pnl.toFixed(2)} ÷ L₀ ${+trigger.cause.payoffBasis.l0.toPrecision(8)}（初始仓位 × ${trigger.cause.payoffBasis.l0Pct}%）≥ ${trigger.cause.threshold}R；${trigger.atOpen?'开盘跳过目标价，按开盘价':`盘中触及 ${+trigger.cause.payoffBasis.targetPrice.toPrecision(8)}，按目标价`}卖出全部持仓`:closed&&trigger?.cause?.supportDrops?`K 连续下移 ${trigger.cause.supportDrops.count} 次全仓卖出：支撑下移到 ${trigger.cause.supportDrops.support}，K ${trigger.cause.supportDrops.previousK} → ${trigger.cause.supportDrops.newK}；下一分钟开盘价卖出全部持仓`:closed&&trigger?.cause?.kind==='addition-geometric-profit'?`加仓止盈：几何仓位 ${trigger.cause.additionBasis!.geometricMultiple.toPrecision(8)}× ≥ ${trigger.cause.geometricMultiple}×，价格 ${finalPrice.toPrecision(8)} ≥ 均衡价 K ${trigger.cause.additionBasis!.equilibriumPrice.toPrecision(8)} ×（1＋${trigger.cause.threshold}%）；${trigger.atOpen?'开盘达标，按开盘价':'盘中触价，按目标价'}卖出全部余仓与加仓`:closed&&trigger?.cause?.id==='addition-floor'?`保本底线 F 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越过 F，按开盘价':'盘中触及 F，按 F'}卖出全部持仓（加仓量按 F 算，整笔保本）`:closed&&trigger?.cause?.kind==='addition-support'&&trigger.cause.confirmCloses?`防守线 K 止损：${trigger.cause.threshold}；5 分钟收盘连续 ${trigger.cause.confirmCloses} 根低于 K，下一分钟开盘卖出`:closed&&trigger?.cause?.kind==='addition-support'?`加仓支撑线 K 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按支撑价卖出'}`:closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && !trigger?.cause && trigger?.stage && group.combo ? (trigger.stage === 'after'
+      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen,...(trigger.stage ? { stage: trigger.stage } : {}),...(trigger.advantage?{advantage:trigger.advantage}:{})} : undefined,
+      reason: closed&&trigger?.advantage?`优势分级 ${trigger.advantage.observation.grade}：原软退出连续 ${trigger.advantage.count} 根已完成 1 分钟读数确认（要求 ${trigger.advantage.required} 根），下一分钟开盘卖出`:closed&&trigger?.cause?.geometricLock?`保住有效涨幅：几何仓位 ${trigger.cause.geometricLock.multiple.toFixed(2)} > ${trigger.cause.geometricLock.threshold}，止损从 Kₘ ${+trigger.cause.geometricLock.k.toPrecision(8)} 上移到 ${+trigger.cause.geometricLock.line.toPrecision(8)}（＋${trigger.cause.geometricLock.pct}% × 首次开仓价）；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按该价卖出全部持仓'}`:closed&&trigger?.cause?.payoffBasis?`盈亏比止盈：整笔盈亏 ${trigger.cause.payoffBasis.pnl.toFixed(2)} ÷ L₀ ${+trigger.cause.payoffBasis.l0.toPrecision(8)}（初始仓位 × ${trigger.cause.payoffBasis.l0Pct}%）≥ ${trigger.cause.threshold}R；${trigger.atOpen?'开盘跳过目标价，按开盘价':`盘中触及 ${+trigger.cause.payoffBasis.targetPrice.toPrecision(8)}，按目标价`}卖出全部持仓`:closed&&trigger?.cause?.supportDrops?`K 连续下移 ${trigger.cause.supportDrops.count} 次全仓卖出：支撑下移到 ${trigger.cause.supportDrops.support}，K ${trigger.cause.supportDrops.previousK} → ${trigger.cause.supportDrops.newK}；下一分钟开盘价卖出全部持仓`:closed&&trigger?.cause?.kind==='addition-geometric-profit'?`加仓止盈：几何仓位 ${trigger.cause.additionBasis!.geometricMultiple.toPrecision(8)}× ≥ ${trigger.cause.geometricMultiple}×，价格 ${finalPrice.toPrecision(8)} ≥ 均衡价 K ${trigger.cause.additionBasis!.equilibriumPrice.toPrecision(8)} ×（1＋${trigger.cause.threshold}%）；${trigger.atOpen?'开盘达标，按开盘价':'盘中触价，按目标价'}卖出全部余仓与加仓`:closed&&trigger?.cause?.id==='addition-floor'?`保本底线 F 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越过 F，按开盘价':'盘中触及 F，按 F'}卖出全部持仓（加仓量按 F 算，整笔保本）`:closed&&trigger?.cause?.kind==='addition-support'&&trigger.cause.confirmCloses?`防守线 K 止损：${trigger.cause.threshold}；5 分钟收盘连续 ${trigger.cause.confirmCloses} 根低于 K，下一分钟开盘卖出`:closed&&trigger?.cause?.kind==='addition-support'?`加仓支撑线 K 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按支撑价卖出'}`:closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && !trigger?.cause && trigger?.stage && group.combo ? (trigger.stage === 'after'
         ? `组合卖出：涨幅已达 ${group.combo.switchPct}%，按 ${group.combo.after.label} ${group.combo.after.rule.direction} ${group.combo.after.rule.threshold} 盘中复原达标，下一分钟开盘卖出`
         : `组合卖出：涨幅未达 ${group.combo.switchPct}%，按 ${group.combo.beforeLabel} ${group.rule!.direction} ${group.rule!.threshold} 盘中复原达标，下一分钟开盘卖出`)
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
