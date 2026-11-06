@@ -3,7 +3,7 @@ import { findQualityIntrabarExit } from './qualityIntrabar';
 import { withTuringInitialization } from './qualityInitialization';
 import { planVersionChanges } from './qualityPlanVersions';
 import type { FishReconstructionLoader } from './reconstruction';
-import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
+import { PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
 import { formatUTC8 } from '../timeFormat';
 
 export function preEntryPlanFilters(plan: QualityGroup): QualityBuyFilter[] {
@@ -39,17 +39,23 @@ export async function collectPreEntryIntrabar(task: PreEntryRun, load: FishRecon
         publish({status: readyAt >= end ? 'warming' : 'unmatched', detail: readyAt >= end ? `当前行情无法完成本方案预热；最早可判断 ${formatUTC8(readyAt)}。可另建图灵杯专用副本，原方案保留。` : '本轮行情范围已结束'});
       } else {
         let lastPaint = 0;
+        let waitingForTrade = false;
         const result = await findQualityIntrabarExit({ row: {...record.sample.source, timeMs: now}, ...plans[0], rule: filters[0],
           entry: readyAt, since, end, resumed: since > readyAt, load: initialized, signal, matchMode: 'all',
+          zeroTradePolicy: task.round.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? 'wait' : undefined,
           conditions: filters.slice(1).map((f, i) => ({...plans[i+1], rule: f, cause: { id: f.id, label: f.label, kind: 'indicator', direction: f.direction, threshold: f.threshold }})),
-          onObservation: at => {
+          onObservation: (at, observation) => {
+            waitingForTrade = observation?.waitingForTrade ?? false;
+            if (waitingForTrade && at > (record.zeroTradeWait?.lastAt ?? -Infinity)) {
+              record.zeroTradeWait = { count: (record.zeroTradeWait?.count ?? 0) + 1, firstAt: record.zeroTradeWait?.firstAt ?? at, lastAt: at };
+            }
             record.cursor = at;
-            if (performance.now() - lastPaint >= 150) { lastPaint = performance.now(); publish({detail: `正在筛选 ${formatUTC8(at)}`}); onProgress({done, total:task.records.length, current:`${record.sample.source.symbol} · ${selected.label}`}); }
+            if (performance.now() - lastPaint >= 150) { lastPaint = performance.now(); publish({detail: waitingForTrade ? `零成交或读数恢复中，暂不判定入选：${formatUTC8(at)}` : `正在筛选 ${formatUTC8(at)}`}); onProgress({done, total:task.records.length, current:`${record.sample.source.symbol} · ${selected.label}`}); }
           } });
         if (result.trigger) publish({status: 'matched', cursor: result.trigger.at, matchedAt: result.trigger.at,
           readings: (result.trigger.readings ?? []).map(r => ({key:r.id, value:r.value, at:r.at})),
           detail: '按持仓监测同一套分钟盘中复原流程，买入算法和启用的确认条件首次同时满足；已停在该买入节点'});
-        else publish({status:'unmatched', cursor:end, detail:'本轮范围内，买入算法和确认条件未同时满足'});
+        else publish({status:'unmatched', cursor:end, detail:waitingForTrade?'行情末尾仍在等待零成交后的有效读数，未判定入选':'本轮范围内，买入算法和确认条件未同时满足'});
       }
     } catch (cause) {
       if (signal.aborted) { publish({status:'paused', detail:'已暂停，继续时沿用本轮冻结方案'}); throw cause; }

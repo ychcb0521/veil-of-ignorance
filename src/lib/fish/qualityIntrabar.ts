@@ -1,4 +1,6 @@
 import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
+import { completeZeroTradeBar, zeroTradeReadingPending } from './qualityZeroTrade';
+import { isTuringCupSymbol } from '../turingCupSymbol';
 /** Causal, one-minute replay of a forming indicator candle. */
 import { evaluateOnBars } from '@/lib/deepDig/features';
 import { createFormulaEvaluationCache } from '@/lib/deepDig/formula';
@@ -55,7 +57,9 @@ export interface QualityIntrabarCondition {
 }
 export async function findQualityIntrabarExit(o: {
   matchMode?: 'all';
-  onObservation?: (at: number) => void;
+  /** Opt-in entry v3 only. Holding and earlier entry engines keep their original behavior. */
+  zeroTradePolicy?: 'wait';
+  onObservation?: (at: number, observation?: { waitingForTrade: boolean }) => void;
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
@@ -72,6 +76,7 @@ export async function findQualityIntrabarExit(o: {
   confirmOrdinary?: (at:number, seller:string, met:boolean) => Promise<{ confirmed:boolean; evidence:import('./qualityAdvantage').QualityAdvantageState }>;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill }> {
   const {signal}=o;
+  const waitForTrade = o.zeroTradePolicy === 'wait' && o.matchMode === 'all' && isTuringCupSymbol(o.row.symbol);
   // Check all conditions on the SAME chronological observations. Never search one
   // condition to the end and accidentally overlook an earlier veto from another.
   const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule,stage:o.ruleStage,closeOnly:o.ruleCloseOnly}]:[])];
@@ -116,12 +121,13 @@ export async function findQualityIntrabarExit(o: {
       dropPrevious.set(v.id,{at,reading});
     }
   };
-  const check=async(at:number):Promise<QualityTrigger|undefined>=>{
+  const check=async(at:number,minute?:ResearchBar):Promise<QualityTrigger|undefined>=>{
     const drop=checkDrop(at);
     if(at<(o.resumed?o.since:o.entry))return;
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
     if(drop)return drop;
     let error:string|undefined;
+    let waitingForTrade = waitForTrade && completeZeroTradeBar(minute);
     const matches: QualityTrigger[] = [], readings: NonNullable<QualityTrigger['readings']> = [];
     const after=switched();
     for(const s of streams) {
@@ -132,7 +138,12 @@ export async function findQualityIntrabarExit(o: {
       const bars=s.partial?[...s.history,s.partial]:s.history;
       const out=evaluateOnBars(bars,s.plan.compiled,s.plan.def,s.cache).vars.get(s.plan.averageName);
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;
-      if(!Number.isFinite(reading)) {if(!s.previous&&qualityInitializationPending(o.load,typeof out==='number'?[out]:out??[],typeof out==='number'?0:bars.length-1))continue;error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;}
+      if(!Number.isFinite(reading)) {
+        const values = typeof out === 'number' ? [out] : out ?? [], index = typeof out === 'number' ? 0 : bars.length - 1;
+        if(waitForTrade && s.plan.compiled.usesAmounts && zeroTradeReadingPending(bars,values,index)) { waitingForTrade = true; continue; }
+        if(!s.previous&&qualityInitializationPending(o.load,values,index))continue;
+        error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;
+      }
       // A confirmed veto closes immediately; later conditions need not also qualify or finish evaluating.
       const met=qualityConditionMet(reading,s.rule.direction,s.rule.threshold);
       const confirmation=!s.cause&&o.confirmOrdinary&&at>=checkFrom
@@ -146,8 +157,11 @@ export async function findQualityIntrabarExit(o: {
       s.previous={at,reading};
     }
     if(error)throw new Error(error);
-    if(o.matchMode==='all'&&streams.length&&matches.length===streams.length)return {...matches.at(-1)!,readings};
-    if(at>=checkFrom)o.onObservation?.(at);
+    if(o.matchMode==='all'&&!waitingForTrade&&streams.length&&matches.length===streams.length)return {...matches.at(-1)!,readings};
+    if(at>=checkFrom) {
+      if(waitForTrade)o.onObservation?.(at,{waitingForTrade});
+      else o.onObservation?.(at);
+    }
   };
   const replayStart=streams.length?Math.min(...streams.map(s=>s.start)):o.since;
   // Re-read at most five past minutes on resume, solely to restore the rolling window and previous reading.
@@ -198,7 +212,7 @@ export async function findQualityIntrabarExit(o: {
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding){holding=advanceQualityHolding(holding,minute);sellerPeak=Math.max(sellerPeak,minute.high);}}
       if(drops.length&&minute.openTime>=o.entry) {dropMinutes.push(minute);while(dropMinutes.length>maxDropWindow)dropMinutes.shift();}
-      const at=minute.openTime+MINUTE,trigger=await check(at);
+      const at=minute.openTime+MINUTE,trigger=await check(at,minute);
       if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices,mirrorFill};}
       for(const s of streams)if(s.partial&&at%s.plan.step===0) {s.history.push(s.partial);s.partial=undefined;}
       if(i%20===19)await fishDelay(0,signal);
