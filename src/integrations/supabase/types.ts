@@ -1122,7 +1122,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      read_turing_cup_klines: {
+        Args: { p_symbol: string; p_interval: string; p_start: number | null; p_end: number | null; p_limit: number }
+        Returns: Json
+      }
+      read_turing_cup_tick_size: { Args: { p_symbol: string }; Returns: number | null }
     }
     Enums: {
       [_ in never]: never

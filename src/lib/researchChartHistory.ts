@@ -1,6 +1,8 @@
 /** Hidden, symbol-isolated prehistory for chart indicator warmup. Never adds visible candles. */
 import type { KLineData } from 'klinecharts';
 import { fetchResearchKlines, RESEARCH_INTERVALS, intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
 
 interface Entry { from: number; desiredFrom:number; bars: KLineData[]; pending: boolean; retryAt: number; views:Map<number,KLineData[]> }
 const entries = new Map<string, Entry>();
@@ -9,13 +11,15 @@ let version = 0;
 export const researchHistoryVersion = () => version;
 export function subscribeResearchHistory(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
 export function resetResearchHistory() { entries.clear(); version++; }
+const historyKey = (symbol: string, interval: string, to: number, namespace?: string) =>
+  `${isTuringCupSymbol(symbol) ? getUserPrefix() : ''}${namespace ? namespace + '|' : ''}${symbol}|${interval}|${to}`;
 
 export function chartPrehistory(data: KLineData[], bars: number, step: number, namespace?:string): KLineData[] {
   const symbol = data[0]?.researchSymbol;
   const interval = RESEARCH_INTERVALS.find(i => intervalMs(i) === step) as ResearchInterval | undefined;
   if (typeof symbol !== 'string' || !interval || !data.length || !Number.isFinite(bars) || bars <= 0) return [];
   const to = data[0].timestamp, from = Math.max(0, to - Math.ceil(bars) * step);
-  const key = `${namespace?namespace+'|':''}${symbol}|${interval}|${to}`;
+  const key = historyKey(symbol, interval, to, namespace);
   let entry = entries.get(key);
   if (!entry) {
     entry = { from: to, desiredFrom:from,bars: [], pending: false, retryAt: 0, views:new Map() };
@@ -56,5 +60,6 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number, n
 /** An exact-state feature must wait for the complete requested prefix, not publish a provisional origin. */
 export function chartPrehistoryReady(data:KLineData[],bars:number,step:number,namespace?:string):boolean {
  if(bars<=0)return true;const interval=RESEARCH_INTERVALS.find(i=>intervalMs(i)===step),to=data[0]?.timestamp,symbol=data[0]?.researchSymbol;
- const entry=entries.get(`${namespace?namespace+'|':''}${symbol}|${interval}|${to}`);return !!entry&&!entry.pending&&entry.from<=Math.max(0,to-Math.ceil(bars)*step);
+ if (typeof symbol !== 'string' || !interval) return false;
+ const entry=entries.get(historyKey(symbol,interval,to,namespace));return !!entry&&!entry.pending&&entry.from<=Math.max(0,to-Math.ceil(bars)*step);
 }

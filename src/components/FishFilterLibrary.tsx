@@ -43,7 +43,7 @@ export function FishFilterLibrary({ study }: { study: FishQualityStudy }) {
       // 每个条件一个读数，顺序与「过滤条件」一致；悬停看逐条判断
       const readingText = s.filters.map((_, i) => { const x = r.readings[i]; return !x ? '—' : x.error || !Number.isFinite(x.value) ? '缺' : qualityFilterValueText(x.value!); }).join(' / ');
       return <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="filter-library-row" title={r.status.detail}>
-        <td className={`${libraryCell} font-mono`}>{r.source.symbol}{r.origin === 'library' && <span className="ml-1.5 font-sans text-[9px] text-muted-foreground">信号库</span>}</td>
+        <td className={`${libraryCell} font-mono`}>{r.source.symbol}{(r.origin === 'library' || r.origin === 'turing') && <span className="ml-1.5 font-sans text-[9px] text-muted-foreground">{r.origin === 'turing' ? '图灵杯' : '信号库'}</span>}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.source.timeMs)}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.enteredAt)}</td>
         <td className={`${libraryCell} min-w-[320px] max-w-[440px] align-top`}><p className="mb-1 text-[9px] text-muted-foreground">{saved.length>1?'交集 · 以下条件全部满足':'单条件'}</p><div className="space-y-1.5">{saved.map((c,i)=><FishLibraryCondition key={i} condition={c}/>)}</div></td>

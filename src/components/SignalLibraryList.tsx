@@ -33,6 +33,7 @@ import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/Fi
 import { FishProcessButton } from '@/components/FishProcess';
 import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID } from '@/components/SignalLibraryHeader';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
+import { turingCupTicker } from '@/lib/turingCupSymbol';
 import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { SignalQualityStars } from '@/components/SignalQualityStars';
 import { signalJumpIssueLabel, type SignalJumpIssue } from '@/lib/signalJumpDiagnostics';
@@ -588,7 +589,7 @@ function SignalLibraryListImpl({
         algorithmTypes={rowAlgorithmTypes?.(sig)}
         extraTitle={rowTitle?.(sig)}
         algorithm={rowAlgorithm?.(sig)}
-        symbol={sig.symbol}
+        symbol={turingCupTicker(sig.symbol)}
         exchange={sig.exchange}
         market={sig.market}
         chartUnavailable={!signalChartSymbol(sig)}

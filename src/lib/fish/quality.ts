@@ -258,15 +258,15 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
  * 三个来源独立保存；同一信号和入场时刻合并显示，删除只清理对应来源。
  */
 export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(signalDedupKey(source))}`;
-export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now()): FishQualityStudy {
-  study=resolveLegacySourceMemberships(study,signals,'library');
+export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' = 'library'): FishQualityStudy {
+  study=resolveLegacySourceMemberships(study,signals,origin);
   const ids = new Set(study.samples.map(s => s.id)), added: QualitySample[] = [];
   for (const source of signals) {
     const id = qualityLibrarySampleId(source);
     if (ids.has(id)) continue;
     ids.add(id);
     const enteredAt = Number.isFinite(source.timeMs) && source.timeMs > 0 ? source.timeMs : null;
-    added.push({ id, source: structuredClone(source), groups: [], enteredAt, basis: enteredAt == null ? 'missing' : 'signal', importedAt: now, origin: 'library',origins:['library'] });
+    added.push({ id, source: structuredClone(source), groups: [], enteredAt, basis: enteredAt == null ? 'missing' : 'signal', importedAt: now, origin, origins: [origin] });
   }
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
 }
@@ -657,6 +657,8 @@ export interface QualityProgress { done: number; total: number; current: string 
 export const QUALITY_CONCURRENCY = 4, QUALITY_CONCURRENCY_MAX = 8;
 export interface QualityRunTiming { sampleId: string; groupId: string; symbol: string; ms: number }
 export interface QualityRunOptions {
+  /** A finite offline series ends at its last available candle rather than at wall-clock time. */
+  marketEnd?: (symbol: string) => Promise<number>;
   /** 同时计算的行数（默认 QUALITY_CONCURRENCY）。 */
   concurrency?: number;
   /** 每笔评估的用时（调试与耗时统计用）。 */
@@ -764,11 +766,14 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
         const finished = cached?.complete || cached?.status === 'closed' && Number.isFinite(cached.returnPct);
         if (!finished && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) {
           // 【用户要求】2026-11-03 旧模板复原：标了旧引擎的方案交给冻结的 10-31 引擎
-          const t = performance.now(), result = isLegacyQualityPlan(g)
-            ? await evaluateLegacyQualitySample(s, g, study.observeHours, now, load, signal, qualityResultKey(s, g, study.observeHours))
-            : await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached);
+          const t = performance.now();
+          // The loader reports availability errors on the affected row, rather than ending the whole batch.
+          const marketEnd = await options.marketEnd?.(s.source.symbol).catch(() => now) ?? now;
+          const result = isLegacyQualityPlan(g)
+            ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, load, signal, qualityResultKey(s, g, study.observeHours))
+            : await evaluateQualitySample(s, g, study.observeHours, marketEnd, load, signal, cached);
           options.onTiming?.({ sampleId: s.id, groupId: g.id, symbol: s.source.symbol, ms: performance.now() - t });
-          options.onResult(result);
+          options.onResult(marketEnd === now ? result : { ...result, evaluatedAt: now });
         }
         done++;
         await new Promise(resolve => setTimeout(resolve, 0));

@@ -15,6 +15,7 @@
  */
 
 import { stockCode } from './signalMarket';
+import { isTuringCupSymbol } from './turingCupSymbol';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
 import { queueSimStatePush } from './simStateSync';
@@ -155,7 +156,7 @@ function normalizeSymbol(raw: string): string {
  * 其中「谢林兜底区」是标签、可有可无、与两侧可无空格。
  * 例：`naoris 0.107`、`tac 谢林兜底区 0.0127`、`M谢林兜底区 3.4（无）`、`补充on 谢林兜底区0.108`。
  */
-function parseSymbolLine(line: string): { symbol: string; zone: string } {
+function parseSymbolLine(line: string, normalize: (symbol: string) => string): { symbol: string; zone: string } {
   const s = line.trim().replace(LEADING_ANNOT_RE, '');
   const lm = FALLBACK_LABEL_RE.exec(s);
   let symbolPart: string;
@@ -173,7 +174,7 @@ function parseSymbolLine(line: string): { symbol: string; zone: string } {
       zonePart = '';
     }
   }
-  return { symbol: normalizeSymbol(symbolPart), zone: zonePart.trim() };
+  return { symbol: normalize(symbolPart), zone: zonePart.trim() };
 }
 
 function pushSignal(
@@ -199,7 +200,7 @@ function pushSignal(
  *   ② 行内格式：`标的, 时间, 兜底区`（逗号 / 制表符 / 空白分隔，时间自带在行内）。
  * 空行、`#`//` 注释、表头行、`无` 日期行会被静默跳过；同一 标的@时间 自动去重。
  */
-export function parseSignalText(text: string): { signals: TradeSignal[]; errors: string[] } {
+export function parseSignalText(text: string, normalize = normalizeSymbol): { signals: TradeSignal[]; errors: string[] } {
   const errors: string[] = [];
   const out: TradeSignal[] = [];
   const seen = new Set<string>();
@@ -242,7 +243,7 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
       if (HEADER_TIME_RE.test(parts[1])) continue; // 表头行静默跳过
       const tOld = parseSignalTime(parts[1]);
       if (tOld != null) {
-        const sym = normalizeSymbol(parts[0]);
+        const sym = normalize(parts[0]);
         if (sym) pushSignal(out, seen, sym, tOld, parts[1].trim(), parts.slice(2).join(' ').trim(), marketInfo);
         else errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
         continue;
@@ -254,7 +255,7 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
     if (inline) {
       const tInline = parseSignalTime(inline[2]);
       if (tInline != null) {
-        const sym = normalizeSymbol(inline[1]);
+        const sym = normalize(inline[1]);
         if (sym) pushSignal(out, seen, sym, tInline, inline[2].trim(), inline[3].trim(), marketInfo);
         else errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
         continue;
@@ -266,7 +267,7 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
       errors.push(`第 ${idx + 1} 行无法解析（其上方缺少日期表头）：${line}`);
       continue;
     }
-    const { symbol, zone } = parseSymbolLine(line);
+    const { symbol, zone } = parseSymbolLine(line, normalize);
     if (!symbol) {
       errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
       continue;
@@ -279,10 +280,12 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
 
 /** Binance keeps its legacy key; other venues have independent keys. */
 export function signalDedupKey(s: Pick<TradeSignal, 'exchange' | 'symbol' | 'timeMs' | 'market' | 'underlying'>): string {
+  if (isTuringCupSymbol(s.symbol)) return `${s.symbol}@${s.timeMs}`;
   if (s.market === 'us_stock') return `us:${s.exchange ?? 'binance'}:${stockCode(s)}@${s.timeMs}`;
   return `${s.exchange && s.exchange !== 'binance' ? `${s.exchange}:` : ''}${s.symbol}@${s.timeMs}`;
 }
 export function signalChartSymbol(s: TradeSignal): string | null {
+  if (isTuringCupSymbol(s.symbol)) return s.symbol;
   if (s.market === 'us_stock') return null;
   return !s.exchange || s.exchange === 'binance' ? s.symbol : s.binanceSymbol ?? null;
 }

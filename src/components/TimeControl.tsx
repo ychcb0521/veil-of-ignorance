@@ -21,6 +21,8 @@ import {
 } from '@/lib/signalLibrary';
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { useSignalLibrary } from '@/hooks/useSignalLibrary';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
 import { usePageFishQuality } from '@/contexts/FishQualityContext';
@@ -64,6 +66,7 @@ interface Props {
 }
 
 const FISH_TIME_KEY = 'veil.fish.time';
+const EMPTY_TURING_SIGNALS: TradeSignal[] = [];
 export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
@@ -93,6 +96,7 @@ export function TimeControl({
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
+  const [turing, setTuring] = useState(false);
   // 【用户要求】从鱼质量点进交易战役再返回：自动展开「渔」，鱼质量回到原来的位置（见 lib/fish/qualityReturn）
   const [fishOpen, setFishOpen] = useState(() => armQualityReturn());
   // 【用户要求】2026-10-26 打开「渔」时不弹「刚平了一笔 — 要现在做平仓评价吗？」，只记进消息列表
@@ -123,12 +127,21 @@ export function TimeControl({
   const fishNotify = useFishNotify(user?.id, undefined, getMailFish);
   const fish = useFish(user?.id, { onCaught: fishNotify.send });
   mailFishRef.current = fish.unionFish;
-  const [signals, setSignals] = useSignalLibrary();
+  const [onlineSignals, setOnlineSignals] = useSignalLibrary();
+  const [savedTuringSignals, setTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
+  const turingSignals = useMemo(() => Array.isArray(savedTuringSignals) ? savedTuringSignals.filter(signal =>
+    signal && typeof signal.id === 'string' && typeof signal.symbol === 'string' && isTuringCupSymbol(signal.symbol)
+    && Number.isFinite(signal.timeMs) && typeof signal.timeLabel === 'string' && typeof signal.fallbackZone === 'string'
+  ) : EMPTY_TURING_SIGNALS, [savedTuringSignals]);
+  const [signals, setSignals] = turing ? [turingSignals, setTuringSignals] : [onlineSignals, setOnlineSignals];
+  const libraryName = turing ? '图灵杯' : '信号库';
   // 信号库的信号也进鱼质量，只参加卖出比较（与鱼舱的鱼分开）
-  const fishQuality = usePageFishQuality(fish.signals, signals);
-  const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
+  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingSignals);
+  const onlineReconstruction = useFishReconstruction(user?.id, onlineSignals, fish.reconstruct);
+  const turingReconstruction = useFishReconstruction(user?.id, turingSignals, fish.reconstruct, true);
+  const reconstruction = turing ? turingReconstruction : onlineReconstruction;
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
-  const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;
+  const reconstructionRunning = useRef(false); reconstructionRunning.current = onlineReconstruction.running || turingReconstruction.running;
   const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.start, busy: () => fish.busy() || reconstructionRunning.current });
   const fishWasOpen = useRef(false);
   useEffect(() => {
@@ -158,6 +171,20 @@ export function TimeControl({
    */
   const [sortKey, setSortKey] = useState<'symbol' | 'time' | 'quality'>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleLibrary = (offline: boolean) => {
+    setFishOpen(false);
+    if (offline !== turing) {
+      setTuring(offline);
+      setImportOpen((offline ? turingSignals : onlineSignals).length === 0);
+      setImportText('');
+      setImportErrors([]);
+      setQuery('');
+      setMonthFilter('');
+      setSortKey('symbol');
+      setSortDir('asc');
+    }
+    setSignalLibOpen(open => offline !== turing || !open);
+  };
   const toggleSort = (key: 'symbol' | 'time' | 'quality') => {
     if (key === sortKey) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
     setSortKey(key);
@@ -184,7 +211,8 @@ export function TimeControl({
     checked: number;
     total: number;
   } | null>(null);
-  const completedSignalAuditKeyRef = useRef<string | null>(null);
+  const completedSignalAuditKeys = useRef<{ library?: string; turing?: string }>({});
+  const [turingCoverageWarning, setTuringCoverageWarning] = useState(false);
   /**
    * 行上的三个回调（跳转 / 删除 / 打分）必须**身份恒定**：
    * TimeControl 每跳一格模拟时间就重渲染一次（时钟、倍速、状态都挂在它身上），
@@ -217,7 +245,8 @@ export function TimeControl({
       setSignalAuditProgress(null);
       return;
     }
-    if (completedSignalAuditKeyRef.current === signalAuditKey) return;
+    const source = turing ? 'turing' : 'library';
+    if (completedSignalAuditKeys.current[source] === signalAuditKey) { setSignalAuditProgress(null); return; }
 
     const controller = new AbortController();
     const candidates = auditSignals.map(s => ({ id: s.id, symbol: signalChartSymbol(s)!, timeMs: s.timeMs }));
@@ -251,12 +280,13 @@ export function TimeControl({
       },
     ).then((summary) => {
       if (controller.signal.aborted) return;
+      if (turing) setTuringCoverageWarning(summary.retryableSymbols > 0);
       if (
         !summary.retryableReason
         && summary.retryableSymbols === 0
         && summary.checkedSymbols === summary.totalSymbols
       ) {
-        completedSignalAuditKeyRef.current = signalAuditKey;
+        completedSignalAuditKeys.current[source] = signalAuditKey;
       }
       setSignalAuditProgress(null);
     }).catch(() => {
@@ -266,6 +296,8 @@ export function TimeControl({
     return () => controller.abort();
   }, [
     signalAuditKey,
+    setSignals,
+    turing,
     signalJumpInterval,
     signalJumpIntervalMs,
   ]);
@@ -297,7 +329,7 @@ export function TimeControl({
    * 刻意不看 sortedFiltered 的身份：打分和删除也会换掉那个数组，
    * 但那两种情况下把人弹回顶部只会让他丢失刚才看到哪儿了。
    */
-  const listResetKey = `${sortKey}|${sortDir}|${monthFilter}|${query.trim().toUpperCase()}`;
+  const listResetKey = `${libraryName}|${sortKey}|${sortDir}|${monthFilter}|${query.trim().toUpperCase()}`;
   const listResetKeyRef = useRef(listResetKey);
   listResetKeyRef.current = listResetKey;
   // 冻结表带着记下时的口径：口径一变即作废（点表头那一帧就按新评分排，不闪旧顺序）
@@ -346,16 +378,17 @@ export function TimeControl({
   }, [signalLibOpen, fishOpen, user?.id]);
 
   const doImport = (text: string) => {
-    const { signals: parsed, errors } = parseSignalText(text);
+    const { signals: parsed, errors } = parseSignalText(text, turing ? turingCupSymbol : undefined);
+    const accepted = turing ? parsed : parsed.filter(signal => !isTuringCupSymbol(signal.symbol));
     setImportErrors(errors);
-    if (parsed.length === 0) {
+    if (accepted.length === 0) {
       toast.error('没有可导入的信号', { description: errors[0] ?? '请粘贴「日期时间表头 + 多行标的」或「标的, 时间, 兜底区」' });
       return;
     }
-    const merged = mergeSignals(signals, parsed);
+    const merged = mergeSignals(signals, accepted);
     const added = merged.length - signals.length;
     setSignals(merged);
-    toast.success(`已导入 ${added} 条信号`, added < parsed.length ? { description: `${parsed.length - added} 条重复已跳过` } : undefined);
+    toast.success(`已导入 ${added} 条信号`, added < accepted.length ? { description: `${accepted.length - added} 条重复已跳过` } : undefined);
   };
 
   const handleImport = () => { doImport(importText); setImportText(''); };
@@ -371,8 +404,8 @@ export function TimeControl({
   };
 
   const handleDeleteSignal = useCallback(
-    (id: string) => {const source=signalsRef.current.find(s=>s.id===id);if(!source)return;void (async()=>{try{await fishQuality.deleteSources?.([{source,entry:null,origin:'library'}]);setSignals(prev=>prev.filter(s=>s.id!==id));}catch(e){toast.error((e as Error).message);}})();},
-    [fishQuality.deleteSources],
+    (id: string) => {const source=signalsRef.current.find(s=>s.id===id);if(!source)return;void (async()=>{try{await fishQuality.deleteSources?.([{source,entry:null,origin:turing?'turing':'library'}]);setSignals(prev=>prev.filter(s=>s.id!==id));}catch(e){toast.error((e as Error).message);}})();},
+    [fishQuality.deleteSources, setSignals, turing],
   );
   /**
    * 打分。setSignals 会将这次手动修改落盘，并顺着 saveSignals 推到云端；
@@ -388,19 +421,19 @@ export function TimeControl({
       return map.has(id) ? prev : { key, map: new Map(map).set(id, before) };
     });
     setSignals(prev => setSignalQuality(prev, id, next));
-  }, []);
-  const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message('信号库已清空'); };
+  }, [setSignals]);
+  const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message(`${libraryName}已清空`); };
 
   // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。
   const handleExportSignals = () => {
     if (signals.length === 0) return;
-    const text = serializeSignals(signals);
+    const text = serializeSignals(turing ? signals.map(signal => ({ ...signal, symbol: turingCupTicker(signal.symbol) })) : signals);
     const stamp = formatUTC8(Date.now()).replace(/[^\d]/g, '').slice(0, 12);
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `signal-library-${stamp || 'export'}.txt`;
+    a.download = `${turing ? 'turing-cup' : 'signal-library'}-${stamp || 'export'}.txt`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -441,7 +474,7 @@ export function TimeControl({
       jumpingSignalIdRef.current = null;
       setJumpingSignalId(null);
     }
-  }, []);
+  }, [setSignals]);
 
   // 手动删除走 fish.remove：记删除记号，别的设备 / 窗口的旧副本合并时不会把它带回来
   const handleDeleteFish = useCallback((id: string) => fish.remove(id), [fish.remove]);
@@ -456,7 +489,7 @@ export function TimeControl({
     jumpingSignalIdRef.current = id; setJumpingSignalId(id);
     const updateIssue = (issue: TradeSignal['jumpIssue']) => {
       if (fishSignal) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
-      else setSignals(previous => previous.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
+      else (isTuringCupSymbol(sig.symbol) ? setTuringSignals : setOnlineSignals)(previous => previous.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
     };
     try {
       const result = await jumpTo(signalChartSymbol(sig)!, sig.timeMs);
@@ -468,7 +501,7 @@ export function TimeControl({
         if (issue) updateIssue(issue);
       }
     } finally { jumpingSignalIdRef.current = null; setJumpingSignalId(null); }
-  }, [fish.commit, fish.signalsRef, rememberFishPosition, setSignals]);
+  }, [fish.commit, fish.signalsRef, rememberFishPosition, setOnlineSignals, setTuringSignals]);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -505,20 +538,30 @@ export function TimeControl({
         </div>
 
         <button
-          onClick={() => { setFishOpen(false); setSignalLibOpen(o => !o); }}
+          type="button"
+          aria-expanded={signalLibOpen && !turing}
+          onClick={() => toggleLibrary(false)}
           title="信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面"
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
-            signalLibOpen
+            signalLibOpen && !turing
               ? 'border-primary/40 bg-primary/15 text-primary'
               : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'
           }`}
         >
           <Database className="w-3 h-3" />
           信号库
-          {signals.length > 0 && (
-            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{signals.length}</span>
+          {onlineSignals.length > 0 && (
+            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{onlineSignals.length}</span>
           )}
-          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && !turing ? 'rotate-180' : ''}`} />
+        </button>
+
+        <button type="button" aria-expanded={signalLibOpen && turing} onClick={() => toggleLibrary(true)}
+          title="图灵杯：使用导入的离线行情查看盘面和复盘"
+          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${signalLibOpen && turing ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
+          <Database className="w-3 h-3" />图灵杯
+          {turingSignals.length > 0 && <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{turingSignals.length}</span>}
+          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && turing ? 'rotate-180' : ''}`} />
         </button>
 
         <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); setFishOpen(o => !o); }}
@@ -588,12 +631,12 @@ export function TimeControl({
         )}
       </div>
 
-      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={onlineReconstruction} librarySignals={onlineSignals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
         onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
-        <div data-testid="signal-library-panel" className="mt-2 border-t border-border/60 pt-2">
+        <div key={libraryName} data-testid={turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2">
           {/* 统一工具条：筛选 + 导入 / 导出 / 预检。
               原先「只放两个 12px 图标」的独立一行已并入这里——横向本来就过剩，
               纵向才是稀缺的，这是把过剩的横向兑换成纵向的一次交易。 */}
@@ -631,14 +674,14 @@ export function TimeControl({
               {signals.length > 0 && (
                 <button
                   onClick={handleExportSignals}
-                  title="导出信号库为 txt（与导入互逆，可原样再导入）"
+                  title={`导出${libraryName}为 txt（与导入互逆，可原样再导入）`}
                   className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   <Download className="h-3 w-3" />
                 </button>
               )}
               {signals.length > 0 && (
-                <SignalTurnoverButton signals={signals} run={fish.turnover} busyReason={fish.progress?.status === 'running' || reconstruction.running ? '捕捞或复原进行中，结束后再统计' : undefined} />
+                <SignalTurnoverButton turing={turing} signals={signals} run={fish.turnover} busyReason={fish.progress?.status === 'running' || reconstructionRunning.current ? '捕捞或复原进行中，结束后再统计' : undefined} />
               )}
               {signalAuditProgress && (
                 <span
@@ -650,11 +693,14 @@ export function TimeControl({
                   预检 {signalAuditProgress.checked}/{signalAuditProgress.total}
                 </span>
               )}
+              {turing && !signalAuditProgress && turingCoverageWarning && (
+                <span className="text-[10px] text-muted-foreground">部分信号缺少当前周期的离线 K 线</span>
+              )}
             </div>
           {importOpen && (
             <div className="mb-1.5">
             <div className="mb-1.5 text-[10px] text-muted-foreground">
-              上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · 标的自动补 USDT
+              上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · {turing ? '标的需与离线行情一致' : '标的自动补 USDT'}
             </div>
             <textarea
               value={importText}
@@ -697,7 +743,7 @@ export function TimeControl({
             {sortedFiltered.length === 0 ? (
               <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">
                 {signals.length === 0
-                  ? '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
+                  ? turing ? '图灵杯暂无信号。离线行情和信号导入后，可在这里查看盘面、战役，并在「鱼质量」筛选图灵杯。' : '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
                   : '没有匹配的标的。'}
               </div>
             ) : (

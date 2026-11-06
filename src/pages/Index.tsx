@@ -3,6 +3,7 @@ import { formatUTC8 } from "@/lib/timeFormat";
 import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from "@/contexts/TradingContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { SUPERSEDED_INIT_LOAD, useBinanceData, intervalToMs, chartAmountFields, type KlineData } from "@/hooks/useBinanceData";
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { useBackgroundPrices } from "@/hooks/useBackgroundPrices";
 import { useReplayChartRestore } from "@/hooks/useReplayChartRestore";
 import { usePersistedState, clearSimState } from "@/hooks/usePersistedState";
@@ -1907,7 +1908,7 @@ const Index = () => {
   // 从「信号库」下拉点开某标的时调用，越过手动输入标的/时间，直接定位盘面。
   const handleJumpToSignal = useCallback(
     async (symbol: string, timeMs: number): Promise<SignalJumpResult> => {
-      const normalized = symbol.toUpperCase().replace(/[\s/]+/g, "");
+      const normalized = isTuringCupSymbol(symbol) ? symbol : symbol.toUpperCase().replace(/[\s/]+/g, "");
 
       // 关键：先取数，确认拿到数据后，才改任何共享状态。
       // 「信号库」（按信号自动启动）与「手动启动」必须相互独立——一次失败的跳转

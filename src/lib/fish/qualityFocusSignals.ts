@@ -4,6 +4,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { fishMetricLabel } from './records';
 import { qualityMembers, type FishQualityStudy } from './quality';
 import type { FishSnapshot } from './algorithm';
+import { isSignalLibraryOrigin } from './qualitySources';
 
 export const FOCUS_DETECTORS = ['avg_CBI2_2', 'avg_CBA_2'] as const;
 /** User's screenshot, April 2026, UTC+8. References only; never invent monitoring returns. */
@@ -43,12 +44,12 @@ export function qualityFocusSignals(study:FishQualityStudy):QualityFocusSignal[]
  for(const seed of FOCUS_SIGNAL_SEEDS)ensure(seed,false).specified=true;
  for(const sample of study.samples){
   const event=ensure(sample.source);
-  if(sample.origin==='library')continue;
+  if(isSignalLibraryOrigin(sample.origin))continue;
   evidence(event,[...sample.groups.flatMap(id=>groups.has(id)?[groups.get(id)!.snapshot]:[]),...qualityMembers(sample.source)]);
  }
  for(const run of study.campaignRuns ?? []){
   const event=ensure(run.sample.source);
-  if(run.sample.origin!=='library')evidence(event,run.detectors.map(g=>g.snapshot));
+  if(!isSignalLibraryOrigin(run.sample.origin))evidence(event,run.detectors.map(g=>g.snapshot));
  }
  for(const record of study.monitorLibrary?.records ?? []){
   const setting=settings.get(record.settingId);if(!setting)continue;

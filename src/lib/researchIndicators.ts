@@ -1,3 +1,4 @@
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS} from '@/lib/dbl5m';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
@@ -354,8 +355,12 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   let ref: (number | null)[] | undefined;
   if (usesBtc && data.length) {
     const times = data.map(d => d.timestamp), interval = chartInterval(data);
-    if (options.fetchReference !== false) requestBtcReference(times[0], times[times.length - 1] + interval, interval);
-    ref = btcClosesAt(times, interval);
+    const symbol = data.find(bar => typeof bar.researchSymbol === 'string')?.researchSymbol as string | undefined;
+    if (options.fetchReference !== false) {
+      if (isTuringCupSymbol(symbol ?? '')) requestBtcReference(times[0], times[times.length - 1] + interval, interval, undefined, symbol);
+      else requestBtcReference(times[0], times[times.length - 1] + interval, interval);
+    }
+    ref = btcClosesAt(times, interval, symbol);
   }
   const names = researchSeriesNames(item, formula);
   const generation = chartDataGenerations.get(data);

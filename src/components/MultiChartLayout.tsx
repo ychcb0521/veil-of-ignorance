@@ -1,3 +1,4 @@
+import { fetchSignalMarketKlines } from '@/lib/turingCupMarketData';
 import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import type { ChartImperativeApi } from "./CandlestickChart";
 import { CandlestickChart } from "./CandlestickChart";
@@ -126,9 +127,8 @@ export function MultiChartLayout({
         const ms = intervalMs[interval] || 60000;
         const startTime = endTime - ms * 300;
 
-        const res = await fetch(
-          `https://fapi.binance.com/fapi/v1/klines?symbol=${rawSymbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=300`,
-        );
+        const params = new URLSearchParams({ symbol: rawSymbol, interval, startTime: String(startTime), endTime: String(endTime), limit: '300' });
+        const res = await fetchSignalMarketKlines(`https://fapi.binance.com/fapi/v1/klines?${params}`, fetch);
         const raw = await res.json();
         const data: KlineData[] = raw.map((k: any[]) => ({
           time: k[0],

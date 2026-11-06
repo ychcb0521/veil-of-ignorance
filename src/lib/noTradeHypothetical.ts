@@ -1,5 +1,6 @@
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import type { TradeJournal } from '@/types/journal';
+import { fetchSignalMarketKlines } from './turingCupMarketData';
 
 export interface NoTradeHypotheticalResult {
   pnl_24h_pct: number | null;
@@ -27,7 +28,7 @@ async function fetchKlines({
     endTime: String(endTime),
   });
 
-  const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`);
+  const res = await fetchSignalMarketKlines(`https://fapi.binance.com/fapi/v1/klines?${qs}`, fetch);
   if (!res.ok) throw new Error(`K 线加载失败：API ${res.status}`);
   const raw: unknown = await res.json();
   if (!Array.isArray(raw)) return [];

@@ -12,9 +12,9 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishSignalFingerprint } from '@/lib/fish/suggestions';
 import { TURNOVER_BUCKETS, TURNOVER_WINDOWS, bucketTurnover, formatUsdtCn, readSignalTurnover, signalTurnoverCsv, turnoverValues, rateTurnoverRows, type SignalTurnoverOptions, type SignalTurnoverProgress, type SignalTurnoverResult, type TurnoverWindow } from '@/lib/signalTurnover';
 
-export function SignalTurnoverButton({ signals, run, busyReason }: { signals: readonly TradeSignal[]; run?: (options: SignalTurnoverOptions) => Promise<SignalTurnoverResult>; busyReason?: string }) {
+export function SignalTurnoverButton({ signals, run, busyReason, turing = false }: { turing?: boolean; signals: readonly TradeSignal[]; run?: (options: SignalTurnoverOptions) => Promise<SignalTurnoverResult>; busyReason?: string }) {
   const [open, setOpen] = useState(false);
-  const [result, setResult] = useState<SignalTurnoverResult | null>(readSignalTurnover);
+  const [result, setResult] = useState<SignalTurnoverResult | null>(() => readSignalTurnover(turing));
   const [progress, setProgress] = useState<SignalTurnoverProgress | null>(null);
   const [error, setError] = useState('');
   const [win, setWin] = useState<TurnoverWindow>(24);
@@ -70,7 +70,7 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
         </div>}
 
         {!running && !result && <div className="space-y-3 text-[11px] leading-relaxed text-muted-foreground">
-          <p>在你的浏览器里逐个向交易所取信号前 24 小时的 5 分钟 K 线（每个信号一次请求，约几分钟），六个时长一起算出，存在本机，下次打开直接看。</p>
+          <p>在你的浏览器里逐个从{turing ? '图灵杯离线库' : '交易所'}读取信号前 24 小时的 5 分钟 K 线，六个时长一起算出，存在本机，下次打开直接看。</p>
           <button type="button" disabled={!run || !!busyReason || !signals.length} onClick={() => void start()} className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">开始统计</button>
           {busyReason && <p className="text-[10.5px]">{busyReason}</p>}
         </div>}
@@ -81,7 +81,7 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
           {TURNOVER_WINDOWS.map(h => <button key={h} type="button" role="tab" aria-selected={win === h} onClick={() => setWin(h)} className={`h-6 rounded px-2.5 font-mono tabular-nums transition-colors ${win === h ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{h}h</button>)}
         </div>}
         {result && s && <div className="space-y-4" data-testid="signal-turnover-result">
-          {stale && <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[10.5px] text-muted-foreground">信号库有改动，这份结果是按改动前的 {result.total} 个信号算的。</p>}
+          {stale && <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[10.5px] text-muted-foreground">{turing ? '图灵杯' : '信号库'}有改动，这份结果是按改动前的 {result.total} 个信号算的。</p>}
           <div>
             <div className="text-[10.5px] text-muted-foreground">信号前 {win} 小时成交额 · 区间（最小 ~ 最大）</div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-mono tabular-nums"><span className="text-lg font-semibold">{formatUsdtCn(s.min)} ~ {formatUsdtCn(s.max)}</span><span className="text-[11px] text-muted-foreground">USDT</span></div>

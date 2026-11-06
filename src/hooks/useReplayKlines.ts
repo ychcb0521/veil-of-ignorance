@@ -1,6 +1,8 @@
 /**
  * useReplayKlines — 拉取指定时间范围 + 周期的历史 K 线（只读，不挂在主 useBinanceData 上）
  */
+import { fetchSignalMarketKlines } from '@/lib/turingCupMarketData';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { useEffect, useRef, useState } from 'react';
 import { intervalToMs, klineAmountFields, type KlineData } from '@/hooks/useBinanceData';
 import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
@@ -153,7 +155,7 @@ async function fetchKlinePage(url: string, signal?: AbortSignal): Promise<KlineD
     return await Promise.race([
       interruption,
       (async () => {
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await fetchSignalMarketKlines(url, fetch, controller.signal);
         throwIfAborted(signal);
         if (!response.ok) throw responseError(response);
         let raw: unknown;
@@ -185,6 +187,7 @@ async function fetchKlinePage(url: string, signal?: AbortSignal): Promise<KlineD
   } catch (error) {
     if (signal?.aborted) throw abortError();
     if (error instanceof ReplayKlineRequestError || isAbortError(error)) throw error;
+    if (isTuringCupSymbol(new URL(url).searchParams.get('symbol') ?? '') && error instanceof Error) throw error;
     throw new ReplayKlineRequestError('K 线网络请求失败', 'network', true);
   } finally {
     clearTimeout(timer);
@@ -239,6 +242,7 @@ export async function fetchReplayKlineRange(
   const out: KlineData[] = [];
   let cursor = fromTime;
   const priority = options?.priority ?? 'interactive';
+  const offline = isTuringCupSymbol(symbol);
   // Binance fapi limit 1500 per request
   const limit = 1500;
   while (cursor < toTime) {
@@ -250,17 +254,17 @@ export async function fetchReplayKlineRange(
       endTime: String(toTime),
       limit: String(limit),
     });
-    const cooldown = priority === 'background' ? backgroundCooldownError() : undefined;
+    const cooldown = !offline && priority === 'background' ? backgroundCooldownError() : undefined;
     if (cooldown) throw cooldown;
     const primaryUrl = `https://fapi.binance.com/fapi/v1/klines?${qs}`;
     const alternateUrl = `https://www.binance.com/fapi/v1/klines?${qs}`;
     const alternateFirst = preferAlternateKlineEndpointUntil > Date.now();
     let page: KlineData[];
     try {
-      page = await governedKlineFetch(alternateFirst ? alternateUrl : primaryUrl, signal, priority);
+      page = offline ? await fetchKlinePage(primaryUrl, signal) : await governedKlineFetch(alternateFirst ? alternateUrl : primaryUrl, signal, priority);
     } catch (firstError) {
       throwIfAborted(signal);
-      if (!(firstError instanceof ReplayKlineRequestError) || !firstError.retryable) throw firstError;
+      if (offline || !(firstError instanceof ReplayKlineRequestError) || !firstError.retryable) throw firstError;
       try {
         page = await governedKlineFetch(alternateFirst ? primaryUrl : alternateUrl, signal, priority);
         preferAlternateKlineEndpointUntil = alternateFirst ? 0 : Date.now() + 5 * 60_000;
@@ -288,7 +292,7 @@ export async function fetchReplayKlineRange(
     out.push(...page);
     const last = out[out.length - 1];
     if (!last) break;
-    const next = last.time + intervalToMs(interval);
+    const next = last.time + (offline ? 1 : intervalToMs(interval));
     if (next <= cursor) throw new ReplayKlineRequestError('K 线分页未前进', 'invalid-response', true);
     cursor = next;
     if (page.length < limit) break;
