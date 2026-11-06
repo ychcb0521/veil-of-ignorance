@@ -1,10 +1,25 @@
-import { signalDedupKey } from '@/lib/signalLibrary';
+import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import type { QualitySample } from './quality';
 import {qualityOrigins} from './qualitySources';
 
 /** Display-only grouping by signal and buy time. Preserve every entry, source and detector ID for execution and selection. */
 export interface QualityTableRow extends QualitySample { members?: QualitySample[] }
 export const qualityTableMembers = (row: QualityTableRow): QualitySample[] => row.members ?? [row];
+/** Wall-clock capture time. A historical scan anchor is never a capture time. */
+export function miningCaptureTime(signal: TradeSignal): number | null {
+  if (!signal.mined) return null;
+  const archive = signal.fishArchive;
+  const at = signal.caughtAt ?? (archive?.id.startsWith('mine-') ? archive.at : undefined);
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null;
+}
+export function qualityTableMinedAt(row: QualityTableRow): number | null {
+  let earliest: number | null = null;
+  for (const { source } of qualityTableMembers(row)) {
+    const at = miningCaptureTime(source);
+    if (at !== null && (earliest === null || at < earliest)) earliest = at;
+  }
+  return earliest;
+}
 export const qualityTableSignalKey = (row: QualitySample) => signalDedupKey(row.source);
 export function collapseQualityTableRows(rows: readonly QualitySample[]): QualityTableRow[] {
   const grouped = new Map<string, QualityTableRow>();

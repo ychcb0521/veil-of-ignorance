@@ -323,6 +323,31 @@ it('sorts by every header, keeping empty values last in both directions', () => 
   fireEvent.click(screen.getByRole('button', { name: '按标的排序' })); expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
   expect(screen.getByRole('columnheader', { name: /标的/ })).toHaveAttribute('aria-sort', 'ascending');
 });
+it('sorts the combination table by actual mining time in both directions, with missing times last', () => {
+  const s = state();
+  s.study.samples = s.study.samples.map((sample, index) => ({
+    ...sample, origin: 'mined', origins: ['mined'],
+    source: {
+      ...sample.source, symbol: index < 2 ? 'AAAUSDT' : 'BBBUSDT',
+      timeMs: index < 2 ? T : T - 60_000, mined: { anchorMs: T },
+      caughtAt: T + (index < 2 ? 10_000 : 30_000),
+    },
+  }));
+  s.study = importQualityLibrary(s.study, [{ id: 'manual', symbol: 'CCCUSDT', timeMs: T + 60_000, timeLabel: '', fallbackZone: '' }]);
+  render(<FishQuality state={s}/>);
+  const symbols = () => screen.getAllByTestId('quality-fish-row').map(row => row.textContent!.match(/[A-Z]{3}USDT/)![0]);
+  const heading = screen.getByTestId('quality-mined-at-column');
+  const button = within(heading).getByRole('button', { name: '按挖掘时间排序' });
+  expect(symbols()).toEqual(['CCCUSDT', 'AAAUSDT', 'BBBUSDT']);
+  fireEvent.click(button);
+  expect(heading).toHaveAttribute('aria-sort', 'descending');
+  expect(symbols()).toEqual(['BBBUSDT', 'AAAUSDT', 'CCCUSDT']);
+  fireEvent.click(button);
+  expect(heading).toHaveAttribute('aria-sort', 'ascending');
+  expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
+  fireEvent.click(screen.getByRole('button', { name: '展开探测算法明细' }));
+  expect(symbols()).toEqual(['AAAUSDT', 'AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
+});
 it('sorts sell outcomes among bought signals only; not-bought and pending rows stay last', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');

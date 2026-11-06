@@ -1,4 +1,5 @@
 import {useFishBulkDelete} from './FishBulkDeletion';
+import { miningRecordDeleteTargets } from '@/lib/fish/libraryDeletion';
 import { miningLibraryConditions, libraryConditionSearch } from '@/lib/fish/libraryConditions';
 import { FishLibraryCondition, libraryReading } from '@/components/FishLibraryConditions';
 /** 挖掘库：批量挖掘每一档的扫描与挖到的信号（数据见 lib/fish/miningLibrary，存 IndexedDB 并随账号同步）。 */
@@ -8,6 +9,7 @@ import { emptyMiningLibrary, type FishMiningLibrary, type FishMiningRecord, type
 import { loadMiningLibrary, MINING_LIBRARY_EVENT } from '@/lib/fish/miningLibraryStore';
 import { fishVisibleCatchKey } from '@/lib/fish/records';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { miningCaptureTime } from '@/lib/fish/qualityTableRows';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 const date = (t: number | null | undefined) => t == null ? '—' : formatUTC8(t);
@@ -16,11 +18,12 @@ const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CB
 const runText = (run: FishMiningRun) => run.rules.map(r => `${RULE_NAMES[r.featureId] ?? r.featureId} · ${r.statistic} > ${r.threshold}`).join(run.combination === 'and' ? ' ∩ ' : ' ∪ ');
 /** 实际捕到这条信号的探测算法（并集只列命中的，交集列全部）。 */
 
-type FishMiningRow = FishMiningRecord & { ids: string[]; catchKeys: string[] };
+type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null };
 
 
 export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
   const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
+  const [direction, setDirection] = useState<'none' | 'ascending' | 'descending'>('none');
   const [library, setLibrary] = useState<FishMiningLibrary>(emptyMiningLibrary), [open, setOpen] = useState(false);
   const reload = useCallback(() => { void loadMiningLibrary(account).then(setLibrary); }, [account]);
   // 打开时读；开着的时候挖到新的一档就刷新
@@ -36,29 +39,45 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
   const anchors = useMemo(() => [...library.anchors].sort((a, b) => b.anchorMs - a.anchorMs || b.scannedAt - a.scannedAt), [library.anchors]);
   const anchorOf = useMemo(() => new Map(library.anchors.map(a => [a.id, new Set(a.recordIds)])), [library.anchors]);
   // 【用户要求】2026-10-27「命中算法只显示探测算法（被哪个算法捕捉到的）」：只列实际命中的算法（并集看命中编号）。
-  // 同一档里标的、信号时间、完整命中条件都一样的记录（算法编号修过别名前后各存了一份）显示时合并为一行，保留最新那份。
-  const items = useMemo(() => {
+  // 同一方案与档位里的算法别名重复项合并。重新开始的轮次各自保留，便于核对和删除。
+  const byAnchor = useMemo(() => {
     const rows = new Map<string, FishMiningRow>();
     for (const record of library.records) {
-      const key = `${record.anchorMs}|${fishVisibleCatchKey(record.signal)}|${evidence.get(record.id)!.identity}`, prior = rows.get(key);
-      if (!prior) rows.set(key, { ...record, ids: [record.id], catchKeys: [record.catchKey] });
-      else rows.set(key, { ...(prior.updatedAt >= record.updatedAt ? prior : record), ids: [...prior.ids, record.id], catchKeys: [...prior.catchKeys, record.catchKey] });
+      const key = `${record.runId}|${record.anchorMs}|${fishVisibleCatchKey(record.signal)}|${evidence.get(record.id)!.identity}`, prior = rows.get(key);
+      const minedAt = miningCaptureTime(record.signal);
+      if (!prior) rows.set(key, { ...record, ids: [record.id], minedAt });
+      else {
+        const latest = prior.updatedAt >= record.updatedAt ? prior : record;
+        rows.set(key, { ...latest, ids: [...prior.ids, record.id], minedAt: miningCaptureTime(latest.signal) ?? prior.minedAt ?? minedAt });
+      }
     }
     return [...rows.values()].sort((a, b) => b.anchorMs - a.anchorMs || b.signal.timeMs - a.signal.timeMs || a.signal.symbol.localeCompare(b.signal.symbol));
-  }, [library.records,evidence]);
+  }, [library.records, evidence]);
+  const items = useMemo(() => {
+    if (direction === 'none') return byAnchor;
+    return [...byAnchor].sort((a, b) => {
+      if (a.minedAt === null) return b.minedAt === null ? 0 : 1;
+      if (b.minedAt === null) return -1;
+      return direction === 'ascending' ? a.minedAt - b.minedAt : b.minedAt - a.minedAt;
+    });
+  }, [byAnchor, direction]);
   const multipleRuns = library.runs.length > 1;
   const options = anchors.map(a => ({ id: a.id, error: a.error, label: `${short(a.anchorMs)} 这一档 · ${a.error ? `出错${a.attempts > 1 ? `（已试 ${a.attempts} 次）` : ''}` : `扫到 ${a.found} · 新增 ${a.added}`}${multipleRuns ? ` · ${runText(runs.get(a.runId)!)}` : ''}` }));
   const match = useCallback((r: FishMiningRow, needle: string, anchorId: string) => {
     if (anchorId && !r.ids.some(id => anchorOf.get(anchorId)?.has(id))) return false;
-    return !needle || r.signal.symbol.toUpperCase().includes(needle) || evidence.get(r.id)!.conditions.some(c=>libraryConditionSearch(c).toUpperCase().includes(needle));
+    return !needle || r.signal.symbol.toUpperCase().includes(needle) || (r.minedAt !== null && date(r.minedAt).includes(needle)) || evidence.get(r.id)!.conditions.some(c=>libraryConditionSearch(c).toUpperCase().includes(needle));
   }, [anchorOf,evidence]);
   const errors = library.anchors.filter(a => a.error).length;
   const latestRun = [...library.runs].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  return <FishLibraryDialog name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、具体指标或门槛…" onOpenChange={setOpen}
+  return <FishLibraryDialog name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { setOpen(next); if (!next) setSelected(new Set()); }}
     description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}`}
-    info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。相同档位、信号及完整算法条件的重复记录合并显示；不同门槛或公式版本分别保留。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
-    headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '入库时间']}
-    items={items} match={match} selection={bulk?{key:r=>r.id,selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),toggle:()=>{},select:ids=>setSelected(s=>new Set([...s,...ids])),clear:()=>setSelected(new Set()),remove:()=>{const picked=items.filter(r=>selected.has(r.id));bulk({kind:'mining',ids:picked.flatMap(r=>r.ids),targets:picked.map(r=>({source:r.signal,entry:r.anchorMs}))});}}:undefined}
+    info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
+    headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '挖掘时间']}
+    sortColumn={{ label: '挖掘时间', direction, toggle: () => setDirection(current => current === 'descending' ? 'ascending' : 'descending') }}
+    items={items} match={match} selection={bulk?{key:r=>r.id,selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),toggle:()=>{},select:ids=>setSelected(new Set(ids)),clear:()=>setSelected(new Set()),remove:()=>{
+      const ids = items.filter(r => selected.has(r.id)).flatMap(r => r.ids);
+      bulk({ kind: 'mining', ids, targets: miningRecordDeleteTargets(library.records, new Set(ids)) });
+    }}:undefined}
     empty={{ none: '暂无挖掘记录。开始批量挖掘后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
     row={r => {
       const saved=evidence.get(r.id)!;
@@ -69,7 +88,7 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{short(r.anchorMs)}</td>
         <td className={`${libraryCell} min-w-[320px] max-w-[440px] align-top`}><p className="mb-1 text-[9px] text-muted-foreground">{saved.combination}</p><div className="space-y-1.5">{saved.conditions.map((c,i)=><FishLibraryCondition key={i} condition={c}/>)}</div>{saved.note&&<p className="mt-1 whitespace-normal text-[10px] text-muted-foreground">{saved.note}</p>}</td>
         <td className={`${libraryCell} min-w-[180px] align-top font-mono tabular-nums`}><p className="mb-1 font-sans text-[9px] text-muted-foreground">与左侧算法逐项对应</p><div className="space-y-1.5">{saved.conditions.map((c,i)=><div key={i} className="min-h-9"><p className="text-foreground">{c.metric} = {libraryReading(c.reading)}</p>{c.rawReading!==undefined&&c.reading===undefined?<p className="text-[9px] text-muted-foreground">原值 {libraryReading(c.rawReading)} · 显示倍率未记录</p>:<p className="text-[9px] text-muted-foreground">{c.snapshot.scale===1?'原值':`原值 × ${c.snapshot.scale??'未知'}`}</p>}</div>)}</div></td>
-        <td className={`${libraryCell} font-mono text-muted-foreground`} title={date(r.firstSavedAt)}>{date(r.firstSavedAt).slice(5, 16)}</td>
+        <td className={`${libraryCell} font-mono text-muted-foreground`} title={`入库时间：${date(r.firstSavedAt)}`} data-testid="mining-library-mined-at">{date(r.minedAt)}</td>
       </tr>;
     }}/>;
 }

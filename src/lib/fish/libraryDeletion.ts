@@ -2,25 +2,60 @@
 import {librarySignalIdentity} from './libraryRounds';
 import type {TradeSignal} from '@/lib/signalLibrary';
 import {qualityComparisonRows,activeStandaloneBuyFilters,activeBuyFilters,qualityFilterReadingKey,type FishQualityStudy} from './quality';
-import type {FishMiningLibrary} from './miningLibrary';
+import type {FishMiningLibrary, FishMiningRecord} from './miningLibrary';
 import {qualityOrigins,mergeLegacySourceResolutions,type LegacySourceResolutions,type QualityOrigin,type QualityProvenance} from './qualitySources';
 export type SourceDeletions=Record<string,number>;
-export type DeleteTarget={source:Pick<TradeSignal,'symbol'|'timeMs'|'exchange'|'market'|'underlying'>;entry:number|null;origin?:QualityOrigin};
-export const deletionKey=(t:DeleteTarget)=>JSON.stringify([librarySignalIdentity(t.source),t.entry,t.origin??'*']);
+export type DeleteTarget={source:Pick<TradeSignal,'symbol'|'timeMs'|'exchange'|'market'|'underlying'>;entry:number|null;origin?:QualityOrigin;miningCaptureId?:string};
+export const deletionKey=(t:DeleteTarget)=>JSON.stringify(t.miningCaptureId === undefined
+ ? [librarySignalIdentity(t.source),t.entry,t.origin??'*']
+ : [librarySignalIdentity(t.source),t.entry,'mined-capture',t.miningCaptureId]);
 export const fishDeleteTarget=(source:TradeSignal):DeleteTarget=>({source,entry:source.mined?.anchorMs??source.fish?.cutoffMs??null});
 export function mergeSourceDeletions(...maps:(SourceDeletions|undefined)[]):SourceDeletions{const out:SourceDeletions={};for(const map of maps)for(const [k,v] of Object.entries(map??{}))if(Number.isFinite(v)&&v>0)out[k]=Math.max(out[k]??0,v);return out;}
-export function sourceDeletionMatcher(marks:SourceDeletions={},resolved:LegacySourceResolutions={}){const index=new Map<string,{key:string;entry:number|null;origin?:QualityOrigin|'*'}[]>();for(const [key,at] of Object.entries(marks)){if(!(at>0))continue;try{const [source,entry,origin]=JSON.parse(key),id=JSON.stringify(source),values=index.get(id)??[];values.push({key,entry,origin});index.set(id,values);}catch{/* Invalid legacy marks never match. */}}return (source:DeleteTarget['source'],entry:number|null,origin?:QualityOrigin)=>!!index.get(JSON.stringify(librarySignalIdentity(source)))?.some(v=>(v.entry===null||v.entry===entry)&&(!origin||v.origin==='*'||!v.origin&&!resolved[v.key]?.includes(origin)||v.origin===origin));}
+export function sourceDeletionMatcher(marks:SourceDeletions={},resolved:LegacySourceResolutions={}){
+ const index=new Map<string,{key:string;entry:number|null;origin?:QualityOrigin|'*'|'mined-capture';captureId?:string}[]>();
+ for(const [key,at] of Object.entries(marks)){
+  if(!(at>0))continue;
+  try{const [source,entry,origin,captureId]=JSON.parse(key),id=JSON.stringify(source),values=index.get(id)??[];values.push({key,entry,origin,captureId});index.set(id,values);}catch{/* Invalid legacy marks never match. */}
+ }
+ return (source:DeleteTarget['source'],entry:number|null,origin?:QualityOrigin,captureId?:string)=>!!index.get(JSON.stringify(librarySignalIdentity(source)))?.some(v=>{
+  if(v.entry!==null&&v.entry!==entry)return false;
+  // A separate tag also keeps older builds from treating this as a whole-source deletion.
+  if(v.origin==='mined-capture')return origin==='mined'&&captureId!==undefined&&v.captureId===captureId;
+  return !origin||v.origin==='*'||!v.origin&&!resolved[v.key]?.includes(origin)||v.origin===origin;
+ });
+}
+/** A remaining capture at this entry still owns its shared filtering and monitoring results. */
+export function miningRecordDeleteTargets(records: readonly FishMiningRecord[], selected: ReadonlySet<string>): DeleteTarget[] {
+ const retained = new Map<string, Set<string>>();
+ for (const record of records) {
+  if (selected.has(record.id)) continue;
+  const key = deletionKey({ source: record.signal, entry: record.anchorMs, origin: 'mined' });
+  const ids = retained.get(key) ?? new Set<string>();
+  ids.add(record.signal.id);
+  retained.set(key, ids);
+ }
+ const targets = new Map<string, DeleteTarget>();
+ for (const record of records) {
+  if (!selected.has(record.id)) continue;
+  const target: DeleteTarget = { source: record.signal, entry: record.anchorMs, origin: 'mined' };
+  const siblings = retained.get(deletionKey(target));
+  if (siblings?.has(record.signal.id)) continue;
+  if (siblings) target.miningCaptureId = record.signal.id;
+  targets.set(deletionKey(target), target);
+ }
+ return [...targets.values()];
+}
 export function markSourceDeletions(study:FishQualityStudy,targets:readonly DeleteTarget[],at=Date.now()):FishQualityStudy{return applySourceDeletions({...study,deletedSources:mergeSourceDeletions(study.deletedSources,Object.fromEntries(targets.map(t=>[deletionKey(t),at])))});}
 function pruneRounds<T extends {recordIds?:string[];added?:string[];removed?:string[]}>(rounds:T[],removed:Set<string>):T[]{return rounds.map(r=>({...r,...(r.recordIds?{recordIds:r.recordIds.filter(id=>!removed.has(id))}:{}),...(r.added?{added:r.added.filter(id=>!removed.has(id))}:{}),...(r.removed?{removed:r.removed.filter(id=>!removed.has(id))}:{})}));}
 export function applySourceDeletions(study:FishQualityStudy):FishQualityStudy{
  if(!Object.keys(study.deletedSources??{}).length&&!Object.keys(study.deletedReadings??{}).length)return study;
  const gone=sourceDeletionMatcher(study.deletedSources,study.resolvedLegacySources),before=qualityComparisonRows(study),identity=(r:{source:DeleteTarget['source'];enteredAt:number|null})=>JSON.stringify([librarySignalIdentity(r.source),r.enteredAt]),inheritedRows=new Map(before.map(s=>[identity(s),s]));
- const clean=<T extends QualityProvenance & {source:DeleteTarget['source'];enteredAt:number|null}>(r:T):T|undefined=>{
+ const clean=<T extends QualityProvenance & {source:DeleteTarget['source'] & {id?:string};enteredAt:number|null}>(r:T, matchCapture=false):T|undefined=>{
   const inherited=!r.origins&&!r.origin?inheritedRows.get(identity(r)):undefined;
-  const origins=qualityOrigins(inherited??r),kept=origins.filter(o=>!gone(r.source,r.enteredAt,o));
+  const origins=qualityOrigins(inherited??r),kept=origins.filter(o=>!gone(r.source,r.enteredAt,o,matchCapture?r.source.id:undefined));
   return !kept.length?undefined:kept.length===origins.length?r:{...r,origin:kept.length===1?kept[0]:undefined,origins:kept};
  };
- const samples=study.samples.flatMap(s=>{const r=clean(s);return r?[r]:[];}),after=qualityComparisonRows({...study,samples}),remainingIds=new Set([...samples,...after].map(s=>s.id)),sampleIds=new Set([...study.samples,...before].filter(s=>!remainingIds.has(s.id)).map(s=>s.id));
+ const samples=study.samples.flatMap(s=>{const r=clean(s,true);return r?[r]:[];}),after=qualityComparisonRows({...study,samples}),remainingIds=new Set([...samples,...after].map(s=>s.id)),sampleIds=new Set([...study.samples,...before].filter(s=>!remainingIds.has(s.id)).map(s=>s.id));
  const filterRecords=study.filterLibrary?.records.flatMap(r=>{const next=clean(r);return next?[next]:[];}),monitorRecords=study.monitorLibrary?.records.flatMap(r=>{const next=clean(r);return next?[next]:[];});
  const keptFilters=new Set(filterRecords?.map(r=>r.id)),keptMonitors=new Set(monitorRecords?.map(r=>r.id)),filterIds=new Set((study.filterLibrary?.records??[]).filter(r=>!keptFilters.has(r.id)).map(r=>r.id)),monitorIds=new Set((study.monitorLibrary?.records??[]).filter(r=>!keptMonitors.has(r.id)).map(r=>r.id)),filters=study.filterLibrary?.records.filter(r=>filterIds.has(r.id))??[],monitors=study.monitorLibrary?.records.filter(r=>monitorIds.has(r.id))??[];
  const removedReadings=new Set(filters.flatMap(r=>r.readings.flatMap(x=>x?[x.key]:[]))),remainingReadings=new Set(study.filterLibrary?.records.filter(r=>!filterIds.has(r.id)).flatMap(r=>r.readings.flatMap(x=>x?[x.key]:[]))??[]);

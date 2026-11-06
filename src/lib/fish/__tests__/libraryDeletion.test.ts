@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {payload} from './libraryTransfer.fixture';
-import {newQualityStudy} from '../quality';
-import {markSourceDeletions,preserveSourceDeletions,deleteMiningRecords} from '../libraryDeletion';
+import {newQualityStudy,qualityComparisonRows} from '../quality';
+import {markSourceDeletions,preserveSourceDeletions,deleteMiningRecords,miningRecordDeleteTargets} from '../libraryDeletion';
 import {mergeMiningLibraries,normalizeMiningLibrary} from '../miningLibrary';
 import {validateLibraryPayload} from '../libraryTransfer';
 function fixture(){const p=payload();return {...newQualityStudy(1),filterLibrary:p.filter,monitorLibrary:p.monitor,samples:[{id:'sample',source:p.monitor!.records[0].source,enteredAt:1300000,basis:'capture',groups:[]}],results:p.monitor!.records.map(r=>r.result!),selectedRowIds:['sample']} as ReturnType<typeof newQualityStudy>;}
@@ -16,4 +16,29 @@ it('removes just selected mining records and never merges them back from an olde
 it('drops entry and post-sale readings but preserves shared observations referenced by a retained trade',()=>{
  const s=fixture(),r=s.monitorLibrary!.records[0],prefix=['binance','crypto','TESTUSDT',null],ek=JSON.stringify(['sell-entry-v1',...prefix,r.enteredAt]),pk=JSON.stringify(['post-exit-v1',...prefix,r.result!.endTime,r.result!.endPrice]);s.entryReadings=[{key:ek,evaluatedAt:100,entryTime:r.enteredAt!,mode:'closed',metric:'state',value:.5}];s.postExitReadings=[{key:pk,evaluatedAt:100,exitTime:r.result!.endTime!,exitPrice:r.result!.endPrice!,startMs:0,excludedExitMinute:true,windows:[]}];
  const next=markSourceDeletions(s,[{source:r.source,entry:r.enteredAt}],2000);expect(next.entryReadings).toEqual([]);expect(next.postExitReadings).toEqual([]);expect(preserveSourceDeletions(next,{...next,entryReadings:s.entryReadings,postExitReadings:s.postExitReadings}).entryReadings).toEqual([]);
+});
+
+it('removes one mining capture without pruning another threshold or their shared entry results', () => {
+ const s = fixture(), entry = s.samples[0].enteredAt!;
+ const stale = { ...s.samples[0].source, id: 'stale-capture' };
+ const fresh = { ...stale, id: 'fresh-capture' };
+ s.samples = [
+   { ...s.samples[0], source: stale, origin: 'mined', origins: ['mined'] },
+   { ...s.samples[0], id: 'fresh-sample', source: fresh, origin: 'mined', origins: ['mined'] },
+ ];
+ s.results = [{ ...s.results[0], sampleId: qualityComparisonRows(s)[0].id }];
+ const saved = payload().mining!.records[0];
+ const records = [
+   { ...saved, id: 'old', signal: stale, anchorMs: entry },
+   { ...saved, id: 'new', signal: fresh, anchorMs: entry },
+ ];
+ const next = markSourceDeletions(s, miningRecordDeleteTargets(records, new Set(['old'])), 2000);
+ expect(next.samples.map(sample => sample.source.id)).toEqual([fresh.id]);
+ expect(next.results).toEqual(s.results);
+ expect(next.filterLibrary!.records).toEqual(s.filterLibrary!.records);
+ expect(next.monitorLibrary!.records).toEqual(s.monitorLibrary!.records);
+ expect(preserveSourceDeletions(next, s).samples.map(sample => sample.source.id)).toEqual([fresh.id]);
+ expect(miningRecordDeleteTargets(records, new Set(['old', 'new']))).toEqual([
+   { source: fresh, entry, origin: 'mined' },
+ ]);
 });

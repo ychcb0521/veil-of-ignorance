@@ -14,12 +14,13 @@ const field = 'h-8 min-w-0 rounded-md border border-border/60 bg-muted/30 px-2 t
 export const libraryCell = 'px-3 py-2';
 
 export interface FishLibraryRoundOption { id: string; label: string; error?: string }
-export function FishLibraryDialog<T extends {id:string}>({ name, info, description, placeholder, rounds, roundLabel, headers, items, match, row, empty, detail, onOpenChange,selection }: {
+export function FishLibraryDialog<T extends {id:string}>({ name, info, description, placeholder, rounds, roundLabel, headers, items, match, row, empty, detail, onOpenChange, selection, sortColumn }: {
   selection?:{key:(item:T)=>string;selected:ReadonlySet<string>;toggle:(key:string)=>void;select:(keys:string[])=>void;clear:()=>void;remove:()=>void};
   /** 按钮与标题，如「挖掘库」。 */
   name: string; info: ReactNode; description: string; placeholder: string;
   rounds: FishLibraryRoundOption[]; roundLabel: string;
   headers: string[];
+  sortColumn?: { label: string; direction: 'none' | 'ascending' | 'descending'; toggle: () => void };
   /** 全部记录（已排序）；按轮次与关键词筛选由 match 决定。 */
   items: readonly T[]; match: (item: T, needle: string, roundId: string) => boolean;
   row: (item: T) => ReactElement; empty: { none: string; unmatched: string };
@@ -46,9 +47,16 @@ export function FishLibraryDialog<T extends {id:string}>({ name, info, descripti
       {round?.error && <p role="status" className="shrink-0 text-[11px] text-destructive">{round.error}</p>}
       {detail}
       {selection&&<div className="flex flex-wrap items-center gap-2 text-[11px]"><button type="button" className={action} onClick={()=>selection.select(filtered.map(selection.key))}>全选当前筛选（{filtered.length}）</button><button type="button" className={action} onClick={selection.clear}>取消选择</button><button type="button" className={`${action} text-destructive`} disabled={!selection.selected.size} onClick={selection.remove}>删除所选（{selection.selected.size}）</button></div>}
-      <FishContinuousTable items={filtered} getKey={item=>item.id} row={row} columns={headers.length+(selection?1:0)} resetKey={JSON.stringify([open,needle,roundId])} label={`${name}连续滚动列表`} testId={`${name}-table`} estimate={104}
+      <FishContinuousTable items={filtered} getKey={item=>item.id} row={row} columns={headers.length+(selection?1:0)} resetKey={JSON.stringify([open,needle,roundId,sortColumn?.direction])} label={`${name}连续滚动列表`} testId={`${name}-table`} estimate={104}
         className="max-h-[50dvh] min-h-32 shrink-0 rounded-md border border-border/60" tableClassName="whitespace-nowrap text-left text-[11px]" headClassName="text-[10px] text-muted-foreground"
-        header={<tr className="bg-muted/40">{selection&&<th className={libraryCell}>选择</th>}{headers.map(h=><th key={h} className={`${libraryCell} font-medium`}>{h}</th>)}</tr>}
+        header={<tr className="bg-muted/40">{selection&&<th className={libraryCell}>选择</th>}{headers.map(label => {
+          const sortable = sortColumn?.label === label;
+          return <th key={label} className={`${libraryCell} font-medium`} aria-sort={sortable ? sortColumn.direction : undefined}>
+            {sortable ? <button type="button" className="hover:text-foreground" aria-label={`按${label}排序`} onClick={sortColumn.toggle}>
+              {label}{sortColumn.direction === 'ascending' ? ' ↑' : sortColumn.direction === 'descending' ? ' ↓' : ''}
+            </button> : label}
+          </th>;
+        })}</tr>}
         empty={<p className="px-4 py-8 text-center text-[11px] text-muted-foreground">{items.length?empty.unmatched:empty.none}</p>}/>
       <p className="shrink-0 text-[10px] text-muted-foreground">共 {filtered.length} 条 · 连续滚动查看全部记录</p>
     </DialogContent>
