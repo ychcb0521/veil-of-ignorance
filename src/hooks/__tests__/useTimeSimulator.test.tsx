@@ -68,6 +68,22 @@ describe("useTimeSimulator 倒叙播放", () => {
     expect(result.current.getSimTime()).toBe(100_000 - 2_000 * 10);
   });
 
+  it("暂停倒放时同一轮切回正序并重开，时钟从新起点前进", () => {
+    const { result } = renderHook(() => useTimeSimulator({
+      status: "paused", direction: -1, currentSimulatedTime: 180_000, historicalAnchorTime: 180_000,
+    }));
+
+    act(() => {
+      result.current.syncReactState(180_000);
+      result.current.setDirection(1);
+      result.current.startSimulation(60_000);
+    });
+    vi.setSystemTime(new Date("2026-01-01T00:00:02.000Z"));
+    expect(result.current.getSimTime()).toBe(62_000);
+    act(() => result.current.pauseSimulation());
+    expect(result.current.currentSimulatedTime).toBe(62_000);
+  });
+
   it("播放中翻转方向：切换瞬间时钟连续、不跳变", () => {
     const { result } = renderHook(() => useTimeSimulator());
 

@@ -18,6 +18,7 @@ import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD
 import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import {miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
+import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import type { FishReconstructionLoader } from './reconstruction';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
 import { validateFishBars } from './shared';
@@ -306,6 +307,17 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
 export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(signalDedupKey(source))}`;
 export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' = 'library'): FishQualityStudy {
   study=resolveLegacySourceMemberships(study,signals,origin);
+  // A first-candle sample can share the exact timestamp of a legacy sample in a short archive.
+  // Keep its row identity and attach the current source so it stays visible and runnable.
+  if (origin === 'turing' && study.samples.some(s => isDelayedTuringReplaySample(s.source))) {
+    const current = new Map(signals.map(source => [qualityLibrarySampleId(source), source]));
+    const samples = study.samples.map(sample => {
+      const source = current.get(sample.id);
+      return source && isDelayedTuringReplaySample(sample.source) && !isDelayedTuringReplaySample(source)
+        ? { ...sample, source: structuredClone(source) } : sample;
+    });
+    if (samples.some((sample, index) => sample !== study.samples[index])) study = { ...study, samples };
+  }
   const ids = new Set(study.samples.map(s => s.id)), added: QualitySample[] = [];
   for (const source of signals) {
     const id = qualityLibrarySampleId(source);
@@ -379,8 +391,9 @@ export function migrateQualitySourceRows(study:FishQualityStudy):FishQualityStud
 }
 export const qualityDisplayRows = (study: FishQualityStudy) => expandQualityRows(qualityComparisonRows(study));
 export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
-  if (!study.sellPlans && !study.independentFilters) return study.samples;
-  const signals = qualityComparisonRows(study), selected = new Set(study.selectedRowIds ?? []);
+  if (!study.sellPlans && !study.independentFilters) return study.samples.filter(s => !isDelayedTuringReplaySample(s.source));
+  const signals = qualityComparisonRows(study).filter(s => !isDelayedTuringReplaySample(s.source));
+  const selected = new Set(study.selectedRowIds ?? []);
   const selectedSignals = new Set(expandQualityRows(signals).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.signalId));
   return signals.filter(s => selectedSignals.has(s.id));
 }

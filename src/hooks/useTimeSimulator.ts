@@ -181,22 +181,23 @@ export function useTimeSimulator(initialState?: Partial<PersistedTimeSim>) {
     const snap = (t: number) => (
       opts?.snapToMs && opts.snapToMs > 0 ? Math.floor(t / opts.snapToMs) * opts.snapToMs : t
     );
-    setState(prev => {
-      if (prev.direction === direction) return prev;
-      if (prev.status !== 'playing' || !prev.realStartTime || prev.historicalAnchorTime == null) {
-        const frozen = snap(prev.currentSimulatedTime);
-        currentTimeRef.current = frozen;
-        syncCore({ direction, historicalAnchorTime: prev.status === 'paused' ? frozen : prev.historicalAnchorTime });
-        return prev.status === 'paused'
-          ? { ...prev, direction, historicalAnchorTime: frozen, currentSimulatedTime: frozen }
-          : { ...prev, direction };
-      }
+    const core = coreRef.current;
+    if (core.direction === direction) return;
+    if (core.status === 'playing' && core.realStartTime && core.historicalAnchorTime != null) {
       const now = Date.now();
-      const currentSim = snap(prev.historicalAnchorTime + (now - prev.realStartTime) * prev.speed * prev.direction);
-      currentTimeRef.current = currentSim;
-      syncCore({ direction, historicalAnchorTime: currentSim, realStartTime: now });
-      return { ...prev, direction, historicalAnchorTime: currentSim, realStartTime: now, currentSimulatedTime: currentSim };
-    });
+      const frozen = snap(core.historicalAnchorTime + (now - core.realStartTime) * core.speed * core.direction);
+      currentTimeRef.current = frozen;
+      syncCore({ direction, historicalAnchorTime: frozen, realStartTime: now });
+      setState(prev => ({ ...prev, direction, historicalAnchorTime: frozen, realStartTime: now, currentSimulatedTime: frozen }));
+    } else if (core.status === 'paused') {
+      const frozen = snap(currentTimeRef.current);
+      currentTimeRef.current = frozen;
+      syncCore({ direction, historicalAnchorTime: frozen });
+      setState(prev => ({ ...prev, direction, historicalAnchorTime: frozen, currentSimulatedTime: frozen }));
+    } else {
+      syncCore({ direction });
+      setState(prev => ({ ...prev, direction }));
+    }
   }, []);
 
   // ---- beforeunload: force-persist exact time on page close ----

@@ -54,6 +54,7 @@ import { planForwardReplayStep, type ForwardReplayCursor } from "@/lib/replayExe
 import {
   diagnoseSignalJump,
   hasKlineCoveringSignalTime,
+  type SignalJumpOptions,
   type SignalJumpResult,
 } from "@/lib/signalJumpDiagnostics";
 import { buildOperationAssetHistory, buildOperationDailyPnl, buildOperationDailyPnlDetails, pnlForOperationDate } from "@/lib/assetReport";
@@ -147,6 +148,7 @@ const Index = () => {
     timeMode,
     setTimeMode,
     timeDirection,
+    setTimeDirection,
     reverseCapTime,
     setReverseCapTime,
     tradingMode,
@@ -1907,8 +1909,13 @@ const Index = () => {
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
   // 从「信号库」下拉点开某标的时调用，越过手动输入标的/时间，直接定位盘面。
   const handleJumpToSignal = useCallback(
-    async (symbol: string, timeMs: number): Promise<SignalJumpResult> => {
-      const normalized = isTuringCupSymbol(symbol) ? symbol : symbol.toUpperCase().replace(/[\s/]+/g, "");
+    async (symbol: string, timeMs: number, options?: SignalJumpOptions): Promise<SignalJumpResult> => {
+      const offline = isTuringCupSymbol(symbol);
+      const normalized = offline ? symbol : symbol.toUpperCase().replace(/[\s/]+/g, "");
+      const fromFirstCandle = offline && options?.fromFirstCandle;
+      const jumpInterval = fromFirstCandle ? "1m" : interval;
+      const jumpIntervalMs = intervalToMs(jumpInterval);
+      const direction = fromFirstCandle ? 1 : timeDirection;
 
       // 关键：先取数，确认拿到数据后，才改任何共享状态。
       // 「信号库」（按信号自动启动）与「手动启动」必须相互独立——一次失败的跳转
@@ -1917,24 +1924,24 @@ const Index = () => {
       // 「取到了但不覆盖信号时刻」同样算失败：先验后提交（accept），验不过的那批 K 线不进数据层——
       // 否则数据层里留着另一个标的的行情，当前标的的委托会拿它撮合。
       const loadOptions = {
-        reverse: timeDirection === -1,
-        accept: (candles: KlineData[]) => hasKlineCoveringSignalTime(candles, timeMs, iMs),
+        reverse: direction === -1,
+        accept: (candles: KlineData[]) => hasKlineCoveringSignalTime(candles, timeMs, jumpIntervalMs),
       };
       // 取数期间用户又做了别的操作（切周期 / 切标的 / 再启动）：以后一次为准，这次跳转静默放弃——不诊断、不重试、不给信号打标记。
       const superseded: SignalJumpResult = { ok: false, reason: "已被后一次操作取代" };
-      let data = await initLoad(normalized, interval, timeMs, loadOptions);
+      let data = await initLoad(normalized, jumpInterval, timeMs, loadOptions);
       if (data === SUPERSEDED_INIT_LOAD) return superseded;
-      let coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
+      let coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, jumpIntervalMs);
 
       if (!coversSignalTime) {
-        const diagnostic = await diagnoseSignalJump(normalized, timeMs, interval, iMs);
+        const diagnostic = await diagnoseSignalJump(normalized, timeMs, jumpInterval, jumpIntervalMs);
 
         // 首次取数可能刚好碰上短暂请求抖动；诊断确认行情存在时只重试一次，
         // 不把可恢复问题错误写成信号库的永久标记。
         if (diagnostic.status === "available") {
-          data = await initLoad(normalized, interval, timeMs, loadOptions);
+          data = await initLoad(normalized, jumpInterval, timeMs, loadOptions);
           if (data === SUPERSEDED_INIT_LOAD) return superseded;
-          coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
+          coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, jumpIntervalMs);
         }
 
         if (!coversSignalTime) {
@@ -1952,7 +1959,12 @@ const Index = () => {
         }
       }
 
-      // 取数成功——此时才原子地切换标的并清理该标的的旧缓存。
+      // 取数成功后才切换标的、周期和方向。
+      if (jumpInterval !== interval) setIntervalVal(jumpInterval);
+      if (direction !== timeDirection) {
+        setTimeDirection(direction);
+        timeDirectionRef.current = direction;
+      }
       if (normalized !== activeSymbol) {
         setActiveSymbol(normalized);
         latestChartPriceRef.current = 0;
@@ -1972,10 +1984,10 @@ const Index = () => {
       lastReverseSimTimeRef.current = null;
 
       // 倒叙播放下跳转：同 handleStart，起点吸附并记镜面 cap。
-      const startTs = timeDirection === -1 ? snapToBarStart(timeMs, iMs) : timeMs;
-      if (timeDirection === -1) setReverseCapTime(startTs);
+      const startTs = direction === -1 ? snapToBarStart(timeMs, jumpIntervalMs) : timeMs;
+      if (direction === -1) setReverseCapTime(startTs);
       // 行情覆盖检查都过了才分叉（失败的跳转不留任何痕迹）。同步模式分全局那只钟，隔离模式只分这个币的。
-      forkReplayTimeline(normalized, "jump", startTs, timeDirection);
+      forkReplayTimeline(normalized, "jump", startTs, direction);
       // 跳到信号时刻就是新的一场：上一场的加仓计划不带过来（隔离模式只清这个币的）
       clearAddSizingPlan(timeMode === "isolated" ? normalized : undefined);
 
@@ -1988,7 +2000,7 @@ const Index = () => {
           historicalAnchorTime: startTs,
           realStartTime: now,
           originTime: startTs,
-          reverseCapTime: timeDirection === -1 ? startTs : null,
+          reverseCapTime: direction === -1 ? startTs : null,
         };
         // 同 handleStart：新钟与分叉同步写进 ref，撮合循环看不到「新时间线 + 旧时钟」的那一帧。
         coinTimelinesRef.current = { ...coinTimelinesRef.current, [normalized]: jumped };
@@ -1999,12 +2011,12 @@ const Index = () => {
         sim.startSimulation(startTs);
       }
       toast.success(`已跳转到 ${normalized}`, {
-        description: `时间机器已定位到信号时间 · 加载 ${data.length} 根K线`,
+        description: `${fromFirstCandle ? "从第一根 1 分钟 K 线开始播放" : "时间机器已定位到信号时间"} · 加载 ${data.length} 根 K 线`,
       });
       return { ok: true };
     },
     [
-      activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime,
+      activeSymbol, interval, initLoad, sim, timeMode, timeDirection, setTimeDirection, setIntervalVal, setReverseCapTime,
       setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime, forkReplayTimeline,
     ],
   );

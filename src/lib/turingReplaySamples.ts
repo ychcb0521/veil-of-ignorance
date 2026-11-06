@@ -3,35 +3,18 @@ import { formatUTC8 } from './timeFormat';
 import { TURING_REPLAY_MINUTE_MS, type TuringReplayArchive } from './turingCupReplayArchive';
 import { turingCupSymbol } from './turingCupSymbol';
 
-// Fish Quality reads the last closed 5m bar in addition to its 48h window.
-const HISTORY_MINUTES = 48 * 60 + 5;
-const FOLLOWUP_MINUTES = 5;
+export function isDelayedTuringReplaySample(signal: Pick<TradeSignal, 'id' | 'turingReplaySample'>): boolean {
+  return signal.turingReplaySample === true && signal.id.startsWith('turing-replay-sample-v1:');
+}
 
-/** One reproducible comparison entry per market, based on candle availability. */
+/** One comparison entry per market at its first available minute candle. */
 export function turingReplaySamples(archive: TuringReplayArchive): TradeSignal[] {
-  const shortArchive = archive.minutes < HISTORY_MINUTES + FOLLOWUP_MINUTES;
-  const history = shortArchive ? Math.floor(archive.minutes / 2) : HISTORY_MINUTES;
-  const followup = shortArchive ? 1 : FOLLOWUP_MINUTES;
   return Object.entries(archive.markets).flatMap(([ticker, minutes]) => {
-    let gaps = 0;
-    let bestGaps = Number.POSITIVE_INFINITY;
-    let entry = -1;
-    for (let slot = 0; slot <= archive.minutes - followup; slot++) {
-      const time = archive.anchorMs + slot * TURING_REPLAY_MINUTE_MS;
-      if (slot >= history && time % (5 * TURING_REPLAY_MINUTE_MS) === 0
-        && minutes.slice(slot, slot + followup).every(Boolean) && gaps < bestGaps) {
-        entry = slot;
-        bestGaps = gaps;
-        if (!gaps) break;
-      }
-      if (!minutes[slot]) gaps++;
-      if (slot >= history && !minutes[slot - history]) gaps--;
-    }
-    if (entry < 0) entry = minutes.findIndex(minute => minute !== null);
-    if (entry < 0) return [];
+    const firstCandle = minutes.findIndex(minute => minute !== null);
+    if (firstCandle < 0) return [];
     const symbol = turingCupSymbol(ticker);
-    const timeMs = archive.anchorMs + entry * TURING_REPLAY_MINUTE_MS;
-    return [{ id: `turing-replay-sample-v1:${symbol}@${timeMs}`, symbol, timeMs, timeLabel: formatUTC8(timeMs),
+    const timeMs = archive.anchorMs + firstCandle * TURING_REPLAY_MINUTE_MS;
+    return [{ id: `turing-replay-sample-v2:${symbol}@${timeMs}`, symbol, timeMs, timeLabel: formatUTC8(timeMs),
       fallbackZone: '', turingReplaySample: true }];
   });
 }

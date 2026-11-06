@@ -35,6 +35,7 @@ import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
 import {
   preflightSignalJumpIssues,
+  type SignalJumpOptions,
   type SignalJumpResult,
 } from '@/lib/signalJumpDiagnostics';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
@@ -64,7 +65,7 @@ interface Props {
   originTime?: number | null;
   onSymbolChange?: (symbol: string) => void;
   activeSymbol?: string;
-  onJumpToSignal?: (symbol: string, timeMs: number) => Promise<SignalJumpResult>;
+  onJumpToSignal?: (symbol: string, timeMs: number, options?: SignalJumpOptions) => Promise<SignalJumpResult>;
   signalJumpInterval?: string;
   signalJumpIntervalMs?: number;
 }
@@ -264,8 +265,9 @@ export function TimeControl({
   }, [signalJumpInterval, signalJumpIntervalMs, signals]);
 
   useEffect(() => {
-    const auditSignals = signalsRef.current.filter(s => signalChartSymbol(s));
+    const auditSignals = signalsRef.current.filter(s => !s.turingReplaySample && signalChartSymbol(s));
     if (auditSignals.length === 0) {
+      if (turing) setTuringCoverageWarning(false);
       setSignalAuditProgress(null);
       return;
     }
@@ -493,8 +495,12 @@ export function TimeControl({
     jumpingSignalIdRef.current = sig.id;
     setJumpingSignalId(sig.id);
     try {
-      const result = await jumpTo(signalChartSymbol(sig)!, sig.timeMs);
+      const chartSymbol = signalChartSymbol(sig)!;
+      const result = await (sig.turingReplaySample
+        ? jumpTo(chartSymbol, sig.timeMs, { fromFirstCandle: true })
+        : jumpTo(chartSymbol, sig.timeMs));
       if (result.ok) {
+        if (sig.turingReplaySample) setDateInput(formatUTC8(sig.timeMs));
         if (sig.jumpIssue) {
           setSignals(prev => prev.map(item =>
             item.id === sig.id ? { ...item, jumpIssue: undefined } : item));
@@ -529,8 +535,12 @@ export function TimeControl({
       else (isTuringCupSymbol(sig.symbol) ? setTuringSignals : setOnlineSignals)(previous => previous.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
     };
     try {
-      const result = await jumpTo(signalChartSymbol(sig)!, sig.timeMs);
+      const chartSymbol = signalChartSymbol(sig)!;
+      const result = await (sig.turingReplaySample
+        ? jumpTo(chartSymbol, sig.timeMs, { fromFirstCandle: true })
+        : jumpTo(chartSymbol, sig.timeMs));
       if (result.ok) {
+        if (sig.turingReplaySample) setDateInput(formatUTC8(sig.timeMs));
         if (sig.jumpIssue) updateIssue(undefined);
         setFishOpen(false);
       } else {

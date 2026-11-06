@@ -53,6 +53,7 @@ import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { normalizeSignalQuality, signalMonthKey, type TradeSignal } from '@/lib/signalLibrary';
 import { isTuringCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
+import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { hasQualityExit, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
@@ -500,7 +501,10 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   });
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
   const [statistics, setStatistics] = useState<QualityStatisticsRequest | null>(null);
-  const allRows = useMemo(() => qualityDisplayRows(study), [study]);
+  const allRows = useMemo(() => {
+    const rows = qualityDisplayRows(study);
+    return archiveView ? rows : rows.filter(row => !isDelayedTuringReplaySample(row.source));
+  }, [study, archiveView]);
   const detectorMap = useMemo(() => new Map(study.groups.map(g => [g.id, g])), [study.groups]);
   const batch = allRows;
   // 月份条数跟随来源、探测算法、标的筛选；同一信号的多个探测行只计一次。

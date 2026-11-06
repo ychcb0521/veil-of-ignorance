@@ -70,7 +70,7 @@ describe('Index.tsx 的加仓计划接线', () => {
     expect(startFork).toBeGreaterThan(-1);
     expect(start.indexOf('clearAddSizingPlan(timeMode === "isolated" ? activeSymbol : undefined);')).toBeGreaterThan(startFork);
     const jump = slice(index, 'const handleJumpToSignal = useCallback(', 'const handleSetTimeMode = useCallback(');
-    const jumpFork = jump.indexOf('forkReplayTimeline(normalized, "jump", startTs, timeDirection);');
+    const jumpFork = jump.indexOf('forkReplayTimeline(normalized, "jump", startTs, direction);');
     expect(jumpFork).toBeGreaterThan(-1);
     const jumpClear = jump.indexOf('clearAddSizingPlan(timeMode === "isolated" ? normalized : undefined);');
     expect(jumpClear).toBeGreaterThan(jumpFork);

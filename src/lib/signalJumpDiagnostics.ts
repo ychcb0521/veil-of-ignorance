@@ -14,6 +14,8 @@ export interface SignalJumpIssue {
   checkedAt: number;
 }
 
+export type SignalJumpOptions = { fromFirstCandle?: boolean };
+
 export type SignalJumpResult =
   | { ok: true }
   | { ok: false; fatalIssue?: SignalJumpIssue; reason: string };
