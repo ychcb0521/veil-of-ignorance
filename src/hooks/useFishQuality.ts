@@ -1,5 +1,7 @@
 import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useQualityPlanCatalog } from './useQualityPlanCatalog';
+import { usePreEntryMonitor } from './usePreEntryMonitor';
+import { preEntrySignal } from '@/lib/fish/preEntryMonitor';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
 import { restoreQualityPlanTemplate, mergeQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
@@ -32,6 +34,7 @@ export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 const NO_SIGNALS: readonly TradeSignal[] = [];
 export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true, turing: readonly TradeSignal[] = NO_SIGNALS) {
   const definitions = useFeatureDefinitions();
+  const preEntry = usePreEntryMonitor(owner, enabled, run);
   const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [archiving,setArchiving]=useState(false),archiveLock=useRef(false);
@@ -432,10 +435,24 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
-  return { account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+  const selectPreEntryRecords = useCallback((ids: readonly string[]) => {
+    const chosen = new Set(ids);
+    const signals = preEntry.library.records.filter(r => chosen.has(r.id)).map(preEntrySignal).filter((s): s is TradeSignal => !!s);
+    if (!signals.length || !readyRef.current) return 0;
+    const entries = new Set(signals.map(s => qualityEntryIdentity(s, s.timeMs)));
+    change(s => {
+      const next = importQualityLibrary(s, signals, Date.now(), 'pre-entry');
+      return { ...next, selectedRowIds: qualityComparisonRows(next).filter(r => entries.has(qualityEntryIdentity(r.source, r.enteredAt))).map(r => r.id) };
+    });
+    return signals.length;
+  }, [preEntry.library.records, change]);
+  const preEntryState = { ...preEntry,
+    start: (hours: number) => preEntry.start(scoped(current.current), hours),
+    resume: (roundId: string) => preEntry.resume(roundId, current.current) };
+  return { preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'> & Partial<Pick<CompleteFishQualityState,'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'> & Partial<Pick<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'clearFilterResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，
