@@ -27,6 +27,9 @@ export interface FishMiningAnchor {
   error?: string; attempts: number;
 }
 export interface FishMiningRecord extends LibraryRecordBase { runId: string; anchorMs: number; catchKey: string; signal: TradeSignal }
+export const miningRecordSignal = (record: FishMiningRecord): TradeSignal => ({
+  ...record.signal, mined: { ...record.signal.mined, anchorMs: record.anchorMs },
+});
 export interface FishMiningLibrary { deletedRecords?:Record<string,number>; version: 1; runs: FishMiningRun[]; anchors: FishMiningAnchor[]; records: FishMiningRecord[]; adoptedHold?: boolean }
 
 export const emptyMiningLibrary = (): FishMiningLibrary => ({ version: 1, runs: [], anchors: [], records: [] });

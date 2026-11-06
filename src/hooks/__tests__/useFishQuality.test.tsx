@@ -671,3 +671,23 @@ it('backfills existing study templates into the independent system-archived cata
  const catalog=JSON.parse(readPersistedStateRaw('sim_a_quality_plan_templates_v1')!);
  expect(catalog.some((t:any)=>t.name==='已有模板')).toBe(true);expect(h.result.current.study.planTemplates?.[0].plan?.frozenVersions).toEqual(archived.planTemplates![0].plan!.frozenVersions);
 });
+
+it('selects every requested mining entry, preserves distinct anchors and shows the latest recapture time', async () => {
+  const june = Date.UTC(2026, 5, 22, 4), november = Date.UTC(2026, 10, 6, 1, 18, 2);
+  const first = { ...signal, id: 'first-mine', timeMs: june - 600_000, mined: { anchorMs: june }, caughtAt: november - 86400_000 };
+  const repeated = { ...first, id: 'repeat-mine', caughtAt: november };
+  const later = { ...first, id: 'another-slot', mined: { anchorMs: june + 43_200_000 }, caughtAt: november };
+  const run = vi.fn(async () => {});
+  const h = renderHook(() => useFishQuality('a', [signal], run));
+  await flush();
+  act(() => {
+    expect(h.result.current.selectMiningRecords([first, repeated, later])).toEqual({ selected: 2, requested: 2 });
+  });
+  await flush();
+  const study = h.result.current.study;
+  expect(qualityRunSamples(study).map(row => [row.enteredAt, row.minedAt])).toEqual([
+    [june, november], [june + 43_200_000, november],
+  ]);
+  expect(importQualityFish(study, [first, repeated, later], Date.now(), 'mined')).toBe(study);
+  expect(run).not.toHaveBeenCalled();
+});

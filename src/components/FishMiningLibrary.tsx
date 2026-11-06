@@ -5,11 +5,11 @@ import { FishLibraryCondition, libraryReading } from '@/components/FishLibraryCo
 /** 挖掘库：批量挖掘每一档的扫描与挖到的信号（数据见 lib/fish/miningLibrary，存 IndexedDB 并随账号同步）。 */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FishLibraryDialog, libraryCell } from '@/components/FishLibraryDialog';
-import { emptyMiningLibrary, type FishMiningLibrary, type FishMiningRecord, type FishMiningRun } from '@/lib/fish/miningLibrary';
+import { emptyMiningLibrary, miningRecordSignal, type FishMiningLibrary, type FishMiningRecord, type FishMiningRun } from '@/lib/fish/miningLibrary';
 import { loadMiningLibrary, MINING_LIBRARY_EVENT } from '@/lib/fish/miningLibraryStore';
 import { fishVisibleCatchKey } from '@/lib/fish/records';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { miningCaptureTime } from '@/lib/fish/qualityTableRows';
+import { miningCaptureTime } from '@/lib/fish/qualitySources';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 const date = (t: number | null | undefined) => t == null ? '—' : formatUTC8(t);
@@ -21,10 +21,11 @@ const runText = (run: FishMiningRun) => run.rules.map(r => `${RULE_NAMES[r.featu
 type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null };
 
 
-export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
+export function FishMiningLibrary({ account, holdKeys, onJump, canJump, onSelectInTable }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onSelectInTable?: (signals: readonly TradeSignal[]) => boolean }) {
   const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
   const [direction, setDirection] = useState<'none' | 'ascending' | 'descending'>('none');
   const [library, setLibrary] = useState<FishMiningLibrary>(emptyMiningLibrary), [open, setOpen] = useState(false);
+  const [tableError, setTableError] = useState('');
   const reload = useCallback(() => { void loadMiningLibrary(account).then(setLibrary); }, [account]);
   // 打开时读；开着的时候挖到新的一档就刷新
   useEffect(() => {
@@ -44,11 +45,11 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
     const rows = new Map<string, FishMiningRow>();
     for (const record of library.records) {
       const key = `${record.runId}|${record.anchorMs}|${fishVisibleCatchKey(record.signal)}|${evidence.get(record.id)!.identity}`, prior = rows.get(key);
-      const minedAt = miningCaptureTime(record.signal);
+      const minedAt = miningCaptureTime(miningRecordSignal(record));
       if (!prior) rows.set(key, { ...record, ids: [record.id], minedAt });
       else {
         const latest = prior.updatedAt >= record.updatedAt ? prior : record;
-        rows.set(key, { ...latest, ids: [...prior.ids, record.id], minedAt: miningCaptureTime(latest.signal) ?? prior.minedAt ?? minedAt });
+        rows.set(key, { ...latest, ids: [...prior.ids, record.id], minedAt: (latest === prior ? prior.minedAt : minedAt) ?? prior.minedAt ?? minedAt });
       }
     }
     return [...rows.values()].sort((a, b) => b.anchorMs - a.anchorMs || b.signal.timeMs - a.signal.timeMs || a.signal.symbol.localeCompare(b.signal.symbol));
@@ -69,15 +70,30 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
   }, [anchorOf,evidence]);
   const errors = library.anchors.filter(a => a.error).length;
   const latestRun = [...library.runs].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-  return <FishLibraryDialog name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { setOpen(next); if (!next) setSelected(new Set()); }}
+  const selectedItems = items.filter(row => selected.has(row.id));
+  const selectedIds = () => selectedItems.flatMap(row => row.ids);
+  const selectInTable = () => {
+    const ids = new Set(selectedIds());
+    const signals = library.records.filter(record => ids.has(record.id)).map(miningRecordSignal);
+    if (onSelectInTable?.(signals)) return true;
+    setTableError('这批记录暂未在组合表中找到，请刷新挖掘库后重试。');
+    return false;
+  };
+  return <FishLibraryDialog name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { setOpen(next); setTableError(''); if (!next) setSelected(new Set()); }}
     description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}`}
     info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
     headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '挖掘时间']}
     sortColumn={{ label: '挖掘时间', direction, toggle: () => setDirection(current => current === 'descending' ? 'ascending' : 'descending') }}
-    items={items} match={match} selection={bulk?{selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),select:ids=>setSelected(new Set(ids)),remove:()=>{
-      const ids = items.filter(r => selected.has(r.id)).flatMap(r => r.ids);
-      bulk({ kind: 'mining', ids, targets: miningRecordDeleteTargets(library.records, new Set(ids)) });
-    }}:undefined}
+    items={items} match={match} detail={tableError && <p role="alert" className="text-xs text-destructive">{tableError}</p>}
+    selection={bulk || onSelectInTable ? {
+      selected: new Set(selectedItems.map(row => row.id)),
+      select: ids => { setSelected(new Set(ids)); setTableError(''); },
+      action: onSelectInTable ? selectInTable : undefined,
+      remove: bulk ? () => {
+        const ids = selectedIds();
+        bulk({ kind: 'mining', ids, targets: miningRecordDeleteTargets(library.records, new Set(ids)) });
+      } : undefined,
+    } : undefined}
     empty={{ none: '暂无挖掘记录。开始批量挖掘后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
     row={(r, onCheck) => {
       const saved=evidence.get(r.id)!;

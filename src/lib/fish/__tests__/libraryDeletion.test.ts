@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {payload} from './libraryTransfer.fixture';
-import {newQualityStudy,qualityComparisonRows} from '../quality';
+import {importQualityFish,newQualityStudy,qualityComparisonRows} from '../quality';
 import {markSourceDeletions,preserveSourceDeletions,deleteMiningRecords,miningRecordDeleteTargets} from '../libraryDeletion';
 import {mergeMiningLibraries,normalizeMiningLibrary} from '../miningLibrary';
 import {validateLibraryPayload} from '../libraryTransfer';
@@ -41,4 +41,14 @@ it('removes one mining capture without pruning another threshold or their shared
  expect(miningRecordDeleteTargets(records, new Set(['old', 'new']))).toEqual([
    { source: fresh, entry, origin: 'mined' },
  ]);
+});
+
+it('allows a mining capture discovered after an older deletion at the same historical entry', () => {
+ const s = fixture(), entry = s.samples[0].enteredAt!;
+ const original = { ...s.samples[0].source, mined: { anchorMs: entry }, caughtAt: 1000 };
+ s.samples = [{ ...s.samples[0], source: original, origin: 'mined', origins: ['mined'] }];
+ const deleted = markSourceDeletions(s, [{ source: original, entry, origin: 'mined' }], 2000);
+ expect(deleted.samples).toHaveLength(0);
+ const recaptured = { ...original, id: 'recaptured', caughtAt: 3000 };
+ expect(preserveSourceDeletions(deleted, importQualityFish(deleted, [recaptured], 3000, 'mined')).samples.map(x => x.source.id)).toEqual(['recaptured']);
 });

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useFishQuality, type FishQualityState, type QualityRunner } from '@/hooks/useFishQuality';
 import { runPageFishQuality } from '@/hooks/useFish';
 import type { TradeSignal } from '@/lib/signalLibrary';
+import { miningRecordSignal } from '@/lib/fish/miningLibrary';
 import {loadMiningLibrary,MINING_LIBRARY_EVENT} from '@/lib/fish/miningLibraryStore';
 
 const EMPTY: readonly TradeSignal[] = [];
@@ -13,7 +14,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const [input, setInput] = useState({ fish: EMPTY, library: EMPTY });
   const [requested, setRequested] = useState(false);
   const [mined,setMined]=useState<readonly TradeSignal[]>(EMPTY);
-  useEffect(()=>{if (!requested) return;let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(r=>({...r.signal,mined:{...r.signal.mined,anchorMs:r.anchorMs}} as TradeSignal)));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner,requested]);
+  useEffect(()=>{if (!requested) return;let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(miningRecordSignal));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner,requested]);
   const state = useFishQuality(owner, input.fish, run, input.library,mined, requested);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[]) => {
     setRequested(true);

@@ -16,7 +16,7 @@ import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD_TEXT, type FishSnapshot, type FishProgram } from './algorithm';
 import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey } from '@/lib/signalLibrary';
-import {qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
+import {miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
 import type { FishReconstructionLoader } from './reconstruction';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
 import { validateFishBars } from './shared';
@@ -76,6 +76,8 @@ export interface QualitySample {
   origin?: QualityOrigin; origins?:QualityOrigin[];
   /** Derived per-row capture readings; never replaces any saved source snapshot. */
   readings?: Record<string, FishSnapshot>;
+  /** Most recent actual mining time among captures represented by this display row. */
+  minedAt?: number;
   /** Derived display rows share one signalId / paper trade; detectorId selects their attribution. */
   signalId?: string; detectorId?: string;
 }
@@ -161,7 +163,7 @@ export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQuali
   const reset = new Set<string>();
   const samples = study.samples.map(sample => {
     if (sample.basis === 'detected' || qualityOrigins(sample).includes('library')) return sample;
-    const cutoff = sample.source.fish?.cutoffMs;
+    const cutoff = qualityOrigins(sample).includes('mined') ? qualityMiningEntryAt(sample.source) : sample.source.fish?.cutoffMs;
     const enteredAt = cutoff != null && Number.isFinite(cutoff) && cutoff > 0 ? cutoff : null;
     const basis = enteredAt == null ? 'missing' : 'capture';
     if (sample.enteredAt === enteredAt && sample.basis === basis) return sample;
@@ -229,8 +231,49 @@ export function qualityMetricPlan(f: FishSnapshot, metric = 'capture'): { plan: 
   if (plan.unavailable) throw new Error(plan.unavailable);
   return { plan, scale: metric === 'capture' ? f.scale ?? 1 : 1 };
 }
+const qualityMiningEntryAt = (source: TradeSignal): number | null => {
+  const anchor = source.mined?.anchorMs ?? source.fish?.cutoffMs;
+  return typeof anchor === 'number' && Number.isFinite(anchor) && anchor > 0 ? anchor : null;
+};
+export const qualityEntryIdentity = (source: TradeSignal, enteredAt: number | null) => `${signalDedupKey(source)}|${enteredAt}`;
+export const qualityMiningEntryKey = (source: TradeSignal) => qualityEntryIdentity(source, qualityMiningEntryAt(source));
+
+/** Every mined capture can join its own historical entry. Repeated captures at that entry still share one paper trade. */
+function importQualityMining(study: FishQualityStudy, signals: readonly TradeSignal[], now: number): FishQualityStudy {
+  const keyFor = (source: TradeSignal, ids: string[]) => JSON.stringify([
+    qualityMiningEntryKey(source), source.id, source.mined?.roundId, miningCaptureTime(source), ids.sort(),
+  ]);
+  const prior = new Map(study.samples.filter(s => qualityOrigins(s).includes('mined')).map(s => [
+    keyFor(s.source, qualityMembers(s.source).map(qualityGroupId)), s,
+  ]));
+  const groups = new Map(study.groups.map(group => [group.id, group]));
+  const samples = new Map(study.samples.map(sample => [sample.id, sample]));
+  let changed = false;
+  for (const source of signals) {
+    const members = new Map(qualityMembers(source).map(snapshot => [qualityGroupId(snapshot), snapshot]));
+    const ids = [...members.keys()];
+    const key = keyFor(source, [...ids]);
+    const existing = prior.get(key);
+    const enteredAt = qualityMiningEntryAt(source);
+    if (existing && existing.enteredAt === enteredAt && existing.groups.length === ids.length && ids.every(id => existing.groups.includes(id))) continue;
+    const sample: QualitySample = {
+      id: existing?.id ?? `mine-${shortFishHash(key)}`, source: structuredClone(source), groups: ids,
+      enteredAt, basis: enteredAt === null ? 'missing' : 'capture', importedAt: existing?.importedAt ?? now,
+      origin: existing ? existing.origin : 'mined', origins: existing?.origins ?? ['mined'],
+    };
+    samples.set(sample.id, sample);
+    prior.set(key, sample);
+    for (const [id, snapshot] of members) if (!groups.has(id)) {
+      groups.set(id, { id, label: fishSourceLabel(snapshot), metric: fishMetricLabel(snapshot), snapshot: structuredClone(snapshot) });
+    }
+    changed = true;
+  }
+  return changed ? { ...study, groups: [...groups.values()], samples: [...samples.values()] } : study;
+}
+
 export function importQualityFish(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(),origin:QualityOrigin='fish'): FishQualityStudy {
   const previous=study;study=resolveLegacySourceMemberships(study,signals,origin);
+  if (origin === 'mined') return importQualityMining(study, signals, now);
   const groups = new Map(study.groups.map(g => [g.id, g])), samples = new Map(study.samples.map(s => [s.id, s]));
   const seen = new Set(study.samples.filter(s=>qualityOrigins(s).includes(origin)).flatMap(s => qualityMembers(s.source).filter(f => s.groups.includes(qualityGroupId(f))).map(f => memberKey(s.source, f))));
   let changed = previous!==study;
@@ -239,9 +282,9 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
     const ids = members.map(qualityGroupId);
     if (!ids.length) continue;
     // Archiving/reopening a panel cannot buy the same signal again; changed capture settings are a new experiment.
-    const id = `${origin==='mined'?'mine-':''}${shortFishHash(JSON.stringify(members.map(f => memberKey(source, f)).sort()))}`;
+    const id = shortFishHash(JSON.stringify(members.map(f => memberKey(source, f)).sort()));
     if (samples.has(id)) {const prior=samples.get(id)!;if(!qualityOrigins(prior).includes(origin)){samples.set(id,{...prior,origins:[...qualityOrigins(prior),origin]});changed=true;}continue;}
-    const cutoff = origin==='mined'?source.mined?.anchorMs??source.fish?.cutoffMs:source.fish?.cutoffMs;
+    const cutoff = source.fish?.cutoffMs;
     const live = source.freshCatch && (source.caughtAt ?? 0) >= study.startedAt && cutoff != null && Math.abs((source.caughtAt ?? 0) - cutoff) < 3_600_000;
     const enteredAt = live ? source.caughtAt : study.entryMode === 'signal' ? source.timeMs : cutoff;
     samples.set(id, { id, source: structuredClone(source), groups: ids, enteredAt: Number.isFinite(enteredAt) && enteredAt! > 0 ? enteredAt! : null,
@@ -302,12 +345,13 @@ export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] 
 function buildComparisonRows(study: FishQualityStudy): QualitySample[] {
   const rows = new Map<string, QualitySample>();
   for (const sample of study.samples) {
-    const identity = `${signalDedupKey(sample.source)}|${sample.enteredAt}`;
+    const identity = qualityEntryIdentity(sample.source, sample.enteredAt);
     const prior = rows.get(identity);
     const readings = Object.fromEntries(qualityMembers(sample.source).filter(f => sample.groups.includes(qualityGroupId(f))).map(f => [qualityGroupId(f), f]));
     const origins=[...new Set([...(prior?qualityOrigins(prior):[]),...qualityOrigins(sample)])];
-    rows.set(identity, prior ? { ...prior,...(!prior.groups.length&&sample.groups.length?{source:sample.source,basis:sample.basis}:{}),origin:origins.length===1?origins[0]:undefined,origins,groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
-      : { ...sample,origins,id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
+    const minedAt = Math.max(prior?.minedAt ?? 0, miningCaptureTime(sample.source) ?? 0) || undefined;
+    rows.set(identity, prior ? { ...prior, minedAt,...(!prior.groups.length&&sample.groups.length?{source:sample.source,basis:sample.basis}:{}),origin:origins.length===1?origins[0]:undefined,origins,groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
+      : { ...sample,minedAt,origins,id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
   }
   return [...rows.values()];
 }
@@ -342,7 +386,7 @@ export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
  */
 export function selectMinedRows(study: FishQualityStudy): FishQualityStudy {
   if (!study.sellPlans) return study;
-  const done = new Set(study.minedAutoSelected ?? []), fresh = qualityDisplayRows(study).filter(r => r.source.mined && !done.has(r.signalId!));
+  const done = new Set(study.minedAutoSelected ?? []), fresh = qualityDisplayRows(study).filter(r => (r.source.mined || qualityOrigins(r).includes('mined')) && !done.has(r.signalId!));
   if (!fresh.length) return study;
   const selected = new Set(study.selectedRowIds ?? []);
   fresh.forEach(r => selected.add(r.id));

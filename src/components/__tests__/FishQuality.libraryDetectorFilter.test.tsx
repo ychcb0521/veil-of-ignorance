@@ -29,10 +29,10 @@ it('remembers only the user’s own detector choice, so 信号库 still shows it
   window.history.replaceState({ key: 'fish-entry', idx: 1 }, '');
   const s = state();
   render(<MemoryRouter><FishQuality state={s}/></MemoryRouter>);
-  // 全部来源下默认探测筛选生效：信号库自己的信号不在表里
-  expect(symbols().some(t => t.includes('LIB'))).toBe(false);
+  // 没有主动选择算法时，全部来源应直接包含信号库的记录。
+  expect(symbols().filter(t => t.includes('LIB'))).toHaveLength(2);
   fireEvent.click(screen.getAllByTitle(/打开交易战役/)[0]);
-  expect(JSON.parse(sessionStorage.getItem(QUALITY_RETURN_KEY)!).ui.algorithms).toBeUndefined();
+  expect(JSON.parse(sessionStorage.getItem(QUALITY_RETURN_KEY)!).ui.algorithms).toEqual([]);
   cleanup(); expect(armQualityReturn()).toBe(true);
   render(<MemoryRouter><FishQuality state={s}/></MemoryRouter>);
   fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'library' } });

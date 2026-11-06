@@ -16,3 +16,12 @@ export function resolveLegacySourceMemberships<T extends {deletedSources?:Record
  for(const key of Object.keys(study.deletedSources??{})){try{const [source,_entry,scope]=JSON.parse(key);if(scope!==undefined||!live.has(JSON.stringify(source))||resolved?.[key]?.includes(origin))continue;resolved={...resolved,[key]:[...(resolved?.[key]??[]),origin]};}catch{/* Invalid legacy markers stay inert. */}}
  return resolved===study.resolvedLegacySources?study:{...study,resolvedLegacySources:resolved};
 }
+
+
+/** Wall-clock capture time. A historical scan anchor is never a capture time. */
+export function miningCaptureTime(signal: TradeSignal): number | null {
+  if (!signal.mined) return null;
+  const archive = signal.fishArchive;
+  const at = signal.caughtAt ?? (archive?.id.startsWith('mine-') ? archive.at : undefined);
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null;
+}

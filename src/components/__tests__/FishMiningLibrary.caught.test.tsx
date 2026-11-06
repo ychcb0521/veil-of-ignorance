@@ -123,3 +123,18 @@ it('bulk selects a sorted, filtered range across the scroll window and supports 
   fireEvent.click(header);
   expect(screen.getByRole('button', { name: '删除所选（0）' })).toBeDisabled();
 });
+
+it('hands the selected actual mining date to the combination table with each original anchor', async () => {
+  const old = { ...signal('OLDUSDT', [1]), caughtAt: Date.UTC(2026, 10, 4, 1) };
+  const selected = { ...signal('NEWUSDT', [2]), caughtAt: Date.UTC(2026, 10, 6, 1, 18), mined: undefined };
+  store.library = { ...emptyMiningLibrary(), records: [record(old, 'old', 'old', A), record(selected, 'new', 'new', A)] };
+  const useInTable = vi.fn(() => true);
+  render(<FishMiningLibrary onSelectInTable={useInTable}/>);
+  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));
+  await screen.findAllByTestId('mining-library-row');
+  fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: '2026-11-06' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: '全选当前筛选的挖掘库记录' }));
+  fireEvent.click(screen.getByRole('button', { name: '在组合表中勾选' }));
+  expect(useInTable).toHaveBeenCalledWith([{ ...selected, mined: { anchorMs: A } }]);
+  expect(screen.queryByRole('dialog', { name: '挖掘库' })).not.toBeInTheDocument();
+});

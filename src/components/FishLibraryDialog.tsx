@@ -16,7 +16,7 @@ export const libraryCell = 'px-3 py-2';
 
 export interface FishLibraryRoundOption { id: string; label: string; error?: string }
 export function FishLibraryDialog<T extends {id:string}>({ name, info, description, placeholder, rounds, roundLabel, headers, items, match, row, empty, detail, onOpenChange, selection, sortColumn }: {
-  selection?: { selected: ReadonlySet<string>; select: (ids: string[]) => void; remove: () => void };
+  selection?: { selected: ReadonlySet<string>; select: (ids: string[]) => void; remove?: () => void; action?: () => boolean };
   /** 按钮与标题，如「挖掘库」。 */
   name: string; info: ReactNode; description: string; placeholder: string;
   rounds: FishLibraryRoundOption[]; roundLabel: string;
@@ -62,7 +62,8 @@ export function FishLibraryDialog<T extends {id:string}>({ name, info, descripti
       {selection && <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <button type="button" className={action} disabled={!order.length} onClick={() => replaceSelection(order)}>全选当前筛选（{order.length}）</button>
         <button type="button" className={action} disabled={!selection.selected.size} onClick={() => replaceSelection([])}>取消选择</button>
-        <button type="button" className={`${action} text-destructive`} disabled={!selection.selected.size} onClick={selection.remove}>删除所选（{selection.selected.size}）</button>
+        {selection.action && <button type="button" className={`${action} text-primary`} disabled={!selection.selected.size} onClick={() => { if (selection.action?.()) change(false); }}>在组合表中勾选</button>}
+        {selection.remove && <button type="button" className={`${action} text-destructive`} disabled={!selection.selected.size} onClick={selection.remove}>删除所选（{selection.selected.size}）</button>}
         {selection.selected.size > checkedCount && <span className="text-muted-foreground">筛选外已选 {selection.selected.size - checkedCount} 条</span>}
       </div>}
       <FishContinuousTable items={filtered} getKey={item=>item.id} row={item => row(item, selection ? (checked, shift) => toggleRow(item.id, checked, shift) : undefined)} columns={headers.length+(selection?1:0)} resetKey={resetKey} label={`${name}连续滚动列表`} testId={`${name}-table`} estimate={104}

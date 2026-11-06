@@ -546,19 +546,17 @@ it('keeps holding vetoes under 持仓监测, per sell plan', async () => {
 });
 // 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
 it('picks one or several detectors straight from the detector header, keeps the toolbar in sync and clears with 全部', () => {
-  // 【用户要求】2026-10-28 下拉只列捕捞 / 批量挖掘的默认算法与数值；打开时默认全选它们
+  // 2026-11-06 打开组合表时显示全部历史算法；预设只用于主动筛选。
   const s = defaultDetectorState(); render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button', { name: '展开探测算法明细' }));
   const symbols = () => screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/D\dUSDT/)![0]).sort();
-  expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT']);
+  expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT', 'D3USDT']);
   fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
   const picker = screen.getByTestId('quality-detector-picker');
   const boxes = () => within(picker).getAllByRole('checkbox') as HTMLInputElement[];
-  expect(boxes()).toHaveLength(3); expect(boxes().map(b => b.checked)).toEqual([true, true, true]);
+  expect(boxes()).toHaveLength(3); expect(boxes().map(b => b.checked)).toEqual([false, false, false]);
   expect(within(picker).queryByRole('checkbox', { name: /> 0\.06$/ })).toBeNull();
-  expect(within(picker).getByText('已选 3 / 3')).toBeInTheDocument();
-  fireEvent.click(within(picker).getByRole('button', { name: '全部' }));
-  expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT', 'D3USDT']);
+  expect(within(picker).getByRole('button', { name: '全部' })).toBeDisabled();
   // 2026-11-02 筛选栏的探测算法下拉已删除（表头已有）
   expect(screen.queryByRole('button', { name: '鱼质量的探测算法' })).toBeNull();
   fireEvent.click(boxes()[1]);
@@ -572,6 +570,8 @@ it('picks one or several detectors straight from the detector header, keeps the 
   expect(symbols()).toEqual(['D0USDT']);
   fireEvent.click(within(picker).getAllByRole('button', { name: /^只看 / })[2]);
   expect(symbols()).toEqual(['D2USDT']);
+  fireEvent.click(within(picker).getByRole('button', { name: '全部' }));
+  expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT', 'D3USDT']);
 });
 
 it('places independent filter results immediately after capture, runs without sell rules and sorts readings with missing values last', async () => {

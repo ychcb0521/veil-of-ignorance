@@ -35,7 +35,7 @@ export function qualityDetectorChoices(groups: readonly QualityGroup[]): Quality
   });
 }
 
-/** 打开时默认勾上全部默认规则（按默认顺序）。 */
+/** 预设筛选包含的探测组，按预设顺序排列。 */
 export function defaultQualityDetectorIds(groups: readonly QualityGroup[]): string[] {
   return qualityDetectorChoices(groups).flatMap(choice => choice.ids);
 }
