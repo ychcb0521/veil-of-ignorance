@@ -74,15 +74,20 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { acco
     info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
     headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '挖掘时间']}
     sortColumn={{ label: '挖掘时间', direction, toggle: () => setDirection(current => current === 'descending' ? 'ascending' : 'descending') }}
-    items={items} match={match} selection={bulk?{key:r=>r.id,selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),toggle:()=>{},select:ids=>setSelected(new Set(ids)),clear:()=>setSelected(new Set()),remove:()=>{
+    items={items} match={match} selection={bulk?{selected:new Set(items.filter(r=>selected.has(r.id)).map(r=>r.id)),select:ids=>setSelected(new Set(ids)),remove:()=>{
       const ids = items.filter(r => selected.has(r.id)).flatMap(r => r.ids);
       bulk({ kind: 'mining', ids, targets: miningRecordDeleteTargets(library.records, new Set(ids)) });
     }}:undefined}
     empty={{ none: '暂无挖掘记录。开始批量挖掘后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
-    row={r => {
+    row={(r, onCheck) => {
       const saved=evidence.get(r.id)!;
       return <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="mining-library-row">
-        {bulk&&<td className={libraryCell}><input type="checkbox" aria-label={`选择挖掘记录 ${r.signal.symbol} ${r.id}`} checked={selected.has(r.id)} onChange={()=>setSelected(s=>{const n=new Set(s);if(n.has(r.id))n.delete(r.id);else n.add(r.id);return n;})}/></td>}
+        {onCheck && <td className={libraryCell}>
+          <input type="checkbox" aria-label={`选择挖掘记录 ${r.signal.symbol} ${r.id}`} checked={selected.has(r.id)}
+            title="按住 Shift 点另一行可连续选择"
+            onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }}
+            onChange={e => onCheck(e.target.checked, (e.nativeEvent as MouseEvent).shiftKey === true)}/>
+        </td>}
         <td className={`${libraryCell} font-mono`}><button type="button" className="hover:text-primary hover:underline disabled:cursor-default disabled:no-underline disabled:hover:text-inherit" disabled={!onJump || !!canJump && !canJump(r.signal)} onClick={() => onJump?.(r.signal)}>{r.signal.symbol}</button></td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.signal.timeMs)}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{short(r.anchorMs)}</td>

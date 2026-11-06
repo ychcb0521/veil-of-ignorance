@@ -89,3 +89,37 @@ it('shows exact Beijing mining times, sorts repeated captures separately, and se
     kind: 'mining', ids: ['old'], targets: [{ source: old, entry: A, origin: 'mined', miningCaptureId: old.id }],
   });
 });
+
+it('bulk selects a sorted, filtered range across the scroll window and supports the header checkbox', async () => {
+  const captures = Array.from({ length: 20 }, (_, i) => {
+    const source = { ...signal(`KEEP${String(i).padStart(2, '0')}USDT`, [1]), caughtAt: A + (i + 1) * 1000 };
+    return record(source, String(i), String(i), source.caughtAt);
+  });
+  const excluded = { ...signal('OTHERUSDT', [1]), caughtAt: A + 10_500 };
+  store.library = { ...emptyMiningLibrary(), records: [...captures, record(excluded, 'excluded', 'excluded', excluded.caughtAt)] };
+  const remove = vi.fn();
+  render(<FishBulkDeleteContext.Provider value={remove}><FishMiningLibrary/></FishBulkDeleteContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));
+  await screen.findAllByTestId('mining-library-row');
+
+  fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: 'KEEP' } });
+  fireEvent.click(screen.getByRole('button', { name: '按挖掘时间排序' }));
+  const first = screen.getByRole('checkbox', { name: '选择挖掘记录 KEEP19USDT 19' });
+  const last = screen.getByRole('checkbox', { name: '选择挖掘记录 KEEP00USDT 0' });
+  const header = screen.getByRole('checkbox', { name: '全选当前筛选的挖掘库记录' });
+  expect(screen.queryByRole('checkbox', { name: '选择挖掘记录 KEEP03USDT 3' })).not.toBeInTheDocument();
+
+  fireEvent.click(first);
+  expect(header).toBePartiallyChecked();
+  fireEvent.click(last, { shiftKey: true });
+  expect(header).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: '删除所选（20）' }));
+  expect(remove.mock.calls[0][0].ids).toEqual(captures.map(capture => capture.id).reverse());
+
+  fireEvent.click(first, { shiftKey: true });
+  expect(screen.getByRole('button', { name: '删除所选（0）' })).toBeDisabled();
+  fireEvent.click(header);
+  expect(screen.getByRole('button', { name: '删除所选（20）' })).toBeEnabled();
+  fireEvent.click(header);
+  expect(screen.getByRole('button', { name: '删除所选（0）' })).toBeDisabled();
+});
