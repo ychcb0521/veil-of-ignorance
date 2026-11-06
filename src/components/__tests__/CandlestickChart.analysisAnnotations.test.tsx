@@ -216,7 +216,7 @@ describe('CandlestickChart analysis annotations', () => {
     }finally{view.unmount();root.remove();delete(mocks.chart as any).getDom;delete(mocks.chart as any).overrideIndicator;if(previous==null)localStorage.removeItem(key);else localStorage.setItem(key,previous);}
   });
 
-  it('五项研究指标各创建三个副图；参数与 BTC 更新传播到三条线，关闭时全部移除', () => {
+  it('研究指标按定义创建图线，参数与 BTC 更新传播到对应图线，关闭时全部移除', () => {
     const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
     localStorage.setItem(key, JSON.stringify(RESEARCH_INDICATORS.map(item => ({ type: item.id, period: item.period, enabled: true, showAverage: true, color: '#F6465D' }))));
     resetBtcReference();
@@ -224,11 +224,16 @@ describe('CandlestickChart analysis annotations', () => {
     Object.assign(mocks.chart, { overrideIndicator });
     const view = render(<TooltipProvider><CandlestickChart data={[candle(300000), candle(600000)]} symbol="TESTUSDT" /></TooltipProvider>);
     try {
-      const names = RESEARCH_INDICATORS.flatMap(item => [0, 1, 2].map(level => researchKcName(item.id, level)));
+      const names = RESEARCH_INDICATORS.flatMap(item =>
+        ('rawOnly' in item && item.rawOnly ? [0] : [0, 1, 2]).map(level => researchKcName(item.id, level))
+      );
+      const state = RESEARCH_INDICATORS.find(item => item.id === 'STATE')!;
       expect((mocks.chart.createIndicator.mock.calls as unknown as [{ name: string }][]).map(([arg]) => arg.name)).toEqual(names);
       fireEvent.click(screen.getByRole('button', { name: '指标' }));
-      fireEvent.change(screen.getByLabelText(RESEARCH_INDICATORS[0].short + ' 参数'), { target: { value: '12.5' } });
-      for (const name of names.slice(0, 3)) expect(overrideIndicator).toHaveBeenCalledWith(expect.objectContaining({ name, calcParams: expect.arrayContaining([12.5]) }));
+      fireEvent.change(screen.getByLabelText(state.short + ' 参数'), { target: { value: '12.5' } });
+      for (const level of [0, 1, 2]) {
+        expect(overrideIndicator).toHaveBeenCalledWith(expect.objectContaining({ name: researchKcName(state.id, level), calcParams: expect.arrayContaining([12.5]) }));
+      }
       overrideIndicator.mockClear();
       act(() => ingestBtcBars(300000, [{ openTime: 300000, close: 60000 }]));
       expect((overrideIndicator.mock.calls as unknown as [{ name: string }][]).map(([arg]) => arg.name)).toEqual(names);
@@ -473,6 +478,37 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.chart.updateData).toHaveBeenCalledTimes(3);
     expect(mocks.chart.updateData.mock.calls[2][0].timestamp).toBe(2000);
     expect(mocks.chart.updateData.mock.calls[2][0].close).toBe(1.4);
+  });
+
+  it('coalesces forming-candle paints but draws the final candle immediately', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    try {
+      const chartApiRef = { current: null as ChartImperativeApi | null };
+      const view = render(<TooltipProvider><CandlestickChart data={[candle(1000, 1)]} symbol="BTCUSDT" chartApiRef={chartApiRef} /></TooltipProvider>);
+      mocks.chart.updateData.mockClear();
+      const partial = { timestamp: 1000, open: 1, high: 2, low: 1, close: 1, volume: 1, cba2Closed: false };
+      act(() => {
+        chartApiRef.current!.updateData(partial);
+        chartApiRef.current!.updateData({ ...partial, close: 1.1 });
+        chartApiRef.current!.updateData({ ...partial, close: 1.2 });
+      });
+      expect(mocks.chart.updateData).toHaveBeenCalledTimes(1);
+      act(() => vi.advanceTimersByTime(55));
+      expect(mocks.chart.updateData).toHaveBeenCalledTimes(2);
+      expect(mocks.chart.updateData.mock.calls[1][0].close).toBe(1.2);
+
+      act(() => {
+        chartApiRef.current!.updateData({ ...partial, close: 1.3 });
+        chartApiRef.current!.updateData({ ...partial, close: 2, cba2Closed: true });
+      });
+      expect(mocks.chart.updateData).toHaveBeenCalledTimes(3);
+      expect(mocks.chart.updateData.mock.calls[2][0].close).toBe(2);
+      act(() => vi.advanceTimersByTime(55));
+      expect(mocks.chart.updateData).toHaveBeenCalledTimes(3);
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('900x / 1m React snapshots keep the existing chart and indicator data after several streamed candles', () => {

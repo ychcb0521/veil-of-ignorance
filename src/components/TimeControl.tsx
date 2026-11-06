@@ -134,7 +134,8 @@ export function TimeControl({
   mailFishRef.current = fish.unionFish;
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
-  const turingArchive = useTuringReplayArchive(user?.id);
+  const needsTuringArchive = (turing && signalLibOpen) || fishOpen || isTuringCupSymbol(activeSymbol ?? '');
+  const turingArchive = useTuringReplayArchive(user?.id, needsTuringArchive);
   const replaySamples = useMemo(() => turingArchive.archive ? turingReplaySamples(turingArchive.archive) : EMPTY_TURING_SIGNALS, [turingArchive.archive]);
   const replayIds = useMemo(() => new Set(replaySamples.map(signal => signal.id)), [replaySamples]);
   const turingInputs = useMemo(() => {
@@ -559,7 +560,8 @@ export function TimeControl({
   // 元素而不是内部组件：TimeControl 每跳一格时钟就重渲染，内部组件会被卸载重建、下拉面板随之关掉
   const speedButtons = <SpeedSelector speed={visualSpeed} onSelect={s => { setVisualSpeed(s); onSetSpeed(s); }} />;
 
-  const TimeDisplay = ({ paused }: { paused?: boolean }) => (
+  const paused = status === 'paused';
+  const timeDisplay = (
     <div className="ml-auto flex items-center gap-3 whitespace-nowrap">
       {originTime != null && (
         // 【用户要求】2026-10-19 这一行要放得下：启始只写「月-日 时:分」，悬停看完整时间
@@ -651,7 +653,7 @@ export function TimeControl({
               </button>
             </div>
             {speedButtons}
-            <TimeDisplay />
+            {timeDisplay}
           </>
         )}
 
@@ -673,7 +675,7 @@ export function TimeControl({
               </button>
             </div>
             {speedButtons}
-            <TimeDisplay paused />
+            {timeDisplay}
           </>
         )}
       </div>

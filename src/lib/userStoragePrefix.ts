@@ -5,21 +5,32 @@
  * 而不少测试会整体 mock 掉 usePersistedState——若前缀逻辑还住在那里，
  * 一个与本测试无关的 mock 就会把消息中心连带打坏。
  */
+let sessionKey: string | undefined;
+let sessionSnapshot: string | null = null;
+let sessionUserId: string | null = null;
+
 export function getUserId(): string | null {
   try {
-    const storageKey = Object.keys(localStorage).find(k =>
-      k.startsWith('sb-') && k.endsWith('-auth-token')
-    );
-    if (storageKey) {
-      const data = JSON.parse(localStorage.getItem(storageKey) || '{}');
-      const userId = data?.user?.id;
-      if (userId) return userId;
+    let raw = sessionKey ? localStorage.getItem(sessionKey) : null;
+    if (raw === null) {
+      sessionKey = Object.keys(localStorage).find(key => key.startsWith('sb-') && key.endsWith('-auth-token'));
+      raw = sessionKey ? localStorage.getItem(sessionKey) : null;
     }
-  } catch {}
-  return null;
+    if (raw !== sessionSnapshot) {
+      // The storage value also changes on same-tab logout, account switches and token refresh.
+      sessionSnapshot = raw;
+      sessionUserId = null;
+      if (raw) {
+        const id = JSON.parse(raw)?.user?.id;
+        if (typeof id === 'string' && id) sessionUserId = id;
+      }
+    }
+    return sessionUserId;
+  } catch {
+    return null;
+  }
 }
 
-export function getUserPrefix(): string {
-  const userId = getUserId();
+export function getUserPrefix(userId = getUserId()): string {
   return userId ? `sim_${userId}_` : 'sim_anon_';
 }

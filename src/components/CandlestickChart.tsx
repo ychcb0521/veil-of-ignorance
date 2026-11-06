@@ -1002,11 +1002,30 @@ function CandlestickChartComponent({
     // high replay speeds, concurrent calls can therefore finish out of order
     // and leave the right-axis last-price mark on an older candle. Serialize
     // different timestamps and coalesce repeated updates of the active candle.
+    let formingUpdateTimer: number | null = null;
     if (chartApiRef) {
+      const formingUpdateMs = 50;
       let refreshRequested = false, lastLiveUpdateAt = -Infinity;
+      let lastFormingTimestamp: number | undefined;
+      let lastFormingUpdateAt = -Infinity;
       const drainLiveUpdates = () => {
         if (chartRef.current !== chart || liveUpdateInFlightRef.current) return;
-        let nextCandle = liveUpdateQueueRef.current.shift();
+        const queue = liveUpdateQueueRef.current;
+        const pending = queue[0];
+        const wait = formingUpdateMs - (performance.now() - lastFormingUpdateAt);
+        if (queue.length === 1 && pending.cba2Closed === false && pending.timestamp === lastFormingTimestamp && wait > 0) {
+          // Intermediate paints can wait. The latest partial still reaches the chart after a pause.
+          if (formingUpdateTimer == null) formingUpdateTimer = window.setTimeout(() => {
+            formingUpdateTimer = null;
+            drainLiveUpdates();
+          }, wait);
+          return;
+        }
+        if (formingUpdateTimer != null) {
+          window.clearTimeout(formingUpdateTimer);
+          formingUpdateTimer = null;
+        }
+        let nextCandle = queue.shift();
         const refreshOnly = !nextCandle;
         if (nextCandle) {
           refreshRequested = false;
@@ -1014,6 +1033,10 @@ function CandlestickChartComponent({
         }
         if (!nextCandle && refreshRequested) { refreshRequested = false; nextCandle = chart.getDataList().at(-1); }
         if (!nextCandle) return;
+        if (!refreshOnly && nextCandle.cba2Closed === false) {
+          lastFormingTimestamp = nextCandle.timestamp;
+          lastFormingUpdateAt = performance.now();
+        }
 
         liveUpdateInFlightRef.current = true;
         const generation = liveUpdateGenerationRef.current;
@@ -1158,6 +1181,7 @@ function CandlestickChartComponent({
       ro.disconnect();
       layoutHost.removeEventListener("pointerenter", healStaleLayout);
       layoutHost.removeEventListener("pointerdown", healStaleLayout, true);
+      if (formingUpdateTimer != null) window.clearTimeout(formingUpdateTimer);
       if (computationRefreshTimerRef.current != null) { window.clearTimeout(computationRefreshTimerRef.current); computationRefreshTimerRef.current = null; }
       liveUpdateGenerationRef.current += 1;
       liveUpdateQueueRef.current = [];

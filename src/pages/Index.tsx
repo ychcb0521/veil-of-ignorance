@@ -503,7 +503,7 @@ const Index = () => {
     });
   }, [ordersMap]);
 
-  const DISPLAY_PRICE_FLUSH_MS = 33;
+  const DISPLAY_PRICE_FLUSH_MS = 66;
   const DISPLAY_PRICE_SMOOTHING_MS = 42;
   const DISPLAY_PRICE_SNAP_RATIO = 0.08;
   const REACT_FLUSH_MS = 250;
@@ -542,7 +542,8 @@ const Index = () => {
 
     activeDisplayPriceRef.current = next;
     const rendered = renderedDisplayPriceRef.current;
-    if (now - lastDisplayPriceFlushRef.current < DISPLAY_PRICE_FLUSH_MS && Math.abs(next - rendered) < minStep) {
+    // Keep the live price current for order placement without rerendering the page on every frame.
+    if (now - lastDisplayPriceFlushRef.current < DISPLAY_PRICE_FLUSH_MS || Math.abs(next - rendered) < minStep) {
       return next;
     }
     lastDisplayPriceFlushRef.current = now;

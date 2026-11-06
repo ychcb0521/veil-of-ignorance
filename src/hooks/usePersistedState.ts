@@ -11,9 +11,8 @@ import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 export { getUserPrefix };
 
 export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
-  const prefix = getUserPrefix();
-  const fullKey = prefix + key;
   const userId = getUserId();
+  const fullKey = getUserPrefix(userId) + key;
 
   const [state, setStateRaw] = useState<T>(() => {
     try {
