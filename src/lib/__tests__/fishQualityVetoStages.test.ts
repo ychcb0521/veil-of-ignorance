@@ -44,6 +44,19 @@ it('can carry the holding peak or restart the peak at the switching addition wit
  const held=await run(g,9,undefined,load),reset=await run({...g,vetoPeakBasis:'stage'},9,undefined,load);
  expect(held).toMatchObject({status:'closed',endPrice:378,exitSnapshot:{cause:{kind:'dynamic-drawdown'}}});expect(reset.status).toBe('open');const defaultPeak=await run({...g,vetoPeakBasis:undefined},9,undefined,load);expect(defaultPeak).toEqual(reset);expect(reset.peakPct).toBe(320);expect(reset.vetoPath!.peak).toBe(405);
 });
+it('executes the displayed 15% stage veto using the selected peak, and does not require an ordinary sell signal',async()=>{
+ const g=vetoGroup();g.rule=undefined;g.addition!.maxRounds=6;g.vetoStages=[{afterAdditions:6,conditions:[dynamic(15)]}];
+ // Keep early fills unchanged, and place the final K below both drawdown lines to isolate the veto.
+ g.addition!.rounds=Array.from({length:6},(_,i)=>({source:'custom',stricterPct:10,condition:g.addition!.condition,supportOffsetAtr:i===5?3:1.5}));
+ const load=atrLoader(m=>m===4?bar(m,300,1,299,400,320):m===5?bar(m,350,1,349,420,400):m===6?bar(m,400,0,399,405,400):m===7?bar(m,400,0,350,405,400):m>=8?bar(m,400,0,340,405,350):bar(m));
+ const holding=await run({...g,vetoPeakBasis:'holding'},8,undefined,load);
+ expect(holding).toMatchObject({status:'closed',endTime:T+7*M,endPrice:357,exitSnapshot:{cause:{kind:'dynamic-drawdown',threshold:15}}});
+ const stage=await run({...g,vetoPeakBasis:'stage'},8,undefined,load);expect(stage.status).toBe('open');
+ expect(stage.vetoPath!.peak).toBe(405);
+ const later=await run({...g,vetoPeakBasis:'stage'},10,stage,load);
+ expect(later).toMatchObject({status:'closed',endTime:T+8*M,endPrice:344.25,exitSnapshot:{cause:{kind:'dynamic-drawdown',threshold:15}}});
+ expect(await run({...g,vetoPeakBasis:'stage'},10,undefined,load)).toEqual(later);
+});
 it('replaces matching conditions cumulatively or whole profiles, and allows explicitly disabling a matching base rule',()=>{
  const g=vetoGroup(),stop=makeQualityHoldingVeto('static-drawdown','>=',5);g.holdingVetoes!.push(stop);expect(stagedHoldingVetoes(g,5)).toEqual(g.holdingVetoes);expect(stagedHoldingVetoes(g,6)).toEqual([stop,dynamic(20)]);expect(stagedHoldingVetoes(g,7)).toEqual([stop,dynamic(15)]);
  expect(stagedHoldingVetoes({...g,vetoStageMode:'replace'},7)).toEqual([dynamic(15)]);

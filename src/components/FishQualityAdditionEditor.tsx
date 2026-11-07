@@ -320,6 +320,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
      const stages=conditions.length?[...rest,{afterAdditions:String(n),conditions}].sort((a,b)=>Number(a.afterAdditions)-Number(b.afterAdditions)):rest;
      setVetoStages({...vetoStages,enabled:stages.length>0,stages});};
     return <div className="space-y-2" data-testid="addition-sell-vetoes">
+     {stage?.conditions.some(v=>v.enabled&&v.choice==='dynamic-drawdown')&&<p className="text-[10.5px] leading-relaxed text-primary" data-testid="addition-dynamic-drawdown-basis">第 {n} 次加仓实际成交后生效。动态回撤＝（参考高点−当前价）÷参考高点；{vetoStages.peakBasis==='holding'?'参考高点沿用持仓以来最高价，不因加仓重置。':'参考高点从本次加仓价重新记录，之前高点不沿用；进入后续另设的一票阶段时会再次重新记录。'}保存后运行新轮次；旧轮次沿用原设置。</p>}
      <FishQualityHoldingVetoEditor compact labelPrefix={`第 ${n} 次加仓后 `} draft={stage?.conditions??[]} setDraft={put}/>
      {stage&&<div className="grid grid-cols-2 gap-2">
       <label className="space-y-1 text-[10px] text-muted-foreground">与硬性终止（各次通用）<select aria-label="一票次数切换条件范围" className={field+' w-full'} value={vetoStages.mode} onChange={e=>setVetoStages({...vetoStages,mode:e.target.value as VetoStagesDraft['mode']})}><option value="overlay">同类替换，其余并存</option><option value="replace">整组替换</option></select></label>

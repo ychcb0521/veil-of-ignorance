@@ -5,10 +5,24 @@ import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdd
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
+import type {VetoStagesDraft} from '../FishQualityVetoStagesEditor';
 afterEach(cleanup);
 function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
+it('shows the selected peak basis beside the dynamic stage condition without changing its 15% threshold',()=>{
+ function StageEditor(){
+  const [draft,setDraft]=useState(()=>additionDraft({...defaultQualityAddition(),enabled:true}));
+  const [vetoStages,setVetoStages]=useState<VetoStagesDraft>({enabled:true,mode:'overlay',peakBasis:'stage',stages:[{afterAdditions:'1',conditions:[{choice:'dynamic-drawdown',direction:'>=',threshold:'15',enabled:true}]}]});
+  return <FishQualityAdditionEditor draft={draft} setDraft={setDraft} vetoStages={vetoStages} setVetoStages={setVetoStages}/>;
+ }
+ render(<StageEditor/>);
+ expect(screen.getByTestId('addition-dynamic-drawdown-basis')).toHaveTextContent('参考高点从本次加仓价重新记录');
+ expect(screen.getByLabelText('第 1 次加仓后 持仓否决 1 阈值')).toHaveValue(15);
+ fireEvent.change(screen.getByLabelText('一票次数切换峰值口径'),{target:{value:'holding'}});
+ expect(screen.getByTestId('addition-dynamic-drawdown-basis')).toHaveTextContent('沿用持仓以来最高价，不因加仓重置');
+ expect(screen.getByLabelText('第 1 次加仓后 持仓否决 1 阈值')).toHaveValue(15);
+});
 it('switches the screenshot K row to immediate execution, persists it for every round, and preserves original sizing',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
