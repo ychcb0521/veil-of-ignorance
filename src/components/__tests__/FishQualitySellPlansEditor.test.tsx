@@ -5,7 +5,36 @@ import { enableQualityComparison, ensureQualitySellCombo } from '@/lib/fish/qual
 import { newQualityStudy, type QualityGroup } from '@/lib/fish/quality';
 import { makeQualitySellPlan, replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
+import { buildFusionTemplatePlan } from '@/lib/fish/qualityBuiltinTemplates';
+import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 afterEach(() => { cleanup(); localStorage.clear(); });
+it('splits a saved routed combination into two complete independent drafts and keeps the original', () => {
+  const plan = freezeQualityPlan(buildFusionTemplatePlan(BUILTIN_FEATURES, 'routed', '原组合'));
+  const before = structuredClone(plan), save = vi.fn();
+  render(<FishQualitySellPlansEditor plans={[plan]} ready onSave={save}/>);
+  fireEvent.click(screen.getByLabelText('拆分卖出组合 1'));
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('卖出算法 2 名称')).toHaveValue('原组合 · 结构型');
+  expect(screen.getByLabelText('卖出算法 3 名称')).toHaveValue('原组合 · 进攻型');
+  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
+  const [original, structure, attack]: QualityGroup[] = save.mock.calls[0][0];
+  expect(original).toEqual(before);
+  for (const [copy, branch] of [[structure, 'structure'], [attack, 'attack']] as const) {
+    expect(copy.router).toBeUndefined(); expect(copy.addition).toEqual(plan.router![branch].addition);
+    expect(copy.snapshot).toEqual(plan.router![branch].snapshot);
+    expect(copy.holdingVetoes).toEqual(plan.router![branch].holdingVetoes);
+    expect(copy.sellStages).toEqual(plan.router![branch].sellStages);
+  }
+  expect(new Set([original.id, structure.id, attack.id]).size).toBe(3);
+  expect(plan).toEqual(before);
+});
+it('requires saving pending settings before splitting and hides splitting from embedded branch editors', () => {
+  const plan = buildFusionTemplatePlan(BUILTIN_FEATURES, 'routed');
+  const view = render(<FishQualitySellPlansEditor plans={[plan]} ready extraDirty onSave={vi.fn()}/>);
+  expect(screen.getByLabelText('拆分卖出组合 1')).toBeDisabled();
+  view.rerender(<FishQualitySellPlansEditor plans={[plan]} ready embedded onSave={vi.fn()}/>);
+  expect(screen.queryByLabelText('拆分卖出组合 1')).toBeNull();
+});
 const initial = () => ensureQualitySellCombo(enableQualityComparison(newQualityStudy())).sellPlans!;
 it('adds either bearish feature or a custom series with editable direction/threshold while preserving existing plans', () => {
   const save = vi.fn(), plans = initial();

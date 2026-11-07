@@ -23,6 +23,26 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('saves detached structure/attack plans without rebuilding the selected branch from editor defaults', async () => {
+ const {buildFusionTemplatePlan}=await import('@/lib/fish/qualityBuiltinTemplates');
+ const {BUILTIN_FEATURES}=await import('@/lib/deepDig/features');
+ const {freezeQualityPlan}=await import('@/lib/fish/qualityPlanVersions');
+ const s=state(),plan=freezeQualityPlan(buildFusionTemplatePlan(BUILTIN_FEATURES,'split-original','原组合'));
+ s.study.sellPlans=[plan];const before=structuredClone(plan);
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ fireEvent.click(screen.getByLabelText('拆分卖出组合 1'));
+ expect(s.setSellPlans).not.toHaveBeenCalled();
+ const structureId=screen.getByTestId('sell-plan-draft-1').getAttribute('data-plan-id');
+ expect(screen.getAllByTestId('quality-monitor-editor').some(n=>n.getAttribute('data-plan-id')===structureId)).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
+ expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0];
+ expect(saved).toHaveLength(3);expect(saved[0]).toEqual(before);
+ for(const [i,key] of (['structure','attack'] as const).entries()){
+  const {id:_id,label:_label,frozenVersions:_versions,...expected}=before.router![key];
+  const {id,label,frozenVersions,...actual}=saved[i+1];expect(actual).toEqual(expected);
+ }
+ expect(plan).toEqual(before);expect(s.start).not.toHaveBeenCalled();
+},30000);
 it('saves a Turing copy without enabling default holding conditions or changing the original', () => {
  const s=state(), original=structuredClone(s.study.sellPlans![0]);
  delete original.mirrorTakeProfit; delete original.addition;

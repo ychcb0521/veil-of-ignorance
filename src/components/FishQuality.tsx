@@ -358,7 +358,8 @@ function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outs
       </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
         allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{
           const saved=view.save(next=>next.map(p=>{
-            if(p.id!==active.id||isLegacyQualityPlan(p)||p.router||(p.initialization&&!changed(active)))return p;
+            // Untouched saved/copied settings must not be rebuilt from form defaults on Save.
+            if(p.id!==active.id||isLegacyQualityPlan(p)||p.router||!changed(active))return p;
             try { return {...p,...parseMonitorDraft(forPlan(active),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
           }));
           if(saved)done();

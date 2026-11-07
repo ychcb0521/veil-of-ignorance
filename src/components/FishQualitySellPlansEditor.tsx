@@ -1,4 +1,5 @@
 import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
+import { splitQualityBranches } from '@/lib/fish/qualitySplitBranches';
 import {FishQualityTemplateArchive} from './FishQualityTemplateArchive';
 import { FishQualityAdvantageSettings } from './FishQualityAdvantageSettings';
 import { withQualityAdvantageOptions, type QualityAdvantageOptions } from '@/lib/fish/qualityAdvantage';
@@ -134,6 +135,15 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     change([...drafts.slice(0, index + 1), copy, ...drafts.slice(index + 1)]);
     onSelectPlan?.(copy.id);
   };
+  const splitBranches=(source:Draft,index:number)=>{
+    try{
+      const base=baseOf(source)!;
+      const copies=splitQualityBranches(base,{structure:newQualitySellPlanId(),attack:newQualitySellPlanId()},
+        {structure:uniqueLabel(labelOf(source,base)+' · 结构型'),attack:uniqueLabel(labelOf(source,base)+' · 进攻型')});
+      change([...drafts.slice(0,index+1),...copies.map(draftOf),...drafts.slice(index+1)]);
+      onSelectPlan?.(copies[0].id);
+    }catch(cause){setError(cause instanceof Error?cause.message:'拆分失败，原组合未改动');}
+  };
   /** 旧引擎方案复制成当前引擎可编辑的 S/T/K 方案（原方案保留）。不沿用原方案的监测草稿：草稿按新方案自己生成。 */
   const editableCopy = (source: Draft, index: number) => {
     const base = legacyToEditablePlan(baseOf(source)!), copyBase = { ...base, id: newQualitySellPlanId(), label: uniqueLabel(`${labelOf(source, baseOf(source))}（可编辑）`) };
@@ -225,6 +235,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         {isLegacyQualityPlan(baseOf(d)) && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300" title="按 10-31 的引擎原样复算；除名称外不能修改" data-testid={'sell-plan-legacy-' + i}>{LEGACY_ENGINE_LABEL} · 只读</span>}
         {!readOnly && !embedded && isLegacyQualityPlan(baseOf(d)) && <button type="button" disabled={!ready} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/20 disabled:opacity-40" title="复制成当前引擎的「指标 · S / T / K」方案，可以改参数；入场距离沿用原值、涨幅门槛按持仓均价。原方案保留。" aria-label={'转为可编辑 ' + (i + 1)} onClick={() => editableCopy(d, i)}>转为可编辑</button>}
         {purpose !== 'entry' && <select aria-label={`${action}算法 ` + (i + 1) + ' 类型'} disabled={isLegacyQualityPlan(baseOf(d)) || !!baseOf(d)?.router} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>}
+        {!readOnly&&!embedded&&baseOf(d)?.router&&<button type="button" aria-label={`拆分卖出组合 ${i+1}`} title="原组合保留；将已保存的两条分支分别复制成独立方案，包含所有轮次及冻结参数。先保存未保存的修改。" disabled={!ready||dirty||extraDirty} onClick={()=>splitBranches(d,i)} className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40">拆成结构型 / 进攻型</button>}
         {!readOnly && !embedded && templates && <SaveTemplateButton index={i} defaultName={labelOf(d, baseOf(d))} disabledReason={!ready ? '尚未加载完成' : !plans.some(p => p.id === d.id) ? '新方案先点「保存全部方案」，再存为模板' : dirty || extraDirty ? '有未保存的修改：先点「保存全部方案」，模板保存的是已保存的设置' : undefined} onSave={name => templates.save(d.id, name)}/>}
         {!readOnly && !embedded && !baseOf(d)?.initialization && <button type="button" className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40" disabled={!ready || dirty || extraDirty || !plans.some(p=>p.id===d.id)} title="原方案保留；新副本从图灵杯首根行情初始化，BTC 依赖改用已有独立无 BTC 版本。请先保存当前修改。" aria-label={'新建图灵杯专用副本 ' + (i + 1)} onClick={()=>turingCopy(d)}>图灵杯副本</button>}
       {baseOf(d)?.initialization && <span className="text-[10px] text-amber-600" title="从实际首根行情初始化；初期读数与完整历史预热不同。原方案另行保留。">首根初始化 v1</span>}
