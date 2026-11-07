@@ -51,6 +51,8 @@ export function minuteTransport(plan: FishProgram): FishProgram {
 }
 
 export interface QualityIntrabarCondition {
+  /** Opt-in pre-entry v4: a match excludes admission instead of confirming it. */
+  entryVeto?: boolean;
   plan: FishProgram; scale: number; rule: {direction:QualityOperator;threshold:number}; cause?:QualityExitCause;
   /** 组合卖出的分段：before 只在涨幅未过分水岭时生效，after 只在之后生效；缺省 = 全程（持仓否决）。 */
   stage?: 'before' | 'after';
@@ -60,7 +62,9 @@ export async function findQualityIntrabarExit(o: {
   matchMode?: 'all';
   /** Opt-in entry v3 only. Holding and earlier entry engines keep their original behavior. */
   zeroTradePolicy?: 'wait';
-  onObservation?: (at: number, observation?: { waitingForTrade: boolean }) => void;
+  onObservation?: (at: number, observation?: { waitingForTrade: boolean; entryBlocked?: string; entryPending?: string; readings?: QualityTrigger['readings'] }) => void;
+  /** Only new entry rounds supply this gate; existing holding/entry rules are unchanged. */
+  entryGate?: (at: number, minute?: ResearchBar) => Promise<{ blocked?: string; pending?: string }>;
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
@@ -78,6 +82,7 @@ export async function findQualityIntrabarExit(o: {
   confirmOrdinary?: (at:number, seller:string, met:boolean) => Promise<{ confirmed:boolean; evidence:import('./qualityAdvantage').QualityAdvantageState }>;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill;boxStopStates?:Record<string,BoxStopState>;boxStopStateAt?:(at:number)=>Record<string,BoxStopState> }> {
   const {signal}=o;
+  if (o.entryGate && o.matchMode !== 'all') throw Error('买前否决只用于全部条件同时满足的动态筛选');
   const waitForTrade = o.zeroTradePolicy === 'wait' && o.matchMode === 'all' && isTuringCupSymbol(o.row.symbol);
   // Check all conditions on the SAME chronological observations. Never search one
   // condition to the end and accidentally overlook an earlier veto from another.
@@ -130,6 +135,9 @@ export async function findQualityIntrabarExit(o: {
     if(at<(o.resumed?o.since:o.entry))return;
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
     if(drop)return drop;
+    const gate = await o.entryGate?.(at, minute);
+    let entryBlocked = gate?.blocked;
+    let entryPending = gate?.pending;
     let error:string|undefined;
     let waitingForTrade = waitForTrade && completeZeroTradeBar(minute);
     const matches: QualityTrigger[] = [], readings: NonNullable<QualityTrigger['readings']> = [];
@@ -145,7 +153,10 @@ export async function findQualityIntrabarExit(o: {
       if(!Number.isFinite(reading)) {
         const values = typeof out === 'number' ? [out] : out ?? [], index = typeof out === 'number' ? 0 : bars.length - 1;
         if(waitForTrade && s.plan.compiled.usesAmounts && zeroTradeReadingPending(bars,values,index)) { waitingForTrade = true; continue; }
-        if(!s.previous&&qualityInitializationPending(o.load,values,index))continue;
+        if(!s.previous&&qualityInitializationPending(o.load,values,index)) {
+          if(o.entryGate&&s.entryVeto)entryPending??=`等待否决指标初始化：${s.cause?.label ?? '指标否决'}`;
+          continue;
+        }
         error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;
       }
       // A confirmed veto closes immediately; later conditions need not also qualify or finish evaluating.
@@ -153,6 +164,11 @@ export async function findQualityIntrabarExit(o: {
       const confirmation=!s.cause&&o.confirmOrdinary&&at>=checkFrom
         ? await o.confirmOrdinary(at,JSON.stringify([s.plan.def,s.rule,s.stage]),met) : undefined;
       readings.push({id:s.cause?.id??'primary',at,value:reading});
+      if (o.entryGate && s.entryVeto) {
+        if (met) entryBlocked ??= `${s.cause?.label ?? '指标否决'}：${reading} ${s.rule.direction} ${s.rule.threshold}`;
+        s.previous={at,reading};
+        continue;
+      }
       if(at>=checkFrom&&met&&(!confirmation||confirmation.confirmed)) {
         const trigger:QualityTrigger={at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
         if(o.matchMode!=='all')return trigger;
@@ -161,9 +177,11 @@ export async function findQualityIntrabarExit(o: {
       s.previous={at,reading};
     }
     if(error)throw new Error(error);
-    if(o.matchMode==='all'&&!waitingForTrade&&streams.length&&matches.length===streams.length)return {...matches.at(-1)!,readings};
+    const required = o.entryGate ? streams.filter(s=>!s.entryVeto).length : streams.length;
+    if(o.matchMode==='all'&&!waitingForTrade&&!entryBlocked&&!entryPending&&required&&matches.length===required)return {...matches.at(-1)!,readings};
     if(at>=checkFrom) {
-      if(waitForTrade)o.onObservation?.(at,{waitingForTrade});
+      if(o.entryGate)o.onObservation?.(at,{waitingForTrade,entryBlocked,entryPending,readings});
+      else if(waitForTrade)o.onObservation?.(at,{waitingForTrade});
       else o.onObservation?.(at);
     }
   };

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
-import { loadPreEntryLibraryV3, savePreEntryLibraryV3 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV3Store';
-import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
+import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
+import { loadPreEntryLibraryV4, savePreEntryLibraryV4 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV4Store';
+import { freezeQualityPlan, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
-import { PRE_ENTRY_ZERO_TRADE_VERSION } from '@/lib/fish/preEntryMonitor';
+import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { activeStandaloneBuyFilters, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
 export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>) {
@@ -24,9 +25,12 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
-    void Promise.all([loadPreEntryLibraryV3(owner), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, v2, legacy]) => {
-      const old = mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary());
+    void Promise.all([loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, v3, v2, legacy]) => {
+      const old = mergePreEntryLibraries(mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary()), v3 ?? emptyPreEntryLibrary());
       const value = mergePreEntryLibraries(old, newLibrary);
+      // Once v4 has its own settings, a still-open older page cannot replace
+      // them merely by saving its older schema with a later timestamp.
+      if (newLibrary.settings) value.settings = newLibrary.settings;
       if (epoch.current !== generation) return;
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
@@ -101,11 +105,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
     const plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
     let filters;
-    try { filters = plans.flatMap(preEntryPlanFilters); } catch (cause) { setError(cause instanceof Error ? cause.message : '买入条件无效'); return; }
+    try { plans.forEach(p=>{validatePreEntryConditions(p.preEntryConditions);if(planVersionChanges(p).length)throw Error(`「${p.label}」的冻结版本已变化，请保留旧方案并另存新副本`);}); filters = plans.flatMap(preEntryPlanFilters); } catch (cause) { setError(cause instanceof Error ? cause.message : '买入条件无效'); return; }
     if (!filters.length || !samples.length) { setError('请启用买前过滤条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: PRE_ENTRY_ZERO_TRADE_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => ({ id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
       status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
     commit({...mergePreEntryLibraries(current.current, { version: 1, rounds: [round], records }), settings: current.current.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
@@ -124,7 +128,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const configure = useCallback((plans: QualityGroup[], hours: number) => {
     if (!readyRef.current) throw Error('入选库尚未恢复完成');
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) throw Error('筛选时长须为 0～8784 小时');
-    plans.forEach(preEntryPlanFilters);
+    plans.forEach(p=>{preEntryPlanFilters(p);validatePreEntryConditions(p.preEntryConditions);});
     const next = {...current.current, settings: {plans: structuredClone(plans.map(freezeQualityPlan)), hours, updatedAt:Date.now()}};
     commit(next);
     void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));

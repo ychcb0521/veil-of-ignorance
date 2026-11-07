@@ -32,6 +32,15 @@ it('uses the exact native red-cross event only after its 5m close and sells at t
  const r=reader();expect(await r.read(bar(T+4*M,100,1))).toBeUndefined();
  expect(await r.read(bar(T+5*M,82,1,120))).toMatchObject({at:T+5*M,fillPrice:82,atOpen:true,barOpenTime:T,cause:{boxBreakEvidence:{version:BOX_BREAK_VERSION,event:'darvas_5m_guard_broken',confirmedAt:T+5*M,sourceBarOpenTime:T}}});
 });
+it('allows entry v4 to observe the red cross at its confirmed close without inventing a sell fill',async()=>{
+ broken=at=>at===T+5*M;
+ const r=reader();
+ expect(await r.read(bar(T+3*M),{observeNativeClose:true})).toBeUndefined();
+ const hit=await r.read(bar(T+4*M),{observeNativeClose:true});
+ expect(hit).toMatchObject({at:T+5*M,cause:{boxBreakEvidence:{confirmedAt:T+5*M}}});
+ expect(hit?.fillPrice).toBeUndefined();expect(hit?.atOpen).toBeUndefined();
+ expect(await r.read(bar(T+5*M),{observeNativeClose:true})).toBeUndefined();
+});
 it('saves execution evidence and resumes identically without needing additions or mirror fills',async()=>{
  broken=at=>at===T+5*M;
  const g=plan(),l=load(t=>t===T+5*M?bar(t,82,1,120):bar(t));

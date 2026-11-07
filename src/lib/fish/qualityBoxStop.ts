@@ -59,11 +59,15 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
   const record=(id:string,at:number,state:BoxStopState)=>{const list=history.get(id)!;if(JSON.stringify(list.at(-1)!.state)!==JSON.stringify(state))list.push({at,state:{...state}});};
   const statesAt=(at:number)=>Object.fromEntries(rules.map(r=>[r.v.id,{...history.get(r.v.id)!.filter(p=>p.at<=at).at(-1)?.state}]));
-  const read=async (minute:ResearchBar):Promise<QualityTrigger|undefined>=>{
+  const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean}):Promise<QualityTrigger|undefined>=>{
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
       let breakAt:number|undefined,brokenBar:number|undefined;
-      const cut=Math.floor(minute.openTime/300000)*300000;
+      // Entry v4 observes the newly completed native event at this minute's
+      // close. Touch stops still use only lines known before the minute opened.
+      const nativeClose=options?.observeNativeClose&&isBoxBreak(r.rule);
+      const observedAt=minute.openTime+(nativeClose?60000:0);
+      const cut=Math.floor(observedAt/300000)*300000;
       while(r.cursor<cut){
         if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
         const to=Math.min(cut,r.cursor+500*300000),bars=await o.load(o.row,r.cursor,to,r.plan,o.signal);
@@ -94,7 +98,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       }
       record(r.v.id,minute.openTime,r.state);
       if(isBoxBreak(r.rule)){
-        if(breakAt!=null)candidates.push({at:minute.openTime,reading:1,fillPrice:minute.open,fillPeak:minute.open,barOpenTime:brokenBar!,atOpen:true,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:1,boxBreakEvidence:{version:BOX_BREAK_VERSION,event:'darvas_5m_guard_broken',confirmedAt:breakAt,sourceBarOpenTime:brokenBar!}}});
+        if(breakAt!=null)candidates.push({at:observedAt,reading:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:1,boxBreakEvidence:{version:BOX_BREAK_VERSION,event:'darvas_5m_guard_broken',confirmedAt:breakAt,sourceBarOpenTime:brokenBar!}}});
         continue;
       }
       const line=r.state.line;if(line==null)continue;

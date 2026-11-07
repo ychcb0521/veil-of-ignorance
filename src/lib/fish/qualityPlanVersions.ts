@@ -1,4 +1,5 @@
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel} from './qualityBoxStop';
+import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
@@ -58,6 +59,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [...initialization];
+  if (plan.preEntryConditions) out.push({ key: 'pre-entry-conditions', part: '动态筛选', name: '入选条件与三组否决', version: preEntryConditionsVersion(plan), summary: '同一分钟入选条件全部满足且无否决；从筛选起点累计观察，不模拟持仓，旧轮次不升级。' });
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;
   if(plan.advantage)add('advantage','优势筛选与退出灵敏度','逐次筛选 · 软退出动态确认',QUALITY_ADVANTAGE_VERSION+' · 参数 #'+qualityAdvantageFingerprint(plan),
@@ -121,6 +123,7 @@ export const planVersionChangeText = (changes: readonly PlanVersionChange[]) => 
 
 /** 方案里每个箱体规则写下所用版本（防守线参数写成明确值）。 */
 export function withFrozenStructures(plan: QualityGroup): QualityGroup {
+  if (plan.preEntryConditions) plan = { ...plan, preEntryConditions: freezePreEntryConditions(plan.preEntryConditions) };
   if(plan.router)return {...plan,router:{...plan.router,structure:withFrozenStructures(plan.router.structure),attack:withFrozenStructures(plan.router.attack)}};
   const freezeVeto=(v:import('./qualityVeto').QualityHoldingVeto)=>v.boxStop?{...v,boxStop:freezeBoxStop(v.boxStop)}:v;
   if(plan.holdingVetoes?.some(v=>v.boxStop)||plan.vetoStages?.some(s=>s.conditions.some(v=>v.boxStop)))plan={...plan,holdingVetoes:plan.holdingVetoes?.map(freezeVeto),vetoStages:plan.vetoStages?.map(s=>({...s,conditions:s.conditions.map(freezeVeto)}))};

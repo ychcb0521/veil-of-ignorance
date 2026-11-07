@@ -5,9 +5,11 @@ import { evaluateFishProgram } from './algorithm';
 import { qualityMetricPlan, type QualityBuyFilter, type QualityFilterReading, type QualitySample, type QualityProgress, type QualityGroup } from './quality';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
+import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
+  lastVeto?: { at: number; reason: string; count: number };
   zeroTradeWait?: { count: number; firstAt: number; lastAt: number };
   planId?: string;
   id: string; roundId: string; sample: QualitySample; status: PreEntryStatus;
@@ -21,7 +23,7 @@ export const PRE_ENTRY_INTRABAR_VERSION = 'pre-entry-intrabar-v2' as const;
 export const PRE_ENTRY_ZERO_TRADE_VERSION = 'pre-entry-zero-trade-v3' as const;
 export interface PreEntrySettings { updatedAt: number; plans: QualityGroup[]; hours: number }
 export interface PreEntryRound {
-  engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION; plans?: QualityGroup[];
+  engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION | typeof PRE_ENTRY_CONDITIONS_VERSION; plans?: QualityGroup[];
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
 }
@@ -56,7 +58,7 @@ export async function collectPreEntryMonitor(
   onProgress: (progress: QualityProgress) => void,
   bounds?: { start?: (symbol: string) => Promise<number | undefined>; end?: (symbol: string) => Promise<number> },
 ): Promise<void> {
-  if (task.round.engine === PRE_ENTRY_INTRABAR_VERSION || task.round.engine === PRE_ENTRY_ZERO_TRADE_VERSION) {
+  if (task.round.engine === PRE_ENTRY_INTRABAR_VERSION || task.round.engine === PRE_ENTRY_ZERO_TRADE_VERSION || task.round.engine === PRE_ENTRY_CONDITIONS_VERSION) {
     const { collectPreEntryIntrabar } = await import('./preEntryIntrabar');
     return collectPreEntryIntrabar(task, load, now, signal, onProgress, bounds);
   }

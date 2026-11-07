@@ -1,0 +1,12 @@
+import { ADDITION_VETO_DEFAULTS, ADDITION_VETO_KINDS, pullbackParams, type AdditionEntryVetoKind, type QualityAdditionEntryVeto } from './qualityAdditionVeto';
+export type VetoFieldDraft={enabled:boolean;lookbackBars:string;atr:string;ratio:string;pct:string;er:string;join?:'and'|'or';sticky?:boolean;windows:{minutes:string;pct:string}[]};
+export type AdditionVetoDraft=Record<AdditionEntryVetoKind,VetoFieldDraft>;
+export const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft=>Object.fromEntries(ADDITION_VETO_KINDS.map(kind=>{const found=saved?.find(x=>x.kind===kind),v=kind==='pullback'?(found?pullbackParams(found):ADDITION_VETO_DEFAULTS.pullback):{...ADDITION_VETO_DEFAULTS[kind],...found},str=(x?:number)=>x==null?'':String(x);const defaults=ADDITION_VETO_DEFAULTS[kind].windows??[],windows=v.windows??defaults;return [kind,{enabled:!!saved?.find(x=>x.kind===kind)?.enabled,lookbackBars:str(v.lookbackBars),atr:str(v.atr),ratio:str(v.ratio),pct:str(v.pct),er:str(v.er),join:v.join??'and',sticky:found?!!found.sticky:(kind==='pullback'||kind==='pullback-atr'),windows:Array.from({length:Math.max(3,windows.length)},(_,i)=>({minutes:str(windows[i]?.minutes??defaults[i]?.minutes),pct:windows[i]?str(windows[i].pct):''}))}];})) as AdditionVetoDraft;
+
+export function parseAdditionVetoDraft(draft:AdditionVetoDraft):QualityAdditionEntryVeto[]{
+ const num=(x:string)=>x.trim()?Number(x):NaN;return ADDITION_VETO_KINDS.filter(k=>draft?.[k]?.enabled).map(kind=>{const f=draft[kind],base=ADDITION_VETO_DEFAULTS[kind];
+  // 冲高回落：ATR 与百分比各自可留空（留空＝不用这一项），两项都填时带上「且 / 或」
+  if(kind==='pullback')return {kind,enabled:true,...(f.atr.trim()?{atr:num(f.atr)}:{}),...(f.pct.trim()?{pct:num(f.pct)}:{}),...(f.atr.trim()&&f.pct.trim()?{join:f.join??'and'}:{}),...(f.sticky?{sticky:true}:{})} as QualityAdditionEntryVeto;
+  if(kind==='pullback-atr')return {kind,enabled:true,atr:num(f.atr),...(f.sticky?{sticky:true}:{})} as QualityAdditionEntryVeto;
+  return {kind,enabled:true,...(base.lookbackBars!=null?{lookbackBars:num(f.lookbackBars)}:{}),...(base.atr!=null?{atr:num(f.atr)}:{}),...(base.ratio!=null?{ratio:num(f.ratio)}:{}),...(base.pct!=null?{pct:num(f.pct)}:{}),...(base.er!=null?{er:num(f.er)}:{}),...(base.windows!=null?{windows:(f.windows??[]).filter(w=>w.pct.trim()).map(w=>({minutes:num(w.minutes),pct:num(w.pct)}))}:{})};});
+}
