@@ -1,15 +1,17 @@
+import type {FishProgram} from '@/lib/fish/algorithm';
+import {FISH_ACCOUNT_SETTINGS_KEY} from '@/lib/fish/accountSettings';
 import {beforeEach,it,expect,vi} from 'vitest';
 import {act,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {useState} from 'react';
 import {FishPanel,type FishPanelProps} from '@/components/FishPanel';
 import {FEATURES_KEY,CBI2_DEF} from '@/lib/deepDig/features';
 import {getUserPrefix} from '@/lib/userStoragePrefix';
-import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
+import {collectFishSuggestion,type FishSuggestionOptions,type FishSuggestion} from '@/lib/fish/suggestions';
 import {readFishPreference} from '@/lib/fish/preferences';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const def={...CBI2_DEF,id:'ui-suggest',name:'建议自检',short:'Z',formula:'n = 2 # 常数\nV = Q # 成交额\nC',scale:2,unit:'点',builtin:false};
 const signals:TradeSignal[]=['AAAUSDT','BBBUSDT'].map((symbol,i)=>({id:symbol,symbol,timeMs:Date.UTC(2026,5,20)+i*300000,timeLabel:'',fallbackZone:''}));
-const load=vi.fn(async({symbol}:{symbol:string},cut:number,plan:any)=>Array.from({length:plan.N},(_,i)=>({openTime:cut-(plan.N-i)*plan.step,open:1,close:symbol==='AAAUSDT'?1:3,high:4,low:0,volume:1,quoteVolume:symbol==='AAAUSDT'?100:300,takerBuyQuoteVolume:50,takerBuyVolume:null,refClose:50000})));
+const load=vi.fn(async({symbol}:{symbol:string},cut:number,plan:FishProgram)=>Array.from({length:plan.N},(_,i)=>({openTime:cut-(plan.N-i)*plan.step,open:1,close:symbol==='AAAUSDT'?1:3,high:4,low:0,volume:1,quoteVolume:symbol==='AAAUSDT'?100:300,takerBuyQuoteVolume:50,takerBuyVolume:null,refClose:50000})));
 const suggest=vi.fn((options:FishSuggestionOptions)=>collectFishSuggestion(options,load));
 const start=vi.fn();
 function Harness({onSuggest=suggest}:{onSuggest?:FishPanelProps['onSuggest']}){
@@ -38,12 +40,12 @@ it('手动刷新重新取样；无记录区间的信号库变动后自动重算�
  fireEvent.click(screen.getByRole('button',{name:'捕捞说明'}));expect(screen.getByTestId('fish-suggestion-detail')).toHaveTextContent('随机对照');
 },10000);
 it('后台计算时点开始捕捞：先停掉建议再开始',async()=>{
- const delayed=vi.fn((o:FishSuggestionOptions)=>new Promise<any>((_resolve,reject)=>{o.onProgress({status:'running',phase:'signals',done:1,total:2,current:'AAAUSDT'});o.signal.addEventListener('abort',()=>reject(new DOMException('已取消','AbortError')),{once:true});}));
+ const delayed=vi.fn((o:FishSuggestionOptions)=>new Promise<FishSuggestion>((_resolve,reject)=>{o.onProgress({status:'running',phase:'signals',done:1,total:2,current:'AAAUSDT'});o.signal.addEventListener('abort',()=>reject(new DOMException('已取消','AbortError')),{once:true});}));
  render(<Harness onSuggest={delayed}/>);select();fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'2'}});await waitFor(()=>expect(delayed).toHaveBeenCalled(),{timeout:3000});help();expect(screen.getByTestId('fish-suggestion-auto')).toHaveTextContent('建议计算中 1 / 2');expect(screen.getByRole('button',{name:'开始捕捞'})).toBeEnabled();
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(start).toHaveBeenCalled());expect(delayed.mock.calls[0][0].signal.aborted).toBe(true);
 });
 it('计算期间锁定设置与捕捞，可取消；进度收在明细入口',async()=>{
- const delayed=vi.fn((o:FishSuggestionOptions)=>new Promise<any>((_resolve,reject)=>{o.onProgress({status:'running',phase:'signals',done:1,total:2,current:'AAAUSDT'});o.signal.addEventListener('abort',()=>reject(new DOMException('已取消','AbortError')),{once:true});}));
+ const delayed=vi.fn((o:FishSuggestionOptions)=>new Promise<FishSuggestion>((_resolve,reject)=>{o.onProgress({status:'running',phase:'signals',done:1,total:2,current:'AAAUSDT'});o.signal.addEventListener('abort',()=>reject(new DOMException('已取消','AbortError')),{once:true});}));
  render(<Harness onSuggest={delayed}/>);select();help();fireEvent.click(screen.getByRole('button',{name:'计算建议'}));expect(screen.getByLabelText('捕捞统计量')).toBeDisabled();expect(screen.queryByRole('button',{name:'开始捕捞'})).toBeNull();expect(screen.getByRole('button',{name:'取消'})).toBeEnabled();expect(screen.queryByTestId('fish-suggestion-detail')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'捕捞说明'}));expect(screen.getByTestId('fish-suggestion-detail')).toHaveTextContent('1 / 2');fireEvent.click(screen.getByRole('button',{name:'取消'}));await waitFor(()=>expect(screen.getByTestId('fish-suggestion-detail')).toHaveTextContent('已取消'));expect(delayed.mock.calls[0][0].signal.aborted).toBe(true);expect(screen.getByLabelText('捕捞统计量')).toBeEnabled();
 });
 
@@ -88,3 +90,15 @@ it('已有记录区间的卡不自动排队或取数，淡色刷新只手动重�
  expect(screen.getByTestId('fish-recorded-range-2')).toHaveTextContent('2.0469 ~ 10.0813');
  await act(()=>new Promise(r=>setTimeout(r,1000)));expect(suggest).toHaveBeenCalledTimes(1);
 },10000);
+
+it('账号已保存的阈值保持固定，后台建议重算与信号库变化均不覆盖',async()=>{
+ localStorage.setItem(getUserPrefix()+FISH_ACCOUNT_SETTINGS_KEY,JSON.stringify({version:1,cards:[{id:'first',featureId:def.id,enabled:true,pref:{statistic:'结果',direction:'>',threshold:'77',lastSuggestion:'77',constraints:[]}}],combination:'and',lookbackHours:24,downwardWick:{enabled:true,hours:48,atrMultiple:3},selection:{exchanges:['binance'],includeDuplicates:false}}));
+ render(<Harness/>);
+ await waitFor(()=>expect(suggest).toHaveBeenCalledTimes(1),{timeout:5000});
+ await act(()=>new Promise(resolve=>setTimeout(resolve,1000)));
+ expect(screen.getByLabelText('捕捞阈值')).toHaveValue(77);
+ fireEvent.click(screen.getByRole('button',{name:'增加信号'}));
+ await waitFor(()=>expect(suggest).toHaveBeenCalledTimes(2),{timeout:5000});
+ await act(()=>new Promise(resolve=>setTimeout(resolve,1000)));
+ expect(screen.getByLabelText('捕捞阈值')).toHaveValue(77);
+});

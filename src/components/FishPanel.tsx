@@ -1,3 +1,5 @@
+import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
+import type { FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
@@ -102,6 +104,8 @@ export function FishPanel(p: FishPanelProps) {
   });
 
   const owner=getUserPrefix();
+  const {settings: savedAccountSettings, save: saveAccountSettings}=useFishAccountSettings();
+  const [savingParameters,setSavingParameters]=useState(false);
   const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
   useEffect(()=>{const h=readFishLookback();setLookbackHours(h);setLookbackDraft(String(h));},[owner]);
   const applyLookback=()=>{try{const h=saveFishLookback(lookbackDraft);setLookbackHours(h);setError('');}catch(e){setError(e instanceof Error?e.message:'覆盖时间无效');}};
@@ -128,7 +132,8 @@ export function FishPanel(p: FishPanelProps) {
   /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
   const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>;target?:string}|null>(null);
   const autoTried=useRef(new Set<string>());
-  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
+  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner,savedAccountSettings]);
+  useEffect(()=>{if(!savedAccountSettings)return;setLookbackHours(savedAccountSettings.lookbackHours);setLookbackDraft(String(savedAccountSettings.lookbackHours));setDownwardWick({...savedAccountSettings.downwardWick});p.onSelectionChange(savedAccountSettings.selection);},[savedAccountSettings]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
   const def=listedDef;
@@ -136,7 +141,7 @@ export function FishPanel(p: FishPanelProps) {
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(cleanPreference(readFishPreference(def.id)));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const [autoSuggesting,setAutoSuggesting]=useState(false);
-  const {exchanges,includeDuplicates,includeUsStocks=false}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=p.progress?.status==='running'||suggesting||!!p.reconstruction?.running;
+  const {exchanges,includeDuplicates,includeUsStocks=false}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=savingParameters||p.progress?.status==='running'||suggesting||!!p.reconstruction?.running;
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:[]});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const multiple=useMemo(()=>{
     const plans=[];let error='';
@@ -165,6 +170,9 @@ export function FishPanel(p: FishPanelProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[selectionSignature,p.roundPlans]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
+  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:validateFishLookback(lookbackDraft),downwardWick,selection:p.selection,...(p.auto?{auto:{mode:p.auto.mode,hours:p.auto.hours}}:{})});
+  const saveParameters=async()=>{setSavingParameters(true);setError('');try{if(multiple.error)throw new Error(multiple.error);if(!p.selection.exchanges.length)throw new Error('请至少选择一家交易所');await saveAccountSettings(parameterDraft());toast.success('捕捞参数已保存到账号');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setSavingParameters(false);}};
+
   const runProbe=async()=>{
     if(!p.onDiagnose||!probe.symbol.trim()||running)return;
     let anchorMs:number|undefined;
@@ -206,11 +214,12 @@ export function FishPanel(p: FishPanelProps) {
       memResults.current.set(key,result);setSuggestionVersion(v=>v+1);
       // 阈值为空、或仍是上次自动填的建议值时填入；手动改过的不覆盖
       if(target){
+        if(mode==='auto'&&savedAccountSettings){setSuggestionProgress(null);return;}
         setExtraCards(cs=>cs.map(c=>{if(c.id!==target.id)return c;const t=suggestedFishThreshold(result,c.pref.direction);if(t===null||!mayFillFishThreshold(c.pref.threshold,c.pref.lastSuggestion))return c;return {...c,pref:{...c.pref,threshold:String(t),lastSuggestion:String(t)}};}));
         setSuggestionProgress(null);return;
       }
       const current=prefRef.current,threshold=suggestedFishThreshold(result,current.direction);
-      if(threshold!==null&&mayFillFishThreshold(current.threshold,current.lastSuggestion)){const value=String(threshold);update({...current,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
+      if((mode==='manual'||!savedAccountSettings)&&threshold!==null&&mayFillFishThreshold(current.threshold,current.lastSuggestion)){const value=String(threshold);update({...current,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
       setSuggestion(result);setSuggestionProgress(value=>value?{...value,status:'complete'}:null);
     }catch(e){if(suggestionController.current===mine){setSuggestionProgress(value=>value?{...value,status:mine.signal.aborted?'cancelled':'aborted'}:null);if(!mine.signal.aborted&&mode==='manual')setError(e instanceof Error?e.message:String(e));}}
     finally{if(suggestionController.current===mine)suggestionController.current=null;if(suggestionRun.current?.done===done){suggestionRun.current=null;setAutoSuggesting(false);}}})();
@@ -389,6 +398,8 @@ export function FishPanel(p: FishPanelProps) {
       {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onRecalculate={()=>{const target=extraSuggest[i];if(target)void calculateSuggestion('manual',{id:target.id,plan:target.plan});}} recalculateDisabled={running||probe.busy||!p.onSuggest||!extraSuggest[i]} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/50 bg-muted/20 px-2 py-1.5">
+        <button type="button" disabled={running||savingParameters} onClick={()=>void saveParameters()} className="inline-flex h-6 items-center rounded border border-primary/40 px-2 text-[11px] text-primary disabled:opacity-40">{savingParameters?'保存中…':'保存参数'}</button>
+        <span className="text-[10px] text-muted-foreground">保存后跟随账号，直到下次手动修改并保存</span>
         <button type="button" aria-label="+ 算法" title={`添加一个算法（最多 ${FISH_MAX_ALGORITHMS} 个）`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={running||extraCards.length>=FISH_MAX_ALGORITHMS-1} onClick={()=>setExtraCards(cs=>cs.length>=FISH_MAX_ALGORITHMS-1?cs:[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}><Plus aria-hidden className="h-3 w-3"/>算法</button>
         {extraCards.length>0&&<div role="radiogroup" aria-label="多重算法合并方式" className="inline-flex h-6 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[10.5px]">
           {([['and','交集','每个算法都命中才留下'],['or','并集','任一算法命中即留下']] as const).map(([value,text,hint])=><button key={value} type="button" role="radio" aria-checked={combination===value} title={hint} disabled={running&&!(scanning&&p.onLiveCombination)} onClick={()=>{if(value===combination)return;setCombination(value);if(scanning)p.onLiveCombination?.(value);}} className={`h-5 rounded px-2 transition-colors disabled:opacity-50 ${combination===value?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{text}</button>)}

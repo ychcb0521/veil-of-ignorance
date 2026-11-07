@@ -1,5 +1,7 @@
+import * as sync from '@/lib/simStateSync';
+import { readFishAccountSettings } from '@/lib/fish/accountSettings';
 import {beforeEach,it,expect,vi} from 'vitest';
-import {fireEvent,render,screen,cleanup} from '@testing-library/react';
+import {fireEvent,render,screen,cleanup,waitFor} from '@testing-library/react';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
 import {BSS_DEF,CBA_DEF,CDA_DEF,CBI2_DEF,CBI_DEF,DRIFT_SPEED_Z_DEF,STATE_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {fishFeatureDefinitions} from '@/lib/fish/features';
@@ -93,3 +95,22 @@ it('邮件来源展示实际捕捞序列与已保存的额外来源，打开或�
  expect(notify.update).not.toHaveBeenCalled();
  expect(screen.getByRole('checkbox',{name:'邮件来源：DSP·a·avg₂'})).toBeChecked();
 },15_000);
+
+it('保存参数提交整套账号配置，重开时忽略本机旧卡片和未保存的临时阈值',async()=>{
+ localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id:'saved-user'}}));
+ const push=vi.spyOn(sync,'pushSimStateImmediately').mockResolvedValue(true);
+ const view=render(panel());
+ fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'0.765'}});
+ fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'23'}});
+ fireEvent.click(screen.getByRole('radio',{name:'并集'}));
+ fireEvent.click(screen.getByRole('button',{name:'保存参数'}));
+ await waitFor(()=>expect(push).toHaveBeenCalled());
+ expect(readFishAccountSettings()).toMatchObject({combination:'or',cards:[{pref:{threshold:'0.765'}},{pref:{threshold:'23'}},{pref:{threshold:'0.04'}},{pref:{threshold:'8'}}]});
+ await waitFor(()=>expect(screen.getByRole('button',{name:'保存参数'})).toBeEnabled());
+ fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'99'}});
+ view.unmount();render(panel());
+ expect(screen.getByLabelText('捕捞阈值')).toHaveValue(0.765);
+ expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(23);
+ expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
+ push.mockRestore();
+});

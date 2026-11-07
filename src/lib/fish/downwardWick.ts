@@ -1,3 +1,4 @@
+import { readFishAccountSettings } from './accountSettings';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishDataAdapter } from './adapters';
 import type { FishExchange, FishMarket } from './exchanges';
@@ -12,6 +13,7 @@ export const FISH_WICK_ATR_MULTIPLES = [1, 1.5, 2, 3] as const;
 export const DEFAULT_FISH_DOWNWARD_WICK: Readonly<FishDownwardWick> = { enabled: true, hours: 48, atrMultiple: 3 };
 const key = () => `${getUserPrefix()}fish-downward-wick.v2`;
 export function readFishDownwardWick(): FishDownwardWick {
+  const saved=readFishAccountSettings();if(saved)return {...saved.downwardWick};
   try {
     const current = readPersistedStateRaw(key());
     const x = JSON.parse(current ?? readPersistedStateRaw(`${getUserPrefix()}fish-downward-wick.v1`) ?? 'null');

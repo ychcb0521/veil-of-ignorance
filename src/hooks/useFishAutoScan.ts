@@ -1,3 +1,4 @@
+import { useFishAccountSettings } from './useFishAccountSettings';
 import { readFishLookback } from '@/lib/fish/lookback';
 /**
  * 定时自动捕捞的调度：网站开着（哪怕在后台标签页）就按设定的间隔自动捕一次。
@@ -23,6 +24,7 @@ export interface FishAutoScan {
 }
 export function useFishAutoScan(o: { account?: string; selection: FishScanSelection; start: (settings: FishScanSettings) => Promise<unknown> | void; busy: () => boolean }): FishAutoScan {
   const defs = useFishFeatures();
+  const { settings: accountSettings } = useFishAccountSettings();
   const [state, setStateRaw] = useState<FishAutoState>(readFishAuto);
   const [error, setError] = useState('');
   const [isOnline, setOnline] = useState(online);
@@ -34,7 +36,7 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   const runningRef = useRef(false), retryAt = useRef(0);
   const setState = useCallback((next: FishAutoState) => { stateRef.current = next; setStateRaw(next); saveFishAuto(next); }, []);
   const resetDefaults = useCallback(() => { const s = resetFishAuto(); stateRef.current = s; setStateRaw(s); setError(''); setWaiting(false); retryAt.current = 0; }, []);
-  useEffect(resetDefaults, [o.account, resetDefaults]);
+  useEffect(resetDefaults, [o.account, resetDefaults, accountSettings]);
 
   const tick = useCallback(async () => {
     const s = stateRef.current, now = Date.now();

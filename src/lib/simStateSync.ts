@@ -357,17 +357,22 @@ export interface HydrateResult {
  * 仅当远端行比本地影子时间戳更新（或本地没有该键）时才覆盖——
  * 新浏览器拿到全量，旧浏览器更新的本地值不被回滚。
  */
-export async function hydrateSimState(userId: string): Promise<HydrateResult> {
+export async function hydrateSimState(userId: string, keys?: readonly string[]): Promise<HydrateResult> {
   if (!userId) return { status: 'error', applied: 0 };
   // 水化发生在交易组件树挂载之前，是认定会话归属最早、也最可靠的时机。
   setActiveSyncUser(userId);
+  // Saved account preferences use the server row as authority, independent of device clock skew.
+  const preferenceKey = 'fish-account-settings.v1';
+  const preferenceGeneration = generation.get(genKey(userId, preferenceKey)) ?? 0;
   try {
-    const { data, error } = await supabase
+    const query = supabase
       .from('user_sim_state' as never)
       .select('key, value, updated_at')
       // 大块本机数据（鱼质量、扫描结果……）由 accountBlobSync 单独对账：不下载、不写进 localStorage。
       .not('key', 'like', `${ACCOUNT_BLOB_PREFIX}%`)
       .eq('user_id', userId);
+    const { data, error } = await (keys ? query.in('key', [...keys]) : query);
+    if (activeUserId !== userId) return { status: 'error', applied: 0 };
     if (error) {
       if (isMissingSimStateTableError(error)) {
         tableMissing = true;
@@ -415,9 +420,14 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
       // 历史登记表已在上方并集合并，不会以远端整键覆盖这些本地新节点。
       if (memoryMetadata?.source === 'local' || unsyncedGeneration.has(genKey(userId, row.key))) continue;
       const remoteRaw = JSON.stringify(row.value);
+      if (row.key === preferenceKey) {
+        // A response started before a local Save cannot undo that Save after its acknowledgement.
+        if ((generation.get(genKey(userId, preferenceKey)) ?? 0) !== preferenceGeneration) continue;
+        if (hasLocal && sameJsonContent(localRaw, remoteRaw)) continue;
+      }
       // 修复旧版本留下的「影子戳已追平云端，数据写入却失败」：等戳还须内容一致。
       // 真正更晚的本地写入仍然保留，正在推送的同毫秒本地写入已由上方保护。
-      if (hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
+      if (row.key !== preferenceKey && hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
       try {
         writePersistedStateRaw(fullKey, remoteRaw, { source: 'remote', updatedAt: remoteTs });
         writePersistedValueShadowTs(fullKey, remoteRaw, remoteTs);
@@ -430,12 +440,23 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
     // 存量回填：推送只在「写入时」触发，老浏览器里早已存在、此后不再变动的
     // 数据（历史成交、旧持仓……）永远等不到一次 setState。这里把「本地有、
     // 云端没有」的键补推一次，让迁移方案上线前的数据也上云。
-    backfillLocalOnlyKeys(userId, new Set(rows.map(row => row.key)));
+    if (!keys) backfillLocalOnlyKeys(userId, new Set(rows.map(row => row.key)));
     return { status: rows.length === 0 ? 'empty' : 'hydrated', applied };
   } catch (e) {
     console.warn('[simStateSync] 水化异常：', e);
     return { status: 'error', applied: 0 };
   }
+}
+
+/** Explicit Save waits for the server acknowledgement; failed values remain queued for retry. */
+export async function pushSimStateImmediately(userId: string, key: string, value: unknown): Promise<boolean> {
+  queueSimStatePush(userId, key, value);
+  const entry = pending.get(key);
+  if (!entry) return false;
+  clearTimeout(entry.timer);
+  pending.delete(key);
+  await pushNow(userId, key, entry.value, entry.gen);
+  return !unsyncedGeneration.has(genKey(userId, key));
 }
 
 function backfillLocalOnlyKeys(userId: string, remoteKeys: Set<string>): void {

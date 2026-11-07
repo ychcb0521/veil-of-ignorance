@@ -1,8 +1,9 @@
+import { readFishAccountSettings } from './accountSettings';
 /**
  * 「渔」的定时自动捕捞：手动 / 自动两种模式，自动时每隔 N 小时捕一次。
  * 【用户要求】2026-10-21「渔这里增设一个定时自动（& 手动）捕捉的功能，自动模式下可以设置多长时间（0.5h / 1h / 2h / 4h / 8h / 16h / 32h / 64h）
  * 自动捕捉一次；只要电脑联着网，就进行自动捕捉。手动模式下，与现在的保持一致。」
- * 设置只存本机（按账号分区）：每台电脑各自定时，不跨设备同步，免得两台同时捕。
+ * 模式与间隔优先使用已保存的账号配置；上次运行时间和租约留在本机。
  */
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -26,9 +27,9 @@ export function readFishAuto(): FishAutoState {
 export function saveFishAuto(state: FishAutoState): void {
   try { writePersistedStateRaw(fishAutoKey(), JSON.stringify({ ...state, defaultsVersion: 1 })); } catch { /* 记不住只是下次要重新设 */ }
 }
-/** Each new opening restores hourly automatic scanning. Manual overrides last only while open. */
+/** Reopen restores explicitly saved account preferences; unsaved legacy sessions retain hourly defaults. */
 export function resetFishAuto(): FishAutoState {
-  const state = { ...DEFAULT_FISH_AUTO, lastRunAt: readFishAuto().lastRunAt };
+  const state = { ...DEFAULT_FISH_AUTO, ...readFishAccountSettings()?.auto, lastRunAt: readFishAuto().lastRunAt };
   saveFishAuto(state);
   return state;
 }

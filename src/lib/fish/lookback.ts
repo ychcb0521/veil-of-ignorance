@@ -1,3 +1,4 @@
+import { readFishAccountSettings } from './accountSettings';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { FishProgram } from './algorithm';
@@ -12,6 +13,7 @@ export function validateFishLookback(value:unknown):number {
  return n;
 }
 export function readFishLookback():number {
+ const saved=readFishAccountSettings();if(saved)return saved.lookbackHours;
  try{
   // Upgrade the former 12h default once; other custom hours and subsequent explicit 12h edits survive.
   if(readPersistedStateRaw(defaultVersionKey())!=='1'){

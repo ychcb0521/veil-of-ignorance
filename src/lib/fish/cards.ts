@@ -1,3 +1,4 @@
+import { readFishAccountSettings } from './accountSettings';
 /**
  * 「渔」的算法卡片：面板与定时自动捕捞共用同一份默认配置。
  */
@@ -22,10 +23,11 @@ export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(ru
 // v5：与挖掘共用明确命名的四项序列；仅初始化无已存卡片的账号；保存过的配置优先。
 export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v5`;
 export const fishCombinationKey = () => `${getUserPrefix()}fish-combination.v1`;
-export const readFishCombination = (): 'and' | 'or' => readPersistedStateRaw(fishCombinationKey()) === 'or' ? 'or' : 'and';
+export const readFishCombination = (): 'and' | 'or' => readFishAccountSettings()?.combination ?? (readPersistedStateRaw(fishCombinationKey()) === 'or' ? 'or' : 'and');
 
 /** Initialize a new account only; never replace saved algorithms with a newer preset. */
 function initializeFishDefaults(available: readonly string[]): void {
+  if (readFishAccountSettings()) return;
   try {
     if (Array.isArray(JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? 'null'))) return;
   } catch { /* Malformed storage can fall back to the initial preset. */ }
@@ -48,6 +50,8 @@ export function fishDefaultCards(ids:readonly string[],available:readonly string
   return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
 }
 export function readFishCards(): FishCard[] {
+  const saved = readFishAccountSettings();
+  if (saved) return structuredClone(saved.cards);
   try {
     const x = JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? '[]');
     if (!Array.isArray(x)) return [];

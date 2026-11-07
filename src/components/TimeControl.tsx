@@ -1,3 +1,5 @@
+import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
+import { readFishAccountSettings } from '@/lib/fish/accountSettings';
 import {FishBulkDeletionProvider} from './FishBulkDeletion';
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useFishNotify } from '@/hooks/useFishNotify';
@@ -80,6 +82,7 @@ export function TimeControl({
 }: Props) {
   const ctx = useTradingContext();
   const { user } = useAuth();
+  const { settings: fishAccountSettings } = useFishAccountSettings(true);
   const [noEntryOpen, setNoEntryOpen] = useState(false);
   const [noEntrySimTime, setNoEntrySimTime] = useState<number>(Date.now());
   const [noEntryTimelineId, setNoEntryTimelineId] = useState<string | null>(null);
@@ -121,10 +124,11 @@ export function TimeControl({
     const restore=()=>{const saved=fishReturnPosition.current,panel=fishHostRef.current?.querySelector<HTMLElement>('[data-testid="fish-panel"]');if(!saved||!panel)return;panel.scrollTop=saved.panelTop;for(const {node,top,left} of saved.ancestors)if(node.isConnected){node.scrollTop=top;node.scrollLeft=left;}};
     restore();const frame=requestAnimationFrame(restore);return()=>cancelAnimationFrame(frame);
   },[fishOpen]);
-  // 每次重新打开恢复自动、1h、现在；本次打开期间可输入历史截止时间。
+  // 历史截止时间仅用于本轮；算法与调度优先恢复已保存的账号配置。
   const [fishInputs, setFishInputsState] = useState({ time: '', threshold: '0.3' });
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
-  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
+  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>(() => readFishAccountSettings()?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
+  useEffect(() => { setFishSelection(fishAccountSettings?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false }); }, [fishAccountSettings, user?.id]);
   // 新鱼邮件提醒：每轮捕捞结束把第一次捕到的鱼发到所填邮箱
   // 测试邮件发的和正式邮件一样：本轮所选算法的并集（没有本轮结果时用新鱼列表）
   const mailFishRef = useRef<() => TradeSignal[]>(() => []);
