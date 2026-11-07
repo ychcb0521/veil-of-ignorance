@@ -1,4 +1,4 @@
-import {BOX_STOP_KIND,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
+import {BOX_STOP_KIND,BOX_BREAK_CHOICE,isBoxBreak,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
 import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
@@ -47,13 +47,13 @@ export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:
 /** 【用户要求】2026-11-03 每套卖出算法的硬性终止框都默认带一条「盈亏比止盈」（不勾选、预填 5000R），用不用由用户选。 */
 export const PAYOFF_STOP_DEFAULT_R='5000';
 const withPayoffRow=(rows:HoldingVetoDraft[]):HoldingVetoDraft[]=>rows.some(r=>r.choice===PAYOFF_STOP_KIND)?rows:[...rows,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:PAYOFF_STOP_DEFAULT_R,enabled:false}];
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind===BOX_STOP_KIND&&v.boxStop&&isBoxBreak(v.boxStop)?BOX_BREAK_CHOICE:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
   [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}]);
 /** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
 export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
 export function parseHoldingVetoDraft(draft:HoldingVetoDraft[]):QualityHoldingVeto[] {
-  const boxes=draft.filter(d=>d.choice===BOX_STOP_KIND).map(d=>{validateBoxStop(d.boxStop);return {id:'veto-box-'+shortFishHash(JSON.stringify(boxStopIdentity(d.boxStop))),label:boxStopLabel(d.boxStop),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:0,enabled:d.enabled,boxStop:freezeBoxStop(structuredClone(d.boxStop))};});
-  draft=draft.filter(d=>d.choice!==BOX_STOP_KIND);
+  const boxes=draft.filter(d=>d.choice===BOX_STOP_KIND||d.choice===BOX_BREAK_CHOICE).map(d=>{validateBoxStop(d.boxStop);if((d.choice===BOX_BREAK_CHOICE)!==isBoxBreak(d.boxStop))throw Error('支撑断裂与触价条件的执行版本不符');return {id:'veto-box-'+shortFishHash(JSON.stringify(boxStopIdentity(d.boxStop))),label:boxStopLabel(d.boxStop),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:0,enabled:d.enabled,boxStop:freezeBoxStop(structuredClone(d.boxStop))};});
+  draft=draft.filter(d=>d.choice!==BOX_STOP_KIND&&d.choice!==BOX_BREAK_CHOICE);
   if(draft.some(d=>(d.enabled||d.threshold.trim())&&(!d.threshold.trim()||!Number.isFinite(Number(d.threshold)))))throw new Error('请为启用的否决条件填写有限数字阈值');
   // 没勾选、还是默认 5000R 的那条盈亏比止盈只是预留位，不存进方案（下次打开会自动补上）
   return [...boxes,...new Map(draft.filter(d=>(d.enabled||d.threshold.trim())&&!(d.choice===PAYOFF_STOP_KIND&&!d.enabled&&d.threshold.trim()===PAYOFF_STOP_DEFAULT_R)).map(d=>{const v=makeQualityHoldingVeto(d.choice,d.direction,Number(d.threshold),d.enabled,undefined,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);return [v.id,v];})).values()];

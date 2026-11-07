@@ -15,11 +15,13 @@ import type { QualityTrigger } from './qualityIntrabar';
 
 export const BOX_STOP_KIND = 'box-stop' as const;
 export const BOX_STOP_VERSION = 'holding-box-stop-v1';
+export const BOX_BREAK_VERSION = 'holding-support-break-v1';
+export const BOX_BREAK_CHOICE = 'box-support-break';
 export interface BoxStopRule {
-  version: typeof BOX_STOP_VERSION;
+  version: typeof BOX_STOP_VERSION | typeof BOX_BREAK_VERSION;
   structure: StructureAdditionRule;
   update: 'fixed' | 'raise-only' | 'follow';
-  confirmation: 'touch' | 'close-1m' | 'close-5m';
+  confirmation: 'touch' | 'close-1m' | 'close-5m' | 'guard-break';
   closes: number;
 }
 export interface BoxStopState { line?: number; confirmedAt?: number; count: number }
@@ -28,14 +30,21 @@ export function freezeBoxStop(rule:BoxStopRule):BoxStopRule {
   return {...rule,structure:{...structure,definition:{...d,...(structure.algorithm==='dbl5'?{DBL5_config:dbl5Parameters(d.DBL5_config)}:{SBS5M_config:sbsParameters(d.SBS5M_config)})}}};
 }
 export const defaultBoxStop = (defs: readonly DeepDigFeatureDef[] = []): BoxStopRule => freezeBoxStop({version: BOX_STOP_VERSION, structure: {...defaultStructureAddition('dbl5', defs), kSource:'current'}, update:'raise-only', confirmation:'touch', closes:1});
+/** Opt-in event exit: the exact DBL-5 flag used to draw a red cross. */
+export const isBoxBreak = (rule:BoxStopRule) => rule.version === BOX_BREAK_VERSION;
+export const defaultBoxBreak = (defs:readonly DeepDigFeatureDef[]=[]):BoxStopRule => freezeBoxStop({version:BOX_BREAK_VERSION,structure:{...defaultStructureAddition('dbl5',defs),kSource:'guard',buffer:0,bufferUnit:'atr'},update:'follow',confirmation:'guard-break',closes:1});
 export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule {
-  if (!rule || rule.version !== BOX_STOP_VERSION) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
+  if (!rule || ![BOX_STOP_VERSION,BOX_BREAK_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
   validateStructureAddition(rule.structure);
+  if(isBoxBreak(rule)){
+    if(rule.structure.algorithm!=='dbl5'||rule.structure.kSource!=='guard'||rule.structure.buffer!==0||rule.structure.bufferUnit!=='atr'||rule.confirmation!=='guard-break'||rule.update!=='follow'||rule.closes!==1)throw Error('支撑断裂须使用 DBL-5 防守线原生红叉事件，不能添加触价冗余或另行确认');
+    return;
+  }
   if (!['current','guard'].includes(rule.structure.kSource ?? '') || !['fixed','raise-only','follow'].includes(rule.update)
     || !['touch','close-1m','close-5m'].includes(rule.confirmation) || !Number.isInteger(rule.closes) || rule.closes<1 || rule.closes>100) throw Error('请完善箱体硬止损的基准、更新方式与确认根数（1–100）');
 }
 export const boxStopIdentity = (r: BoxStopRule) => [r.version,structureAdditionIdentity(r.structure),r.update,r.confirmation,r.closes];
-export const boxStopLabel = (r: BoxStopRule) => `${r.structure.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${r.structure.kSource==='guard'?'防守线':r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1':'5'} 分钟连续 ${r.closes} 根收盘 ≤ K`}`;
+export const boxStopLabel = (r: BoxStopRule) => isBoxBreak(r)?'DBL-5 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出':`${r.structure.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${r.structure.kSource==='guard'?'防守线':r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1':'5'} 分钟连续 ${r.closes} 根收盘 ≤ K`}`;
 
 /** Only already closed native 5m structures can place a stop for the next minute. */
 export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
@@ -53,6 +62,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   const read=async (minute:ResearchBar):Promise<QualityTrigger|undefined>=>{
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
+      let breakAt:number|undefined,brokenBar:number|undefined;
       const cut=Math.floor(minute.openTime/300000)*300000;
       while(r.cursor<cut){
         if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
@@ -68,6 +78,11 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
           const at=bars[i].openTime+300000;
           // Older history initializes the box/ATR, never moves an already saved stop backwards.
           if(at<Math.floor(o.since/300000)*300000 || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
+          if(isBoxBreak(r.rule)){
+            // Warmup breaks are historical. An unavailable/newly absent line is not a red cross.
+            if(at>o.entry&&at>=o.since&&(row as Dbl5Row).darvas_5m_guard_broken&&breakAt==null){breakAt=at;brokenBar=bars[i].openTime;r.state.confirmedAt=at;}
+            return;
+          }
           const active=structureActiveBox(r.rule.structure,row);
           const base=r.rule.structure.kSource==='guard'?(row as Dbl5Row).darvas_5m_guard:r.rule.structure.kBasis==='invalidation'?active?.invalidation:active?.support;
           if(base==null)return; // Keep an existing protective K when the box subsequently breaks.
@@ -78,6 +93,10 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
         r.cursor=to;
       }
       record(r.v.id,minute.openTime,r.state);
+      if(isBoxBreak(r.rule)){
+        if(breakAt!=null)candidates.push({at:minute.openTime,reading:1,fillPrice:minute.open,fillPeak:minute.open,barOpenTime:brokenBar!,atOpen:true,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:1,boxBreakEvidence:{version:BOX_BREAK_VERSION,event:'darvas_5m_guard_broken',confirmedAt:breakAt,sourceBarOpenTime:brokenBar!}}});
+        continue;
+      }
       const line=r.state.line;if(line==null)continue;
       const cause={id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:line,boxStopEvidence:{version:BOX_STOP_VERSION,line,confirmedAt:r.state.confirmedAt!,confirmation:r.rule.confirmation}};
       if(r.rule.confirmation==='touch'){

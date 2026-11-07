@@ -1,4 +1,4 @@
-import {BOX_STOP_KIND,freezeBoxStop,BOX_STOP_VERSION,boxStopLabel} from './qualityBoxStop';
+import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel} from './qualityBoxStop';
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
@@ -77,7 +77,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (vetoes.length) add('hard-stop', '硬性终止', vetoes.map(v => holdingVetoLabel(v)).join(' 或 '),
     join([qualityVetoVersion(plan), ...vetoes.filter(v => v.snapshot?.definitionKey).map(v => formulaFingerprint(v.snapshot!))]),
     plan.vetoFill === 'stop' ? '回撤止损盘中触及按止损价成交' : '回撤否决下一分钟开盘成交');
-  vetoes.filter(v=>v.kind===BOX_STOP_KIND).forEach((v,i)=>{const r=v.boxStop!,versions=structureVersions(r.structure);add(`hard-stop-box-${i}`, '硬性终止',boxStopLabel(r),[BOX_STOP_VERSION,versions.box,versions.guard].filter(Boolean).join(' · '),'独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');});
+  vetoes.filter(v=>v.kind===BOX_STOP_KIND).forEach((v,i)=>{const r=v.boxStop!,versions=structureVersions(r.structure);add(`hard-stop-box-${i}`, '硬性终止',boxStopLabel(r),[r.version,versions.box,versions.guard].filter(Boolean).join(' · '),isBoxBreak(r)?'仅在原生 DBL-5 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂':'独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');});
   const a = plan.addition;
   if (a?.enabled) {
     if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
