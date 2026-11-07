@@ -31,10 +31,9 @@ it('saves detached structure/attack plans without rebuilding the selected branch
  s.study.sellPlans=[plan];const before=structuredClone(plan);
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
  fireEvent.click(screen.getByLabelText('拆分卖出组合 1'));
- expect(s.setSellPlans).not.toHaveBeenCalled();
+ expect(s.setSellPlans).toHaveBeenCalledOnce();
  const structureId=screen.getByTestId('sell-plan-draft-1').getAttribute('data-plan-id');
  expect(screen.getAllByTestId('quality-monitor-editor').some(n=>n.getAttribute('data-plan-id')===structureId)).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0];
  expect(saved).toHaveLength(3);expect(saved[0]).toEqual(before);
  for(const [i,key] of (['structure','attack'] as const).entries()){

@@ -1,5 +1,7 @@
 import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
 import { splitQualityBranches } from '@/lib/fish/qualitySplitBranches';
+import {FishQualitySavedPlanRecovery} from './FishQualitySavedPlanRecovery';
+import type {RecoverableQualityPlan} from '@/lib/fish/qualitySavedPlans';
 import {FishQualityTemplateArchive} from './FishQualityTemplateArchive';
 import { FishQualityAdvantageSettings } from './FishQualityAdvantageSettings';
 import { withQualityAdvantageOptions, type QualityAdvantageOptions } from '@/lib/fish/qualityAdvantage';
@@ -10,7 +12,7 @@ import { BookmarkPlus, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-reac
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import { BUILTIN_QUALITY_TEMPLATES, type QualityBuiltinTemplate } from '@/lib/fish/qualityBuiltinTemplates';
-import { planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
@@ -95,11 +97,12 @@ function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin }: { act
     <FishQualityTemplateArchive owner={actions.owner} restore={actions.restore}/>
   </PopoverContent></Popover>;
 }
-export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, readOnly = false, embedded = false, onDirtyChange, purpose = 'sell' }: {
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell' }: {
   purpose?: 'sell' | 'entry';
   plans: readonly QualityGroup[]; ready: boolean; onSave: (plans: QualityGroup[]) => void;
   onCopyPlan?: (source: QualityGroup, copy: QualityGroup) => void;
   templates?: PlanTemplateActions;
+  recoverablePlans?:readonly RecoverableQualityPlan[];
   /** 只读展示（交易战役里查看当时冻结的设置）：不显示新增 / 复制 / 删除 / 保存，输入全部禁用。 */
   readOnly?: boolean;
   /** A branch is one editable plan; its parent owns save, copy and run actions. */
@@ -137,12 +140,19 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   const splitBranches=(source:Draft,index:number)=>{
     try{
-      const base=baseOf(source)!;
+      const saved=freezeSavedPlans(plans,build()),base=saved.find(p=>p.id===source.id)!;
       const copies=splitQualityBranches(base,{structure:newQualitySellPlanId(),attack:newQualitySellPlanId()},
         {structure:uniqueLabel(labelOf(source,base)+' · 结构型'),attack:uniqueLabel(labelOf(source,base)+' · 进攻型')});
-      change([...drafts.slice(0,index+1),...copies.map(draftOf),...drafts.slice(index+1)]);
+      const next=[...saved.slice(0,index+1),...copies,...saved.slice(index+1)];
+      onSave(next);setDrafts(next.map(draftOf));setDirty(false);setError('');
       onSelectPlan?.(copies[0].id);
     }catch(cause){setError(cause instanceof Error?cause.message:'拆分失败，原组合未改动');}
+  };
+  const restoreSavedPlan=(plan:QualityGroup)=>{
+    if(drafts.some(d=>d.id===plan.id))throw Error('这套方案已在当前列表中');
+    if(planVersionChanges(plan).length)throw Error('该快照的冻结版本与当前代码不一致，原快照保留，不能自动升级恢复');
+    const next=[...build(),structuredClone(plan)];
+    onSave(next);setDrafts(next.map(draftOf));setDirty(false);setError('');onSelectPlan?.(plan.id);
   };
   /** 旧引擎方案复制成当前引擎可编辑的 S/T/K 方案（原方案保留）。不沿用原方案的监测草稿：草稿按新方案自己生成。 */
   const editableCopy = (source: Draft, index: number) => {
@@ -235,7 +245,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         {isLegacyQualityPlan(baseOf(d)) && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300" title="按 10-31 的引擎原样复算；除名称外不能修改" data-testid={'sell-plan-legacy-' + i}>{LEGACY_ENGINE_LABEL} · 只读</span>}
         {!readOnly && !embedded && isLegacyQualityPlan(baseOf(d)) && <button type="button" disabled={!ready} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/20 disabled:opacity-40" title="复制成当前引擎的「指标 · S / T / K」方案，可以改参数；入场距离沿用原值、涨幅门槛按持仓均价。原方案保留。" aria-label={'转为可编辑 ' + (i + 1)} onClick={() => editableCopy(d, i)}>转为可编辑</button>}
         {purpose !== 'entry' && <select aria-label={`${action}算法 ` + (i + 1) + ' 类型'} disabled={isLegacyQualityPlan(baseOf(d)) || !!baseOf(d)?.router} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>}
-        {!readOnly&&!embedded&&baseOf(d)?.router&&<button type="button" aria-label={`拆分卖出组合 ${i+1}`} title="原组合保留；将已保存的两条分支分别复制成独立方案，包含所有轮次及冻结参数。先保存未保存的修改。" disabled={!ready||dirty||extraDirty} onClick={()=>splitBranches(d,i)} className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40">拆成结构型 / 进攻型</button>}
+        {!readOnly&&!embedded&&baseOf(d)?.router&&<button type="button" aria-label={`拆分卖出组合 ${i+1}`} title="一并保存当前修改、原组合和两套独立方案；参数完整保留，不启动监测。" disabled={!ready} onClick={()=>splitBranches(d,i)} className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40">{dirty||extraDirty?'保存并拆成结构型 / 进攻型':'拆成结构型 / 进攻型'}</button>}
         {!readOnly && !embedded && templates && <SaveTemplateButton index={i} defaultName={labelOf(d, baseOf(d))} disabledReason={!ready ? '尚未加载完成' : !plans.some(p => p.id === d.id) ? '新方案先点「保存全部方案」，再存为模板' : dirty || extraDirty ? '有未保存的修改：先点「保存全部方案」，模板保存的是已保存的设置' : undefined} onSave={name => templates.save(d.id, name)}/>}
         {!readOnly && !embedded && !baseOf(d)?.initialization && <button type="button" className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40" disabled={!ready || dirty || extraDirty || !plans.some(p=>p.id===d.id)} title="原方案保留；新副本从图灵杯首根行情初始化，BTC 依赖改用已有独立无 BTC 版本。请先保存当前修改。" aria-label={'新建图灵杯专用副本 ' + (i + 1)} onClick={()=>turingCopy(d)}>图灵杯副本</button>}
       {baseOf(d)?.initialization && <span className="text-[10px] text-amber-600" title="从实际首根行情初始化；初期读数与完整历史预热不同。原方案另行保留。">首根初始化 v1</span>}
@@ -253,6 +263,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         </div></div>}</fieldset>}
       {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
     </div>)}
+    {!readOnly&&!embedded&&recoverablePlans&&<FishQualitySavedPlanRecovery plans={recoverablePlans.filter(p=>!drafts.some(d=>d.id===p.plan.id))} disabled={!ready} onRestore={restoreSavedPlan}/>}
+    {!readOnly&&!embedded&&drafts.some(d=>baseOf(d)?.router)&&<p className="text-[10.5px] text-muted-foreground">拆分时一并保存当前修改、原组合和两套独立方案，不启动监测。</p>}
     {!readOnly && !embedded && <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : `保存${action}算法`}</button>
       <span className="text-[10px] text-muted-foreground">{purpose === 'entry' ? '每套买入方案须填写门槛；确认条件可选，启用后须与买入算法同时满足。' : '未填普通门槛时，可单独使用该方案的加仓、镜像止盈或持仓否决。'}</span></div>}
     {error && !renderHolding && <p role="alert" className="text-[11px] text-destructive">{error}</p>}

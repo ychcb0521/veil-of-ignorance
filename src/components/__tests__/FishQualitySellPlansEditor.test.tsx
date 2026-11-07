@@ -13,10 +13,9 @@ it('splits a saved routed combination into two complete independent drafts and k
   const before = structuredClone(plan), save = vi.fn();
   render(<FishQualitySellPlansEditor plans={[plan]} ready onSave={save}/>);
   fireEvent.click(screen.getByLabelText('拆分卖出组合 1'));
-  expect(save).not.toHaveBeenCalled();
+  expect(save).toHaveBeenCalledOnce();
   expect(screen.getByLabelText('卖出算法 2 名称')).toHaveValue('原组合 · 结构型');
   expect(screen.getByLabelText('卖出算法 3 名称')).toHaveValue('原组合 · 进攻型');
-  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
   const [original, structure, attack]: QualityGroup[] = save.mock.calls[0][0];
   expect(original).toEqual(before);
   for (const [copy, branch] of [[structure, 'structure'], [attack, 'attack']] as const) {
@@ -28,12 +27,32 @@ it('splits a saved routed combination into two complete independent drafts and k
   expect(new Set([original.id, structure.id, attack.id]).size).toBe(3);
   expect(plan).toEqual(before);
 });
-it('requires saving pending settings before splitting and hides splitting from embedded branch editors', () => {
+it('offers save-and-split for pending settings and hides splitting from embedded branch editors', () => {
   const plan = buildFusionTemplatePlan(BUILTIN_FEATURES, 'routed');
   const view = render(<FishQualitySellPlansEditor plans={[plan]} ready extraDirty onSave={vi.fn()}/>);
-  expect(screen.getByLabelText('拆分卖出组合 1')).toBeDisabled();
+  expect(screen.getByLabelText('拆分卖出组合 1')).toBeEnabled();
+  expect(screen.getByLabelText('拆分卖出组合 1')).toHaveTextContent('保存并拆成');
   view.rerender(<FishQualitySellPlansEditor plans={[plan]} ready embedded onSave={vi.fn()}/>);
   expect(screen.queryByLabelText('拆分卖出组合 1')).toBeNull();
+});
+it('atomically saves pending branch parameters and both detached plans, and leaves the source intact',()=>{
+ const plan=freezeQualityPlan(buildFusionTemplatePlan(BUILTIN_FEATURES,'pending','原组合')),before=structuredClone(plan),save=vi.fn();
+ render(<FishQualitySellPlansEditor plans={[plan]} ready extraDirty onSave={save} prepare={next=>next.map(p=>({...p,router:{...p.router!,attack:{...p.router!.attack,addition:{...p.router!.attack.addition!,rounds:p.router!.attack.addition!.rounds!.map((r,i)=>i===5?{...r,minGainPct:2.25}:r)}}}}))}/>);
+ fireEvent.click(screen.getByLabelText('拆分卖出组合 1'));
+ expect(save).toHaveBeenCalledOnce();const saved:QualityGroup[]=save.mock.calls[0][0];expect(saved).toHaveLength(3);
+ expect(saved[0].router!.attack.addition!.rounds![5].minGainPct).toBe(2.25);
+ expect(saved[2].addition!.rounds![5].minGainPct).toBe(2.25);expect(saved[1].addition).toEqual(plan.router!.structure.addition);expect(plan).toEqual(before);
+});
+it('keeps all drafts and writes nothing when save-and-split validation fails',()=>{
+ const plan=buildFusionTemplatePlan(BUILTIN_FEATURES,'invalid'),save=vi.fn();
+ render(<FishQualitySellPlansEditor plans={[plan]} ready extraDirty onSave={save} prepare={()=>{throw Error('分支参数不完整');}}/>);
+ fireEvent.click(screen.getByLabelText('拆分卖出组合 1'));expect(save).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('分支参数不完整');expect(screen.getAllByTestId(/sell-plan-draft-\d/)).toHaveLength(1);
+});
+it('recovers the saved full snapshot into the active list without rebuilding it from templates',()=>{
+ const original=initial()[0],missing=freezeQualityPlan({...structuredClone(original),id:'missing',label:'已保存的结构型',rule:{metric:original.metric,direction:'<',threshold:.37}}),save=vi.fn();
+ render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save} recoverablePlans={[{plan:missing,at:1,source:'监测快照'}]}/>);
+ fireEvent.click(screen.getByRole('button',{name:'找回已保存方案（1）'}));fireEvent.click(screen.getByRole('button',{name:'恢复并保存 已保存的结构型'}));
+ expect(save).toHaveBeenCalledOnce();expect(save.mock.calls[0][0]).toEqual([original,missing]);
 });
 const initial = () => ensureQualitySellCombo(enableQualityComparison(newQualityStudy())).sellPlans!;
 it('adds either bearish feature or a custom series with editable direction/threshold while preserving existing plans', () => {

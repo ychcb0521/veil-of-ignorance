@@ -27,6 +27,7 @@ import { qualityDetectorReading } from '@/lib/fish/qualityDetectorReading';
 import { defaultQualityAddition, qualityAdditionFills } from '@/lib/fish/qualityAddition';
 import { FishQualityAdditionEditor, additionDraft, parseAdditionDraft, parseAdditionSellStages } from '@/components/FishQualityAdditionEditor';
 import { FishQualitySellPlansEditor } from './FishQualitySellPlansEditor';
+import {recoverableQualityPlans,readSavedQualityPlans} from '@/lib/fish/qualitySavedPlans';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { qualitySalePriceChangePct, qualityPeakPct, qualityHalfMirror, qualityAdditionSummary, qualityRelativeGain, qualityRelativeGainText, qualityPayoffRatio, qualityPayoffRatioText, qualityGeometricPosition, qualityGeometricPositionText } from '@/lib/fish/qualityPresentation';
 import { FishQualityMirrorEditor, mirrorDraft, parseMirrorDraft } from '@/components/FishQualityMirrorEditor';
@@ -228,18 +229,19 @@ function parseRouterMonitorDraft(plan: QualityGroup, draft: MonitorDraft, defini
   }
   if (same(draft.addition, original.addition)) { parsed.addition = plan.addition; parsed.sellStages = plan.sellStages; return parsed; }
   if (plan.addition && parsed.addition) {
+    const restoreAdditionField=<K extends keyof NonNullable<QualityGroup['addition']>>(key:K)=>{parsed.addition![key]=plan.addition![key];};
     const roundKeys = Object.keys(original.addition.otherRounds[0]).filter(k => k !== 'sellSwitch');
     const roundDraftAt = (d: MonitorDraft, i: number) => { const value = i ? d.addition.otherRounds[i - 1] : d.addition; return value ? Object.fromEntries(roundKeys.map(k => [k, value[k]])) : undefined; };
     const oldFirst = plan.addition.rounds?.[0];
     if (oldFirst && same(roundDraftAt(draft, 0), roundDraftAt(original, 0))) {
       // Preserve the first-round fields duplicated on the root addition rule as well.
       for (const key of ['source','structure','stricterPct','condition','conditions','prerequisites','minGainPct','entryBufferAtr','supportOffsetAtr','entryDistanceAtr','gainBasis','entryVetoes','detectorPrerequisite'] as const) {
-        if (plan.addition[key] === undefined) delete parsed.addition[key]; else (parsed.addition as any)[key] = plan.addition[key];
+        if (plan.addition[key] === undefined) delete parsed.addition[key]; else restoreAdditionField(key);
       }
     }
     parsed.addition.rounds = parsed.addition.rounds?.map((r, i) => plan.addition!.rounds?.[i] && same(roundDraftAt(draft, i), roundDraftAt(original, i)) ? plan.addition!.rounds[i] : r);
     for (const key of ['supportReduction','geometricLock','breakevenFloor'] as const) {
-      if (same(draft.addition[key], original.addition[key])) (parsed.addition as any)[key] = plan.addition[key];
+      if (same(draft.addition[key], original.addition[key])) restoreAdditionField(key);
     }
     parsed.sellStages = parsed.sellStages?.map(stage => {
       const old = plan.sellStages?.find(s => s.afterAdditions === stage.afterAdditions);
@@ -329,7 +331,7 @@ function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outs
     if(!changed(p)||isLegacyQualityPlan(p))return p;
     try { return {...p,...parseMonitorDraft(forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
   });
-  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} onSave={state.setSellPlans} onSelectPlan={onSelect} templates={state.savePlanTemplate&&state.deletePlanTemplate?{owner:state.account,restore:state.restorePlanTemplate,templates:activeQualityPlanTemplates(state.study),save:state.savePlanTemplate,remove:state.deletePlanTemplate}:undefined} onCopyPlan={(source,copy)=>{
+  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} onSave={state.setSellPlans} onSelectPlan={onSelect} recoverablePlans={recoverableQualityPlans(state.study,readSavedQualityPlans(state.account))} templates={state.savePlanTemplate&&state.deletePlanTemplate?{owner:state.account,restore:state.restorePlanTemplate,templates:activeQualityPlanTemplates(state.study),save:state.savePlanTemplate,remove:state.deletePlanTemplate}:undefined} onCopyPlan={(source,copy)=>{
     if(copy.router){copy.router=structuredClone(controllers.current[source.id]?.current?.build()??copy.router);return;}
     setDrafts(current=>({...current,[copy.id]:{base:monitorBaseKey(copy),draft:structuredClone(forPlan(source))}}));
   }} extraDirty={extraDirty} prepare={merge} renderHolding={view=>{
