@@ -18,7 +18,10 @@ export async function collectPreEntryIntrabar(task: PreEntryRun, load: FishRecon
   let done = 0;
   for (const original of task.records) {
     if (signal.aborted) throw new DOMException('已取消', 'AbortError');
-    if (['matched', 'unmatched', 'warming'].includes(original.status)) { done++; continue; }
+    if (['matched', 'unmatched', 'warming'].includes(original.status)) {
+      onProgress({ done: ++done, total: task.records.length, current: original.sample.source.symbol });
+      continue;
+    }
     let record = { ...original };
     const publish = (patch: Partial<PreEntryRecord>) => { record = { ...record, ...patch, updatedAt: Date.now() }; task.onRecord(record); };
     try {

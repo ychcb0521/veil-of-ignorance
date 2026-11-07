@@ -135,6 +135,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   useEffect(() => { if (ready && readyRef.current && turing.length) change(s => importQualityLibrary(s, turing, Date.now(), 'turing')); }, [turing, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s,mined,Date.now(),'mined')); }, [mined, ready, change]);
   useEffect(() => {
+    if (!ready || !readyRef.current || !preEntry.ready) return;
+    const signals = preEntry.library.records.map(preEntrySignal).filter((s): s is TradeSignal => !!s);
+    if (signals.length) change(s => importQualityLibrary(s, signals, Date.now(), 'pre-entry'));
+  }, [preEntry.library.records, preEntry.ready, ready, change]);
+  useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
     const epoch = generation.current;

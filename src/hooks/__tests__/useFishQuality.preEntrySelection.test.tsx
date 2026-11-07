@@ -6,13 +6,27 @@ import { emptyPreEntryLibrary, type PreEntryRecord } from '@/lib/fish/preEntryMo
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: async () => ({ study: newQualityStudy() }), saveQualityStudy: vi.fn(async () => true) }));
-vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: async () => ({ ...emptyPreEntryLibrary(), records: [record] }), savePreEntryLibrary: vi.fn(async () => undefined) }));
+vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: async () => ({ ...emptyPreEntryLibrary(), records: [record, {...record,id:'failed',status:'error'}, {...record,id:'queued',status:'queued'}] }), savePreEntryLibrary: vi.fn(async () => undefined) }));
 vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: async () => emptyPreEntryLibrary(), savePreEntryLibraryV2: vi.fn(async () => undefined) }));
 vi.mock('@/lib/fish/preEntryMonitorV3Store', () => ({ loadPreEntryLibraryV3: async () => emptyPreEntryLibrary(), savePreEntryLibraryV3: vi.fn(async () => undefined) }));
 const time = Date.UTC(2026, 2, 29, 5), matchedAt = time + 2 * 86400_000;
 const record: PreEntryRecord = { id: 'matched', roundId: 'round', status: 'matched', startTime: time, cursor: matchedAt, matchedAt, updatedAt: time, readings: [],
   sample: { id: 'original', source: { id: 'source', symbol: 'TURING:TURING 50', timeMs: time, timeLabel: '', fallbackZone: '' }, groups: [], enteredAt: time, basis: 'signal', importedAt: time, origin: 'turing' } };
 afterEach(cleanup);
+
+it('automatically exposes restored matches as entry sources without selecting or starting monitoring', async () => {
+  const empty: TradeSignal[] = [], run = vi.fn(async () => undefined);
+  const hook = renderHook(() => useFishQuality('entry-sync-test', empty, run));
+  await waitFor(() => expect(qualityDisplayRows(hook.result.current.study)).toHaveLength(1));
+  const row = qualityDisplayRows(hook.result.current.study)[0];
+  expect(row.source.preEntryMonitor?.recordId).toBe('matched');
+  expect(row.enteredAt).toBe(matchedAt);
+  expect(hook.result.current.study.samples[0].origin).toBe('pre-entry');
+  expect(hook.result.current.study.selectedRowIds ?? []).toEqual([]);
+  hook.rerender();
+  expect(qualityDisplayRows(hook.result.current.study)).toHaveLength(1);
+  expect(run).not.toHaveBeenCalled();
+});
 
 it('selects display rows from the selected library so the visible table can run holding monitoring', async () => {
   const empty: TradeSignal[] = [], tasks: QualityRunOptions[] = [];

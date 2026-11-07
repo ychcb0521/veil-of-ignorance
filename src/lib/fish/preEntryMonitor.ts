@@ -14,6 +14,9 @@ export interface PreEntryRecord {
   startTime: number; cursor: number; endTime?: number; matchedAt?: number;
   readings: QualityFilterReading[]; detail?: string; updatedAt: number;
 }
+/** A failed record has been attempted; only unprocessed work keeps a round paused. */
+export const preEntryRecordPending = (record: Pick<PreEntryRecord, 'status'>) =>
+  record.status === 'queued' || record.status === 'scanning' || record.status === 'paused';
 export const PRE_ENTRY_INTRABAR_VERSION = 'pre-entry-intrabar-v2' as const;
 export const PRE_ENTRY_ZERO_TRADE_VERSION = 'pre-entry-zero-trade-v3' as const;
 export interface PreEntrySettings { updatedAt: number; plans: QualityGroup[]; hours: number }
@@ -64,7 +67,10 @@ export async function collectPreEntryMonitor(
   let done = 0;
   for (const original of task.records) {
     check(signal);
-    if (['matched', 'unmatched', 'warming'].includes(original.status)) { done++; continue; }
+    if (['matched', 'unmatched', 'warming'].includes(original.status)) {
+      onProgress({ done: ++done, total: task.records.length, current: original.sample.source.symbol });
+      continue;
+    }
     let record = { ...original, status: 'scanning' as PreEntryStatus, detail: undefined as string | undefined };
     const publish = (patch: Partial<PreEntryRecord>) => {
       record = { ...record, ...patch, updatedAt: Date.now() };

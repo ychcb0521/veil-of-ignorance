@@ -7,6 +7,22 @@ import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQualityModule';
 
 afterEach(cleanup);
+it('shows completed attempts and data errors instead of a stale progress count, and offers retry', () => {
+  const resume = vi.fn(), time = Date.UTC(2026, 2, 29, 5);
+  const records: PreEntryRecord[] = ['matched','error','unmatched'].map((status, i) => ({
+    id: String(i), roundId: 'r', status: status as PreEntryRecord['status'], startTime: time, cursor: time,
+    updatedAt: i, readings: [], sample: { source: { symbol: String(i), timeMs: time } } as PreEntryRecord['sample'],
+  }));
+  const state = { ready: true, preEntry: { library: { ...emptyPreEntryLibrary(), records,
+    rounds: [{ id: 'r', engine: PRE_ENTRY_ZERO_TRADE_VERSION, state: 'complete', filters: [], hours: 0, startedAt: 1, updatedAt: 1 }] },
+    ready: true, running: false, progress: { done: 1, total: 3 }, error: '', resume } } as unknown as FishQualityState;
+  render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={0} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+  expect(screen.getByRole('status')).toHaveTextContent('筛选完成 3/3');
+  expect(screen.getByRole('status')).toHaveTextContent('已满足 1 · 缺数据 1');
+  fireEvent.click(screen.getByText('重试缺数据记录'));
+  expect(resume).toHaveBeenCalledWith('r');
+});
+
 it('admits only matched records and keeps errors and pending work in separate scan records', async () => {
   const time=Date.UTC(2026,2,29,5), statuses=['matched','unmatched','warming','error','paused','queued','scanning'] as const;
   const records:PreEntryRecord[]=statuses.map((status,i)=>({id:status,roundId:'r',status,startTime:time,cursor:time,matchedAt:status==='matched'?time+60000:undefined,updatedAt:i,readings:[],detail:status==='error'?'真实行情缺口':undefined,

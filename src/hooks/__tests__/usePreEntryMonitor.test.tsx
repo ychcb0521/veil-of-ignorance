@@ -18,6 +18,34 @@ function study() {
 }
 beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); });
 describe('买前监测独立任务', () => {
+  it('finishes a fully attempted round with data errors and retries only the frozen batch', async () => {
+    const run = vi.fn(async (task: QualityRunOptions) => {
+      const record = task.preEntry!.records[0];
+      task.preEntry!.onRecord({ ...record, status: run.mock.calls.length === 1 ? 'error' : 'matched', detail: '历史不足', updatedAt: Date.now() });
+      task.onProgress({ done: 0, total: 1, current: record.sample.source.symbol });
+    });
+    const { result } = renderHook(() => usePreEntryMonitor('alice', true, run));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    await act(() => result.current.start(study(), 12));
+    expect(result.current.library.rounds[0].state).toBe('complete');
+    expect(result.current.progress).toMatchObject({ done: 1, total: 1 });
+    expect(result.current.library.records[0].status).toBe('error');
+    await act(() => result.current.resume(result.current.library.rounds[0].id, study()));
+    expect(result.current.library.rounds).toHaveLength(1);
+    expect(result.current.library.records[0].status).toBe('matched');
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['error', 'queued'] as const)('recovers a legacy paused round containing a %s record', async status => {
+    const input = study(), sample = qualityComparisonRows(input)[0];
+    storage.load.mockResolvedValue({ ...emptyPreEntryLibrary(), rounds: [{ id: 'old', state: 'paused', startedAt: 1, updatedAt: 1, filters: [], hours: 0 }],
+      records: [{ id: 'row', roundId: 'old', sample, status, startTime: t, cursor: t, readings: [], updatedAt: 1, detail: '历史不足' }] });
+    const { result } = renderHook(() => usePreEntryMonitor('alice', true, vi.fn()));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.library.rounds[0].state).toBe(status === 'error' ? 'complete' : 'paused');
+    expect(result.current.library.records[0]).toMatchObject({ status, detail: '历史不足' });
+  });
+
   it('freezes selected rows and filters before starting and saves matches independently', async () => {
     let task!: QualityRunOptions, finish!: () => void;
     const run = vi.fn(async (options: QualityRunOptions) => { task = options; await new Promise<void>(resolve => { finish = resolve; }); });

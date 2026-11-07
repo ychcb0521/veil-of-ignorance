@@ -46,3 +46,14 @@ it('keeps the newer independent dynamic settings while merging legacy records',(
  expect(mergePreEntryLibraries(fresh,old).settings).toEqual(fresh.settings);
  expect(mergePreEntryLibraries(fresh,emptyPreEntryLibrary()).settings).toEqual(fresh.settings);
 });
+it('reports full progress when a resumed batch ends with already settled records', async () => {
+ const p = plan(), onProgress = vi.fn();
+ const records: PreEntryRecord[] = ['matched','unmatched','warming'].map((status,i)=>({
+  id:String(i),roundId:'round',planId:p.id,sample,status:status as PreEntryRecord['status'],startTime:T,cursor:T,readings:[],updatedAt:T,
+ }));
+ const loader = vi.fn(load);
+ await collectPreEntryMonitor({round:{id:'round',engine:PRE_ENTRY_INTRABAR_VERSION,plans:[p],filters:[],hours:0,state:'running',startedAt:T,updatedAt:T},records,onRecord:vi.fn()},
+  loader,T+10*M,new AbortController().signal,onProgress);
+ expect(onProgress).toHaveBeenLastCalledWith({done:3,total:3,current:sample.source.symbol});
+ expect(loader).not.toHaveBeenCalled();
+});

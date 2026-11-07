@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
+import { emptyPreEntryLibrary, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3, savePreEntryLibraryV3 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV3Store';
@@ -30,7 +30,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (epoch.current !== generation) return;
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
-      const recovered = { ...value, rounds: value.rounds.map(r => r.state === 'running' ? { ...r, state: 'paused' as const, updatedAt: at } : r),
+      const recovered = { ...value, rounds: value.rounds.map(r => {
+        const records = value.records.filter(record => record.roundId === r.id);
+        if (r.state !== 'complete' && records.length && !records.some(preEntryRecordPending)) {
+          return { ...r, state: 'complete' as const, updatedAt: at };
+        }
+        return r.state === 'running' ? { ...r, state: 'paused' as const, updatedAt: at } : r;
+      }),
         records: value.records.map(r => r.status === 'scanning' ? { ...r, status: 'paused' as const, updatedAt: at } : r) };
       commit(recovered); loaded = true; readyRef.current = true; setReady(true);
     }).catch(reason => { if (epoch.current === generation) setError(reason instanceof Error ? reason.message : '读取买前监测库失败'); });
@@ -78,9 +84,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     } catch (reason) { if (live() && !aborter.signal.aborted) setError(reason instanceof Error ? reason.message : '买前监测失败'); }
     finally {
       if (live()) {
-        const pending = current.current.records.some(r => r.roundId === round.id && ['queued', 'paused', 'scanning', 'error'].includes(r.status));
+        const records = current.current.records.filter(r => r.roundId === round.id);
+        const pending = records.some(preEntryRecordPending);
         commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id
           ? { ...r, state: aborter.signal.aborted || pending ? 'paused' : 'complete', updatedAt: Date.now() } : r) });
+        setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
         await save(); setRunning(false);
       }
       if (controller.current === aborter) controller.current = null;
