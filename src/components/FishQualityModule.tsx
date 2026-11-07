@@ -1,8 +1,10 @@
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { useId, useState, type ReactNode } from 'react';
-import { ChevronDown, CircleHelp, type LucideIcon } from 'lucide-react';
+import { ChevronDown, CircleHelp, Filter, type LucideIcon } from 'lucide-react';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { fishInfoTrigger, fishSubHeading } from './FishSection';
+
+const submoduleHeading = '-ml-1 inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md px-1 text-left text-[10px] font-normal text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring';
 
 // 子模块操作低于标题层级；监测主按钮与菜单合计宽度和另外两个操作一致。
 const shape = 'inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap px-2 text-[10px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40';
@@ -21,7 +23,7 @@ export function FishQualityInfo({ label, children }: { label: string; children: 
 
 /** 鱼质量的三个工作模块共用尺寸、留白和标题层级。 */
 /** trailing：放在行尾最右侧的次要操作（如组合表结果的隐藏 / 清除），不打乱三行按钮的逐列对齐。 */
-export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, trailing, testId, titleTestId }: {
+export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, trailing, testId, titleTestId, level='module' }: {
   title: string;
   icon: LucideIcon;
   summary?: ReactNode;
@@ -31,13 +33,15 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
   trailing?: ReactNode;
   testId?: string;
   titleTestId?: string;
+  level?: 'module' | 'submodule';
 }) {
   const [open, setOpen] = useState(true), contentId = useId();
-  return <section aria-label={`${title}模块`} data-testid={testId} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-1.5 last:border-b-0">
+  const Heading = level==='module'?'h4':'h5';
+  return <section aria-label={`${title}模块`} data-testid={testId} data-module-level={level} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-1.5 last:border-b-0">
     <div className="flex h-7 w-28 shrink-0 items-center gap-0.5">
-      <h4 className="min-w-0">
-        <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)} className={fishSubHeading}><Icon aria-hidden className="h-3 w-3 text-muted-foreground"/><span data-testid={titleTestId}>{title}</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button>
-      </h4>
+      <Heading className="min-w-0">
+        <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)} className={level==='module'?fishSubHeading:submoduleHeading}><Icon aria-hidden className={`${level==='module'?'h-3.5 w-3.5':'h-3 w-3'} text-muted-foreground`}/><span data-testid={titleTestId}>{title}</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button>
+      </Heading>
       <div className="flex min-w-0 items-center text-[10px] text-muted-foreground">{summary}</div>
     </div>
     <div id={contentId} hidden={!open} className="min-w-0 flex-1 basis-52">
@@ -50,10 +54,10 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
 /** The buy workspace keeps static filtering and dynamic screening visibly separate. */
 export function FishQualityModuleGroup({children}:{children:ReactNode}) {
   const [open,setOpen]=useState(true), id=useId();
-  return <section aria-label="买前过滤模块" data-testid="quality-filter-controls" className="border-b border-border/40 pb-1">
-    <h4><button type="button" aria-expanded={open} aria-controls={id} onClick={()=>setOpen(!open)} className={`${fishSubHeading} my-1`}>
-      买前过滤<ChevronDown aria-hidden className={`h-3 w-3 transition-transform ${open?'rotate-180':''}`}/>
+  return <section aria-label="买前过滤模块" data-testid="quality-filter-controls" data-module-level="module" className="border-b border-border/40 py-1.5">
+    <h4 className="flex h-7 items-center"><button type="button" aria-expanded={open} aria-controls={id} onClick={()=>setOpen(!open)} className={fishSubHeading}>
+      <Filter aria-hidden className="h-3.5 w-3.5 text-muted-foreground"/><span>买前过滤</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open?'rotate-180':''}`}/>
     </button></h4>
-    <div id={id} hidden={!open}>{children}</div>
+    <div id={id} hidden={!open} className="ml-1.5 min-w-0 border-l border-border/50 pl-3 sm:pl-4">{children}</div>
   </section>;
 }

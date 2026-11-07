@@ -1,6 +1,6 @@
 import {ADDITION_K_TOUCH_VERSION} from '@/lib/fish/qualityAddition';
 import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { defaultBreakevenFloor, defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
 import { qualityFilterChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
@@ -10,7 +10,10 @@ import {defaultStructureAddition,guardTrendOnly,type StructureAdditionRule} from
 import {boxAlgorithmVersion,CURRENT_BOX_VERSION,CURRENT_GUARD_VERSION,freezeStructureVersions,structureVersionLabel} from '@/lib/fish/boxAlgorithmVersions';
 import {BoxAlgorithmVersionNotes} from '@/components/FishQualityPlanVersions';
 import { FishQualityInfo } from '@/components/FishQualityModule';
-import { ADDITION_VETO_DEFAULTS, ADDITION_VETO_KINDS, ADDITION_VETO_LABELS, pullbackParams, type AdditionEntryVetoKind, type QualityAdditionEntryVeto } from '@/lib/fish/qualityAdditionVeto';
+import type { AdditionEntryVetoKind } from '@/lib/fish/qualityAdditionVeto';
+import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
+import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft, type VetoFieldDraft } from '@/lib/fish/qualityEntryVetoDraft';
+export type { AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVetoEditor';
 import type { VetoStagesDraft } from '@/components/FishQualityVetoStagesEditor';
 import type { HoldingVetoDraft } from '@/lib/fish/qualityFilters';
@@ -29,9 +32,6 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 interface ConditionDraft {choice:string;direction:'<'|'>';threshold:string}
 export interface SellSwitchDraft extends ConditionDraft {enabled:boolean}
 /** 加仓否决的编辑草稿：四条各自的开关与参数（字符串，保存时校验）。 */
-type VetoFieldDraft={enabled:boolean;lookbackBars:string;atr:string;ratio:string;pct:string;er:string;join?:'and'|'or';sticky?:boolean;windows:{minutes:string;pct:string}[]};
-export type AdditionVetoDraft=Record<AdditionEntryVetoKind,VetoFieldDraft>;
-const vetoDraftOf=(saved?:readonly QualityAdditionEntryVeto[]):AdditionVetoDraft=>Object.fromEntries(ADDITION_VETO_KINDS.map(kind=>{const found=saved?.find(x=>x.kind===kind),v=kind==='pullback'?(found?pullbackParams(found):ADDITION_VETO_DEFAULTS.pullback):{...ADDITION_VETO_DEFAULTS[kind],...found},str=(x?:number)=>x==null?'':String(x);const defaults=ADDITION_VETO_DEFAULTS[kind].windows??[],windows=v.windows??defaults;return [kind,{enabled:!!saved?.find(x=>x.kind===kind)?.enabled,lookbackBars:str(v.lookbackBars),atr:str(v.atr),ratio:str(v.ratio),pct:str(v.pct),er:str(v.er),join:v.join??'and',sticky:found?!!found.sticky:(kind==='pullback'||kind==='pullback-atr'),windows:Array.from({length:Math.max(3,windows.length)},(_,i)=>({minutes:str(windows[i]?.minutes??defaults[i]?.minutes),pct:windows[i]?str(windows[i].pct):''}))}];})) as AdditionVetoDraft;
 interface DetectorPreDraft {enabled:boolean;featureId:string;stricterPct:string}
 interface RoundDraft extends ConditionDraft {detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
  /** 【用户要求】2026-11-04 恢复 S/T/K 位置：入场距离 T ≥ S＋n×ATR（空＝不检查）；涨幅门槛基准。 */
@@ -103,11 +103,7 @@ function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef
  if(d.gainEnabled&&d.gainBasis==='average')rule.gainBasis='average';
  if(d.source==='custom'&&d.entryDistanceAtr?.trim())rule.entryDistanceAtr=Number(d.entryDistanceAtr);
  if(d.source!=='custom'&&d.detectorPre?.enabled)rule.detectorPrerequisite={enabled:true,stricterPct:d.detectorPre.stricterPct.trim()?Number(d.detectorPre.stricterPct):NaN,...(d.detectorPre.featureId?{featureId:d.detectorPre.featureId}:{})};
- const num=(x:string)=>x.trim()?Number(x):NaN,vetoes=ADDITION_VETO_KINDS.filter(k=>d.entryVetoes?.[k]?.enabled).map(kind=>{const f=d.entryVetoes[kind],base=ADDITION_VETO_DEFAULTS[kind];
-  // 冲高回落：ATR 与百分比各自可留空（留空＝不用这一项），两项都填时带上「且 / 或」
-  if(kind==='pullback')return {kind,enabled:true,...(f.atr.trim()?{atr:num(f.atr)}:{}),...(f.pct.trim()?{pct:num(f.pct)}:{}),...(f.atr.trim()&&f.pct.trim()?{join:f.join??'and'}:{}),...(f.sticky?{sticky:true}:{})} as QualityAdditionEntryVeto;
-  if(kind==='pullback-atr')return {kind,enabled:true,atr:num(f.atr),...(f.sticky?{sticky:true}:{})} as QualityAdditionEntryVeto;
-  return {kind,enabled:true,...(base.lookbackBars!=null?{lookbackBars:num(f.lookbackBars)}:{}),...(base.atr!=null?{atr:num(f.atr)}:{}),...(base.ratio!=null?{ratio:num(f.ratio)}:{}),...(base.pct!=null?{pct:num(f.pct)}:{}),...(base.er!=null?{er:num(f.er)}:{}),...(base.windows!=null?{windows:(f.windows??[]).filter(w=>w.pct.trim()).map(w=>({minutes:num(w.minutes),pct:num(w.pct)}))}:{})};});
+ const vetoes=parseAdditionVetoDraft(d.entryVetoes);
  if(vetoes.length)rule.entryVetoes=vetoes;
  return rule;
 }
@@ -241,15 +237,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted-foreground" data-testid="addition-veto-presets"><span>回放预设</span>
     {VETO_PRESETS.map(p=><button key={p.name} type="button" disabled={!d.enabled} title={p.detail} aria-label={`否决预设 ${p.name}`} className="rounded border border-border/60 px-2 py-0.5 hover:bg-muted disabled:opacity-40" onClick={()=>{const base=d.entryVetoes??vetoDraftOf(),next={...base};for(const [kind,v] of Object.entries(p.set) as [AdditionEntryVetoKind,Partial<VetoFieldDraft>|false][])next[kind]={...base[kind],...(v===false?{enabled:false}:{enabled:true,...v})};patch({entryVetoes:next});}}>{p.name}</button>)}
     <FishQualityInfo label="否决预设说明"><div className="space-y-1.5 text-[11px]"><p>「组合算法1」44 场回放（基准约 +5590；去掉最赚 2 笔后基准约 +230）：</p><ul className="list-disc space-y-0.5 pl-4">{VETO_PRESETS.map(p=><li key={p.name}><span className="font-medium">{p.name}</span>：{p.detail}</li>)}</ul><p className="text-muted-foreground">预设只改冲高回落、冲高回落·仅ATR、长上影线三项，其他否决保持原样；只作用于当前选中的这一次加仓。</p></div></FishQualityInfo></div>
-   <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
-   {ADDITION_VETO_KINDS.map(kind=>{const f=d.entryVetoes?.[kind]??vetoDraftOf()[kind],off=!d.enabled||!f.enabled,set=(next:Partial<VetoFieldDraft>)=>patch({entryVetoes:{...(d.entryVetoes??vetoDraftOf()),[kind]:{...f,...next}}}),num=(key:keyof Omit<VetoFieldDraft,'enabled'|'windows'|'join'|'sticky'>,label:string,w='w-14')=><input aria-label={`${ADDITION_VETO_LABELS[kind]} ${label}`} type="number" step="any" disabled={off} value={f[key]} onChange={e=>set({[key]:e.target.value})} className={cell+' '+w}/>;
-    return <Fragment key={kind}><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label={`启用加仓否决 ${ADDITION_VETO_LABELS[kind]}`} disabled={!d.enabled} checked={f.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={`font-medium ${f.enabled?'':'text-muted-foreground'}`}>{ADDITION_VETO_LABELS[kind]}</span></label>
-     <div className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 text-muted-foreground ${f.enabled?'':'opacity-55'}`} data-testid={`addition-veto-${kind}`}>{kind==='upper-wick'?<>近{num('lookbackBars','回看根数','w-12')}根 · 上影 ≥{num('atr','ATR倍数')}ATR 且占整根 ≥{num('ratio','上影占比','w-12')}%</>
-      :kind==='lower-spike'?<>近{num('lookbackBars','回看根数','w-12')}根 · 下影 ≥{num('atr','ATR倍数')}ATR 或低于前收 ≥{num('pct','跌幅','w-12')}%</>
-      :kind==='volatility'?<>ATR ≥ 6 小时中位 ×{num('ratio','ATR放大倍数')}或 ER(24) ≤{num('er','效率比')}</>
-      :kind==='pullback-atr'?<>距持仓最高点回落 ≥{num('atr','回落ATR倍数')}ATR<span className="text-[10px] text-muted-foreground/70">不看百分比</span><label className="ml-1 inline-flex items-center gap-1 whitespace-nowrap text-[10px]"><input type="checkbox" className="h-3 w-3" aria-label={`${ADDITION_VETO_LABELS[kind]} 未收复最高点前不再加`} disabled={off} checked={!!f.sticky} onChange={e=>set({sticky:e.target.checked})}/>未收复最高点前不再加</label></>:kind==='fast-drop'?<>{(f.windows??[]).map((w,i)=><span key={i} className="inline-flex items-center gap-1 whitespace-nowrap">{i>0&&<span className="px-0.5 text-muted-foreground/50">·</span>}<input aria-label={`持仓期间急跌 第${i+1}组分钟`} type="number" step="1" min="1" disabled={off} value={w.minutes} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,minutes:e.target.value}:x)})} className={cell+' w-11'}/>分钟跌 ≥<input aria-label={`持仓期间急跌 第${i+1}组跌幅`} type="number" step="any" placeholder="不用" disabled={off} value={w.pct} onChange={e=>set({windows:f.windows.map((x,j)=>j===i?{...x,pct:e.target.value}:x)})} className={cell+' w-12'}/>%</span>)}</>
-      :<>距持仓最高点回落 ≥{num('atr','回落ATR倍数')}ATR<select aria-label="冲高回落组合方式" disabled={off} value={f.join??'and'} onChange={e=>set({join:e.target.value as 'and'|'or'})} className={field+' h-7 px-1.5'}><option value="and">且</option><option value="or">或</option></select>≥{num('pct','回落百分比')}%<label className="ml-1 inline-flex items-center gap-1 whitespace-nowrap text-[10px]"><input type="checkbox" className="h-3 w-3" aria-label={`${ADDITION_VETO_LABELS[kind]} 未收复最高点前不再加`} disabled={off} checked={!!f.sticky} onChange={e=>set({sticky:e.target.checked})}/>未收复最高点前不再加</label></>}</div></Fragment>;})}
-   </div>
+   <FishQualityEntryVetoEditor draft={d.entryVetoes??vetoDraftOf()} setDraft={entryVetoes=>patch({entryVetoes})} enabled={d.enabled}/>
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
    <InfoBlock title="指标 · S / T / K">

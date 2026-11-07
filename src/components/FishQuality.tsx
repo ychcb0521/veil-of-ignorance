@@ -770,7 +770,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           return true;
         } : undefined} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
         <FishQualityModuleGroup>
-          <FishQualityModule title="静态过滤" icon={Filter} testId="quality-static-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={()=>toggleHidden('filter')} count={study.filterReadings?.length??0} onClear={state.clearFilterResults} disabled={!ready}/>}
+          <FishQualityModule level="submodule" title="静态过滤" icon={Filter} testId="quality-static-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={()=>toggleHidden('filter')} count={study.filterReadings?.length??0} onClear={state.clearFilterResults} disabled={!ready}/>}
             summary={<FishQualityInfo label="静态过滤说明"><p>只检查原买入时点之前最后一根已收盘 K 线，不移动买入时间。条件和过滤库独立保留。</p></FishQualityInfo>}
             status={state.filterProgress&&<span role="status">{state.filterRunning?'过滤中':state.filterError?'过滤未完成':state.filterProgress.done===state.filterProgress.total?'过滤完成':'已暂停'} {state.filterProgress.done}/{state.filterProgress.total}</span>}>
           {state.filterRunning
@@ -783,7 +783,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           </PopoverContent></Popover>
           <FishFilterLibrary study={study}/>
           </FishQualityModule>
-          {state.preEntry&&<FishQualityModule title="动态筛选" icon={Activity} testId="quality-dynamic-controls" summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套买入方案独立筛选，买入算法和启用的确认条件首次同时满足时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
+          {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls" summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套买入方案独立筛选，入选算法与确认条件同分钟满足、且没有启用的否决触发时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
             <FishPreEntryMonitor state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
               onSelected={()=>{setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
