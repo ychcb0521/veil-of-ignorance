@@ -104,11 +104,20 @@ export function FishPanel(p: FishPanelProps) {
   });
 
   const owner=getUserPrefix();
-  const {settings: savedAccountSettings, save: saveAccountSettings}=useFishAccountSettings();
+  const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
   const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
   useEffect(()=>{const h=readFishLookback();setLookbackHours(h);setLookbackDraft(String(h));},[owner]);
-  const applyLookback=()=>{try{const h=saveFishLookback(lookbackDraft);setLookbackHours(h);setError('');}catch(e){setError(e instanceof Error?e.message:'覆盖时间无效');}};
+  const applyLookback=async()=>{
+    const editingOwner=owner;
+    try {
+      const hours=validateFishLookback(lookbackDraft);
+      setLookbackHours(hours);setError('');
+      await saveLookback(hours);
+    } catch(e) {
+      if(getUserPrefix()===editingOwner)setError(e instanceof Error?e.message:'覆盖时间无效');
+    }
+  };
   const [downwardWick,setDownwardWick]=useState(readFishDownwardWick);
   const [wickChanged,setWickChanged]=useState(false);
   useEffect(()=>{setDownwardWick(readFishDownwardWick());setWickChanged(false);},[owner]);
@@ -132,8 +141,19 @@ export function FishPanel(p: FishPanelProps) {
   /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
   const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>;target?:string}|null>(null);
   const autoTried=useRef(new Set<string>());
-  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner,savedAccountSettings]);
-  useEffect(()=>{if(!savedAccountSettings)return;setLookbackHours(savedAccountSettings.lookbackHours);setLookbackDraft(String(savedAccountSettings.lookbackHours));setDownwardWick({...savedAccountSettings.downwardWick});p.onSelectionChange(savedAccountSettings.selection);},[savedAccountSettings]);
+  // Saving the coverage alone must preserve edits in the algorithm cards and other controls.
+  const accountAlgorithmKey=JSON.stringify([savedAccountSettings?.cards,savedAccountSettings?.combination]);
+  const accountLookbackHours=savedAccountSettings?.lookbackHours;
+  const accountWickKey=JSON.stringify(savedAccountSettings?.downwardWick);
+  const accountSelectionKey=JSON.stringify(savedAccountSettings?.selection);
+  useEffect(()=>()=>{suggestionController.current?.abort();suggestionController.current=null;},[owner]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);},[owner,accountAlgorithmKey]);
+  useEffect(()=>{if(accountLookbackHours===undefined)return;setLookbackHours(accountLookbackHours);setLookbackDraft(String(accountLookbackHours));},[owner,accountLookbackHours]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{if(savedAccountSettings)setDownwardWick({...savedAccountSettings.downwardWick});},[owner,accountWickKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{if(savedAccountSettings)p.onSelectionChange(savedAccountSettings.selection);},[owner,accountSelectionKey]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
   const def=listedDef;
@@ -247,7 +267,7 @@ export function FishPanel(p: FishPanelProps) {
     if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
     else update({...pref,direction});
   };
-  const start=async()=>{try{const hours=saveFishLookback(lookbackDraft);setLookbackHours(hours);const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
+  const start=async()=>{try{const hours=saveFishLookback(lookbackDraft);setLookbackHours(hours);void applyLookback();const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const plans=p.onRecombine?pool:multiple.plans;
@@ -294,7 +314,7 @@ export function FishPanel(p: FishPanelProps) {
           <input aria-label="捕捞时间（UTC+8）" autoComplete="off" spellCheck={false} placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
           <span className="shrink-0 text-[9px] text-muted-foreground/60">UTC+8</span>
         </label>
-        <label className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。每个勾选算法分别按此范围判定；指标计算保留必要历史。自动捕捞间隔另行设置。">扫描过去<input aria-label="扫描覆盖时间（小时）" type="number" min="0.01" max="8784" step="any" disabled={running} value={lookbackDraft} onChange={e=>setLookbackDraft(e.target.value)} onBlur={applyLookback} onKeyDown={e=>{if(e.key==='Enter')applyLookback();}} className="h-6 w-12 rounded bg-transparent px-1 text-center font-mono tabular-nums text-foreground outline-none focus:bg-background disabled:opacity-40"/>小时</label>
+        <label className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。每个勾选算法分别按此范围判定；指标计算保留必要历史。默认 1 小时；修改后按回车或离开输入框，自动随账号保存。自动捕捞间隔另行设置。">扫描过去<input aria-label="扫描覆盖时间（小时）" type="number" min="0.01" max="8784" step="any" disabled={running} value={lookbackDraft} onChange={e=>setLookbackDraft(e.target.value)} onBlur={()=>void applyLookback()} onKeyDown={e=>{if(e.key==='Enter')void applyLookback();}} className="h-6 w-12 rounded bg-transparent px-1 text-center font-mono tabular-nums text-foreground outline-none focus:bg-background disabled:opacity-40"/>小时</label>
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||probe.busy||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}

@@ -4,6 +4,8 @@ import {FishPanel} from '@/components/FishPanel';
 import {CBI2_DEF} from '@/lib/deepDig/features';
 import {readFishLookback} from '@/lib/fish/lookback';
 import {initialFishProgress} from '@/lib/fishScanner';
+import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
+vi.mock('@/lib/simStateSync',async importOriginal=>({...await importOriginal<typeof import('@/lib/simStateSync')>(),pushSimStateImmediately:vi.fn(async()=>true)}));
 const defs=[{...CBI2_DEF,formula:'X = C\nX',scale:1}];
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>defs}));
 const props={signals:[],progress:null,inputs:{time:'',threshold:''},onInputsChange:vi.fn(),selection:{exchanges:['binance' as const],includeDuplicates:false},onSelectionChange:vi.fn(),onStart:vi.fn((_settings:any)=>{}),onCancel:vi.fn(),onJump:vi.fn(),onDelete:vi.fn(),onRate:vi.fn(),jumpingSignalId:null,tradedDayIndex:new Set<string>(),campaignDayIndex:new Set<string>()};
@@ -20,4 +22,21 @@ it('shows the frozen range of the previous round and prevents invalid or mid-run
  expect(screen.getByTestId('fish-status')).toHaveAttribute('title',expect.stringContaining('本轮覆盖过去 12 小时'));expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('下一轮生效');expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('过去 12 小时的结果');
  fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'0'}});fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(props.onStart).not.toHaveBeenCalled();expect(screen.getByText('扫描覆盖时间须大于 0 且不超过 8784 小时')).toBeInTheDocument();
  h.rerender(<FishPanel {...props} progress={{...progress,status:'running'}}/>);expect(screen.getByLabelText('扫描覆盖时间（小时）')).toBeDisabled();
+});
+it('autosaves coverage over an older fixed account value without resetting algorithm edits', async () => {
+ localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id:'coverage-user'}}));
+ const saved:FishAccountSettings={version:1,cards:[{id:'first',featureId:'cbi2',enabled:true,pref:{statistic:'结果',direction:'>',threshold:'0.7',constraints:[]}}],
+  combination:'and',lookbackHours:24,downwardWick:{enabled:false,hours:12,atrMultiple:2},selection:props.selection};
+ localStorage.setItem('sim_coverage-user_'+FISH_ACCOUNT_SETTINGS_KEY,JSON.stringify(saved));
+ const view=render(<FishPanel {...props}/>);
+ expect(screen.getByLabelText('扫描覆盖时间（小时）')).toHaveValue(24);
+ fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'0.9'}});
+ fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'1'}});
+ fireEvent.blur(screen.getByLabelText('扫描覆盖时间（小时）'));
+ await waitFor(()=>expect(readFishAccountSettings()?.lookbackHours).toBe(1));
+ expect(screen.getByLabelText('捕捞阈值')).toHaveValue(.9);
+ expect(readFishAccountSettings()?.cards).toEqual(saved.cards);
+ view.unmount();render(<FishPanel {...props}/>);
+ expect(screen.getByLabelText('扫描覆盖时间（小时）')).toHaveValue(1);
+ expect(screen.getByLabelText('捕捞阈值')).toHaveValue(.7);
 });

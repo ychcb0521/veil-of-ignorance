@@ -7,7 +7,8 @@ const DEFS=fishFeatureDefinitions([CBI2_DEF,STATE_DEF,CBA_DEF,DRIFT_SPEED_Z_DEF,
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>DEFS}));
 import {useFishAutoScan} from '@/hooks/useFishAutoScan';
 import {readFishAuto,saveFishAuto,FISH_AUTO_INTERVALS,fishAutoKey} from '@/lib/fish/autoScan';
-import {writePersistedStateRaw} from '@/lib/persistedStateStorage';
+import {writePersistedStateRaw,notifyPersistedStateHydrated} from '@/lib/persistedStateStorage';
+import {FISH_ACCOUNT_SETTINGS_KEY} from '@/lib/fish/accountSettings';
 import {buildFishScanSettings} from '@/lib/fish/scanPlan';
 import {readFishCards} from '@/lib/fish/cards';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
@@ -100,4 +101,16 @@ it('coverage hours are independent from the automatic interval and refreshed fro
  expect((start.mock.calls[0][0] as any).lookbackHours).toBe(1);
  saveFishLookback(2);await flush(HOUR+1000);
  expect((start.mock.calls.at(-1)![0] as any).lookbackHours).toBe(2);expect(view.result.current.hours).toBe(1);
+});
+
+it('a coverage-only account update preserves the current manual mode and automatic interval',async()=>{
+ const saved={version:1,cards:[{id:'first',featureId:'cbi2',enabled:true,pref:{statistic:'结果',direction:'>',threshold:'0.04',constraints:[]}}],
+  combination:'and',lookbackHours:24,downwardWick:{enabled:false,hours:12,atrMultiple:2},selection,auto:{mode:'auto',hours:1}};
+ const key='sim_anon_'+FISH_ACCOUNT_SETTINGS_KEY;
+ writePersistedStateRaw(key,JSON.stringify(saved));
+ const {view}=hook();await flush();
+ act(()=>{view.result.current.setMode('manual');view.result.current.setHours(2);});
+ act(()=>{writePersistedStateRaw(key,JSON.stringify({...saved,lookbackHours:1}));notifyPersistedStateHydrated(key);});
+ await flush();
+ expect(view.result.current).toMatchObject({mode:'manual',hours:2});
 });

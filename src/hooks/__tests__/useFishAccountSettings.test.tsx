@@ -66,3 +66,37 @@ it('server preferences win even when the other computer’s clock is behind',asy
  await act(async()=>{await hydrateSimState('A',[FISH_ACCOUNT_SETTINGS_KEY]);});
  expect(view.result.current.settings).toEqual(remote);
 });
+
+it('updates coverage in saved account settings without replacing fixed algorithms and restores it on another computer', async () => {
+ const first=renderHook(()=>useFishAccountSettings());
+ await act(()=>first.result.current.save(value));
+ await act(()=>first.result.current.saveLookback(1));
+ expect(cloud.rows.get('A'+FISH_ACCOUNT_SETTINGS_KEY)?.value).toEqual({...value,lookbackHours:1});
+ expect(readFishLookback()).toBe(1);
+ first.unmount();localStorage.clear();__resetSimStateSyncForTests();login('A');
+ await hydrateSimState('A');
+ expect(readFishLookback()).toBe(1);
+ expect(readFishCards()).toEqual(value.cards);
+ login('B');
+ expect(readFishLookback()).toBe(1);
+ const second=renderHook(()=>useFishAccountSettings());
+ await act(()=>second.result.current.saveLookback(4));
+ expect(readFishLookback()).toBe(4);
+ login('A');
+ expect(readFishLookback()).toBe(1);
+ second.unmount();
+});
+
+it('persists coverage for an account without a fixed algorithm snapshot', async () => {
+ const first=renderHook(()=>useFishAccountSettings());
+ expect(readFishLookback()).toBe(1);
+ await act(()=>first.result.current.saveLookback(2));
+ expect(first.result.current.settings).toBeNull();
+ first.unmount();localStorage.clear();__resetSimStateSyncForTests();login('A');
+ await hydrateSimState('A');
+ expect(readFishLookback()).toBe(2);
+ const second=renderHook(()=>useFishAccountSettings());
+ await act(async()=>{await expect(second.result.current.saveLookback(0)).rejects.toThrow('扫描覆盖时间');});
+ expect(readFishLookback()).toBe(2);
+ second.unmount();
+});

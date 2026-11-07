@@ -5,7 +5,8 @@ import type { FishProgram } from './algorithm';
 import type { FishMemberResult } from './intersection';
 import { FISH_MAX_HISTORY_BARS, type FishTurnoverFloor } from './shared';
 export const FISH_DEFAULT_LOOKBACK_HOURS=1;
-export const fishLookbackKey=()=>`${getUserPrefix()}fish-lookback-hours.v1`;
+export const FISH_LOOKBACK_KEY='fish-lookback-hours.v1';
+export const fishLookbackKey=()=>getUserPrefix()+FISH_LOOKBACK_KEY;
 const defaultVersionKey=()=>`${getUserPrefix()}fish-lookback-default.v2`;
 export function validateFishLookback(value:unknown):number {
  const n=typeof value==='number'?value:typeof value==='string'&&value.trim()?Number(value):NaN;
