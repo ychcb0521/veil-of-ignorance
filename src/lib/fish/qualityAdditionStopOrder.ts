@@ -1,3 +1,4 @@
+import {ADDITION_K_TOUCH_VERSION} from './qualityAddition';
 /**
  * 【用户要求】2026-11-02 持仓监测战役的「委托」里放进加仓所参考的支撑线 K：K 是加仓那一刻就挂上的保护整个仓位的卖出止损，
  * 与提前挂好的对冲空单目的、作用一致。状态：下一次加仓把止损上移 → 已上移；支撑线下移减仓把止损挪到 K′ → 已下移；
@@ -20,9 +21,9 @@ const pct = (x: number) => `${+(x * 100).toFixed(2)}%`;
 export function qualityAdditionStopOrders(leg: Pick<TradeJournal, 'quality_addition_fill'>, campaign?: Pick<TradeCampaign, 'closed_at' | 'comparison'> | null): AdditionStopOrder[] {
   const fill = leg.quality_addition_fill, F = fill?.sizing?.guardK != null ? fill.sizing.support : undefined, K = fill?.sizing?.guardK ?? fill?.sizing?.support;
   if (!fill || K == null || !(K > 0) || !Number.isFinite(K)) return [];
-  const evidence = campaign?.comparison?.sellEvidence, guard = fill.structureEvidence?.guardCloses;
+  const evidence = campaign?.comparison?.sellEvidence, guard = fill.kStopVersion===ADDITION_K_TOUCH_VERSION?undefined:fill.structureEvidence?.guardCloses;
   const widened = fill.structureEvidence?.widenedFrom != null ? `；箱体算出的 K ${fill.structureEvidence.widenedFrom} 离加仓价不足 ${fill.structureEvidence.minDistancePct}%，已放宽到此` : '';
-  const label = guard ? '防守线 K' : '支撑线 K', floorText = (f?: number) => f != null ? `；保本底线 F ${+f.toPrecision(8)}：盘中碰到即按 F 卖出全部持仓（加仓量按 F 算）` : '';
+  const label = fill.structureEvidence?.guardCloses ? '防守线 K' : '支撑线 K', floorText = (f?: number) => f != null ? `；保本底线 F ${+f.toPrecision(8)}：盘中碰到即按 F 卖出全部持仓（加仓量按 F 算）` : '';
   const detail = (guard ? `5 分钟收盘连续 ${guard} 根低于 K 才卖出` : '价格碰到 K 即卖出全部持仓') + widened;
   const fills = evidence?.additionFills ?? [], index = fills.findIndex(f => f.at === fill.at), next = index >= 0 ? fills[index + 1] : undefined;
   const moves = (evidence?.additionReductions ?? []).filter(r => r.at > fill.at && (!next || r.at < next.at) && r.newK > 0 && Number.isFinite(r.newK));

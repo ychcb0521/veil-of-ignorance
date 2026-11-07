@@ -71,3 +71,8 @@ export function assertStructureVersionsAvailable(rule: Parameters<typeof structu
   if (!box || box.algorithm !== rule.algorithm || box.layer !== 'box' || v.box !== CURRENT_BOX_VERSION[rule.algorithm]) throw Error(`方案冻结的箱体算法版本 ${v.box} 当前没有可运行的实现，请勿改用其它版本代替`);
   if (v.guard && v.guard !== CURRENT_GUARD_VERSION) throw Error(`方案冻结的防守线版本 ${v.guard} 当前没有可运行的实现，请勿改用其它版本代替`);
 }
+
+/** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */
+export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
+  {id:'addition-k-touch-v1',since:'2026-11-07',summary:'加仓卖出第一行的 K / K′ 改为盘中即时触碰全仓卖出，包含防守线与影线；跳空按开盘价。旧方案未选此版本仍按原规则执行，原加仓定量与 F 不变。'},
+]);

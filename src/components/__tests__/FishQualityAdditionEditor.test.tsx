@@ -9,6 +9,20 @@ afterEach(cleanup);
 function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
+it('switches the screenshot K row to immediate execution, persists it for every round, and preserves original sizing',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+ fireEvent.click(screen.getByLabelText('防守线保本底线'));
+ const original=save();expect(original.kStopVersion).toBeUndefined();
+ expect(screen.getByLabelText('碰到K执行版本')).toHaveValue('legacy');
+ fireEvent.change(screen.getByLabelText('碰到K执行版本'),{target:{value:'addition-k-touch-v1'}});
+ expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('影线算，不等 1 分钟或 5 分钟收盘确认');
+ const current=save(),{kStopVersion,...body}=current;expect(kStopVersion).toBe('addition-k-touch-v1');expect(body).toEqual(original);
+ tab(2);expect(screen.getByLabelText('碰到K执行版本')).toHaveValue('addition-k-touch-v1');
+ expect(parseAdditionDraft(additionDraft(current),BUILTIN_FEATURES)).toEqual(current);
+ fireEvent.change(screen.getByLabelText('碰到K执行版本'),{target:{value:'legacy'}});
+ expect(save()).toEqual(original);
+});
 // 【用户要求】2026-11-01 位置只用箱体算法（DBL / SBS），下方一行 K = 旧C − n×ATR，n 由用户自己填（新方案先填 0）。
 it('defaults to the box position (S/T/K also offered), with calculator defaults and K = 旧C − n×ATR',()=>{
  render(<Editor/>);expect(screen.getByLabelText('启用条件加仓')).not.toBeChecked();expect(screen.getByLabelText('加仓条件来源')).toBeDisabled();

@@ -80,6 +80,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   vetoes.filter(v=>v.kind===BOX_STOP_KIND).forEach((v,i)=>{const r=v.boxStop!,versions=structureVersions(r.structure);add(`hard-stop-box-${i}`, '硬性终止',boxStopLabel(r),[BOX_STOP_VERSION,versions.box,versions.guard].filter(Boolean).join(' · '),'独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');});
   const a = plan.addition;
   if (a?.enabled) {
+    if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
     const rounds = a.rounds?.length ? a.rounds : [a];
     // 加仓引擎本身（平衡公式、轮次、门槛、否决、减仓等），不含箱体——箱体按轮单列
     add('addition', '加仓规则', `最多 ${a.maxRounds ?? rounds.length} 次`, join([...versionTags(additionIdentity({ ...a, structure: undefined, rounds: a.rounds?.map(r => ({ ...r, structure: undefined })) })), ...versionTags(additionMirrorIdentity(a, plan.mirrorTakeProfit))]),

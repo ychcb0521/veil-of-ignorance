@@ -1,8 +1,11 @@
+export const ADDITION_K_TOUCH_VERSION='addition-k-touch-v1' as const;
 /** Conditional paper additions; disabled and legacy rules retain their frozen identities. */
 import { activeAdditionVetoes, additionVetoIdentity, validateAdditionVetoes } from './qualityAdditionVeto';
 import type { QualityBuyFilter } from './quality';
 import {validateStructureAddition,structureAdditionIdentity,structureAdditionLabel,type StructureAdditionRule,type StructureAdditionEvidence} from './qualityAdditionStructure';
 export interface QualityAdditionRule {
+  /** Opt-in execution upgrade; missing keeps the original guard close confirmation. */
+  kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
   enabled: boolean; source: 'detector' | 'custom' | 'structure';
   structure?:StructureAdditionRule; stricterPct: number;
   quantityMode?: 'calculator' | 'entry' | 'fixed'; quantity?: number;
@@ -94,6 +97,7 @@ const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(ru
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
+  kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
  advantage?: import('./qualityAdvantage').QualityAdvantageObservation;
   /** 每轮分流时这一次成交走的是保守（rounds）还是进攻（alternativeRounds）；没有备选的轮次不写。 */
   lane?:'structure'|'attack';
@@ -147,6 +151,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...([rule,...(rule.rounds??[])].some(r=>r.entryDistanceAtr!=null)?[['entry-distance-v1',[rule,...(rule.rounds??[])].map(r=>r.entryDistanceAtr??null)]]:[]),
   ...([rule,...(rule.rounds??[])].some(r=>r.gainBasis==='average')?[['gain-basis-average-v1',[rule,...(rule.rounds??[])].map(r=>r.gainBasis??null)]]:[]),
   ...(rule.geometricLock?.enabled?[['geometric-lock-v1',rule.geometricLock.multiple,rule.geometricLock.pct]]:[]),
+  ...(rule.kStopVersion?[[rule.kStopVersion]]:[]),
   ...(rule.breakevenFloor?.enabled?[['breakeven-floor-v1',rule.breakevenFloor.atr]]:[]),
   // v2（2026-11-03）：减仓后再加仓时，减仓所得不再当成额外可用利润重复计入（v1 会多加）；开了减仓的方案须重算
   ...(rule.supportReduction?.enabled?[[rule.supportReduction.version===2?'support-drop-reduction-v2':'support-drop-reduction-v1',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct,...(rule.supportReduction.exitAfterDrops!=null?[['exit-after-support-drops-v1',rule.supportReduction.exitAfterDrops]]:[])]]:[]),
@@ -157,6 +162,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   // 2026-11-06 结构开局：进攻备选从第 n 次起才参与；n＝1 或没有备选时身份不变
   ...(rule.alternativeRounds?.length&&(rule.attackFromRound??1)>1?[['addition-round-race-from-v1',rule.attackFromRound]]:[])];
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
+  if(rule?.kStopVersion!=null&&rule.kStopVersion!==ADDITION_K_TOUCH_VERSION)throw new Error('加仓 K 止损执行版本不可用，请保留原方案并选择受支持的新版');
   if (!rule?.enabled) return;
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
   if(rule.source==='structure'){validateStructureAddition(rule.structure);if(rule.quantityMode!=='calculator')throw Error('箱体加仓须使用按平衡公式定量');}

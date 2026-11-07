@@ -4,7 +4,7 @@ import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCov
 import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
-import {isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
+import {ADDITION_K_TOUCH_VERSION,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
 import {additionVetoesNeedMinutes,evaluateAdditionVetoes,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
 import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
@@ -17,6 +17,7 @@ interface SupportStop {at:number;price:number;support:number;atOpen:boolean;caus
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
+ kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
  advantage?: import('./qualityAdvantage').QualityAdvantageRule;
  readAdvantage?: (at:number)=>Promise<import('./qualityAdvantage').QualityAdvantageObservation>;
  structure?:StructureAdditionRule;
@@ -97,6 +98,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const findStop=(support:number|undefined,from:number):SupportStop|undefined=>{
   if(support==null)return;
   const closes=fills.at(-1)?.structureEvidence?.guardCloses;
+  if(o.kStopVersion===ADDITION_K_TOUCH_VERSION){const cur=currentK();return findTouchStop(cur.k===support?(cur.guard??support):support,from);}
   if(closes){
    // 【用户要求】2026-11-03 保本底线：防守线 K 照旧收盘确认、下一分钟开盘卖；F（＝support，加仓量按它算）盘中碰到即按 F 卖，谁先到算谁
    const cur=currentK(),guard=cur.k===support?cur.guard:undefined;if(guard==null)return findGuardStop(support,closes,from);
@@ -109,10 +111,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  /** 价格盘中碰到这条线即卖出（跳空按开盘价）。 */
  const findTouchStop=(support:number,from:number):SupportStop|undefined=>{
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
-  const search=(node:number,left:number,right:number):number=>{if(right<=first||lowTree[node]>support)return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
+  const search=(node:number,left:number,right:number):number=>{if(right<=first||lowTree[node]>(o.kStopVersion===ADDITION_K_TOUCH_VERSION?support*(1+1e-12):support))return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
   const index=search(1,0,size),bar=bars[index];if(!bar)return;
   const exit=o.ordinaryExit;if(exit&&bar.openTime===exit.at&&(exit.atOpen||!exit.mirror&&exit.price>=support))return;
-  const atOpen=bar.open<=support;return {at:bar.openTime,price:atOpen?bar.open:support,support,atOpen};
+  const atOpen=bar.open<=(o.kStopVersion===ADDITION_K_TOUCH_VERSION?support*(1+1e-12):support);return {at:bar.openTime,price:atOpen?bar.open:support,support,atOpen};
  };
  const profitRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===ADDITION_PROFIT_KIND).sort((a,b)=>a.id.localeCompare(b.id));
  // 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏 ÷ L₀ ≥ N 时卖出全部持仓；L₀＝初始仓位 × 静态回撤%
@@ -289,7 +291,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   }
   if(advantage?.grade==='U')skip({at:hit.at,round:roundNo,kind:'advantage-unavailable',label:'优势辅助数据缺失，沿用原规则',reading:advantage.reason??'缺辅助数据'});
   if(advantage)hit={...hit,advantage};
-  fills.push({...hit,quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(floorRule?{guardK:selected!.k,floorAtr:floorRule.atr}:{})}});
+  fills.push({...hit,...(o.kStopVersion?{kStopVersion:o.kStopVersion}:{}),quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(floorRule?{guardK:selected!.k,floorAtr:floorRule.atr}:{})}});
   if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }
  return done(findPositionExit(currentK().k,Math.max(o.since,currentK().at??o.since)));
