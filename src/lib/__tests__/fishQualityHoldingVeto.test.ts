@@ -184,6 +184,22 @@ it('uses a rolling five-minute window rather than fixed five-minute candles or l
  const prior=await run(g,path,T+8*M);expect(prior.status).toBe('open');
  expect(await run(g,path,T+12*M,prior)).toEqual(whole);
 });
+it('reproduces ALLO 2026-05-29 rolling 7% confirmation before the aligned five-minute candle rebounds',async()=>{
+ // Public Binance USDM 1m OHLC, Beijing 14:13–14:19; read-only audit fixture.
+ const at=Date.UTC(2026,4,29,6,13),ohlc=[
+  [.23339,.23352,.23006,.23120],[.23116,.23301,.23050,.23232],
+  [.23227,.23293,.23090,.23166],[.23165,.23450,.22625,.22787],
+  [.22786,.22949,.21518,.21705],[.21716,.22612,.21694,.22478],
+  [.22474,.22718,.22423,.22560],
+ ];
+ const s={...sample,enteredAt:at,source:{...sample.source,symbol:'ALLOUSDT',timeMs:at}},g={...group(),rule:undefined,holdingVetoes:[makeQualityHoldingVeto('drop-5m','>=',7)]};
+ const load=loader(t=>{const p=ohlc[(t-at)/M];return p?bar(t,p[0],p[1],p[2],p[3]):bar(t,.23339);});
+ const result=await evaluateQualitySample(s,g,0,at+7*M,load,signal());
+ expect(result).toMatchObject({status:'closed',endTime:at+5*M,endPrice:.21716,exitReading:expect.closeTo(7.001156861904964,10),exitSnapshot:{barOpenTime:at,cause:{kind:'drop-5m',threshold:7}}});
+ expect((.23227-.22560)/.23227*100).toBeLessThan(7);
+ const pending=await evaluateQualitySample(s,g,0,at+5*M,load,signal());expect(pending.pendingExit?.at).toBe(at+5*M);
+ expect(await evaluateQualitySample(s,g,0,at+7*M,load,signal(),pending)).toEqual(result);
+});
 it('starts short windows at entry, rejects gaps, and allows each minute fall independently',async()=>{
  for(const kind of ['drop-1m','drop-5m'] as const) {
   const g={...group(),rule:undefined,holdingVetoes:[makeQualityHoldingVeto(kind,'>=',3)]};

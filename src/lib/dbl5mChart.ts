@@ -31,7 +31,12 @@ export function registerDbl5Indicator(item:ResearchIndicator){
         const row=indicator.result[i],value=row?._DBL5_guard,identity=row?._DBL5_guard_segment;
         if(!Number.isFinite(value)||!Number.isFinite(identity)){previous=undefined;continue;}
         const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);ctx.beginPath();ctx.setLineDash(row._DBL5_guard_trend===1?[]:[5,3]);
-        if(previous?.identity===identity){ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}ctx.stroke();previous={x,y,identity};
+        if(previous?.identity===identity){
+          ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.stroke();
+          // The publication step shares the next candle's opening centre. A
+          // faint connector keeps an overlapping real wick visible (ALLO 14:15).
+          if(previous.y!==y){ctx.beginPath();ctx.globalAlpha=.25;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.moveTo(x,previous.y);ctx.lineTo(x,y);ctx.stroke();ctx.globalAlpha=1;ctx.lineWidth=2;ctx.setLineDash(row._DBL5_guard_trend===1?[]:[5,3]);}
+        }else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);ctx.stroke();}previous={x,y,identity};
       }
       ctx.setLineDash([]);
       for(let i=Math.max(0,visibleRange.from-1);i<Math.min(indicator.result.length,visibleRange.to+1);i++){

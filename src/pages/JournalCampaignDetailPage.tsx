@@ -2719,7 +2719,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       error={batchKlinesError ? `K 线加载失败：${batchKlinesError}` : null}
       onComplete={batchExport.onComplete}
       onError={reportBatchError}
-    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <QualityCampaignChartFrame campaign={campaign} chartHeight={BATCH_CHART_SURFACE.height} onSummaryHeight={setMirrorBoardHeight}><ReplayKlineChart
+    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <QualityCampaignChartFrame campaign={campaign} klines={chartKlines} intervalMs={intervalToMs(displayInterval)} chartHeight={BATCH_CHART_SURFACE.height} onSummaryHeight={setMirrorBoardHeight}><ReplayKlineChart
       key={`${campaign.id}:${displayInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
       klines={chartKlines}
       currentTime={chartCurrentTime}
@@ -3051,7 +3051,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               )}
               <div className="flex-1" />
             </div>
-            <QualityCampaignChartFrame campaign={campaign} chartHeight={CAMPAIGN_CHART_MIN_HEIGHT} fitHeight={campaignChartFitHeight??480} chartRef={campaignChartExportRef}>
+            <QualityCampaignChartFrame campaign={campaign} klines={chartKlines} intervalMs={intervalToMs(displayInterval)} chartHeight={CAMPAIGN_CHART_MIN_HEIGHT} fitHeight={campaignChartFitHeight??480} chartRef={campaignChartExportRef}>
               {chartKlinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
               ) : chartKlinesError ? (
