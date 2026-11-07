@@ -27,7 +27,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
       <b className="font-medium">卖出方式：{evidence.triggerCause ? `一票否决 · ${evidence.triggerCause.label}` : '盘中达标即卖'} · 1 分钟复原</b>
       <span>{evidence.triggerCause?.kind.endsWith('drawdown') ? '触发价格分钟起点' : `原指标周期：${evidence.interval} · K 线起点`} {formatUTC8(evidence.barOpenAt ?? Math.floor((evidence.confirmedAt - 1) / step) * step)}</span>
       {evidence.previousAt != null && evidence.previousReading != null && <span className="font-mono">前次：{formatUTC8(evidence.previousAt)} · {evidence.previousReading.toPrecision(9)}</span>}
-      <span className="font-mono">首次达标：{formatUTC8(evidence.confirmedAt)} · {evidence.reading.toPrecision(9)} {evidence.triggerCause?.direction ?? evidence.direction} {evidence.triggerCause?.threshold ?? evidence.threshold}{evidence.triggerCause && evidence.triggerCause.kind!=='indicator'?'%':''}</span>
+      <span className="font-mono">首次达标：{formatUTC8(evidence.confirmedAt)} · {evidence.reading.toPrecision(9)} {evidence.triggerCause?.direction ?? evidence.direction} {evidence.triggerCause?.threshold ?? evidence.threshold}{evidence.triggerCause && !['indicator','box-stop'].includes(evidence.triggerCause.kind)?'%':''}</span>
     </div>
     <p className="text-muted-foreground">{evidence.triggerAtOpen ? '开盘价已越过持仓回撤阈值，当分钟开盘即触发，未使用该分钟后续高低价。' : evidence.triggerCause?.kind.endsWith('drawdown') ? '按已完成分钟的持仓价格路径检查回撤；同一分钟高低点顺序不明时不假定高点先发生，精度为 1 分钟。' : '用当时已完成的 1 分钟行情逐步复原原周期指标，精度为 1 分钟。'}{evidence.executedAt != null ? `按 ${formatUTC8(evidence.executedAt)} 起的 1 分钟 K 线开盘价成交。` : '已确认达标，等待分钟开盘数据，尚未记为成交。'}{evidence.triggerCause?.kind.endsWith('drawdown') ? '回撤依据持仓价格路径。' : '下方副图画的是原周期最终收盘值，可能与盘中触发读数不同。'}</p>
   </aside>;
@@ -36,7 +36,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
     <div className="flex flex-wrap gap-x-4 gap-y-1">
       <b className="font-medium">卖出方式：{evidence.interval} 收盘确认</b>
       <span>触发 K 线：{formatUTC8(open)} → {formatUTC8(evidence.confirmedAt)}</span>
-      <span className="font-mono">收盘读数 {evidence.reading.toPrecision(9)} {evidence.triggerCause?.direction ?? evidence.direction} {evidence.triggerCause?.threshold ?? evidence.threshold}{evidence.triggerCause && evidence.triggerCause.kind!=='indicator'?'%':''}</span>
+      <span className="font-mono">收盘读数 {evidence.reading.toPrecision(9)} {evidence.triggerCause?.direction ?? evidence.direction} {evidence.triggerCause?.threshold ?? evidence.threshold}{evidence.triggerCause && !['indicator','box-stop'].includes(evidence.triggerCause.kind)?'%':''}</span>
     </div>
     <p className="text-muted-foreground">图上指标点画在该根 K 线的开盘位置，最终读数到收盘才确定；指标连线不表示盘中首次达标。{evidence.executedAt != null ? `确认后按 ${formatUTC8(evidence.executedAt)} 起的 1 分钟 K 线开盘价成交。` : '已确认达标，等待分钟开盘数据，尚未记为成交。'}</p>
   </aside>;

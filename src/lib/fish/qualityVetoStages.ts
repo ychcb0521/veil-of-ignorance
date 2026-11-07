@@ -3,7 +3,7 @@ import type {QualityGroup,QualityResult} from './quality';
 export interface QualityVetoStage {afterAdditions:number;conditions:QualityHoldingVeto[]}
 export type QualityVetoStageActivation=QualityVetoStage&{at:number;mode:'overlay'|'replace';peakBasis:'holding'|'stage'};
 export const orderedVetoStages=(g:Pick<QualityGroup,'vetoStages'>)=>[...(g.vetoStages??[])].sort((a,b)=>a.afterAdditions-b.afterAdditions);
-const slot=(v:QualityHoldingVeto)=>v.kind==='indicator'?`${v.kind}:${v.snapshot?.featureId}:${v.metric}`:v.kind;
+const slot=(v:QualityHoldingVeto)=>v.kind==='box-stop'?`${v.kind}:${v.boxStop?.structure.algorithm}`:v.kind==='indicator'?`${v.kind}:${v.snapshot?.featureId}:${v.metric}`:v.kind;
 export const qualityVetoStagesIdentity=(g:Pick<QualityGroup,'vetoStages'|'vetoStageMode'|'vetoPeakBasis'>)=>g.vetoStages?.length?['addition-count-veto-stages-v1',g.vetoStageMode??'overlay',g.vetoPeakBasis??'stage',orderedVetoStages(g).map(s=>[s.afterAdditions,s.conditions.map(v=>[v.enabled,holdingVetoIdentity([{...v,enabled:true}])[0]])])]:null;
 export function validateQualityVetoStages(g:Pick<QualityGroup,'vetoStages'|'vetoStageMode'|'vetoPeakBasis'|'addition'>){
  if(!g.vetoStages?.length)return;
@@ -23,4 +23,4 @@ export function beginVetoStagePath(g:QualityGroup,r:QualityResult):QualityHoldin
  return {entry,peak,minimum:price,dynamic:0};
 }
 
-export const qualityVetoStagesLabel=(g:Pick<QualityGroup,'vetoStages'>)=>orderedVetoStages(g).map(s=>`第 ${s.afterAdditions} 次加仓后：${s.conditions.map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.enabled?'':'（停用）'}`).join(' 或 ')}`).join('；');
+export const qualityVetoStagesLabel=(g:Pick<QualityGroup,'vetoStages'>)=>orderedVetoStages(g).map(s=>`第 ${s.afterAdditions} 次加仓后：${s.conditions.map(v=>`${v.label} ${v.direction} ${v.threshold}${['indicator','box-stop'].includes(v.kind)?'':'%'}${v.enabled?'':'（停用）'}`).join(' 或 ')}`).join('；');

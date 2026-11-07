@@ -1,12 +1,14 @@
 /** Frozen holding-period exit conditions. Any enabled condition can close the paper trade. */
 import type { FishSnapshot } from './algorithm';
 import type { ResearchBar } from '@/lib/deepRsa/window';
+import { BOX_STOP_KIND, validateBoxStop, boxStopIdentity, boxStopLabel, type BoxStopRule } from './qualityBoxStop';
 export type QualityOperator = '<' | '>' | '<=' | '>=';
 export interface QualityHoldingVeto {
-  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator' | 'addition-geometric-profit' | 'payoff-ratio';
+  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator' | 'addition-geometric-profit' | 'payoff-ratio' | 'box-stop';
   direction: QualityOperator; threshold: number; enabled: boolean;
   metric?: string; snapshot?: FishSnapshot;
   geometricMultiple?:number;
+  boxStop?:BoxStopRule;
 }
 export const holdingPriceLabels = { 'static-drawdown': '持仓过程静态最大回撤', 'dynamic-drawdown': '持仓过程动态最大回撤', 'drop-1m': '1分钟内跌幅', 'drop-5m': '5分钟内跌幅' } as const;
 export const isHoldingPriceChoice = (choice: string): choice is keyof typeof holdingPriceLabels => Object.prototype.hasOwnProperty.call(holdingPriceLabels, choice);
@@ -16,11 +18,12 @@ export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
 /** 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏（已落袋＋按当时价格的未实现）÷ 初始最大预期亏损 L₀ ≥ N（R）时立刻卖出全部持仓。L₀＝初始仓位 × 硬性终止静态回撤%。 */
 export const PAYOFF_STOP_KIND='payoff-ratio' as const;
 export const PAYOFF_STOP_LABEL='盈亏比止盈';
-export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'>&{kind:string})=>v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
-export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number};/** 几何仓位保住有效涨幅：当时的几何仓位、门槛、百分比与上移后的止损线。 */geometricLock?:{multiple:number;threshold:number;pct:number;line:number;k:number};/** 盈亏比止盈：L₀、目标价与成交时的整笔盈亏。 */payoffBasis?:{l0:number;l0Pct:number;targetPrice:number;pnl:number}};
+export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'>&{kind:string})=>v.kind===BOX_STOP_KIND&&'boxStop' in v?boxStopLabel((v as QualityHoldingVeto).boxStop!):v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
+export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'>, 'kind'> & {kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;boxStopEvidence?:{version:string;line:number;confirmedAt:number;confirmation:string};/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number};/** 几何仓位保住有效涨幅：当时的几何仓位、门槛、百分比与上移后的止损线。 */geometricLock?:{multiple:number;threshold:number;pct:number;line:number;k:number};/** 盈亏比止盈：L₀、目标价与成交时的整笔盈亏。 */payoffBasis?:{l0:number;l0Pct:number;targetPrice:number;pnl:number}};
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
+  if(v.kind===BOX_STOP_KIND){validateBoxStop(v.boxStop);return;}
   if (![...Object.keys(holdingPriceLabels),'indicator',ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND].includes(v.kind))throw new Error('未知的持仓否决指标');
   if (v.kind===PAYOFF_STOP_KIND){if(!(v.threshold>0)||!Number.isFinite(v.threshold)||v.direction!=='>=')throw new Error('盈亏比止盈须填写大于 0 的倍数（R）');return;}
   if (!Number.isFinite(v.threshold) || !['<','>','<=','>='].includes(v.direction)) throw new Error('一票否决条件须设置有效方向和有限数字阈值');
@@ -38,7 +41,7 @@ export function validatePayoffStops(vetoes: readonly QualityHoldingVeto[] = []) 
 }
 /** No conditions keeps old experiment keys byte-for-byte compatible. IDs/order do not change the outcome. */
 export function holdingVetoIdentity(vetoes: readonly QualityHoldingVeto[] = []): unknown[] {
-  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[]),...(v.kind===BOX_STOP_KIND?[boxStopIdentity(v.boxStop!)]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 export interface QualityHoldingPath { entry: number; peak: number; minimum: number; dynamic: number }
 /** OHLC cannot tell high/low order within a minute: use prior peak/open→low, and high→close, whose order is known. */

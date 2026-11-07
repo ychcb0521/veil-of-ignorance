@@ -1,0 +1,24 @@
+import { expect, it } from 'vitest';
+import { computeDbl5 } from '@/lib/dbl5m';
+import { computeSbs5m } from '@/lib/sbs5m';
+import { sample as dblSample, T } from './fixtures/dblBars';
+import { sbsComplete } from './fixtures/sbsBars';
+import { createBoxStopReader, defaultBoxStop, freezeBoxStop } from '@/lib/fish/qualityBoxStop';
+import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
+import type { FishReconstructionLoader } from '@/lib/fish/reconstruction';
+import type { ResearchBar } from '@/lib/deepRsa/window';
+for (const algorithm of ['dbl5','sbs5m'] as const) it(`uses the unchanged native ${algorithm} output as K`,async()=>{
+ const fixtures=algorithm==='dbl5'?dblSample():sbsComplete(), entry=T+(algorithm==='dbl5'?15:48)*300000;
+ const byTime=new Map(fixtures.map(b=>[b.openTime,b]));
+ const at=(t:number):ResearchBar=>({...byTime.get(t)??{openTime:t,open:100,high:100,low:100,close:100,volume:10,takerBuyVolume:5,quoteVolume:1000,takerBuyQuoteVolume:500},DBL5_tick_size:1,SBS5M_tick_size:.1} as ResearchBar);
+ const load:FishReconstructionLoader=async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>at(a+i*p.step));
+ const history=Array.from({length:288},(_,i)=>at(entry-(288-i)*300000));
+ const native=algorithm==='dbl5'?computeDbl5(history,{symbol:'TESTUSDT',tickSize:1}).rows.at(-1)?.active?.D:computeSbs5m(history,{symbol:'TESTUSDT',tickSize:.1}).rows.at(-1)?.active?.s;
+ expect(native).toBeGreaterThan(0);
+ const rule=freezeBoxStop({...defaultBoxStop(),structure:{...defaultStructureAddition(algorithm),kSource:'current'}});
+ const veto={id:'v',kind:'box-stop' as const,label:'box',enabled:true,direction:'<=' as const,threshold:0,boxStop:rule};
+ const row={id:'row',symbol:'TESTUSDT',timeMs:entry,timeLabel:'',fallbackZone:''};
+ const reader=createBoxStopReader({vetoes:[veto],row,entry,since:entry,load,signal:new AbortController().signal});
+ const hit=await reader.read({openTime:entry,open:200,high:200,low:1,close:200,volume:10,takerBuyVolume:5});
+ expect(hit?.fillPrice).toBe(native);expect(reader.states().v.line).toBe(native);
+});

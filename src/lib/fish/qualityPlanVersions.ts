@@ -1,3 +1,4 @@
+import {BOX_STOP_KIND,freezeBoxStop,BOX_STOP_VERSION,boxStopLabel} from './qualityBoxStop';
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
@@ -76,6 +77,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (vetoes.length) add('hard-stop', '硬性终止', vetoes.map(v => holdingVetoLabel(v)).join(' 或 '),
     join([qualityVetoVersion(plan), ...vetoes.filter(v => v.snapshot?.definitionKey).map(v => formulaFingerprint(v.snapshot!))]),
     plan.vetoFill === 'stop' ? '回撤止损盘中触及按止损价成交' : '回撤否决下一分钟开盘成交');
+  vetoes.filter(v=>v.kind===BOX_STOP_KIND).forEach((v,i)=>{const r=v.boxStop!,versions=structureVersions(r.structure);add(`hard-stop-box-${i}`, '硬性终止',boxStopLabel(r),[BOX_STOP_VERSION,versions.box,versions.guard].filter(Boolean).join(' · '),'独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');});
   const a = plan.addition;
   if (a?.enabled) {
     const rounds = a.rounds?.length ? a.rounds : [a];
@@ -119,6 +121,8 @@ export const planVersionChangeText = (changes: readonly PlanVersionChange[]) => 
 /** 方案里每个箱体规则写下所用版本（防守线参数写成明确值）。 */
 export function withFrozenStructures(plan: QualityGroup): QualityGroup {
   if(plan.router)return {...plan,router:{...plan.router,structure:withFrozenStructures(plan.router.structure),attack:withFrozenStructures(plan.router.attack)}};
+  const freezeVeto=(v:import('./qualityVeto').QualityHoldingVeto)=>v.boxStop?{...v,boxStop:freezeBoxStop(v.boxStop)}:v;
+  if(plan.holdingVetoes?.some(v=>v.boxStop)||plan.vetoStages?.some(s=>s.conditions.some(v=>v.boxStop)))plan={...plan,holdingVetoes:plan.holdingVetoes?.map(freezeVeto),vetoStages:plan.vetoStages?.map(s=>({...s,conditions:s.conditions.map(freezeVeto)}))};
   const a = plan.addition;
   if (!a) return plan;
   const fix = <R extends { structure?: import('./qualityAdditionStructure').StructureAdditionRule }>(r: R): R => r.structure ? { ...r, structure: freezeStructureVersions(r.structure) } : r;

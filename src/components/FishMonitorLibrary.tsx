@@ -126,7 +126,7 @@ export function FishMonitorLibrary({ study, onJump, canJump, onOpenCampaign,rend
       {detail && detailSetting && <div className="max-h-60 shrink-0 space-y-2 overflow-auto rounded-md border border-border/60 bg-muted/20 p-3 text-[11px]" data-testid="monitor-library-details">
         <div className="flex justify-between gap-2"><p className="font-medium">{detail.source.symbol} · {qualityRuleLabel(detailSetting.plan)}</p><button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setDetailId('')}>收起条件</button></div>
         <p>买前过滤：{buying(detailSetting)}{!detailSetting.filtersKnown && detailSetting.plan.buyFilters?.length ? '（旧快照未保存完整判断读数）' : ''}</p>
-        <p>持仓否决：{activeHoldingVetoes(detailSetting.plan.holdingVetoes).map(v => `${v.label} ${v.direction} ${v.threshold}${v.kind === 'indicator' ? '' : '%'}`).join(' 或 ') || '无'}</p>
+        <p>持仓否决：{activeHoldingVetoes(detailSetting.plan.holdingVetoes).map(v => `${v.label} ${v.direction} ${v.threshold}${['indicator','box-stop'].includes(v.kind) ? '' : '%'}`).join(' 或 ') || '无'}</p>
         <p>探测算法：{!detailSetting.detectorsKnown ? '历史算法未记录' : detailSetting.detectors.map(g => `${g.label} ${g.snapshot.direction ?? '>'} ${g.snapshot.threshold}`).join('；') || '无探测算法'}</p>
         <p>买入时刻：{date(detail.enteredAt)} · {detailSetting.observeHours === 0 ? '持续至卖出' : `观察 ${detailSetting.observeHours} 小时`}</p>
         <p>模拟金额：{detailSetting.notional} USDT · {detailSetting.leverage} 倍</p>

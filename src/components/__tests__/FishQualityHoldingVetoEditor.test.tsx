@@ -6,6 +6,22 @@ import {holdingVetoDraft,parseHoldingVetoDraft,planHoldingVetoDraft} from '@/lib
 import {holdingVetoIdentity} from '@/lib/fish/qualityVeto';
 afterEach(cleanup);
 function Editor({plan=false}:{plan?:boolean}={}){const [draft,setDraft]=useState(plan?planHoldingVetoDraft():holdingVetoDraft());return <><FishQualityHoldingVetoEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存</button><output/></>}
+it('adds an opt-in box hard stop with independent algorithm, parameters and execution choices',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByRole('button',{name:'添加箱体终止'}));
+ expect(screen.getByLabelText('启用持仓否决 3')).not.toBeChecked();
+ expect(screen.getByLabelText('箱体止损 3 算法')).toBeDisabled();
+ fireEvent.click(screen.getByLabelText('启用持仓否决 3'));
+ fireEvent.change(screen.getByLabelText('箱体止损 3 确认方式'),{target:{value:'close-5m'}});
+ fireEvent.change(screen.getByLabelText('箱体止损 3 连续确认根数'),{target:{value:'3'}});
+ fireEvent.change(screen.getByLabelText('箱体止损 3 更新方式'),{target:{value:'fixed'}});
+ fireEvent.change(screen.getByLabelText('箱体止损 3 算法'),{target:{value:'sbs5m'}});
+ fireEvent.change(screen.getByLabelText('箱体止损 3 K基准'),{target:{value:'invalidation'}});
+ fireEvent.change(screen.getByLabelText('箱体止损 3 额外冗余'),{target:{value:'1.25'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));
+ const saved=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved[0]).toMatchObject({kind:'box-stop',enabled:true,boxStop:{version:'holding-box-stop-v1',confirmation:'close-5m',closes:3,update:'fixed',structure:{algorithm:'sbs5m',kBasis:'invalidation',buffer:1.25,versions:{box:'sbs-5m-v1'}}}});
+ expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);
+});
 it('offers joint addition profit rules with editable 100× / 5% defaults, and independently persists multiple rules',()=>{
  render(<Editor/>);fireEvent.click(screen.getByRole('button',{name:'添加加仓止盈约束'}));expect(screen.getByLabelText('持仓否决 3 几何仓位倍数')).toHaveValue(100);expect(screen.getByLabelText('持仓否决 3 均衡价涨幅')).toHaveValue(5);expect(screen.getByLabelText('启用持仓否决 3')).not.toBeChecked();
  fireEvent.click(screen.getByLabelText('启用持仓否决 3'));fireEvent.change(screen.getByLabelText('持仓否决 3 几何仓位倍数'),{target:{value:'125.5'}});fireEvent.change(screen.getByLabelText('持仓否决 3 均衡价涨幅'),{target:{value:'6.25'}});
