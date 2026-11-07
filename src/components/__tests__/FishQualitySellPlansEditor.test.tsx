@@ -8,6 +8,20 @@ import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { buildFusionTemplatePlan } from '@/lib/fish/qualityBuiltinTemplates';
 import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 afterEach(() => { cleanup(); localStorage.clear(); });
+it('preserves a newly synchronized plan when an older open form saves its own edits',()=>{
+ const original=initial()[0],remote={...structuredClone(original),id:'remote-attack',label:'另一设备的进攻型'},save=vi.fn();
+ const view=render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save}/>);
+ fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'.31'}});
+ view.rerender(<FishQualitySellPlansEditor plans={[original,remote]} ready onSave={save}/>);
+ fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+ expect(save).toHaveBeenCalledOnce();expect(save.mock.calls[0][0]).toHaveLength(2);expect(save.mock.calls[0][0][0].rule.threshold).toBe(.31);expect(save.mock.calls[0][0][1]).toEqual(remote);
+});
+it('keeps local drafts and refuses to resurrect a synchronized deletion implicitly',()=>{
+ const original=initial()[0],save=vi.fn(),view=render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save}/>);
+ fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'.31'}});
+ view.rerender(<FishQualitySellPlansEditor plans={[]} ready onSave={save}/>);fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+ expect(save).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('已被另一页面或设备删除');expect(screen.getByLabelText('卖出算法 1 门槛')).toHaveValue(.31);
+});
 it('splits a saved routed combination into two complete independent drafts and keeps the original', () => {
   const plan = freezeQualityPlan(buildFusionTemplatePlan(BUILTIN_FEATURES, 'routed', '原组合'));
   const before = structuredClone(plan), save = vi.fn();

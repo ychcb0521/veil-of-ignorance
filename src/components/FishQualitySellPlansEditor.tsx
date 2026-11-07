@@ -7,7 +7,7 @@ import { FishQualityAdvantageSettings } from './FishQualityAdvantageSettings';
 import { withQualityAdvantageOptions, type QualityAdvantageOptions } from '@/lib/fish/qualityAdvantage';
 import {validateQualityVetoStages} from '@/lib/fish/qualityVetoStages';
 import {validateQualitySellStages} from '@/lib/fish/qualitySellStages';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BookmarkPlus, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
@@ -113,7 +113,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => qualityFilterChoices(definitions), [definitions]);
   const [drafts, setDrafts] = useState(() => plans.map(draftOf)), [dirty, setDirty] = useState(false), [error, setError] = useState('');
-  useEffect(() => { if (!dirty) setDrafts(plans.map(draftOf)); }, [plans, dirty]);
+  const draftPlanIds=useRef(new Set(plans.map(p=>p.id)));
+  useEffect(() => { if (!dirty) {draftPlanIds.current=new Set(plans.map(p=>p.id));setDrafts(plans.map(draftOf));} }, [plans, dirty]);
   useEffect(() => { onDirtyChange?.(dirty || extraDirty); }, [dirty, extraDirty, onDirtyChange]);
   const change = (next: Draft[]) => { setDrafts(next); setDirty(true); setError(''); };
   const patch = (id: string, next: Partial<Draft>) => { onSelectPlan?.(id); change(drafts.map(d => d.id === id ? { ...d, ...next } : d)); };
@@ -185,6 +186,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     onSelectPlan?.(copyBase.id);
   };
   const build = (after?: (plans: QualityGroup[]) => QualityGroup[]) => {
+      const currentIds=new Set(plans.map(p=>p.id));
+      if(drafts.some(d=>draftPlanIds.current.has(d.id)&&!currentIds.has(d.id)))throw Error('有方案已被另一页面或设备删除；当前修改保留，请移除该方案或复制为新方案后再保存');
       const next = drafts.map(d => {
         const base = baseOf(d);
         if(base?.router)return {...base,id:d.id,label:labelOf(d,base)};
@@ -207,6 +210,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
 
         return plan;
       });
+      // A newly hydrated plan was never a deletion decision in this open form.
+      next.push(...plans.filter(p=>!draftPlanIds.current.has(p.id)&&!next.some(n=>n.id===p.id)).map(p=>structuredClone(p)));
       const withAdvantage = next.map(p=>withQualityAdvantageOptions(p,drafts.find(d=>d.id===p.id)?.advantageOptions));
       const prepared = (prepare ? prepare(withAdvantage) : withAdvantage).map(p=>withQualityAdvantageOptions(p,drafts.find(d=>d.id===p.id)?.advantageOptions));
       const saved=after?after(prepared):prepared;
