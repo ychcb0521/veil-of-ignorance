@@ -51,6 +51,7 @@ const EXCLUDED_KEYS = new Set(['price_map', 'symbol_settlement_mode', 'fish-mini
  */
 const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unknown> = {
   quality_plan_templates_v1: mergeQualityPlanCatalogValues,
+  quality_sell_plans_v1: mergeQualityPlanCatalogValues,
   // 并集之后再修剪：本机修掉的老节点不能借远端的副本一次次长回来。
   [REPLAY_TIMELINES_STORAGE_KEY]: (local, remote) =>
     pruneReplayTimelineRegistry(mergeReplayTimelineRegistries(local, remote), { now: Date.now() }),

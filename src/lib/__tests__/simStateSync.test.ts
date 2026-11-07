@@ -24,6 +24,14 @@ import {
 } from '@/lib/simStateSync';
 
 const UID = 'u-1';
+it('merges protected sell-plan snapshots and deletion tombstones during cross-device hydration',async()=>{
+ const key='quality_sell_plans_v1',a={id:'structure',updatedAt:10,position:0,plan:{id:'structure',threshold:15}},b={id:'attack',updatedAt:20,position:1,plan:{id:'attack',threshold:7}},deleted={...a,updatedAt:30,deleted:true};
+ localStorage.setItem(`sim_${UID}_${key}`,JSON.stringify([deleted,b]));
+ mocks.eq.mockResolvedValue({data:[{key,value:[a],updated_at:'2026-11-07T00:00:00Z'}],error:null} as never);
+ await hydrateSimState(UID);
+ const saved=JSON.parse(localStorage.getItem(`sim_${UID}_${key}`)!);
+ expect(saved).toEqual(expect.arrayContaining([deleted,b]));expect(saved).toHaveLength(2);
+});
 
 beforeEach(() => {
   vi.useFakeTimers();

@@ -17,6 +17,25 @@ const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   act(() => { void h.result.current.start(); });
 };
+it('retains explicitly saved split plans across an old-study reload and honors later edits and removals',async()=>{
+ const {readSavedQualityPlans,qualitySavedPlansKey}=await import('@/lib/fish/qualitySavedPlans');
+ const {notifyPersistedStateHydrated,writePersistedStateRaw}=await import('@/lib/persistedStateStorage');
+ const first=renderHook(()=>useFishQuality('split-account',[],async()=>{}));await flush();
+ const base=first.result.current.study.sellPlans![0],original={...base,rule:{metric:base.metric,direction:'<' as const,threshold:.5}};
+ const structure={...structuredClone(original),id:'structure-one',label:'结构型',rule:{...original.rule,threshold:.31}},attack={...structuredClone(original),id:'attack-one',label:'进攻型',rule:{...original.rule,threshold:.41}};
+ act(()=>first.result.current.setSellPlans([original,structure,attack]));await flush();
+ expect(readSavedQualityPlans('split-account').filter(p=>!p.deleted).map(p=>p.id)).toEqual([original.id,structure.id,attack.id]);
+ first.unmount();storage.load.mockResolvedValue({study:{...newQualityStudy(),sellPlansConfigured:true,sellPlans:[original]}});
+ const second=renderHook(({owner})=>useFishQuality(owner,[],async()=>{}),{initialProps:{owner:'split-account'}});await flush();
+ expect(second.result.current.study.sellPlans?.map(p=>p.id)).toEqual([original.id,structure.id,attack.id]);
+ expect(second.result.current.study.sellPlans!.find(p=>p.id===structure.id)!.rule!.threshold).toBe(.31);
+ act(()=>second.result.current.setSellPlans(second.result.current.study.sellPlans!.filter(p=>p.id!==attack.id)));await flush();
+ const removed=readSavedQualityPlans('split-account').find(p=>p.id===attack.id)!;expect(removed.deleted).toBe(true);
+ act(()=>{writePersistedStateRaw(qualitySavedPlansKey('split-account'),JSON.stringify([{id:attack.id,plan:attack,position:2,updatedAt:1}]),{source:'remote'});notifyPersistedStateHydrated(qualitySavedPlansKey('split-account'));});await flush();
+ expect(second.result.current.study.sellPlans!.some(p=>p.id===attack.id)).toBe(false);
+ storage.load.mockResolvedValue({study:newQualityStudy()});second.rerender({owner:'different-account'});await flush();
+ expect(second.result.current.study.sellPlans!.some(p=>p.id===structure.id)).toBe(false);
+});
 it('reads a Deep dig formula edit before the next run instead of reusing the mounted sell snapshot', async () => {
   const tasks: QualityRunOptions[] = [];
   const h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));
@@ -694,7 +713,7 @@ it('backfills existing study templates into the independent system-archived cata
  const archived=saveQualityPlanTemplate(newQualityStudy(),plan,'已有模板',100);storage.load.mockResolvedValue({study:archived});
  const h=renderHook(()=>useFishQuality('a',[],vi.fn(async()=>{})));await flush();
  const catalog=JSON.parse(readPersistedStateRaw('sim_a_quality_plan_templates_v1')!);
- expect(catalog.some((t:any)=>t.name==='已有模板')).toBe(true);expect(h.result.current.study.planTemplates?.[0].plan?.frozenVersions).toEqual(archived.planTemplates![0].plan!.frozenVersions);
+ expect(catalog.some((t:{name:string})=>t.name==='已有模板')).toBe(true);expect(h.result.current.study.planTemplates?.[0].plan?.frozenVersions).toEqual(archived.planTemplates![0].plan!.frozenVersions);
 });
 
 it('selects every requested mining entry, preserves distinct anchors and shows the latest recapture time', async () => {

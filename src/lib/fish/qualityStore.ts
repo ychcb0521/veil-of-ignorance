@@ -1,4 +1,6 @@
 import { mergeQualityPlanTemplates } from './qualityPlanTemplates';
+import {applySavedQualityPlans,readSavedQualityPlans} from './qualitySavedPlans';
+import {loadDurableQualityPlans} from './qualitySavedPlansStore';
 import {preserveSourceDeletions,applySourceDeletions} from './libraryDeletion';
 import { preserveQualityPostExit } from './qualityPostExit';
 import { preserveQualityEntry } from './qualityEntry';
@@ -41,7 +43,7 @@ const pendingReads = new Map<string, Promise<{ study: FishQualityStudy; warning?
 export function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   const key = keyOf(owner), pending = pendingReads.get(key);
   if (pending) return pending;
-  const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: stopQualityRepair(loaded.study, Date.now()) }));
+  const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner)) }));
   pendingReads.set(key, task);
   void task.then(loaded => { void backfillQualityArchiveCounts(owner, loaded.study).finally(() => syncStoredQualityArchiveBodies(owner, loaded.study)); }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };
@@ -62,6 +64,7 @@ export async function prepareQualityCampaignRead(owner?: string): Promise<{ dura
   return { durable: !legacy && typeof indexedDB !== 'undefined', warning };
 }
 async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
+  await loadDurableQualityPlans(owner);
   // 【用户要求】2026-10-27 鱼质量研究跟账号走：先和云端对一次账（换电脑登录也能看到），再读本机。
   const {warning: recoveryError} = await prepareQualityCampaignRead(owner);
   let fallback: unknown;
@@ -154,7 +157,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
   const key = keyOf(owner);
   // 先在内存那份上去重（同一对象只比一次），复制出来的副本也只带几十份方案，事务里的二次压实因此很便宜。
   let copy = structuredClone(compactQualityStudyForStorage(study));
-  const merge = (previous: unknown) => compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner, options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy)));
+  const merge = (previous: unknown) => applySavedQualityPlans(compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner, options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy))),readSavedQualityPlans(owner));
   let leftInline = false;
   const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
     let durablePrevious: FishQualityStudy | undefined;
@@ -242,10 +245,10 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
           req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
         });
         // 上传的总表不带归档正文：正文各有各的云端存档（qualityArchiveBodyBlob）。
-        if (valid(fallback)) return withoutQualityArchiveBodies(preserveStudy(valid(stored) ? stored : undefined, fallback));
-        return valid(stored) ? withoutQualityArchiveBodies(stored) : undefined;
+        if (valid(fallback)) return withoutQualityArchiveBodies(applySavedQualityPlans(preserveStudy(valid(stored) ? stored : undefined, fallback),readSavedQualityPlans(owner)));
+        return valid(stored) ? withoutQualityArchiveBodies(applySavedQualityPlans(stored,readSavedQualityPlans(owner))) : undefined;
       } finally { db.close(); }
-    } catch { return valid(fallback) ? withoutQualityArchiveBodies(fallback) : undefined; }
+    } catch { return valid(fallback) ? withoutQualityArchiveBodies(applySavedQualityPlans(fallback,readSavedQualityPlans(owner))) : undefined; }
   },
   write(owner, study) {
     const key = keyOf(owner);

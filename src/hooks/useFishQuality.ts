@@ -1,5 +1,7 @@
 import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useQualityPlanCatalog } from './useQualityPlanCatalog';
+import {useQualitySavedPlans} from './useQualitySavedPlans';
+import {applySavedQualityPlans,editSavedQualityPlans,seedSavedQualityPlans,readSavedQualityPlans} from '@/lib/fish/qualitySavedPlans';
 import { usePreEntryMonitor } from './usePreEntryMonitor';
 import { preEntrySignal } from '@/lib/fish/preEntryMonitor';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
@@ -36,6 +38,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const definitions = useFeatureDefinitions();
   const preEntry = usePreEntryMonitor(owner, enabled, run);
   const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
+  const [savedPlans,setSavedPlans]=useQualitySavedPlans(owner);
+  const savedPlansWriter=useRef(setSavedPlans);savedPlansWriter.current=setSavedPlans;
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [archiving,setArchiving]=useState(false),archiveLock=useRef(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
@@ -71,8 +75,14 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
   if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
-  const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
-    const next = preserveSourceDeletions(current.current,apply(current.current)); if (next !== current.current) { current.current = next; setStudy(next); }
+  const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy,persistPlans=true) => {
+    const previous=current.current;
+    let next = preserveSourceDeletions(previous,apply(previous));
+    if(next!==previous&&persistPlans&&readyRef.current&&next.sellPlansConfigured&&next.sellPlans!==previous.sellPlans&&JSON.stringify(next.sellPlans)!==JSON.stringify(previous.sellPlans)){
+      const entries=editSavedQualityPlans(readSavedQualityPlans(account.current),previous.sellPlans??[],next.sellPlans??[]);
+      next=applySavedQualityPlans(next,savedPlansWriter.current(entries));
+    }
+    if (next !== current.current) { current.current = next; setStudy(next); }
   }, []);
   useEffect(()=>{
     if(typeof BroadcastChannel==='undefined')return;const channel=new BroadcastChannel('veil-fish-quality-deletions');
@@ -115,6 +125,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       const migrated = backfillPlanVersions(refreezeSyncedFormulas(migrateQualitySourceRows(separateQualityFilters(syncQualitySellDefinitions(archived)))));
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
+      // Preserve the existing startup formula/version migration in the small catalog too.
+      // Later background writes must not revert that already-authorized account formula sync.
+      if(restored.sellPlansConfigured){
+        const entries=readSavedQualityPlans(owner),updated=editSavedQualityPlans(entries,value.study.sellPlans??[],restored.sellPlans??[]);
+        if(JSON.stringify(updated)!==JSON.stringify(entries))savedPlansWriter.current(updated);
+      }
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
     }).catch(cause => {
       if (!active || epoch !== generation.current) return;
@@ -424,13 +440,21 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
   }, [change,pauseForSettings]);
   const setSellPlans = useCallback((plans: import('@/lib/fish/quality').QualityGroup[]) => {
-    if (!readyRef.current) return;
+    if (!readyRef.current) throw Error('账号方案尚未恢复完成，请稍后保存');
     // Validate first, then finalize the old round before replacing its active configuration.
     const checked = replaceQualitySellPlans(current.current, plans);
     if (checked === current.current) return;
     pauseForSettings();
     change(s => replaceQualitySellPlans(s, plans));
   }, [change,pauseForSettings]);
+  useEffect(()=>{
+    if(!readyRef.current||account.current!==owner)return;
+    const restored=applySavedQualityPlans(current.current,savedPlans);
+    if(restored!==current.current){pauseForSettings();change(()=>restored,false);}
+    if(!current.current.sellPlansConfigured)return;
+    const seeded=seedSavedQualityPlans(savedPlans,current.current.sellPlans);
+    if(JSON.stringify(seeded)!==JSON.stringify(savedPlans))setSavedPlans(seeded);
+  },[owner,ready,savedPlans,setSavedPlans,change,pauseForSettings]);
   const deleteSources=useCallback(async(targets:readonly DeleteTarget[])=>{
     if(!readyRef.current)throw Error('鱼质量尚未加载完成');const savedOwner=account.current;
     selectionApproved.current=false;intentRevision.current++;filterRevision.current++;rerun.current=false;markPause('删除了信号来源');controller.current?.abort();filterController.current?.abort();

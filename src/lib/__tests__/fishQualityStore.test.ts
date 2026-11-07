@@ -9,14 +9,36 @@ let fail = false;
 beforeEach(() => {
   disk.clear(); localStorage.clear(); fail = false;
   const db = { close() {}, createObjectStore() {}, transaction() {
-    const tx: any = {};
-    tx.objectStore = () => ({ get(k: string) { const req: any = {}; queueMicrotask(() => { req.result = structuredClone(disk.get(k)); req.onsuccess?.(); }); return req; },
-      put(v: unknown, k: string) { queueMicrotask(() => { if (fail) tx.onabort?.(); else { disk.set(k, structuredClone(v)); tx.oncomplete?.(); } }); } });
+    const tx={onabort:undefined as (()=>void)|undefined,oncomplete:undefined as (()=>void)|undefined,objectStore: () => ({ get(k: string) { const req:{result?:unknown;onsuccess?:()=>void} = {}; queueMicrotask(() => { req.result = structuredClone(disk.get(k)); req.onsuccess?.(); }); return req; },
+      put(v: unknown, k: string) { queueMicrotask(() => { if (fail) tx.onabort?.(); else { disk.set(k, structuredClone(v)); tx.oncomplete?.(); } }); } })
+    };
     return tx;
   } };
-  vi.stubGlobal('indexedDB', { open() { const req: any = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } });
+  vi.stubGlobal('indexedDB', { open() { const req:{result?:typeof db;onsuccess?:()=>void} = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('restores protected split plans when an old tab overwrites the main study with one original plan',async()=>{
+ const store=await import('@/lib/fish/qualityStore');
+ const {makeQualitySellPlan}=await import('@/lib/fish/qualitySellPlans'),{BUILTIN_FEATURES}=await import('@/lib/deepDig/features');
+ const original=makeQualitySellPlan('state:state','<',.5,BUILTIN_FEATURES,undefined,'original');
+ const structure={...structuredClone(original),id:'structure',label:'结构型'},attack={...structuredClone(original),id:'attack',label:'进攻型'};
+ const old={...newQualityStudy(100),sellPlans:[original],sellPlansConfigured:true};
+ await store.saveQualityStudy('split-owner',{...old,sellPlans:[original,structure,attack]});
+ localStorage.setItem('sim_split-owner_quality_sell_plans_v1',JSON.stringify([original,structure,attack].map((plan,position)=>({id:plan.id,plan,position,updatedAt:200}))));
+ await store.saveQualityStudy('split-owner',old);
+ expect((await store.loadQualityStudy('split-owner')).study.sellPlans).toEqual([original,structure,attack]);
+});
+it('recovers the independent durable catalog after both an old-page overwrite and loss of the localStorage cache',async()=>{
+ const store=await import('@/lib/fish/qualityStore'),{saveDurableQualityPlans}=await import('@/lib/fish/qualitySavedPlansStore');
+ const {clearPersistedStateMemoryForTests}=await import('@/lib/persistedStateStorage');
+ const {makeQualitySellPlan}=await import('@/lib/fish/qualitySellPlans'),{BUILTIN_FEATURES}=await import('@/lib/deepDig/features');
+ const original=makeQualitySellPlan('state:state','<',.5,BUILTIN_FEATURES,undefined,'original'),copy={...structuredClone(original),id:'structure',label:'结构型'};
+ await saveDurableQualityPlans('durable-split',[original,copy].map((plan,position)=>({id:plan.id,plan,position,updatedAt:200})));
+ disk.set('fish-quality:durable-split',{...newQualityStudy(100),sellPlans:[original],sellPlansConfigured:true});
+ localStorage.clear();clearPersistedStateMemoryForTests();
+ expect((await store.loadQualityStudy('durable-split')).study.sellPlans).toEqual([original,copy]);
+ expect((await store.loadQualityStudy('other-split-owner')).study.sellPlans).toBeUndefined();
+});
 it('shares concurrent study reads but releases the snapshot before the next read', async () => {
   const store = await import('@/lib/fish/qualityStore');
   await store.saveQualityStudy('shared-read', newQualityStudy(100));
