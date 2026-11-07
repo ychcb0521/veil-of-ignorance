@@ -169,10 +169,12 @@ export function ReplayKlineChart({
         })),
       verticalLines: [
         ...verticalLines.filter(line => line.alwaysVisible || line.time <= currentTime),
-        cursorLine,
+        // A static campaign viewport is not a playback clock. Its reference
+        // cursor can fall after the actual sale and look like another exit.
+        ...(!fitAll ? [cursorLine] : []),
       ],
     };
-  }, [currentTime, intervalMs, markers, priceLines, replayData, timeBoundPriceLines, verticalLines]);
+  }, [currentTime, fitAll, intervalMs, markers, priceLines, replayData, timeBoundPriceLines, verticalLines]);
 
   if (replayData.length === 0) {
     return (

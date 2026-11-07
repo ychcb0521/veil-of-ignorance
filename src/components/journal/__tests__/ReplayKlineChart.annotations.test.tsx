@@ -48,6 +48,17 @@ describe('ReplayKlineChart annotations', () => {
     mocks.throwOnRender = false;
   });
 
+  it.each([true,false])('only shows the reference cursor during playback and preserves real sale and mirror annotations (static=%s)', (fitAll) => {
+    const sale={time:2000,price:1.2,shape:'square' as const,color:'#2B80FF',label:'全部卖出'};
+    const mirror={time:1000,color:'#F0B90B',label:'镜像止盈成交'};
+    const exit={time:2000,color:'#2B80FF',label:'主力·平仓'};
+    render(<ReplayKlineChart klines={[candle(1000),candle(2000),candle(3000)]} currentTime={2500} intervalMs={1000} symbol="FIDAUSDT" fitAll={fitAll} markers={[sale]} verticalLines={[mirror,exit]}/>);
+    const latest=mocks.annotations.at(-1)!;
+    expect(latest.verticalLines?.some(line=>line.color==='rgba(240, 185, 11, 0.72)')).toBe(!fitAll);
+    expect(latest.verticalLines).toEqual(expect.arrayContaining([mirror,exit]));
+    expect(latest.markers).toEqual([sale]);
+  });
+
   it('reports native chart rendering errors to an export worker instead of crashing the batch dialog', () => {
     const onError = vi.fn();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
