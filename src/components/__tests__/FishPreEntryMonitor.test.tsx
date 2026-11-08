@@ -120,10 +120,11 @@ it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → 
     threeStage:{at:time+300000,state:'matched',zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
   const state={ready:true,preEntry:{ready:true,running:false,error:'',library:{...emptyPreEntryLibrary(),records:[record],rounds:[{id:'r',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[{id:'p',label:'三阶',metric:'raw',snapshot:{},preEntryThreeStage:config}],state:'complete',filters:[],hours:0,startedAt:1,updatedAt:1}]}}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  fireEvent.click(screen.getByLabelText('打开入选库'));
+  fireEvent.click(screen.getByLabelText('打开筛选库'));
+  if(screen.queryByLabelText('打开筛选归档 r'))fireEvent.click(screen.getByLabelText('打开筛选归档 r'));
   const dialog=screen.getByRole('dialog');
   expect(within(dialog).getByText('分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）')).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByText('三阶判定证据'));
+  fireEvent.click(within(dialog).getByText('入选判定详情'));
   expect(within(dialog).getByText(/⓪ 必要条件：通过/)).toBeInTheDocument();
   expect(within(dialog).getByText(/② 排除门槛：通过/)).toBeInTheDocument();
 });
