@@ -5,14 +5,14 @@ import { TooltipProvider } from '../ui/tooltip';
 import { emptyPreEntryLibrary, PRE_ENTRY_INTRABAR_VERSION, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQualityModule';
-import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 
 afterEach(cleanup);
 it('renders a v5 admission with guard evidence even when no extra primary indicator is required',()=>{
   const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
   const record:PreEntryRecord={id:'v5',roundId:'r',planId:'p',status:'matched',startTime:time,cursor:time+300000,matchedAt:time+300000,updatedAt:1,readings:[],detail:'三阶同刻通过',sample:{id:'sample',source:{id:'source',symbol:'TESTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time},
     threeStage:{at:time+300000,state:'matched',first:{status:'pass'},second:{status:'pass'},third:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
-  const state={ready:true,preEntry:{ready:true,running:false,error:'',library:{...emptyPreEntryLibrary(),records:[record],rounds:[{id:'r',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[{id:'p',label:'三阶',metric:'raw',snapshot:{},preEntryThreeStage:config}],state:'complete',filters:[],hours:0,startedAt:1,updatedAt:1}]}}} as unknown as FishQualityState;
+  const state={ready:true,preEntry:{ready:true,running:false,error:'',library:{...emptyPreEntryLibrary(),records:[record],rounds:[{id:'r',engine:PRE_ENTRY_THREE_STAGE_V5,plans:[{id:'p',label:'三阶',metric:'raw',snapshot:{},preEntryThreeStage:config}],state:'complete',filters:[],hours:0,startedAt:1,updatedAt:1}]}}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   fireEvent.click(screen.getByLabelText('打开筛选库'));
   if(screen.queryByLabelText('打开筛选归档 r')){fireEvent.click(screen.getByLabelText('打开筛选归档 r'));fireEvent.click(screen.getByText('入选判定详情'));}
@@ -113,4 +113,17 @@ it('does not resume an older paused round after a newer restart has completed', 
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   fireEvent.click(screen.getByText('开始筛选'));
   expect(start).toHaveBeenCalledWith(0); expect(resume).not.toHaveBeenCalled();
+});
+it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → ② 排除门槛',()=>{
+  const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
+  const record:PreEntryRecord={id:'v6',roundId:'r',planId:'p',status:'matched',startTime:time,cursor:time+300000,matchedAt:time+300000,updatedAt:1,readings:[],detail:'三阶同刻通过',sample:{id:'sample',source:{id:'source',symbol:'TESTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time},
+    threeStage:{at:time+300000,state:'matched',zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
+  const state={ready:true,preEntry:{ready:true,running:false,error:'',library:{...emptyPreEntryLibrary(),records:[record],rounds:[{id:'r',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[{id:'p',label:'三阶',metric:'raw',snapshot:{},preEntryThreeStage:config}],state:'complete',filters:[],hours:0,startedAt:1,updatedAt:1}]}}} as unknown as FishQualityState;
+  render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+  fireEvent.click(screen.getByLabelText('打开入选库'));
+  const dialog=screen.getByRole('dialog');
+  expect(within(dialog).getByText('分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）')).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByText('三阶判定证据'));
+  expect(within(dialog).getByText(/⓪ 必要条件：通过/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/② 排除门槛：通过/)).toBeInTheDocument();
 });

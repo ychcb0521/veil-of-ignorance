@@ -34,7 +34,7 @@ beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 afterEach(()=>vi.restoreAllMocks());
 it('admits only at the first native event when both exclusion tiers pass',async()=>{
   const p=plan();p.preEntryThreeStage!.required=[condition('price',90)];
-  expect(await run(p)).toMatchObject({status:'matched',matchedAt:T+5*M,threeStage:{state:'matched',first:{status:'pass'},second:{status:'pass'},event:{at:T+5*M}}});
+  expect(await run(p)).toMatchObject({status:'matched',matchedAt:T+5*M,threeStage:{state:'matched',zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'},event:{at:T+5*M}}});
 });
 it('does not latch early qualification or spend a vetoed event after recovery',async()=>{
   const p=plan();p.preEntryThreeStage!.required=[condition('price',105)];
@@ -54,16 +54,16 @@ it('keeps an entire nested AND/OR seller and consecutive confirmation instead of
   expect(await run(p,{load:loader([100,100,100,100,115,115])})).toMatchObject({matchedAt:T+5*M});
   // Two consecutive confirmations complete the seller and block that event.
   const r=await run(p,{load:loader([115,115,115,115,115,100,100,100,100,100])});
-  expect(r).toMatchObject({matchedAt:T+10*M,missedGuard:{count:1,reason:expect.stringContaining('二阶')}});
+  expect(r).toMatchObject({matchedAt:T+10*M,missedGuard:{count:1,reason:expect.stringContaining("② 排除门槛")}});
 });
 it('hard vetoes win without waiting for an ordinary seller confirmation',async()=>{
   const p=plan();p.preEntryThreeStage!.hardVetoes=[{id:'drop',kind:'drop-1m',label:'急跌',enabled:true,direction:'>=',threshold:5}];
   const r=await run(p,{load:loader([100,100,100,100,90,100,100,100,100,100])});
-  expect(r).toMatchObject({matchedAt:T+10*M,missedGuard:{count:1,reason:expect.stringContaining('二阶')}});
+  expect(r).toMatchObject({matchedAt:T+10*M,missedGuard:{count:1,reason:expect.stringContaining("② 排除门槛")}});
 });
 it('keeps historical fast-drop locks after a new native line appears',async()=>{
   const p=plan();p.preEntryThreeStage!.additionVetoes=[{kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5}]}];
-  expect(await run(p,{load:loader([100,90,100,100,100,100,100,100,100,100])})).toMatchObject({status:'unmatched',missedGuard:{count:2},threeStage:{first:{status:'blocked'}}});
+  expect(await run(p,{load:loader([100,90,100,100,100,100,100,100,100,100])})).toMatchObject({status:'unmatched',missedGuard:{count:2},threeStage:{second:{status:'blocked'}}});
 });
 it('new guard events cannot clear two-drop locks before the original 5m recovery close',async()=>{
   mocked.events=[T+20*M,T+25*M,T+30*M];
@@ -103,7 +103,7 @@ it('preserves closed-original detector thresholds and rejects a missing selected
   const old:PreEntryRecord={id:'r',roundId:'round',planId:p.id,sample:{...sample,readings:{detector:original}},status:'queued',startTime:T,cursor:T,readings:[],updatedAt:T};
   expect(await run(p,{old})).toMatchObject({matchedAt:T+5*M});
   p.preEntryThreeStage!.detectors[0].featureId='absent';
-  expect(await run(p,{old})).toMatchObject({status:'unmatched',threeStage:{first:{status:'blocked',reason:expect.stringContaining('没有所选')}}});
+  expect(await run(p,{old})).toMatchObject({status:'unmatched',threeStage:{zero:{status:'blocked',reason:expect.stringContaining('没有所选')}}});
 });
 it('resumes with identical admission evidence and without duplicating missed events or veto counts',async()=>{
   let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);
