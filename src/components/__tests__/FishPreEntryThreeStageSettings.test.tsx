@@ -1,3 +1,4 @@
+import {freezeQualityPlan} from '@/lib/fish/qualityPlanVersions';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { FishPreEntrySettings } from '../FishPreEntrySettings';
@@ -7,7 +8,7 @@ import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { newQualityStudy } from '@/lib/fish/quality';
 import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
-import { PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 
 afterEach(cleanup);
@@ -55,12 +56,33 @@ it('blocks saving an enabled condition with an empty threshold and keeps the leg
   fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));
   expect(screen.getByRole('alert')).toHaveTextContent('有限门槛');expect(f.configure).not.toHaveBeenCalled();expect(f.restart).not.toHaveBeenCalled();expect(f.plan).toEqual(before);
 });
-it('copies unsaved veto and hard-stop drafts into another three-stage plan',()=>{
+it('keeps unsaved veto drafts in the sole active screening plan',()=>{
   const f=setup();
   fireEvent.click(screen.getByLabelText('启用入选前否决 二次急跌未收复'));
   fireEvent.change(screen.getByLabelText('二次急跌未收复 回落ATR倍数'),{target:{value:'3'}});
-  fireEvent.click(screen.getByRole('button',{name:'复制整套三阶方案'}));
+  expect(screen.queryByRole('button',{name:'复制整套三阶方案'})).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
-  expect(f.configure.mock.calls[0][0]).toHaveLength(2);
+  expect(f.configure.mock.calls[0][0]).toHaveLength(1);
   for(const p of f.configure.mock.calls[0][0])expect(p.preEntryThreeStage.additionVetoes[0]).toMatchObject({kind:'double-drop',atr:3,pct:4,enabled:true});
+});
+
+function singleFixture(){
+ const p=makeQualitySellPlan(qualityFilterChoices(BUILTIN_FEATURES)[0].key,'>',0,BUILTIN_FEATURES,undefined,'keep');p.label='三阶筛选 2';p.preEntryThreeStage=emptyPreEntryThreeStage();p.preEntryThreeStage.hardVetoes=[{id:'custom',kind:'drop-1m',label:'原参数',enabled:true,direction:'>=',threshold:7}];
+ const current=freezeQualityPlan(p),configure=vi.fn(),savePlanTemplate=vi.fn(),deletePlanTemplate=vi.fn(),state={ready:true,study:newQualityStudy(),savePlanTemplate,deletePlanTemplate,preEntry:{ready:true,configure,restart:vi.fn(),library:{version:1,records:[],rounds:[],settings:{updatedAt:1,plans:[{...structuredClone(current),id:'other-one',label:'状态S · 三阶副本'},current,{...structuredClone(current),id:'other-three',label:'三阶筛选 3'},{...structuredClone(current),id:'other-four',label:'三阶筛选 4'}],hours:12}}}} as unknown as FishQualityState;
+ return {current,state,configure,savePlanTemplate,deletePlanTemplate};
+}
+it('keeps the confirmed saved second scheme unchanged and removes the redundant scheme controls',()=>{
+ const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ expect(screen.getByLabelText('三阶方案名称')).toHaveValue('三阶筛选 2');for(const name of ['新增三阶方案','复制整套三阶方案','删除当前副本'])expect(screen.queryByRole('button',{name})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure).toHaveBeenCalledWith([f.current],12);expect(f.state.preEntry!.library).toEqual(before);
+});
+it('uses the same template picker for screening only and replaces the sole draft without altering saved versions',()=>{
+ const f=singleFixture(),templatePlan=structuredClone(f.current);templatePlan.id='from-template';templatePlan.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_V5;const frozen=freezeQualityPlan(templatePlan),entry={id:'entry-template',name:'筛选模板',savedAt:1,updatedAt:1,entryHours:24,plan:frozen},holding={id:'hold-template',name:'持仓资产',savedAt:1,updatedAt:1,plan:freezeQualityPlan({...f.current,preEntryThreeStage:undefined})};f.state.study.planTemplates=[entry,holding];const before=structuredClone(f.state.study.planTemplates);
+ render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:/模板库/}));
+ expect(screen.getByTestId('plan-template-list')).toBeInTheDocument();expect(screen.getAllByTestId('plan-template-item')).toHaveLength(1);expect(screen.queryByTestId('plan-template-builtins')).not.toBeInTheDocument();expect(screen.queryByText('持仓资产')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'用模板 筛选模板 新建方案'}));expect(screen.getByLabelText('三阶方案名称')).toHaveValue('筛选模板');expect(f.configure).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ const saved=f.configure.mock.calls[0][0];expect(saved).toHaveLength(1);expect(saved[0].id).not.toBe(frozen.id);expect(saved[0].preEntryThreeStage).toEqual(frozen.preEntryThreeStage);expect(saved[0].frozenVersions).toEqual(frozen.frozenVersions);expect(f.configure.mock.calls[0][1]).toBe(24);expect(f.state.study.planTemplates).toEqual(before);
+});
+it('offers save-as-template for the already saved current screening scheme',()=>{
+ const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:'把当前筛选方案存为模板'}));fireEvent.change(screen.getByLabelText('模板名称'),{target:{value:'我的三阶模板'}});fireEvent.click(screen.getByRole('button',{name:'保存模板'}));expect(f.savePlanTemplate).toHaveBeenCalledWith(f.current.id,'我的三阶模板');expect(f.configure).not.toHaveBeenCalled();
 });

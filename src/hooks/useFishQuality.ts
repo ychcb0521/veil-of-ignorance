@@ -424,11 +424,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change,cancel]);
   /** 【用户要求】2026-11-02 方案模板：只改模板，不暂停、不重算监测。 */
   const savePlanTemplate = useCallback((planId: string, name: string) => {
-    const plan = current.current.sellPlans?.find(p => p.id === planId);
+    const settings=preEntry.library.settings,entryPlan=settings?.plans.find(p=>p.id===planId),plan=current.current.sellPlans?.find(p=>p.id===planId)??entryPlan;
     if (!plan) throw new Error('请先保存这套方案，再存为模板');
-    saveQualityPlanTemplate(current.current, plan, name); // 先校验名称，出错直接抛给界面
-    changeTemplates(s => { const p = s.sellPlans?.find(x => x.id === planId); return p ? saveQualityPlanTemplate(s, p, name) : s; });
-  }, [changeTemplates]);
+    const scope=entryPlan&&plan===entryPlan?{entryHours:settings!.hours}:undefined,at=Date.now();
+    saveQualityPlanTemplate(current.current,plan,name,at,scope);
+    changeTemplates(s=>{const p=s.sellPlans?.find(x=>x.id===planId)??entryPlan;return p?saveQualityPlanTemplate(s,p,name,at,scope):s;});
+  }, [changeTemplates,preEntry.library.settings]);
   /** 保存战役冻结快照，不按方案 id 查当前设置，也不触发重算。 */
   const savePlanSnapshot = useCallback(async (plan: QualityGroup, name: string) => {
     if (!readyRef.current) throw new Error('账号持仓监测记录尚在恢复，请稍候');

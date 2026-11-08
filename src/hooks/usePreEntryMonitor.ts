@@ -1,3 +1,4 @@
+import {selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
@@ -109,7 +110,9 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
     if (!readyRef.current || controller.current||tableClearLock.current) return;
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
-    const plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
+    let plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
+    const chosen=selectedPreEntryPlan(plans);
+    if(plans.length>1&&plans.some(p=>!!p.preEntryThreeStage)){if(!chosen){setError('请在条件设置中选择并保存唯一的三阶筛选方案');return;}plans=[chosen];}
     let filters;
     const threeStage=plans.some(p=>!!p.preEntryThreeStage);
     try {
@@ -123,7 +126,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => ({ id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
       status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
-    commit({...mergePreEntryLibraries(current.current, { version: 1, rounds: [round], records }), settings: current.current.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
+    const base=current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
+    commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
     await execute(round, structuredClone(study));
   }, [execute, commit]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
@@ -144,7 +148,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const settings={plans: structuredClone(freezeSavedPlans(current.current.settings?.plans,plans)), hours, updatedAt:Date.now()};
     const versions=(plans:QualityGroup[]|undefined)=>[...new Set(plans?.map(p=>p.preEntryThreeStage?.version??'legacy'))].sort().join(',');
     const changedVersion=versions(current.current.settings?.plans)!==versions(plans);
-    const next = changedVersion?archivePreEntrySettings(current.current,settings):{...current.current,settings};
+    const removedPlans=current.current.settings?.plans.some(old=>!plans.some(p=>p.id===old.id));
+    const next = changedVersion||removedPlans?archivePreEntrySettings(current.current,settings):{...current.current,settings};
     commit(next);
     void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));
   }, [commit,owner]);

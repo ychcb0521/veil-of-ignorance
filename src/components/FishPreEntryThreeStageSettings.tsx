@@ -1,3 +1,6 @@
+import {selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
+import {SaveTemplateButton,TemplatePicker} from './FishQualitySellPlansEditor';
+import {activeQualityPlanTemplates,qualityPlanFromTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useMemo, useState } from 'react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
@@ -29,7 +32,7 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
 }
 export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state:FishQualityState;selectedCount:number;done:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterChoices(definitions),[definitions]);
-  const [plans,setPlans]=useState<QualityGroup[]>(()=> (monitor.library.settings?.plans??[]).map(copyAsThreeStage));
+  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=emptyPreEntryThreeStage();return [plan];});
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(monitor.library.settings?.hours??0)),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
@@ -69,11 +72,11 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
     </div>;
   };
   return <div className="space-y-3" data-testid="pre-entry-three-stage-settings">
-    <div className="flex items-center justify-between"><p className="text-xs font-medium">动态筛选 · 三阶准入</p></div>
-    <div className="flex flex-wrap gap-2">{plans.map((p,i)=><button type="button" className={button+(active?.id===p.id?' bg-primary/10 text-primary':'')} key={p.id} onClick={()=>setActiveId(p.id)}>{i+1}. {p.label}</button>)}
-      <button type="button" className={button} disabled={!choices.length} onClick={()=>{const p=makeQualitySellPlan(choices[0].key,'>',0,definitions);p.label='三阶筛选 '+(plans.length+1);p.preEntryThreeStage=emptyPreEntryThreeStage();setPlans([...plans,p]);setActiveId(p.id);}}>新增三阶方案</button>
-      {active&&<><button type="button" className={button} onClick={()=>{const p={...structuredClone(active),id:id(),label:active.label+' 副本'};setPlans([...plans,p]);if(vetoDrafts[active.id])setVetoDrafts({...vetoDrafts,[p.id]:structuredClone(vetoDrafts[active.id])});if(hardDrafts[active.id])setHardDrafts({...hardDrafts,[p.id]:structuredClone(hardDrafts[active.id])});setActiveId(p.id);}}>复制整套三阶方案</button><button type="button" className={button} onClick={()=>{setPlans(plans.filter(p=>p.id!==active.id));setActiveId(undefined);}}>删除当前副本</button></>}
-    </div>
+    <div className="flex items-center justify-between gap-2"><p className="text-xs font-medium">动态筛选 · 三阶准入</p><div className="ml-auto inline-flex items-center gap-1">
+      {active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate?'模板尚未恢复':!monitor.library.settings?.plans.some(p=>p.id===active.id&&JSON.stringify(p)===JSON.stringify(active))||Object.keys(vetoDrafts).length>0||Object.keys(hardDrafts).length>0?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
+      <TemplatePicker purpose="entry" plans={plans} disabled={!state.ready||!monitor.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study).filter(t=>!!t.plan.preEntryThreeStage),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate?template=>{if(!template.plan?.preEntryThreeStage)throw Error('请选择三阶筛选模板');state.restorePlanTemplate!(template);}:undefined}} onUse={template=>{const next=qualityPlanFromTemplate(template,id());setPlans([next]);setActiveId(next.id);if(template.entryHours!=null)setHours(String(template.entryHours));setVetoDrafts({});setHardDrafts({});}}/>
+    </div></div>
+    {!active&&!!monitor.library.settings?.plans.length&&<label className="block text-[11px]">选择唯一保留的筛选方案<select aria-label="选择唯一保留的筛选方案" className={field+' mt-1 w-full'} value="" onChange={e=>{const saved=monitor.library.settings!.plans.find(p=>p.id===e.target.value);if(saved){const plan=copyAsThreeStage(saved);setPlans([plan]);setActiveId(plan.id);}}}><option value="">请选择要保留的已保存方案</option>{monitor.library.settings.plans.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
     {active&&c&&<>
       <input className={field+' w-full'} aria-label="三阶方案名称" value={active.label} onChange={e=>setPlans(plans.map(p=>p.id===active.id?{...p,label:e.target.value}:p))}/>
       <details className="rounded border border-border/50 p-2 text-[11px]"><summary className="cursor-pointer">从持仓方案复制市场条件</summary>

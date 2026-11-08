@@ -1,7 +1,7 @@
 // 【用户要求】2026-11-04 「从模板新建」列表里带内置模板：新建出的方案走普通保存路径（条件分支整套保留、新编号、模板名称）
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { FishQualitySellPlansEditor } from '../FishQualitySellPlansEditor';
+import { FishQualitySellPlansEditor,TemplatePicker } from '../FishQualitySellPlansEditor';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { newQualityStudy, type QualityGroup } from '@/lib/fish/quality';
 import { FUSION_ROUTER_THRESHOLD, FUSION_TEMPLATE_ID, FUSION_TEMPLATE_NAME } from '@/lib/fish/qualityBuiltinTemplates';
@@ -119,3 +119,8 @@ it('gives the second copy a distinct name', () => {
   const labels = (save.mock.calls[0][0] as QualityGroup[]).slice(-2).map(p => p.label);
   expect(labels).toEqual([FUSION_TEMPLATE_NAME, `${FUSION_TEMPLATE_NAME}（2）`]);
 }, 90000);
+
+it('does not offer screening templates in the holding template picker',async()=>{
+ const {emptyPreEntryThreeStage}=await import('@/lib/fish/preEntryThreeStage'),p=enableQualityComparison(newQualityStudy()).sellPlans![0],entry={id:'screening',name:'筛选资产',savedAt:1,updatedAt:1,plan:{...p,preEntryThreeStage:emptyPreEntryThreeStage()}},holding={id:'holding',name:'持仓资产',savedAt:1,updatedAt:1,plan:p};
+ render(<TemplatePicker plans={[]} disabled={false} actions={{templates:[entry,holding],save:vi.fn(),remove:vi.fn()}} onUse={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));const items=screen.getAllByTestId('plan-template-item');expect(items).toHaveLength(1);expect(items[0]).toHaveTextContent('持仓资产');expect(screen.queryByText('筛选资产')).not.toBeInTheDocument();
+});

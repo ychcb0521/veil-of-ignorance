@@ -226,3 +226,9 @@ it('keeps v6 settings authoritative when an older v5 page saves later, while ret
  storage.load.mockResolvedValue({...emptyPreEntryLibrary(),settings:newer});storage.v5Load.mockResolvedValue({...emptyPreEntryLibrary(),settings:{updatedAt:Date.now()+10000,plans:[{...p,id:'old-page',preEntryThreeStage:{...config,version:PRE_ENTRY_THREE_STAGE_V5}}],hours:88}});
  const h=renderHook(()=>usePreEntryMonitor('split-storage',true,vi.fn()));await waitFor(()=>expect(h.result.current.ready).toBe(true));expect(h.result.current.library.settings).toEqual(newer);await act(()=>h.result.current.clearTableResults());expect(storage.save).toHaveBeenCalled();expect(storage.v5Save).not.toHaveBeenCalled();
 });
+
+it('starts only the confirmed saved second screening plan and archives every excluded setting intact',async()=>{
+ const f=study().buyFilters[0],selected=freezeQualityPlan({id:'selected',label:'三阶筛选 2',metric:f.metric,snapshot:f.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()}),other={...structuredClone(selected),id:'other',label:'三阶筛选 3'},settings={updatedAt:1,plans:[other,selected],hours:12},before=structuredClone(settings);
+ storage.load.mockResolvedValue({...emptyPreEntryLibrary(),settings});const tasks:QualityRunOptions[]=[],h=renderHook(()=>usePreEntryMonitor('single-plan',true,async task=>{tasks.push(task);}));await waitFor(()=>expect(h.result.current.ready).toBe(true));await act(()=>h.result.current.start(study(),12));
+ expect(tasks[0].preEntry!.round.plans).toEqual([selected]);expect(tasks[0].preEntry!.records).toHaveLength(1);expect(h.result.current.library.settings!.plans).toEqual([selected]);expect(h.result.current.library.settingsHistory!.some(s=>JSON.stringify(s.plans)===JSON.stringify(before.plans))).toBe(true);expect(settings).toEqual(before);
+});

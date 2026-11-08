@@ -67,7 +67,7 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  expect(dynamic.getByRole('button',{name:'打开筛选库'})).toBeInTheDocument();
  fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
  expect(screen.getByLabelText('三阶筛选时长（小时）')).toBeInTheDocument();
- fireEvent.click(screen.getByText('新增三阶方案'));
+ expect(screen.queryByText('新增三阶方案')).not.toBeInTheDocument();
  expect(screen.getByRole('heading',{name:'⓪ 必要条件'})).toBeInTheDocument();
  expect(screen.getByRole('heading',{name:'① 防守线新事件准入'})).toBeInTheDocument();
  expect(screen.getByRole('heading',{name:'② 排除门槛'})).toBeInTheDocument();
