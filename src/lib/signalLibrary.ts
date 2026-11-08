@@ -54,8 +54,8 @@ export interface TradeSignal {
   timeLabel: string;
   /** 由图灵杯行情生成的固定回放入场点。 */
   turingReplaySample?: true;
-  /** First closed-candle match produced by the independent pre-entry monitoring library. */
-  preEntryMonitor?: { recordId: string; roundId: string; sourceId: string; sourceTime: number };
+  /** First confirmed match produced by the independent pre-entry monitoring library. */
+  preEntryMonitor?: { recordId: string; roundId: string; sourceId: string; sourceTime: number; matchedAt?:number };
   /** 兜底区：价格位 / 区间 / 备注，纯文本 */
   fallbackZone: string;
   /** 已确认的致命跳转问题；瞬时网络 / 限流错误不会写入。 */
@@ -224,7 +224,7 @@ export function parseSignalText(text: string, normalize = normalizeSymbol): { si
       // Optional export metadata is stripped only for explicitly marked US-stock rows.
       let tag: RegExpExecArray | null;
       while ((tag = /\s+\[(交易所|代码):([^\]\r\n]+)\]$/.exec(line))) {
-        if (tag[1] === '交易所' && EXCHANGE_PRIORITY.includes(tag[2] as any)) marketInfo.exchange = tag[2] as TradeSignal['exchange'];
+        if (tag[1] === '交易所' && EXCHANGE_PRIORITY.includes(tag[2] as (typeof EXCHANGE_PRIORITY)[number])) marketInfo.exchange = tag[2] as TradeSignal['exchange'];
         else if (tag[1] === '代码' && /^[A-Za-z0-9._-]+$/.test(tag[2])) marketInfo.underlying = tag[2].toUpperCase();
         else break;
         line = line.slice(0, tag.index).trimEnd();

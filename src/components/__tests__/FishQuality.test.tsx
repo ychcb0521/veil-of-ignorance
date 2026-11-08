@@ -65,8 +65,10 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  expect(dynamic.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
  expect(dynamic.getByLabelText('动态筛选条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
  expect(dynamic.getByRole('button',{name:'打开筛选库'})).toBeInTheDocument();
+ expect(screen.getByTestId('quality-screening-group')).toHaveAttribute('colspan','4');
+ expect(screen.getAllByTestId('quality-screening-column').map(e=>e.textContent)).toEqual(['筛选方案','筛选结果','首次满足时间','排除过程']);
  fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
- expect(screen.getByLabelText('三阶筛选时长（小时）')).toBeInTheDocument();
+ expect(screen.getByLabelText('单标的筛选时限（小时）')).toBeInTheDocument();
  expect(screen.queryByText('新增三阶方案')).not.toBeInTheDocument();
  expect(screen.getByRole('heading',{name:'⓪ 必要条件'})).toBeInTheDocument();
  expect(screen.getByRole('heading',{name:'① 防守线新事件准入'})).toBeInTheDocument();

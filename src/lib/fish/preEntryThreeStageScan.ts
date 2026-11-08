@@ -1,3 +1,4 @@
+import {recordEntryEvidence,recordEntryStop} from './preEntryExclusionProcess';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -50,8 +51,12 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
   for(const original of task.records){
     if(signal.aborted)throw new DOMException('已暂停','AbortError');
     if(['matched','unmatched','warming'].includes(original.status)){onProgress({done:++done,total:task.records.length,current:original.sample.source.symbol});continue;}
-    let record={...original};
-    const publish=(patch:Partial<PreEntryRecord>)=>{record={...record,...patch,updatedAt:Date.now()};task.onRecord(record);};
+    let record={...original,exclusionProcess:original.exclusionProcess??{version:1 as const,startedAt:original.cursor,...(original.cursor>original.startTime?{partialBefore:original.cursor}:{}),entries:[]}};
+    const publish=(patch:Partial<PreEntryRecord>)=>{
+      record={...record,...patch,updatedAt:Date.now()};
+      if(patch.status&&patch.status!=='scanning'&&patch.status!=='queued')record={...record,exclusionProcess:recordEntryStop(record.exclusionProcess!,patch.status,patch.matchedAt??record.cursor,patch.detail??'筛选状态变化')};
+      task.onRecord(record);
+    };
     try{
       if(!Number.isFinite(task.round.hours)||task.round.hours<0||task.round.hours>8784)throw Error('筛选时长无效');
       if(!(record.startTime>0)||!Number.isFinite(record.cursor))throw Error('缺少有效筛选起点');
@@ -143,7 +148,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           // Replaying up to the persisted cursor restores locks and confirmation
           // counts; it cannot admit or duplicate a previously observed event.
           if(at<=resumeAt)continue;
-          record={...record,cursor:at,threeStage:evidence,readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
+          record={...record,cursor:at,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(condition?{threshold:condition.threshold,direction:condition.direction}:{})};})}),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
           if(waiting&&at>(record.zeroTradeWait?.lastAt??-Infinity))record.zeroTradeWait={count:(record.zeroTradeWait?.count??0)+1,firstAt:record.zeroTradeWait?.firstAt??at,lastAt:at};
           if(v6){if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};}
           else if(first.status==='blocked'||second.status==='blocked')record.lastVeto={at,reason:first.status==='blocked'?first.reason!:second.reason!,count:(record.lastVeto?.count??0)+1};
@@ -153,6 +158,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           }
           if(performance.now()-lastPaint>=150){lastPaint=performance.now();publish({detail:entryStageText(evidence)+' · '+formatUTC8(at)});onProgress({done,total:task.records.length,current:row.symbol});await fishDelay(0,signal);}
         }
+        if(matched)break;
         cursor=chunk.cut;readers.forEach(r=>r.trim());await fishDelay(0,signal);
       }
       if(!matched)publish({status:'unmatched',cursor:end,detail:record.threeStage?entryStageText(record.threeStage)+'；本轮未出现三阶同刻通过':'本轮无可判断时点'});

@@ -1,3 +1,4 @@
+import {qualitySignalTime} from './qualityAdmissionTime';
 import {effectiveQualitySellPlan} from './qualitySellStages';
 import {holdingVetoLabel} from './qualityVeto';
 import { qualityEntryValues } from './qualityEntry';
@@ -31,7 +32,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
     qualitySourceLabel(row),
-    formatUTC8(row.source.timeMs), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null, qualityDetectorReading(row).value,
+    formatUTC8(qualitySignalTime(row.source)), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null, qualityDetectorReading(row).value,
     ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
       // 这套方案开着买入过滤而这一行没买入：与界面一致写原因，不列它的卖出结果
@@ -53,7 +54,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const effective=effectiveQualitySellPlan(run.plan,r),definition = qualityDefinition(effective.snapshot);
-    return [run.sample.source.symbol, qualitySourceLabel(run.sample), formatUTC8(run.sample.source.timeMs),
+    return [run.sample.source.symbol, qualitySourceLabel(run.sample), formatUTC8(qualitySignalTime(run.sample.source)),
       run.detectors.map(d => `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}`).join('；') || '—',
       run.plan.label, effective.rule?.metric ?? effective.metric, effective.rule?.direction ?? '', effective.rule?.threshold ?? null,
       r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设卖出',

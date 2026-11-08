@@ -152,3 +152,22 @@ it('uses a custom per-symbol limit and accepts a first match exactly at its dead
  mocked.events=[T+65*M];
  expect(await run(plan(),{hours:1,end:T+72*60*M})).toMatchObject({status:'unmatched',cursor:T+60*M});
 });
+
+it('records exclusion, rejection, recovery and final admission without duplicating observations on resume',async()=>{
+ let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);
+ const p=plan();p.preEntryThreeStage!.required=[condition('price',105)];
+ const load=loader([100,100,100,100,100,110,110,110,110,110]);
+ const aborter=new AbortController(),paused=await run(p,{load,aborter,hours:1,onRecord:r=>{if(r.status==='scanning'&&r.cursor===T+6*M)aborter.abort();}}),before=structuredClone(paused);
+ const resumed=await run(p,{load,old:paused,hours:1}),whole=await run(p,{load,hours:1});
+ expect(resumed.matchedAt).toBe(T+10*M);expect(paused).toEqual(before);
+ expect(resumed.exclusionProcess!.entries.filter(e=>e.kind==='observation')).toEqual(whole.exclusionProcess!.entries.filter(e=>e.kind==='observation'));
+ expect(resumed.exclusionProcess!.entries.find(e=>e.kind==='guard-rejected')).toMatchObject({from:T+5*M,reason:expect.stringContaining('price')});
+ expect(resumed.exclusionProcess!.entries.find(e=>e.stage==='necessary')).toMatchObject({from:T+M,through:T+5*M,count:5,endedAt:T+6*M,nextStatus:'pass'});
+ expect(resumed.exclusionProcess!.entries.at(-1)).toMatchObject({kind:'matched',from:T+10*M});
+});
+
+it('retains the first admitted node if pause arrives just after publishing the match',async()=>{
+ const aborter=new AbortController(),r=await run(plan(),{aborter,onRecord:r=>{if(r.status==='matched')aborter.abort();}});
+ expect(r).toMatchObject({status:'matched',cursor:T+5*M,matchedAt:T+5*M});
+ expect(r.exclusionProcess!.entries.at(-1)?.kind).toBe('matched');
+});

@@ -1,3 +1,4 @@
+import {qualityLibraryEntryAt} from './qualityAdmissionTime';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
 import { createQualityAdvantageReader, advanceQualitySoftConfirmation, requiredSoftConfirmations, qualityAdvantageIdentity, validateQualityAdvantage, type QualityAdvantageState } from './qualityAdvantage';
@@ -172,6 +173,7 @@ export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ versio
  * 已有历史样本改按捕捞时刻重新评估（旧收益作废）；实时发现的鱼和已选的卖出规则保留。
  */
 export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQualityStudy {
+  study=reconcilePreEntryEntries(study);
   let changed = study.entryMode !== 'capture';
   const reset = new Set<string>();
   const repairedRows = new Map<string, string>();
@@ -181,9 +183,9 @@ export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQuali
     // timeline and pre-entry matches. They do not require a fish capture snapshot.
     if (qualityOrigins(sample).some(isSignalLibraryOrigin)) {
       if ((Number.isFinite(sample.enteredAt) && sample.enteredAt! > 0)
-        || !Number.isFinite(sample.source.timeMs) || sample.source.timeMs <= 0) return sample;
+        || qualityLibraryEntryAt(sample.source)==null) return sample;
       // Repair copies cleared by the old capture migration using only their recorded timestamp.
-      const enteredAt = sample.source.timeMs;
+      const enteredAt = qualityLibraryEntryAt(sample.source);
       repairedRows.set(`row-${shortFishHash(qualityEntryIdentity(sample.source, sample.enteredAt))}`,
         `row-${shortFishHash(qualityEntryIdentity(sample.source, enteredAt))}`);
       changed = true;
@@ -339,8 +341,33 @@ function sourceWithQuality(source:TradeSignal,value:number|undefined):TradeSigna
   const {quality:_,...rest}=source;
   return quality==null?rest:{...rest,quality};
 }
+/** Repair active admitted samples from their own admission record, retaining old results and frozen history. */
+function reconcilePreEntryEntries(study:FishQualityStudy,incoming:readonly TradeSignal[]=[]):FishQualityStudy {
+  const byRecord=new Map(incoming.filter(s=>s.preEntryMonitor).map(s=>[JSON.stringify([s.preEntryMonitor!.roundId,s.preEntryMonitor!.recordId]),s]));
+  const aliases=new Map<string,string>();
+  const samples=study.samples.map(sample=>{
+    const marker=sample.source.preEntryMonitor;if(!marker)return sample;
+    const current=byRecord.get(JSON.stringify([marker.roundId,marker.recordId]));
+    const source=current?{...sample.source,...structuredClone(current)}:sample.source;
+    const enteredAt=qualityLibraryEntryAt(source),basis=enteredAt==null?'missing' as const:'signal' as const;
+    if(enteredAt===sample.enteredAt&&basis===sample.basis&&source.timeMs===sample.source.timeMs&&JSON.stringify(source.preEntryMonitor)===JSON.stringify(marker))return sample;
+    const oldRow=`row-${shortFishHash(qualityEntryIdentity(sample.source,sample.enteredAt))}`,newRow=`row-${shortFishHash(qualityEntryIdentity(source,enteredAt))}`;
+    aliases.set(oldRow,newRow);
+    return {...sample,source,enteredAt,basis};
+  });
+  if(samples.every((s,i)=>s===study.samples[i]))return study;
+  // Keep existing source selections too: an old merged row may still represent another library.
+  const selected=study.selectedRowIds,extra=selected?.flatMap(id=>{
+    for(const [oldRow,newRow]of aliases)if(id===oldRow||id.startsWith(oldRow+'/detector/'))return [newRow+id.slice(oldRow.length)];
+    return [];
+  });
+  const rows=qualityComparisonRows({...study,samples}),validRows=new Set([...rows,...expandQualityRows(rows)].map(r=>r.id));
+  const kept=selected?.filter(id=>!([...aliases.keys()].some(old=>id===old||id.startsWith(old+'/detector/')))||validRows.has(id));
+  return {...study,samples,...(selected?{selectedRowIds:[...new Set([...kept!,...extra!])]}:{})};
+}
 export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' | 'pre-entry' = 'library'): FishQualityStudy {
   study=resolveLegacySourceMemberships(study,signals,origin);
+  if(origin==='pre-entry')study=reconcilePreEntryEntries(study,signals);
   if(origin==='library'){
     const ratings=new Map(signals.map(source=>[signalDedupKey(source),source.quality]));
     const samples=study.samples.map(sample=>{
@@ -367,7 +394,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
     const id = qualityLibrarySampleId(source);
     if (ids.has(id)) continue;
     ids.add(id);
-    const enteredAt = Number.isFinite(source.timeMs) && source.timeMs > 0 ? source.timeMs : null;
+    const enteredAt = qualityLibraryEntryAt(source);
     added.push({ id, source: structuredClone(source), groups: [], enteredAt, basis: enteredAt == null ? 'missing' : 'signal', importedAt: now, origin, origins: [origin] });
   }
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;

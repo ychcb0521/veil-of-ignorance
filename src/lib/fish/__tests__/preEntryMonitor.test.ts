@@ -1,3 +1,4 @@
+import {collectFishQuality,qualityResultKey} from '../quality';
 import { describe, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, emptyPreEntryLibrary, mergePreEntryLibraries, preEntrySignal, type PreEntryRecord, type PreEntryRound } from '../preEntryMonitor';
@@ -110,4 +111,17 @@ describe('动态买前监测', () => {
     expect(trade.endTime).toBeGreaterThan(result.matchedAt!);
     expect(original.samples[0].enteredAt).toBe(start);
   });
+});
+
+it('recomputes a repaired admitted entry at its first-match price instead of reusing the old signal-time trade',async()=>{
+ const match=await run(),signal=preEntrySignal(match)!,f=filter(105),plan:QualityGroup={id:'sell',label:'sell',metric:'raw',snapshot:f.snapshot,rule:{metric:'raw',direction:'>',threshold:105}};
+ let input=importQualityLibrary(newQualityStudy(),[signal],start,'pre-entry');input.sellPlans=[plan];input.samples[0]={...input.samples[0],enteredAt:start};
+ const oldRow=qualityComparisonRows(input)[0],oldTrade=await evaluateQualitySample(oldRow,plan,0,start+20*MINUTE,loader,new AbortController().signal);
+ input.results=[oldTrade];input.selectedRowIds=[oldRow.id];
+ input=importQualityLibrary(input,[signal],start+1,'pre-entry');
+ const newRow=qualityComparisonRows(input)[0];expect(qualityResultKey(newRow,plan,0)).not.toBe(oldTrade.key);
+ const results:typeof oldTrade[]=[],load=vi.fn(loader);
+ await collectFishQuality({study:input,signal:new AbortController().signal,onProgress:vi.fn(),onResult:r=>results.push(r)},load,start+20*MINUTE);
+ expect(load).toHaveBeenCalled();expect(results).toHaveLength(1);expect(results[0]).toMatchObject({entryTime:match.matchedAt,entryPrice:104});expect(oldTrade.entryPrice).toBe(100);
+ expect(input.results[0]).toBe(oldTrade);
 });

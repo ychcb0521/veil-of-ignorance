@@ -9,6 +9,7 @@ import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
+  exclusionProcess?:import('./preEntryExclusionProcess').EntryExclusionProcess;
   /** Clear only the working table display, retaining the complete scan history. */
   tableClearedAt?:number;
   threeStage?: import('./preEntryThreeStageScan').EntryStageEvidence;
@@ -48,16 +49,21 @@ export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): 
   };
   const settings = !a.settings || (b.settings?.updatedAt ?? 0) >= a.settings.updatedAt ? b.settings : a.settings;
   const history=merge(a.settingsHistory??[],b.settingsHistory??[]);
+  // A newer status-only save must not discard the separately accumulated audit trail.
+  const processes=new Map<string,NonNullable<PreEntryRecord['exclusionProcess']>>();
+  const coverage=(p:NonNullable<PreEntryRecord['exclusionProcess']>)=>p.entries.reduce((at,e)=>Math.max(at,e.through,e.endedAt??0),p.startedAt);
+  for(const r of [...a.records,...b.records])if(r.exclusionProcess){const old=processes.get(r.id),next=r.exclusionProcess;if(!old||coverage(next)>coverage(old)||coverage(next)===coverage(old)&&next.entries.length>=old.entries.length)processes.set(r.id,next);}
   const clearMarks=new Map<string,number>();for(const r of [...a.records,...b.records])if(r.tableClearedAt)clearMarks.set(r.id,Math.max(clearMarks.get(r.id)??0,r.tableClearedAt));
-  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>clearMarks.has(r.id)?{...r,tableClearedAt:clearMarks.get(r.id)}:r), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
+  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>{const process=processes.get(r.id);return {...r,...(process?{exclusionProcess:process}:{}),...(clearMarks.has(r.id)?{tableClearedAt:clearMarks.get(r.id)}:{})};}), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
 }
 export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
-  if (record.status !== 'matched' || !record.matchedAt) return null;
+  const matchedAt=record.matchedAt;
+  if (record.status !== 'matched' || typeof matchedAt!=='number' || !Number.isFinite(matchedAt) || matchedAt<=0) return null;
   const source = record.sample.source;
   return { id: `pre-entry:${record.id}`, symbol: source.symbol, exchange: source.exchange, market: source.market,
     underlying: source.underlying, binanceSymbol: source.binanceSymbol,
-    timeMs: record.matchedAt, timeLabel: formatUTC8(record.matchedAt), fallbackZone: source.fallbackZone,
-    preEntryMonitor: { recordId: record.id, roundId: record.roundId, sourceId: source.id, sourceTime: source.timeMs } };
+    timeMs: matchedAt, timeLabel: formatUTC8(matchedAt), fallbackZone: source.fallbackZone,
+    preEntryMonitor: { recordId: record.id, roundId: record.roundId, sourceId: source.id, sourceTime: source.timeMs, matchedAt } };
 }
 export interface PreEntryRun {
   round: PreEntryRound; records: readonly PreEntryRecord[];

@@ -33,7 +33,7 @@ it('keeps the library directory readable after clearing and freezes independent 
 });
 it('exports actual evidence including zero readings and never invents a first-match time for a failed record',()=>{
  const l=library();l.records[0].status='unmatched';delete l.records[0].matchedAt;const results=qualityScreeningResults({},l),cell=screeningCell(results),sheet=screeningResultsSheet(results);
- expect(cell.at).toBe('—');expect(cell.detail).toContain(' = 0');expect(sheet.rows[0]).toHaveLength(sheet.columns.length);expect(sheet.rows[0][4]).toBeNull();expect(sheet.rows[0][8]).toBe(JSON.stringify(l.rounds[0].plans));
+ expect(cell.at).toBe('—');expect(cell.detail).toContain(' = 0');expect(sheet.rows[0]).toHaveLength(sheet.columns.length);expect(sheet.rows[0][4]).toBeNull();expect(sheet.rows[0][sheet.columns.findIndex(c=>c.header==='冻结方案 JSON')]).toBe(JSON.stringify(l.rounds[0].plans));
 });
 
 it('shows newer live observations over a copied table snapshot while keeping its archived snapshot frozen',()=>{
@@ -50,4 +50,11 @@ it('renders v6 zero/guard/exclusion evidence without requiring the removed third
 it('prefers the active round for participating rows even in a selected history directory and leaves other rows historical',()=>{
  const l=library(),old=l.records[0],round={...structuredClone(l.rounds[0]),id:'working',startedAt:T+1},current={...structuredClone(old),id:'new-record',roundId:'working',status:'queued' as const,matchedAt:undefined,updatedAt:T+120000},outside={...structuredClone(old),id:'outside',sample:{...structuredClone(old.sample),source:{...old.sample.source,id:'other',symbol:'OTHERUSDT'}}};
  l.rounds.push(round);l.records.push(current,outside);const index=screeningResultIndex(qualityScreeningResults({},l));expect(screeningCell(screeningRowResults(old.sample,index,'r','working')).status).toBe('待筛选');expect(screeningCell(screeningRowResults(old.sample,index,'r')).status).toBe('已入选');expect(screeningCell(screeningRowResults(outside.sample,index,'r','working')).status).toBe('已入选');
+});
+
+it('retains a recorded exclusion process when a newer status-only library save has no process field',()=>{
+ const l=library();l.records[0].exclusionProcess={version:1,startedAt:T,entries:[{kind:'observation',from:T,through:T+60000,count:2,stage:'exclusion',status:'blocked',reason:'原始排除依据'}]};
+ const incoming=structuredClone(l);delete incoming.records[0].exclusionProcess;incoming.records[0].updatedAt+=60000;
+ const merged=mergePreEntryLibraries(l,incoming);
+ expect(merged.records[0].exclusionProcess).toEqual(l.records[0].exclusionProcess);expect(merged.records[0].updatedAt).toBe(incoming.records[0].updatedAt);
 });
