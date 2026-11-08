@@ -1,7 +1,7 @@
 import {expect,it,vi} from 'vitest';
 import {firstMatchFixture,SIGNAL_AT,MATCHED_AT} from './qualityFirstMatch.fixture';
 import {qualityMonitorEntryAt} from '../qualityAdmissionTime';
-import {withQualityScreeningEntries} from '../qualityScreeningResults';
+import {withQualityScreeningEntries,screeningCell,screeningRowResults,screeningResultIndex,qualityScreeningResults} from '../qualityScreeningResults';
 import {collectFishQuality,qualityComparisonRows,qualityRunSamples,qualityResultKey,qualityFilterStatus,type QualityResult,type QualityBuyFilter,type QualityFilterReading} from '../quality';
 import {qualityRowResult} from '../qualityComparison';
 import {archiveQualityResult} from '../qualityCampaignArchive';
@@ -45,6 +45,8 @@ it('does not shift another entry, exchange, symbol or the original screening sta
  const {study,library}=firstMatchFixture(),sample=study.samples[0];
  study.samples.push({...sample,id:'other-entry',enteredAt:SIGNAL_AT+60000},{...sample,id:'other-exchange',source:{...sample.source,exchange:'okx'}},{...sample,id:'other-symbol',source:{...sample.source,symbol:'OTHERUSDT'}});
  const before=structuredClone(library),next=withQualityScreeningEntries(study,library);
+ const displayed=screeningCell(screeningRowResults(study.samples[0],screeningResultIndex(qualityScreeningResults(study,library))));
+ expect(displayed.at).toBe('2026-04-13 19:40:00');expect(displayed.time).toBe(qualityMonitorEntryAt(next.samples[0]));
  expect(next.samples.slice(1)).toEqual(study.samples.slice(1));expect(library).toEqual(before);
  expect(next.samples[0].source).toBe(sample.source);expect(next.samples[0].enteredAt).toBe(SIGNAL_AT);
 });
@@ -74,6 +76,15 @@ it('requires a specific admission for different first-match times instead of sil
  const next=withQualityScreeningEntries(study,library),load=vi.fn(),results:QualityResult[]=[];
  await collectFishQuality({study:next,task:'monitor',signal:new AbortController().signal,onProgress:vi.fn(),onResult:r=>results.push(r)},load,MATCHED_AT+120000);
  expect(results[0]).toMatchObject({status:'error',reason:expect.stringContaining('多个首次满足时间')});expect(load).not.toHaveBeenCalled();
+});
+it('uses the single visible first-match time when cleared history contains a different frozen plan and time',()=>{
+ const {study,library}=firstMatchFixture(),old={...library.rounds[0],id:'cleared-old',filters:[{id:'older-plan'}] as typeof library.rounds[0]['filters']};
+ library.rounds.push(old);library.records.push({...library.records[0],id:'old-match',roundId:old.id,matchedAt:MATCHED_AT-60000,tableClearedAt:MATCHED_AT+60000,updatedAt:MATCHED_AT});
+ const before=structuredClone(library),next=withQualityScreeningEntries(study,library);
+ expect(qualityMonitorEntryAt(next.samples[0])).toBe(MATCHED_AT);expect(next.samples[0].monitorEntry?.error).toBeUndefined();expect(next.samples[0].monitorEntry?.records).toEqual([JSON.stringify(['screen',library.records[0].id])]);expect(library).toEqual(before);
+ // Clearing the visible cell still preserves its saved admission, without rewriting history.
+ library.records[0].tableClearedAt=MATCHED_AT+60000;
+ expect(withQualityScreeningEntries(next,library,{roundId:'screen'}).samples[0].monitorEntry?.at).toBe(MATCHED_AT);
 });
 
 it('restores the same admission from a saved screening snapshot without changing templates or prior results',()=>{

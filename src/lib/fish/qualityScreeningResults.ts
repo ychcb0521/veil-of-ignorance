@@ -38,11 +38,15 @@ export function screeningRowResults(row:QualityTableRow,index:ReturnType<typeof 
 export interface QualityScreeningScope { roundId?: string; workingRoundId?: string }
 /** Use the same row/round association as the first-match column, including original signal rows. */
 export function withQualityScreeningEntries(study: FishQualityStudy, library?: PreEntryLibrary, scope: QualityScreeningScope = {}): FishQualityStudy {
- const index=screeningResultIndex(qualityScreeningResults(study,library,true));
+ // Resolve the record set shown in the table first. Cleared history is retained
+ // only as a fallback when the row has no visible screening result at all.
+ const index=screeningResultIndex(qualityScreeningResults(study,library));
+ let archivedIndex:ReturnType<typeof screeningResultIndex>|undefined;
  const samples=study.samples.map(sample=>{
   // Admitted sources already own an explicit, frozen first-match timestamp.
   if(sample.source.preEntryMonitor)return sample;
-  const results=screeningRowResults(sample,index,scope.roundId,scope.workingRoundId);
+  const visible=screeningRowResults(sample,index,scope.roundId,scope.workingRoundId);
+  const results=visible.length?visible:screeningRowResults(sample,archivedIndex??=screeningResultIndex(qualityScreeningResults(study,library,true)),scope.roundId,scope.workingRoundId);
   if(!results.length)return sample;
   const matched=results.filter(r=>r.record.status==='matched');
   let monitorEntry:QualityMonitorEntry|undefined;

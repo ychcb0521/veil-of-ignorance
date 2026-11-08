@@ -1,3 +1,4 @@
+import {validLibraryDirectoryEdits} from './libraryDirectoryEdits';
 import {type PreEntryLibrary} from './preEntryMonitor';
 /** Backup/import is additive. Current runnable settings are never replaced by import. */
 export function parsePreEntryLibraryBackup(text:string):PreEntryLibrary{
@@ -7,7 +8,7 @@ export function parsePreEntryLibraryBackup(text:string):PreEntryLibrary{
  for(const r of library.rounds){if(!r||typeof r.id!=='string'||ids.has(r.id)||!Number.isFinite(r.startedAt)||!Number.isFinite(r.updatedAt)||!Array.isArray(r.filters)||!['running','paused','complete'].includes(r.state)||r.plans!==undefined&&!Array.isArray(r.plans))throw Error('入选库轮次无效');ids.add(r.id);}
  const records=new Set<string>();
  for(const r of library.records){if(!r||typeof r.id!=='string'||records.has(r.id)||!ids.has(r.roundId)||typeof r.sample?.source?.symbol!=='string'||!Number.isFinite(r.sample?.source?.timeMs)||!Number.isFinite(r.updatedAt)||!Array.isArray(r.sample.groups)||!Array.isArray(r.readings)||!['queued','scanning','paused','matched','unmatched','warming','error'].includes(r.status)||r.status==='matched'&&!(r.matchedAt>0))throw Error('入选库记录无效');records.add(r.id);}
- if(library.directoryEdits){if(typeof library.directoryEdits!=='object'||Array.isArray(library.directoryEdits))throw Error('目录标记无效');for(const edit of Object.values(library.directoryEdits) as {hidden:boolean;at:number}[])if(!edit||typeof edit.hidden!=='boolean'||!Number.isFinite(edit.at))throw Error('目录标记无效');}
+ if(library.directoryEdits!==undefined&&!validLibraryDirectoryEdits(library.directoryEdits))throw Error('目录标记无效');
  return library;
 }
 export function downloadPreEntryLibraryBackup(library:PreEntryLibrary){

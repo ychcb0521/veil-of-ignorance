@@ -10,6 +10,18 @@ vi.mock('../usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:true,librar
 beforeEach(()=>{vi.useFakeTimers();storage.load.mockReset().mockImplementation(async()=>({study:monitorArchiveFixture()}));storage.save.mockReset().mockResolvedValue(true);});
 afterEach(()=>{cleanup();vi.clearAllTimers();vi.useRealTimers();localStorage.clear();});
 const flush=async()=>{await act(async()=>{await vi.advanceTimersByTimeAsync(0);});};
+it('waits for directory-name storage, preserves failed drafts, and restores the saved name on reload',async()=>{
+ const runner=vi.fn(),h=renderHook(()=>useFishQuality('a',[],runner));await flush();const before=h.result.current.study;
+ storage.save.mockResolvedValueOnce(false);await act(async()=>{expect(await h.result.current.renameLibraryEntry('directory','我的目录')).toBe(false);});expect(h.result.current.study.monitorLibrary?.directoryEdits?.directory).toBeUndefined();
+ storage.save.mockResolvedValue(true);await act(async()=>{expect(await h.result.current.renameLibraryEntry('directory','我的目录')).toBe(true);});const saved=structuredClone(h.result.current.study);
+ expect(saved.monitorLibrary!.directoryEdits!.directory.name).toBe('我的目录');expect(saved.samples).toEqual(before.samples);expect(saved.results).toEqual(before.results);expect(saved.planTemplates).toEqual(before.planTemplates);expect(runner).not.toHaveBeenCalled();
+ h.unmount();storage.load.mockResolvedValue({study:saved});const reloaded=renderHook(()=>useFishQuality('a',[],runner));await flush();expect(reloaded.result.current.study.monitorLibrary!.directoryEdits!.directory.name).toBe('我的目录');
+});
+it('does not install a saved directory name into a different account after switching',async()=>{
+ const h=renderHook(({owner})=>useFishQuality(owner,[],vi.fn()),{initialProps:{owner:'a'}});await flush();let resolve!:(ok:boolean)=>void;
+ storage.save.mockImplementation(async(_owner,s)=>s.monitorLibrary?.directoryEdits?.directory?.name==='旧账号目录'?new Promise<boolean>(r=>{resolve=r;}):true);let pending!:Promise<boolean>;act(()=>{pending=h.result.current.renameLibraryEntry('directory','旧账号目录');});await flush();
+ h.rerender({owner:'b'});await flush();await act(async()=>{resolve(true);expect(await pending).toBe(false);});expect(h.result.current.study.monitorLibrary?.directoryEdits?.directory).toBeUndefined();
+});
 it('keeps active holding plans, duration and matching saved results when selecting a source directory',async()=>{
  const runner=vi.fn(async(_o:QualityRunOptions)=>{}),h=renderHook(()=>useFishQuality('a',[],runner));await flush();
  const before=structuredClone(h.result.current.study),snapshot={...newQualityStudy(),samples:[structuredClone(before.samples[0])],groups:structuredClone(before.groups),sellPlans:[]};

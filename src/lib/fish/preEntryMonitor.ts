@@ -1,3 +1,4 @@
+import {mergeLibraryDirectoryEdits,type LibraryDirectoryEdits} from './libraryDirectoryEdits';
 /** Independent first-match scan. Values use the existing closed-candle buy-filter calculation. */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -32,7 +33,7 @@ export interface PreEntryRound {
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
 }
-export interface PreEntryLibrary { settings?: PreEntrySettings; settingsHistory?: (PreEntrySettings & {id:string})[]; version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
+export interface PreEntryLibrary { directoryEdits?:LibraryDirectoryEdits; settings?: PreEntrySettings; settingsHistory?: (PreEntrySettings & {id:string})[]; version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
 /** Explicit version switching retains both frozen setting sets for later reuse. */
 export function archivePreEntrySettings(library:PreEntryLibrary,next:PreEntrySettings):PreEntryLibrary {
   const previous=library.settings;
@@ -49,12 +50,13 @@ export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): 
   };
   const settings = !a.settings || (b.settings?.updatedAt ?? 0) >= a.settings.updatedAt ? b.settings : a.settings;
   const history=merge(a.settingsHistory??[],b.settingsHistory??[]);
+  const directoryEdits=mergeLibraryDirectoryEdits(a.directoryEdits,b.directoryEdits);
   // A newer status-only save must not discard the separately accumulated audit trail.
   const processes=new Map<string,NonNullable<PreEntryRecord['exclusionProcess']>>();
   const coverage=(p:NonNullable<PreEntryRecord['exclusionProcess']>)=>p.entries.reduce((at,e)=>Math.max(at,e.through,e.endedAt??0),p.startedAt);
   for(const r of [...a.records,...b.records])if(r.exclusionProcess){const old=processes.get(r.id),next=r.exclusionProcess;if(!old||coverage(next)>coverage(old)||coverage(next)===coverage(old)&&next.entries.length>=old.entries.length)processes.set(r.id,next);}
   const clearMarks=new Map<string,number>();for(const r of [...a.records,...b.records])if(r.tableClearedAt)clearMarks.set(r.id,Math.max(clearMarks.get(r.id)??0,r.tableClearedAt));
-  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>{const process=processes.get(r.id);return {...r,...(process?{exclusionProcess:process}:{}),...(clearMarks.has(r.id)?{tableClearedAt:clearMarks.get(r.id)}:{})};}), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
+  return { ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>{const process=processes.get(r.id);return {...r,...(process?{exclusionProcess:process}:{}),...(clearMarks.has(r.id)?{tableClearedAt:clearMarks.get(r.id)}:{})};}), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
 }
 export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   const matchedAt=record.matchedAt;

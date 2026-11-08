@@ -13,8 +13,14 @@ it('places one quiet record icon after first-match time and opens the process wi
  expect(screen.getAllByRole('columnheader').map(e=>e.textContent)).toEqual(['筛选方案','筛选结果','首次满足时间','排除过程']);
  expect(screen.getAllByRole('cell')).toHaveLength(4);
  fireEvent.click(screen.getByLabelText('排除过程'));expect(screen.getByTestId('screening-process-dialog')).toHaveTextContent('冲高回落锁定');
- fireEvent.click(screen.getByText('观测读数'));expect(screen.getByText('状态 = 0.4 · 未满足')).toBeInTheDocument();expect(results).toEqual(before);
+ expect(screen.getByText('观测读数 · 1 项未满足').closest('details')).toHaveAttribute('open');expect(screen.getByTestId('screening-process-unmet')).toHaveTextContent('状态 = 0.4 · 未满足');expect(screen.getByTestId('screening-process-item')).toHaveAttribute('data-negative','true');expect(results).toEqual(before);
  const sheet=screeningResultsSheet(results);expect(sheet.columns.map(c=>c.header)).toContain('排除过程');expect(sheet.rows[0].join(' ')).toContain('冲高回落锁定');
+});
+it('distinguishes unknown and pending readings from failed conditions and keeps chronological order',()=>{
+ const results=result(),process=results[0].record.exclusionProcess!;
+ process.entries.push({kind:'observation',stage:'necessary',status:'pending',from:T+180000,through:T+180000,count:1,reason:'等待读数',readings:[{id:'pending',at:T+180000,met:false,value:null,pending:'数据尚未就绪'}]});
+ render(<FishScreeningProcessButton results={results}/>);fireEvent.click(screen.getByLabelText('排除过程'));
+ expect(screen.getAllByTestId('screening-process-unmet')).toHaveLength(1);const items=screen.getAllByTestId('screening-process-item');expect(items[0]).toHaveTextContent('冲高回落锁定');expect(items[1]).toHaveAttribute('data-negative','false');expect(items[1]).toHaveTextContent('等待读数');
 });
 it('shows only the stored summary for a legacy record instead of inventing a historical process',()=>{
  const results=result();delete results[0].record.exclusionProcess;

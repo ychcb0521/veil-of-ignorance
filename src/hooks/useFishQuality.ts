@@ -1,4 +1,5 @@
-import {editLibraryDirectory} from '@/lib/fish/qualityMonitorArchive';
+import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
+import {editLibraryDirectory,renameLibraryDirectory} from '@/lib/fish/qualityMonitorArchive';
 import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useQualityPlanCatalog } from './useQualityPlanCatalog';
 import {useQualitySavedPlans} from './useQualitySavedPlans';
@@ -164,6 +165,14 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   useEffect(() => {
     if (ready && readyRef.current && preEntry.ready) change(s => withQualityScreeningEntries(s, preEntry.library, screeningScope.current));
   }, [ready, preEntry.ready, preEntry.library, study.samples, study.screeningResults, study.screeningRounds, change]);
+  // Imported entry backups may own names too. Keep them in the shared map,
+  // so saves from already-open older entry runners cannot discard those names.
+  useEffect(()=>{
+    if(!ready||!readyRef.current||!preEntry.ready||!preEntry.library.directoryEdits)return;
+    const old=current.current.monitorLibrary?.directoryEdits,merged=mergeLibraryDirectoryEdits(old,preEntry.library.directoryEdits);
+    if(JSON.stringify(old??{})===JSON.stringify(merged))return;
+    change(s=>({...s,monitorLibrary:{version:1,importedLegacy:false,settings:[],records:[],rounds:[],...s.monitorLibrary,directoryEdits:mergeLibraryDirectoryEdits(s.monitorLibrary?.directoryEdits,merged)}}));
+  },[preEntry.library.directoryEdits,preEntry.ready,ready,change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
@@ -329,6 +338,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const setLibraryEntryHidden=useCallback(async(id:string,hidden:boolean)=>{
     if(!readyRef.current||archiveLock.current)return false;
     const savedOwner=account.current,epoch=generation.current,next=editLibraryDirectory(current.current,id,hidden);
+    if(next===current.current)return false;
+    try{if(!await saveQualityStudy(savedOwner,next))return false;
+      if(account.current!==savedOwner||generation.current!==epoch)return false;
+      change(s=>preserveQualityMonitorLibrary(next,s));return true;
+    }catch{return false;}
+  },[change]);
+  const renameLibraryEntry=useCallback(async(id:string,name:string)=>{
+    if(!readyRef.current||archiveLock.current)return false;
+    const savedOwner=account.current,epoch=generation.current,next=renameLibraryDirectory(current.current,id,name);
     if(next===current.current)return false;
     try{if(!await saveQualityStudy(savedOwner,next))return false;
       if(account.current!==savedOwner||generation.current!==epoch)return false;
@@ -514,10 +532,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
     restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
     resume: (roundId: string) => preEntry.resume(roundId, current.current) };
-  return { preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+  return { preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
 type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
-export type FishQualityState=Omit<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'> & Partial<Pick<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'> & Partial<Pick<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，

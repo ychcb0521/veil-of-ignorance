@@ -3,7 +3,18 @@ import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/reac
 import {afterEach,expect,it,vi} from 'vitest';
 import {FishLibraryTimeDirectory,type FishDirectoryItem} from '../FishLibraryTimeDirectory';
 import {newQualityStudy,type FishQualityStudy} from '@/lib/fish/quality';
+import type {LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 afterEach(cleanup);
+it('edits a directory without loading its snapshot, retains failed drafts, and persists a name across remounts',async()=>{
+ const read=vi.fn(()=>newQualityStudy(1)),save=vi.fn(async()=>false);let durable:LibraryDirectoryEdits={};
+ function Named(){const [edits,setEdits]=useState(durable);return <FishLibraryTimeDirectory name="过滤库" prefix="filter" description="测试" info={null} items={[{id:'one',at:1,label:'默认目录',summary:'1 条记录',study:read}]} edits={edits} recordCount={1} download={vi.fn()} empty="空" onRename={async(id,name)=>{if(!await save())return false;durable={...durable,[id]:{hidden:false,at:0,name,nameAt:1}};setEdits(durable);return true;}}/>;}
+ const h=render(<Named/>);fireEvent.click(screen.getByLabelText('打开过滤库'));fireEvent.keyDown(screen.getByLabelText('管理过滤归档 one'),{key:'Enter'});fireEvent.click(await screen.findByRole('menuitem',{name:'编辑名称'}));
+ fireEvent.change(screen.getByRole('textbox',{name:'目录名称'}),{target:{value:'  我的过滤结果  '}});fireEvent.click(screen.getByRole('button',{name:'保存名称'}));
+ await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('目录名称未保存'));expect(screen.getByRole('textbox')).toHaveValue('  我的过滤结果  ');
+ save.mockResolvedValue(true);fireEvent.click(screen.getByRole('button',{name:'保存名称'}));await waitFor(()=>expect(screen.queryByRole('textbox')).toBeNull());expect(screen.getByText('我的过滤结果')).toBeInTheDocument();expect(read).not.toHaveBeenCalled();
+ h.unmount();render(<Named/>);fireEvent.click(screen.getByLabelText('打开过滤库'));expect(screen.getByText('我的过滤结果')).toBeInTheDocument();
+ fireEvent.keyDown(screen.getByLabelText('管理过滤归档 one'),{key:'Enter'});fireEvent.click(await screen.findByRole('menuitem',{name:'编辑名称'}));fireEvent.change(screen.getByRole('textbox',{name:'目录名称'}),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存名称'}));await waitFor(()=>expect(screen.getByText('默认目录')).toBeInTheDocument());
+});
 const snapshot=newQualityStudy(1),items:FishDirectoryItem[]=[{id:'one',at:1,label:'本轮',summary:'1 条记录',study:()=>snapshot}];
 it('allows multiple directories or a single directory, applies only on confirmation, and restores checked choices on reopen',async()=>{
  const selected=vi.fn(async(_id:string,_study:FishQualityStudy,_ids?:string[])=>true),entries=[items[0],{...items[0],id:'two',at:2,label:'另一轮',study:()=>newQualityStudy(2)}];

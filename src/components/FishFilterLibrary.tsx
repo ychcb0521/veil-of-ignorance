@@ -12,14 +12,14 @@ import {formatUTC8} from '@/lib/timeFormat';
 const date=(t:number|null|undefined)=>t==null?'—':formatUTC8(t);
 const STATE={pass:'满足',fail:'不满足',error:'缺数据',pending:'待判断',none:'不过滤'} as const;
 const ROUND_STATE={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
-export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory}:{openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;study:FishQualityStudy;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>}){
+export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,onRename,openRequest,onSelectDirectory}:{openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;study:FishQualityStudy;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;onRename?:(id:string,name:string)=>Promise<boolean>}){
  const library=study.filterLibrary,rounds=library?.rounds??[];
  const items:FishDirectoryItem[]=library?rounds.map(r=>({id:r.id,at:r.startedAt,label:'过滤轮次',summary:filterDirectoryData(library,r).records.length+' 条记录 · '+ROUND_STATE[r.state],revision:library,study:()=>filterDirectoryStudy(library,r),details:<FilterEvidence {...filterDirectoryData(library,r)}/>,note:r.filterSnapshot?'保留本轮组合表输入、冻结条件和判断；后续重算不会覆盖。':'早期轮次仅保存记录引用，展示当前仍保存的版本；未保存的探测值和评分保持缺失。'})):[];
  const legacy=library?filterDirectoryData(library):undefined;
  if(legacy?.records.length)items.push({id:'filter-legacy',at:Math.max(...legacy.records.map(r=>r.updatedAt)),label:'历史记录',summary:legacy.records.length+' 条记录',revision:library,study:()=>filterDirectoryStudy(library!),details:<FilterEvidence {...legacy}/>,note:'历史记录未保存轮次，只展示已有的冻结条件与读数，不补造缺失数据。'});
- return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" items={items} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
+ return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" items={items} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
   description={`${library?.records.length??0} 条记录 · ${rounds.length} 轮过滤`} dataActions={<FishLibraryDataActions scope="filter"/>} download={()=>downloadDirectoryTables('过滤库',items.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
-  info={<><p>与监测库共用时间目录。展开后展示该轮组合表，条件、读数和判断取自保存记录，不重新计算。</p><p>新轮次单独保存组合表输入和过滤结果；早期轮次只有记录引用，会明确标注。目录可删除和恢复，复制前先完整归档当前组合表。</p></>}
+  info={<><p>与监测库共用时间目录。展开后展示该轮组合表，条件、读数和判断取自保存记录，不重新计算。</p><p>新轮次单独保存组合表输入和过滤结果；早期轮次只有记录引用，会明确标注。目录可编辑名称、删除和恢复，复制前先完整归档当前组合表。</p></>}
   empty="暂无过滤记录。设置买入条件并开始过滤后，每轮会自动保存。"/>;
 }
 function FilterEvidence({settings:catalog,records}:{settings:QualityFilterSetting[];records:QualityFilterRecord[]}){

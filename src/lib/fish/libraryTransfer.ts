@@ -1,3 +1,4 @@
+import {validLibraryDirectoryEdits} from './libraryDirectoryEdits';
 import {mergeLegacySourceResolutions,QUALITY_SOURCE_NAMES,type LegacySourceResolutions} from './qualitySources';
 import {applySourceDeletions,mergeSourceDeletions,pruneMiningDeletions,type SourceDeletions} from './libraryDeletion';
 import {newQualityStudy} from './quality';
@@ -46,7 +47,7 @@ export function validateLibraryPayload(input:unknown):asserts input is LibraryPa
  for(const round of v.filter?.rounds??[])if(round.filterSnapshot){const snapshot=round.filterSnapshot;if(!object(snapshot)||!finite(snapshot.at))fail('过滤轮次快照无效');validateLibraryPayload({filter:{version:1,settings:snapshot.settings,records:snapshot.records,rounds:[]}});for(const record of snapshot.records)if(record.sample){source(record.sample.source);if(!Array.isArray(record.sample.groups))fail('过滤组合表快照无效');}}
  if(v.monitor){const l=v.monitor;if(l.version!==1)fail('监测库版本不支持');const settings=list(l.settings,'监测方案'),records=list(l.records,'监测记录'),settingIds=ids(settings,'监测方案'),recordIds=ids(records,'监测记录');
   for(const s of settings){if(typeof s.signature!=='string'||!Array.isArray(s.detectors)||!finite(s.observeHours))fail('监测方案缺少参数');plan(s.plan);}
-  if(l.directoryEdits){if(!object(l.directoryEdits))fail('目录删除标记无效');for(const edit of Object.values(l.directoryEdits))if(!object(edit)||typeof edit.hidden!=='boolean'||!finite(edit.at))fail('目录删除标记无效');}
+  if(l.directoryEdits!==undefined&&!validLibraryDirectoryEdits(l.directoryEdits))fail('目录标记无效');
   if(l.archives){const archives=list(l.archives,'监测归档');ids(archives,'监测归档');for(const a of archives){if(a.version!==1||!['restart','copy','copy-source'].includes(a.reason)||!finite(a.createdAt)||!object(a.study)||a.study.version!==1||a.study.monitorLibrary||a.study.filterLibrary)fail('监测归档快照无效');for(const s of list(a.study.samples,'归档信号'))source(s.source);for(const g of list(a.study.groups,'归档探测算法'))plan(g);for(const g of a.study.sellPlans??[])plan(g);for(const r of list(a.study.results,'归档运行结果'))if(!object(r)||typeof r.key!=='string'||!finite(r.evaluatedAt))fail('归档结果无效');}}
   for(const r of records){source(r.source);provenance(r);if(!settingIds.has(r.settingId)||!finite(r.updatedAt))fail('监测记录引用或时间无效');if(r.result&&(!object(r.result)||!finite(r.result.evaluatedAt)||!['open','closed','waiting','error'].includes(r.result.status)))fail('监测结果无效');}rounds(list(l.rounds,'监测轮次'),recordIds);
  }
@@ -57,7 +58,7 @@ function parseFile(text:string){return JSON.parse(text,(key,v)=>{if(['__proto__'
 export async function packageId(p:Pick<LibraryPackage,'source'|'scope'|'libraries'>){const bytes=new TextEncoder().encode(stringifyLibraryFile([p.source.account,p.scope,p.libraries]));return 'sha256:'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');}
 export async function makeLibraryPackage(account:string,label:string,libraries:LibraryPayload,scope:LibraryScope='all',at=Date.now()):Promise<LibraryPackage>{
  libraries=pruneTransferPayload(libraries);
- const selected:LibraryPayload=scope==='all'?libraries:scope==='mining'?{mining:libraries.mining}:scope==='filter'?{filter:libraries.filter}:{monitor:libraries.monitor,observations:libraries.observations};
+ const selected:LibraryPayload=scope==='all'?libraries:scope==='mining'?{mining:libraries.mining}:scope==='filter'?{filter:libraries.filter,...(libraries.monitor?.directoryEdits?{monitor:{version:1 as const,importedLegacy:false,settings:[],records:[],rounds:[],directoryEdits:libraries.monitor.directoryEdits}}:{})}:{monitor:libraries.monitor,observations:libraries.observations};
  if(libraries.resolvedLegacySources)selected.resolvedLegacySources=libraries.resolvedLegacySources;if(libraries.deletedSources)selected.deletedSources=libraries.deletedSources;if(libraries.deletedReadings)selected.deletedReadings=libraries.deletedReadings;
  validateLibraryPayload(selected);const p={format:'veil-fish-quality-libraries' as const,version:1 as const,scope,source:{account,label},libraries:structuredClone(selected),exportedAt:at};return {...p,id:await packageId(p)};
 }
