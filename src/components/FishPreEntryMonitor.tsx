@@ -27,7 +27,7 @@ const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';
 export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory }: {
   state: FishQualityState; selectedCount: number; filtersOn: boolean; onSelected: () => void; onJump?: (signal: TradeSignal) => void;
-  openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;
+  openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;
   onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;
   renderStudy?:(study:FishQualityStudy)=>ReactNode;onCopyStudy?:(study:FishQualityStudy)=>Promise<boolean>;
   renderConditions?: (close: () => void) => ReactNode;

@@ -12,7 +12,7 @@ export interface QualityReturnUi {
   open: boolean; query: string; month: string; algorithms?: string[];
   /** 旧版本记下的单选探测算法。 */
   algorithm?: string; origin: '' | QualityOrigin | 'filter';
-  directory?:{kind:'filter'|'pre-entry'|'mined';id:string};
+  directory?:{kind:'filter'|'pre-entry'|'mined';id:string;ids?:string[]};
   /** 旧版本的分页（已合并为一个视图）。 */
   phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;

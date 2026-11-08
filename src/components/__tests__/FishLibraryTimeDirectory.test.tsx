@@ -1,10 +1,35 @@
 import {useState} from 'react';
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {FishLibraryTimeDirectory,type FishDirectoryItem} from '../FishLibraryTimeDirectory';
 import {newQualityStudy,type FishQualityStudy} from '@/lib/fish/quality';
 afterEach(cleanup);
 const snapshot=newQualityStudy(1),items:FishDirectoryItem[]=[{id:'one',at:1,label:'本轮',summary:'1 条记录',study:()=>snapshot}];
+it('allows multiple directories or a single directory, applies only on confirmation, and restores checked choices on reopen',async()=>{
+ const selected=vi.fn(async(_id:string,_study:FishQualityStudy,_ids?:string[])=>true),entries=[items[0],{...items[0],id:'two',at:2,label:'另一轮',study:()=>newQualityStudy(2)}];
+ const props={name:'挖掘库',prefix:'mining',description:'测试',info:null,items:entries,recordCount:2,download:vi.fn(),empty:'空',onSelectDirectory:selected};
+ const h=render(<FishLibraryTimeDirectory {...props} openRequest={{key:1,selectedIds:['one']}}/>);
+ expect(screen.getByLabelText('选择挖掘库目录 本轮 one')).toBeChecked();
+ fireEvent.click(screen.getByLabelText('选择挖掘库目录 另一轮 two'));expect(selected).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'应用所选目录（2）'}));await waitFor(()=>expect(selected).toHaveBeenCalledOnce());
+ expect(selected.mock.calls[0][2]).toEqual(['two','one']);expect(screen.queryByRole('dialog')).toBeNull();
+ h.rerender(<FishLibraryTimeDirectory {...props} openRequest={{key:2,selectedIds:['one','two']}}/>);
+ expect(screen.getByLabelText('选择挖掘库目录 本轮 one')).toBeChecked();expect(screen.getByLabelText('选择挖掘库目录 另一轮 two')).toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'清空选择'}));expect(screen.getByRole('button',{name:'应用所选目录（0）'})).toBeDisabled();
+ fireEvent.click(screen.getByLabelText('选择挖掘库目录 本轮 one'));fireEvent.click(screen.getByRole('button',{name:'应用所选目录（1）'}));
+ await waitFor(()=>expect(selected).toHaveBeenCalledTimes(2));expect(selected.mock.calls[1][2]).toEqual(['one']);expect(snapshot).toEqual(newQualityStudy(1));
+});
+
+it('keeps the table when any selected directory fails to read and cancels a pending selection on close',async()=>{
+ const selected=vi.fn(async()=>true),bad={...items[0],id:'bad',label:'坏目录',study:async()=>{throw Error('读取失败');}};
+ const h=render(<FishLibraryTimeDirectory name="过滤库" prefix="filter" description="" info={null} items={[items[0],bad]} recordCount={2} download={vi.fn()} empty="空" onSelectDirectory={selected}/>);
+ fireEvent.click(screen.getByLabelText('打开过滤库'));fireEvent.click(screen.getByLabelText('全选过滤库可见目录'));fireEvent.click(screen.getByRole('button',{name:'应用所选目录（2）'}));
+ await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('读取失败'));expect(selected).not.toHaveBeenCalled();
+ h.unmount();let release!:(s:FishQualityStudy)=>void;const pending=new Promise<FishQualityStudy>(resolve=>{release=resolve;});
+ render(<FishLibraryTimeDirectory name="过滤库" prefix="filter" description="" info={null} items={[{...items[0],study:()=>pending}]} recordCount={1} download={vi.fn()} empty="空" onSelectDirectory={selected}/>);
+ fireEvent.click(screen.getByLabelText('打开过滤库'));fireEvent.click(screen.getByLabelText('全选过滤库可见目录'));fireEvent.click(screen.getByRole('button',{name:'应用所选目录（1）'}));
+ fireEvent.click(screen.getByRole('button',{name:'关闭'}));await act(async()=>release(newQualityStudy(3)));expect(selected).not.toHaveBeenCalled();
+});
 function Harness({copy,hidden}:{copy?:(s:FishQualityStudy)=>Promise<boolean>;hidden:(id:string,value:boolean)=>void}){
  const [edits,setEdits]=useState<Record<string,{hidden:boolean;at:number}>>({});
  return <FishLibraryTimeDirectory name="过滤库" prefix="filter" description="测试" info={<p>说明</p>} items={items} edits={edits} recordCount={1} download={vi.fn()} empty="空目录" renderStudy={()=><p>冻结组合表</p>} onCopyStudy={copy} onSetHidden={async(id,value)=>{hidden(id,value);setEdits(e=>({...e,[id]:{hidden:value,at:1}}));return true;}}/>;

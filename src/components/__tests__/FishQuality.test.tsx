@@ -23,6 +23,21 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('applies multiple screening directories to the main table and keeps holding plans while exposing both entries',async()=>{
+ const {firstMatchFixture}=await import('@/lib/fish/__tests__/qualityFirstMatch.fixture'),{library}=firstMatchFixture(),second={...library.rounds[0],id:'second',startedAt:library.rounds[0].startedAt+60000};
+ library.rounds.push(second);library.records.push({...structuredClone(library.records[0]),id:'other-record',roundId:'second',sample:{...structuredClone(library.records[0].sample),source:{...library.records[0].sample.source,id:'other',symbol:'OTHERUSDT'}},matchedAt:library.records[0].matchedAt!+60000});
+ const s=state(),holding=s.study.sellPlans;
+ s.preEntry={library,ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn(),importLibrary:vi.fn(),clearTableResults:vi.fn()};
+ s.restoreMonitorStudy=vi.fn(async(snapshot)=>{s.study={...s.study,samples:snapshot.samples,groups:snapshot.groups,selectedRowIds:snapshot.selectedRowIds,screeningResults:snapshot.screeningResults,screeningRounds:snapshot.screeningRounds};return true;});
+ render(<FishQuality state={s}/>);chooseSource('pre-entry');
+ fireEvent.click(screen.getByLabelText('全选筛选库可见目录'));fireEvent.click(screen.getByRole('button',{name:'应用所选目录（2）'}));
+ await waitFor(()=>expect(screen.getByTestId('quality-active-directory')).toHaveTextContent('已选目录（2）'));
+ const rows=screen.getAllByTestId('quality-fish-row');expect(rows).toHaveLength(2);
+ expect(rows.some(row=>row.textContent?.includes('UAIUSDT'))).toBe(true);expect(rows.some(row=>row.textContent?.includes('OTHERUSDT'))).toBe(true);
+ expect(s.restoreMonitorStudy).toHaveBeenCalledWith(expect.objectContaining({samples:expect.any(Array)}),undefined,true);
+ expect(s.study.sellPlans).toBe(holding);expect(s.start).not.toHaveBeenCalled();
+ expect(vi.mocked(s.setScope).mock.calls.at(-1)![0]).toHaveLength(2);
+});
 it('shows the original signal first-match buy time and links only the recomputed holding campaign',async()=>{
  const {firstMatchFixture,SIGNAL_AT,MATCHED_AT}=await import('@/lib/fish/__tests__/qualityFirstMatch.fixture');
  const {withQualityScreeningEntries}=await import('@/lib/fish/qualityScreeningResults');

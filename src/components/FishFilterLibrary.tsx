@@ -12,7 +12,7 @@ import {formatUTC8} from '@/lib/timeFormat';
 const date=(t:number|null|undefined)=>t==null?'—':formatUTC8(t);
 const STATE={pass:'满足',fail:'不满足',error:'缺数据',pending:'待判断',none:'不过滤'} as const;
 const ROUND_STATE={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
-export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory}:{openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;study:FishQualityStudy;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>}){
+export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory}:{openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;study:FishQualityStudy;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>}){
  const library=study.filterLibrary,rounds=library?.rounds??[];
  const items:FishDirectoryItem[]=library?rounds.map(r=>({id:r.id,at:r.startedAt,label:'过滤轮次',summary:filterDirectoryData(library,r).records.length+' 条记录 · '+ROUND_STATE[r.state],revision:library,study:()=>filterDirectoryStudy(library,r),details:<FilterEvidence {...filterDirectoryData(library,r)}/>,note:r.filterSnapshot?'保留本轮组合表输入、冻结条件和判断；后续重算不会覆盖。':'早期轮次仅保存记录引用，展示当前仍保存的版本；未保存的探测值和评分保持缺失。'})):[];
  const legacy=library?filterDirectoryData(library):undefined;

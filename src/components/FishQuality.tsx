@@ -2,7 +2,7 @@ import {qualityMonitorEntryAt,qualitySignalTime} from '@/lib/fish/qualityAdmissi
 import {ScreeningHeaders,ScreeningCells,ScreeningStatistics,type ScreeningSortKey} from './FishQualityScreeningResults';
 import {qualityScreeningResults,screeningResultIndex,screeningRowResults,screeningCell,screeningResultsSheet} from '@/lib/fish/qualityScreeningResults';
 import {FishQualitySourcePicker} from './FishQualitySourcePicker';
-import {latestEntryDirectory,sourceDirectoryKeys,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
+import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
 import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
 import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
@@ -523,7 +523,8 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running').reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
   const activeScreeningId=activeScreeningRound?.id,activeScreeningAt=activeScreeningRound?.updatedAt;
   useEffect(()=>{if(!archiveView&&activeScreeningId){sourceDefaulted.current=true;setScreeningRunId(activeScreeningId);}},[archiveView,activeScreeningId,activeScreeningAt]);
-  const screeningRoundId=directoryChoice?.kind==='pre-entry'?directoryChoice.id:undefined;
+  const directoryIds=directoryChoice?sourceDirectoryIds(directoryChoice):[];
+  const screeningRoundId=directoryChoice?.kind==='pre-entry'&&directoryIds.length===1?directoryIds[0]:undefined;
   const showScreening=!hideScreening&&(!!state.preEntry||study.screeningResults!==undefined);
   const detectorMap = useMemo(() => new Map(study.groups.map(g => [g.id, g])), [study.groups]);
   const batch = allRows;
@@ -535,7 +536,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const activeAlgorithms = useMemo(() => algorithmChoice.filter(id => batchDetectors.has(id) && defaultIds.has(id)), [algorithmChoice, batchDetectors, defaultIds]);
   const directoryKeys=useMemo(()=>sourceDirectoryKeys(directoryChoice,{filterLibrary:study.filterLibrary},state.preEntry?.library),[directoryChoice,study.filterLibrary,state.preEntry?.library]);
   const searched = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) &&
-    (directoryChoice&&directoryChoice.kind===origin?(directoryKeys?directoryKeys.has(qualityEntryIdentity(r.source,r.enteredAt)):hasSource(r,'mined')&&matchesMiningDirectory(r,study.groups,directoryChoice.id)):!origin||origin!=='filter'&&hasSource(r,origin))), [batch,query,origin,directoryChoice,directoryKeys,study.groups]);
+    (directoryChoice&&directoryChoice.kind===origin?(directoryKeys?directoryKeys.has(qualityEntryIdentity(r.source,r.enteredAt)):hasSource(r,'mined')&&sourceDirectoryIds(directoryChoice).some(id=>matchesMiningDirectory(r,study.groups,id))):!origin||origin!=='filter'&&hasSource(r,origin))), [batch,query,origin,directoryChoice,directoryKeys,study.groups]);
   const narrowed = useMemo(() => activeAlgorithms.length ? searched.filter(r => activeAlgorithms.includes(r.detectorId ?? '')) : searched, [searched, activeAlgorithms]);
   /** 各探测算法在当前来源 / 标的筛选下的信号条数（同一信号只计一次）。 */
   const detectorSignals = useMemo(() => { const ids = new Map<string, Set<string>>(); for (const r of searched) if (r.detectorId) { if (!ids.has(r.detectorId)) ids.set(r.detectorId, new Set()); ids.get(r.detectorId)!.add(r.signalId ?? r.id); } return ids; }, [searched]);
@@ -675,16 +676,16 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
   const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
-  const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy)=>{
+  const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy,ids?:string[])=>{
     if(!state.restoreMonitorStudy)return false;
     const copied=await state.restoreMonitorStudy(snapshot,undefined,true);if(!copied)return false;
-    sourceDefaulted.current=true;setScreeningRunId(undefined);setDirectoryChoice({kind,id});setOrigin(kind);setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();return true;
+    sourceDefaulted.current=true;setScreeningRunId(undefined);setDirectoryChoice({kind,id,...(ids?{ids}: {})});setOrigin(kind);setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();return true;
   };
   const selectSource=(value:QualityReturnUi['origin'])=>{
     sourceDefaulted.current=true;
     if(!archiveView&&(value==='filter'||value==='pre-entry'&&!!state.preEntry||value==='mined'&&!!mining)){
       const current=directoryChoice?.kind===value?directoryChoice.id:value==='pre-entry'?latestEntry?.id:undefined;
-      setDirectoryRequests(requests=>({...requests,[value]:{key:(requests[value]?.key??0)+1,selectedId:current}}));return;
+      setDirectoryRequests(requests=>({...requests,[value]:{key:(requests[value]?.key??0)+1,selectedId:current,selectedIds:directoryChoice?.kind===value?sourceDirectoryIds(directoryChoice):current?[current]:[]}}));return;
     }
     setDirectoryChoice(undefined);setOrigin(value);resetScroll();
   };
@@ -778,7 +779,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     </></FishQualityManual>
     {open && <div id={contentId} className="mt-2 space-y-2">
       {!archiveView&&<div className={fishRail} aria-label="鱼质量工作模块" data-testid="quality-modules">
-        {mining && <FishMiningPanel openRequest={directoryRequests.mined} onSelectDirectory={(id,snapshot)=>chooseDirectory('mined',id,snapshot)} directoryEdits={study.monitorLibrary?.directoryEdits} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} mining={mining} onJump={onJump} canJump={canJump} onSelectInTable={ready && state.selectMiningRecords ? signals => {
+        {mining && <FishMiningPanel openRequest={directoryRequests.mined} onSelectDirectory={(id,snapshot,ids)=>chooseDirectory('mined',id,snapshot,ids)} directoryEdits={study.monitorLibrary?.directoryEdits} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} mining={mining} onJump={onJump} canJump={canJump} onSelectInTable={ready && state.selectMiningRecords ? signals => {
           const result = state.selectMiningRecords!(signals);
           if (!result.selected) return false;
           sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('mined'); setQuery(''); setMonth(''); setAlgorithmsState([]);
@@ -798,10 +799,10 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={() => setFilterOpen(false)}/>
           </PopoverContent></Popover>
-          <FishFilterLibrary openRequest={directoryRequests.filter} onSelectDirectory={(id,snapshot)=>chooseDirectory('filter',id,snapshot)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
+          <FishFilterLibrary openRequest={directoryRequests.filter} onSelectDirectory={(id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls" trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><p>必要条件 → 防守线新事件 → 排除门槛须同分钟共同通过，首次满足即停止，保存该时间节点为入选记录。</p><p>在条件设置中填写单标的筛选时限，新筛选默认 48 小时；已有正数时限保留。到时未命中判为不满足；行情更短、缺数据或历史不足按实际状态标记。</p><p>运行时显示完成条数与实际扫描进度，停止后收起。点击进度，或从开始按钮右侧的 ▾ 选择「本轮筛选结果」，查看全部状态和原因。筛选库按时间目录保存入选记录；组合表的「排除过程」可查看排除、解除及新防守线事件被否决的记录。</p><p>暂停继续沿用本轮冻结方案；新条件和时限从头筛选生效。旧的无限时暂停轮次保留，主按钮另开有限时新轮次。</p></FishQualityInfo>}>
-            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={(id,snapshot)=>chooseDirectory('pre-entry',id,snapshot)} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
+            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={(id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
         </FishQualityModuleGroup>
@@ -830,7 +831,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           {value:'mined',label:'挖掘库',count:countSignals(batch.filter(r=>hasSource(r,'mined')))},
           {value:'fish',label:'鱼舱',count:countSignals(batch.filter(r=>hasSource(r,'fish')))},
         ]}/>
-        {directoryChoice&&<span className="text-[10px] text-muted-foreground" data-testid="quality-active-directory">已选目录：{directoryChoice.id==='filter-legacy'?'历史记录':directoryChoice.kind==='mined'?directoryChoice.id.replace('mining-family-','')+' 系列':formatUTC8(directoryChoice.kind==='filter'?study.filterLibrary?.rounds.find(r=>r.id===directoryChoice.id)?.startedAt??0:state.preEntry?.library.rounds.find(r=>r.id===directoryChoice.id)?.startedAt??0)}</span>}
+        {directoryChoice&&<span className="text-[10px] text-muted-foreground" data-testid="quality-active-directory">已选目录{directoryIds.length>1?`（${directoryIds.length}）`:''}：{directoryIds.map(id=>id==='filter-legacy'?'历史记录':directoryChoice.kind==='mined'?id.replace('mining-family-','')+' 系列':formatUTC8(directoryChoice.kind==='filter'?study.filterLibrary?.rounds.find(r=>r.id===id)?.startedAt??0:state.preEntry?.library.rounds.find(r=>r.id===id)?.startedAt??0)).join('、')}</span>}
         <span className="relative shrink-0"><select aria-label="鱼质量的月份" title="按信号发生月份筛选。可在挖掘库按实际挖掘日期搜索，再带到组合表。" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
         <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · </>}</span>{outsideHint}<FishQualityInfo label="处理范围说明"><p>开始筛选、开始监测只处理当前筛选（来源、月份、探测算法、标的）下已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>
