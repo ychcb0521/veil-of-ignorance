@@ -4,6 +4,7 @@ import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
+import { compatibleHoldingParameterOrder } from './qualityPlanParameterCompatibility';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -153,7 +154,20 @@ export function freezeSavedPlans(previous: readonly QualityGroup[] | undefined, 
   });
 }
 /** 方案冻结的版本与当前代码的差异；没冻结过的旧方案视为当前版本。 */
-export const planVersionChanges = (plan: QualityGroup): PlanVersionChange[] => plan.frozenVersions ? comparePlanVersions(plan.frozenVersions, qualityPlanVersions(body(plan))) : [];
+export function planVersionChanges(plan: QualityGroup): PlanVersionChange[] {
+  if (!plan.frozenVersions) return [];
+  const current = body(plan);
+  return comparePlanVersions(plan.frozenVersions, qualityPlanVersions(current)).filter(change => {
+    const path = change.key.split(':'), key = path.pop();
+    if (key !== 'hard-stop-params' || !change.from || !change.to) return true;
+    let branch = current;
+    for (const part of path) {
+      if (!branch.router || (part !== 'structure' && part !== 'attack')) return true;
+      branch = branch.router[part];
+    }
+    return !compatibleHoldingParameterOrder(branch.holdingVetoes, change.from);
+  });
+}
 /**
  * 【用户要求】2026-11-03 模板里 11-01 之前形态的方案（带入场距离）只可能是旧引擎算的：标上旧引擎，
  * 换掉 11-03「从战役存模板」按当前代码误记的版本清单。这样新建出来的方案按 10-31 引擎算，结果与原战役一致。
