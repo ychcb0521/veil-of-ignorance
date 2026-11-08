@@ -71,7 +71,7 @@ it('returns a durable, self-explaining veto at a later add even after the immedi
  expect(planVersionChanges(frozen).length).toBeGreaterThan(0);
 });
 it('actually prevents a calculator fill, preserves the disabled path, and resumes to the same veto evidence',async()=>{
- const M=60000,points=[80,100,95,97,95,99,99],def={id:'late-add',name:'late-add',short:'add',definition:'',formula:`raw=if(T>=${T+20*M},1,0)`,scale:1,unit:'',positive:'1',control:'0',interval:'1m'};
+ const M=60000,points=[80,100,95,97,95,99,99],def={id:'late-add',name:'late-add',short:'add',definition:'',formula:`raw=if(T>=${T+20*M},1,0)`,scale:1,unit:'',positive:'1',control:'0',interval:'1m' as const};
  const snapshot={featureId:def.id,definitionKey:definitionKey(def),statistic:'raw',interval:'1m',scale:1,threshold:.5,cutoffMs:T,average:0,cbi2:0,startAverage:0,previousAverage:0};
  const sample:QualitySample={id:'a',enteredAt:T,basis:'signal',importedAt:T,groups:[],source:{id:'s',symbol:'TESTUSDT',timeMs:T,timeLabel:'',fallbackZone:''}};
  const group=(enabled:boolean):QualityGroup=>({id:'g',label:'test',metric:'raw',snapshot,rule:{metric:'raw',direction:'<',threshold:-1},execution:'intrabar-1m',mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},addition:{...defaultQualityAddition(),enabled:true,source:'custom',condition:{id:'trigger',label:'late',metric:'raw',direction:'>',threshold:.5,enabled:true,snapshot},entryVetoes:[{kind:'double-drop',enabled,pct:4}]}});
