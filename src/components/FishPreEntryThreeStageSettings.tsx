@@ -117,7 +117,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
         <p className="text-[11px] font-medium">硬性终止</p><FishQualityHoldingVetoEditor entry compact labelPrefix="三阶硬性终止 " draft={hardDrafts[active.id]??holdingVetoDraft(c.hardVetoes)} setDraft={draft=>setHardDrafts({...hardDrafts,[active.id]:draft})}/>
       </section>
       <details className="text-[11px]"><summary className="cursor-pointer">观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
-      {active.frozenVersions&&<details className="text-[11px]"><summary className="cursor-pointer">已保存版本</summary><PlanVersionList plan={active}/></details>}
+      {active.frozenVersions&&<details className="text-[11px]"><summary className="cursor-pointer">已保存版本</summary><PlanVersionList plan={active} draft/></details>}
     </>}
     <label className="flex items-center gap-2 text-[11px]">筛选时长<input aria-label="三阶筛选时长（小时）" className={field+' w-20'} type="number" min="0" max="8784" value={hours} onChange={e=>setHours(e.target.value)}/>小时，0 为至可用行情末尾</label>
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}

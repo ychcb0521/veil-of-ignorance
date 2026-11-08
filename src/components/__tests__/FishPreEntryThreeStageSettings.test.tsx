@@ -1,3 +1,4 @@
+import {ModuleErrorBoundary} from '../ModuleErrorBoundary';
 import {freezeQualityPlan} from '@/lib/fish/qualityPlanVersions';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -11,7 +12,7 @@ import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.restoreAllMocks();localStorage.clear();});
 function setup(){
   const plan=makeQualitySellPlan(qualityFilterChoices(BUILTIN_FEATURES)[0].key,'>',0,BUILTIN_FEATURES,undefined,'old');
   plan.label='旧版资产';plan.preEntryConditions=emptyPreEntryConditions();
@@ -85,4 +86,24 @@ it('uses the same template picker for screening only and replaces the sole draft
 });
 it('offers save-as-template for the already saved current screening scheme',()=>{
  const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:'把当前筛选方案存为模板'}));fireEvent.change(screen.getByLabelText('模板名称'),{target:{value:'我的三阶模板'}});fireEvent.click(screen.getByRole('button',{name:'保存模板'}));expect(f.savePlanTemplate).toHaveBeenCalledWith(f.current.id,'我的三阶模板');expect(f.configure).not.toHaveBeenCalled();
+});
+
+it('keeps the saved screening editor mounted when a numeric threshold is cleared before replacement',()=>{
+ vi.spyOn(console,'error').mockImplementation(()=>{});const f=singleFixture(),p=f.current;p.preEntryThreeStage!.required=[{id:'required',label:'必要数值',metric:p.metric,snapshot:p.snapshot,enabled:true,direction:'>',threshold:1,timing:'intrabar'}];p.frozenVersions=freezeQualityPlan(p).frozenVersions;const before=structuredClone(f.state.preEntry!.library);
+ render(<ModuleErrorBoundary label="鱼质量" backgroundTasks><TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider></ModuleErrorBoundary>);
+ fireEvent.change(screen.getByLabelText('必要条件 1 门槛'),{target:{value:''}});expect(screen.queryByText('鱼质量显示暂时异常')).not.toBeInTheDocument();expect(screen.getByTestId('pre-entry-three-stage-settings')).toBeInTheDocument();expect(f.state.preEntry!.library).toEqual(before);expect(f.configure).not.toHaveBeenCalled();
+});
+
+it('allows intermediate inputs across saved numeric controls, blocks invalid saves and preserves every stored snapshot',()=>{
+ vi.spyOn(console,'error').mockImplementation(()=>{});const f=singleFixture(),p=f.current,c=p.preEntryThreeStage!,condition={id:'required',label:'必要数值',metric:p.metric,snapshot:p.snapshot,enabled:true,direction:'>' as const,threshold:1,timing:'intrabar' as const};
+ c.required=[condition];c.detectors=[{id:'detector',stricterPct:0,match:'all'}];c.sellRules=[{id:'seller',label:'退出条件',enabled:true,expression:{condition:{...structuredClone(condition),id:'seller-condition'}},confirmation:{samples:1,minutes:1}}];p.frozenVersions=freezeQualityPlan(p).frozenVersions;
+ f.state.study.planTemplates=[{id:'protected',name:'原样保留',savedAt:1,updatedAt:1,plan:structuredClone(p)}];const library=structuredClone(f.state.preEntry!.library),templates=structuredClone(f.state.study.planTemplates),done=vi.fn();
+ render(<ModuleErrorBoundary label="鱼质量" backgroundTasks><TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={done}/></TooltipProvider></ModuleErrorBoundary>);
+ for(const [label,value] of [['必要条件 1 门槛','-0.25'],['原探测 1 提高幅度','2.5'],['完整卖出 1 确认次数','3'],['完整卖出 1 确认周期','5'],['卖出 1 门槛','0.75'],['三阶准入 箱体确认 n','4'],['三阶准入 几何窗口（分钟）','60'],['三阶准入 上涨期防守冗余','0.75']]){
+   fireEvent.change(screen.getByLabelText(label),{target:{value:''}});expect(screen.queryByText('鱼质量显示暂时异常')).not.toBeInTheDocument();expect(screen.getByTestId('plan-version-draft-pending')).toHaveTextContent('已保存版本保持不变');
+   fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));expect(f.configure).not.toHaveBeenCalled();expect(f.state.preEntry!.restart).not.toHaveBeenCalled();expect(done).not.toHaveBeenCalled();
+   fireEvent.change(screen.getByLabelText(label),{target:{value}});expect(screen.queryByTestId('plan-version-draft-pending')).not.toBeInTheDocument();
+ }
+ fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));expect(f.configure).toHaveBeenCalledOnce();expect(f.state.preEntry!.restart).toHaveBeenCalledOnce();expect(done).toHaveBeenCalledOnce();
+ const saved=f.configure.mock.calls[0][0][0];expect(saved.preEntryThreeStage.required[0].threshold).toBe(-0.25);expect(saved.preEntryThreeStage.guard.rule.structure.definition.DBL5_config.guard_trend_atr).toBe(.75);expect(saved.preEntryThreeStage.sellRules[0].confirmation).toEqual({samples:3,minutes:5});expect(f.state.preEntry!.library).toEqual(library);expect(f.state.study.planTemplates).toEqual(templates);
 });

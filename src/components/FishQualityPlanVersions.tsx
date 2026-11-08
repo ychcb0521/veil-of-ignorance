@@ -4,12 +4,16 @@
  */
 import type { QualityGroup } from '@/lib/fish/quality';
 import { BOX_ALGORITHM_VERSIONS } from '@/lib/fish/boxAlgorithmVersions';
-import { planVersionChanges, qualityPlanVersions } from '@/lib/fish/qualityPlanVersions';
+import { planVersionChanges, qualityPlanVersions, type PlanVersionChange, type PlanVersionEntry } from '@/lib/fish/qualityPlanVersions';
 
-export function PlanVersionList({ plan }: { plan: QualityGroup }) {
-  const entries = plan.frozenVersions ?? qualityPlanVersions(plan), changes = planVersionChanges(plan), changed = new Set(changes.map(c => c.key));
+/** 编辑草稿可能暂时无效；仅允许展示层等待输入，保存与执行仍使用原严格校验。 */
+export function PlanVersionList({ plan,draft=false }: { plan: QualityGroup;draft?:boolean }) {
+  let entries:readonly PlanVersionEntry[]=plan.frozenVersions??[],changes:PlanVersionChange[]=[],draftError='';
+  try{entries=plan.frozenVersions??qualityPlanVersions(plan);changes=planVersionChanges(plan);}
+  catch(error){if(!draft)throw error;draftError=error instanceof Error?error.message:'参数尚未填写完整';}
+  const changed = new Set(changes.map(c => c.key));
   return <div className="space-y-1.5 text-[11px]" data-testid="plan-version-list">
-    {changes.length > 0
+    {draftError?<p role="status" className="rounded bg-muted/50 px-2 py-1 text-[10.5px] text-muted-foreground" data-testid="plan-version-draft-pending">参数尚未填写完整：{draftError}。完成输入后再保存；已保存版本保持不变。</p>:changes.length > 0
       ? <p className="rounded bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">有 {changes.length} 项与当前代码的版本不同，不能按这份设置运行：{changes.map(c => `${c.part}「${c.name}」${c.from ?? '（无）'} → ${c.to ?? '（已不存在）'}`).join('；')}</p>
       : <p className="text-[10px] text-muted-foreground">{plan.frozenVersions ? '保存时冻结的版本，与当前代码一致' : '尚未冻结（按当前代码显示）'}</p>}
     <ul className="space-y-1">{entries.map(e => <li key={e.key} className={`rounded px-1.5 py-1 ${changed.has(e.key) ? 'bg-destructive/5' : ''}`} data-testid={`plan-version-${e.key}`}>
