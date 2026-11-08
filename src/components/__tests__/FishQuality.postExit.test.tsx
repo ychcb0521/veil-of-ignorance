@@ -9,7 +9,7 @@ import type {FishQualityState} from '@/hooks/useFishQuality';
 const T=Date.UTC(2026,9,20),M=60000;
 afterEach(()=>{cleanup();localStorage.clear();sessionStorage.clear();vi.useRealTimers();});
 function state(){
- let study=enableQualityComparison(importQualityLibrary(newQualityStudy(),[0,1].map(i=>({id:'s'+i,symbol:'TEST'+i+'USDT',timeMs:T+i*M,timeLabel:'',fallbackZone:''}))));
+ const study=enableQualityComparison(importQualityLibrary(newQualityStudy(),[0,1].map(i=>({id:'s'+i,symbol:'TEST'+i+'USDT',timeMs:T+i*M,timeLabel:'',fallbackZone:''}))));
  const rows=qualityComparisonRows(study);
  study.results=rows.flatMap((row,i)=>study.sellPlans!.map(plan=>({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T+6*3600000,status:'closed' as const,entryTime:T+i*M,entryPrice:100,endTime:T+(i+10)*M,endPrice:110+i,returnPct:10+i,heldHours:1})));
  study.postExitReadings=rows.flatMap((row,i)=>study.sellPlans!.map(plan=>{const result=study.results.find(r=>r.sampleId===row.id&&r.groupId===plan.id)!;return {key:qualityPostExitKey(row.source,result,plan)!,evaluatedAt:T+7*3600000,exitTime:result.endTime!,exitPrice:result.endPrice!,startMs:result.endTime!,excludedExitMinute:false,windows:POST_EXIT_HOURS.map(hours=>({hours,status:'ready' as const,peakPct:hours+i+1,drawdown2Pct:hours/10+i}))} satisfies QualityPostExitReading;}));
@@ -20,9 +20,9 @@ it('adds exactly ten columns per expanded sub-algorithm, aligns all header/body 
  expect(screen.queryAllByTestId('quality-post-exit-header')).toHaveLength(0);expect(screen.getAllByTestId('quality-post-exit-folded')).toHaveLength(2);
  fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖后反事实'}));
  expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);expect(screen.getAllByTestId('quality-post-exit-value')).toHaveLength(20);
- expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','25');
+ expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','23');
  expect(screen.getByRole('button',{name:'展开'+b.label+'卖后反事实'})).toHaveAttribute('aria-expanded','false');
- for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getAllByRole('cell')).toHaveLength(34);
+ for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getAllByRole('cell')).toHaveLength(32);
  expect(s.postExit.request).toHaveBeenCalledWith([a.id],expect.any(Array),true);
  fireEvent.click(screen.getByRole('button',{name:'展开'+b.label+'卖后反事实'}));expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(20);
  fireEvent.click(screen.getByRole('button',{name:'收起'+a.label+'卖后反事实'}));expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);

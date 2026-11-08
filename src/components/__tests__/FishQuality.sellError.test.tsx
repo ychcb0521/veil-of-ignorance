@@ -5,10 +5,11 @@ import {newQualityStudy,importQualityLibrary,qualityComparisonRows,qualityResult
 import {enableQualityComparison} from '@/lib/fish/qualityComparison';
 import {POST_EXIT_HOURS,qualityPostExitKey} from '@/lib/fish/qualityPostExit';
 import {buildQualitySheets} from '@/lib/fish/qualityExport';
+import {saveQualityReturn,armQualityReturn,finishQualityReturn} from '@/lib/fish/qualityReturn';
 import type {FishQualityState} from '@/hooks/useFishQuality';
 const T=Date.UTC(2026,9,20),M=60000,NOW=T+9*3600000;
 beforeEach(()=>{vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(NOW);});
-afterEach(()=>{cleanup();localStorage.clear();sessionStorage.clear();vi.useRealTimers();});
+afterEach(()=>{cleanup();finishQualityReturn();window.history.replaceState(null,'');localStorage.clear();sessionStorage.clear();vi.useRealTimers();});
 function fill(study:FishQualityStudy){
  study.sellPlans=study.sellPlans!.map(p=>({...p,rule:{metric:p.metric,direction:'<' as const,threshold:.5}}));
  study.results=qualityComparisonRows(study).flatMap((row,i)=>study.sellPlans!.map((p,j)=>{const end=T+(10+i+j)*M;return {key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:NOW,status:'closed' as const,entryTime:row.enteredAt!,entryPrice:100,endTime:end,endPrice:110,returnPct:10,pnl:10,exitReading:.4,...(i===3?{}:{exitSnapshot:{barOpenTime:end-M,observedAt:end,...(i===2?{cause:{id:'stop',kind:'static-drawdown' as const,label:'静态止损',direction:'>=' as const,threshold:5}}:{})}})};}));
@@ -17,27 +18,42 @@ function fill(study:FishQualityStudy){
 }
 function state(){const study=fill(enableQualityComparison(importQualityLibrary(newQualityStudy(),[0,1,2,3].map(i=>({id:'e'+i,symbol:'SERR'+i+'USDT',timeMs:T+i*M,timeLabel:'',fallbackZone:''})))));return {study,ready:true,running:false,progress:null,filterRunning:false,filterProgress:null,filterError:'',warning:'',error:'',start:vi.fn(),restart:vi.fn(),cancel:vi.fn(),startFilter:vi.fn(),cancelFilter:vi.fn(),setRule:vi.fn(),setCombo:vi.fn(),setObserveHours:vi.fn(),selectSell:vi.fn(),setSelectedRows:vi.fn(),setPriority:vi.fn(),setScope:vi.fn(),setFilters:vi.fn(),setHoldingVetoes:vi.fn(),setSellPlans:vi.fn(),postExit:{owner:'test',running:false,progress:null,error:'',request:vi.fn(),cancel:vi.fn()}} satisfies FishQualityState;}
 const row=(i:number)=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent!.includes('SERR'+i+'USDT'))!;
-it('places five independently folded seller labels before counterfactuals and requests only evidenced algorithm exits',()=>{
- const s=state(),[a,b]=s.study.sellPlans!;const view=render(<FishQuality state={s}/>);
- expect(screen.getAllByTestId('quality-sell-error-folded')).toHaveLength(2);expect(screen.queryAllByTestId('quality-sell-error-header')).toHaveLength(0);
- const held=screen.getByRole('button',{name:'按'+a.label+'持仓时间排序'}).closest('th')!;expect(held.nextElementSibling).toHaveAttribute('data-testid','quality-sell-error-folded');expect(held.nextElementSibling!.nextElementSibling).toHaveAttribute('data-testid','quality-post-exit-folded');
- fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖出误报'}));expect(screen.getAllByTestId('quality-sell-error-header')).toHaveLength(5);expect(screen.getAllByTestId('quality-post-exit-folded')).toHaveLength(2);expect(screen.getByRole('button',{name:'展开'+b.label+'卖出误报'})).toHaveAttribute('aria-expanded','false');expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','20');
- expect(within(row(0)).getAllByTestId('quality-sell-error-item').map(x=>x.dataset.label)).toEqual(['false-exit','not-met','false-exit','not-met','false-exit']);expect(within(row(2)).getAllByTestId('quality-sell-error-item').every(x=>x.dataset.label==='other-exit')).toBe(true);expect(within(row(3)).getAllByTestId('quality-sell-error-item').every(x=>x.dataset.label==='unknown-cause')).toBe(true);
- const eligible=qualityComparisonRows(s.study).slice(0,2).map(r=>r.id);expect(s.postExit.request).toHaveBeenCalledWith([a.id],expect.arrayContaining(eligible),true);for(const c of s.postExit.request.mock.calls)expect(c[1]).toHaveLength(2);
- view.rerender(<FishQuality state={{...s,study:{...s.study,sellPlans:s.study.sellPlans!.map(p=>p.id===a.id?{...p,label:'改名方案'}:p)}}}/>);expect(screen.getByRole('button',{name:'收起改名方案卖出误报'})).toHaveAttribute('aria-expanded','true');
- fireEvent.click(screen.getByRole('button',{name:'收起改名方案卖出误报'}));expect(screen.queryAllByTestId('quality-sell-error-header')).toHaveLength(0);
+it('removes seller-error columns and keeps counterfactuals directly after holding time',()=>{
+ const s=state(),a=s.study.sellPlans![0];render(<FishQuality state={s}/>);
+ expect(screen.queryByText('卖出误报')).not.toBeInTheDocument();
+ expect(screen.queryAllByTestId('quality-sell-error-folded')).toHaveLength(0);
+ expect(screen.queryAllByTestId('quality-sell-error-header')).toHaveLength(0);
+ expect(screen.queryAllByTestId('quality-sell-error-summary')).toHaveLength(0);
+ const held=screen.getByRole('button',{name:'按'+a.label+'持仓时间排序'}).closest('th')!;
+ expect(held.nextElementSibling).toHaveAttribute('data-testid','quality-post-exit-folded');
+ expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','14');
+ expect(s.postExit.request).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖后反事实'}));
+ expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','23');
+ const columns=screen.getByTestId('quality-fish-table').querySelectorAll('col').length;
+ for(const bodyRow of screen.getAllByTestId('quality-fish-row'))expect(within(bodyRow).getAllByRole('cell')).toHaveLength(columns);
+ expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);
 });
-it('sorts each horizon and exports the same five tags while folded, updating from cache without rerunning trades',()=>{
- const s=state(),a=s.study.sellPlans![0],rows=qualityComparisonRows(s.study),sheets=buildQualitySheets(s.study,rows),main=sheets[0],runs=sheets.find(s=>s.name==='运行结果')!;
- const cols=POST_EXIT_HOURS.map(h=>main.columns.findIndex(c=>c.header===a.label+' · 卖后'+h+'h 卖出误报'));expect(cols.map(c=>main.rows[0][c])).toEqual(['卖出误报','未达误报','卖出误报','未达误报','卖出误报']);expect(main.columns[cols[4]+1].header).toContain('卖后0.5h 峰值涨幅');expect(main.rows.every(r=>r.length===main.columns.length)).toBe(true);expect(runs.rows.every(r=>r.length===runs.columns.length)).toBe(true);expect(runs.rows).toHaveLength(8);
- const runCol=runs.columns.findIndex(c=>c.header==='卖后0.5h 卖出误报');expect(runs.rows.map(r=>r[runCol])).toContain('卖出误报');expect(runs.rows.map(r=>r[runCol])).toContain('非算法触发');
- const view=render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖出误报'}));const sort=screen.getByRole('button',{name:'按'+a.label+'卖后0.5h卖出误报排序'});fireEvent.click(sort);expect(screen.getAllByTestId('quality-fish-row').slice(0,2).map(r=>r.textContent!.match(/SERR\dUSDT/)![0])).toEqual(['SERR0USDT','SERR1USDT']);fireEvent.click(sort);expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('SERR1USDT');
- const next={...s,study:{...s.study,postExitReadings:s.study.postExitReadings!.map(r=>({...r,windows:r.windows.map(w=>({...w,peakPct:1,drawdown2Pct:1}))}))}};view.rerender(<FishQuality state={next}/>);expect(within(row(0)).getAllByTestId('quality-sell-error-item').every(x=>x.dataset.label==='not-met')).toBe(true);expect(s.start).not.toHaveBeenCalled();expect(s.restart).not.toHaveBeenCalled();
+it('omits removed fields from exports while retaining counterfactual values and aligned rows',()=>{
+ const s=state(),before=structuredClone(s.study),a=s.study.sellPlans![0];
+ const sheets=buildQualitySheets(s.study,qualityComparisonRows(s.study)),main=sheets[0],runs=sheets.find(s=>s.name==='运行结果')!;
+ for(const sheet of [main,runs]){
+  expect(sheet.columns.some(c=>c.header.includes('卖出误报'))).toBe(false);
+  expect(sheet.rows.every(r=>r.length===sheet.columns.length)).toBe(true);
+ }
+ const peak=main.columns.findIndex(c=>c.header===a.label+' · 卖后0.5h 峰值涨幅 %（卖出价基准）');
+ expect(main.rows[0][peak]).toBe(4);
+ expect(main.columns[peak+1].header).toContain('静态最大回撤2');
+ expect(runs.rows).toHaveLength(8);expect(s.study).toEqual(before);
 });
-it('distinguishes future windows and missing data from negative findings even if a ready cache exists',()=>{
- const s=state(),a=s.study.sellPlans![0];vi.setSystemTime(T+60*M);s.study.postExitReadings=s.study.postExitReadings!.map(r=>({...r,windows:r.windows.map(w=>w.hours===.5?{hours:w.hours,status:'error' as const,error:'缺根'}:w)}));render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖出误报'}));const tags=within(row(0)).getAllByTestId('quality-sell-error-item');expect(tags[0]).toHaveTextContent('缺数据');expect(tags[1]).toHaveTextContent('待满1h');expect(tags[4]).toHaveTextContent('待满6h');
-});
-// 2026-11-02 同一信号不同买入时间各占一行（不再合并成区间）
-it('keeps each buy in its own row and does not duplicate one exit for detector rows',()=>{
- const s=state(),first=s.study.samples[0];s.study={...s.study,samples:[first,{...first,id:'again',enteredAt:first.enteredAt!+M}]};fill(s.study);const a=s.study.sellPlans![0];render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖出误报'}));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);const cells=screen.getAllByTestId('quality-sell-error-value');expect([cells[0],cells[5]].flatMap(c=>within(c).getAllByTestId('quality-sell-error-item').map(x=>x.dataset.label)).sort()).toEqual(['false-exit','not-met']);fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);expect(screen.getAllByTestId('quality-sell-error-item')).toHaveLength(10);
+it('ignores legacy seller-error expansion and sorting without requesting hidden background observations',()=>{
+ const s=state(),a=s.study.sellPlans![0];
+ window.history.replaceState({key:'legacy-sell-error'},'');
+ saveQualityReturn({ui:{open:true,query:'',month:'',origin:'',detectorExpanded:false,sellErrorExpanded:[a.id],postExitExpanded:[],sort:'sell-error:0.5:'+a.id,ascending:false,tableTop:0},scroll:[]},NOW);
+ expect(armQualityReturn(NOW)).toBe(true);
+ render(<FishQuality state={s}/>);
+ expect(screen.queryByText('卖出误报')).not.toBeInTheDocument();
+ expect(screen.getByRole('columnheader',{name:/信号时间/})).toHaveAttribute('aria-sort','descending');
+ expect(s.postExit.request).not.toHaveBeenCalled();
+ expect(screen.queryByTestId('quality-post-exit-progress')).not.toBeInTheDocument();
 });
