@@ -7,7 +7,7 @@ import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQualityModule';
 
 afterEach(cleanup);
-it('shows completed attempts and data errors instead of a stale progress count, and offers retry', () => {
+it('keeps scan controls compact and offers data retries inside the action menu', () => {
   const resume = vi.fn(), time = Date.UTC(2026, 2, 29, 5);
   const records: PreEntryRecord[] = ['matched','error','unmatched'].map((status, i) => ({
     id: String(i), roundId: 'r', status: status as PreEntryRecord['status'], startTime: time, cursor: time,
@@ -17,13 +17,15 @@ it('shows completed attempts and data errors instead of a stale progress count, 
     rounds: [{ id: 'r', engine: PRE_ENTRY_ZERO_TRADE_VERSION, state: 'complete', filters: [], hours: 0, startedAt: 1, updatedAt: 1 }] },
     ready: true, running: false, progress: { done: 1, total: 3 }, error: '', resume } } as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={0} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  expect(screen.getByRole('status')).toHaveTextContent('筛选完成 3/3');
-  expect(screen.getByRole('status')).toHaveTextContent('已满足 1 · 缺数据 1');
-  fireEvent.click(screen.getByText('重试缺数据记录'));
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('打开筛选记录')).not.toBeInTheDocument();
+  expect(screen.queryByText(/本轮沿用/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
+  fireEvent.click(screen.getByText('重试本轮缺数据（1）'));
   expect(resume).toHaveBeenCalledWith('r');
 });
 
-it('admits only matched records and keeps errors and pending work in separate scan records', async () => {
+it('shows only admitted records and preserves all underlying scan records', async () => {
   const time=Date.UTC(2026,2,29,5), statuses=['matched','unmatched','warming','error','paused','queued','scanning'] as const;
   const records:PreEntryRecord[]=statuses.map((status,i)=>({id:status,roundId:'r',status,startTime:time,cursor:time,matchedAt:status==='matched'?time+60000:undefined,updatedAt:i,readings:[],detail:status==='error'?'真实行情缺口':undefined,
     sample:{id:status,source:{id:status,symbol:`TURING:TURING ${i+1}`,timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time}}));
@@ -38,11 +40,7 @@ it('admits only matched records and keeps errors and pending work in separate sc
   fireEvent.click(within(admitted).getByText('在组合表中勾选'));
   expect(state.selectPreEntryRecords).toHaveBeenCalledWith(['matched']);
   await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  fireEvent.click(screen.getByLabelText('打开筛选记录'));
-  const audit=screen.getByRole('dialog');
-  expect(within(audit).getAllByTestId('pre-entry-scan-row')).toHaveLength(7);
-  expect(within(audit).getByText('真实行情缺口')).toBeInTheDocument();
-  expect(within(audit).queryByText('在组合表中勾选')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('打开筛选记录')).not.toBeInTheDocument();
   expect(records).toHaveLength(7);
 });
 
@@ -50,7 +48,9 @@ it('offers an explicit new round for an old failed scan instead of silently chan
   const restart=vi.fn(), time=Date.UTC(2026,2,29,5);
   const state={ready:true,preEntry:{library:{...emptyPreEntryLibrary(),rounds:[{id:'old',engine:PRE_ENTRY_INTRABAR_VERSION,state:'paused',filters:[],hours:0,startedAt:1,updatedAt:1}],records:[{id:'error',roundId:'old',status:'error',startTime:time,cursor:time,updatedAt:1,readings:[],sample:{source:{symbol:'TURING:TURING 50',timeMs:time}}}]},ready:true,running:false,error:'',progress:null,restart,resume:vi.fn()}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  fireEvent.click(screen.getByText('保留旧轮次，用新版重新筛选'));
+  expect(screen.queryByText(/本轮沿用/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
+  fireEvent.click(screen.getByText('从头重新筛选'));
   expect(restart).toHaveBeenCalledWith(0); expect(state.preEntry!.resume).not.toHaveBeenCalled();
 });
 it('orders start, conditions and selected library like holding monitoring, with duration inside settings', async () => {

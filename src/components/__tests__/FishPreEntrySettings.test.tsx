@@ -18,6 +18,8 @@ function setup(){
 }
 it('offers all market veto groups using the holding controls and explicitly disables position-only choices',()=>{
   const f=setup();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={f.done}/></TooltipProvider>);
+  expect(screen.getByRole('heading',{name:/筛选算法/})).toBeInTheDocument();
+  expect(screen.queryByText(/买入算法|寻找买入时机/)).not.toBeInTheDocument();
   for(const label of ['长上影线','向下大插针','高震荡','冲高回落','冲高回落·仅ATR','筛选期间急跌'])expect(screen.getByLabelText(`启用入选前否决 ${label}`)).toBeInTheDocument();
   for(const section of ['pre-entry-sell-veto','pre-entry-hard-veto']){
     const area=within(screen.getByTestId(section));
@@ -36,7 +38,7 @@ it('copies unsaved per-plan veto settings and saves independently from static an
   fireEvent.change(hard.getByLabelText('筛选硬性终止 持仓否决 1 指标'),{target:{value:'drop-1m'}});
   fireEvent.change(hard.getByLabelText('筛选硬性终止 持仓否决 1 阈值'),{target:{value:'5'}});
   fireEvent.click(hard.getByLabelText('筛选硬性终止 启用持仓否决 1'));
-  fireEvent.click(screen.getByLabelText('复制买入算法 1'));
+  fireEvent.click(screen.getByLabelText('复制筛选算法 1'));
   fireEvent.click(screen.getByRole('button',{name:'保存方案'}));
   expect(f.configure).toHaveBeenCalledOnce();
   const plans=f.configure.mock.calls[0][0];expect(plans).toHaveLength(2);

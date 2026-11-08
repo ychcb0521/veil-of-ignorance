@@ -783,7 +783,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           </PopoverContent></Popover>
           <FishFilterLibrary study={study}/>
           </FishQualityModule>
-          {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls" summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套买入方案独立筛选，入选算法与确认条件同分钟满足、且没有启用的否决触发时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
+          {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls" summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套筛选方案独立筛选，筛选算法与确认条件同分钟满足、且没有启用的否决触发时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
             <FishPreEntryMonitor state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
               onSelected={()=>{setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}}/>
           </FishQualityModule>}

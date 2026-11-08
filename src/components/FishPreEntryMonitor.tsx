@@ -7,7 +7,7 @@ import { qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseActi
 import { Popover, PopoverTrigger } from './ui/popover';
 import { FishPopoverContent as PopoverContent } from './FishPopoverContent';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { preEntrySignal, preEntryRecordPending, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryStatus, type PreEntryRound } from '@/lib/fish/preEntryMonitor';
+import { preEntrySignal, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryStatus, type PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { PRE_ENTRY_CONDITIONS_VERSION, preEntryConditionText, preEntryVetoes } from '@/lib/fish/preEntryConditions';
@@ -31,11 +31,6 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const records = [...monitor.library.records].sort((a, b) => b.updatedAt - a.updatedAt);
   const latestRecords = records.filter(r => r.roundId === latestRound?.id);
   const missingCount = latestRecords.filter(r => r.status === 'error').length;
-  const settledCount = latestRecords.filter(r => !preEntryRecordPending(r)).length;
-  const matchedCount = latestRecords.filter(r => r.status === 'matched').length;
-  const progressDone = monitor.running ? monitor.progress?.done ?? settledCount : settledCount;
-  const progressTotal = latestRecords.length || monitor.progress?.total || 0;
-  const progressLabel = monitor.running ? '筛选中' : resumable ? '已暂停' : '筛选完成';
   const hours = monitor.library.settings?.hours ?? 0;
   const filtersFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId), plan=round?.plans?.find(p=>p.id===r.planId);return plan?preEntryPlanFilters(plan):round?.filters??[]; };
   const exclusionsFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId);return round?.engine===PRE_ENTRY_CONDITIONS_VERSION?round.plans?.find(p=>p.id===r.planId)?.preEntryConditions:undefined; };
@@ -70,32 +65,23 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
     <div role="group" aria-label="筛选运行" className="inline-flex h-6 shrink-0 items-stretch">
       {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={monitor.pause}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
         : <button type="button" className={qualitySplitPrimaryAction} disabled={resumable ? !monitor.ready || !state.ready : !canStart}
-          title={resumable ? '继续上轮：沿用已冻结的信号和条件，从暂停处继续筛选' : !filtersOn ? '先设置并启用买前条件' : !selectedCount ? '当前筛选下没有已勾选的信号' : `对已勾选的 ${selectedCount} 条信号向后筛选，首次满足全部条件时保存到入选库`}
+          title={resumable ? '继续上轮：沿用已冻结的信号和条件，从暂停处继续筛选' : !filtersOn ? '先设置并启用筛选条件' : !selectedCount ? '当前筛选下没有已勾选的信号' : `对已勾选的 ${selectedCount} 条信号向后筛选，首次满足全部条件时保存到入选库`}
           onClick={() => void (resumable ? monitor.resume(resumable.id) : monitor.start(Number(hours)))}><Filter aria-hidden className="h-3 w-3"/>开始筛选</button>}
-      <Popover open={menuOpen} onOpenChange={setMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始筛选的其他方式" disabled={!monitor.ready || !state.ready}
+      <Popover open={menuOpen} onOpenChange={setMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始筛选的其他方式" disabled={!state.ready}
         className={`${qualitySplitMenuAction} ${monitor.running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-1"><button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新筛选</span><span className="text-[10px] leading-relaxed text-muted-foreground">保留历史轮次，按当前勾选和条件重新开始{monitor.running ? '；先停止当前批次' : ''}。</span></button>
-          {latestRound && missingCount > 0 && <button type="button" disabled={monitor.running} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
+          {latestRound && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
+          {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取入选库…</p>}
+          {monitor.error && <p role="alert" className="px-2 py-1.5 text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</p>}
         </PopoverContent>
       </Popover>
     </div>
-    <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="动态筛选条件" title="设置买前筛选条件与时长"><Settings2 aria-hidden className="h-3 w-3"/>条件设置</button></PopoverTrigger>
+    <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="动态筛选条件" title="设置动态筛选条件与时长"><Settings2 aria-hidden className="h-3 w-3"/>条件设置</button></PopoverTrigger>
       <PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
         {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
       </PopoverContent>
     </Popover>
     {renderLibrary(true)}
-    {!!records.length && renderLibrary(false)}
-    {!monitor.ready && !monitor.error && <span role="status" className="text-[10px] text-muted-foreground">正在读取入选库…</span>}
-    {(monitor.progress || latestRecords.length > 0) && <span role="status" className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
-      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${monitor.running ? 'animate-pulse bg-primary' : 'bg-muted-foreground/50'}`}/>
-      {progressLabel} {progressDone}/{progressTotal} {monitor.running && monitor.progress?.current}
-      {!monitor.running && latestRecords.length > 0 && ` · 已满足 ${matchedCount} · 缺数据 ${missingCount}`}
-    </span>}
-    {!monitor.running && resumable && !monitor.progress && !latestRecords.length && <span role="status" className="text-[10px] text-muted-foreground">已暂停 · 点击“开始筛选”继续上轮</span>}
-    {!monitor.running && missingCount > 0 && <span className="text-[10px] text-muted-foreground">缺数据原因见“筛选记录”<button type="button" className="ml-1 text-primary underline" onClick={()=>void monitor.resume(latestRound!.id)}>重试缺数据记录</button></span>}
-    {!monitor.running && latestRound && latestRound.engine !== PRE_ENTRY_CONDITIONS_VERSION && missingCount > 0 && <span className="text-[10px] text-muted-foreground">本轮沿用{engineLabel(latestRound)}；使用入选否决与零成交等待规则请<button type="button" className="ml-1 text-primary underline disabled:opacity-40" disabled={!canStart} onClick={()=>void monitor.restart(Number(hours))}>保留旧轮次，用新版重新筛选</button></span>}
-    {monitor.error && <span role="alert" className="text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</span>}
   </div>;
 }
