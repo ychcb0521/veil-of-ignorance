@@ -479,11 +479,12 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const [manualOpen, setManualOpen] = useState(false);
   const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
   const [directoryChoice,setDirectoryChoice]=useState<QualitySourceDirectory|undefined>(ui?.directory);
+  const [screeningRunId,setScreeningRunId]=useState<string>();
   const [directoryRequests,setDirectoryRequests]=useState<Partial<Record<QualitySourceDirectory['kind'],FishDirectoryRequest>>>({});
   const sourceDefaulted=useRef(!!ui),sourceAccount=useRef(state.account);
   const latestEntry=latestEntryDirectory(state.preEntry?.library,study.monitorLibrary?.directoryEdits),latestEntryId=latestEntry?.id;
   useEffect(()=>{
-    if(sourceAccount.current!==state.account){sourceAccount.current=state.account;sourceDefaulted.current=false;setDirectoryChoice(undefined);setOrigin('');}
+    if(sourceAccount.current!==state.account){sourceAccount.current=state.account;sourceDefaulted.current=false;setDirectoryChoice(undefined);setScreeningRunId(undefined);setOrigin('');}
     if(!archiveView&&ready&&state.preEntry?.ready&&!sourceDefaulted.current&&latestEntryId){setOrigin('pre-entry');setDirectoryChoice({kind:'pre-entry',id:latestEntryId});}
   },[archiveView,ready,state.preEntry?.ready,state.account,latestEntryId]);
   // 【用户要求】2026-10-26「比较卖出和比较探测没必要分开，合并到一起，统一叫做卖出与探测（控制变量法）」：只有一个视图
@@ -518,6 +519,9 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const [screeningStatistics,setScreeningStatistics]=useState(false);
   const screeningResults=useMemo(()=>qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library),[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView]);
   const screeningIndex=useMemo(()=>screeningResultIndex(screeningResults),[screeningResults]);
+  const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running').reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
+  const activeScreeningId=activeScreeningRound?.id,activeScreeningAt=activeScreeningRound?.updatedAt;
+  useEffect(()=>{if(!archiveView&&activeScreeningId){sourceDefaulted.current=true;setScreeningRunId(activeScreeningId);}},[archiveView,activeScreeningId,activeScreeningAt]);
   const screeningRoundId=directoryChoice?.kind==='pre-entry'?directoryChoice.id:undefined;
   const showScreening=!hideScreening&&(!!state.preEntry||study.screeningResults!==undefined);
   const detectorMap = useMemo(() => new Map(study.groups.map(g => [g.id, g])), [study.groups]);
@@ -560,7 +564,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const sortedRows = useMemo(() => {
     const map = resultMap;
     const value = (r: QualitySample): number | string | null => {
-      if(sort.startsWith('screening:')){const value=screeningCell(screeningRowResults(r,screeningIndex,screeningRoundId));return sort==='screening:time'?value.time:sort==='screening:plan'?value.plan==='—'?null:value.plan:value.status==='—'?null:value.status;}
+      if(sort.startsWith('screening:')){const value=screeningCell(screeningRowResults(r,screeningIndex,screeningRoundId,screeningRunId));return sort==='screening:time'?value.time:sort==='screening:plan'?value.plan==='—'?null:value.plan:value.status==='—'?null:value.status;}
       if (sort === 'time') return r.source.timeMs;
       if (sort === 'mined-at') return qualityTableMinedAt(r);
       if (sort === 'symbol') return r.source.symbol;
@@ -595,7 +599,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       const order = typeof a.v === 'string' ? a.v.localeCompare(String(b.v)) : a.v - (b.v as number);
       return order * (ascending ? 1 : -1) || b.r.source.timeMs - a.r.source.timeMs || a.r.id.localeCompare(b.r.id);
     }).map(x => x.r);
-  }, [runScopeRows, sort, ascending, detectorMap, resultMap, plansForSort, filterStatus, filterColumns, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runScopeRows, sort, ascending, detectorMap, resultMap, plansForSort, filterStatus, filterColumns, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows), [sortedRows, detectorExpanded]);
   // 表格为空时探测算法表头不显示：是它们滤空的，就在空状态里写明并给出清除
   const emptyByDetector = !rows.length && activeAlgorithms.length > 0 && searched.length > 0 && narrowed.length === 0;
@@ -673,7 +677,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy)=>{
     if(!state.restoreMonitorStudy)return false;
     const copied=await state.restoreMonitorStudy(snapshot,undefined,true);if(!copied)return false;
-    sourceDefaulted.current=true;setDirectoryChoice({kind,id});setOrigin(kind);setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();return true;
+    sourceDefaulted.current=true;setScreeningRunId(undefined);setDirectoryChoice({kind,id});setOrigin(kind);setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();return true;
   };
   const selectSource=(value:QualityReturnUi['origin'])=>{
     sourceDefaulted.current=true;
@@ -748,7 +752,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
         readQualityTableSheet(table, { selectedOnly: anySelected }),
         qualityPlanDetailSheet(detailPlans),
         qualityTradeDetailSheet(members, detailPlans, (m, p) => qualityRowResult(study, m, p, resultMap)),
-        ...(showScreening?[screeningResultsSheet([...new Map(members.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId)).map(result=>[result.record.id,result])).values()])]:[]),
+        ...(showScreening?[screeningResultsSheet([...new Map(members.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)).map(result=>[result.record.id,result])).values()])]:[]),
       ]);
     } catch (e) { setError(e instanceof Error ? e.message : '导出失败'); }
     finally { setExportAll(false); }
@@ -763,7 +767,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     <FishQualityManual open={manualOpen} onOpenChange={setManualOpen}><><p>点「开始过滤」独立计算买入条件：在捕捞过程右侧查看各指标读数和是否满足条件。读数取买入时刻之前最后一根已收盘 K 线；修改门槛复用已有读数。</p><p>设置卖出算法后，可比较同一批信号的收益，再固定一套卖出规则，比较各探测算法。</p><p>批量挖掘、买前过滤和持仓监测可同时独立运行，各自暂停。点「开始监测」后在后台运行：按开始时的勾选和参数计算，切换选项或页面不会中断；已算完且条件没变的结果直接沿用，只补算缺的和改过的；要全部重算，点「开始监测」右侧的 ▾ 选「从头重新计算」（先将全部现有运行结果独立归档到监测库，保存完成后再重算；时间目录内按当时条件展示，同条件重复重算也各自保留）。改了买入过滤会复用已有结果，修改卖出参数只保存设置并暂停旧参数任务；全部调整完成后，点击「开始监测」按最新参数运行。</p><p>信号库、图灵杯、鱼舱、挖掘库独立并行，均可进入过滤与监测；同标的、同信号时间和入场时间的记录合并显示，保留全部来源。删除一个来源不影响另两个库；有其他来源的下游结果继续保留。信号库和图灵杯按信号时间买入，图灵杯的研究使用独立的离线 K 线。</p><p>历史鱼按捕捞时刻入场（不用信号时间：那是事后才知道会持续下去的起点），实时新鱼按实际发现时点入场；随后首根 1 分钟 K 线开盘价近似买入。已有历史样本按此口径重新评估，卖出规则保留。</p><p>收益未扣手续费、资金费和滑点。未卖出持仓单独标记；缺数据不计为零收益。探测分组可以重叠，组间盈亏不相加。</p><p>同一标的、同一信号时间默认合并一行；打开「探测值」或「探测算法」表头的展开开关后，每个算法与当次保存的探测值各占一行；探测值位于评分之后。不同买入记录的结果显示范围；合并行勾选覆盖全部明细，展开后可单独勾选。</p><p>原捕获记录与旧版规则保留；本次两套卖出试验独立计算，公式冻结，均使用原始值。</p></></FishQualityManual>
     {open && <div id={contentId} className="mt-2 space-y-2">
       {!archiveView&&<div className={fishRail} aria-label="鱼质量工作模块" data-testid="quality-modules">
-        {mining && <FishMiningPanel openRequest={directoryRequests.mined} onSelectDirectory={(id,snapshot)=>chooseDirectory('mined',id,snapshot)} directoryEdits={study.monitorLibrary?.directoryEdits} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} mining={mining} onJump={onJump} canJump={canJump} onSelectInTable={ready && state.selectMiningRecords ? signals => {
+        {mining && <FishMiningPanel openRequest={directoryRequests.mined} onSelectDirectory={(id,snapshot)=>chooseDirectory('mined',id,snapshot)} directoryEdits={study.monitorLibrary?.directoryEdits} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} mining={mining} onJump={onJump} canJump={canJump} onSelectInTable={ready && state.selectMiningRecords ? signals => {
           const result = state.selectMiningRecords!(signals);
           if (!result.selected) return false;
           sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('mined'); setQuery(''); setMonth(''); setAlgorithmsState([]);
@@ -783,10 +787,10 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={() => setFilterOpen(false)}/>
           </PopoverContent></Popover>
-          <FishFilterLibrary openRequest={directoryRequests.filter} onSelectDirectory={(id,snapshot)=>chooseDirectory('filter',id,snapshot)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
+          <FishFilterLibrary openRequest={directoryRequests.filter} onSelectDirectory={(id,snapshot)=>chooseDirectory('filter',id,snapshot)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls" trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套筛选方案独立筛选，筛选算法与确认条件同分钟满足、且没有启用的否决触发时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
-            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={(id,snapshot)=>chooseDirectory('pre-entry',id,snapshot)} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
+            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={(id,snapshot)=>chooseDirectory('pre-entry',id,snapshot)} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
         </FishQualityModuleGroup>
@@ -802,7 +806,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/>
           </PopoverContent></Popover>
-          <FishMonitorLibrary study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
+          <FishMonitorLibrary study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>
       </div>}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -871,7 +875,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <td className={`${cell} border-t border-border/40 text-muted-foreground`} data-testid="quality-detector-cell" data-detector-id={row.detectorId ?? ''} title={row.detectorId ? `${detectorMap.get(row.detectorId)?.metric} · ${detectorMap.get(row.detectorId)?.snapshot.interval ?? '5m'} · 公式版本 ${row.detectorId}` : '导入的信号不归属探测算法'}>{!detectorExpanded && row.groups.length > 0 ? <button type="button" className="text-primary hover:underline" onClick={() => expandDetectors(true)} title="展开此列表的探测算法与各次买入记录">{row.groups.length} 个算法 · 展开</button> : row.detectorId ? <span className="inline-flex items-center gap-2"><span>{detectorMap.get(row.detectorId)?.label ?? '探测算法'}</span><span className="font-mono text-muted-foreground/70">{detectorMap.get(row.detectorId)?.snapshot.direction ?? '>'} {detectorMap.get(row.detectorId)?.snapshot.threshold}</span></span> : '—'}</td>
           <td className={`${cell} border-t border-border/40`}>{isLibrary(row) ? <span className="text-muted-foreground/60">—</span> : <FishProcessButton signal={row.source}/>}</td></>}
           {shownFilters.map(column => { const reading = qualityFilterCell(row, column.filter, filterReadingMap); return <td key={column.id} className={`${cell} border-l border-t border-border/40`} data-testid="quality-filter-cell" data-filter-state={reading.state} title={reading.detail}><span className="inline-flex items-center gap-2"><span className="font-mono tabular-nums">{reading.value}</span><span className={`text-[9px] ${reading.state === 'pass' ? 'text-emerald-600 dark:text-emerald-400' : reading.state === 'fail' ? 'text-destructive' : 'text-muted-foreground'}`}>{reading.status}</span></span></td>; })}
-          {showScreening&&<ScreeningCells cell={cell} results={screeningRowResults(row,screeningIndex,screeningRoundId)}/>}
+          {showScreening&&<ScreeningCells cell={cell} results={screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)}/>}
           {shownPlans.map(p => { const entries = [...new Map(qualityTableMembers(row).map(member => [member.signalId ?? member.id, member])).values()];
             if(entries.length > 1) return <Fragment key={p.id}><MergedEntryCells entries={entries.map(member => ({result:qualityRowResult(study,member,p,resultMap),skipped:skippedBy(p,member)}))} phase={phase} planId={p.id} plan={p} expand={() => expandDetectors(true)}/><PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={entries.map(member=>({row:member,result:qualityRowResult(study,member,p,resultMap),skipped:!!skippedBy(p,member)}))} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>;
             const f = skippedBy(p, row), skipped = f && f.state !== 'pass', result = qualityRowResult(study,row,p,resultMap);
@@ -881,7 +885,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       {rows.length > 0 && <p className="text-right text-[10px] tabular-nums text-muted-foreground" data-testid="quality-row-count">{selectedRowCount > 0 && <span className="font-medium text-primary" data-testid="quality-selected-row-count">已选 {selectedRowCount} 行 · </span>}共 {rows.length} 行 · {countSignals(rows)} 条信号{!detectorExpanded ? ' · 已合并探测明细' : ''}{sortedRows.length < batch.length ? `（筛选自 ${countSignals(batch)} 条信号）` : ''}</p>}
     </div>}
     {statistics && <FishQualityStatistics key={`${statistics.category}:${statistics.variableId ?? ''}:${statistics.levelId ?? ''}`} study={study} rows={sortedRows} request={statistics} onClose={() => setStatistics(null)}/>}
-    {screeningStatistics&&<ScreeningStatistics results={[...new Map(sortedRows.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId)).map(result=>[result.record.id,result])).values()]} onClose={()=>setScreeningStatistics(false)}/>}
+    {screeningStatistics&&<ScreeningStatistics results={[...new Map(sortedRows.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)).map(result=>[result.record.id,result])).values()]} onClose={()=>setScreeningStatistics(false)}/>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} close={() => setDetailId('')}/>
   </section>;
   return <QualityArchiveContext.Provider value={archiveView}>{archiveView?body:<FishLibraryDataManager key={state.account??mining?.account??'anonymous'} account={state.account??mining?.account} study={study} ready={ready}>{body}</FishLibraryDataManager>}</QualityArchiveContext.Provider>;

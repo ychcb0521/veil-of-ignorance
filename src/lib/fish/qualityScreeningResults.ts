@@ -22,13 +22,15 @@ export function screeningResultIndex(results:readonly QualityScreeningResult[]){
  }
  return index;
 }
-export function screeningRowResults(row:QualityTableRow,index:ReturnType<typeof screeningResultIndex>,roundId?:string):QualityScreeningResult[]{
+export function screeningRowResults(row:QualityTableRow,index:ReturnType<typeof screeningResultIndex>,roundId?:string,workingRoundId?:string):QualityScreeningResult[]{
  const entries=new Map<string,QualityScreeningResult>();
- for(const member of qualityTableMembers(row))for(const result of index.get(qualityEntryIdentity(member.source,member.enteredAt))??[]){
-  const scope=roundId??member.source.preEntryMonitor?.roundId;if(scope&&result.round.id!==scope)continue;
+ for(const member of qualityTableMembers(row)){const matches=index.get(qualityEntryIdentity(member.source,member.enteredAt))??[];
+ const scope=workingRoundId&&matches.some(r=>r.round.id===workingRoundId)?workingRoundId:roundId??member.source.preEntryMonitor?.roundId;
+ for(const result of matches){
+  if(scope&&result.round.id!==scope)continue;
   const plan=result.round.plans?.find(p=>p.id===result.record.planId),key=JSON.stringify(plan??result.round.filters),old=entries.get(key);
   if(!old||result.record.updatedAt>old.record.updatedAt||result.record.updatedAt===old.record.updatedAt&&result.round.startedAt>old.round.startedAt)entries.set(key,result);
- }
+ }}
  return [...entries.values()];
 }
 export function screeningCell(results:readonly QualityScreeningResult[]){

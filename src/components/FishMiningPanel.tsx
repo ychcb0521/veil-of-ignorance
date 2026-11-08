@@ -7,11 +7,11 @@ import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverCo
  * 挖到的鱼入鱼舱、进鱼质量，按固定的卖出方案评估后生成「探测比较」交易战役。
  */
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Pause, Pickaxe, Play, Plus, RotateCcw, Settings2, X } from 'lucide-react';
-import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from '@/components/FishQualityModule';
+import { ArrowUpRight, ChevronDown, Pause, Pickaxe, Play, Plus, RotateCcw, Settings2, X } from 'lucide-react';
+import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseAction, qualitySplitMenuAction } from '@/components/FishQualityModule';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { currentDefaultRules, type FishMiningRule } from '@/lib/fish/mining';
@@ -70,7 +70,7 @@ function MiningRuleEditor({ mining, close, restart = false }: { mining: FishMini
 }
 export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump, onSelectInTable,renderStudy,onCopyStudy,directoryEdits,onSetHidden,openRequest,onSelectDirectory }: { openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onSelectInTable?: (signals: readonly TradeSignal[]) => boolean }) {
   const { state: s, running, anchorMs, progress, waiting } = mining;
-  const [clock,setClock]=useState(Date.now),[settingsOpen,setSettingsOpen]=useState(false),[restartOpen,setRestartOpen]=useState(false);
+  const [clock,setClock]=useState(Date.now),[settingsOpen,setSettingsOpen]=useState(false),[restartOpen,setRestartOpen]=useState(false),[runMenuOpen,setRunMenuOpen]=useState(false);
   useEffect(()=>{if(!s.enabled||running||!s.retryAt||s.retryAt<=Date.now())return;const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[s.enabled,s.retryAt,running]);
   const rules = s.rules.length ? s.rules : currentDefaultRules(), reached = s.mined >= s.target, now = Date.now();
   const caughtUp = !reached && s.cursorMs > now, share = Math.min(1, s.mined / s.target);
@@ -95,12 +95,16 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           </div>
         </FishQualityInfo>
       </>} progress={<div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-border/60" role="progressbar" aria-label="挖掘进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已挖 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
-        {s.enabled
-          ? <button type="button" onClick={mining.pause} className={qualityPauseAction}><Pause className="h-3 w-3"/>暂停</button>
-          : <button type="button" onClick={mining.start} className={qualityPrimaryAction}><Play className="h-3 w-3"/>{s.anchorsDone ? '继续挖掘' : '开始挖掘'}</button>}
-        <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" disabled={running} className="inline-flex h-7 w-[5.5rem] shrink-0 whitespace-nowrap items-center justify-center gap-1 rounded px-2 text-[10.5px] text-muted-foreground hover:bg-muted disabled:opacity-40"><Settings2 className="h-3 w-3"/>挖掘条件</button></PopoverTrigger><PopoverContent align="start" className="flex w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(75dvh,var(--radix-popover-content-available-height))] flex-col overflow-hidden p-0" data-testid="mining-rule-popover"><MiningRuleEditor key={JSON.stringify(s.rules)} mining={mining} close={()=>setSettingsOpen(false)}/></PopoverContent></Popover>
+        <div role="group" aria-label="挖掘运行" className="inline-flex h-6 shrink-0 items-stretch">
+          {s.enabled
+            ? <button type="button" onClick={mining.pause} className={qualitySplitPauseAction}><Pause className="h-3 w-3"/>暂停</button>
+            : <button type="button" onClick={mining.start} className={qualitySplitPrimaryAction}><Play className="h-3 w-3"/>{s.anchorsDone ? '继续挖掘' : '开始挖掘'}</button>}
+          <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始挖掘的其他方式" className={`${qualitySplitMenuAction} ${s.enabled?'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground':'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
+            <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="重新开始" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onClick={()=>{setRunMenuOpen(false);setRestartOpen(true);}}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>重新开始</span><span className="text-[10px] leading-relaxed text-muted-foreground">设置新起点和条件，历史结果保留在挖掘库。</span></button></PopoverContent>
+          </Popover>
+        </div>
+        <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" disabled={running} className={qualitySettingsAction}><Settings2 className="h-3 w-3"/>挖掘条件</button></PopoverTrigger><PopoverContent align="start" className="flex w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(75dvh,var(--radix-popover-content-available-height))] flex-col overflow-hidden p-0" data-testid="mining-rule-popover"><MiningRuleEditor key={JSON.stringify(s.rules)} mining={mining} close={()=>setSettingsOpen(false)}/></PopoverContent></Popover>
         <Dialog open={restartOpen} onOpenChange={setRestartOpen}>
-          <DialogTrigger asChild><button type="button" className={qualityPauseAction}><RotateCcw aria-hidden className="h-3 w-3"/>重新开始</button></DialogTrigger>
           <DialogContent className="flex max-h-[80dvh] w-[calc(100%-2rem)] max-w-[34rem] flex-col gap-0 overflow-hidden p-0">
             <DialogHeader className="shrink-0 border-b border-border/50 px-4 pb-3 pt-4 pr-10 text-left">
               <DialogTitle className="text-sm">重新开始批量挖掘</DialogTitle>

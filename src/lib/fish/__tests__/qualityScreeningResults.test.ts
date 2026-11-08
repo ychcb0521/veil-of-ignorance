@@ -46,3 +46,8 @@ it('renders v6 zero/guard/exclusion evidence without requiring the removed third
  const l=library();l.records[0].threeStage={at:T+60000,state:'matched',zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'},readings:[]};
  expect(screeningCell(qualityScreeningResults({},l)).detail).toContain('⓪ 必要条件 pass / ① 防守线 pass / ② 排除门槛 pass');
 });
+
+it('prefers the active round for participating rows even in a selected history directory and leaves other rows historical',()=>{
+ const l=library(),old=l.records[0],round={...structuredClone(l.rounds[0]),id:'working',startedAt:T+1},current={...structuredClone(old),id:'new-record',roundId:'working',status:'queued' as const,matchedAt:undefined,updatedAt:T+120000},outside={...structuredClone(old),id:'outside',sample:{...structuredClone(old.sample),source:{...old.sample.source,id:'other',symbol:'OTHERUSDT'}}};
+ l.rounds.push(round);l.records.push(current,outside);const index=screeningResultIndex(qualityScreeningResults({},l));expect(screeningCell(screeningRowResults(old.sample,index,'r','working')).status).toBe('待筛选');expect(screeningCell(screeningRowResults(old.sample,index,'r')).status).toBe('已入选');expect(screeningCell(screeningRowResults(outside.sample,index,'r','working')).status).toBe('已入选');
+});

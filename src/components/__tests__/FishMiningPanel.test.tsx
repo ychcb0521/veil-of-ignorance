@@ -28,6 +28,8 @@ it('explains the plan, starts mining and edits the target', () => {
   expect(screen.queryByText(/还没固定卖出方案/)).toBeNull();
   expect(screen.queryByText('0 / 1000')).toBeNull();
   expect(screen.queryByRole('status')).toBeNull();
+  const controls=screen.getByTestId('fish-mining-panel');
+  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始挖掘','开始挖掘的其他方式','挖掘条件','打开挖掘库','重新开始'].includes(name!))).toEqual(['开始挖掘','开始挖掘的其他方式','挖掘条件','打开挖掘库']);
   fireEvent.click(screen.getByRole('button', { name: '开始挖掘' })); expect(m.start).toHaveBeenCalled();
   expect(screen.queryByLabelText('挖掘目标条数')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
   fireEvent.change(screen.getByLabelText('挖掘目标条数'), { target: { value: '2000' } });fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
@@ -100,7 +102,8 @@ it('edits a new round while a scan is running and waits for explicit confirmatio
     { featureId: 'cba', label: 'CBA', statistics: [{ name: '结果', label: '结果' }] },
   ] }, { enabled: true, rules });
   render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
-  const open = () => fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+  const open = () => {fireEvent.click(screen.getByRole('button', { name: '开始挖掘的其他方式' }));fireEvent.click(screen.getByRole('button', { name: '重新开始' }));};
+  expect(screen.queryByRole('button',{name:'重新开始'})).not.toBeInTheDocument();
   open();
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(restart).not.toHaveBeenCalled();
