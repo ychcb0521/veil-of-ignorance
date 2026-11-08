@@ -1,4 +1,5 @@
 import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,type QualityMonitorEntry} from './qualityAdmissionTime';
+import {preEntryWindowLoader} from './preEntryWindowLoader';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
 import { createQualityAdvantageReader, advanceQualitySoftConfirmation, requiredSoftConfirmations, qualityAdvantageIdentity, validateQualityAdvantage, type QualityAdvantageState } from './qualityAdvantage';
@@ -23,7 +24,7 @@ import {isSignalLibraryOrigin,miningCaptureTime,qualityOrigins,resolveLegacySour
 import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import type { FishReconstructionLoader } from './reconstruction';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
-import { validateFishBars } from './shared';
+import { fishDelay, validateFishBars } from './shared';
 import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
@@ -696,7 +697,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
             if (rule.direction === '<' ? reading < rule.threshold : reading > rule.threshold) { trigger = { at, reading }; break; }
           }
           cursor = cut;
-          await new Promise(resolve => setTimeout(resolve, 0));
+          await fishDelay(0, signal);
         }
       }
     }
@@ -886,7 +887,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
         abort(signal); readings.set(key,reading); options.onFilterReading?.(reading);
       }
       done++;
-      await new Promise(resolve=>setTimeout(resolve,0));
+      await fishDelay(0, signal);
     }
     options.onProgress({done,total,current:''}); return;
   }
@@ -946,9 +947,11 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
           let result: QualityResult;
           try {
             if (s.monitorEntry?.error) throw new Error(s.monitorEntry.error);
-            const initializedLoad = g.initialization ? withTuringInitialization(load, s.source.symbol, await options.marketStart?.(s.source.symbol) ?? NaN) : load;
+            // Batch 5m transport per trade; every engine still receives its exact closed prefix.
+            const tradeLoad = preEntryWindowLoader(load, marketEnd);
+            const initializedLoad = g.initialization ? withTuringInitialization(tradeLoad, s.source.symbol, await options.marketStart?.(s.source.symbol) ?? NaN) : tradeLoad;
             result = isLegacyQualityPlan(g)
-              ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, load, signal, qualityResultKey(s, g, study.observeHours))
+              ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, tradeLoad, signal, qualityResultKey(s, g, study.observeHours))
               : await evaluateQualitySample(s, g, study.observeHours, marketEnd, initializedLoad, signal, cached);
             if (initializedLoad.turingInitialization) result = {...result, initialization: initializedLoad.turingInitialization};
           } catch (cause) {
@@ -959,7 +962,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
           options.onResult(marketEnd === now ? result : { ...result, evaluatedAt: now });
         }
         done++;
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await fishDelay(0, signal);
       }
     }
   };
