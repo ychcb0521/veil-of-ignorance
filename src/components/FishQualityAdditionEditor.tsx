@@ -3,7 +3,7 @@ import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { defaultBreakevenFloor, defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
-import { qualityFilterChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
+import { qualityFilterMenuChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { orderedSellStages, type QualitySellStage } from '@/lib/fish/qualitySellStages';
 import {defaultStructureAddition,guardTrendOnly,type StructureAdditionRule} from '@/lib/fish/qualityAdditionStructure';
@@ -151,7 +151,7 @@ function Part({title,role,info,children,testId}:{title:string;role:string;info:R
 }
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
 export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void}) {
- const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterChoices(defs),[defs]);
+ const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(defs),[defs]);
  const features=[...new Map(choices.map(c=>[c.featureId,c.group])).entries()];
  const [selectedRound,setSelectedRound]=useState(0),count=Math.min(100,Math.max(1,Math.floor(Number(all.maxRounds)||1))),index=Math.min(selectedRound,count-1);
  const current=index?all.otherRounds[index-1]??all:all,d={...all,...current};
@@ -159,10 +159,10 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
  /** 特征值 + 变量 + 方向 + 门槛，一行。 */
  const indicator=(row:ConditionDraft,label:string,update:(change:Partial<ConditionDraft>)=>void,disabled=!d.enabled)=>{
-  const feature=choices.find(c=>c.key===row.choice)?.featureId??'';
+  const feature=choices.find(c=>c.key===row.choice)?.featureId??row.choice.split(':')[0];
   return <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem_5rem] gap-1.5">
    <select aria-label={label.replace('{x}','特征值')} disabled={disabled} value={feature} className={field} onChange={e=>update({choice:choices.find(c=>c.featureId===e.target.value)!.key})}><option value="" disabled>选择特征值</option>{features.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select>
-   <select aria-label={label.replace('{x}','指标变量')} disabled={disabled} value={row.choice} className={field} onChange={e=>update({choice:e.target.value})}><option value="" disabled>选择变量</option>{choices.filter(c=>c.featureId===feature).map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</select>
+   <select aria-label={label.replace('{x}','指标变量')} disabled={disabled} value={row.choice} className={field} onChange={e=>update({choice:e.target.value})}><option value="" disabled>选择变量</option>{row.choice&&!choices.some(c=>c.key===row.choice)&&<option hidden disabled value={row.choice}>已保存指标：{row.choice}</option>}{choices.filter(c=>c.featureId===feature).map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</select>
    <select aria-label={label.replace('{x}','方向')} className={field} disabled={disabled} value={row.direction} onChange={e=>update({direction:e.target.value as '<'|'>'})}><option value=">">&gt;</option><option value="<">&lt;</option></select>
    <input aria-label={label.replace('{x}','指标门槛')} className={field} disabled={disabled} type="number" step="any" placeholder="门槛" value={row.threshold} onChange={e=>update({threshold:e.target.value})}/>
   </div>;

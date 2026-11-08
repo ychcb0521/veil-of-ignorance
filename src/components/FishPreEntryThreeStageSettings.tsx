@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import type { QualityGroup } from '@/lib/fish/quality';
-import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
+import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { emptyPreEntryThreeStage, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
@@ -31,7 +31,7 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
   return {id:id(),label:p.label+' · 三阶副本',metric:p.metric,snapshot:structuredClone(p.snapshot),execution:'intrabar-1m',initialization:p.initialization,preEntryThreeStage:c};
 }
 export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state:FishQualityState;selectedCount:number;done:()=>void}){
-  const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterChoices(definitions),[definitions]);
+  const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=emptyPreEntryThreeStage();return [plan];});
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(monitor.library.settings?.hours??0)),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
@@ -55,7 +55,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
   const conditionEditor=(condition:EntryMarketCondition,put:(c:EntryMarketCondition)=>void,remove:()=>void,prefix:string)=><div className="flex flex-wrap items-center gap-1.5 rounded border border-border/50 p-2">
     <input type="checkbox" aria-label={prefix+'启用'} checked={condition.enabled} onChange={e=>put({...condition,enabled:e.target.checked})}/>
     <select className={field+' max-w-full flex-1'} aria-label={prefix+'指标'} value={qualityFilterChoiceKey({...condition,direction:'>'})} onChange={e=>put({...entryCondition({...makeQualityBuyFilter(e.target.value,'>',condition.threshold,condition.enabled,definitions),id:condition.id},condition.timing),direction:condition.direction})}>
-      {!choices.some(choice=>choice.key===qualityFilterChoiceKey({...condition,direction:'>'}))&&<option value={qualityFilterChoiceKey({...condition,direction:'>'})}>{condition.label}（保存的公式）</option>}
+      {!choices.some(choice=>choice.key===qualityFilterChoiceKey({...condition,direction:'>'}))&&<option hidden disabled value={qualityFilterChoiceKey({...condition,direction:'>'})}>{condition.label}（保存的公式）</option>}
       {choices.map(choice=><option key={choice.key} value={choice.key}>{choice.group} · {choice.label}</option>)}
     </select>
     <select className={field} aria-label={prefix+'方向'} value={condition.direction} onChange={e=>put({...condition,direction:e.target.value as EntryMarketCondition['direction']})}>{['>','>=','<','<='].map(v=><option key={v}>{v}</option>)}</select>
@@ -119,7 +119,6 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
       <details className="text-[11px]"><summary className="cursor-pointer">观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
       {active.frozenVersions&&<details className="text-[11px]"><summary className="cursor-pointer">已保存版本</summary><PlanVersionList plan={active} draft/></details>}
     </>}
-    <label className="flex items-center gap-2 text-[11px]">筛选时长<input aria-label="三阶筛选时长（小时）" className={field+' w-20'} type="number" min="0" max="8784" value={hours} onChange={e=>setHours(e.target.value)}/>小时，0 为至可用行情末尾</label>
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
     <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border/50 bg-popover py-2"><button type="button" disabled={!state.ready||!monitor.ready} className={button} onClick={()=>save(false)}>保存三阶方案</button><button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' bg-primary text-primary-foreground'} onClick={()=>save(true)}>保存并开始三阶筛选</button></div>
   </div>;

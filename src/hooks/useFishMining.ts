@@ -1,3 +1,4 @@
+import { algorithmMetricMenu } from '@/lib/fish/algorithmMetricMenu';
 import { readBinanceCooldown } from '@/lib/binanceRateLimit';
 import { formatUTC8 } from '@/lib/timeFormat';
 /**
@@ -28,7 +29,7 @@ export interface FishMiningApi {
   start: () => void; pause: () => void; setTarget: (target: number) => void;
   restart: (settings: MiningRestart) => void;
   /** 挖掘库按账号独立保存。 */
-  ruleChoices?: {featureId:string;label:string;statistics:{name:string;label:string}[]}[];
+  ruleChoices?: {featureId:string;label:string;statistics:{name:string;label:string}[];menuStatistics?:{name:string;label:string}[]}[];
   configure?: (rules:FishMiningState['rules'])=>void;
   retry?: () => void; useCurrentScope?: () => void; resetConfiguration?: () => void;
   account?: string; holdKeys?: () => ReadonlySet<string>;
@@ -88,7 +89,7 @@ export function useFishMining(o: {
     const scope=(s.selection as FishScanSelection|undefined)??latest.current.selection;
     const unsupported=scope.exchanges.find(exchange=>!AUDITED_EXCHANGES.includes(exchange));
     const missing=s.rules.find(rule=>!latest.current.defs.some(def=>def.id===rule.featureId));
-    const built = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
+    const built:ReturnType<typeof buildFishScanSettings> = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
     if (built.error !== undefined) {
       const failed=miningFailureState(s,built.error,now,'configuration');setState(failed);setWaiting('配置需修正，修正后点「重新检查」');
       void updateMiningLibrary(account.current,library=>recordMiningError(library,failed,anchor,built.error,now,MINING_COMBINATION));
@@ -199,7 +200,7 @@ export function useFishMining(o: {
     setState({...s,rules:structuredClone(rules),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
-  const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{return {featureId:def.id,label,statistics:fishStatistics(def)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
+  const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{const statistics=fishStatistics(def);return {featureId:def.id,label,statistics,menuStatistics:algorithmMetricMenu(def,statistics)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
   // 算法编号修过别名后同一条鱼的键会变：再按整行内容（标的、时间、命中算法）认一次
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).flatMap(s => [fishCatchKey(s), fishVisibleCatchKey(s)])), []);
   return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys };

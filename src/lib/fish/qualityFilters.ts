@@ -1,3 +1,4 @@
+import { algorithmMetricMenu } from './algorithmMetricMenu';
 import {BOX_STOP_KIND,BOX_BREAK_CHOICE,isBoxBreak,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
 import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -26,6 +27,18 @@ function build(definitions: readonly DeepDigFeatureDef[]) {
   return {choices,defs};
 }
 export const qualityFilterChoices = (definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityFilterChoice[] => build(definitions).choices;
+/** Only these three series can be newly selected; legacy builders above remain complete. */
+export function qualityFilterMenuChoices(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityFilterChoice[] {
+  const {choices,defs}=build(definitions);
+  return definitions.flatMap(def=>{
+    const compiled=defs.get(def.id);if(!compiled)return [];
+    const own=choices.filter(c=>c.featureId===def.id);
+    return algorithmMetricMenu(compiled,own.map(c=>({name:c.metric,label:c.label}))).flatMap(metric=>{
+      const choice=own.find(c=>c.metric===metric.name);
+      return choice?[{...choice,label:`${choice.group} ${metric.label}`}]:[];
+    });
+  });
+}
 export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', threshold: number, enabled = true, definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityBuyFilter {
   const {choices,defs}=build(definitions),choice=choices.find(c=>c.key===choiceKey),def=choice&&defs.get(choice.featureId);
   if (!choice || !def) throw new Error('未知的过滤指标，请检查账号公式');

@@ -3,12 +3,12 @@ import {BOX_STOP_KIND,BOX_BREAK_CHOICE,defaultBoxBreak,defaultBoxStop} from '@/l
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { useMemo } from 'react';
 import { Plus, X } from 'lucide-react';
-import { qualityFilterChoices, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
+import { qualityFilterMenuChoices, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { isHoldingPriceChoice, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, type QualityOperator } from '@/lib/fish/qualityVeto';
 const field='h-7 min-w-0 rounded-md bg-muted/50 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
 export function FishQualityHoldingVetoEditor({draft,setDraft,compact=false,labelPrefix='',entry=false}:{draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;labelPrefix?:string;entry?:boolean}) {
   const definitions=useFeatureDefinitions();
-  const choices=useMemo(()=>qualityFilterChoices(definitions),[definitions]),groups=[...new Set(choices.map(c=>c.group))];
+  const choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]),groups=[...new Set(choices.map(c=>c.group))];
   const patch=(i:number,p:Partial<HoldingVetoDraft>)=>setDraft(draft.map((d,j)=>j===i?{...d,...p}:d));
   const riskSummary=([['static-drawdown','静态回撤'],['dynamic-drawdown','动态回撤'],['drop-1m','1分钟内跌幅'],['drop-5m','5分钟内跌幅']] as const).map(([kind,label])=>{
     const enabled=draft.filter(d=>d.enabled&&d.choice===kind);
@@ -24,7 +24,7 @@ export function FishQualityHoldingVetoEditor({draft,setDraft,compact=false,label
     <div className="space-y-2">{draft.map((d,i)=>{const risk=isHoldingPriceChoice(d.choice),addition=d.choice===ADDITION_PROFIT_KIND,payoff=d.choice===PAYOFF_STOP_KIND,box=d.choice===BOX_STOP_KIND||d.choice===BOX_BREAK_CHOICE;return <div key={i} className={addition||box?'flex flex-wrap items-center gap-2 rounded border border-border/60 p-2':'flex items-center gap-1'}>
       <input type="checkbox" className="h-3 w-3 shrink-0" aria-label={`${labelPrefix}启用持仓否决 ${i+1}`} disabled={entry&&(addition||payoff)} checked={d.enabled} onChange={e=>patch(i,{enabled:e.target.checked})}/>
       <select aria-label={`${labelPrefix}持仓否决 ${i+1} 指标`} className={`${field} flex-1`} value={d.choice} onChange={e=>patch(i,{choice:e.target.value,...(e.target.value===BOX_BREAK_CHOICE?{boxStop:defaultBoxBreak(definitions),threshold:'0'}:e.target.value===BOX_STOP_KIND?{boxStop:defaultBoxStop(definitions),threshold:'0'}:{}),direction:isHoldingPriceChoice(e.target.value)||e.target.value===ADDITION_PROFIT_KIND||e.target.value===PAYOFF_STOP_KIND?'>=':d.direction,...(e.target.value===ADDITION_PROFIT_KIND?{threshold:'5',geometricMultiple:'100'}:e.target.value===PAYOFF_STOP_KIND?{threshold:'5000'}:{})})}>
-        <optgroup label="止盈"><option value={PAYOFF_STOP_KIND} disabled={entry}>盈亏比 ≥ N R{entry?'（观察期间无持仓，不适用）':'（立刻全部卖出）'}</option><option value={ADDITION_PROFIT_KIND} disabled={entry}>{ADDITION_PROFIT_LABEL}{entry?'（观察筛选不适用）':''}</option></optgroup><optgroup label={entry?'筛选过程':'持仓过程'}><option value="static-drawdown">{entry?'筛选过程':'持仓过程'}静态最大回撤</option><option value="dynamic-drawdown">{entry?'筛选过程':'持仓过程'}动态最大回撤</option></optgroup>
+        {d.choice.includes(':')&&!choices.some(c=>c.key===d.choice)&&<option hidden disabled value={d.choice}>已保存指标：{d.choice}</option>}<optgroup label="止盈"><option value={PAYOFF_STOP_KIND} disabled={entry}>盈亏比 ≥ N R{entry?'（观察期间无持仓，不适用）':'（立刻全部卖出）'}</option><option value={ADDITION_PROFIT_KIND} disabled={entry}>{ADDITION_PROFIT_LABEL}{entry?'（观察筛选不适用）':''}</option></optgroup><optgroup label={entry?'筛选过程':'持仓过程'}><option value="static-drawdown">{entry?'筛选过程':'持仓过程'}静态最大回撤</option><option value="dynamic-drawdown">{entry?'筛选过程':'持仓过程'}动态最大回撤</option></optgroup>
         <optgroup label="短时跌幅"><option value="drop-1m">1分钟内跌幅</option><option value="drop-5m">5分钟内跌幅</option></optgroup>
         <optgroup label="箱体硬止损"><option value={BOX_STOP_KIND}>箱体算法 · K 硬止损</option><option value={BOX_BREAK_CHOICE}>支撑断裂即终止 · DBL-5 红叉</option></optgroup>{groups.map(g=><optgroup key={g} label={g}>{choices.filter(c=>c.group===g).map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</optgroup>)}
       </select>

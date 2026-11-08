@@ -16,7 +16,7 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
-import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
+import { qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { isLegacyQualityPlan, LEGACY_ENGINE_LABEL, legacyToEditablePlan } from '@/lib/fish/qualityLegacyEngine';
 
@@ -112,7 +112,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
 }) {
   const action = purpose === 'entry' ? '筛选' : '卖出';
   const definitions = useFeatureDefinitions();
-  const choices = useMemo(() => qualityFilterChoices(definitions), [definitions]);
+  const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]);
   const [drafts, setDrafts] = useState(() => plans.map(draftOf)), [dirty, setDirty] = useState(false), [error, setError] = useState('');
   const draftPlanIds=useRef(new Set(plans.map(p=>p.id)));
   useEffect(() => { if (!dirty) {draftPlanIds.current=new Set(plans.map(p=>p.id));setDrafts(plans.map(draftOf));} }, [plans, dirty]);
@@ -235,7 +235,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         {features.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
       </select>
       <select aria-label={label} className={field + ' w-full'} value={value} onChange={e => onChange(e.target.value)}>
-        {!choices.some(c => c.key === value) && <option value={value}>请选择变量</option>}
+        {!choices.some(c => c.key === value) && <option hidden disabled value={value}>已保存指标：{value}</option>}
         {choices.filter(c => c.featureId === featureId).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
       </select>
     </div>;

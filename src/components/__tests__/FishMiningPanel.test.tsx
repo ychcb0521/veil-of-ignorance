@@ -89,7 +89,7 @@ it('shows the cause, retry time and actions directly, and exposes configuration 
 it('lets an invalid saved statistic be repaired locally and explicitly resumed without clearing progress',()=>{
  const configure=vi.fn(),m=api({configure,ruleChoices:[{featureId:'drift-speed-z',label:'az',statistics:[{name:'结果',label:'结果 · avg_a_2'},{name:'avg_a',label:'avg_a'}]}]},{mined:220,anchorsDone:93,rules:[{id:'az',featureId:'drift-speed-z',statistic:'avg_az',threshold:'0.15'}],lastError:'统计量已不存在',errorKind:'configuration'});
  render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
- expect(screen.getByRole('option',{name:'avg_az（已失效）'})).toBeInTheDocument();
+ expect((screen.getByLabelText('挖掘算法 1 统计量') as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('avg_az（已失效）');
  fireEvent.change(screen.getByLabelText('挖掘算法 1 统计量'),{target:{value:'avg_a'}});fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
  expect(configure).toHaveBeenCalledWith([{id:'az',featureId:'drift-speed-z',statistic:'avg_a',threshold:'0.15'}]);expect(m.state.mined).toBe(220);
 });
@@ -127,4 +127,17 @@ it('edits a new round while a scan is running and waits for explicit confirmatio
     startMs: Date.parse('2026-01-15T07:30:00+08:00'), target: 80,
     rules: [{ ...rules[0], featureId: 'cba', statistic: '结果', threshold: '9' }],
   });
+});
+
+it('limits newly selectable mining metrics while keeping a saved intermediate series unchanged',()=>{
+ const configure=vi.fn(),rule={id:'legacy',featureId:'custom',statistic:'helper',threshold:'0.15'};
+ const menuStatistics=[{name:'core',label:'原值'},{name:'avg_core',label:'avg'},{name:'avg_core_2',label:'avg_2'}];
+ const m=api({configure,ruleChoices:[{featureId:'custom',label:'测试',statistics:[{name:'helper',label:'内部变量'},...menuStatistics],menuStatistics}]},{rules:[rule]});
+ render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
+ const select=screen.getByLabelText('挖掘算法 1 统计量') as HTMLSelectElement;
+ expect(Array.from(select.options).filter(o=>!o.hidden).map(o=>o.textContent)).toEqual(['原值','avg','avg_2']);
+ expect(select.value).toBe('helper');
+ fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
+ expect(configure).toHaveBeenCalledWith([rule]);
+ expect(m.state.rules).toEqual([rule]);
 });

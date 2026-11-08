@@ -61,7 +61,7 @@ import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { hasQualityExit, qualityEntryIdentity, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
-import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices } from '@/lib/fish/qualityFilters';
+import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { qualityResultMap, qualityRowResult, qualitySellSuggestions } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
 import { downloadQualityComparison } from '@/lib/fish/qualityExport';
@@ -165,7 +165,7 @@ type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; en
 /** Standalone buy-filter configuration, independent of sell algorithms. */
 function BuyFilterEditor({ state, done, scan = false }: { state: FishQualityState; done: () => void; scan?: boolean }) {
   const definitions = useFeatureDefinitions();
-  const choices = useMemo(() => qualityFilterChoices(definitions), [definitions]), groups = [...new Set(choices.map(c => c.group))];
+  const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]), groups = [...new Set(choices.map(c => c.group))];
   const [draft, setDraft] = useState<FilterDraft[]>(() => standaloneBuyFilters(state.study).map(f => ({ choice: qualityFilterChoiceKey(f), direction: f.direction, threshold: String(f.threshold), enabled: f.enabled })));
   const [error, setError] = useState('');
   const patch = (i: number, p: Partial<FilterDraft>) => setDraft(draft.map((d, j) => j === i ? { ...d, ...p } : d));
@@ -179,7 +179,7 @@ function BuyFilterEditor({ state, done, scan = false }: { state: FishQualityStat
     <div className="space-y-0.5"><p className="text-xs font-medium">买前过滤</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">{scan ? '条件独立保存，不绑定卖出算法。按所设周期的已收盘 K 线向后筛选；全部启用条件首次同时满足时，保存该标的的入选时间节点。' : '过滤条件独立保存，不绑定卖出算法。读数取买入时刻之前最后一根已收盘的 5 分钟 K 线，全部启用的条件满足时标记为通过。'}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">{scan ? '保存后点击「开始筛选」运行。命中节点保存在入选库，可带入组合表进行持仓监测；继续暂停轮次仍沿用该轮条件，要使用新条件请从头重新筛选。' : '保存后点击「开始过滤」对已勾选信号运行；已有读数可复用。过滤不会运行、暂停或隐藏卖出监测结果。持仓一票否决在「持仓监测」中设置。'}</p></div>
     {draft.length ? <div className="space-y-1.5">{draft.map((d, i) => <div key={i} className="flex items-center gap-1.5">
       <input type="checkbox" aria-label={`启用买入条件 ${i + 1}`} checked={d.enabled} onChange={e => patch(i, { enabled: e.target.checked })} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/>
-      <select aria-label={`买入条件 ${i + 1} 指标`} className={`${field} min-w-0 flex-1`} value={d.choice} onChange={e => patch(i, { choice: e.target.value })}>{groups.map(g => <optgroup key={g} label={g}>{choices.filter(c => c.group === g).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</optgroup>)}</select>
+      <select aria-label={`买入条件 ${i + 1} 指标`} className={`${field} min-w-0 flex-1`} value={d.choice} onChange={e => patch(i, { choice: e.target.value })}>{!choices.some(c=>c.key===d.choice)&&<option hidden disabled value={d.choice}>已保存指标：{d.choice}</option>}{groups.map(g => <optgroup key={g} label={g}>{choices.filter(c => c.group === g).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</optgroup>)}</select>
       <select aria-label={`买入条件 ${i + 1} 方向`} className={field} value={d.direction} onChange={e => patch(i, { direction: e.target.value as '<' | '>' })}><option value=">">&gt;</option><option value="<">&lt;</option></select>
       <input aria-label={`买入条件 ${i + 1} 门槛`} type="number" step="any" className={`${field} w-20`} value={d.threshold} onChange={e => patch(i, { threshold: e.target.value })}/>
       <button type="button" aria-label={`删除买入条件 ${i + 1}`} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground" onClick={() => setDraft(draft.filter((_, j) => j !== i))}><X className="h-3 w-3"/></button>
