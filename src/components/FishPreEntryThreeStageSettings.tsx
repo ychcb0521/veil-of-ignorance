@@ -4,8 +4,7 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
-import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
-import { emptyPreEntryThreeStage, entryCondition, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
 import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
@@ -28,7 +27,7 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
   c.hardVetoes.push(...(p.preEntryConditions?.hardVetoes??[]).map(v=>({...structuredClone(v),id:id()})));
   return {id:id(),label:p.label+' · 三阶副本',metric:p.metric,snapshot:structuredClone(p.snapshot),execution:'intrabar-1m',initialization:p.initialization,preEntryThreeStage:c};
 }
-export function FishPreEntryThreeStageSettings({state,selectedCount,done,cancel}:{state:FishQualityState;selectedCount:number;done:()=>void;cancel?:()=>void}){
+export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state:FishQualityState;selectedCount:number;done:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterChoices(definitions),[definitions]);
   const [plans,setPlans]=useState<QualityGroup[]>(()=> (monitor.library.settings?.plans??[]).map(copyAsThreeStage));
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(monitor.library.settings?.hours??0)),[error,setError]=useState('');
@@ -70,7 +69,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,cancel}
     </div>;
   };
   return <div className="space-y-3" data-testid="pre-entry-three-stage-settings">
-    <div className="flex items-center justify-between"><p className="text-xs font-medium">动态筛选 · 三阶准入</p>{cancel&&<button type="button" className={button} onClick={cancel}>返回旧版设置</button>}</div>
+    <div className="flex items-center justify-between"><p className="text-xs font-medium">动态筛选 · 三阶准入</p></div>
     <div className="flex flex-wrap gap-2">{plans.map((p,i)=><button type="button" className={button+(active?.id===p.id?' bg-primary/10 text-primary':'')} key={p.id} onClick={()=>setActiveId(p.id)}>{i+1}. {p.label}</button>)}
       <button type="button" className={button} disabled={!choices.length} onClick={()=>{const p=makeQualitySellPlan(choices[0].key,'>',0,definitions);p.label='三阶筛选 '+(plans.length+1);p.preEntryThreeStage=emptyPreEntryThreeStage();setPlans([...plans,p]);setActiveId(p.id);}}>新增三阶方案</button>
       {active&&<><button type="button" className={button} onClick={()=>{const p={...structuredClone(active),id:id(),label:active.label+' 副本'};setPlans([...plans,p]);if(vetoDrafts[active.id])setVetoDrafts({...vetoDrafts,[p.id]:structuredClone(vetoDrafts[active.id])});if(hardDrafts[active.id])setHardDrafts({...hardDrafts,[p.id]:structuredClone(hardDrafts[active.id])});setActiveId(p.id);}}>复制整套三阶方案</button><button type="button" className={button} onClick={()=>{setPlans(plans.filter(p=>p.id!==active.id));setActiveId(undefined);}}>删除当前副本</button></>}
@@ -84,20 +83,25 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,cancel}
           <button type="button" className={button} disabled={!source} onClick={()=>guardAction(()=>{if(planVersionChanges(source!).length)throw Error('来源方案版本不符，不能复制');const rule=copyOrdinaryMarketSeller(source!);patch({sellRules:[...c.sellRules,rule]});})}>复制完整普通卖出规则</button>
         </div><p className="mt-2 text-muted-foreground">仅复制所选轮次的市场条件；原探测算法按每条原信号的冻结公式和门槛判断。实际成本、分段持仓及动态退出确认不能直接转换。来源配置和旧模板保持原样。</p>
       </details>
-      <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-first">
-        <h4 className="text-xs font-medium">① 一阶排除门槛</h4><p className="text-[11px] text-muted-foreground">必要条件全部满足，且没有任一加仓共用否决。结构触发统一交由第三阶判断。</p>
+      <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-zero">
+        <h4 className="text-xs font-medium">⓪ 必要条件</h4><p className="text-[11px] text-muted-foreground">全部满足才继续看后面的阶；这里只判断指标与探测门槛，不含任何否决。</p>
         <p className="text-[11px] font-medium">必要条件（全部满足）</p>
         {c.required.map((f,i)=><div key={f.id}>{conditionEditor(f,value=>patch({required:c.required.map((old,j)=>j===i?value:old)}),()=>patch({required:c.required.filter((_,j)=>j!==i)}),'必要条件 '+(i+1)+' ')}</div>)}
-        {!c.required.length&&<p className="text-[11px] text-muted-foreground">未设置额外指标门槛；仍须通过否决检查及第三阶事件。</p>}
+        {!c.required.length&&<p className="text-[11px] text-muted-foreground">未设置额外指标门槛；仍须通过防守线事件与排除门槛。</p>}
         <button type="button" className={button} disabled={!choices.length} onClick={()=>patch({required:[...c.required,newCondition()]})}>添加必要条件</button>
         {(c.detectors??[]).map((d,index)=><div key={d.id} className="flex flex-wrap items-center gap-2 text-[11px]"><span>原信号探测门槛提高</span><input aria-label={'原探测 '+(index+1)+' 提高幅度'} className={field+' w-16'} type="number" min="0" step="any" value={Number.isFinite(d.stricterPct)?d.stricterPct:''} onChange={e=>patch({detectors:c.detectors!.map((item,i)=>i===index?{...item,stricterPct:e.target.value.trim()?Number(e.target.value):NaN}:item)})}/><span>%</span><select aria-label={'原探测 '+(index+1)+' 关系'} className={field} value={d.match} onChange={e=>patch({detectors:c.detectors!.map((item,i)=>i===index?{...item,match:e.target.value as 'all'|'any'}:item)})}><option value="all">全部原探测同时满足</option><option value="any">任一原探测满足</option></select><select aria-label={'原探测 '+(index+1)+' 算法'} className={field} value={d.featureId??''} onChange={e=>patch({detectors:c.detectors!.map((item,i)=>i===index?{...item,featureId:e.target.value||undefined}:item)})}><option value="">本条信号的全部原探测</option>{definitions.map(def=><option value={def.id} key={def.id}>{def.name}</option>)}</select><button type="button" className={button} onClick={()=>patch({detectors:c.detectors!.filter((_,i)=>i!==index)})}>删除探测条件</button></div>)}
         <button type="button" className={button} onClick={()=>patch({detectors:[...(c.detectors??[]),{id:id(),stricterPct:0,match:'all'}]})}>添加原探测门槛条件</button>
         {c.additionSource&&<p className="text-[10px] text-muted-foreground">复制来源：{c.additionSource.label} · 第 {c.additionSource.round} 次加仓主分支；必要条件只读已收盘原周期。</p>}
-        <p className="text-[11px] font-medium">加仓共用一票否决（任一成立即排除）</p>
-        <FishQualityEntryVetoEditor entry allowDoubleDrop draft={vetoDrafts[active.id]??vetoDraftOf(c.additionVetoes)} setDraft={draft=>setVetoDrafts({...vetoDrafts,[active.id]:draft})}/>
+      </section>
+      <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-first">
+        <h4 className="text-xs font-medium">① 防守线新事件准入</h4><p className="text-[11px]">原生防守线首次产生、断裂后重建、价格上移或下移、实虚切换均算新事件。同价同型延续及仅换箱体编号不算。</p>
+        <FishQualityBoxStopEditor entry admission disabled={false} prefix="三阶准入 " definitions={definitions} rule={c.guard.rule} onChange={rule=>patch({guard:{...c.guard,rule}})}/>
+        <p className="text-[11px] text-muted-foreground">只读已收盘 5 分钟结构；新事件发生的同一时点，⓪ 与 ② 必须同时通过。被否决的事件不延期兑现，新线不清除历史锁定。</p>
       </section>
       <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-second">
-        <h4 className="text-xs font-medium">② 二阶排除门槛</h4><p className="text-[11px] text-muted-foreground">任一完整普通卖出规则，或任一硬性终止成立即排除。硬性终止不等待普通卖出确认。</p>
+        <h4 className="text-xs font-medium">② 排除门槛</h4><p className="text-[11px] text-muted-foreground">加仓共用否决、任一完整普通卖出规则、任一硬性终止，三者任一成立即排除。硬性终止不等待普通卖出确认。</p>
+        <p className="text-[11px] font-medium">加仓共用一票否决（任一成立即排除）</p>
+        <FishQualityEntryVetoEditor entry allowDoubleDrop draft={vetoDrafts[active.id]??vetoDraftOf(c.additionVetoes)} setDraft={draft=>setVetoDrafts({...vetoDrafts,[active.id]:draft})}/>
         {c.sellRules.map((rule,i)=>{
           const put=(p:Partial<EntrySellRule>)=>patch({sellRules:c.sellRules.map((r,j)=>j===i?{...r,...p}:r)});
           return <div className="space-y-2 rounded border border-border/60 p-2" key={rule.id}>
@@ -108,11 +112,6 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,cancel}
         })}
         <button type="button" className={button} disabled={!choices.length} onClick={()=>patch({sellRules:[...c.sellRules,{id:id(),label:'普通卖出 '+(c.sellRules.length+1),enabled:true,expression:{join:'all',children:[{condition:newCondition()}]},confirmation:{samples:1,minutes:1}}]})}>添加完整卖出规则</button>
         <p className="text-[11px] font-medium">硬性终止</p><FishQualityHoldingVetoEditor entry compact labelPrefix="三阶硬性终止 " draft={hardDrafts[active.id]??holdingVetoDraft(c.hardVetoes)} setDraft={draft=>setHardDrafts({...hardDrafts,[active.id]:draft})}/>
-      </section>
-      <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-third">
-        <h4 className="text-xs font-medium">③ 三阶准入门槛</h4><p className="text-[11px]">原生防守线首次产生、断裂后重建、价格上移或下移、实虚切换均算新事件。同价同型延续及仅换箱体编号不算。</p>
-        <FishQualityBoxStopEditor entry admission disabled={false} prefix="三阶准入 " definitions={definitions} rule={c.guard.rule} onChange={rule=>patch({guard:{...c.guard,rule}})}/>
-        <p className="text-[11px] text-muted-foreground">只读已收盘 5 分钟结构；新事件发生的同一时点，前两阶必须通过。被否决的事件不延期兑现，新线不清除历史锁定。</p>
       </section>
       <details className="text-[11px]"><summary className="cursor-pointer">观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
       {active.frozenVersions&&<details className="text-[11px]"><summary className="cursor-pointer">已保存版本</summary><PlanVersionList plan={active}/></details>}

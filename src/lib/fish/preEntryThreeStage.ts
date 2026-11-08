@@ -7,7 +7,13 @@ import { validateStructureAddition } from './qualityAdditionStructure';
 import { qualityAdditionConditions, qualityAdditionPrerequisites, type QualityAdditionRoundRule } from './qualityAddition';
 import { preEntryPositionOnly } from './preEntryConditions';
 
-export const PRE_ENTRY_THREE_STAGE_VERSION = 'pre-entry-three-stage-v5' as const;
+/**
+ * 【用户要求】2026-11-08 三阶重排：必要条件提到最前（⓪），原生防守线新事件提前到 ①，加仓共用否决与卖出／硬终止合并为 ② 排除段。
+ * 判定顺序变了，按 AGENTS.md 开新版本号；v5 的代码与输出不动，已存 v5 方案继续按 v5 跑。
+ */
+export const PRE_ENTRY_THREE_STAGE_V5 = 'pre-entry-three-stage-v5' as const;
+export const PRE_ENTRY_THREE_STAGE_VERSION = 'pre-entry-three-stage-v6' as const;
+export type PreEntryThreeStageVersion = typeof PRE_ENTRY_THREE_STAGE_V5 | typeof PRE_ENTRY_THREE_STAGE_VERSION;
 export const PRE_ENTRY_GUARD_EVENT_VERSION = 'pre-entry-guard-event-v1' as const;
 export interface EntryMarketCondition {
   id: string; label: string; metric: string; snapshot: FishSnapshot;
@@ -22,7 +28,7 @@ export interface EntrySellRule {
   source?: { planId: string; label: string; versions: QualityGroup['frozenVersions'] };
 }
 export interface PreEntryThreeStage {
-  version: typeof PRE_ENTRY_THREE_STAGE_VERSION;
+  version: PreEntryThreeStageVersion;
   observationBasis: 'scan-origin-v1';
   required: EntryMarketCondition[];
   detectors?: {id:string;featureId?:string;stricterPct:number;match:'all'|'any'}[];
@@ -33,6 +39,11 @@ export interface PreEntryThreeStage {
   guard: { version: typeof PRE_ENTRY_GUARD_EVENT_VERSION; rule: BoxStopRule };
 }
 export const entryCondition = (f: QualityBuyFilter, timing: EntryMarketCondition['timing'] = 'intrabar'): EntryMarketCondition => ({ ...structuredClone(f), timing });
+/** 方案里的全部生效买前条件：主规则 + 启用的附加确认。 */
+export function preEntryPlanFilters(plan: QualityGroup): QualityBuyFilter[] {
+  if (!plan.rule || !Number.isFinite(plan.rule.threshold)) throw Error(`「${plan.label}」需要填写买入门槛`);
+  return [{ id: 'primary', label: plan.label, metric: plan.rule.metric, snapshot: plan.snapshot, direction: plan.rule.direction, threshold: plan.rule.threshold, enabled: true }, ...(plan.buyFilters ?? []).filter(f => f.enabled)];
+}
 export const emptyPreEntryThreeStage = (): PreEntryThreeStage => ({
   version: PRE_ENTRY_THREE_STAGE_VERSION, observationBasis: 'scan-origin-v1', required: [], additionVetoes: [], sellRules: [], hardVetoes: [],
   guard: { version: PRE_ENTRY_GUARD_EVENT_VERSION, rule: defaultBoxBreak() },
@@ -41,8 +52,9 @@ export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondi
 export function validateEntryCondition(c: EntryMarketCondition) {
   if (!c.id || !c.metric || !c.snapshot?.definitionKey || !c.label.trim() || !Number.isFinite(c.threshold) || !['<','>','<=','>='].includes(c.direction) || !['intrabar','closed'].includes(c.timing)) throw Error('市场条件须选择指标、方向、有限门槛及确认方式');
 }
+/** v5 或 v6 都是可运行版本；更早的扩展一律拒绝。 */
 export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is PreEntryThreeStage {
-  if (!c || c.version !== PRE_ENTRY_THREE_STAGE_VERSION || c.observationBasis !== 'scan-origin-v1' || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
+  if (!c || (c.version !== PRE_ENTRY_THREE_STAGE_VERSION && c.version !== PRE_ENTRY_THREE_STAGE_V5) || c.observationBasis !== 'scan-origin-v1' || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
   const ids = new Set<string>();
   const unique = (id: string) => { if (!id || ids.has(id)) throw Error('三阶条件编号重复'); ids.add(id); };
   c.required.forEach(f => { unique(f.id); validateEntryCondition(f); });

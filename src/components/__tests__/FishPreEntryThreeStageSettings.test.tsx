@@ -19,13 +19,17 @@ function setup(){
   render(<TooltipProvider><FishPreEntrySettings state={state} selectedCount={1} done={done}/></TooltipProvider>);
   return {plan,configure,restart,done,state};
 }
-it('requires an explicit new copy and groups the editor in exactly three ordered modules',()=>{
+it('shows the three-stage editor directly and groups it in the new ordered modules',()=>{
   const f=setup(),before=structuredClone(f.plan);
-  expect(screen.queryByTestId('pre-entry-three-stage-settings')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'新建三阶方案副本'}));
-  expect(screen.getAllByRole('heading').map(e=>e.textContent)).toEqual(['① 一阶排除门槛','② 二阶排除门槛','③ 三阶准入门槛']);
-  expect(within(screen.getByTestId('three-stage-first')).getByLabelText('启用入选前否决 二次急跌未收复')).toBeInTheDocument();
-  expect(within(screen.getByTestId('three-stage-third')).queryByText(/确认当分钟不入选/)).not.toBeInTheDocument();
+  // 旧版编辑器已下线：面板打开就是三阶编辑器，没有「新建三阶方案副本」引导。
+  expect(screen.getByTestId('pre-entry-three-stage-settings')).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'新建三阶方案副本'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'返回旧版设置'})).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('切换已存筛选方案集')).not.toBeInTheDocument();
+  expect(screen.getAllByRole('heading').map(e=>e.textContent)).toEqual(['⓪ 必要条件','① 防守线新事件准入','② 排除门槛']);
+  // 加仓共用否决并入最后的排除段。
+  expect(within(screen.getByTestId('three-stage-second')).getByLabelText('启用入选前否决 二次急跌未收复')).toBeInTheDocument();
+  expect(within(screen.getByTestId('three-stage-zero')).queryByLabelText('启用入选前否决 二次急跌未收复')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
   const saved=f.configure.mock.calls[0][0][0];
   expect(saved.id).not.toBe(f.plan.id);expect(saved.preEntryThreeStage.version).toBe(PRE_ENTRY_THREE_STAGE_VERSION);
@@ -33,7 +37,7 @@ it('requires an explicit new copy and groups the editor in exactly three ordered
   expect(saved.preEntryConditions).toBeUndefined();expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
 });
 it('saves a complete nested sell expression and its explicit confirmation clock',()=>{
-  const f=setup();fireEvent.click(screen.getByRole('button',{name:'新建三阶方案副本'}));
+  const f=setup();
   fireEvent.click(screen.getByRole('button',{name:'添加完整卖出规则'}));
   fireEvent.change(screen.getByLabelText('卖出 1 组合关系'),{target:{value:'all'}});
   fireEvent.click(screen.getByRole('button',{name:'添加且／或子组'}));
@@ -47,13 +51,12 @@ it('saves a complete nested sell expression and its explicit confirmation clock'
 });
 it('blocks saving an enabled condition with an empty threshold and keeps the legacy source untouched',()=>{
   const f=setup(),before=structuredClone(f.plan);
-  fireEvent.click(screen.getByRole('button',{name:'新建三阶方案副本'}));
   fireEvent.change(screen.getByLabelText('必要条件 1 门槛'),{target:{value:''}});
   fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));
   expect(screen.getByRole('alert')).toHaveTextContent('有限门槛');expect(f.configure).not.toHaveBeenCalled();expect(f.restart).not.toHaveBeenCalled();expect(f.plan).toEqual(before);
 });
 it('copies unsaved veto and hard-stop drafts into another three-stage plan',()=>{
-  const f=setup();fireEvent.click(screen.getByRole('button',{name:'新建三阶方案副本'}));
+  const f=setup();
   fireEvent.click(screen.getByLabelText('启用入选前否决 二次急跌未收复'));
   fireEvent.change(screen.getByLabelText('二次急跌未收复 回落ATR倍数'),{target:{value:'3'}});
   fireEvent.click(screen.getByRole('button',{name:'复制整套三阶方案'}));
