@@ -34,6 +34,7 @@ export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
 export interface QualityGroup {
+  preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
   preEntryConditions?: import('./preEntryConditions').PreEntryConditions;
   initialization?: import('./qualityInitialization').QualityInitialization;
   advantage?: import('./qualityAdvantage').QualityAdvantageRule;

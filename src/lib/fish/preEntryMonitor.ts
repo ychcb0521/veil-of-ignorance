@@ -1,7 +1,7 @@
 /** Independent first-match scan. Values use the existing closed-candle buy-filter calculation. */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { evaluateFishProgram } from './algorithm';
+import { evaluateFishProgram, shortFishHash } from './algorithm';
 import { qualityMetricPlan, type QualityBuyFilter, type QualityFilterReading, type QualitySample, type QualityProgress, type QualityGroup } from './quality';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
@@ -9,6 +9,8 @@ import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
+  threeStage?: import('./preEntryThreeStageScan').EntryStageEvidence;
+  missedGuard?: { count:number; event:import('./preEntryGuardEvent').EntryGuardEvent; reason:string };
   lastVeto?: { at: number; reason: string; count: number };
   zeroTradeWait?: { count: number; firstAt: number; lastAt: number };
   planId?: string;
@@ -23,11 +25,18 @@ export const PRE_ENTRY_INTRABAR_VERSION = 'pre-entry-intrabar-v2' as const;
 export const PRE_ENTRY_ZERO_TRADE_VERSION = 'pre-entry-zero-trade-v3' as const;
 export interface PreEntrySettings { updatedAt: number; plans: QualityGroup[]; hours: number }
 export interface PreEntryRound {
-  engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION | typeof PRE_ENTRY_CONDITIONS_VERSION; plans?: QualityGroup[];
+  engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION | typeof PRE_ENTRY_CONDITIONS_VERSION | typeof import('./preEntryThreeStage').PRE_ENTRY_THREE_STAGE_VERSION; plans?: QualityGroup[];
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
 }
-export interface PreEntryLibrary { settings?: PreEntrySettings; version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
+export interface PreEntryLibrary { settings?: PreEntrySettings; settingsHistory?: (PreEntrySettings & {id:string})[]; version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
+/** Explicit version switching retains both frozen setting sets for later reuse. */
+export function archivePreEntrySettings(library:PreEntryLibrary,next:PreEntrySettings):PreEntryLibrary {
+  const previous=library.settings;
+  if(!previous)return {...library,settings:next};
+  const id='entry-settings-'+shortFishHash(JSON.stringify([previous.plans,previous.hours]));
+  return {...library,settings:next,settingsHistory:[...(library.settingsHistory??[]).filter(s=>s.id!==id),{...structuredClone(previous),id}]};
+}
 export const emptyPreEntryLibrary = (): PreEntryLibrary => ({ version: 1, rounds: [], records: [] });
 export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): PreEntryLibrary {
   const merge = <T extends { id: string; updatedAt: number }>(left: T[], right: T[]) => {
@@ -36,7 +45,8 @@ export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): 
     return [...all.values()];
   };
   const settings = !a.settings || (b.settings?.updatedAt ?? 0) >= a.settings.updatedAt ? b.settings : a.settings;
-  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records), ...(settings ? {settings} : {}) };
+  const history=merge(a.settingsHistory??[],b.settingsHistory??[]);
+  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
 }
 export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   if (record.status !== 'matched' || !record.matchedAt) return null;
@@ -58,6 +68,10 @@ export async function collectPreEntryMonitor(
   onProgress: (progress: QualityProgress) => void,
   bounds?: { start?: (symbol: string) => Promise<number | undefined>; end?: (symbol: string) => Promise<number> },
 ): Promise<void> {
+  if (task.round.engine === 'pre-entry-three-stage-v5') {
+    const { collectPreEntryThreeStage } = await import('./preEntryThreeStageScan');
+    return collectPreEntryThreeStage(task, load, now, signal, onProgress, bounds);
+  }
   if (task.round.engine === PRE_ENTRY_INTRABAR_VERSION || task.round.engine === PRE_ENTRY_ZERO_TRADE_VERSION || task.round.engine === PRE_ENTRY_CONDITIONS_VERSION) {
     const { collectPreEntryIntrabar } = await import('./preEntryIntrabar');
     return collectPreEntryIntrabar(task, load, now, signal, onProgress, bounds);

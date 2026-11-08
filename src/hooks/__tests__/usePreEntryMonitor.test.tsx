@@ -5,12 +5,15 @@ import { usePreEntryMonitor } from '../usePreEntryMonitor';
 import { emptyPreEntryLibrary, PRE_ENTRY_INTRABAR_VERSION, PRE_ENTRY_ZERO_TRADE_VERSION } from '@/lib/fish/preEntryMonitor';
 import { importQualityLibrary, newQualityStudy, qualityComparisonRows, type QualityRunOptions } from '@/lib/fish/quality';
 import { definitionKey } from '@/lib/deepDig/features';
+import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
+import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 
-const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), v2Load: vi.fn(), v2Save: vi.fn(), v1Load: vi.fn(), v1Save: vi.fn(), v3Load: vi.fn(), v3Save: vi.fn() }));
+const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), v4Load: vi.fn(), v4Save: vi.fn(), v2Load: vi.fn(), v2Save: vi.fn(), v1Load: vi.fn(), v1Save: vi.fn(), v3Load: vi.fn(), v3Save: vi.fn() }));
 vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: storage.v1Load, savePreEntryLibrary: storage.v1Save }));
 vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: storage.v2Load, savePreEntryLibraryV2: storage.v2Save }));
 vi.mock('@/lib/fish/preEntryMonitorV3Store', () => ({ loadPreEntryLibraryV3: storage.v3Load, savePreEntryLibraryV3: storage.v3Save }));
-vi.mock('@/lib/fish/preEntryMonitorV4Store', () => ({ loadPreEntryLibraryV4: storage.load, savePreEntryLibraryV4: storage.save }));
+vi.mock('@/lib/fish/preEntryMonitorV5Store', () => ({ loadPreEntryLibraryV5: storage.load, savePreEntryLibraryV5: storage.save }));
+vi.mock('@/lib/fish/preEntryMonitorV4Store', () => ({ loadPreEntryLibraryV4: storage.v4Load, savePreEntryLibraryV4: storage.v4Save }));
 const t = Date.UTC(2026, 2, 29, 5);
 function study() {
   const s = importQualityLibrary(newQualityStudy(), [{ id: 's', symbol: 'TURING:TURING 1', timeMs: t, timeLabel: '', fallbackZone: '' }], t, 'turing');
@@ -18,8 +21,45 @@ function study() {
   return { ...s, independentFilters: true as const, selectedRowIds: qualityComparisonRows(s).map(r => r.id), buyFilters: [{ id: 'f', label: '买盘', enabled: true, metric: 'raw', direction: '>' as const, threshold: 100,
     snapshot: { featureId: def.id, featureShort: def.short, definitionKey: definitionKey(def), statistic: 'raw', interval: '5m' as const, scale: 1, direction: '>' as const, threshold: 100, cutoffMs: t, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 } }] };
 }
-beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v3Load.mockResolvedValue(emptyPreEntryLibrary()); });
+beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.v4Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v3Load.mockResolvedValue(emptyPreEntryLibrary()); });
 describe('买前监测独立任务', () => {
+  it('retains both frozen settings when switching versions and can run the old set again',async()=>{
+    const f=study().buyFilters[0],oldPlan=freezeQualityPlan({id:'old',label:'原版资产',metric:f.metric,snapshot:f.snapshot,rule:{metric:f.metric,direction:f.direction,threshold:f.threshold}});
+    const saved={updatedAt:1,plans:[oldPlan],hours:12},before=structuredClone(saved);
+    storage.v4Load.mockResolvedValue({...emptyPreEntryLibrary(),settings:saved});
+    const tasks:QualityRunOptions[]=[],{result}=renderHook(()=>usePreEntryMonitor('alice',true,async task=>{tasks.push(task);}));
+    await waitFor(()=>expect(result.current.ready).toBe(true));
+    act(()=>result.current.configure([{id:'v5',label:'三阶副本',metric:f.metric,snapshot:f.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()}],0));
+    const oldId=result.current.library.settingsHistory![0].id;
+    expect(result.current.library.settingsHistory![0].plans).toEqual(before.plans);
+    act(()=>result.current.useSavedSettings(oldId));
+    expect(result.current.library.settings!.plans[0].frozenVersions).toEqual(oldPlan.frozenVersions);
+    await act(()=>result.current.start(study(),12));
+    expect(tasks[0].preEntry!.round.engine).toBe(PRE_ENTRY_CONDITIONS_VERSION);
+    const newId=result.current.library.settingsHistory!.find(s=>s.plans[0].id==='v5')!.id;
+    act(()=>result.current.useSavedSettings(newId));
+    await act(()=>result.current.start(study(),0));
+    expect(tasks[1].preEntry!.round.engine).toBe(PRE_ENTRY_THREE_STAGE_VERSION);
+    expect(saved).toEqual(before);expect(storage.v4Save).not.toHaveBeenCalled();
+  });
+  it('runs v5 only for explicitly configured three-stage copies and writes no older library',async()=>{
+    const run=vi.fn(async(_options:QualityRunOptions)=>undefined),{result}=renderHook(()=>usePreEntryMonitor('alice',true,run));
+    await waitFor(()=>expect(result.current.ready).toBe(true));
+    const f=study().buyFilters[0],p={id:'v5',label:'三阶副本',metric:f.metric,snapshot:f.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()};
+    act(()=>result.current.configure([p],0));
+    await act(()=>result.current.start(study(),0));
+    expect(run.mock.calls[0][0].preEntry.round.engine).toBe(PRE_ENTRY_THREE_STAGE_VERSION);
+    expect(storage.save).toHaveBeenCalled();
+    for(const save of [storage.v4Save,storage.v3Save,storage.v2Save,storage.v1Save])expect(save).not.toHaveBeenCalled();
+  });
+  it('protects saved v5 settings from a newer timestamp written by an older page',async()=>{
+    const f=study().buyFilters[0],p={id:'v5',label:'三阶副本',metric:f.metric,snapshot:f.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()};
+    storage.load.mockResolvedValue({...emptyPreEntryLibrary(),settings:{updatedAt:1,plans:[p],hours:3}});
+    storage.v4Load.mockResolvedValue({...emptyPreEntryLibrary(),settings:{updatedAt:999,plans:[{...p,id:'old',preEntryThreeStage:undefined}],hours:999}});
+    const {result}=renderHook(()=>usePreEntryMonitor('alice',true,vi.fn()));
+    await waitFor(()=>expect(result.current.ready).toBe(true));
+    expect(result.current.library.settings).toMatchObject({hours:3,plans:[{id:'v5'}]});
+  });
   it('finishes a fully attempted round with data errors and retries only the frozen batch', async () => {
     const run = vi.fn(async (task: QualityRunOptions) => {
       const record = task.preEntry!.records[0];
@@ -135,7 +175,7 @@ it('stores dynamic plans independently and freezes every plan before running',as
  expect(input.buyFilters[0].threshold).toBe(999);
 });
 
-it('imports v2 rounds without changing their engine and writes new rounds only to the v4 store', async () => {
+it('imports v2 rounds without changing their engine and writes only to the v5 store', async () => {
  const input=study(), sample=qualityComparisonRows(input)[0];
  const old={...emptyPreEntryLibrary(),rounds:[{id:'old',engine:PRE_ENTRY_INTRABAR_VERSION,startedAt:1,updatedAt:1,state:'paused' as const,filters:input.buyFilters!,hours:0}],records:[{id:'old-row',roundId:'old',sample,status:'error' as const,startTime:t,cursor:t,readings:[],updatedAt:1,detail:'旧版缺失读数'}]};
  storage.v2Load.mockResolvedValue(old);
@@ -152,7 +192,7 @@ it('imports v2 rounds without changing their engine and writes new rounds only t
  expect(old.rounds[0].engine).toBe(PRE_ENTRY_INTRABAR_VERSION);
 });
 
-it('keeps v4 settings when an old v3 page saved a later timestamp, while preserving its old round',async()=>{
+it('keeps v5 settings when an old v3 page saved a later timestamp, while preserving its old round',async()=>{
  const current={updatedAt:10,hours:24,plans:[]},old={updatedAt:100,hours:48,plans:[]};
  storage.load.mockResolvedValue({...emptyPreEntryLibrary(),settings:current});
  storage.v3Load.mockResolvedValue({...emptyPreEntryLibrary(),settings:old,rounds:[{id:'v3',engine:PRE_ENTRY_ZERO_TRADE_VERSION,startedAt:1,updatedAt:1,state:'complete',filters:[],hours:48}]});

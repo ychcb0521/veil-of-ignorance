@@ -5,8 +5,22 @@ import { TooltipProvider } from '../ui/tooltip';
 import { emptyPreEntryLibrary, PRE_ENTRY_INTRABAR_VERSION, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQualityModule';
+import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 
 afterEach(cleanup);
+it('renders a v5 admission with guard evidence even when no extra primary indicator is required',()=>{
+  const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
+  const record:PreEntryRecord={id:'v5',roundId:'r',planId:'p',status:'matched',startTime:time,cursor:time+300000,matchedAt:time+300000,updatedAt:1,readings:[],detail:'三阶同刻通过',sample:{id:'sample',source:{id:'source',symbol:'TESTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time},
+    threeStage:{at:time+300000,state:'matched',first:{status:'pass'},second:{status:'pass'},third:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
+  const state={ready:true,preEntry:{ready:true,running:false,error:'',library:{...emptyPreEntryLibrary(),records:[record],rounds:[{id:'r',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[{id:'p',label:'三阶',metric:'raw',snapshot:{},preEntryThreeStage:config}],state:'complete',filters:[],hours:0,startedAt:1,updatedAt:1}]}}} as unknown as FishQualityState;
+  render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+  fireEvent.click(screen.getByLabelText('打开入选库'));
+  const dialog=screen.getByRole('dialog');
+  expect(within(dialog).getByText('分钟筛选 v5 · 三阶准入')).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByText('三阶判定证据'));
+  expect(within(dialog).getByText(/价格下移 · 90 · 虚线/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/native-event/)).toBeInTheDocument();
+});
 it('keeps scan controls compact and offers data retries inside the action menu', () => {
   const resume = vi.fn(), time = Date.UTC(2026, 2, 29, 5);
   const records: PreEntryRecord[] = ['matched','error','unmatched'].map((status, i) => ({

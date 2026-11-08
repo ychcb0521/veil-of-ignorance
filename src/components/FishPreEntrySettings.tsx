@@ -11,6 +11,7 @@ import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
 import { holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { emptyPreEntryConditions, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { PlanVersionList } from './FishQualityPlanVersions';
+import { FishPreEntryThreeStageSettings } from './FishPreEntryThreeStageSettings';
 
 const field = 'h-7 min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
 type Confirmation = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean };
@@ -18,7 +19,13 @@ const draftsOf = (filters: QualityBuyFilter[] = []): Confirmation[] => filters.m
 type ExclusionDraft = { entry: AdditionVetoDraft; sell: HoldingVetoDraft[]; hard: HoldingVetoDraft[] };
 const exclusionsOf = (p:QualityGroup):ExclusionDraft => ({entry:vetoDraftOf(p.preEntryConditions?.entryVetoes),sell:holdingVetoDraft(p.preEntryConditions?.sellVetoes),hard:holdingVetoDraft(p.preEntryConditions?.hardVetoes)});
 
-export function FishPreEntrySettings({state, selectedCount, done}: {state: FishQualityState; selectedCount: number; done:()=>void}) {
+export function FishPreEntrySettings(props: {state: FishQualityState; selectedCount: number; done:()=>void}) {
+  const hasThreeStage=props.state.preEntry?.library.settings?.plans.some(p=>!!p.preEntryThreeStage);
+  const [threeStage,setThreeStage]=useState(!!hasThreeStage||!props.state.preEntry?.library.settings?.plans.length);
+  const history=props.state.preEntry?.library.settingsHistory??[];
+  return <div className="space-y-3">{!!history.length&&<label className="flex items-center gap-2 text-[11px]">已存筛选方案集<select aria-label="切换已存筛选方案集" className="h-7 min-w-0 flex-1 rounded border border-border/60 bg-muted/40 px-2" value="" onChange={e=>{if(e.target.value){props.state.preEntry?.useSavedSettings(e.target.value);const saved=history.find(s=>s.id===e.target.value);setThreeStage(!!saved?.plans.some(p=>!!p.preEntryThreeStage));}}}><option value="">当前：{hasThreeStage?'三阶准入':'原版筛选'}</option>{history.map(s=><option key={s.id} value={s.id}>{s.plans.some(p=>!!p.preEntryThreeStage)?'三阶准入':'原版筛选'} · {s.plans.map(p=>p.label).join('、')}</option>)}</select></label>}{threeStage?<FishPreEntryThreeStageSettings key={props.state.preEntry?.library.settings?.updatedAt??'new'} {...props} cancel={hasThreeStage?undefined:()=>setThreeStage(false)}/>:<><div className="flex items-center justify-between rounded border border-border/50 p-2 text-[11px]"><span>当前保存方案沿用原版筛选</span><button type="button" disabled={!props.state.preEntry?.ready} className="rounded border border-primary/30 px-2 py-1 text-primary" onClick={()=>setThreeStage(true)}>新建三阶方案副本</button></div><LegacyPreEntrySettings key={props.state.preEntry?.library.settings?.updatedAt??'old'} {...props}/></>}</div>;
+}
+function LegacyPreEntrySettings({state, selectedCount, done}: {state: FishQualityState; selectedCount: number; done:()=>void}) {
   const monitor = state.preEntry!, definitions = useFeatureDefinitions(), choices = useMemo(()=>qualityFilterChoices(definitions),[definitions]);
   const legacy = activeStandaloneBuyFilters(state.study);
   const plans: QualityGroup[] = monitor.library.settings?.plans ?? (legacy.length ? [{id:'entry-original',label:'筛选方案 1',metric:legacy[0].metric,snapshot:legacy[0].snapshot,rule:{metric:legacy[0].metric,direction:legacy[0].direction,threshold:legacy[0].threshold},execution:'intrabar-1m',buyFilters:legacy.slice(1)}] : []);

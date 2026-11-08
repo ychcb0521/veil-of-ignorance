@@ -9,6 +9,8 @@ vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: async () => ({ stu
 vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: async () => ({ ...emptyPreEntryLibrary(), records: [record, {...record,id:'failed',status:'error'}, {...record,id:'queued',status:'queued'}] }), savePreEntryLibrary: vi.fn(async () => undefined) }));
 vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: async () => emptyPreEntryLibrary(), savePreEntryLibraryV2: vi.fn(async () => undefined) }));
 vi.mock('@/lib/fish/preEntryMonitorV3Store', () => ({ loadPreEntryLibraryV3: async () => emptyPreEntryLibrary(), savePreEntryLibraryV3: vi.fn(async () => undefined) }));
+vi.mock('@/lib/fish/preEntryMonitorV4Store', () => ({ loadPreEntryLibraryV4: async () => emptyPreEntryLibrary(), savePreEntryLibraryV4: vi.fn(async () => undefined) }));
+vi.mock('@/lib/fish/preEntryMonitorV5Store', () => ({ loadPreEntryLibraryV5: async () => emptyPreEntryLibrary(), savePreEntryLibraryV5: vi.fn(async () => undefined) }));
 const time = Date.UTC(2026, 2, 29, 5), matchedAt = time + 2 * 86400_000;
 const record: PreEntryRecord = { id: 'matched', roundId: 'round', status: 'matched', startTime: time, cursor: matchedAt, matchedAt, updatedAt: time, readings: [],
   sample: { id: 'original', source: { id: 'source', symbol: 'TURING:TURING 50', timeMs: time, timeLabel: '', fallbackZone: '' }, groups: [], enteredAt: time, basis: 'signal', importedAt: time, origin: 'turing' } };

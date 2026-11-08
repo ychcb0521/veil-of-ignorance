@@ -5,6 +5,7 @@ import { routerFingerprint, routerVersionSummary, validateQualityRouter, equival
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
 import { compatibleHoldingParameterOrder } from './qualityPlanParameterCompatibility';
+import { freezePreEntryThreeStage, threeStageFingerprint, PRE_ENTRY_THREE_STAGE_VERSION } from './preEntryThreeStage';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -61,6 +62,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [...initialization];
+  if (plan.preEntryThreeStage) out.push({key:'pre-entry-three-stage',part:'动态筛选',name:'三阶同刻准入',version:PRE_ENTRY_THREE_STAGE_VERSION+' · 参数 #'+threeStageFingerprint(plan.preEntryThreeStage),summary:'加仓共用资格、完整卖出排除及原生防守线更新同刻判断；观察起点固定，旧事件不延期兑现。'});
   if (plan.preEntryConditions) out.push({ key: 'pre-entry-conditions', part: '动态筛选', name: '入选条件与三组否决', version: preEntryConditionsVersion(plan), summary: '同一分钟入选条件全部满足且无否决；从筛选起点累计观察，不模拟持仓，旧轮次不升级。' });
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;
@@ -127,6 +129,7 @@ export const planVersionChangeText = (changes: readonly PlanVersionChange[]) => 
 
 /** 方案里每个箱体规则写下所用版本（防守线参数写成明确值）。 */
 export function withFrozenStructures(plan: QualityGroup): QualityGroup {
+  if (plan.preEntryThreeStage) plan = { ...plan, preEntryThreeStage:freezePreEntryThreeStage(plan.preEntryThreeStage) };
   if (plan.preEntryConditions) plan = { ...plan, preEntryConditions: freezePreEntryConditions(plan.preEntryConditions) };
   if(plan.router)return {...plan,router:{...plan.router,structure:withFrozenStructures(plan.router.structure),attack:withFrozenStructures(plan.router.attack)}};
   const freezeVeto=(v:import('./qualityVeto').QualityHoldingVeto)=>v.boxStop?{...v,boxStop:freezeBoxStop(v.boxStop)}:v;

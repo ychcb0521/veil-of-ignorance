@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { emptyPreEntryLibrary, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
+import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
-import { loadPreEntryLibraryV4, savePreEntryLibraryV4 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV4Store';
-import { freezeQualityPlan, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
+import { loadPreEntryLibraryV5, savePreEntryLibraryV5 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV5Store';
+import { PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { activeStandaloneBuyFilters, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
@@ -25,10 +27,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
-    void Promise.all([loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, v3, v2, legacy]) => {
-      const old = mergePreEntryLibraries(mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary()), v3 ?? emptyPreEntryLibrary());
+    void Promise.all([loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, v4, v3, v2, legacy]) => {
+      const old = mergePreEntryLibraries(mergePreEntryLibraries(mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary()), v3 ?? emptyPreEntryLibrary()), v4);
+      if(v4.settings) old.settings=v4.settings;
       const value = mergePreEntryLibraries(old, newLibrary);
-      // Once v4 has its own settings, a still-open older page cannot replace
+      // Once v5 has its own settings, a still-open older page cannot replace
       // them merely by saving its older schema with a later timestamp.
       if (newLibrary.settings) value.settings = newLibrary.settings;
       if (epoch.current !== generation) return;
@@ -105,11 +108,16 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
     const plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
     let filters;
-    try { plans.forEach(p=>{validatePreEntryConditions(p.preEntryConditions);if(planVersionChanges(p).length)throw Error(`「${p.label}」的冻结版本已变化，请保留旧方案并另存新副本`);}); filters = plans.flatMap(preEntryPlanFilters); } catch (cause) { setError(cause instanceof Error ? cause.message : '买入条件无效'); return; }
-    if (!filters.length || !samples.length) { setError('请启用买前过滤条件，并勾选要监测的信号'); return; }
+    const threeStage=plans.some(p=>!!p.preEntryThreeStage);
+    try {
+      if(threeStage&&plans.some(p=>!p.preEntryThreeStage))throw Error('三阶方案与旧版方案须分别运行，不能混用版本');
+      plans.forEach(p=>{if(p.preEntryThreeStage)validatePreEntryThreeStage(p.preEntryThreeStage);else validatePreEntryConditions(p.preEntryConditions);if(planVersionChanges(p).length)throw Error(`「${p.label}」的冻结版本已变化，请保留旧方案并另存新副本`);});
+      filters = threeStage ? [] : plans.flatMap(preEntryPlanFilters);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '筛选条件无效'); return; }
+    if (!plans.length || !threeStage&&!filters.length || !samples.length) { setError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?PRE_ENTRY_THREE_STAGE_VERSION:PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => ({ id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
       status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
     commit({...mergePreEntryLibraries(current.current, { version: 1, rounds: [round], records }), settings: current.current.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
@@ -128,11 +136,21 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const configure = useCallback((plans: QualityGroup[], hours: number) => {
     if (!readyRef.current) throw Error('入选库尚未恢复完成');
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) throw Error('筛选时长须为 0～8784 小时');
-    plans.forEach(p=>{preEntryPlanFilters(p);validatePreEntryConditions(p.preEntryConditions);});
-    const next = {...current.current, settings: {plans: structuredClone(plans.map(freezeQualityPlan)), hours, updatedAt:Date.now()}};
+    if(plans.some(p=>!!p.preEntryThreeStage)&&plans.some(p=>!p.preEntryThreeStage))throw Error('三阶方案与旧版方案须分别保存');
+    plans.forEach(p=>{if(p.preEntryThreeStage)validatePreEntryThreeStage(p.preEntryThreeStage);else{preEntryPlanFilters(p);validatePreEntryConditions(p.preEntryConditions);}});
+    const settings={plans: structuredClone(freezeSavedPlans(current.current.settings?.plans,plans)), hours, updatedAt:Date.now()};
+    const changedVersion=!!current.current.settings?.plans.some(p=>!!p.preEntryThreeStage)!==!!plans.some(p=>!!p.preEntryThreeStage);
+    const next = changedVersion?archivePreEntrySettings(current.current,settings):{...current.current,settings};
     commit(next);
     void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));
   }, [commit,owner]);
-  return { library, ready, running, error, progress, start, resume, restart, configure,
+  const useSavedSettings=useCallback((id:string)=>{
+    if(!readyRef.current)throw Error('入选库尚未恢复完成');
+    const saved=current.current.settingsHistory?.find(s=>s.id===id);
+    if(!saved)throw Error('未找到已存筛选方案集');
+    const next=archivePreEntrySettings(current.current,{plans:structuredClone(saved.plans),hours:saved.hours,updatedAt:Date.now()});
+    commit(next);void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
+  },[commit,owner]);
+  return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

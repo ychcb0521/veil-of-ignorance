@@ -56,9 +56,9 @@ it('saves a Turing copy without enabling default holding conditions or changing 
  expect(saved[1].mirrorTakeProfit).toBeUndefined(); expect(saved[1].addition).toBeUndefined();
  expect(saved[1].rule).toEqual(original.rule);
 },30000);
-it('keeps static and dynamic modules separate and shares plan editing with holding monitoring', () => {
+it('keeps static and dynamic modules separate and opens the new three-stage settings', () => {
  const s=state();
- s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn()};
+ s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn()};
  render(<FishQuality state={s}/>);
  const fixed=within(screen.getByTestId('quality-static-controls')),dynamic=within(screen.getByTestId('quality-dynamic-controls')),holding=within(screen.getByTestId('quality-run-controls'));
  expect(fixed.getByRole('button',{name:'开始过滤'})).toBeInTheDocument();
@@ -66,10 +66,13 @@ it('keeps static and dynamic modules separate and shares plan editing with holdi
  expect(dynamic.getByLabelText('动态筛选条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
  expect(dynamic.getByRole('button',{name:'打开入选库'})).toBeInTheDocument();
  fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
- expect(screen.getByLabelText('筛选时长（小时）')).toBeInTheDocument();
- expect(screen.getByText('新增买入算法')).toBeInTheDocument();
- expect(screen.getByText('保存并开始筛选')).toBeInTheDocument();
- fireEvent.click(screen.getByText('保存方案'));
+ expect(screen.getByLabelText('三阶筛选时长（小时）')).toBeInTheDocument();
+ fireEvent.click(screen.getByText('新增三阶方案'));
+ expect(screen.getByRole('heading',{name:'① 一阶排除门槛'})).toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'② 二阶排除门槛'})).toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'③ 三阶准入门槛'})).toBeInTheDocument();
+ expect(screen.getByText('保存并开始三阶筛选')).toBeInTheDocument();
+ fireEvent.click(screen.getByText('保存三阶方案'));
  expect(s.preEntry.configure).toHaveBeenCalled();
  expect(s.setFilters).not.toHaveBeenCalled();
 });
