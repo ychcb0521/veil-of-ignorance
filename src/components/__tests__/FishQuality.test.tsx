@@ -68,9 +68,10 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
  expect(screen.getByLabelText('三阶筛选时长（小时）')).toBeInTheDocument();
  fireEvent.click(screen.getByText('新增三阶方案'));
- expect(screen.getByRole('heading',{name:'① 一阶排除门槛'})).toBeInTheDocument();
- expect(screen.getByRole('heading',{name:'② 二阶排除门槛'})).toBeInTheDocument();
- expect(screen.getByRole('heading',{name:'③ 三阶准入门槛'})).toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'⓪ 必要条件'})).toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'① 防守线新事件准入'})).toBeInTheDocument();
+ expect(screen.getByRole('heading',{name:'② 排除门槛'})).toBeInTheDocument();
+ expect(screen.queryByText('返回旧版设置')).not.toBeInTheDocument();
  expect(screen.getByText('保存并开始三阶筛选')).toBeInTheDocument();
  fireEvent.click(screen.getByText('保存三阶方案'));
  expect(s.preEntry.configure).toHaveBeenCalled();

@@ -7,9 +7,7 @@ import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
 import { loadPreEntryLibraryV5, savePreEntryLibraryV5 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV5Store';
 import { PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
-import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
-import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
-import { activeStandaloneBuyFilters, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
+import { qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
 export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
@@ -105,19 +103,17 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   }, [owner, commit]);
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
     if (!readyRef.current || controller.current) return;
-    const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
-    const plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
-    let filters;
-    const threeStage=plans.some(p=>!!p.preEntryThreeStage);
+    const samples = qualityRunSamples(study);
+    const plans = current.current.settings?.plans ?? [];
     try {
-      if(threeStage&&plans.some(p=>!p.preEntryThreeStage))throw Error('三阶方案与旧版方案须分别运行，不能混用版本');
-      plans.forEach(p=>{if(p.preEntryThreeStage)validatePreEntryThreeStage(p.preEntryThreeStage);else validatePreEntryConditions(p.preEntryConditions);if(planVersionChanges(p).length)throw Error(`「${p.label}」的冻结版本已变化，请保留旧方案并另存新副本`);});
-      filters = threeStage ? [] : plans.flatMap(preEntryPlanFilters);
+      // 旧版筛选已下线：每个方案都必须是三阶，否则明确拒绝，不做静默回退。
+      if(plans.some(p=>!p.preEntryThreeStage))throw Error('旧版筛选已下线；请新建三阶方案后再开始筛选');
+      plans.forEach(p=>{validatePreEntryThreeStage(p.preEntryThreeStage);if(planVersionChanges(p).length)throw Error(`「${p.label}」的冻结版本已变化，请保留旧方案并另存新副本`);});
     } catch (cause) { setError(cause instanceof Error ? cause.message : '筛选条件无效'); return; }
-    if (!plans.length || !threeStage&&!filters.length || !samples.length) { setError('请设置筛选条件，并勾选要监测的信号'); return; }
+    if (!plans.length || !samples.length) { setError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?PRE_ENTRY_THREE_STAGE_VERSION:PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: [], hours, state: 'running', engine: PRE_ENTRY_THREE_STAGE_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => ({ id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
       status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
     commit({...mergePreEntryLibraries(current.current, { version: 1, rounds: [round], records }), settings: current.current.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
@@ -136,18 +132,19 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const configure = useCallback((plans: QualityGroup[], hours: number) => {
     if (!readyRef.current) throw Error('入选库尚未恢复完成');
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) throw Error('筛选时长须为 0～8784 小时');
-    if(plans.some(p=>!!p.preEntryThreeStage)&&plans.some(p=>!p.preEntryThreeStage))throw Error('三阶方案与旧版方案须分别保存');
-    plans.forEach(p=>{if(p.preEntryThreeStage)validatePreEntryThreeStage(p.preEntryThreeStage);else{preEntryPlanFilters(p);validatePreEntryConditions(p.preEntryConditions);}});
+    if(plans.some(p=>!p.preEntryThreeStage))throw Error('旧版筛选已下线；请先新建三阶方案');
+    plans.forEach(p=>validatePreEntryThreeStage(p.preEntryThreeStage));
     const settings={plans: structuredClone(freezeSavedPlans(current.current.settings?.plans,plans)), hours, updatedAt:Date.now()};
-    const changedVersion=!!current.current.settings?.plans.some(p=>!!p.preEntryThreeStage)!==!!plans.some(p=>!!p.preEntryThreeStage);
-    const next = changedVersion?archivePreEntrySettings(current.current,settings):{...current.current,settings};
+    // 方案集下拉已下线：保存时不再另存历史方案集，避免堆出无法回看的快照。
+    const next = {...current.current, settings};
     commit(next);
     void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));
   }, [commit,owner]);
+  /** 旧版筛选方案集已不再提供入口；保留接口只为兼容，调到时明确拒绝。 */
   const useSavedSettings=useCallback((id:string)=>{
-    if(!readyRef.current)throw Error('入选库尚未恢复完成');
     const saved=current.current.settingsHistory?.find(s=>s.id===id);
     if(!saved)throw Error('未找到已存筛选方案集');
+    if(saved.plans.some(p=>!p.preEntryThreeStage))throw Error('旧版筛选已下线，该方案集不能再用；请新建三阶方案');
     const next=archivePreEntrySettings(current.current,{plans:structuredClone(saved.plans),hours:saved.hours,updatedAt:Date.now()});
     commit(next);void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
   },[commit,owner]);
