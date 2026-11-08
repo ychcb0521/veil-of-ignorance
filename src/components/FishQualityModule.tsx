@@ -38,7 +38,8 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
   const [open, setOpen] = useState(true), contentId = useId();
   const Heading = level==='module'?'h4':'h5';
   return <section aria-label={`${title}模块`} data-testid={testId} data-module-level={level} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-1.5 last:border-b-0">
-    <div className="flex h-7 w-28 shrink-0 items-center gap-0.5">
+    {/* 顶层标题列补齐子模块的左缩进（ml-1.5 + border-l + pl-3 / sm:pl-4），让四行操作按钮对齐。 */}
+    <div className={`flex h-7 ${level==='submodule'?'w-28':'w-[calc(8.125rem+1px)] sm:w-[calc(8.375rem+1px)]'} shrink-0 items-center gap-0.5`}>
       <Heading className="min-w-0">
         <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)} className={level==='module'?fishSubHeading:submoduleHeading}><Icon aria-hidden className={`${level==='module'?'h-3.5 w-3.5':'h-3 w-3'} text-muted-foreground`}/><span data-testid={titleTestId}>{title}</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button>
       </Heading>
