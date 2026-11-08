@@ -4,7 +4,7 @@ afterEach(()=>vi.useRealTimers());
 const url='https://example.supabase.co/auth/v1/token?grant_type=password';
 it('aborts a stalled connection and settles even when the fetch implementation ignores cancellation',async()=>{
  vi.useFakeTimers();const fetcher=vi.fn<typeof fetch>(()=>new Promise<Response>(()=>{})),request=createAuthFetch(fetcher)(url,{method:'POST'});
- const assertion=expect(request).rejects.toThrow('15 秒');await vi.advanceTimersByTimeAsync(AUTH_REQUEST_TIMEOUT_MS);await assertion;
+ const assertion=expect(request).rejects.toThrow('30 秒');await vi.advanceTimersByTimeAsync(AUTH_REQUEST_TIMEOUT_MS);await assertion;
  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
 });
 it('the timeout covers stalled response bodies, while successful JSON remains unchanged',async()=>{
@@ -23,4 +23,24 @@ it('ends SDK steps that never settle and clears timers after success',async()=>{
  vi.useFakeTimers();const request=boundedAuthAction(()=>new Promise(()=>{}),100),assertion=expect(request).rejects.toBeInstanceOf(AuthActionTimeout);
  await vi.advanceTimersByTimeAsync(100);await assertion;
  expect(await boundedAuthAction(async()=>42)).toBe(42);expect(vi.getTimerCount()).toBe(0);
+});
+it('accepts a normal response after 17s instead of cancelling a working slow connection',async()=>{
+ vi.useFakeTimers();
+ const fetcher=vi.fn<typeof fetch>(()=>new Promise<Response>(resolve=>setTimeout(()=>resolve(new Response('{"msg":"Invalid login credentials"}',{status:400})),17_000)));
+ const request=boundedAuthAction(async()=>{
+  const response=await createAuthFetch(fetcher)(url);
+  // The SDK may still need to read/interpret the reply and update its session.
+  await new Promise(resolve=>setTimeout(resolve,14_000));
+  return {status:response.status,body:await response.json()};
+ });
+ await vi.advanceTimersByTimeAsync(31_000);
+ expect(await request).toEqual({status:400,body:{msg:'Invalid login credentials'}});
+ expect(fetcher).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+});
+it('reports the actual configured deadline and keeps a stalled body bounded',async()=>{
+ vi.useFakeTimers();
+ const fetcher=vi.fn<typeof fetch>(async()=>({status:200,headers:new Headers(),arrayBuffer:()=>new Promise(()=>{})}) as Response);
+ const request=createAuthFetch(fetcher,2_000)(url),assertion=expect(request).rejects.toThrow('2 秒内未完成响应');
+ await vi.advanceTimersByTimeAsync(2_000);await assertion;
+ expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);expect(vi.getTimerCount()).toBe(0);
 });
