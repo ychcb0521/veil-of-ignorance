@@ -151,6 +151,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next=archivePreEntrySettings(current.current,{plans:structuredClone(saved.plans),hours:saved.hours,updatedAt:Date.now()});
     commit(next);void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
   },[commit,owner]);
-  return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,
+  const importLibrary=useCallback(async(value:PreEntryLibrary)=>{
+    if(!readyRef.current||controller.current)return false;
+    const generation=epoch.current;
+    // Imported process records are historical; no task is started or resumed.
+    const historical={...value,settings:undefined,rounds:value.rounds.map(r=>r.state==='running'?{...r,state:'paused' as const}:r),records:value.records.map(r=>r.status==='scanning'?{...r,status:'paused' as const}:r)};
+    const next={...mergePreEntryLibraries(current.current,historical),settings:current.current.settings};
+    try{await savePreEntryLibrary(owner,next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
+  },[owner,commit]);
+  return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

@@ -24,16 +24,16 @@ it('puts the table exactly as shown, with only the selected rows, first; then th
   expect(captured).toHaveLength(1);
   const [table, plans, trades] = captured[0].leading;
   expect(table.name).toBe('组合表');
-  // 表头与界面一致：分组表头按导出后的列数合并；列名行「标的」前加行号，运行状态拆成过滤 / 监测
-  expect(table.headerRows?.[0][0]).toEqual({ text: '入场信息', span: 7 });
-  expect(table.columns.slice(0, 7).map(c => c.header)).toEqual(['行号', '标的', '运行状态 · 过滤', '运行状态 · 监测', '信号时间', '市场', '评分']);
+  // 表头与界面一致：分组表头按导出后的列数合并；列名行「标的」前加行号；运行状态已移除
+  expect(table.headerRows?.[0][0]).toEqual({ text: '入场信息', span: 5 });
+  expect(table.columns.slice(0, 5).map(c => c.header)).toEqual(['行号', '标的', '信号时间', '市场', '评分']);
   const sellHeaders = table.columns.map(c => c.header);
   for (const h of ['加仓次数', '几何仓位', '相对涨幅', '盈亏比', '静态最大回撤', '峰值涨幅', '首仓涨幅', '半仓镜像', '持仓时间']) expect(sellHeaders).toContain(h);
   expect(sellHeaders).not.toContain('跳转');
   // 只导出选中的两行，行号、标的、评分照界面
   expect(table.rows).toHaveLength(2);
   expect(table.rows.map(r => r[1])).toEqual(['AAAUSDT', 'BBBUSDT']);
-  expect(table.rows[0][0]).toBe(1);expect(table.rows[0][6]).toBe('★★★☆☆');
+  expect(table.rows[0][0]).toBe(1);expect(table.rows[0][4]).toBe('★★★☆☆');
   expect(plans.name).toBe('组合算法');expect(plans.rows.some(r => r[2] === '卖出算法')).toBe(true);
   expect(trades.name).toBe('买入·加仓·卖出');expect(new Set(trades.rows.map(r => r[0]))).toEqual(new Set(['AAAUSDT', 'BBBUSDT']));
 });

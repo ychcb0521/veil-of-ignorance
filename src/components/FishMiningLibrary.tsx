@@ -1,9 +1,14 @@
+import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishLibraryDataActions} from './FishLibraryTransferContext';
+import {miningAlgorithmDirectories,miningFamilyLibrary,miningDirectoryStudy} from '@/lib/fish/miningLibraryDirectory';
+import {downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
+import type {FishQualityStudy} from '@/lib/fish/quality';
 import {useFishBulkDelete} from './FishBulkDeletion';
 import { miningRecordDeleteTargets } from '@/lib/fish/libraryDeletion';
 import { miningLibraryConditions, libraryConditionSearch } from '@/lib/fish/libraryConditions';
 import { FishLibraryCondition, libraryReading } from '@/components/FishLibraryConditions';
 /** 挖掘库：批量挖掘每一档的扫描与挖到的信号（数据见 lib/fish/miningLibrary，存 IndexedDB 并随账号同步）。 */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect,useRef, useMemo, useState, type ReactNode } from 'react';
 import { FishLibraryDialog, libraryCell } from '@/components/FishLibraryDialog';
 import { emptyMiningLibrary, miningRecordSignal, type FishMiningLibrary, type FishMiningRecord, type FishMiningRun } from '@/lib/fish/miningLibrary';
 import { loadMiningLibrary, MINING_LIBRARY_EVENT } from '@/lib/fish/miningLibraryStore';
@@ -21,20 +26,27 @@ const runText = (run: FishMiningRun) => run.rules.map(r => `${RULE_NAMES[r.featu
 type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null };
 
 
-export function FishMiningLibrary({ account, holdKeys, onJump, canJump, onSelectInTable }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onSelectInTable?: (signals: readonly TradeSignal[]) => boolean }) {
+type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;account?:string;holdKeys?:()=>ReadonlySet<string>;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onSelectInTable?:(signals:readonly TradeSignal[])=>boolean;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>};
+export function FishMiningLibrary(props:MiningDirectoryProps){
+ const {account,renderStudy,onCopyStudy,directoryEdits,onSetHidden,openRequest,onSelectDirectory}=props;
+ const [library,setLibrary]=useState<FishMiningLibrary>(emptyMiningLibrary),[open,setOpen]=useState(false),[loadError,setLoadError]=useState('');
+ const generation=useRef(0);
+ useEffect(()=>{const epoch=++generation.current;setLibrary(emptyMiningLibrary());setLoadError('');if(!open)return;
+  const reload=()=>{void loadMiningLibrary(account).then(value=>{if(generation.current===epoch)setLibrary(value);},()=>{if(generation.current===epoch)setLoadError('读取挖掘库失败，请关闭后重试');});};
+  reload();const refresh=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(account??null))reload();};window.addEventListener(MINING_LIBRARY_EVENT,refresh);return()=>{generation.current=epoch+1;window.removeEventListener(MINING_LIBRARY_EVENT,refresh);};
+ },[open,account]);
+ const directories=useMemo(()=>miningAlgorithmDirectories(library),[library]);
+ const items:FishDirectoryItem[]=directories.map(d=>({id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><details className="m-4 text-[11px]"><summary className="cursor-pointer text-muted-foreground">挖掘记录详情</summary><FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} onClose={close}/></details>}));
+ return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="挖掘库" prefix="mining" kind="algorithm" items={items} edits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
+  description={`${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`} dataActions={<FishLibraryDataActions scope="mining"/>} download={()=>downloadDirectoryTables('挖掘库',directories.map(d=>({id:d.id,study:miningDirectoryStudy(d.records,d.family)})))}
+  info={<><p>与监测库共用目录布局和操作，按实际命中的算法大类归档。CDA、BSS、CBI-2 等同系列的门槛、周期和版本放在同一个目录，原始条件和读数分别保留。</p><p>一个记录命中多个系列时，可在对应目录分别查看；原始信号不复制入库。展开后展示组合表，可复制至主组合表，复制前先完整归档当前表。</p>{loadError&&<p role="alert">{loadError}</p>}</>}
+  empty={loadError||'暂无挖掘记录。开始批量挖掘后，每一档会自动保存。'}/>;
+}
+function FishMiningRecords({ onJump, canJump, onSelectInTable,librarySource,onClose }: MiningDirectoryProps & {librarySource:FishMiningLibrary;onClose:()=>void}) {
   const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
   const [direction, setDirection] = useState<'none' | 'ascending' | 'descending'>('none');
-  const [library, setLibrary] = useState<FishMiningLibrary>(emptyMiningLibrary), [open, setOpen] = useState(false);
-  const [tableError, setTableError] = useState('');
-  const reload = useCallback(() => { void loadMiningLibrary(account).then(setLibrary); }, [account]);
-  // 打开时读；开着的时候挖到新的一档就刷新
-  useEffect(() => {
-    if (!open) return;
-    reload();
-    const refresh = (e: Event) => { if (((e as CustomEvent).detail?.owner ?? null) === (account ?? null)) reload(); };
-    window.addEventListener(MINING_LIBRARY_EVENT, refresh);
-    return () => window.removeEventListener(MINING_LIBRARY_EVENT, refresh);
-  }, [open, reload, account]);
+  const library=librarySource;
+  const [tableError,setTableError]=useState('');
   const runs = useMemo(() => new Map(library.runs.map(r => [r.id, r])), [library.runs]);
   const evidence=useMemo(()=>new Map(library.records.map(r=>[r.id,miningLibraryConditions(r,runs.get(r.runId))])),[library.records,runs]);
   const anchors = useMemo(() => [...library.anchors].sort((a, b) => b.anchorMs - a.anchorMs || b.scannedAt - a.scannedAt), [library.anchors]);
@@ -79,7 +91,7 @@ export function FishMiningLibrary({ account, holdKeys, onJump, canJump, onSelect
     setTableError('这批记录暂未在组合表中找到，请刷新挖掘库后重试。');
     return false;
   };
-  return <FishLibraryDialog name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { setOpen(next); setTableError(''); if (!next) setSelected(new Set()); }}
+  return <FishLibraryDialog embedded name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { if(!next)onClose(); setTableError(''); if (!next) setSelected(new Set()); }}
     description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}`}
     info={<><p>批量挖掘每扫一档（每 12 小时一档）记一次：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起</p>}</>}
     headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '挖掘时间']}

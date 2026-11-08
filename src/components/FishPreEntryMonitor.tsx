@@ -1,8 +1,12 @@
+import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
+import {entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
+import type {FishQualityStudy} from '@/lib/fish/quality';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronDown, Filter, Pause, RotateCcw, Settings2 } from 'lucide-react';
-import { FishLibraryDialog, libraryCell } from './FishLibraryDialog';
+import { libraryCell } from './FishLibraryDialog';
 import { qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseAction, qualitySplitMenuAction } from './FishQualityModule';
 import { Popover, PopoverTrigger } from './ui/popover';
 import { FishPopoverContent as PopoverContent } from './FishPopoverContent';
@@ -20,8 +24,11 @@ const engineLabel = (round?: PreEntryRound) => round?.engine === PRE_ENTRY_THREE
 const stageStatus={pass:'通过',blocked:'排除',pending:'等待'} as const;
 const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';
-export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions }: {
+export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory }: {
   state: FishQualityState; selectedCount: number; filtersOn: boolean; onSelected: () => void; onJump?: (signal: TradeSignal) => void;
+  openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;
+  onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;
+  renderStudy?:(study:FishQualityStudy)=>ReactNode;onCopyStudy?:(study:FishQualityStudy)=>Promise<boolean>;
   renderConditions?: (close: () => void) => ReactNode;
 }) {
   const monitor = state.preEntry;
@@ -42,19 +49,11 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const readingLabel = (r:typeof records[number],key:string,index:number) => (rounds.get(r.roundId)?.engine?filtersFor(r).find(f=>f.id===key):filtersFor(r)[index])?.label ?? stagesFor(r)?.sellRules.flatMap(s=>expressionConditions(s.expression)).find(c=>c.id===key)?.label ?? stagesFor(r)?.hardVetoes.find(v=>'hard:'+v.id===key)?.label ?? r.threeStage?.readings.find(reading=>reading.id===key)?.label ?? preEntryVetoes(exclusionsFor(r)).find(v=>v.id===key)?.label ?? key;
   const canStart = monitor.ready && state.ready && selectedCount > 0 && filtersOn;
   const admitted = records.filter(r => r.status === 'matched');
-  const renderLibrary = (selectedOnly: boolean) => <FishLibraryDialog name={selectedOnly ? "入选库" : "筛选记录"} roundLabel="轮次" placeholder="搜索标的、条件或状态…"
-      description={selectedOnly ? `仅收录满足全部条件的标的 · ${admitted.length} 条入选记录` : `全部筛选过程 · ${records.length} 条记录 · ${rounds.size} 轮`}
-      info={<><p>每轮保存当时启用的条件和原始信号。三阶方案使用分钟筛选 v5：一阶共用资格、二阶卖出排除、三阶新防守线同刻通过才入选；原版方案继续使用原引擎；图灵杯零成交等待读数恢复，真实缺口记为缺数据。旧轮次继续使用当时版本，历史结果保留。</p><p>已满足记录自动同步到组合表的“入选库”来源。勾选后再运行持仓监测。</p></>}
-      rounds={[...rounds.values()].filter(round=>!selectedOnly||admitted.some(r=>r.roundId===round.id)).reverse().map(r => ({ id: r.id, label: `${formatUTC8(r.startedAt)} · ${r.state === 'running' ? '运行中' : r.state === 'paused' ? '已暂停' : '已完成'}` }))}
-      headers={['标的', '原信号 / 监测起点', '监测条件', '状态与原因', '扫描到', '首次满足时间', '命中读数', '操作']}
-      items={selectedOnly ? admitted : records} match={(r, needle, roundId) => (!roundId || r.roundId === roundId) && (!needle || `${r.sample.source.symbol} ${STATUS[r.status]} ${r.detail ?? ''} ${filtersFor(r).map(f => f.label).join(' ')}`.toUpperCase().includes(needle))}
-      selection={selectedOnly ? { selected: selectedSet, select: setSelected, action: () => {
-        const count = state.selectPreEntryRecords?.(selected) ?? 0;
-        if (!count) { setMessage('请至少选择一条“已满足”的记录'); return false; }
-        setMessage(''); onSelected(); return true;
-      } } : undefined} detail={selectedOnly && message ? <p role="alert" className="text-xs text-destructive">{message}</p> : undefined}
-      empty={{ none: selectedOnly ? '暂无入选记录。满足全部条件后才会进入入选库。' : '暂无筛选记录。', unmatched: '没有匹配的记录。' }}
-      row={(r, onCheck) => <tr key={r.id} data-testid={selectedOnly ? "pre-entry-library-row" : "pre-entry-scan-row"} className="border-t border-border/40">
+  const selectedOnly=true;
+  const renderEvidence=(roundId:string,close:()=>void)=><details className="m-4 text-[11px]"><summary className="cursor-pointer text-muted-foreground">入选判定详情</summary>
+    <div className="my-2 flex items-center gap-2"><label><input type="checkbox" aria-label="全选当前筛选的筛选库记录" checked={admitted.filter(r=>r.roundId===roundId).every(r=>selectedSet.has(r.id))} onChange={e=>setSelected(e.target.checked?admitted.filter(r=>r.roundId===roundId).map(r=>r.id):[])}/> 全选本轮</label>
+    <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected();close();}}>在组合表中勾选</button></div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
+    <div className="overflow-auto"><table className="w-full text-[11px]"><thead><tr>{['选择','标的','原信号 / 监测起点','监测条件','状态与原因','扫描到','首次满足时间','命中读数','操作'].map(h=><th key={h} className={libraryCell}>{h}</th>)}</tr></thead><tbody>{admitted.filter(r=>r.roundId===roundId).map(r=>{const onCheck=(checked:boolean,_shift?:boolean)=>setSelected(ids=>checked?[...new Set([...ids,r.id])]:ids.filter(id=>id!==r.id));return <tr key={r.id} data-testid={selectedOnly ? "pre-entry-library-row" : "pre-entry-scan-row"} className="border-t border-border/40">
         {selectedOnly && <td className={libraryCell}><input type="checkbox" aria-label={`选择入选记录 ${r.sample.source.symbol} ${r.id}`} checked={selectedSet.has(r.id)} onChange={e => onCheck?.(e.target.checked, (e.nativeEvent as MouseEvent).shiftKey)}/></td>}
         <td className={`${libraryCell} font-mono`}>{r.sample.source.symbol}</td>
         <td className={`${libraryCell} text-muted-foreground`}>{formatUTC8(r.sample.source.timeMs)}<br/>{formatUTC8(r.startTime)}</td>
@@ -65,19 +64,26 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         <td className={libraryCell}>{r.readings.map((reading, i) => <p key={reading.key}>{readingLabel(r,reading.key,i)}: {reading.value == null ? '—' : +reading.value.toPrecision(6)}{reading.at && <span className="ml-1 text-[10px] text-muted-foreground">{formatUTC8(reading.at)}</span>}</p>)}{r.lastVeto&&<p className="text-[10px] text-muted-foreground">曾被否决 {r.lastVeto.count} 个分钟观测 · 最近 {formatUTC8(r.lastVeto.at)}：{r.lastVeto.reason}</p>}</td>
         <td className={libraryCell}>{r.status === 'matched' && onJump && <button type="button" className="text-primary" onClick={() => { const signal = preEntrySignal(r); if (signal) onJump(signal); }}>K 线</button>}
           {!selectedOnly && (r.status === 'error' || rounds.get(r.roundId)?.state === 'paused') && <button type="button" disabled={monitor.running} className="text-primary disabled:opacity-40" onClick={() => void monitor.resume(r.roundId)}>{r.status === 'error' ? '重试本轮缺数据' : '继续本轮'}</button>}</td>
-      </tr>}/>;
+      </tr>;})}</tbody></table></div></details>;
+  const directoryItems:FishDirectoryItem[]=[...rounds.values()].filter(round=>admitted.some(r=>r.roundId===round.id)).map(round=>({id:round.id,at:round.startedAt,label:'入选轮次',summary:admitted.filter(r=>r.roundId===round.id).length+' 条记录 · '+(round.state==='running'?'运行中':round.state==='paused'?'已暂停':'已完成'),revision:monitor.library,study:()=>entryDirectoryStudy(monitor.library,round),details:close=>renderEvidence(round.id,close)}));
+  const renderLibrary=()=> <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" items={directoryItems} edits={state.study?.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
+    description={`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮`}
+    dataActions={<FishEntryLibraryDataActions library={monitor.library} onImport={monitor.importLibrary}/>}
+    download={()=>downloadDirectoryTables('筛选库',directoryItems.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
+    info={<><p>与监测库共用时间目录，按轮次保存入选组合表。仅收录已满足记录，原信号、冻结条件、首次满足时间和判定证据保留；未入选的扫描记录仍保存在原库。</p><p>展开后可复制至组合表。复制前完整归档当前组合表，载入后不自动运行；完整下载与导入保留各版本历史，不改当前方案。</p></>}
+    empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
   return <div className="contents" data-testid="pre-entry-controls">
     <div role="group" aria-label="筛选运行" className="inline-flex h-6 shrink-0 items-stretch">
       {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={monitor.pause}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
         : <button type="button" className={qualitySplitPrimaryAction} disabled={resumable ? !monitor.ready || !state.ready : !canStart}
-          title={resumable ? '继续上轮：沿用已冻结的信号和条件，从暂停处继续筛选' : !filtersOn ? '先设置并启用筛选条件' : !selectedCount ? '当前筛选下没有已勾选的信号' : `对已勾选的 ${selectedCount} 条信号向后筛选，首次满足全部条件时保存到入选库`}
+          title={resumable ? '继续上轮：沿用已冻结的信号和条件，从暂停处继续筛选' : !filtersOn ? '先设置并启用筛选条件' : !selectedCount ? '当前筛选下没有已勾选的信号' : `对已勾选的 ${selectedCount} 条信号向后筛选，首次满足全部条件时保存到筛选库`}
           onClick={() => void (resumable ? monitor.resume(resumable.id) : monitor.start(Number(hours)))}><Filter aria-hidden className="h-3 w-3"/>开始筛选</button>}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始筛选的其他方式" disabled={!state.ready}
         className={`${qualitySplitMenuAction} ${monitor.running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-1"><button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新筛选</span><span className="text-[10px] leading-relaxed text-muted-foreground">保留历史轮次，按当前勾选和条件重新开始{monitor.running ? '；先停止当前批次' : ''}。</span></button>
           {latestRound && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
-          {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取入选库…</p>}
+          {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取筛选库…</p>}
           {monitor.error && <p role="alert" className="px-2 py-1.5 text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</p>}
         </PopoverContent>
       </Popover>
@@ -87,6 +93,6 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
       </PopoverContent>
     </Popover>
-    {renderLibrary(true)}
+    {renderLibrary()}
   </div>;
 }

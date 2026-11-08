@@ -1,3 +1,6 @@
+import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import type {ReactNode} from 'react';
+import type {FishQualityStudy} from '@/lib/fish/quality';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 /**
  * 「比较探测」的持续挖掘面板：从所选起点每半天扫一档，
@@ -65,7 +68,7 @@ function MiningRuleEditor({ mining, close, restart = false }: { mining: FishMini
     </div></div></div>
   </div>;
 }
-export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump, onSelectInTable }: { mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onSelectInTable?: (signals: readonly TradeSignal[]) => boolean }) {
+export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump, onSelectInTable,renderStudy,onCopyStudy,directoryEdits,onSetHidden,openRequest,onSelectDirectory }: { openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onSelectInTable?: (signals: readonly TradeSignal[]) => boolean }) {
   const { state: s, running, anchorMs, progress, waiting } = mining;
   const [clock,setClock]=useState(Date.now),[settingsOpen,setSettingsOpen]=useState(false),[restartOpen,setRestartOpen]=useState(false);
   useEffect(()=>{if(!s.enabled||running||!s.retryAt||s.retryAt<=Date.now())return;const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[s.enabled,s.retryAt,running]);
@@ -106,7 +109,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
             <MiningRuleEditor mining={mining} close={()=>setRestartOpen(false)} restart/>
           </DialogContent>
         </Dialog>
-        <FishMiningLibrary account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump} onSelectInTable={onSelectInTable}/>
+        <FishMiningLibrary openRequest={openRequest} onSelectDirectory={onSelectDirectory} directoryEdits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump} onSelectInTable={onSelectInTable}/>
         {(running||hasError||s.enabled||hasStarted)&&<span role="status" aria-label={status} title={status} className={`ml-1 inline-flex items-center gap-2 whitespace-nowrap text-[10px] ${hasError?'text-destructive':'text-muted-foreground'}`}><span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${running?'animate-pulse bg-primary':hasError?'bg-destructive':'bg-muted-foreground/40'}`}/>{statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>{running&&progress&&progress.total>0&&<span className="font-mono tabular-nums" aria-label={`本档已扫 ${progress.done} / ${progress.total} 个标的`}>{progress.done}/{progress.total}</span>}</span>}
 
         {hasError&&<button type="button" disabled={running} onClick={mining.retry??mining.start} className={qualityPrimaryAction}>{s.errorKind==='configuration'?'重新检查':'立即重试'}</button>}

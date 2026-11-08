@@ -1,3 +1,6 @@
+import {FishQualitySourcePicker} from './FishQualitySourcePicker';
+import {latestEntryDirectory,sourceDirectoryKeys,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
+import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
 import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
 import { isRaceRouter, raceAttackFromRound, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
@@ -30,7 +33,6 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { qualitySalePriceChangePct, qualityPeakPct, qualityHalfMirror, qualityAdditionSummary, qualityRelativeGain, qualityRelativeGainText, qualityPayoffRatio, qualityPayoffRatioText, qualityGeometricPosition, qualityGeometricPositionText } from '@/lib/fish/qualityPresentation';
 import { FishQualityMirrorEditor, mirrorDraft, parseMirrorDraft } from '@/components/FishQualityMirrorEditor';
 import { defaultQualityMirror, validateQualityMirror } from '@/lib/fish/qualityMirror';
-import { qualityRunStatusMap, qualityRowRunStatus, qualityRunStatusText, qualityRunStatusDetail, qualitySelectRunState, type QualityRunStage, type QualityRunStateFilter } from '@/lib/fish/qualityRunStatus';
 import { FishQualityStatistics, QualityStatisticsButton, type QualityStatisticsRequest } from '@/components/FishQualityStatistics';
 import { qualityVariables, qualityVariableKey } from '@/lib/fish/qualityVariables';
 import { Fragment,useCallback,createContext,useContext,useId, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -56,7 +58,7 @@ import { isTuringCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { hasQualityExit, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
+import { hasQualityExit, qualityEntryIdentity, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
 import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { qualityResultMap, qualityRowResult, qualitySellSuggestions } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
@@ -84,7 +86,7 @@ const hasSource = (row: QualitySample,source:QualityOrigin) => qualityOrigins(ro
 // 否则启动监测 / 结果更新后，33px 与 40px 的首行可能交替出现，形成布局更新死循环。
 const ROW_PX = 33, TABLE_PX = 448, OVERSCAN = 12;
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」：空值（未评估、无评分等）不论升降都排在最后
-type SortKey = `addition:${string}` | `entry:${string}` | `price-change:${string}` | `label:${string}` | PostExitSortKey | 'run' | 'time' | 'mined-at' | 'symbol' | 'market' | 'quality' | 'process' | 'detector' | 'detector-value' | `filter:${string}` | `sell:${string}` | `static:${string}` | `peak:${string}` | `mirror:${string}` | `held:${string}` | `relative:${string}` | `payoff:${string}` | `geometric:${string}`;
+type SortKey = `addition:${string}` | `entry:${string}` | `price-change:${string}` | `label:${string}` | PostExitSortKey | 'time' | 'mined-at' | 'symbol' | 'market' | 'quality' | 'process' | 'detector' | 'detector-value' | `filter:${string}` | `sell:${string}` | `static:${string}` | `peak:${string}` | `mirror:${string}` | `held:${string}` | `relative:${string}` | `payoff:${string}` | `geometric:${string}`;
 const TEXT_KEYS = new Set(['symbol', 'market', 'detector']);
 /** 持仓时间：不到 1 小时写分钟，两天内写小时，再长写天。 */
 export function heldText(hours: number | null | undefined): string {
@@ -373,8 +375,6 @@ const QualityArchiveContext=createContext(false);
  * 【用户要求】2026-11-01 卖出列分栏、各有名称：加仓次数 · 几何仓位 · 相对涨幅（「进程」一栏用户要求删除）。固定栏宽，行与行上下对齐。
  * 相对涨幅与交易战役同口径（qualityRelativeGain）；收益率只在悬停说明里。
  */
-/** 运行状态两位数字（过滤、监测）与表头小字共用同一栅格，上下对齐。 */
-const RUN_STATE_GRID = 'grid w-[4.5rem] grid-cols-2 items-center gap-2';
 const SELL_PARTS = 'grid w-full grid-cols-[3.25rem_3.5rem_4rem_4rem] items-center gap-2';
 function ResultCell({ plan, result, onClick, section, onOpenCampaign }: { plan: QualityGroup; result?: QualityResult; onClick: () => void; section: 'sell' | 'detect'; onOpenCampaign?: () => void }) {
   const archiveView=useContext(QualityArchiveContext);
@@ -476,6 +476,14 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const [back] = useState(() => archiveView?undefined:pendingQualityReturn()), ui = back?.ui;
   const [manualOpen, setManualOpen] = useState(false);
   const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
+  const [directoryChoice,setDirectoryChoice]=useState<QualitySourceDirectory|undefined>(ui?.directory);
+  const [directoryRequests,setDirectoryRequests]=useState<Partial<Record<QualitySourceDirectory['kind'],FishDirectoryRequest>>>({});
+  const sourceDefaulted=useRef(!!ui),sourceAccount=useRef(state.account);
+  const latestEntry=latestEntryDirectory(state.preEntry?.library,study.monitorLibrary?.directoryEdits),latestEntryId=latestEntry?.id;
+  useEffect(()=>{
+    if(sourceAccount.current!==state.account){sourceAccount.current=state.account;sourceDefaulted.current=false;setDirectoryChoice(undefined);setOrigin('');}
+    if(!archiveView&&ready&&state.preEntry?.ready&&!sourceDefaulted.current&&latestEntryId){setOrigin('pre-entry');setDirectoryChoice({kind:'pre-entry',id:latestEntryId});}
+  },[archiveView,ready,state.preEntry?.ready,state.account,latestEntryId]);
   // 【用户要求】2026-10-26「比较卖出和比较探测没必要分开，合并到一起，统一叫做卖出与探测（控制变量法）」：只有一个视图
   const phase = 'sell' as const;
   const [detectorExpanded, setDetectorExpanded] = useState(ui?.detectorExpanded ?? false);
@@ -486,18 +494,17 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const postExitOpen=useMemo(()=>new Set(postExitExpanded),[postExitExpanded]);
   const entryReadings=useMemo(()=>new Map((study.entryReadings??[]).map(r=>[r.key,r])),[study.entryReadings]);
   const postExitReadings=useMemo(()=>new Map((study.postExitReadings??[]).map(r=>[r.key,r])),[study.postExitReadings]);
-  const [runStage, setRunStage] = useState<QualityRunStage>(ui?.runStage ?? 'monitor'), [runState, setRunState] = useState<QualityRunStateFilter>(ui?.runState ?? '');
   const [filterOpen, setFilterOpen] = useState(false), [monitorOpen, setMonitorOpen] = useState(false), [runMenuOpen, setRunMenuOpen] = useState(false);
   const [hideFilter, setHideFilter] = useState(() => readHidden('filter')), [hideMonitor, setHideMonitor] = useState(() => readHidden('monitor'));
   const toggleHidden = (kind: 'filter' | 'monitor') => (kind === 'filter' ? setHideFilter : setHideMonitor)(hidden => { writeHidden(kind, !hidden); return !hidden; });
-  const [sort, setSort] = useState<SortKey>((ui?.sort?.startsWith('sell-error:')?'time':ui?.sort?.replace(/^dynamic:/,'peak:')) as SortKey ?? 'time'), [ascending, setAscending] = useState(ui?.ascending ?? false), [scrollTop, setScrollTop] = useState(ui?.tableTop ?? 0);
+  const [sort, setSort] = useState<SortKey>((ui?.sort==='run'||ui?.sort?.startsWith('sell-error:')?'time':ui?.sort?.replace(/^dynamic:/,'peak:')) as SortKey ?? 'time'), [ascending, setAscending] = useState(ui?.ascending ?? false), [scrollTop, setScrollTop] = useState(ui?.tableTop ?? 0);
   const rootRef = useRef<HTMLElement>(null);
   // 【用户要求】2026-11-01 查「点进战役后持仓监测停了」：没在跑、上一轮是暂停结束时，直接写出暂停原因
   const lastRound = study.monitorLibrary?.rounds.reduce<NonNullable<FishQualityStudy['monitorLibrary']>['rounds'][number] | undefined>((a, r) => !a || r.startedAt > a.startedAt ? r : a, undefined);
   const lastPause = lastRound?.state === 'paused' && lastRound.error ? { reason: lastRound.error, at: lastRound.finishedAt ?? lastRound.updatedAt } : null;
   /** 点进交易战役前记下界面状态与滚动位置，返回时原样恢复。 */
   const rememberReturn = () => saveQualityReturn({
-    ui: { open, query, month, algorithms: algorithmChoice, origin, detectorExpanded, labelExpanded, postExitExpanded, entryExpanded, runStage, runState, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
+    ui: { open, query, month, algorithms: algorithmChoice, origin,directory:directoryChoice, detectorExpanded, labelExpanded, postExitExpanded, entryExpanded, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
     scroll: ancestorScrolls(rootRef.current),
   });
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
@@ -514,7 +521,9 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const defaultIds = useMemo(() => new Set(defaultQualityDetectorIds(study.groups)), [study.groups]);
   // Apply only the explicitly selected presets; the default table includes every historical capture.
   const activeAlgorithms = useMemo(() => algorithmChoice.filter(id => batchDetectors.has(id) && defaultIds.has(id)), [algorithmChoice, batchDetectors, defaultIds]);
-  const searched = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) && (!origin || hasSource(r,origin))), [batch, query, origin]);
+  const directoryKeys=useMemo(()=>sourceDirectoryKeys(directoryChoice,{filterLibrary:study.filterLibrary},state.preEntry?.library),[directoryChoice,study.filterLibrary,state.preEntry?.library]);
+  const searched = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) &&
+    (directoryChoice&&directoryChoice.kind===origin?(directoryKeys?directoryKeys.has(qualityEntryIdentity(r.source,r.enteredAt)):hasSource(r,'mined')&&matchesMiningDirectory(r,study.groups,directoryChoice.id)):!origin||origin!=='filter'&&hasSource(r,origin))), [batch,query,origin,directoryChoice,directoryKeys,study.groups]);
   const narrowed = useMemo(() => activeAlgorithms.length ? searched.filter(r => activeAlgorithms.includes(r.detectorId ?? '')) : searched, [searched, activeAlgorithms]);
   /** 各探测算法在当前来源 / 标的筛选下的信号条数（同一信号只计一次）。 */
   const detectorSignals = useMemo(() => { const ids = new Map<string, Set<string>>(); for (const r of searched) if (r.detectorId) { if (!ids.has(r.detectorId)) ids.set(r.detectorId, new Set()); ids.get(r.detectorId)!.add(r.signalId ?? r.id); } return ids; }, [searched]);
@@ -540,16 +549,10 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const [monitorPlanId, setMonitorPlanId] = useState<string | null>(null);
   const filterCount = activeStandaloneBuyFilters(study).length, vetoCount = (study.sellPlans ?? []).reduce((n, p) => n + activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0) + (p.addition?.enabled ? 1 : 0)+(p.vetoStages?.length??0), 0);
   const plansForSort = study.sellPlans;
-  const runStatuses = useMemo(() => qualityRunStatusMap(study, batch), [batch, study.results, study.filterReadings, study.sellPlans, study.buyFilters, study.observeHours, study.selectedSellId, study.independentFilters]); // eslint-disable-line react-hooks/exhaustive-deps
   const runScopeRows = useMemo(() => narrowed.filter(r => !month || signalMonthKey(r.source.timeMs) === month), [narrowed, month]);
-  const runCounts = useMemo(() => {
-    const entries = [...new Map(runScopeRows.map(r => [r.signalId ?? r.id, r])).keys()];
-    return entries.reduce((counts, id) => { const status = runStatuses.get(id)?.[runStage]; if (status?.total) counts[status.complete ? 'done' : 'pending']++; return counts; }, {done: 0, pending: 0});
-  }, [runScopeRows, runStatuses, runStage]);
   const sortedRows = useMemo(() => {
     const map = resultMap;
     const value = (r: QualitySample): number | string | null => {
-      if (sort === 'run') { const status = runStatuses.get(r.signalId ?? r.id)?.[runStage]; return status?.total ? Number(status.complete) : null; }
       if (sort === 'time') return r.source.timeMs;
       if (sort === 'mined-at') return qualityTableMinedAt(r);
       if (sort === 'symbol') return r.source.symbol;
@@ -578,17 +581,16 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       if (metric === 'static') return qualityDrawdownPct(res,'static');
       return res && (res.status === 'closed' || res.status === 'open') && Number.isFinite(res.returnPct) ? res.returnPct! : null;
     };
-    const keyed = runScopeRows.filter(r => { const status = runStatuses.get(r.signalId ?? r.id)?.[runStage]; return !runState || !!status?.total && status.complete === (runState === 'done'); }).map(r => ({ r, v: value(r) }));
+    const keyed = runScopeRows.map(r => ({ r, v: value(r) }));
     return keyed.sort((a, b) => {
       if (a.v == null || b.v == null) return a.v == null && b.v == null ? b.r.source.timeMs - a.r.source.timeMs : a.v == null ? 1 : -1;
       const order = typeof a.v === 'string' ? a.v.localeCompare(String(b.v)) : a.v - (b.v as number);
       return order * (ascending ? 1 : -1) || b.r.source.timeMs - a.r.source.timeMs || a.r.id.localeCompare(b.r.id);
     }).map(x => x.r);
-  }, [runScopeRows, runState, runStage, runStatuses, sort, ascending, detectorMap, resultMap, plansForSort, filterStatus, filterColumns, filterReadingMap, postExitReadings, entryReadings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runScopeRows, sort, ascending, detectorMap, resultMap, plansForSort, filterStatus, filterColumns, filterReadingMap, postExitReadings, entryReadings]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows), [sortedRows, detectorExpanded]);
-  // 表格为空时表头（探测算法、运行状态两个筛选的入口）不显示：是它们滤空的，就在空状态里写明并给出清除
+  // 表格为空时探测算法表头不显示：是它们滤空的，就在空状态里写明并给出清除
   const emptyByDetector = !rows.length && activeAlgorithms.length > 0 && searched.length > 0 && narrowed.length === 0;
-  const emptyByRunState = !rows.length && !!runState && runScopeRows.length > 0;
   const monthCounts = useMemo(() => {
     const ids = new Map<string, Set<string>>();
     for (const r of narrowed) { const key = signalMonthKey(r.source.timeMs); if (!ids.has(key)) ids.set(key, new Set()); ids.get(key)!.add(qualityTableSignalKey(r)); }
@@ -621,14 +623,14 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     const names = QUALITY_SOURCE_NAMES;
     return { count: selectedTotal - selectedCount, text: bySource.map(x => `${names[x.o]} ${x.n}`).join('、') };
   }, [selectedBatch, scopedSelected, selectedTotal, selectedCount]);
-  /** 只改挡住已勾选信号的筛选：来源优先换成能包含全部勾选的那一个，否则全部来源；月份、标的、探测算法、运行状态挡住了才清空。 */
+  /** 只改挡住已勾选信号的筛选：来源优先换成能包含全部勾选的那一个，否则全部来源；月份、标的、探测算法挡住了才清空。 */
   const revealSelected = () => {
     const sel = selectedBatch;
-    if (origin && sel.some(r => !hasSource(r, origin))) setOrigin((['mined', 'fish', 'library', 'turing', 'pre-entry'] as const).find(o => sel.every(r => hasSource(r, o))) ?? '');
+    setDirectoryChoice(undefined);sourceDefaulted.current=true;
+    if (origin && (origin==='filter'||sel.some(r => !hasSource(r, origin)))) setOrigin((['mined', 'fish', 'library', 'turing', 'pre-entry'] as const).find(o => sel.every(r => hasSource(r, o))) ?? '');
     if (month && sel.some(r => signalMonthKey(r.source.timeMs) !== month)) setMonth('');
     if (query.trim() && sel.some(r => !r.source.symbol.toUpperCase().includes(query.trim().toUpperCase()))) setQuery('');
     if (activeAlgorithms.length && sel.some(r => !activeAlgorithms.includes(r.detectorId ?? ''))) setAlgorithmsState([]);
-    if (runState) setRunState('');
     resetScroll();
   };
   const outsideHint = outsideSelection && <span className="inline-flex flex-wrap items-center gap-1" data-testid="quality-outside-selection">{selectedCount === 0 ? <>勾选的 {outsideSelection.count} 条都在当前筛选外</> : <>筛选外另有 {outsideSelection.count} 条已勾选</>}（{outsideSelection.text}）
@@ -655,11 +657,24 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   };
   // 【用户要求】2026-11-03 批量挖掘的数据显示挖掘时间（真实物理时间，挖到这条信号的那一刻）：表里有挖掘库记录时才多这一列
   const showMinedAt=rows.some(row=>qualityTableMinedAt(row)!=null);
-  const columnWidths=[184,144,152,...(showMinedAt?[152]:[]),80,80,...(hideFilter?[]:[128,144,112]),...shownFilters.map(()=>176),...shownPlans.flatMap(p=>[312,128,128,128,128,128,...Array(postExitOpen.has(p.id)?10:1).fill(128)]),40];
+  const columnWidths=[184,152,...(showMinedAt?[152]:[]),80,80,...(hideFilter?[]:[128,144,112]),...shownFilters.map(()=>176),...shownPlans.flatMap(p=>[312,128,128,128,128,128,...Array(postExitOpen.has(p.id)?10:1).fill(128)]),40];
   const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
   const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
+  const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy)=>{
+    if(!state.restoreMonitorStudy)return false;
+    const copied=await state.restoreMonitorStudy(snapshot,undefined,true);if(!copied)return false;
+    sourceDefaulted.current=true;setDirectoryChoice({kind,id});setOrigin(kind);setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();return true;
+  };
+  const selectSource=(value:QualityReturnUi['origin'])=>{
+    sourceDefaulted.current=true;
+    if(!archiveView&&(value==='filter'||value==='pre-entry'&&!!state.preEntry||value==='mined'&&!!mining)){
+      const current=directoryChoice?.kind===value?directoryChoice.id:value==='pre-entry'?latestEntry?.id:undefined;
+      setDirectoryRequests(requests=>({...requests,[value]:{key:(requests[value]?.key??0)+1,selectedId:current}}));return;
+    }
+    setDirectoryChoice(undefined);setOrigin(value);resetScroll();
+  };
   const expandDetectors = (expanded: boolean) => { setDetectorExpanded(expanded); selectAnchor.current = null; resetScroll(); };
   // 返回时把表格与外面各层滚回原处：数据是陆续载入的，逐帧重试到位置稳住（最多 8 秒）；用户一动滚轮 / 触屏 / 按键就停手
   const readyRef = useRef(ready); readyRef.current = ready;
@@ -713,19 +728,6 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const arrow = (key: SortKey) => sort === key ? ascending ? ' ↑' : ' ↓' : '';
   const ariaSort = (key: SortKey) => sort === key ? ascending ? 'ascending' as const : 'descending' as const : 'none' as const;
   const sortButton = (k: SortKey, label: string) => <button type="button" className="hover:text-foreground" onClick={() => changeSort(k)} aria-label={`按${label}排序`}>{label}{arrow(k)}</button>;
-  const selectRunState = (complete: boolean) => {
-    // Replace the selection, so hidden previously checked rows cannot join this batch.
-    state.setSelectedRows(qualitySelectRunState(runScopeRows, runStatuses, runStage, complete));
-    setRunState(complete ? 'done' : 'pending'); selectAnchor.current = null; resetScroll();
-  };
-  const runPicker = (children: ReactNode) => <Popover><PopoverTrigger asChild>{children}</PopoverTrigger><PopoverContent align="start" className="w-72 space-y-3 p-3 text-[11px]" data-testid="quality-run-state-picker">
-    <p className="font-medium">运行状态与批量选取</p>
-    <label className="flex items-center justify-between gap-2">工作步骤<select aria-label="运行状态的工作步骤" className={field} value={runStage} onChange={e => {setRunStage(e.target.value as QualityRunStage); resetScroll();}}><option value="filter">买前过滤</option><option value="monitor">持仓监测</option></select></label>
-    <label className="flex items-center justify-between gap-2">显示范围<select aria-label="筛选运行状态" className={field} value={runState} onChange={e => {setRunState(e.target.value as QualityRunStateFilter); resetScroll();}}><option value="">全部状态</option><option value="pending">尚未运行（{runCounts.pending}）</option><option value="done">已经运行（{runCounts.done}）</option></select></label>
-    <div className="grid grid-cols-2 gap-2 border-t border-border/50 pt-3"><button type="button" disabled={!ready || !runCounts.pending} className="rounded-md bg-primary/10 px-2 py-2 text-primary hover:bg-primary/20 disabled:opacity-40" onClick={() => selectRunState(false)}>仅选尚未运行</button><button type="button" disabled={!ready || !runCounts.done} className="rounded-md bg-muted/50 px-2 py-2 hover:bg-muted disabled:opacity-40" onClick={() => selectRunState(true)}>仅选已经运行</button></div>
-    <button type="button" disabled={!ready || !selectedEntryCount} className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40" onClick={() => {state.setSelectedRows([]); selectAnchor.current = null;}}>清空全部勾选</button>
-    <p className="text-[10px] leading-relaxed text-muted-foreground">批量选取按当前来源、月份、标的和探测筛选，覆盖全部匹配记录，并替换之前的勾选。已运行指当前条件下有效结果齐全；部分完成或缺数据仍可补算。未配置的步骤单列为“未设置”。</p>
-  </PopoverContent></Popover>;
   const exportRows = () => { setError(''); setExportAll(true); };
   useLayoutEffect(() => {
     if (!exportAll) return;
@@ -752,10 +754,10 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
     <FishQualityManual open={manualOpen} onOpenChange={setManualOpen}><><p>点「开始过滤」独立计算买入条件：在捕捞过程右侧查看各指标读数和是否满足条件。读数取买入时刻之前最后一根已收盘 K 线；修改门槛复用已有读数。</p><p>设置卖出算法后，可比较同一批信号的收益，再固定一套卖出规则，比较各探测算法。</p><p>批量挖掘、买前过滤和持仓监测可同时独立运行，各自暂停。点「开始监测」后在后台运行：按开始时的勾选和参数计算，切换选项或页面不会中断；已算完且条件没变的结果直接沿用，只补算缺的和改过的；要全部重算，点「开始监测」右侧的 ▾ 选「从头重新计算」（先将全部现有运行结果独立归档到监测库，保存完成后再重算；时间目录内按当时条件展示，同条件重复重算也各自保留）。改了买入过滤会复用已有结果，修改卖出参数只保存设置并暂停旧参数任务；全部调整完成后，点击「开始监测」按最新参数运行。</p><p>信号库、图灵杯、鱼舱、挖掘库独立并行，均可进入过滤与监测；同标的、同信号时间和入场时间的记录合并显示，保留全部来源。删除一个来源不影响另两个库；有其他来源的下游结果继续保留。信号库和图灵杯按信号时间买入，图灵杯的研究使用独立的离线 K 线。</p><p>历史鱼按捕捞时刻入场（不用信号时间：那是事后才知道会持续下去的起点），实时新鱼按实际发现时点入场；随后首根 1 分钟 K 线开盘价近似买入。已有历史样本按此口径重新评估，卖出规则保留。</p><p>收益未扣手续费、资金费和滑点。未卖出持仓单独标记；缺数据不计为零收益。探测分组可以重叠，组间盈亏不相加。</p><p>同一标的、同一信号时间默认合并一行；打开「探测值」或「探测算法」表头的展开开关后，每个算法与当次保存的探测值各占一行；探测值位于评分之后。不同买入记录的结果显示范围；合并行勾选覆盖全部明细，展开后可单独勾选。</p><p>原捕获记录与旧版规则保留；本次两套卖出试验独立计算，公式冻结，均使用原始值。</p></></FishQualityManual>
     {open && <div id={contentId} className="mt-2 space-y-2">
       {!archiveView&&<div className={fishRail} aria-label="鱼质量工作模块" data-testid="quality-modules">
-        {mining && <FishMiningPanel mining={mining} onJump={onJump} canJump={canJump} onSelectInTable={ready && state.selectMiningRecords ? signals => {
+        {mining && <FishMiningPanel openRequest={directoryRequests.mined} onSelectDirectory={(id,snapshot)=>chooseDirectory('mined',id,snapshot)} directoryEdits={study.monitorLibrary?.directoryEdits} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} mining={mining} onJump={onJump} canJump={canJump} onSelectInTable={ready && state.selectMiningRecords ? signals => {
           const result = state.selectMiningRecords!(signals);
           if (!result.selected) return false;
-          setOrigin('mined'); setQuery(''); setMonth(''); setAlgorithmsState([]); setRunState('');
+          sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('mined'); setQuery(''); setMonth(''); setAlgorithmsState([]);
           setSort('mined-at'); setAscending(false); selectAnchor.current = null; resetScroll();
           setError(result.selected < result.requested ? `有 ${result.requested - result.selected} 个入场记录暂未在组合表找到。` : '');
           return true;
@@ -772,11 +774,11 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={() => setFilterOpen(false)}/>
           </PopoverContent></Popover>
-          <FishFilterLibrary study={study}/>
+          <FishFilterLibrary openRequest={directoryRequests.filter} onSelectDirectory={(id,snapshot)=>chooseDirectory('filter',id,snapshot)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls" summary={<FishQualityInfo label="动态筛选说明"><p>与持仓监测共用分钟盘中复原流程。每套筛选方案独立筛选，筛选算法与确认条件同分钟满足、且没有启用的否决触发时停止，生成入选库记录。</p><p>静态过滤与动态筛选的设置分别保存；暂停继续沿用本轮冻结方案，从头筛选使用当前设置。</p></FishQualityInfo>}>
-            <FishPreEntryMonitor state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
-              onSelected={()=>{setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}}/>
+            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={(id,snapshot)=>chooseDirectory('pre-entry',id,snapshot)} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
+              onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
         </FishQualityModuleGroup>
         <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" trailing={<QualityResultTools kind="monitor" hidden={hideMonitor} onToggle={() => toggleHidden('monitor')} count={study.results.length} onClear={state.clearMonitorResults} disabled={!ready || !!state.archiving}/>} titleTestId="quality-mode" summary={<FishQualityInfo label="持仓监测说明"><p>100 USDT · 1 倍</p>{vetoCount > 0 && <p>{vetoCount} 项监测条件</p>}<p className="text-muted-foreground">按已勾选信号和当前卖出规则独立监测，支持后台运行；已算完且条件没变的结果直接沿用；要全部重算，点「开始监测」右侧的 ▾。归档按时间排列，后续重算不会覆盖本次快照。</p></FishQualityInfo>} status={running ? <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"/>监测中</span><span className="font-mono tabular-nums">{progress?.done ?? 0} / {progress?.total ?? 0}</span></p> : lastPause && <p className="max-w-[22rem] truncate text-muted-foreground" data-testid="quality-last-pause" title={`上一轮于 ${formatUTC8(lastPause.at)}（UTC+8）暂停：${lastPause.reason}`}>已暂停：{lastPause.reason}</p>}>
@@ -791,13 +793,21 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/>
           </PopoverContent></Popover>
-          <FishMonitorLibrary study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setRunState('');setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
+          <FishMonitorLibrary study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>
       </div>}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="relative shrink-0"><select aria-label="鱼质量的来源" title="同一信号可能属于多个来源，各来源计数可能重叠；全部来源按信号去重。" className={`${field} appearance-none pr-6`} value={origin} onChange={e => { setOrigin(e.target.value as QualityReturnUi['origin']); resetScroll(); }}><option value="">全部来源（{countSignals(batch)}）</option><option value="library">信号库（{countSignals(batch.filter(r=>hasSource(r,'library')))}）</option><option value="turing">图灵杯（{countSignals(batch.filter(r=>hasSource(r,'turing')))}）</option><option value="pre-entry">入选库（{countSignals(batch.filter(r=>hasSource(r,'pre-entry')))}）</option><option value="fish">鱼舱（{countSignals(batch.filter(r=>hasSource(r,'fish')))}）</option><option value="mined">挖掘库（{countSignals(batch.filter(r=>hasSource(r,'mined')))}）</option></select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
+        <FishQualitySourcePicker value={origin} onSelect={selectSource} options={[
+          {value:'',label:'全部来源',count:countSignals(batch)},
+          {value:'library',label:'信号库',count:countSignals(batch.filter(r=>hasSource(r,'library')))},
+          {value:'turing',label:'图灵杯',count:countSignals(batch.filter(r=>hasSource(r,'turing')))},
+          ...(!archiveView?[{value:'filter' as const,label:'过滤库',count:new Set(study.filterLibrary?.records.map(r=>qualityEntryIdentity(r.source,r.enteredAt))).size}]:[]),
+          {value:'pre-entry',label:'筛选库',count:state.preEntry?new Set(state.preEntry.library.records.filter(r=>r.status==='matched').map(r=>[r.sample.source.symbol,r.matchedAt].join('|'))).size:countSignals(batch.filter(r=>hasSource(r,'pre-entry')))},
+          {value:'mined',label:'挖掘库',count:countSignals(batch.filter(r=>hasSource(r,'mined')))},
+          {value:'fish',label:'鱼舱',count:countSignals(batch.filter(r=>hasSource(r,'fish')))},
+        ]}/>
+        {directoryChoice&&<span className="text-[10px] text-muted-foreground" data-testid="quality-active-directory">已选目录：{directoryChoice.id==='filter-legacy'?'历史记录':directoryChoice.kind==='mined'?directoryChoice.id.replace('mining-family-','')+' 系列':formatUTC8(directoryChoice.kind==='filter'?study.filterLibrary?.rounds.find(r=>r.id===directoryChoice.id)?.startedAt??0:state.preEntry?.library.rounds.find(r=>r.id===directoryChoice.id)?.startedAt??0)}</span>}
         <span className="relative shrink-0"><select aria-label="鱼质量的月份" title="按信号发生月份筛选。可在挖掘库按实际挖掘日期搜索，再带到组合表。" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
-        {/* 【用户要求】2026-11-02 「探测算法」与「监测 · 状态」筛选在表头（探测算法列、运行状态列）已有，筛选栏不再重复 */}
         <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
         <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · </>}</span>{outsideHint}<FishQualityInfo label="处理范围说明"><p>开始筛选、开始监测只处理当前筛选（来源、月份、探测算法、标的）下已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>
       </div>
@@ -812,13 +822,13 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground">
           <tr className="bg-muted/35" data-testid="quality-algorithm-categories">
             {/* 【用户要求】2026-11-02 探测值、探测算法、捕捞过程、过滤读数和入场读数都归「买前过滤」；「卖出算法」改名「持仓监测」 */}
-            <th colSpan={showMinedAt?6:5} className="px-2 py-1.5 text-[9px] font-normal text-muted-foreground/70">入场信息</th>
+            <th colSpan={showMinedAt?5:4} className="px-2 py-1.5 text-[9px] font-normal text-muted-foreground/70">入场信息</th>
             {!hideFilter && <><th colSpan={3+shownFilters.length} className="relative border-l border-border/40 px-2 py-1.5 pr-8 font-medium" aria-label="过滤类别统计" data-testid="quality-filter-group">买前过滤<QualityStatisticsButton label="全部过滤算法" onClick={() => setStatistics({category:'filter'})}/></th></>}
             {shownPlans.length > 0 && <th colSpan={qualitySellSpan(shownPlans,postExitOpen)} className="relative border-l border-border/40 px-2 py-1.5 pr-8 font-medium" aria-label="卖出类别统计" data-testid="quality-monitor-group">持仓监测<QualityStatisticsButton label="全部卖出算法" onClick={() => setStatistics({category:'sell'})}/></th>}
             <th aria-hidden="true"/>
           </tr>
           <tr className="bg-muted/20" data-testid="quality-algorithm-variables">
-            <th colSpan={showMinedAt?6:5} className="px-2 py-1 text-[9px] font-normal text-muted-foreground/50">变量 / 水平</th>
+            <th colSpan={showMinedAt?5:4} className="px-2 py-1 text-[9px] font-normal text-muted-foreground/50">变量 / 水平</th>
             {!hideFilter && <><th aria-hidden="true" className="border-l border-border/40"/>
             <th className="relative px-2 py-1 pr-8 font-normal text-muted-foreground/60" aria-label="探测变量数量">{detectorChoices.length ? `${detectorChoices.length} 个默认算法` : ''}<QualityStatisticsButton label="全部探测算法" onClick={() => setStatistics({category:'detect'})}/></th>
             <th aria-hidden="true"/></>}
@@ -828,7 +838,6 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           </tr>
           <tr className="bg-muted/40">
           <th className={`${cell} sticky left-0 z-30 min-w-[184px] bg-muted font-medium`} aria-sort={ariaSort('symbol')}><span className="flex items-center gap-2"><span aria-hidden className="w-6 shrink-0"/><input type="checkbox" aria-label="全选当前筛选信号" title="全选当前筛选下的所有行；按住 Shift 点两行可连续选择" checked={allSelected} ref={el => { if (el) el.indeterminate = selectedRows.length > 0 && !allSelected; }} disabled={!ready} onChange={e => selectVisible(e.target.checked)} className="h-3 w-3 accent-[hsl(var(--primary))]"/>{sortButton('symbol', '标的')}</span></th>
-          <th className={`${cell} min-w-[110px] font-medium`} aria-sort={ariaSort('run')} data-testid="quality-run-state-column" title="左为买前过滤、右为持仓监测：1 = 已运行，0 = 未运行（红色为缺数据）；悬停单元格看明细"><span className="flex items-center gap-2">{sortButton('run', '运行状态')}{runPicker(<button type="button" aria-label="在表头筛选运行状态" className="rounded p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground"><Filter className="h-3 w-3"/></button>)}</span><span className={`${RUN_STATE_GRID} mt-0.5 text-[9px] font-normal text-muted-foreground/60`} data-testid="quality-run-state-parts"><span>过滤</span><span>监测</span></span></th>
           <th className={`${cell} min-w-[140px] font-medium`} aria-sort={ariaSort('time')}>{sortButton('time', '信号时间')}</th>
           {showMinedAt && <th className={`${cell} min-w-[140px] font-medium`} data-testid="quality-mined-at-column" aria-sort={ariaSort('mined-at')} title="批量挖掘挖到这条信号时的真实时间（UTC+8）；不是挖掘的历史档位，也不是信号时间。同一入场有多次挖掘时显示最近一次。">{sortButton('mined-at', '挖掘时间')}</th>}
           <th className={`${cell} font-medium`} aria-sort={ariaSort('market')}>{sortButton('market', '市场')}</th>
@@ -841,9 +850,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
           <th className={`${cell} font-medium`} aria-label="跳转"/>
         </tr></thead><tbody>{padTop > 0 && <tr aria-hidden style={{ height: padTop }}/>}{visible.map((row, vi) => <tr key={row.id} style={{ height: rowPx }} className="group hover:bg-accent/30" data-testid="quality-fish-row">
           <td className={`${cell} sticky left-0 z-10 border-t border-border/40 bg-background font-mono group-hover:bg-accent`} title={`${(isTuringCupSymbol(row.source.symbol) ? '离线行情' : EXCHANGE_NAMES[row.source.exchange ?? 'binance'])} · 来源：${qualitySourceLabel(row)}`}><span className="inline-flex items-center gap-2"><span className={`w-6 shrink-0 select-none text-right text-[9px] tabular-nums ${rowSelected(row) ? 'font-medium text-primary' : 'text-muted-foreground/55'}`} data-testid="quality-row-number">{first + vi + 1}</span><input type="checkbox" aria-label={`选择 ${row.source.symbol} ${date(row.source.timeMs)}${row.detectorId ? ` ${detectorMap.get(row.detectorId)?.label} ${detectorMap.get(row.detectorId)?.snapshot.threshold}` : detectorExpanded ? ' 信号库' : ' 合并信号'}`} title="按住 Shift 点另一行可连续选择" checked={rowSelected(row)} ref={el => { if (el) el.indeterminate = !rowSelected(row) && qualityTableMembers(row).some(member => selectedIds.has(member.id)); }} disabled={!ready} onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }} onChange={e => toggleRow(row.id, e.target.checked, (e.nativeEvent as MouseEvent).shiftKey === true)} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/><button type="button" aria-label={`查看 ${row.source.symbol} 盘面`} title={`查看 ${row.source.symbol} 在 ${date(row.source.timeMs)} 的盘面`} disabled={!onJump || !!canJump && !canJump(row.source)} onClick={() => onJump?.(row.source)} className="rounded-sm text-left transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:no-underline disabled:hover:text-inherit">{turingCupTicker(row.source.symbol)}</button>{row.source.turingReplaySample && <span className="font-sans text-[9px] text-muted-foreground" title="图灵杯行情的模拟入场点">回放样本</span>}</span>{!isTuringCupSymbol(row.source.symbol) && row.source.exchange && row.source.exchange !== 'binance' && <span className="ml-1 font-sans text-[9px] text-muted-foreground">{EXCHANGE_NAMES[row.source.exchange]}</span>}</td>
-          <td className={`${cell} border-t border-border/40`} data-testid="quality-run-state-cell"><span className={RUN_STATE_GRID}>{(['filter','monitor'] as const).map(stage => { const status = qualityRowRunStatus(row, runStatuses)[stage], text = qualityRunStatusText(status);
-            // 【用户要求】2026-11-01 运行状态只显示 0 和 1（已运行 1、其余 0，缺数据的 0 标红）；「过滤 / 监测」字样挪到表头，进度和完整状态只在悬停说明与读屏标签里
-            return <span key={stage} className={`font-mono text-[11px] leading-[14px] tabular-nums ${status.complete ? 'text-emerald-600 dark:text-emerald-400' : text === '缺数据' ? 'text-destructive' : 'text-muted-foreground'}`} title={`${stage === 'filter' ? '买前过滤' : '持仓监测'}：${text}。${qualityRunStatusDetail(status)}`} data-run-stage={stage} data-run-state={!status.total ? 'unset' : status.complete ? 'done' : 'pending'} aria-label={text}>{status.complete ? '1' : '0'}</span>; })}</span></td>
+
           <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} title={`模拟买入：${date(row.enteredAt)}（${row.basis === 'detected' ? '实际发现' : row.basis === 'capture' ? '捕捞时刻' : row.basis === 'missing' ? '时间缺失' : isLibrary(row) ? qualitySourceLabel(row) + '信号时间' : '原始信号'}）`}>{date(row.source.timeMs)}</td>
           {showMinedAt && (() => { const at = qualityTableMinedAt(row); return <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} data-testid="quality-mined-at-cell" title={at ? `挖掘档位：${date(row.enteredAt)}` : '不是批量挖掘的记录'}>{at ? date(at) : '—'}</td>; })()}
           <td className={`${cell} border-t border-border/40 text-muted-foreground`}>{row.source.market === 'us_stock' ? '美股' : ''}</td>
@@ -857,7 +864,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
             const f = skippedBy(p, row), skipped = f && f.state !== 'pass', result = qualityRowResult(study,row,p,resultMap);
             return <Fragment key={p.id}><td className={`${cell} border-l border-t border-border/40`}>{skipped ? <span className="text-[9px] text-muted-foreground/60" title={f.detail}>{f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断' : '买入过滤缺数据'}</span> : filtersOn && !hasQualityExit(p) ? <span className="text-[9px] text-muted-foreground/60">待设卖出</span> : <ResultCell plan={p} result={result} section="sell" onClick={() => setDetailId(qualityTableMembers(row)[0].id)} onOpenCampaign={rememberReturn}/>}</td>{phase === 'sell' && <><td className={`${cell} border-t border-border/40 font-mono tabular-nums ${!skipped && (qualityDrawdownPct(result,'static')??0)>0?'text-destructive':'text-muted-foreground'}`} data-testid="quality-static-drawdown" data-sell-plan={p.id}>{pct(skipped?null:qualityDrawdownPct(result,'static')).replace(/^\+/, '')}</td><td className={`${cell} border-t border-border/40 font-mono tabular-nums ${signed(skipped?null:qualityPeakPct(result))}`} data-testid="quality-peak-gain" data-sell-plan={p.id} title={skipped?f.detail:'持仓价格路径的峰值涨幅，与该笔交易战役读取同一份结果'}>{pct(skipped?null:qualityPeakPct(result))}</td><QualitySalePriceChangeCell plan={p} entries={[{result,skipped}]}/><td className={`${cell} border-t border-border/40`} data-testid="quality-half-mirror" data-sell-plan={p.id}><QualityHalfMirrorCell plan={p} result={result} skipped={skipped?f.detail:undefined}/></td></>}{phase === 'sell' && <td className={`${cell} border-t border-border/40 font-mono tabular-nums ${result?.status === 'open' ? 'text-foreground/80' : 'text-muted-foreground'}`} data-testid="quality-held-time" data-sell-plan={p.id} title={skipped ? f.detail : result?.status === 'open' ? '仍在持有：算到最近一次估值' : result?.reason}>{skipped || !(result?.status === 'closed' || result?.status === 'open') ? '—' : heldText(result.heldHours)}</td>}<PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={[{row,result,skipped:!!skipped}]} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>; })}
           <td className={`${cell} border-t border-border/40`}><button type="button" aria-label={`跳转 ${row.source.symbol}`} disabled={!onJump || !!canJump && !canJump(row.source)} onClick={() => onJump?.(row.source)} className="text-primary disabled:opacity-30"><ArrowRightCircle className="h-3.5 w-3.5"/></button></td>
-        </tr>)}{padBottom > 0 && <tr aria-hidden style={{ height: padBottom }}/>}</tbody></table></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{allRows.length ? <>没有匹配的标的。{emptyByDetector && <span className="ml-1" data-testid="quality-empty-detector-filter">表头「探测算法」筛选{chosenChoices.length ? `（${chosenChoices.map(choiceText).join('、')}）` : ''}把它们全滤掉了{isSignalLibraryOrigin(origin) ? '：' + QUALITY_SOURCE_NAMES[origin] + '自己的信号没有探测算法' : ''}。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => setAlgorithms([])}>清除探测算法筛选</button></span>}{!emptyByDetector && emptyByRunState && <span className="ml-1" data-testid="quality-empty-run-state">表头「运行状态」只显示{runState === 'done' ? '已经运行' : '尚未运行'}的信号。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => { setRunState(''); resetScroll(); }}>显示全部状态</button></span>}</> : '暂无可评估的信号。捕捞到的鱼、信号库和图灵杯的信号会自动加入。'}</div>}
+        </tr>)}{padBottom > 0 && <tr aria-hidden style={{ height: padBottom }}/>}</tbody></table></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{allRows.length ? <>没有匹配的标的。{emptyByDetector && <span className="ml-1" data-testid="quality-empty-detector-filter">表头「探测算法」筛选{chosenChoices.length ? `（${chosenChoices.map(choiceText).join('、')}）` : ''}把它们全滤掉了{isSignalLibraryOrigin(origin) ? '：' + QUALITY_SOURCE_NAMES[origin] + '自己的信号没有探测算法' : ''}。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => setAlgorithms([])}>清除探测算法筛选</button></span>}</> : '暂无可评估的信号。捕捞到的鱼、信号库和图灵杯的信号会自动加入。'}</div>}
       {rows.length > 0 && <p className="text-right text-[10px] tabular-nums text-muted-foreground" data-testid="quality-row-count">{selectedRowCount > 0 && <span className="font-medium text-primary" data-testid="quality-selected-row-count">已选 {selectedRowCount} 行 · </span>}共 {rows.length} 行 · {countSignals(rows)} 条信号{!detectorExpanded ? ' · 已合并探测明细' : ''}{sortedRows.length < batch.length ? `（筛选自 ${countSignals(batch)} 条信号）` : ''}</p>}
     </div>}
     {statistics && <FishQualityStatistics key={`${statistics.category}:${statistics.variableId ?? ''}:${statistics.levelId ?? ''}`} study={study} rows={sortedRows} request={statistics} onClose={() => setStatistics(null)}/>}

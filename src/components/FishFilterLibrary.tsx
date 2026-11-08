@@ -1,56 +1,38 @@
-import { filterLibraryCondition, libraryConditionSearch } from '@/lib/fish/libraryConditions';
-import { FishLibraryCondition } from '@/components/FishLibraryConditions';
-/** 过滤库：买前过滤每一轮冻结的条件与判断（数据见 lib/fish/qualityFilterLibrary）。 */
-import { useCallback, useMemo } from 'react';
-import { FishLibraryDialog, libraryCell } from '@/components/FishLibraryDialog';
-import type { FishQualityStudy } from '@/lib/fish/quality';
-import type { QualityFilterRecord, QualityFilterSetting } from '@/lib/fish/qualityFilterLibrary';
-import { libraryRoundRecordIds } from '@/lib/fish/libraryRounds';
-import { qualityFilterValueText } from '@/lib/fish/qualityFilterColumns';
-import { formatUTC8 } from '@/lib/timeFormat';
-
-const date = (t: number | null | undefined) => t == null ? '—' : formatUTC8(t);
-
-const STATE = { pass: ['满足', 'text-emerald-600 dark:text-emerald-400'], fail: ['不满足', 'text-destructive'], error: ['缺数据', 'text-muted-foreground'], pending: ['待判断', 'text-muted-foreground'], none: ['不过滤', 'text-muted-foreground'] } as const;
-const ROUND_STATE = { running: '运行中', complete: '已完成', paused: '已暂停', failed: '失败' } as const;
-
-export function FishFilterLibrary({ study }: { study: FishQualityStudy }) {
-  const library = study.filterLibrary;
-  const settings = useMemo(() => new Map((library?.settings ?? []).map(s => [s.id, s])), [library?.settings]);
-  const evidence=useMemo(()=>new Map([...settings.values()].map(s=>[s.id,s.filters.map(filterLibraryCondition)])),[settings]);
-  const rounds = useMemo(() => [...(library?.rounds ?? [])].sort((a, b) => b.startedAt - a.startedAt), [library?.rounds]);
-  const roundIds = useMemo(() => {
-    const cache = new Map<string, string[]>(), all = library?.rounds ?? [];
-    return new Map(rounds.map(r => [r.id, new Set(libraryRoundRecordIds(all, r, cache))]));
-  }, [rounds, library?.rounds]);
-  const items = useMemo(() => [...(library?.records ?? [])].filter(r => settings.has(r.settingId))
-    .sort((a, b) => b.updatedAt - a.updatedAt || b.source.timeMs - a.source.timeMs || a.source.symbol.localeCompare(b.source.symbol)), [library?.records, settings]);
-  const options = rounds.map((r, i) => ({ id: r.id, label: `第 ${rounds.length - i} 轮 · ${date(r.startedAt)} · ${ROUND_STATE[r.state]} · ${roundIds.get(r.id)?.size ?? 0} 条`, error: r.error }));
-  const match = useCallback((r: QualityFilterRecord, needle: string, roundId: string) => {
-    if (roundId && !roundIds.get(roundId)?.has(r.id)) return false;
-    const s = settings.get(r.settingId)!;
-    return !needle || r.source.symbol.toUpperCase().includes(needle) || evidence.get(s.id)!.some(c=>libraryConditionSearch(c).toUpperCase().includes(needle)) || s.plans.some(p => p.toUpperCase().includes(needle));
-  }, [roundIds, settings,evidence]);
-  const settingCount = settings.size, recordCount = items.length;
-  return <FishLibraryDialog name="过滤库" roundLabel="轮次" rounds={options} placeholder="搜索标的、过滤条件…"
-    description={`${recordCount} 条记录 · ${settingCount} 组条件 · ${rounds.length} 轮过滤`}
-    info={<><p>每点一次「开始过滤」记一轮，逐条展示当时实际使用的具体序列、方向、门槛、周期及历史公式版本，点击详情可核对公式与参数。独立保存过滤条件、每条信号的读数及判断，不要求配置或运行卖出算法。历史绑定条件的记录按原样保留。</p><p>同一组条件下，同标的、同信号时间、同买入时刻的合并为一条，保留最新判断；每轮仍可单独查看。只改门槛、读数可直接复用的，也记为新的一轮。</p><p>读数取买入时刻之前最后一根已收盘 K 线，具体周期以各条件的历史快照为准。随账号保存。</p></>}
-    headers={['标的', '信号时间', '买入时刻', '过滤条件', '关联方式', '读数', '判断', '保存时间']}
-    items={items} match={match}
-    empty={{ none: '暂无过滤记录。设置买入条件并开始过滤后，每轮会自动保存。', unmatched: '没有匹配的过滤记录。' }}
-    row={r => {
-      const s = settings.get(r.settingId)!,saved=evidence.get(s.id)!, [label, tone] = STATE[r.status.state];
-      // 每个条件一个读数，顺序与「过滤条件」一致；悬停看逐条判断
-      const readingText = s.filters.map((_, i) => { const x = r.readings[i]; return !x ? '—' : x.error || !Number.isFinite(x.value) ? '缺' : qualityFilterValueText(x.value!); }).join(' / ');
-      return <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="filter-library-row" title={r.status.detail}>
-        <td className={`${libraryCell} font-mono`}>{r.source.symbol}{(r.origin === 'library' || r.origin === 'turing') && <span className="ml-1.5 font-sans text-[9px] text-muted-foreground">{r.origin === 'turing' ? '图灵杯' : '信号库'}</span>}</td>
-        <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.source.timeMs)}</td>
-        <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.enteredAt)}</td>
-        <td className={`${libraryCell} min-w-[320px] max-w-[440px] align-top`}><p className="mb-1 text-[9px] text-muted-foreground">{saved.length>1?'交集 · 以下条件全部满足':'单条件'}</p><div className="space-y-1.5">{saved.map((c,i)=><FishLibraryCondition key={i} condition={c}/>)}</div></td>
-        <td className={`${libraryCell} max-w-40 truncate text-muted-foreground`} title={s.plans.join('、')}>{s.plans.length ? `历史绑定 · ${s.plans.join('、')}` : '独立过滤'}</td>
-        <td className={`${libraryCell} min-w-[180px] align-top font-mono tabular-nums`} title={readingText}><p className="mb-1 font-sans text-[9px] text-muted-foreground">与左侧条件逐项对应</p><div className="space-y-1.5">{saved.map((c,i)=>{const x=r.readings[i],f=s.filters[i],valid=x&&!x.error&&Number.isFinite(x.value),passed=valid&&(f.direction==='>'?x.value!>f.threshold:x.value!<f.threshold);return <div key={i} className="min-h-9" title={x?.error??(x?.at?`读数时点：${date(x.at)}`:undefined)}><p className="text-foreground">{c.metric} = {valid?qualityFilterValueText(x.value!):x?'缺数据':'待计算'}</p><p className={`font-sans text-[9px] ${valid?passed?'text-emerald-600 dark:text-emerald-400':'text-destructive':'text-muted-foreground'}`}>{valid?passed?'满足':'不满足':x?'读数无效':'尚未取得读数'}</p></div>;})}</div></td>
-        <td className={`${libraryCell} ${tone}`}>{label}</td>
-        <td className={`${libraryCell} font-mono text-muted-foreground`} title={date(r.updatedAt)}>{date(r.updatedAt).slice(5, 16)}</td>
-      </tr>;
-    }}/>;
+import {useState,type ReactNode} from 'react';
+import {filterLibraryCondition,libraryConditionSearch} from '@/lib/fish/libraryConditions';
+import {FishLibraryCondition} from './FishLibraryConditions';
+import {libraryCell} from './FishLibraryDialog';
+import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishLibraryDataActions} from './FishLibraryTransferContext';
+import type {FishQualityStudy} from '@/lib/fish/quality';
+import type {QualityFilterRecord,QualityFilterSetting} from '@/lib/fish/qualityFilterLibrary';
+import {filterDirectoryData,filterDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
+import {qualityFilterValueText} from '@/lib/fish/qualityFilterColumns';
+import {formatUTC8} from '@/lib/timeFormat';
+const date=(t:number|null|undefined)=>t==null?'—':formatUTC8(t);
+const STATE={pass:'满足',fail:'不满足',error:'缺数据',pending:'待判断',none:'不过滤'} as const;
+const ROUND_STATE={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
+export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory}:{openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy)=>Promise<boolean>;study:FishQualityStudy;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>}){
+ const library=study.filterLibrary,rounds=library?.rounds??[];
+ const items:FishDirectoryItem[]=library?rounds.map(r=>({id:r.id,at:r.startedAt,label:'过滤轮次',summary:filterDirectoryData(library,r).records.length+' 条记录 · '+ROUND_STATE[r.state],revision:library,study:()=>filterDirectoryStudy(library,r),details:<FilterEvidence {...filterDirectoryData(library,r)}/>,note:r.filterSnapshot?'保留本轮组合表输入、冻结条件和判断；后续重算不会覆盖。':'早期轮次仅保存记录引用，展示当前仍保存的版本；未保存的探测值和评分保持缺失。'})):[];
+ const legacy=library?filterDirectoryData(library):undefined;
+ if(legacy?.records.length)items.push({id:'filter-legacy',at:Math.max(...legacy.records.map(r=>r.updatedAt)),label:'历史记录',summary:legacy.records.length+' 条记录',revision:library,study:()=>filterDirectoryStudy(library!),details:<FilterEvidence {...legacy}/>,note:'历史记录未保存轮次，只展示已有的冻结条件与读数，不补造缺失数据。'});
+ return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" items={items} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
+  description={`${library?.records.length??0} 条记录 · ${rounds.length} 轮过滤`} dataActions={<FishLibraryDataActions scope="filter"/>} download={()=>downloadDirectoryTables('过滤库',items.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
+  info={<><p>与监测库共用时间目录。展开后展示该轮组合表，条件、读数和判断取自保存记录，不重新计算。</p><p>新轮次单独保存组合表输入和过滤结果；早期轮次只有记录引用，会明确标注。目录可删除和恢复，复制前先完整归档当前组合表。</p></>}
+  empty="暂无过滤记录。设置买入条件并开始过滤后，每轮会自动保存。"/>;
+}
+function FilterEvidence({settings:catalog,records}:{settings:QualityFilterSetting[];records:QualityFilterRecord[]}){
+ const [query,setQuery]=useState(''),settings=new Map(catalog.map(s=>[s.id,s]));
+ const items=records.filter(r=>{const s=settings.get(r.settingId);return s&&(!query||r.source.symbol.toUpperCase().includes(query.toUpperCase())||s.filters.some(f=>libraryConditionSearch(filterLibraryCondition(f)).toUpperCase().includes(query.toUpperCase())));});
+ return <details className="m-4 text-[11px]"><summary className="cursor-pointer text-muted-foreground">过滤判定详情</summary><input aria-label="搜索过滤库" placeholder="搜索标的、过滤条件…" value={query} onChange={e=>setQuery(e.target.value)} className="my-2 h-8 w-64 rounded border bg-background px-2"/><div className="overflow-auto"><table className="w-full text-[11px]"><thead><tr>{['标的','信号时间','买入时刻','过滤条件','关联方式','读数','判断','保存时间'].map(h=><th key={h} className={libraryCell}>{h}</th>)}</tr></thead><tbody>{items.map(r=>{
+  const setting=settings.get(r.settingId)!;
+  return <tr key={r.id} data-testid="filter-library-row" className="border-t border-border/40" title={r.status.detail}>
+   <td className={libraryCell}>{r.source.symbol}</td><td className={libraryCell}>{date(r.source.timeMs)}</td><td className={libraryCell}>{date(r.enteredAt)}</td>
+   <td className={libraryCell}><p className="text-muted-foreground">{setting.filters.length>1?'交集 · 以下条件全部满足':'单条件'}</p>{setting.filters.map((f,i)=><FishLibraryCondition key={i} condition={filterLibraryCondition(f)}/>)}</td>
+   <td className={libraryCell}>{setting.plans.length?'历史绑定 · '+setting.plans.join('、'):'独立过滤'}</td>
+   <td className={libraryCell}>{setting.filters.map((f,i)=>{const reading=r.readings[i],valid=reading&&!reading.error&&Number.isFinite(reading.value),passed=valid&&(f.direction==='>'?reading.value!>f.threshold:reading.value!<f.threshold);return <div key={i} title={reading?.error??date(reading?.at)}><p>{filterLibraryCondition(f).metric} = {valid?qualityFilterValueText(reading.value!):reading?'缺数据':'待计算'}</p><p className={valid?passed?'text-emerald-600':'text-destructive':'text-muted-foreground'}>{valid?passed?'满足':'不满足':reading?'读数无效':'尚未取得读数'}</p></div>;})}</td>
+   <td className={libraryCell}>{STATE[r.status.state]}</td><td className={libraryCell}>{date(r.updatedAt)}</td>
+  </tr>;
+ })}</tbody></table></div></details>;
 }

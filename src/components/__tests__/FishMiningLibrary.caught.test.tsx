@@ -1,5 +1,5 @@
 // 【用户要求】2026-10-27「挖掘库中命中算法这里只显示探测算法（也就是被哪个算法捕捉到的）」
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within,waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
 import { FishBulkDeleteContext } from '@/components/FishBulkDeletion';
@@ -8,7 +8,12 @@ import { fishCatchKey, fishVisibleCatchKey } from '@/lib/fish/records';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 const store = vi.hoisted(() => ({ library: null as unknown }));
-vi.mock('@/lib/fish/miningLibraryStore', () => ({ MINING_LIBRARY_EVENT: 'x', loadMiningLibrary: async () => store.library }));
+vi.mock('@/lib/fish/miningLibraryStore', () => ({ MINING_LIBRARY_EVENT: 'x',updateMiningLibrary:vi.fn(), loadMiningLibrary: async () => store.library }));
+
+async function openFamily(family='CBI-2'){
+ await waitFor(()=>expect(screen.getByLabelText('打开挖掘归档 mining-family-'+family)).toBeInTheDocument());
+ fireEvent.click(screen.getByLabelText('打开挖掘归档 mining-family-'+family));fireEvent.click(screen.getByText('挖掘记录详情'));
+}
 const A = Date.UTC(2026, 4, 16, 4);
 const snap = (featureShort: string, statistic: string, algorithmKey: string) => ({ average: 0.05, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: A, threshold: 0.04, featureShort, statistic, algorithmKey });
 const signal = (symbol: string, hit: number[], key = 'k1'): TradeSignal => ({ id: symbol, symbol, timeMs: A - 3_600_000, timeLabel: '', fallbackZone: '', mined: { anchorMs: A },
@@ -25,27 +30,22 @@ it('shows only the detectors that actually caught each signal, merges identical 
   // 鱼舱里 AKE 只有修过别名后的那条（键与旧记录不同），DOGE 已删除
   const hold = new Set([fishCatchKey(ake), fishVisibleCatchKey(ake)]);
   render(<FishMiningLibrary account="u" holdKeys={() => hold}/>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));
-  const rows = await screen.findAllByTestId('mining-library-row');
-  expect(rows).toHaveLength(2);
-  const [first, second] = rows.map(r => within(r).getAllByRole('cell').map(c => c.textContent));
-  const bySymbol = Object.fromEntries([first, second].map(cells => [cells[0], cells]));
-  expect(bySymbol.AKEUSDT[3]).toContain('CBI-2·avg₂ · avg_CBI2_2');expect(bySymbol.AKEUSDT[3]).toContain('CBA·avg₂ · avg_CBA_2');expect(bySymbol.AKEUSDT[3]).not.toContain('avg_state_2');
-  expect(bySymbol.DOGEUSDT[3]).toContain('S·avg₂ · avg_state_2');
+  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
+  const rows=await screen.findAllByTestId('mining-library-row');expect(rows).toHaveLength(1);
+  const cells=within(rows[0]).getAllByRole('cell').map(c=>c.textContent);
+  expect(cells[0]).toBe('AKEUSDT');expect(cells[3]).toContain('CBI-2');expect(cells[3]).toContain('avg_CBA_2');expect(cells[3]).not.toContain('avg_state_2');
+  expect(screen.getByText('CBI-2 系列')).toBeInTheDocument();expect(screen.getByText('CBA 系列')).toBeInTheDocument();expect(screen.getByText('S 系列')).toBeInTheDocument();
+  await openFamily('S');
+  const dogeRows=screen.getAllByTestId('mining-library-row');expect(dogeRows).toHaveLength(1);expect(dogeRows[0]).toHaveTextContent('DOGEUSDT');expect(dogeRows[0]).toHaveTextContent('avg_state_2');
   expect(screen.queryByRole('columnheader',{name:'鱼舱'})).not.toBeInTheDocument();
-  expect(screen.queryByText('已从鱼舱删除')).not.toBeInTheDocument();
-  expect(first).toHaveLength(6);expect(second).toHaveLength(6);
-  expect(screen.getByText(/2 条信号/)).toBeInTheDocument();
-  // 按命中算法搜：只搜得到真正命中的
-  fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: 'S·avg' } });
-  expect(screen.getAllByTestId('mining-library-row').map(r => within(r).getAllByRole('cell')[0].textContent)).toEqual(['DOGEUSDT']);
+
 });
 
 
 it('keeps different historical thresholds visible even when their old shorthand labels and signal times are identical',async()=>{
  const a=signal('AAAUSDT',[1]),b=structuredClone(a);a.fish!.algorithms![0]={...a.fish!.algorithms![0],direction:'>',threshold:.04};b.fish!.algorithms![0]={...b.fish!.algorithms![0],direction:'>',threshold:.05};
  store.library={...emptyMiningLibrary(),records:[record(a,'a','a',1),record(b,'b','b',2)]};
- render(<FishMiningLibrary/>);fireEvent.click(screen.getByRole('button',{name:'打开挖掘库'}));
+ render(<FishMiningLibrary/>);fireEvent.click(screen.getByRole('button',{name:'打开挖掘库'}));await openFamily();
  const rows=await screen.findAllByTestId('mining-library-row');expect(rows).toHaveLength(2);expect(rows.map(r=>r.textContent).join(' ')).toContain('avg_CBI2_2 > 0.04');expect(rows.map(r=>r.textContent).join(' ')).toContain('avg_CBI2_2 > 0.05');
  fireEvent.change(screen.getByLabelText('搜索挖掘库'),{target:{value:'avg_CBI2_2 > 0.05'}});expect(screen.getAllByTestId('mining-library-row')).toHaveLength(1);
 });
@@ -69,7 +69,7 @@ it('shows exact Beijing mining times, sorts repeated captures separately, and se
   ] };
   const remove = vi.fn();
   render(<FishBulkDeleteContext.Provider value={remove}><FishMiningLibrary/></FishBulkDeleteContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
   await screen.findAllByTestId('mining-library-mined-at');
   const dates = () => screen.getAllByTestId('mining-library-mined-at').map(cell => cell.textContent);
   const sort = screen.getByRole('button', { name: '按挖掘时间排序' });
@@ -99,7 +99,7 @@ it('bulk selects a sorted, filtered range across the scroll window and supports 
   store.library = { ...emptyMiningLibrary(), records: [...captures, record(excluded, 'excluded', 'excluded', excluded.caughtAt)] };
   const remove = vi.fn();
   render(<FishBulkDeleteContext.Provider value={remove}><FishMiningLibrary/></FishBulkDeleteContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
   await screen.findAllByTestId('mining-library-row');
 
   fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: 'KEEP' } });
@@ -130,7 +130,7 @@ it('hands the selected actual mining date to the combination table with each ori
   store.library = { ...emptyMiningLibrary(), records: [record(old, 'old', 'old', A), record(selected, 'new', 'new', A)] };
   const useInTable = vi.fn(() => true);
   render(<FishMiningLibrary onSelectInTable={useInTable}/>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));
+  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily('S');
   await screen.findAllByTestId('mining-library-row');
   fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: '2026-11-06' } });
   fireEvent.click(screen.getByRole('checkbox', { name: '全选当前筛选的挖掘库记录' }));

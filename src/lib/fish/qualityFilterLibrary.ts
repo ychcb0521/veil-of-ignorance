@@ -15,13 +15,17 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 
 export interface QualityFilterSetting { id: string; signature: string; filters: QualityBuyFilter[]; plans: string[] }
 export interface QualityFilterRecord extends LibraryRecordBase {
-  settingId: string; source: Pick<TradeSignal, 'id' | 'symbol' | 'timeMs' | 'timeLabel' | 'fallbackZone' | 'exchange' | 'market' | 'underlying' | 'binanceSymbol'>;
+  settingId: string; source: Pick<TradeSignal, 'id' | 'symbol' | 'timeMs' | 'timeLabel' | 'fallbackZone' | 'exchange' | 'market' | 'underlying' | 'binanceSymbol' | 'quality'>;
   enteredAt: number | null; basis: QualitySample['basis']; origin?: QualitySample['origin'];
   origins?:QualitySample['origins'];
+  /** Original combination-table row, frozen for new rounds only. */
+  sample?: QualitySample;
   /** 与条件组的 filters 一一对应；还没读数的为 null。 */
   readings: (QualityFilterReading | null)[]; status: QualityFilterStatus;
 }
-export interface QualityFilterLibrary { version: 1; settings: QualityFilterSetting[]; records: QualityFilterRecord[]; rounds: LibraryRound[] }
+export interface QualityFilterRoundSnapshot { at:number; settings:QualityFilterSetting[]; records:QualityFilterRecord[] }
+export interface QualityFilterRound extends LibraryRound { filterSnapshot?:QualityFilterRoundSnapshot }
+export interface QualityFilterLibrary { version: 1; settings: QualityFilterSetting[]; records: QualityFilterRecord[]; rounds: QualityFilterRound[] }
 interface FilterTask { id: string; setting: QualityFilterSetting; sample: QualitySample }
 export interface QualityFilterCapture { roundId: string; tasks: FilterTask[]; readings: Map<string, QualityFilterReading> }
 
@@ -49,10 +53,10 @@ function tasksFor(study: FishQualityStudy, catalog: Map<string, QualityFilterSet
 }
 function recordFor(task: FilterTask, readings: ReadonlyMap<string, QualityFilterReading>, at: number, prior?: QualityFilterRecord): QualityFilterRecord {
   const { setting, sample } = task;
-  const { id, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol } = sample.source;
+  const { id, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, quality } = sample.source;
   const plan = { id: setting.id, buyFilters: setting.filters } as never;
   const picked = setting.filters.map(f => { const r = readings.get(qualityFilterReadingKey(sample, f)); return r ? structuredClone(r) : null; });
-  return { id: task.id, settingId: setting.id, source: { id, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol },
+  return { id: task.id, settingId: setting.id, source: { id, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, quality }, sample: structuredClone(sample),
     enteredAt: sample.enteredAt, basis: sample.basis, ...(sample.origin ? { origin: sample.origin } : {}),origins:sample.origins, readings: picked,
     status: qualityFilterStatus({ sellPlans: [plan] } as unknown as FishQualityStudy, sample, plan, new Map(readings)),
     firstSavedAt: prior?.firstSavedAt ?? at, updatedAt: at };
@@ -63,6 +67,9 @@ function withRecords(library: QualityFilterLibrary, tasks: readonly FilterTask[]
   return [...records.values()];
 }
 
+function filterRoundSnapshot(tasks:readonly FilterTask[],readings:ReadonlyMap<string,QualityFilterReading>,at:number):QualityFilterRoundSnapshot {
+  return {at,settings:structuredClone([...new Map(tasks.map(t=>[t.setting.id,t.setting])).values()]),records:tasks.map(t=>recordFor(t,readings,at))};
+}
 let sequence = 0;
 /** 开始一轮：冻结当前独立过滤条件（旧版保留绑定信息），先用已有读数写一遍（读数齐全的这一轮就已有结果）。没有任何启用条件时不记轮次。 */
 export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number): { study: FishQualityStudy; capture: QualityFilterCapture } | null {
@@ -73,7 +80,7 @@ export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQua
   const roundId = `filter-${at}-${++sequence}-${Math.random().toString(36).slice(2, 8)}`;
   const round = newLibraryRound(library.rounds, roundId, at, tasks.map(t => t.id));
   return {
-    study: { ...study, filterLibrary: { version: 1, settings: [...catalog.values()], records: withRecords(library, tasks, readings, at), rounds: [...library.rounds, round] } },
+    study: { ...study, filterLibrary: { ...library, version: 1, settings: [...catalog.values()], records: withRecords(library, tasks, readings, at), rounds: [...library.rounds, {...round,filterSnapshot:filterRoundSnapshot(tasks,readings,at)}] } },
     capture: { roundId, tasks, readings },
   };
 }
@@ -81,7 +88,7 @@ export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQua
 export function finishQualityFilterRound(study: FishQualityStudy, capture: QualityFilterCapture, state: 'complete' | 'paused' | 'failed', at: number, error?: string): FishQualityStudy {
   const library = study.filterLibrary;
   if (!library?.rounds.some(r => r.id === capture.roundId)) return study;
-  return { ...study, filterLibrary: { ...library, records: withRecords(library, capture.tasks, capture.readings, at), rounds: finishLibraryRound(library.rounds, capture.roundId, state, at, error) } };
+  return { ...study, filterLibrary: { ...library, records: withRecords(library, capture.tasks, capture.readings, at), rounds: finishLibraryRound(library.rounds, capture.roundId, state, at, error).map(r=>r.id===capture.roundId?{...r,filterSnapshot:filterRoundSnapshot(capture.tasks,capture.readings,at)}:r) } };
 }
 export function recoverQualityFilterRounds(study: FishQualityStudy, at = Date.now()): FishQualityStudy {
   const library = study.filterLibrary;
@@ -94,5 +101,6 @@ export function preserveQualityFilterLibrary(saved: FishQualityStudy | undefined
   if (!b) return { ...incoming, filterLibrary: a };
   const settings = new Map(a.settings.map(s => [s.id, s]));
   for (const s of b.settings) { const old = settings.get(s.id); settings.set(s.id, old ? { ...s, plans: [...new Set([...old.plans, ...s.plans])] } : s); }
-  return { ...incoming, filterLibrary: { version: 1, settings: [...settings.values()], records: mergeLibraryRecords(a.records, b.records), rounds: mergeLibraryRounds(a.rounds, b.rounds) } };
+  const snapshots=new Map<string,QualityFilterRoundSnapshot>();for(const round of [...a.rounds,...b.rounds]){const s=round.filterSnapshot;if(s&&s.at>=(snapshots.get(round.id)?.at??-1))snapshots.set(round.id,s);}
+  return { ...incoming, filterLibrary: { ...a,...b,version: 1, settings: [...settings.values()], records: mergeLibraryRecords(a.records, b.records), rounds: mergeLibraryRounds(a.rounds, b.rounds).map(r=>snapshots.has(r.id)?{...r,filterSnapshot:snapshots.get(r.id)}:r) } };
 }

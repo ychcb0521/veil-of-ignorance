@@ -16,23 +16,20 @@ import { hasQualityExit, qualityRuleText, activeBuyFilters, expandQualityRows, q
 import { qualityRowResult, qualityResultMap } from './qualityComparison';
 import { archiveQualityStudy, isCurrentQualityRun, qualityRuleLabel, qualityFormulaVersion } from './qualityCampaignArchive';
 import { qualityDefinition } from './quality';
-import { qualityRunStatusMap, qualityRunStatusText } from './qualityRunStatus';
 
 /** Match the displayed detector rows; repeated sell values belong to the same signal and entry. */
 export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[]): XlsxSheet[] {
   rows = expandQualityRows(rows);
   const plans = study.sellPlans ?? [], groups = new Map(study.groups.map(g => [g.id, g])), results = qualityResultMap(study), readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const filters = qualityFilterColumns(study);
-  const runStatuses = qualityRunStatusMap(study, rows);
   const sheets: XlsxSheet[] = [{ name: '鱼质量', columns: [
-    { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 }, { header: '探测值', width: 20 },
+    { header: '标的', width: 25 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 }, { header: '探测值', width: 20 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
     ...plans.flatMap(p => [{header:`${p.label} · 入场读数`,width:36},{ header: `卖出 · ${p.label}（${hasQualityExit(p) ? qualityRuleText(p) : '未设置'}）收益率 %`, width: 34 },
       {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 首仓涨幅 %`,width:28},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 加仓次数`,width:20},{header:`${p.label} · 加仓状态`,width:22},{header:`${p.label} · 探测标签`,width:24},{header:`${p.label} · 持仓小时`,width:22},...POST_EXIT_HOURS.flatMap(h=>['峰值涨幅','静态最大回撤2'].map(metric=>({header:`${p.label} · 卖后${h}h ${metric} %（卖出价基准）`,width:34})))]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
-    (() => { const status = runStatuses.get(row.signalId ?? row.id)!; return `过滤：${qualityRunStatusText(status.filter)}；监测：${qualityRunStatusText(status.monitor)}`; })(),
     qualitySourceLabel(row),
     formatUTC8(row.source.timeMs), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null, qualityDetectorReading(row).value,
     ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),

@@ -14,7 +14,8 @@ it('renders a v5 admission with guard evidence even when no extra primary indica
     threeStage:{at:time+300000,state:'matched',first:{status:'pass'},second:{status:'pass'},third:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
   const state={ready:true,preEntry:{ready:true,running:false,error:'',library:{...emptyPreEntryLibrary(),records:[record],rounds:[{id:'r',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[{id:'p',label:'三阶',metric:'raw',snapshot:{},preEntryThreeStage:config}],state:'complete',filters:[],hours:0,startedAt:1,updatedAt:1}]}}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  fireEvent.click(screen.getByLabelText('打开入选库'));
+  fireEvent.click(screen.getByLabelText('打开筛选库'));
+  if(screen.queryByLabelText('打开筛选归档 r')){fireEvent.click(screen.getByLabelText('打开筛选归档 r'));fireEvent.click(screen.getByText('入选判定详情'));}
   const dialog=screen.getByRole('dialog');
   expect(within(dialog).getByText('分钟筛选 v5 · 三阶准入')).toBeInTheDocument();
   fireEvent.click(within(dialog).getByText('三阶判定证据'));
@@ -45,12 +46,13 @@ it('shows only admitted records and preserves all underlying scan records', asyn
     sample:{id:status,source:{id:status,symbol:`TURING:TURING ${i+1}`,timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time}}));
   const state={ready:true,selectPreEntryRecords:vi.fn(()=>1),preEntry:{library:{...emptyPreEntryLibrary(),records,rounds:[{id:'r',engine:PRE_ENTRY_ZERO_TRADE_VERSION,state:'paused',filters:[],hours:0,startedAt:1,updatedAt:1}]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn()}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  fireEvent.click(screen.getByLabelText('打开入选库'));
+  fireEvent.click(screen.getByLabelText('打开筛选库'));
+  if(screen.queryByLabelText('打开筛选归档 r')){fireEvent.click(screen.getByLabelText('打开筛选归档 r'));fireEvent.click(screen.getByText('入选判定详情'));}
   const admitted=screen.getByRole('dialog');
   expect(within(admitted).getAllByTestId('pre-entry-library-row')).toHaveLength(1);
   expect(within(admitted).getByText('TURING:TURING 1')).toBeInTheDocument();
   expect(within(admitted).queryByText('缺数据')).not.toBeInTheDocument();
-  fireEvent.click(within(admitted).getByLabelText('全选当前筛选的入选库记录'));
+  fireEvent.click(within(admitted).getByLabelText('全选当前筛选的筛选库记录'));
   fireEvent.click(within(admitted).getByText('在组合表中勾选'));
   expect(state.selectPreEntryRecords).toHaveBeenCalledWith(['matched']);
   await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -71,16 +73,17 @@ it('orders start, conditions and selected library like holding monitoring, with 
   const start = vi.fn(), pause = vi.fn();
   const state = { ready: true, preEntry: { library: {...emptyPreEntryLibrary(),settings:{updatedAt:1,hours:48,plans:[]}}, ready: true, running: false, error: '', progress: null, start, pause, resume: vi.fn(), retry: vi.fn() } } as unknown as FishQualityState;
   const view = render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()} renderConditions={done => <button onClick={done}>保存条件</button>}/></TooltipProvider>);
-  expect(within(screen.getByTestId('pre-entry-controls')).getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['开始筛选', '开始筛选的其他方式', '动态筛选条件', '打开入选库']);
+  expect(within(screen.getByTestId('pre-entry-controls')).getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['开始筛选', '开始筛选的其他方式', '动态筛选条件', '打开筛选库']);
   expect(screen.getByText('开始筛选').className).toBe(qualitySplitPrimaryAction);
   expect(screen.queryByLabelText('筛选时长（小时）')).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('动态筛选条件'));
   fireEvent.click(screen.getByText('保存条件'));
   fireEvent.click(screen.getByText('开始筛选'));
   expect(start).toHaveBeenCalledWith(48);
-  fireEvent.click(screen.getByLabelText('打开入选库'));
+  fireEvent.click(screen.getByLabelText('打开筛选库'));
+  if(screen.queryByLabelText('打开筛选归档 r')){fireEvent.click(screen.getByLabelText('打开筛选归档 r'));fireEvent.click(screen.getByText('入选判定详情'));}
   await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-  expect(screen.getByText('暂无入选记录。满足全部条件后才会进入入选库。')).toBeInTheDocument();
+  expect(screen.getByText('暂无入选记录。满足全部条件后才会进入筛选库。')).toBeInTheDocument();
   view.unmount();
   render(<TooltipProvider><FishPreEntryMonitor state={{ ...state, preEntry: { ...state.preEntry!, running: true } }} selectedCount={2} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   expect(screen.getByText('暂停筛选').className).toBe(qualitySplitPauseAction);

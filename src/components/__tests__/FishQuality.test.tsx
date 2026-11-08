@@ -58,13 +58,13 @@ it('saves a Turing copy without enabling default holding conditions or changing 
 },30000);
 it('keeps static and dynamic modules separate and opens the new three-stage settings', () => {
  const s=state();
- s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn()};
+ s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn(),importLibrary:vi.fn()};
  render(<FishQuality state={s}/>);
  const fixed=within(screen.getByTestId('quality-static-controls')),dynamic=within(screen.getByTestId('quality-dynamic-controls')),holding=within(screen.getByTestId('quality-run-controls'));
  expect(fixed.getByRole('button',{name:'开始过滤'})).toBeInTheDocument();
  expect(dynamic.getByRole('button',{name:'开始筛选'}).className).toBe(holding.getByRole('button',{name:'开始监测'}).className);
  expect(dynamic.getByLabelText('动态筛选条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
- expect(dynamic.getByRole('button',{name:'打开入选库'})).toBeInTheDocument();
+ expect(dynamic.getByRole('button',{name:'打开筛选库'})).toBeInTheDocument();
  fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
  expect(screen.getByLabelText('三阶筛选时长（小时）')).toBeInTheDocument();
  fireEvent.click(screen.getByText('新增三阶方案'));
@@ -162,14 +162,14 @@ it('keeps source filters working without source badges in detector comparison ro
     expect(within(row).queryByText('信号库')).toBeNull();
   }
   const source = screen.getByLabelText('鱼质量的来源');
-  for (const label of ['全部来源（3）', '鱼舱（1）', '信号库（1）', '挖掘库（1）']) expect(within(source).getByRole('option', { name: label })).toBeInTheDocument();
-  fireEvent.change(source, { target: { value: 'mined' } });
+  fireEvent.click(source);for (const label of ['全部来源 3','鱼舱 1','信号库 1','挖掘库 1'])expect(screen.getByRole('option',{name:label})).toBeInTheDocument();fireEvent.click(source);
+  chooseSource('mined');
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   for(const row of screen.getAllByTestId('quality-fish-row')) { expect(row).toHaveTextContent('AAAUSDT'); expect(within(row).queryByText('默认值挖掘')).toBeNull(); }
-  fireEvent.change(source, { target: { value: 'fish' } });
+  chooseSource('fish');
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('BBBUSDT');
-  fireEvent.change(source, { target: { value: 'library' } });
+  chooseSource('library');
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('CCCUSDT');
 });
@@ -229,11 +229,11 @@ it('filters by each retained source and keeps detector evidence on signals share
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(4);
   for(const row of screen.getAllByTestId('quality-fish-row')) expect(within(row).queryByText('信号库')).toBeNull();
   const source = screen.getByLabelText('鱼质量的来源');
-  expect(within(source).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
-  fireEvent.change(source, { target: { value: 'library' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(4);
+  fireEvent.click(source);expect(screen.getByRole('option',{name:'信号库 2'})).toBeInTheDocument();fireEvent.click(source);
+  chooseSource('library'); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(4);
   const libraryOnly=screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('ZZZUSDT'))!;expect(within(libraryOnly).getByTestId('quality-detector-cell')).toHaveTextContent('—');expect(within(libraryOnly).queryByTestId('fish-process-open')).toBeNull();
   for (const r of screen.getAllByTestId('quality-fish-row')) expect(within(r).queryByText('信号库')).toBeNull();
-  fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  chooseSource('fish'); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
 });
 
@@ -243,7 +243,7 @@ it('allows selecting only a filtered source across the scroll window, shows chec
   s.study.selectedRowIds = [];
   const view = render(<FishQuality state={s}/>);
   expect(screen.getByRole('button', {name:'开始监测'})).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('鱼质量的来源'), {target:{value:'library'}});
+  chooseSource('library');
   fireEvent.click(screen.getByLabelText('全选当前筛选信号'));
   const ids = (s.setSelectedRows as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string[];
   expect(ids).toHaveLength(61); expect(ids).not.toContain(qualityComparisonRows(s.study).find(r => r.origin !== 'library')!.id);
@@ -280,7 +280,7 @@ it('keeps every row reachable in one scroll box, renders only the visible window
   const box = screen.getByTestId('quality-fish-table');
   box.scrollTop = 300 * 33; fireEvent.scroll(box);
   expect(screen.getByText('S299USDT')).toBeInTheDocument(); expect(screen.queryByText('S000USDT')).toBeNull();
-  fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'fish' } });
+  chooseSource('fish');
   expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号 · 已合并探测明细（筛选自 301 条信号）');
   expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
 });
@@ -468,7 +468,7 @@ it('shift-click selects (or clears) the whole run of rows between the last click
   s.study = importQualityLibrary(s.study, Array.from({length: 8}, (_,i) => ({id:`lib-${i}`,symbol:`COIN${i}USDT`,timeMs:T+i*60000,timeLabel:'',fallbackZone:''})));
   s.study.selectedRowIds = [];
   const view = render(<FishQuality state={s}/>);
-  fireEvent.change(screen.getByLabelText('鱼质量的来源'), {target:{value:'library'}});
+  chooseSource('library');
   const set = s.setSelectedRows as ReturnType<typeof vi.fn>;
   const boxes = () => screen.getAllByTestId('quality-fish-row').map(row => within(row).getByRole('checkbox'));
   const symbols = () => screen.getAllByTestId('quality-fish-row').map(row => row.textContent!.match(/COIN\d+USDT/)![0]);
@@ -652,7 +652,7 @@ it('places independent filter results immediately after capture, runs without se
   const view = render(<FishQuality state={s}/>);
   const headerRows = screen.getByTestId('quality-fish-table').querySelectorAll('thead tr');
   const headers = within(headerRows[headerRows.length - 1] as HTMLElement).getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
-  expect(headers[7]).toHaveTextContent('捕捞过程'); expect(headers[8]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
+  expect(headers[6]).toHaveTextContent('捕捞过程'); expect(headers[7]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
   expect(screen.getAllByTestId('quality-filter-column')).toHaveLength(1);
   const run = screen.getByRole('button', { name: '开始过滤' }); expect(run).toBeEnabled(); fireEvent.click(run); expect(s.startFilter).toHaveBeenCalledTimes(1);
   const reading = (symbol: string) => within(screen.getAllByTestId('quality-fish-row').find(row => row.textContent!.includes(symbol))!).getByTestId('quality-filter-cell');
@@ -814,34 +814,10 @@ it('tells the hook which rows are in view and shows how many checked signals thi
 });
 
 
-it('places run state second and bulk-selects only pending entries under the current filters, replacing prior checks', async () => {
-  const {makeQualityBuyFilter} = await import('@/lib/fish/qualityFilters');
-  const {qualityFilterReadingKey} = await import('@/lib/fish/quality');
-  const s = state(), f = makeQualityBuyFilter('state:state','>',.7);
-  s.study = importQualityLibrary(s.study,[{id:'other',symbol:'BBBUSDT',timeMs:T+60000,timeLabel:'',fallbackZone:''}]);
-  s.study.sellPlans = s.study.sellPlans!.map(p=>({...p,buyFilters:[f],rule:{metric:p.metric,direction:'<',threshold:.5}}));
-  const base = qualityComparisonRows(s.study), a = base.find(r=>r.source.symbol==='AAAUSDT')!;
-  s.study.filterReadings = [{key:qualityFilterReadingKey(a,f),value:.9}];
-  s.study.selectedRowIds = qualityDisplayRows(s.study).map(r=>r.id);
-  const view = render(<FishQuality state={s}/>);
-  const header = screen.getByTestId('quality-run-state-column');
-  expect(header.parentElement!.children[1]).toBe(header);
-  const aCell = within(screen.getAllByTestId('quality-fish-row').find(r=>r.textContent!.includes('AAAUSDT'))!).getByTestId('quality-run-state-cell');
-  expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveAttribute('aria-label','已完成'); expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent(/^1$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent(/^0$/); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveAttribute('aria-label','未运行');
-  // 【用户要求】2026-11-01 运行状态只显示 0 和 1：单元格里没有「过滤 / 监测」字样和进度分数，字样在表头
-  expect(aCell).toHaveTextContent(/^10$/);expect(within(header).getByTestId('quality-run-state-parts')).toHaveTextContent('过滤监测');
-  expect(screen.queryByRole('button',{name:'运行状态筛选与批量选取'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'在表头筛选运行状态'}));
-  const picker = screen.getByTestId('quality-run-state-picker');
-  fireEvent.change(within(picker).getByLabelText('运行状态的工作步骤'),{target:{value:'filter'}});
-  fireEvent.click(within(picker).getByRole('button',{name:'仅选尚未运行'}));
-  const ids = vi.mocked(s.setSelectedRows).mock.calls.at(-1)![0];
-  expect(ids).toEqual(qualityDisplayRows(s.study).filter(r=>r.source.symbol==='BBBUSDT').map(r=>r.id));
-  s.study={...s.study,selectedRowIds:ids}; view.rerender(<FishQuality state={s}/>);
-  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('BBBUSDT');
-  fireEvent.keyDown(document.activeElement!,{key:'Escape'}); fireEvent.click(within(screen.getByTestId('quality-selection-scope')).getByRole('button',{name:'处理范围说明'})); expect(screen.getByRole('dialog',{name:'处理范围说明'})).toHaveTextContent('已勾选 1 次入场');
-  fireEvent.keyDown(document.activeElement!,{key:'Escape'});
-  fireEvent.click(screen.getByRole('button',{name:'开始过滤'})); expect(s.startFilter).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole('button',{name:'开始监测'})); expect(s.start).toHaveBeenCalledTimes(1);
+it('removes the redundant run-state column while keeping the standard source and selection controls',()=>{
+ const s=state();render(<FishQuality state={s}/>);
+ expect(screen.queryByTestId('quality-run-state-column')).toBeNull();expect(screen.queryByTestId('quality-run-state-cell')).toBeNull();expect(screen.queryByRole('button',{name:'在表头筛选运行状态'})).toBeNull();
+ expect(screen.getByRole('button',{name:'按信号时间排序'})).toBeInTheDocument();expect(screen.getByRole('checkbox',{name:'全选当前筛选信号'})).toBeInTheDocument();expect(s.start).not.toHaveBeenCalled();
 });
 
 it('explains unavailable filtering and provides a resume/retry action that reuses cached readings independently',async()=>{
@@ -1220,3 +1196,5 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:'把卖出算法 2 存为模板'}));fireEvent.change(screen.getByLabelText('模板名称'),{target:{value:'副本新组合'}});fireEvent.click(screen.getByRole('button',{name:'保存模板'}));
  expect(s.savePlanTemplate).toHaveBeenCalledWith(copied.id,'副本新组合');expect(s.study.planTemplates).toHaveLength(2);expect(s.study.planTemplates![1].plan!.router!.threshold).toBe(.8);expect(planVersionChanges(s.study.planTemplates![1].plan!)).toEqual([]);
 },60000);
+
+function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}

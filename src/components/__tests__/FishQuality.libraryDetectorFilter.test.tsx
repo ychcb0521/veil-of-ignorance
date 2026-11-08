@@ -35,7 +35,7 @@ it('remembers only the user’s own detector choice, so 信号库 still shows it
   expect(JSON.parse(sessionStorage.getItem(QUALITY_RETURN_KEY)!).ui.algorithms).toEqual([]);
   cleanup(); expect(armQualityReturn()).toBe(true);
   render(<MemoryRouter><FishQuality state={s}/></MemoryRouter>);
-  fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'library' } });
+  chooseSource('library');
   expect(symbols().filter(t => t.includes('LIB'))).toHaveLength(2);
   expect(screen.queryByTestId('quality-empty-detector-filter')).toBeNull();
 });
@@ -44,18 +44,17 @@ it('says which header filter emptied the table and clears it from the empty stat
   // 用户明确选过探测算法，又切到信号库
   back({ origin: 'library', algorithms: ids });
   render(<FishQuality state={s}/>);
-  expect(within(screen.getByLabelText('鱼质量的来源')).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('鱼质量的来源'));expect(screen.getByRole('option',{name:'信号库 2'})).toBeInTheDocument();fireEvent.click(screen.getByLabelText('鱼质量的来源'));
   expect(symbols()).toEqual([]);
   const hint = screen.getByTestId('quality-empty-detector-filter');
   expect(hint).toHaveTextContent('表头「探测算法」筛选');expect(hint).toHaveTextContent('信号库自己的信号没有探测算法');
   fireEvent.click(within(hint).getByRole('button', { name: '清除探测算法筛选' }));
   expect(symbols().filter(t => t.includes('LIB'))).toHaveLength(2);
   cleanup(); finishQualityReturn();
-  // 运行状态筛选滤空：同样在空状态里给出
-  back({ origin: 'library', runState: 'done' });
-  render(<FishQuality state={state()}/>);
-  expect(symbols()).toEqual([]);expect(screen.queryByTestId('quality-empty-detector-filter')).toBeNull();
-  const run = screen.getByTestId('quality-empty-run-state');expect(run).toHaveTextContent('只显示已经运行的信号');
-  fireEvent.click(within(run).getByRole('button', { name: '显示全部状态' }));
-  expect(symbols().filter(t => t.includes('LIB'))).toHaveLength(2);
+  // Old return snapshots must not keep an invisible status filter after its column is removed.
+  back({origin:'library',runState:'done',sort:'run'});render(<FishQuality state={state()}/>);
+  expect(symbols().filter(t=>t.includes('LIB'))).toHaveLength(2);expect(screen.queryByTestId('quality-empty-run-state')).toBeNull();
+
 });
+
+function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}

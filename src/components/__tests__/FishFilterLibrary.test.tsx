@@ -13,7 +13,7 @@ function study(){
 }
 it('renders exact historical metrics, both thresholds and separately labelled readings, ignoring current filters and generic names',async()=>{
  const s=study(),before=JSON.stringify(s.filterLibrary);s.buyFilters=[makeQualityBuyFilter('state:state','>',.9)];
- render(<FishFilterLibrary study={s}/>);fireEvent.click(screen.getByRole('button',{name:'打开过滤库'}));const row=screen.getByTestId('filter-library-row');
+ render(<FishFilterLibrary study={s}/>);fireEvent.click(screen.getByRole('button',{name:'打开过滤库'}));fireEvent.click(screen.getByLabelText('打开过滤归档 filter-legacy'));fireEvent.click(screen.getByText('过滤判定详情'));const row=screen.getByTestId('filter-library-row');
  expect(row).toHaveTextContent('avg_CBI2_2 > 0.04');expect(row).toHaveTextContent('avg_CBA_2 > 8');expect(row).toHaveTextContent('avg_CBI2_2 = 0.03');expect(row).toHaveTextContent('avg_CBA_2 = 10');expect(row).not.toHaveTextContent('笼统条件');expect(row).toHaveTextContent('以下条件全部满足');
  const details=within(row).getAllByText(/公式 .*详情/)[0].closest('details')!;details.open=true;fireEvent(details,new Event('toggle'));await waitFor(()=>expect(within(row).getByText(/半衰期 9 小时/)).toBeInTheDocument());expect(within(row).getByText(/avg_CBI2_2 = avg\(CBI2,7\)/)).toBeInTheDocument();
  expect(JSON.stringify(s.filterLibrary)).toBe(before);

@@ -8,6 +8,12 @@ vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:storage.load,saveQualit
 beforeEach(()=>{vi.useFakeTimers();storage.load.mockReset().mockImplementation(async()=>({study:monitorArchiveFixture()}));storage.save.mockReset().mockResolvedValue(true);});
 afterEach(()=>{cleanup();vi.clearAllTimers();vi.useRealTimers();localStorage.clear();});
 const flush=async()=>{await act(async()=>{await vi.advanceTimersByTimeAsync(0);});};
+it('keeps active holding plans, duration and matching saved results when selecting a source directory',async()=>{
+ const runner=vi.fn(async(_o:QualityRunOptions)=>{}),h=renderHook(()=>useFishQuality('a',[],runner));await flush();
+ const before=structuredClone(h.result.current.study),snapshot={...newQualityStudy(),samples:[structuredClone(before.samples[0])],groups:structuredClone(before.groups),sellPlans:[]};
+ await act(()=>h.result.current.restoreMonitorStudy(snapshot,undefined,true));await flush();
+ expect(h.result.current.study.sellPlans).toEqual(before.sellPlans);expect(h.result.current.study.observeHours).toBe(before.observeHours);expect(h.result.current.study.results).toEqual(before.results);expect(runner).not.toHaveBeenCalled();
+});
 it('waits for a full-table archive to persist before starting the selected subset, and ignores duplicate clicks',async()=>{
  const runner=vi.fn(async(_o:QualityRunOptions)=>{}),h=renderHook(()=>useFishQuality('a',[],runner));await flush();const rows=qualityDisplayRows(h.result.current.study);act(()=>{h.result.current.setScope([rows[0].id]);h.result.current.setSelectedRows([rows[0].id]);});
  let release!:(ok:boolean)=>void,held=false;storage.save.mockImplementation(async(_owner,s)=>{if(s.monitorLibrary?.archives?.length&&!held){held=true;return new Promise<boolean>(r=>{release=r;});}return true;});

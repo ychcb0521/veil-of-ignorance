@@ -72,8 +72,8 @@ it('exports one row per detector with a single detector column and shared sell r
   const s = study(), { rows } = seed(s); s.results[0] = {...s.results[0],adversePct:-4,drawdownPct:7,peakPct:12}; s.results[1] = {...s.results[1],adversePct:-9,drawdownPct:15,peakPct:17};
   const sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
   expect(sheet.rows).toHaveLength(2);expect(sheet.rows.every(row=>row.length===sheet.columns.length)).toBe(true);
-  expect(sheet.columns[1].header).toBe('运行状态（过滤 / 监测）');
-  expect(sheet.rows[0][2]).toBe('鱼舱');
+  expect(sheet.columns.map(c=>c.header)).not.toContain('运行状态（过滤 / 监测）');
+  expect(sheet.rows[0][1]).toBe('鱼舱');
   // 每套方案：收益率、静态回撤、峰值涨幅、镜像涨幅及状态、持仓小时。
   const headers=sheet.columns.map(c=>c.header),indices=s.sellPlans!.flatMap(p=>[headers.findIndex(h=>h.startsWith(`卖出 · ${p.label}（`)&&h.endsWith('收益率 %')),headers.indexOf(`${p.label} · 静态最大回撤 %`),headers.indexOf(`${p.label} · 峰值涨幅 %`)]);expect(indices.every(i=>i>=0)).toBe(true);
   expect(sheet.rows.map(row=>indices.map(i=>row[i]))).toEqual([[10,4,12,-5,9,17],[10,4,12,-5,9,17]]);
@@ -124,7 +124,7 @@ it('runs the shared sells on library signals, counts them in the sell comparison
   expect(stats.paired).toContain(lib); expect(stats.sells[0].n).toBe(rows.length);
   expect(stats.detectors.every(d => d.total === rows.filter(r => r.groups.includes(d.group.id)).length && d.mean === 1)).toBe(true);
   const sheet = buildQualitySheets(s, [lib])[0];
-  expect([sheet.rows[0][0],sheet.rows[0][2]]).toEqual(['ZZZUSDT', '信号库']); expect(sheet.rows[0][4]).toBe('');
+  expect([sheet.rows[0][0],sheet.rows[0][1]]).toEqual(['ZZZUSDT', '信号库']); expect(sheet.rows[0][3]).toBe('');
 });
 it('does no market work without a choice and evaluates only the selected signal with both sell plans', async () => {
   const s = study(), rows = qualityComparisonRows(s), load = vi.fn(async (_row, from, cut, p) => Array.from({length:(cut-from)/p.step}, (_,i) => ({openTime:from+i*p.step,open:100,high:101,low:99,close:100,volume:1,takerBuyVolume:.5})));

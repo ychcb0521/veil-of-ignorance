@@ -3,6 +3,8 @@ import {archiveQualityMonitorStudy,qualityMonitorRoundRecordIds,type QualityMoni
 import {librarySignalIdentity} from './libraryRounds';
 import {shortFishHash} from './algorithm';
 import {qualityOrigins} from './qualitySources';
+import {mergeQualityPlanTemplates} from './qualityPlanTemplates';
+import {preserveSourceDeletions} from './libraryDeletion';
 /** Older rounds only retain record references. Reconstruct their available frozen fields, never recompute a price or score. */
 export function monitorRoundStudy(study:FishQualityStudy,round:QualityMonitorRound):FishQualityStudy{
  const l=study.monitorLibrary;if(!l)return newQualityStudy(round.startedAt);
@@ -35,10 +37,15 @@ export function copyMonitorStudy(current:FishQualityStudy,snapshot:FishQualitySt
  }
  const saved=archiveQualityMonitorStudy(source,at,'copy'),copy=structuredClone(snapshot);
  const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...table}=copy;
- const next={...table,monitorLibrary:saved.monitorLibrary,filterLibrary:saved.filterLibrary,campaignRuns:[...(saved.campaignRuns??[]),...(copy.campaignRuns??[]).filter(r=>!saved.campaignRuns?.some(old=>old.result.key===r.result.key))]};
+ const next=preserveSourceDeletions(saved,{...table,planTemplates:structuredClone(mergeQualityPlanTemplates(copy.planTemplates,saved.planTemplates)),monitorLibrary:saved.monitorLibrary,filterLibrary:saved.filterLibrary,campaignRuns:[...(saved.campaignRuns??[]),...(copy.campaignRuns??[]).filter(r=>!saved.campaignRuns?.some(old=>old.result.key===r.result.key))]});
  return {...next,selectedRowIds:qualityDisplayRows(next).map(row=>row.id)};
 }
 export function editMonitorDirectory(study:FishQualityStudy,id:string,hidden:boolean,at=Date.now()):FishQualityStudy{
  const library=study.monitorLibrary;if(!library||!library.archives?.some(a=>a.id===id)&&!library.rounds.some(r=>r.id===id))return study;
+ return {...study,monitorLibrary:{...library,directoryEdits:{...library.directoryEdits,[id]:{hidden,at:Math.max(at,(library.directoryEdits?.[id]?.at??0)+1)}}}};
+}
+/** Reuse the existing durable directory-mark map, understood by already-open older pages. */
+export function editLibraryDirectory(study:FishQualityStudy,id:string,hidden:boolean,at=Date.now()):FishQualityStudy{
+ const library=study.monitorLibrary??{version:1 as const,importedLegacy:false,settings:[],records:[],rounds:[]};
  return {...study,monitorLibrary:{...library,directoryEdits:{...library.directoryEdits,[id]:{hidden,at:Math.max(at,(library.directoryEdits?.[id]?.at??0)+1)}}}};
 }

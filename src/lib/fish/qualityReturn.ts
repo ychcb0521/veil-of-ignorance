@@ -11,7 +11,8 @@ import type { QualityOrigin } from './qualitySources';
 export interface QualityReturnUi {
   open: boolean; query: string; month: string; algorithms?: string[];
   /** 旧版本记下的单选探测算法。 */
-  algorithm?: string; origin: '' | QualityOrigin;
+  algorithm?: string; origin: '' | QualityOrigin | 'filter';
+  directory?:{kind:'filter'|'pre-entry'|'mined';id:string};
   /** 旧版本的分页（已合并为一个视图）。 */
   phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;

@@ -19,12 +19,12 @@ it('勾选的都在筛选外：写明来源与条数，开始监测是灰的；�
   const s = state(); render(<FishQuality state={s}/>);
   const start = () => screen.getByRole('button', { name: '开始监测' });
   expect(start()).not.toBeDisabled();
-  fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'library' } });
+  chooseSource('library');
   const hint = screen.getByTestId('quality-outside-selection');
   expect(hint).toHaveTextContent('勾选的 3 条都在当前筛选外（鱼舱 3）');
   expect(start()).toBeDisabled(); expect(start()).toHaveAttribute('title', expect.stringContaining('切到包含勾选的筛选'));
   fireEvent.click(within(hint).getByRole('button', { name: '切到包含勾选的筛选' }));
-  expect(screen.getByLabelText('鱼质量的来源')).toHaveValue('fish');
+  expect(screen.getByLabelText('鱼质量的来源')).toHaveTextContent('鱼舱');
   expect(screen.queryByTestId('quality-outside-selection')).toBeNull();
   expect(screen.getByTestId('quality-run-scope')).toHaveTextContent('本轮处理已勾选 3 条');
   expect(start()).not.toBeDisabled();
@@ -35,5 +35,7 @@ it('只清挡住勾选的标的搜索，不动别的筛选', () => {
   expect(screen.getByTestId('quality-outside-selection')).toHaveTextContent('筛选外另有 2 条已勾选（鱼舱 2）');
   fireEvent.click(screen.getByRole('button', { name: '切到包含勾选的筛选' }));
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('');
-  expect(screen.getByLabelText('鱼质量的来源')).toHaveValue('');
+  expect(screen.getByLabelText('鱼质量的来源')).toHaveTextContent('全部来源');
 });
+
+function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}

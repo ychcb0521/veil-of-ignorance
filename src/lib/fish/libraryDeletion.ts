@@ -58,6 +58,12 @@ export function applySourceDeletions(study:FishQualityStudy):FishQualityStudy{
  };
  const samples=study.samples.flatMap(s=>{const r=clean(s,s.source);return r?[r]:[];}),after=qualityComparisonRows({...study,samples}),remainingIds=new Set([...samples,...after].map(s=>s.id)),sampleIds=new Set([...study.samples,...before].filter(s=>!remainingIds.has(s.id)).map(s=>s.id));
  const filterRecords=study.filterLibrary?.records.flatMap(r=>{const next=clean(r);return next?[next]:[];}),monitorRecords=study.monitorLibrary?.records.flatMap(r=>{const next=clean(r);return next?[next]:[];});
+ const filterRounds=study.filterLibrary?.rounds.map(round=>{
+  const snapshot=round.filterSnapshot;if(!snapshot)return round;
+  const records=snapshot.records.flatMap(r=>{const next=clean(r,r.sample?.source);if(!next)return [];const sample=next.sample?clean(next.sample,next.sample.source):undefined,readings=next.readings.map(reading=>reading&&study.deletedReadings?.[reading.key]?null:reading);return [sample===next.sample&&readings.every((r,i)=>r===next.readings[i])?next:{...next,sample,readings}];});
+  return records.length===snapshot.records.length&&records.every((r,i)=>r===snapshot.records[i])?round:{...round,filterSnapshot:{...snapshot,records}};
+ });
+ const snapshotsChanged=filterRounds?.some((r,i)=>r!==study.filterLibrary!.rounds[i]);
  const keptFilters=new Set(filterRecords?.map(r=>r.id)),keptMonitors=new Set(monitorRecords?.map(r=>r.id)),filterIds=new Set((study.filterLibrary?.records??[]).filter(r=>!keptFilters.has(r.id)).map(r=>r.id)),monitorIds=new Set((study.monitorLibrary?.records??[]).filter(r=>!keptMonitors.has(r.id)).map(r=>r.id)),filters=study.filterLibrary?.records.filter(r=>filterIds.has(r.id))??[],monitors=study.monitorLibrary?.records.filter(r=>monitorIds.has(r.id))??[];
  const removedReadings=new Set(filters.flatMap(r=>r.readings.flatMap(x=>x?[x.key]:[]))),remainingReadings=new Set(study.filterLibrary?.records.filter(r=>!filterIds.has(r.id)).flatMap(r=>r.readings.flatMap(x=>x?[x.key]:[]))??[]);
  const activeFilters=[...activeStandaloneBuyFilters(study),...(study.sellPlans??[]).flatMap(p=>activeBuyFilters(study,p))];for(const sample of after)for(const filter of activeFilters)remainingReadings.add(qualityFilterReadingKey(sample,filter));
@@ -81,11 +87,11 @@ export function applySourceDeletions(study:FishQualityStudy):FishQualityStudy{
  // 正文已单独存放的归档（只有目录）在读出正文时再套用删除标记，见 applyArchiveSourceDeletions。
  const archives=study.monitorLibrary?.archives?.map(a=>{if(!a.study)return a;const next=applyArchiveSourceDeletions(a.study,study);return next===a.study?a:{...a,study:next};});
  const archivesChanged=archives?.some((a,i)=>a!==study.monitorLibrary!.archives![i]);
- const changed=archivesChanged||filterReadings?.length!==study.filterReadings?.length||entryReadings?.length!==study.entryReadings?.length||postExitReadings?.length!==study.postExitReadings?.length||samples.length!==study.samples.length||samples.some((s,i)=>s!==study.samples[i])||filterRecords?.some((r,i)=>r!==study.filterLibrary!.records[i])||monitorRecords?.some((r,i)=>r!==study.monitorLibrary!.records[i])||filters.length||monitors.length||runs?.some((r,i)=>r!==study.campaignRuns![i])||runs?.length!==study.campaignRuns?.length;
+ const changed=snapshotsChanged||archivesChanged||filterReadings?.length!==study.filterReadings?.length||entryReadings?.length!==study.entryReadings?.length||postExitReadings?.length!==study.postExitReadings?.length||samples.length!==study.samples.length||samples.some((s,i)=>s!==study.samples[i])||filterRecords?.some((r,i)=>r!==study.filterLibrary!.records[i])||monitorRecords?.some((r,i)=>r!==study.monitorLibrary!.records[i])||filters.length||monitors.length||runs?.some((r,i)=>r!==study.campaignRuns![i])||runs?.length!==study.campaignRuns?.length;
  if(!changed)return study;
  return {...study,deletedReadings:readingMarks,samples,results,campaignRuns:runs,selectedRowIds:study.selectedRowIds?.filter(id=>!sampleIds.has(id)&&!sampleIds.has(id.split('/detector/')[0])),
   filterReadings,entryReadings,postExitReadings,
-  ...(study.filterLibrary?{filterLibrary:{...study.filterLibrary,records:filterRecords!,rounds:pruneRounds(study.filterLibrary.rounds,filterIds)}}:{}),
+  ...(study.filterLibrary?{filterLibrary:{...study.filterLibrary,records:filterRecords!,rounds:pruneRounds(filterRounds!,filterIds)}}:{}),
   ...(study.monitorLibrary?{monitorLibrary:{...study.monitorLibrary,...(archives?{archives}:{}),records:monitorRecords!,rounds:pruneRounds(study.monitorLibrary.rounds,monitorIds)}}:{})};
 }
 /** 归档快照套用当前总表的删除标记（标记只增不减，读出时再套用与保存时套用结果一致）。 */

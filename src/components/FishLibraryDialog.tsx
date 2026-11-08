@@ -15,7 +15,8 @@ const field = 'h-8 min-w-0 rounded-md border border-border/60 bg-muted/30 px-2 t
 export const libraryCell = 'px-3 py-2';
 
 export interface FishLibraryRoundOption { id: string; label: string; error?: string }
-export function FishLibraryDialog<T extends {id:string}>({ name, info, description, placeholder, rounds, roundLabel, headers, items, match, row, empty, detail, onOpenChange, selection, sortColumn }: {
+export function FishLibraryDialog<T extends {id:string}>({ name, info, description, placeholder, rounds, roundLabel, headers, items, match, row, empty, detail, onOpenChange, selection, sortColumn,embedded=false }: {
+  embedded?:boolean;
   selection?: { selected: ReadonlySet<string>; select: (ids: string[]) => void; remove?: () => void; action?: () => boolean };
   /** 按钮与标题，如「挖掘库」。 */
   name: string; info: ReactNode; description: string; placeholder: string;
@@ -27,7 +28,7 @@ export function FishLibraryDialog<T extends {id:string}>({ name, info, descripti
   row: (item: T, onCheck?: (checked: boolean, shift: boolean) => void) => ReactElement; empty: { none: string; unmatched: string };
   detail?: ReactNode; onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [roundId, setRoundId] = useState('');
+  const [open, setOpen] = useState(embedded), [query, setQuery] = useState(''), [roundId, setRoundId] = useState('');
   const needle = query.trim().toUpperCase();
   const filtered = useMemo(() => open ? items.filter(item => match(item, needle, roundId)) : [], [open, items, match, needle, roundId]);
   const resetKey = JSON.stringify([open, needle, roundId, sortColumn?.direction]);
@@ -44,13 +45,11 @@ export function FishLibraryDialog<T extends {id:string}>({ name, info, descripti
   };
   const round = rounds.find(r => r.id === roundId);
   const change = (next: boolean) => { setOpen(next); onOpenChange?.(next); };
-  return <Dialog open={open} onOpenChange={change}>
-    <DialogTrigger asChild><button type="button" className={action} aria-label={`打开${name}`}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
-    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
-      <DialogHeader className="shrink-0 space-y-1 text-left">
+  const content=<>{!embedded&&<>      <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="flex flex-wrap items-center gap-1.5"><DialogTitle className="text-sm">{name}</DialogTitle><FishQualityInfo label={`${name}说明`}>{info}</FishQualityInfo>{(name==='挖掘库'||name==='过滤库')&&<FishLibraryDataActions scope={name==='挖掘库'?'mining':'filter'}/>}</div>
         <DialogDescription className="text-[11px]">{description}</DialogDescription>
-      </DialogHeader>
+      </DialogHeader></>}
+
       <div className="flex shrink-0 flex-wrap gap-2">
         <input aria-label={`搜索${name}`} className={`${field} min-w-36 flex-1`} placeholder={placeholder} value={query} onChange={e => setQuery(e.target.value)}/>
         <select aria-label={`${name}${roundLabel}`} className={`${field} max-w-full sm:max-w-96`} value={roundId} onChange={e => setRoundId(e.target.value)}>
@@ -91,6 +90,10 @@ export function FishLibraryDialog<T extends {id:string}>({ name, info, descripti
         })}</tr>}
         empty={<p className="px-4 py-8 text-center text-[11px] text-muted-foreground">{items.length?empty.unmatched:empty.none}</p>}/>
       <p className="shrink-0 text-[10px] text-muted-foreground">共 {filtered.length} 条 · 连续滚动查看全部记录</p>
-    </DialogContent>
+</>;
+  if(embedded)return <section className="space-y-3">{content}</section>;
+  return <Dialog open={open} onOpenChange={change}>
+    <DialogTrigger asChild><button type="button" className={action} aria-label={`打开${name}`}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
+    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">{content}</DialogContent>
   </Dialog>;
 }
