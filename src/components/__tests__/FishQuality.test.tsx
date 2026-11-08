@@ -359,6 +359,20 @@ it('saves standalone conditions and shows their judgments without masking sellin
   expect(screen.queryByRole('tab', { name: /比较探测/ })).toBeNull();
 });
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」
+it('refreshes visible stars for an existing merged library signal and clears them when its rating is removed',()=>{
+  const s=state(),signal={id:'library',symbol:'AAAUSDT',timeMs:T,timeLabel:'',fallbackZone:''};
+  s.study=importQualityLibrary(s.study,[signal],T);
+  const view=render(<FishQuality state={s}/>);
+  expect(screen.getByLabelText('评分 0 星')).toBeInTheDocument();
+  s.study=importQualityLibrary(s.study,[{...signal,quality:5}],T+1);
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getByLabelText('评分 5 星')).toBeInTheDocument();
+  expect(screen.queryByLabelText('评分 0 星')).not.toBeInTheDocument();
+  s.study=importQualityLibrary(s.study,[signal],T+2);
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getByLabelText('评分 0 星')).toBeInTheDocument();
+  expect(s.start).not.toHaveBeenCalled();
+});
 it('sorts by every header, keeping empty values last in both directions', () => {
   const s = state();
   s.study = importQualityLibrary(s.study, [{ id: 'l1', symbol: 'BBBUSDT', timeMs: T - 3600_000, timeLabel: '', fallbackZone: '', quality: 5 }, { id: 'l2', symbol: 'CCCUSDT', timeMs: T - 7200_000, timeLabel: '', fallbackZone: '', quality: 2 }]);

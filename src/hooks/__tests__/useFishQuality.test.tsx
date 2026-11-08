@@ -17,6 +17,20 @@ const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   act(() => { void h.result.current.start(); });
 };
+it('updates library rating metadata after hydration and later edits without starting a calculation',async()=>{
+  const librarySignal={...signal,id:'library',fish:undefined},persisted=importQualityLibrary(newQualityStudy(T),[librarySignal],T);
+  storage.load.mockResolvedValue({study:persisted});
+  const run=vi.fn(async(_options:QualityRunOptions)=>undefined);
+  const h=renderHook(({library})=>useFishQuality('rating-sync',[],run,library),{initialProps:{library:[librarySignal]}});
+  await flush();
+  const id=qualityComparisonRows(h.result.current.study)[0].id,plans=h.result.current.study.sellPlans;
+  h.rerender({library:[{...librarySignal,quality:4}]});await flush();
+  expect(qualityComparisonRows(h.result.current.study)[0]).toMatchObject({id,source:{quality:4}});
+  h.rerender({library:[librarySignal]});await flush();
+  expect(qualityComparisonRows(h.result.current.study)[0].source.quality).toBeUndefined();
+  expect(h.result.current.study.sellPlans).toBe(plans);expect(run).not.toHaveBeenCalled();
+  expect(persisted.samples[0].source.quality).toBeUndefined();
+});
 it('retains explicitly saved split plans across an old-study reload and honors later edits and removals',async()=>{
  const {readSavedQualityPlans,qualitySavedPlansKey}=await import('@/lib/fish/qualitySavedPlans');
  const {notifyPersistedStateHydrated,writePersistedStateRaw}=await import('@/lib/persistedStateStorage');

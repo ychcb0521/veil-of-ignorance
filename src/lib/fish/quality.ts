@@ -17,7 +17,7 @@ import { compileFeatureFormula, type DeepDigFeatureDef } from '@/lib/deepDig/fea
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD_TEXT, type FishSnapshot, type FishProgram } from './algorithm';
 import { fishSourceLabel, fishMetricLabel } from './records';
-import { signalDedupKey } from '@/lib/signalLibrary';
+import { signalDedupKey, normalizeSignalQuality } from '@/lib/signalLibrary';
 import {isSignalLibraryOrigin,miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
 import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -330,8 +330,25 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
  * 三个来源独立保存；同一信号和入场时刻合并显示，删除只清理对应来源。
  */
 export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(source.preEntryMonitor ? source.id : signalDedupKey(source))}`;
+/** Rating is display metadata, never a replacement for the frozen trading snapshot. */
+function sourceWithQuality(source:TradeSignal,value:number|undefined):TradeSignal {
+  const quality=normalizeSignalQuality(value);
+  if(normalizeSignalQuality(source.quality)===quality)return source;
+  const {quality:_,...rest}=source;
+  return quality==null?rest:{...rest,quality};
+}
 export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now(), origin: 'library' | 'turing' | 'pre-entry' = 'library'): FishQualityStudy {
   study=resolveLegacySourceMemberships(study,signals,origin);
+  if(origin==='library'){
+    const ratings=new Map(signals.map(source=>[signalDedupKey(source),source.quality]));
+    const samples=study.samples.map(sample=>{
+      const key=signalDedupKey(sample.source);
+      if(!qualityOrigins(sample).includes('library')||!ratings.has(key))return sample;
+      const source=sourceWithQuality(sample.source,ratings.get(key));
+      return source===sample.source?sample:{...sample,source};
+    });
+    if(samples.some((sample,index)=>sample!==study.samples[index]))study={...study,samples};
+  }
   // A first-candle sample can share the exact timestamp of a legacy sample in a short archive.
   // Keep its row identity and attach the current source so it stays visible and runnable.
   if (origin === 'turing' && study.samples.some(s => isDelayedTuringReplaySample(s.source))) {
@@ -392,8 +409,14 @@ function buildComparisonRows(study: FishQualityStudy): QualitySample[] {
     const readings = Object.fromEntries(qualityMembers(sample.source).filter(f => sample.groups.includes(qualityGroupId(f))).map(f => [qualityGroupId(f), f]));
     const origins=[...new Set([...(prior?qualityOrigins(prior):[]),...qualityOrigins(sample)])];
     const minedAt = Math.max(prior?.minedAt ?? 0, miningCaptureTime(sample.source) ?? 0) || undefined;
-    rows.set(identity, prior ? { ...prior, minedAt,...(!prior.groups.length&&sample.groups.length?{source:sample.source,basis:sample.basis}:{}),origin:origins.length===1?origins[0]:undefined,origins,groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
-      : { ...sample,minedAt,origins,id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
+    const preferDetector=prior&&!prior.groups.length&&sample.groups.length;
+    const preferredSource=preferDetector?sample.source:prior?.source??sample.source;
+    // Detector provenance may supply the row body, while the library owns its
+    // rating (including an explicit removal). Preserve both independently.
+    const ratingSource=qualityOrigins(sample).includes('library')?sample.source:prior&&qualityOrigins(prior).includes('library')?prior.source:undefined;
+    const source=ratingSource?sourceWithQuality(preferredSource,ratingSource.quality):preferredSource;
+    rows.set(identity, prior ? { ...prior, source, minedAt,...(preferDetector?{basis:sample.basis}:{}),origin:origins.length===1?origins[0]:undefined,origins,groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
+      : { ...sample,source,minedAt,origins,id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
   }
   return [...rows.values()];
 }
