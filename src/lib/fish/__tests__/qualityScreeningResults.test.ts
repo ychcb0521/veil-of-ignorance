@@ -41,3 +41,8 @@ it('shows newer live observations over a copied table snapshot while keeping its
  l.records[0]={...l.records[0],status:'scanning',matchedAt:undefined,updatedAt:T+180000,detail:'正在继续'};
  expect(qualityScreeningResults(snapshot,l)[0].record.status).toBe('scanning');expect(qualityScreeningResults(snapshot)[0].record.status).toBe('matched');expect(snapshot).toEqual(before);
 });
+
+it('renders v6 zero/guard/exclusion evidence without requiring the removed third field',()=>{
+ const l=library();l.records[0].threeStage={at:T+60000,state:'matched',zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'},readings:[]};
+ expect(screeningCell(qualityScreeningResults({},l)).detail).toContain('⓪ 必要条件 pass / ① 防守线 pass / ② 排除门槛 pass');
+});

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor';
-import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
-import { freezeQualityPlan } from '../qualityPlanVersions';
+import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
+import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
 import { withTuringInitialization } from '../qualityInitialization';
@@ -114,4 +114,21 @@ it('resumes with identical admission evidence and without duplicating missed eve
   const resumed=await run(p,{load,old:paused}),whole=await run(p,{load});
   expect(resumed.matchedAt).toBe(whole.matchedAt);expect(resumed.threeStage).toEqual(whole.threeStage);
   expect(resumed.missedGuard).toEqual(whole.missedGuard);expect(resumed.lastVeto).toEqual(whole.lastVeto);
+});
+
+it('retains frozen v5 plan identities and flags an explicit version replacement instead of upgrading it silently',()=>{
+ const p=plan();p.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_V5;const saved=freezeQualityPlan(p),before=structuredClone(saved);
+ expect(saved.frozenVersions!.find(v=>v.key==='pre-entry-three-stage')!.version).toMatch(/^pre-entry-three-stage-v5 · 参数 #/);
+ expect(planVersionChanges(JSON.parse(JSON.stringify(saved)))).toEqual([]);expect(freezeSavedPlans([saved],[structuredClone(saved)])[0]).toEqual(before);
+ const changed=structuredClone(saved);changed.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_VERSION;expect(planVersionChanges(changed).map(c=>c.key)).toContain('pre-entry-three-stage');expect(saved).toEqual(before);
+});
+it('runs saved v5 evidence with the original stage meanings while v6 records the reordered stages',async()=>{
+ const old=plan();old.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_V5;old.preEntryThreeStage!.required=[condition('price',90)];const before=structuredClone(old);
+ const v5=await run(old),copy=structuredClone(old);copy.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_VERSION;const v6=await run(copy);
+ expect(v5.matchedAt).toBe(v6.matchedAt);expect(v5.threeStage).toMatchObject({first:{status:'pass'},second:{status:'pass'},third:{status:'pass'}});expect(v5.threeStage!.zero).toBeUndefined();expect(v6.threeStage).toMatchObject({zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'}});expect(old).toEqual(before);
+});
+it('preserves v5 pause/resume evidence and the original veto reasons without moving gates to the new stages',async()=>{
+ let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);const p=plan();p.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_V5;p.preEntryThreeStage!.required=[condition('price',105)];
+ const load=loader([110,110,110,110,100,110,110,110,110,110]),aborter=new AbortController();const paused=await run(p,{load,aborter,onRecord:r=>{if(r.status==='scanning'&&r.cursor===T+6*M)aborter.abort();}});
+ const resumed=await run(p,{load,old:paused}),whole=await run(p,{load});expect(resumed.matchedAt).toBe(whole.matchedAt);expect(resumed.threeStage).toEqual(whole.threeStage);expect(resumed.lastVeto).toEqual(whole.lastVeto);expect(resumed.missedGuard).toEqual(whole.missedGuard);expect(whole.missedGuard!.reason).toContain('一阶排除');
 });

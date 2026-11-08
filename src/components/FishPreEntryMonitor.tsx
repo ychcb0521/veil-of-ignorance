@@ -20,7 +20,7 @@ import { holdingVetoLabel } from '@/lib/fish/qualityVeto';
 import { PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_THREE_STAGE_V5, expressionConditions, preEntryPlanFilters, type EntryMarketExpression } from '@/lib/fish/preEntryThreeStage';
 
 const STATUS: Record<PreEntryStatus, string> = { queued: '待监测', scanning: '监测中', paused: '已暂停', matched: '已满足', unmatched: '未满足', warming: '历史不足·待预热', error: '缺数据' };
-const engineLabel = (round?: PreEntryRound) => round?.engine === PRE_ENTRY_THREE_STAGE_VERSION ? '分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）' : round?.engine === PRE_ENTRY_THREE_STAGE_V5 ? '分钟筛选 v5 · 三阶准入' : round?.engine === PRE_ENTRY_CONDITIONS_VERSION ? '分钟筛选 v4 · 入选与否决（已下线）' : round?.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? '分钟筛选 v3 · 图灵杯零成交等待（已下线）' : round?.engine ? '分钟筛选 v2（已下线）' : '收盘筛选 v1（已下线）';
+const engineLabel = (round?: PreEntryRound) => round?.engine === PRE_ENTRY_THREE_STAGE_VERSION ? '分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）' : round?.engine === PRE_ENTRY_THREE_STAGE_V5 ? '分钟筛选 v5 · 三阶准入' : round?.engine === PRE_ENTRY_CONDITIONS_VERSION ? '分钟筛选 v4 · 入选与否决' : round?.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? '分钟筛选 v3 · 图灵杯零成交等待' : round?.engine ? '分钟筛选 v2' : '收盘筛选 v1';
 const stageStatus={pass:'通过',blocked:'排除',pending:'等待'} as const;
 const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';

@@ -33,7 +33,7 @@ it('keeps scan controls compact and offers data retries inside the action menu',
     ready: true, running: false, progress: { done: 1, total: 3 }, error: '', resume } } as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={0} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   expect(screen.getByRole('status')).toHaveTextContent('已完成');
-  expect(screen.getByRole('status')).toHaveTextContent('入选 1');
+  expect(screen.getByRole('status')).toHaveTextContent('3 / 3');
   expect(screen.queryByLabelText('打开筛选记录')).not.toBeInTheDocument();
   expect(screen.queryByText(/本轮沿用/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
@@ -74,7 +74,7 @@ it('orders start, conditions and selected library like holding monitoring, with 
   const start = vi.fn(), pause = vi.fn();
   const state = { ready: true, preEntry: { library: {...emptyPreEntryLibrary(),settings:{updatedAt:1,hours:48,plans:[]}}, ready: true, running: false, error: '', progress: null, start, pause, resume: vi.fn(), retry: vi.fn() } } as unknown as FishQualityState;
   const view = render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()} renderConditions={done => <button onClick={done}>保存条件</button>}/></TooltipProvider>);
-  expect(within(screen.getByTestId('pre-entry-controls')).getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['开始筛选', '开始筛选的其他方式', '动态筛选条件', '打开筛选库']);
+  expect(within(screen.getByTestId('pre-entry-controls')).getAllByRole('button').map(b => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['开始筛选', '开始筛选的其他方式', '动态筛选条件', '打开筛选库', '查看本轮筛选结果']);
   expect(screen.getByText('开始筛选').className).toBe(qualitySplitPrimaryAction);
   expect(screen.queryByLabelText('筛选时长（小时）')).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('动态筛选条件'));

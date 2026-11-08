@@ -41,7 +41,7 @@ export function decideThreeStage(at:number,first:EntryStageResult,second:EntrySt
   const state=waiting?'waiting-data':first.status==='blocked'?'first-blocked':first.status==='pending'?'waiting-data':second.status==='blocked'?'second-blocked':second.status==='pending'?'waiting-data':guard.event?'matched':'waiting-guard';
   return {at,first,second,third,state,...guard,readings:[]};
 }
-export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶同刻通过，已进入入选库':e.state==='zero-blocked'?'⓪ 必要条件排除：'+e.zero?.reason:e.state==='first-blocked'?(e.zero?'① 防守线排除：'+e.first.reason:'一阶排除：'+e.first.reason):e.state==='second-blocked'?'② 排除门槛：'+e.second.reason:e.state==='waiting-data'?'等待数据：'+(e.zero?.status==='pending'?e.zero.reason:e.first.status==='pending'?e.first.reason:e.second.status==='pending'?e.second.reason:'零成交读数恢复中'):'等待新防守线';
+export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶同刻通过，已进入入选库':e.state==='zero-blocked'?'⓪ 必要条件排除：'+e.zero?.reason:e.state==='first-blocked'?(e.zero?'① 防守线排除：'+e.first.reason:'一阶排除：'+e.first.reason):e.state==='second-blocked'?(e.zero?'② 排除门槛：':'二阶排除：')+e.second.reason:e.state==='waiting-data'?'等待数据：'+(e.zero?.status==='pending'?e.zero.reason:e.first.status==='pending'?e.first.reason:e.second.status==='pending'?e.second.reason:'零成交读数恢复中'):'等待新防守线';
 
 export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishReconstructionLoader,now:number,signal:AbortSignal,onProgress:(p:QualityProgress)=>void,
   bounds?:{start?:(symbol:string)=>Promise<number|undefined>;end?:(symbol:string)=>Promise<number>}) {
@@ -143,7 +143,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           if(at<=resumeAt)continue;
           record={...record,cursor:at,threeStage:evidence,readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
           if(waiting&&at>(record.zeroTradeWait?.lastAt??-Infinity))record.zeroTradeWait={count:(record.zeroTradeWait?.count??0)+1,firstAt:record.zeroTradeWait?.firstAt??at,lastAt:at};
-          if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};
+          if(v6){if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};}
+          else if(first.status==='blocked'||second.status==='blocked')record.lastVeto={at,reason:first.status==='blocked'?first.reason!:second.reason!,count:(record.lastVeto?.count??0)+1};
           if(guard.event&&evidence.state!=='matched')record.missedGuard={count:(record.missedGuard?.count??0)+1,event:guard.event,reason:entryStageText(evidence)};
           if(evidence.state==='matched'){
             publish({status:'matched',matchedAt:at,detail:entryStageText(evidence)});matched=true;break;
