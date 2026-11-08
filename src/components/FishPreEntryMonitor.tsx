@@ -34,7 +34,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
 }) {
   const monitor = state.preEntry;
   const [selected, setSelected] = useState<string[]>([]), [message, setMessage] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [resultsOpen,setResultsOpen]=useState(false);
   const rounds = useMemo(() => new Map(monitor?.library.rounds.map(r => [r.id, r]) ?? []), [monitor?.library.rounds]);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   if (!monitor) return null;
@@ -86,6 +86,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         className={`${qualitySplitMenuAction} ${monitor.running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-1"><button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新筛选</span><span className="text-[10px] leading-relaxed text-muted-foreground">保留历史轮次，按当前勾选和条件重新开始{monitor.running ? '；先停止当前批次' : ''}。</span></button>
+          {latestRound&&<button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={()=>{setMenuOpen(false);setResultsOpen(true);}}>本轮筛选结果</button>}
           {latestRound && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
           {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取筛选库…</p>}
           {monitor.error && <p role="alert" className="px-2 py-1.5 text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</p>}
@@ -98,6 +99,6 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
       </PopoverContent>
     </Popover>
     {renderLibrary()}
-    <FishPreEntryProgress monitor={monitor}/>
+    <FishPreEntryProgress monitor={monitor} open={resultsOpen} onOpenChange={setResultsOpen}/>
   </div>;
 }

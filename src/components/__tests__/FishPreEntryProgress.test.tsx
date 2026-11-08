@@ -22,10 +22,13 @@ it('opens every outcome, including rejected, waiting and missing-data records, w
  for(const label of ['已入选','未入选','历史不足','缺数据','已暂停','待筛选','筛选中'])expect(within(dialog).getByText(label)).toBeInTheDocument();
  expect(within(dialog).getByText('原因-error')).toBeInTheDocument();expect(state.library).toEqual(before);
 });
-it('recovers pause/completion summaries from saved records without ephemeral progress',()=>{
- const state=monitor();state.running=false;state.progress=null;state.library.rounds[0].state='paused';const view=render(<FishPreEntryProgress monitor={state}/>);
- expect(screen.getByRole('status')).toHaveTextContent('已暂停');expect(screen.getByRole('status')).toHaveTextContent('4 / 7');expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
- view.rerender(<FishPreEntryProgress monitor={{...state,library:{...state.library,rounds:[{...state.library.rounds[0],state:'complete'}]}}}/>);expect(screen.getByRole('status')).toHaveTextContent('已完成');
+it('hides the whole progress strip when paused or complete, while preserving results for the menu dialog',()=>{
+ const state=monitor();state.running=false;state.progress=null;state.library.rounds[0].state='paused';const before=structuredClone(state.library),view=render(<FishPreEntryProgress monitor={state}/>);
+ expect(screen.queryByTestId('pre-entry-progress')).not.toBeInTheDocument();expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();expect(screen.queryByText('4 / 7')).not.toBeInTheDocument();
+ view.rerender(<FishPreEntryProgress monitor={state} open/>);
+ expect(screen.getByRole('dialog')).toHaveTextContent('已暂停');expect(screen.getAllByTestId('pre-entry-current-result-row')).toHaveLength(7);expect(state.library).toEqual(before);
+ view.rerender(<FishPreEntryProgress monitor={{...state,library:{...state.library,rounds:[{...state.library.rounds[0],state:'complete'}]}}} open={false}/>);
+ expect(screen.queryByTestId('pre-entry-progress')).not.toBeInTheDocument();expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 it('follows the active older round when resumed rather than presenting newer archived outcomes',()=>{
  const state=monitor();state.library.rounds.push({id:'newer',state:'complete',startedAt:T+1,updatedAt:T+1,filters:[],hours:1});render(<FishPreEntryProgress monitor={state}/>);
