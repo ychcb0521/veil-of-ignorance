@@ -9,6 +9,7 @@
  *   轮次（round）   = 这一轮判断了哪些记录（只存与上一轮的差异，见 libraryRounds）。
  */
 import { shortFishHash } from './algorithm';
+import {qualityMonitoringSample} from './qualityAdmissionTime';
 import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
 import { finishLibraryRound, librarySignalIdentity, mergeLibraryRecords, mergeLibraryRounds, newLibraryRound, recoverLibraryRounds, type LibraryRecordBase, type LibraryRound } from './libraryRounds';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -44,7 +45,8 @@ function tasksFor(study: FishQualityStudy, catalog: Map<string, QualityFilterSet
     let setting = catalog.get(signature);
     if (!setting) { setting = { id: `filter-${shortFishHash(signature)}`, signature, filters: structuredClone(filters), plans: [] }; catalog.set(signature, setting); }
     if (plan.label && !setting.plans.includes(plan.label)) { setting = { ...setting, plans: [...setting.plans, plan.label] }; catalog.set(signature, setting); }
-    for (const sample of qualityRunSamples(study)) {
+    for (const original of qualityRunSamples(study)) {
+      const sample=study.independentFilters?{...original,monitorEntry:undefined}:qualityMonitoringSample(original);
       const id = JSON.stringify([setting.id, ...librarySignalIdentity(sample.source), sample.enteredAt]);
       tasks.set(id, { id, setting: catalog.get(signature)!, sample });
     }

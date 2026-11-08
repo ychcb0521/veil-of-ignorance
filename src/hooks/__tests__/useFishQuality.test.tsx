@@ -8,6 +8,9 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, saveQualityStudy: storage.save }));
+// These holding tests assume upstream history has loaded; loading races have a dedicated regression.
+const screeningLibrary=vi.hoisted(()=>({version:1,rounds:[],records:[]}));
+vi.mock('@/hooks/usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:true,library:screeningLibrary})}));
 const T = Date.UTC(2026, 9, 20);
 const signal: TradeSignal = { id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>', scale: 1 } };
 beforeEach(() => { __resetNotificationCenterForTests(); vi.useFakeTimers(); storage.load.mockReset().mockImplementation(async () => ({ study: newQualityStudy() })); storage.save.mockReset().mockResolvedValue(true); });

@@ -23,6 +23,21 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('shows the original signal first-match buy time and links only the recomputed holding campaign',async()=>{
+ const {firstMatchFixture,SIGNAL_AT,MATCHED_AT}=await import('@/lib/fish/__tests__/qualityFirstMatch.fixture');
+ const {withQualityScreeningEntries}=await import('@/lib/fish/qualityScreeningResults');
+ const {study,library,plan}=firstMatchFixture(),original=qualityComparisonRows(study)[0];
+ const old={key:qualityResultKey(original,plan,0),sampleId:original.id,groupId:plan.id,status:'closed' as const,entryTime:SIGNAL_AT,entryPrice:100,endTime:SIGNAL_AT+60000,endPrice:95,pnl:-5,returnPct:-5,evaluatedAt:MATCHED_AT};
+ const s=state();s.study=withQualityScreeningEntries({...study,results:[old],screeningResults:library.records,screeningRounds:library.rounds});
+ const view=render(<FishQuality state={s}/>),table=screen.getByTestId('quality-fish-table');
+ expect(within(table).getByText('2026-04-12 00:26:00')).toHaveAttribute('title','模拟买入：2026-04-13 19:40:00（动态筛选首次满足）');
+ expect(within(table).getByText('2026-04-13 19:40:00')).toBeInTheDocument();
+ expect(table.querySelector(`a[href*="${old.key}"]`)).toBeNull();
+ const row=qualityComparisonRows(s.study)[0],result={...old,key:qualityResultKey(row,plan,0),entryTime:MATCHED_AT,entryPrice:104,endTime:MATCHED_AT+60000,endPrice:105,pnl:100/104,returnPct:100/104};
+ view.rerender(<FishQuality state={{...s,study:{...s.study,results:[old,result]}}}/>);
+ expect(table.querySelector(`a[href*="${result.key}"]`)).not.toBeNull();
+ expect(table.querySelector(`a[href*="${old.key}"]`)).toBeNull();
+});
 it('saves detached structure/attack plans without rebuilding the selected branch from editor defaults', async () => {
  const {buildFusionTemplatePlan}=await import('@/lib/fish/qualityBuiltinTemplates');
  const {BUILTIN_FEATURES}=await import('@/lib/deepDig/features');

@@ -5,6 +5,8 @@ import {useQualitySavedPlans} from './useQualitySavedPlans';
 import {applySavedQualityPlans,editSavedQualityPlans,seedSavedQualityPlans,readSavedQualityPlans} from '@/lib/fish/qualitySavedPlans';
 import { usePreEntryMonitor } from './usePreEntryMonitor';
 import { preEntrySignal } from '@/lib/fish/preEntryMonitor';
+import {withQualityScreeningEntries,type QualityScreeningScope} from '@/lib/fish/qualityScreeningResults';
+import {qualityMonitoringSample} from '@/lib/fish/qualityAdmissionTime';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
 import { restoreQualityPlanTemplate, mergeQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
@@ -38,6 +40,9 @@ const NO_SIGNALS: readonly TradeSignal[] = [];
 export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true, turing: readonly TradeSignal[] = NO_SIGNALS) {
   const definitions = useFeatureDefinitions();
   const preEntry = usePreEntryMonitor(owner, enabled, run);
+  const screeningLibrary = useRef(preEntry.library); screeningLibrary.current = preEntry.library;
+  const screeningReady = useRef(preEntry.ready); screeningReady.current = preEntry.ready;
+  const screeningScope = useRef<QualityScreeningScope>({});
   const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
   const [savedPlans,setSavedPlans]=useQualitySavedPlans(owner);
   const savedPlansWriter=useRef(setSavedPlans);savedPlansWriter.current=setSavedPlans;
@@ -75,7 +80,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const scoped = (s: FishQualityStudy): FishQualityStudy => scopeRef.current ? { ...s, selectedRowIds: (s.selectedRowIds ?? []).filter(id => scopeRef.current!.has(id)) } : s;
   const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
-  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
+  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; screeningScope.current = {}; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy,persistPlans=true) => {
     const previous=current.current;
     let next = preserveSourceDeletions(previous,apply(previous));
@@ -157,6 +162,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (signals.length) change(s => importQualityLibrary(s, signals, Date.now(), 'pre-entry'));
   }, [preEntry.library.records, preEntry.ready, ready, change]);
   useEffect(() => {
+    if (ready && readyRef.current && preEntry.ready) change(s => withQualityScreeningEntries(s, preEntry.library, screeningScope.current));
+  }, [ready, preEntry.ready, preEntry.library, study.samples, study.screeningResults, study.screeningRounds, change]);
+  useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
     const epoch = generation.current;
@@ -167,6 +175,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
     if(archiveLock.current&&mode!=='restart')return;
+    if (readyRef.current && !screeningReady.current) { if (!automatic) setError('筛选记录尚未恢复，暂不能确定买入时间，请稍后开始监测。'); return; }
+    if (readyRef.current) change(s => withQualityScreeningEntries(s, screeningLibrary.current, screeningScope.current));
     if (!readyRef.current || !qualityRunSamples(scoped(current.current)).length || automatic && !selectionApproved.current && !mode) return;
     if (current.current.sellPlans && !current.current.sellPlans.length) return;
     if (!automatic) selectionApproved.current = true;
@@ -183,7 +193,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const frozen = structuredClone(scoped(current.current));
     const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
     const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
-    const readingKeys = new Set([...frozenSamples.values()].flatMap(row => [...frozenGroups.values()].flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(row, f)))));
+    const readingKeys = new Set([...frozenSamples.values()].flatMap(row => [...frozenGroups.values()].flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(qualityMonitoringSample(row), f)))));
     const begun = beginQualityMonitorRound(current.current, frozen, Date.now(), mode === 'restart'), capture = begun.capture;
     change(() => begun.study);
     const savedOwner = account.current; let finalized = false,finishTask:Promise<void>|undefined;
@@ -354,8 +364,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [study.samples, ready, change, start, defer]);
   // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染
   const setPriority = useCallback((ids: readonly string[]) => { priorityRef.current = ids; }, []);
-  /** 当前筛选下可见的行（显示行编号）；只存引用，下一次开始过滤 / 监测时生效，不打断正在跑的批次。 */
-  const setScope = useCallback((ids: readonly string[] | null) => { scopeRef.current = ids ? new Set(ids) : null; }, []);
+  /** 可见行限定下次任务；筛选目录同步持仓入场依据，不改变正在运行的冻结批次。 */
+  const setScope = useCallback((ids: readonly string[] | null, screening: QualityScreeningScope = {}) => {
+    scopeRef.current = ids ? new Set(ids) : null;
+    const changed = screeningScope.current.roundId !== screening.roundId || screeningScope.current.workingRoundId !== screening.workingRoundId;
+    screeningScope.current = screening;
+    if (readyRef.current && changed) change(s => withQualityScreeningEntries(s, screeningLibrary.current, screening));
+  }, [change]);
   useEffect(() => {
     if (!ready || !warning) return;
     const timer = setInterval(() => { void saveQualityStudy(owner, current.current).then(ok => { if (ok && account.current === owner) setWarning(''); }); }, 15_000);

@@ -4,16 +4,17 @@ import {preEntrySignal,type PreEntryLibrary,type PreEntryRecord,type PreEntryRou
 import {qualityTableMembers,qualityTableRange,type QualityTableRow} from './qualityTableRows';
 import {formatUTC8} from '@/lib/timeFormat';
 import type {XlsxSheet} from '@/lib/xlsxWorkbook';
+import type {QualityMonitorEntry} from './qualityAdmissionTime';
 
 export interface QualityScreeningResult {record:PreEntryRecord;round:PreEntryRound}
 export const screeningStatus={queued:'待筛选',scanning:'筛选中',paused:'已暂停',matched:'已入选',unmatched:'未入选',warming:'历史不足',error:'缺数据'} as const;
 export const hasScreeningTableResult=(record:PreEntryRecord)=>!record.tableClearedAt||record.updatedAt>record.tableClearedAt;
 /** Canonical history remains in its library. A saved table may also own a frozen display snapshot. */
-export function qualityScreeningResults(study:Pick<FishQualityStudy,'screeningResults'|'screeningRounds'>,library?:PreEntryLibrary):QualityScreeningResult[]{
+export function qualityScreeningResults(study:Pick<FishQualityStudy,'screeningResults'|'screeningRounds'>,library?:PreEntryLibrary,includeCleared=false):QualityScreeningResult[]{
  const rounds=new Map(library?.rounds.map(r=>[r.id,r])),results=new Map<string,QualityScreeningResult>();
- for(const record of library?.records??[]){const round=rounds.get(record.roundId);if(round&&hasScreeningTableResult(record))results.set(record.id,{record,round});}
+ for(const record of library?.records??[]){const round=rounds.get(record.roundId);if(round&&(includeCleared||hasScreeningTableResult(record)))results.set(record.id,{record,round});}
  const savedRounds=new Map(study.screeningRounds?.map(r=>[r.id,r]));
- for(const record of study.screeningResults??[]){const round=savedRounds.get(record.roundId);if(round&&hasScreeningTableResult(record)&&(!results.has(record.id)||results.get(record.id)!.record.updatedAt<=record.updatedAt))results.set(record.id,{record,round});}
+ for(const record of study.screeningResults??[]){const round=savedRounds.get(record.roundId);if(round&&(includeCleared||hasScreeningTableResult(record))&&(!results.has(record.id)||results.get(record.id)!.record.updatedAt<=record.updatedAt))results.set(record.id,{record,round});}
  return [...results.values()];
 }
 export function screeningResultIndex(results:readonly QualityScreeningResult[]){
@@ -33,6 +34,28 @@ export function screeningRowResults(row:QualityTableRow,index:ReturnType<typeof 
   if(!old||result.record.updatedAt>old.record.updatedAt||result.record.updatedAt===old.record.updatedAt&&result.round.startedAt>old.round.startedAt)entries.set(key,result);
  }}
  return [...entries.values()];
+}
+export interface QualityScreeningScope { roundId?: string; workingRoundId?: string }
+/** Use the same row/round association as the first-match column, including original signal rows. */
+export function withQualityScreeningEntries(study: FishQualityStudy, library?: PreEntryLibrary, scope: QualityScreeningScope = {}): FishQualityStudy {
+ const index=screeningResultIndex(qualityScreeningResults(study,library,true));
+ const samples=study.samples.map(sample=>{
+  // Admitted sources already own an explicit, frozen first-match timestamp.
+  if(sample.source.preEntryMonitor)return sample;
+  const results=screeningRowResults(sample,index,scope.roundId,scope.workingRoundId);
+  if(!results.length)return sample;
+  const matched=results.filter(r=>r.record.status==='matched');
+  let monitorEntry:QualityMonitorEntry|undefined;
+  if(matched.length){
+   const times=matched.map(r=>r.record.matchedAt),valid=times.every(at=>typeof at==='number'&&Number.isFinite(at)&&at>0),unique=new Set(times);
+   const error=!valid?'首次满足时间无效，无法开始持仓监测':unique.size>1?'存在多个首次满足时间，请从筛选库选择具体入选记录后监测':undefined;
+   monitorEntry={at:error?null:times[0]!,records:matched.map(r=>JSON.stringify([r.round.id,r.record.id])).sort(),...(error?{error}:{})};
+  }
+  if(JSON.stringify(sample.monitorEntry)===JSON.stringify(monitorEntry))return sample;
+  const {monitorEntry:_old,...original}=sample;
+  return monitorEntry?{...original,monitorEntry}:original;
+ });
+ return samples.every((sample,i)=>sample===study.samples[i])?study:{...study,samples};
 }
 export function screeningCell(results:readonly QualityScreeningResult[]){
  const plans=[...new Set(results.map(({record,round})=>round.plans?.find(p=>p.id===record.planId)?.label??(round.filters.map(f=>f.label).join(' 且 ')||'历史筛选方案')))];

@@ -1,3 +1,4 @@
+import {qualityMonitoringSample} from './qualityAdmissionTime';
 import { qualityAdvantageIdentity } from './qualityAdvantage';
 import {routerRuleLabel, routerResultFingerprint} from './qualityPlanRouter';
 import {qualityVetoStagesLabel} from './qualityVetoStages';
@@ -48,7 +49,7 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   if (!hasQualityEntry(result)) return study;
   let index = rowIndexes.get(study.samples);
   if (!index) { index = new Map(qualityComparisonRows(study).map(row => [row.id, row])); rowIndexes.set(study.samples, index); }
-  const sample = index.get(result.sampleId);
+  const original = index.get(result.sampleId), sample = original && qualityMonitoringSample(original);
   const plan = (study.sellPlans ?? study.groups).find(group => group.id === result.groupId);
   // 未设置普通门槛、也没有启用否决的方案只是登记买入，不存成战役
   if (!sample || !plan || !hasQualityExit(plan) || !hasQualityCampaign(result) || qualityResultKey(sample, plan, study.observeHours) !== result.key) return study;
@@ -58,8 +59,8 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   const ids = new Set([...(prior?.detectors.map(d => d.id) ?? []), ...selectedDetectors]);
   const detectors = study.groups.filter(group => ids.has(group.id));
   // Keep the trade's display identity. The source fish and its large reconstruction snapshots already live in samples/groups.
-  const { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying } = sample.source;
-  const frozenSample = prior?.sample ?? { ...sample, groups: [...sample.groups], readings: undefined, source: { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying } };
+  const { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying, preEntryMonitor } = sample.source;
+  const frozenSample = prior?.sample ?? { ...sample, groups: [...sample.groups], readings: undefined, source: { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying, preEntryMonitor } };
   const run: QualityCampaignRun = {
     ...prior,
     sample: frozenSample, plan: freezePlan(plan), detectors: detectors.map(freezePlan), result: structuredClone(result),

@@ -1,4 +1,4 @@
-import {qualityLibraryEntryAt} from './qualityAdmissionTime';
+import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,type QualityMonitorEntry} from './qualityAdmissionTime';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
 import { createQualityAdvantageReader, advanceQualitySoftConfirmation, requiredSoftConfirmations, qualityAdvantageIdentity, validateQualityAdvantage, type QualityAdvantageState } from './qualityAdvantage';
@@ -80,6 +80,8 @@ export function qualityRuleText(g: QualityGroup): string {
 export const hasQualityExit = (group: QualityGroup) => !!group.router || !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
+  /** First-match admission for holding only; never changes the original scan/capture input. */
+  monitorEntry?: QualityMonitorEntry;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
   /** Independent upstream memberships; identical signal and entry times share one display row. */
   origin?: QualityOrigin; origins?:QualityOrigin[];
@@ -400,7 +402,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
-  const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  const identity: unknown[] = [s.signalId ?? s.id, qualityMonitorEntryAt(s), g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.initialization) identity.push(g.initialization);
   if (g.router) identity.push(routerResultFingerprint(g.router));
   const advantage=qualityAdvantageIdentity(g);if(advantage)identity.push(advantage);
@@ -537,6 +539,7 @@ export type QualityFilterStatus = { state: 'none' | 'pass' | 'fail' | 'pending' 
 export function qualityFilterStatus(study: FishQualityStudy, row: QualitySample, plan: QualityGroup | undefined, readings: ReadonlyMap<string, QualityFilterReading> = new Map((study.filterReadings ?? []).map(r => [r.key, r]))): QualityFilterStatus {
   const filters = activeBuyFilters(study, plan);
   if (!filters.length) return { state: 'none', detail: '' };
+  row=qualityMonitoringSample(row);
   const parts: string[] = []; let pending = false, error = false, fail = false;
   for (const f of filters) {
     const r = readings.get(qualityFilterReadingKey(row, f));
@@ -571,6 +574,8 @@ const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMExcept
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 /** Replay each selected seller only until the next actual addition boundary. */
 export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult):Promise<QualityResult>{
+ sample=qualityMonitoringSample(sample);
+ if(sample.monitorEntry?.error)return {key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:sample.monitorEntry.error};
  if(group.router){
   const key=qualityResultKey(sample,group,observeHours);
   try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id};}
@@ -848,7 +853,7 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   const filtersOnly = onlyQualityFilters(study);
   const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Set(study.results.map(r => r.key));
-  for (const row of qualityRunSamples(study)) for (const plan of study.sellPlans ?? []) {
+  for (const row of qualityRunSamples(study).map(qualityMonitoringSample)) for (const plan of study.sellPlans ?? []) {
     if (activeBuyFilters(study, plan).some(f => !readings.has(qualityFilterReadingKey(row, f)))) return true;
     const state = qualityFilterStatus(study, row, plan, readings).state;
     if (mode === 'filter' && !filtersOnly && (state === 'none' || state === 'pass' || plan.id === study.selectedSellId) && !results.has(qualityResultKey(row, plan, study.observeHours))) return true;
@@ -895,6 +900,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   const tasks = study.sellPlans
     ? qualityRunSamples(study).flatMap(s => qualityRunGroups(study).map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
+  if (!study.independentFilters || !filtersOnly) for (const task of tasks) task.s = qualityMonitoringSample(task.s);
   // 【用户要求】2026-10-26「运行完的币种，结果要立即显示出来」：按界面顺序挑下一行，同一行的几条卖出规则连着算完
   const pending = new Map<string, { s: QualitySample; g: QualityGroup }[]>();
   for (const task of tasks) { const list = pending.get(task.s.id); if (list) list.push(task); else pending.set(task.s.id, [task]); }
@@ -939,6 +945,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
           const marketEnd = await options.marketEnd?.(s.source.symbol).catch(() => now) ?? now;
           let result: QualityResult;
           try {
+            if (s.monitorEntry?.error) throw new Error(s.monitorEntry.error);
             const initializedLoad = g.initialization ? withTuringInitialization(load, s.source.symbol, await options.marketStart?.(s.source.symbol) ?? NaN) : load;
             result = isLegacyQualityPlan(g)
               ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, load, signal, qualityResultKey(s, g, study.observeHours))

@@ -5,6 +5,8 @@ import {monitorArchiveFixture} from '@/lib/fish/__tests__/monitorArchive.fixture
 import {newQualityStudy,qualityDisplayRows,type QualityRunOptions} from '@/lib/fish/quality';
 const storage=vi.hoisted(()=>({load:vi.fn(),save:vi.fn()}));
 vi.mock('@/lib/fish/qualityStore',()=>({loadQualityStudy:storage.load,saveQualityStudy:storage.save}));
+const screeningLibrary=vi.hoisted(()=>({version:1,rounds:[],records:[]}));
+vi.mock('../usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:true,library:screeningLibrary})}));
 beforeEach(()=>{vi.useFakeTimers();storage.load.mockReset().mockImplementation(async()=>({study:monitorArchiveFixture()}));storage.save.mockReset().mockResolvedValue(true);});
 afterEach(()=>{cleanup();vi.clearAllTimers();vi.useRealTimers();localStorage.clear();});
 const flush=async()=>{await act(async()=>{await vi.advanceTimersByTimeAsync(0);});};

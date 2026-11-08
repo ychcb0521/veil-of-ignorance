@@ -1,3 +1,4 @@
+import {qualityMonitoringSample} from './qualityAdmissionTime';
 import { qualityAdvantageIdentity } from './qualityAdvantage';
 import {qualityVetoStagesIdentity} from './qualityVetoStages';
 import { isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
@@ -141,7 +142,7 @@ export function beginQualityMonitorRound(study: FishQualityStudy, frozen: FishQu
   const tasks = new Map<string, MonitorTask>(), readings = new Map((frozen.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Map((restart ? [] : frozen.results).map(r => [r.key, r]));
   const records = new Map(library.records.map(r => [r.id, r]));
-  for (const sample of qualityRunSamples(frozen)) for (const plan of qualityRunGroups(frozen).filter(g => frozen.sellPlans || sample.groups.includes(g.id))) {
+  for (const sample of qualityRunSamples(frozen).map(qualityMonitoringSample)) for (const plan of qualityRunGroups(frozen).filter(g => frozen.sellPlans || sample.groups.includes(g.id))) {
     const task = taskFor(frozen, sample, plan, catalog); tasks.set(task.resultKey, task);
     records.set(task.id, recordFor(task, readings, results.get(task.resultKey), at, records.get(task.id)));
   }

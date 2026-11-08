@@ -1,5 +1,6 @@
 /** Explicit source deletion, shared by all library views and durable merges. */
 import {librarySignalIdentity} from './libraryRounds';
+import {qualityMonitoringSample} from './qualityAdmissionTime';
 import type {TradeSignal} from '@/lib/signalLibrary';
 import {qualityComparisonRows,activeStandaloneBuyFilters,activeBuyFilters,qualityFilterReadingKey,type FishQualityStudy} from './quality';
 import type {FishMiningLibrary, FishMiningRecord} from './miningLibrary';
@@ -66,7 +67,7 @@ export function applySourceDeletions(study:FishQualityStudy):FishQualityStudy{
  const snapshotsChanged=filterRounds?.some((r,i)=>r!==study.filterLibrary!.rounds[i]);
  const keptFilters=new Set(filterRecords?.map(r=>r.id)),keptMonitors=new Set(monitorRecords?.map(r=>r.id)),filterIds=new Set((study.filterLibrary?.records??[]).filter(r=>!keptFilters.has(r.id)).map(r=>r.id)),monitorIds=new Set((study.monitorLibrary?.records??[]).filter(r=>!keptMonitors.has(r.id)).map(r=>r.id)),filters=study.filterLibrary?.records.filter(r=>filterIds.has(r.id))??[],monitors=study.monitorLibrary?.records.filter(r=>monitorIds.has(r.id))??[];
  const removedReadings=new Set(filters.flatMap(r=>r.readings.flatMap(x=>x?[x.key]:[]))),remainingReadings=new Set(study.filterLibrary?.records.filter(r=>!filterIds.has(r.id)).flatMap(r=>r.readings.flatMap(x=>x?[x.key]:[]))??[]);
- const activeFilters=[...activeStandaloneBuyFilters(study),...(study.sellPlans??[]).flatMap(p=>activeBuyFilters(study,p))];for(const sample of after)for(const filter of activeFilters)remainingReadings.add(qualityFilterReadingKey(sample,filter));
+ const activeFilters=[...activeStandaloneBuyFilters(study),...(study.sellPlans??[]).flatMap(p=>activeBuyFilters(study,p))];for(const sample of after)for(const filter of activeFilters){remainingReadings.add(qualityFilterReadingKey(sample,filter));remainingReadings.add(qualityFilterReadingKey(qualityMonitoringSample(sample),filter));}
  const results=study.results.filter(r=>!sampleIds.has(r.sampleId)),runs=study.campaignRuns?.flatMap(r=>{const sample=clean(r.sample);return sample?[sample===r.sample?r:{...r,sample}]:[];});
  const removedEntries=new Set<string>(),keptEntries=new Set<string>(),removedExits=new Set<string>(),keptExits=new Set<string>();
  const observe=(source:DeleteTarget['source'],entry:number|null,result:{endTime?:number;endPrice?:number}|undefined,removed:boolean)=>{const prefix=JSON.stringify([source.exchange??'binance',source.market??'crypto',source.symbol,source.underlying??null]);(removed?removedEntries:keptEntries).add(prefix+'|'+entry);if(result)(removed?removedExits:keptExits).add(prefix+'|'+result.endTime+'|'+result.endPrice);};
