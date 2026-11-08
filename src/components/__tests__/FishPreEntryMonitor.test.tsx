@@ -68,7 +68,7 @@ it('offers an explicit new round for an old failed scan instead of silently chan
   expect(screen.queryByText(/本轮沿用/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
   fireEvent.click(screen.getByText('从头重新筛选'));
-  expect(restart).toHaveBeenCalledWith(0); expect(state.preEntry!.resume).not.toHaveBeenCalled();
+  expect(restart).toHaveBeenCalledWith(48); expect(state.preEntry!.resume).not.toHaveBeenCalled();
 });
 it('orders start, conditions and selected library like holding monitoring, with duration inside settings', async () => {
   const start = vi.fn(), pause = vi.fn();
@@ -101,7 +101,7 @@ it('continues a frozen paused round from the main action and exposes restart in 
   expect(resume).toHaveBeenCalledWith('paused'); expect(start).not.toHaveBeenCalled();
   fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
   fireEvent.click(screen.getByText('从头重新筛选'));
-  expect(restart).toHaveBeenCalledWith(0);
+  expect(restart).toHaveBeenCalledWith(48);
 });
 
 it('does not resume an older paused round after a newer restart has completed', () => {
@@ -113,7 +113,7 @@ it('does not resume an older paused round after a newer restart has completed', 
   const state = { ready: true, preEntry: { library, ready: true, running: false, error: '', progress: null, start, resume } } as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   fireEvent.click(screen.getByText('开始筛选'));
-  expect(start).toHaveBeenCalledWith(0); expect(resume).not.toHaveBeenCalled();
+  expect(start).toHaveBeenCalledWith(48); expect(resume).not.toHaveBeenCalled();
 });
 it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → ② 排除门槛',()=>{
   const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
@@ -128,4 +128,25 @@ it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → 
   fireEvent.click(within(dialog).getByText('入选判定详情'));
   expect(within(dialog).getByText(/⓪ 必要条件：通过/)).toBeInTheDocument();
   expect(within(dialog).getByText(/② 排除门槛：通过/)).toBeInTheDocument();
+});
+
+it('paints scanned time before the first symbol completes and keeps counts truthful',()=>{
+ const time=Date.UTC(2026,2,29,5),sample={id:'s',source:{id:'s',symbol:'MMTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal' as const,importedAt:time};
+ const records:PreEntryRecord[]=[{id:'active',roundId:'r',sample,status:'scanning',startTime:time,cursor:time+24*3600000,endTime:time+48*3600000,updatedAt:1,readings:[]},{id:'next',roundId:'r',sample:{...sample,id:'next'},status:'queued',startTime:time,cursor:time,updatedAt:1,readings:[]}];
+ const state={ready:true,preEntry:{library:{...emptyPreEntryLibrary(),records,rounds:[{id:'r',state:'running',filters:[],hours:48,startedAt:1,updatedAt:1}]},ready:true,running:true,error:'',progress:{done:0,total:2,current:'MMTUSDT'}}} as unknown as FishQualityState;
+ render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+ expect(screen.getByRole('status')).toHaveTextContent('0 / 2');
+ expect(screen.getByRole('status')).toHaveTextContent('25.0%');
+ expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','0.5');
+ fireEvent.click(screen.getByRole('button',{name:'查看本轮筛选结果'}));
+ expect(screen.getAllByTestId('pre-entry-current-result-row')).toHaveLength(2);
+ expect(records[1].status).toBe('queued');
+});
+
+it('starts a finite new round from an old unlimited pause without altering its frozen duration',()=>{
+ const start=vi.fn(),resume=vi.fn(),old={id:'unlimited',startedAt:1,updatedAt:1,filters:[],hours:0,state:'paused' as const};
+ const state={ready:true,preEntry:{library:{...emptyPreEntryLibrary(),rounds:[old]},ready:true,running:false,error:'',progress:null,start,resume}} as unknown as FishQualityState;
+ render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+ fireEvent.click(screen.getByText('开始筛选'));
+ expect(start).toHaveBeenCalledWith(48);expect(resume).not.toHaveBeenCalled();expect(old.hours).toBe(0);
 });

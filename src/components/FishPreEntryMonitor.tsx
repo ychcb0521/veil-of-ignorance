@@ -1,3 +1,4 @@
+import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress} from './FishPreEntryProgress';
 import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
@@ -38,11 +39,11 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   if (!monitor) return null;
   const latestRound = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt).at(-1);
-  const resumable = latestRound?.state === 'paused' ? latestRound : undefined;
+  const resumable = latestRound?.state === 'paused' && latestRound.hours>0 ? latestRound : undefined;
   const records = [...monitor.library.records].sort((a, b) => b.updatedAt - a.updatedAt);
   const latestRecords = records.filter(r => r.roundId === latestRound?.id);
   const missingCount = latestRecords.filter(r => r.status === 'error').length;
-  const hours = monitor.library.settings?.hours ?? 0;
+  const hours = newPreEntryHours(monitor.library.settings?.hours);
   const stagesFor=(r:typeof records[number])=>rounds.get(r.roundId)?.plans?.find(p=>p.id===r.planId)?.preEntryThreeStage;
   const filtersFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId), plan=round?.plans?.find(p=>p.id===r.planId);return plan?.preEntryThreeStage?plan.preEntryThreeStage.required:plan?preEntryPlanFilters(plan):round?.filters??[]; };
   const exclusionsFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId);return round?.engine===PRE_ENTRY_CONDITIONS_VERSION?round.plans?.find(p=>p.id===r.planId)?.preEntryConditions:undefined; };

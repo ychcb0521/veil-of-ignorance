@@ -1,3 +1,4 @@
+import {preEntryWindowLoader} from '../preEntryWindowLoader';
 import { expect, it } from 'vitest';
 import { computeDbl5, DBL5_STEP, type Dbl5Bar, type Dbl5Row } from '@/lib/dbl5m';
 import { definitionKey } from '@/lib/deepDig/features';
@@ -107,4 +108,26 @@ it('the complete v5 scanner admits at exactly the original native first event, w
   let record:PreEntryRecord={id:'r',roundId:'round',planId:p.id,status:'queued',startTime:start,cursor:start,readings:[],updatedAt:T,sample:{id:'sample',enteredAt:start,basis:'signal',importedAt:T,groups:[],source:{id:'source',symbol:'TURING:TURING 1',timeMs:start,timeLabel:'',fallbackZone:''}}};
   await collectPreEntryMonitor({round:{id:'round',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:0,state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>record=r},load,T+230*F,new AbortController().signal,()=>undefined,{start:async()=>T});
   expect(record).toMatchObject({status:'matched',matchedAt:expected!.at,threeStage:{event:{price:expected!.darvas_5m_guard,regime:expected!.darvas_5m_guard_regime}}});
+});
+
+it('batches finite-window native data while reproducing every original guard reading and event',async()=>{
+ const bars=walk(350),start=T+150*F,end=T+bars.length*F,config=emptyPreEntryThreeStage(),row={id:'s',symbol:'TURING:TURING 1',timeMs:end,timeLabel:'',fallbackZone:''};
+ const requests:{from:number;to:number}[]=[];
+ const raw:FishReconstructionLoader=async(_row,from,to)=>{requests.push({from,to});return bars.filter(b=>b.openTime>=from&&b.openTime<to);};
+ const load=withTuringInitialization(raw,row.symbol,T);
+ const batched=createPreEntryGuardReader({config,start,row,load:preEntryWindowLoader(load,end),signal:new AbortController().signal});
+ const original=createPreEntryGuardReader({config,start,row,load:withTuringInitialization(async(_row,from,to)=>bars.filter(b=>b.openTime>=from&&b.openTime<to),row.symbol,T),signal:new AbortController().signal});
+ for(let i=150;i<bars.length;i++){
+   const at=T+(i+1)*F;
+   expect(await batched(at)).toEqual(await original(at));
+   expect((await batched(at+60000)).event).toBeUndefined();
+ }
+ expect(requests.length).toBeLessThan(6);expect(requests.every(r=>r.to<=end)).toBe(true);
+});
+it('does not let a future data failure hide an earlier native guard observation',async()=>{
+ const bars=walk(350),start=T+150*F,end=T+bars.length*F,config=emptyPreEntryThreeStage(),row={id:'s',symbol:'TURING:TURING 1',timeMs:end,timeLabel:'',fallbackZone:''};
+ const raw:FishReconstructionLoader=async(_row,from,to)=>{if(to>T+170*F)throw Error('后续行情缺口');return bars.filter(b=>b.openTime>=from&&b.openTime<to);};
+ const reader=createPreEntryGuardReader({config,start,row,load:preEntryWindowLoader(withTuringInitialization(raw,row.symbol,T),end),signal:new AbortController().signal});
+ const original=createPreEntryGuardReader({config,start,row,load:withTuringInitialization(raw,row.symbol,T),signal:new AbortController().signal});
+ expect(await reader(start+F)).toEqual(await original(start+F));
 });

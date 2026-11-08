@@ -1,3 +1,4 @@
+import {collectFishQuality} from '@/lib/fish/quality';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PRE_ENTRY_CONDITIONS_VERSION } from '@/lib/fish/preEntryConditions';
@@ -231,4 +232,31 @@ it('starts only the confirmed saved second screening plan and archives every exc
  const f=study().buyFilters[0],selected=freezeQualityPlan({id:'selected',label:'三阶筛选 2',metric:f.metric,snapshot:f.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()}),other={...structuredClone(selected),id:'other',label:'三阶筛选 3'},settings={updatedAt:1,plans:[other,selected],hours:12},before=structuredClone(settings);
  storage.load.mockResolvedValue({...emptyPreEntryLibrary(),settings});const tasks:QualityRunOptions[]=[],h=renderHook(()=>usePreEntryMonitor('single-plan',true,async task=>{tasks.push(task);}));await waitFor(()=>expect(h.result.current.ready).toBe(true));await act(()=>h.result.current.start(study(),12));
  expect(tasks[0].preEntry!.round.plans).toEqual([selected]);expect(tasks[0].preEntry!.records).toHaveLength(1);expect(h.result.current.library.settings!.plans).toEqual([selected]);expect(h.result.current.library.settingsHistory!.some(s=>JSON.stringify(s.plans)===JSON.stringify(before.plans))).toBe(true);expect(settings).toEqual(before);
+});
+
+vi.mock('@/lib/fish/preEntryGuardEvent',async original=>{
+ const actual=await original<typeof import('@/lib/fish/preEntryGuardEvent')>();
+ return {...actual,createPreEntryGuardReader:({row}:{row:{symbol:string}})=>async(at:number)=>({line:90,regime:'range',broken:false,event:row.symbol==='TURING:TURING 1'&&at===t+5*60000?{id:'event',at,kind:'first',price:90,regime:'range',previousPrice:null,previousRegime:null,boxId:null,segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{},initializationStart:t,initializationId:'fixture',dataChecksum:'fixture'}:undefined})};
+});
+it('runs the complete batch from queued through admission, timeout and data failure, then saves a completed round',async()=>{
+ const input=importQualityLibrary(newQualityStudy(),[1,2,3].map(i=>({id:'s'+i,symbol:'TURING:TURING '+i,timeMs:t,timeLabel:'',fallbackZone:''})),t,'turing');
+ input.selectedRowIds=qualityComparisonRows(input).map(r=>r.id);
+ const filter=study().buyFilters[0],p={id:'three',label:'三阶',metric:filter.metric,snapshot:filter.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()};
+ const run=vi.fn(async(options:QualityRunOptions)=>collectFishQuality(options,async(row,from,to,program)=>{
+   if(row.symbol==='TURING:TURING 3')throw Error('测试行情缺口');
+   return Array.from({length:(to-from)/program.step},(_,i)=>({openTime:from+i*program.step,open:100,close:100,high:101,low:99,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50}));
+ },t+72*3600000));
+ const {result}=renderHook(()=>usePreEntryMonitor('alice',true,run));
+ await waitFor(()=>expect(result.current.ready).toBe(true));
+ act(()=>result.current.configure([p],48));
+ await act(()=>result.current.start(input,48));
+ expect(result.current.running).toBe(false);expect(result.current.library.rounds.at(-1)?.state).toBe('complete');
+ const records=result.current.library.records;
+ expect(records).toHaveLength(3);
+ expect(records.find(r=>r.sample.source.symbol==='TURING:TURING 1')).toMatchObject({status:'matched',cursor:t+5*60000,matchedAt:t+5*60000});
+ expect(records.find(r=>r.sample.source.symbol==='TURING:TURING 2')).toMatchObject({status:'unmatched',cursor:t+48*3600000});
+ expect(records.find(r=>r.sample.source.symbol==='TURING:TURING 3')).toMatchObject({status:'error',detail:'测试行情缺口'});
+ expect(result.current.progress).toMatchObject({done:3,total:3});
+ expect(storage.save.mock.calls.at(-1)?.[1]).toMatchObject({rounds:[{state:'complete',hours:48}]});
+ for(const save of [storage.v1Save,storage.v2Save,storage.v3Save,storage.v4Save,storage.v5Save])expect(save).not.toHaveBeenCalled();
 });

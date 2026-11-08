@@ -108,13 +108,24 @@ it('allows intermediate inputs across saved numeric controls, blocks invalid sav
  const saved=f.configure.mock.calls[0][0][0];expect(saved.preEntryThreeStage.required[0].threshold).toBe(-0.25);expect(saved.preEntryThreeStage.guard.rule.structure.definition.DBL5_config.guard_trend_atr).toBe(.75);expect(saved.preEntryThreeStage.sellRules[0].confirmation).toEqual({samples:3,minutes:5});expect(f.state.preEntry!.library).toEqual(library);expect(f.state.study.planTemplates).toEqual(templates);
 });
 
-it('hides the redundant duration input and preserves the saved observation scope on save and start',()=>{
+it('restores a configurable time limit and preserves saved nonzero scope on save and start',()=>{
  const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);
  render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={()=>{}}/></TooltipProvider>);
- expect(screen.queryByLabelText('三阶筛选时长（小时）')).not.toBeInTheDocument();
+ expect(screen.getByLabelText('单标的筛选时限（小时）')).toHaveValue(12);
  expect(screen.queryByText('筛选时长')).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));
  expect(f.configure).toHaveBeenCalledWith([before.settings!.plans[1]],12);
  expect(f.state.preEntry!.restart).toHaveBeenCalledWith(12);
  expect(f.state.preEntry!.library).toEqual(before);
+});
+
+it('defaults an unlimited draft to 48 hours and blocks creating another unlimited run',()=>{
+ const f=setup(),before=structuredClone(f.state.preEntry!.library);
+ expect(screen.getByLabelText('单标的筛选时限（小时）')).toHaveValue(48);
+ fireEvent.change(screen.getByLabelText('单标的筛选时限（小时）'),{target:{value:'0'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));expect(f.configure).not.toHaveBeenCalled();
+ expect(screen.getByRole('alert')).toHaveTextContent('大于 0');
+ fireEvent.change(screen.getByLabelText('单标的筛选时限（小时）'),{target:{value:'24'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));
+ expect(f.configure.mock.calls[0][1]).toBe(24);expect(f.restart).toHaveBeenCalledWith(24);expect(f.state.preEntry!.library).toEqual(before);
 });

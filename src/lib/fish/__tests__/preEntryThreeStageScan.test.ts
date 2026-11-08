@@ -23,10 +23,10 @@ function loader(closes:number[]=Array(30).fill(100),zeroAt?:number):FishReconstr
     return {openTime,open,close,high:Math.max(open,close),low:Math.min(open,close),volume,quoteVolume:100*volume,takerBuyVolume:.5*volume,takerBuyQuoteVolume:50*volume};
   });
 }
-async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number}={}){
+async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number}={}){
   let record:PreEntryRecord=options.old??{id:'r',roundId:'round',planId:p.id,sample,status:'queued',startTime:T,cursor:T,readings:[],updatedAt:T};
   const aborter=options.aborter??new AbortController();
-  try{await collectPreEntryMonitor({round:{id:'round',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:0,state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn());}
+  try{await collectPreEntryMonitor({round:{id:'round',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??0,state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn());}
   catch(error){if(!aborter.signal.aborted)throw error;}
   return record;
 }
@@ -131,4 +131,24 @@ it('preserves v5 pause/resume evidence and the original veto reasons without mov
  let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);const p=plan();p.preEntryThreeStage!.version=PRE_ENTRY_THREE_STAGE_V5;p.preEntryThreeStage!.required=[condition('price',105)];
  const load=loader([110,110,110,110,100,110,110,110,110,110]),aborter=new AbortController();const paused=await run(p,{load,aborter,onRecord:r=>{if(r.status==='scanning'&&r.cursor===T+6*M)aborter.abort();}});
  const resumed=await run(p,{load,old:paused}),whole=await run(p,{load});expect(resumed.matchedAt).toBe(whole.matchedAt);expect(resumed.threeStage).toEqual(whole.threeStage);expect(resumed.lastVeto).toEqual(whole.lastVeto);expect(resumed.missedGuard).toEqual(whole.missedGuard);expect(whole.missedGuard!.reason).toContain('一阶排除');
+});
+
+it('stops at the first admitted time and never advances its cursor to the configured deadline',async()=>{
+ const trace:PreEntryRecord[]=[];
+ const r=await run(plan(),{hours:48,end:T+72*60*M,onRecord:r=>trace.push(structuredClone(r))});
+ expect(r).toMatchObject({status:'matched',matchedAt:T+5*M,cursor:T+5*M,endTime:T+48*60*M});
+ expect(trace.at(-1)?.cursor).toBe(T+5*M);
+ expect(trace.filter(r=>r.status==='matched')).toHaveLength(1);
+});
+it('finishes an unqualified symbol at exactly 48 hours despite later events and longer available history',async()=>{
+ mocked.events=[T+49*60*M];
+ const r=await run(plan(),{hours:48,end:T+72*60*M});
+ expect(r).toMatchObject({status:'unmatched',cursor:T+48*60*M,endTime:T+48*60*M});
+ expect(r.matchedAt).toBeUndefined();
+});
+it('uses a custom per-symbol limit and accepts a first match exactly at its deadline',async()=>{
+ mocked.events=[T+60*M];
+ expect(await run(plan(),{hours:1,end:T+72*60*M})).toMatchObject({status:'matched',matchedAt:T+60*M,cursor:T+60*M});
+ mocked.events=[T+65*M];
+ expect(await run(plan(),{hours:1,end:T+72*60*M})).toMatchObject({status:'unmatched',cursor:T+60*M});
 });

@@ -1,4 +1,4 @@
-import {selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
+import {selectedPreEntryPlan,newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {SaveTemplateButton,TemplatePicker} from './FishQualitySellPlansEditor';
 import {activeQualityPlanTemplates,qualityPlanFromTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useMemo, useState } from 'react';
@@ -33,7 +33,7 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
 export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state:FishQualityState;selectedCount:number;done:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=emptyPreEntryThreeStage();return [plan];});
-  const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(monitor.library.settings?.hours??0)),[error,setError]=useState('');
+  const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(monitor.library.settings?.hours))),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
@@ -42,7 +42,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
   const save=(start:boolean)=>guardAction(()=>{
-    if(!hours.trim()||!Number.isFinite(Number(hours))||Number(hours)<0||Number(hours)>8784)throw Error('筛选时长须为 0～8784 小时');
+    if(!hours.trim()||!Number.isFinite(Number(hours))||Number(hours)<=0||Number(hours)>8784)throw Error('单标的筛选时限须大于 0 且不超过 8784 小时');
     if(!plans.length)throw Error('请先新增三阶方案');
     const next=plans.map(p=>{
       const current=p.preEntryThreeStage!;
@@ -73,7 +73,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
   };
   return <div className="space-y-3" data-testid="pre-entry-three-stage-settings">
     <div className="flex items-center justify-between gap-2"><p className="text-xs font-medium">动态筛选 · 三阶准入</p><div className="ml-auto inline-flex items-center gap-1">
-      {active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate?'模板尚未恢复':!monitor.library.settings?.plans.some(p=>p.id===active.id&&JSON.stringify(p)===JSON.stringify(active))||Object.keys(vetoDrafts).length>0||Object.keys(hardDrafts).length>0?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
+      {active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate?'模板尚未恢复':!monitor.library.settings?.plans.some(p=>p.id===active.id&&JSON.stringify(p)===JSON.stringify(active))||Object.keys(vetoDrafts).length>0||Object.keys(hardDrafts).length>0||Number(hours)!==monitor.library.settings?.hours?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
       <TemplatePicker purpose="entry" plans={plans} disabled={!state.ready||!monitor.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study).filter(t=>!!t.plan.preEntryThreeStage),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate?template=>{if(!template.plan?.preEntryThreeStage)throw Error('请选择三阶筛选模板');state.restorePlanTemplate!(template);}:undefined}} onUse={template=>{const next=qualityPlanFromTemplate(template,id());setPlans([next]);setActiveId(next.id);if(template.entryHours!=null)setHours(String(template.entryHours));setVetoDrafts({});setHardDrafts({});}}/>
     </div></div>
     {!active&&!!monitor.library.settings?.plans.length&&<label className="block text-[11px]">选择唯一保留的筛选方案<select aria-label="选择唯一保留的筛选方案" className={field+' mt-1 w-full'} value="" onChange={e=>{const saved=monitor.library.settings!.plans.find(p=>p.id===e.target.value);if(saved){const plan=copyAsThreeStage(saved);setPlans([plan]);setActiveId(plan.id);}}}><option value="">请选择要保留的已保存方案</option>{monitor.library.settings.plans.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
@@ -119,6 +119,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
       <details className="text-[11px]"><summary className="cursor-pointer">观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
       {active.frozenVersions&&<details className="text-[11px]"><summary className="cursor-pointer">已保存版本</summary><PlanVersionList plan={active} draft/></details>}
     </>}
+    <div className="space-y-1"><label className="flex items-center gap-2 text-[11px]">单标的筛选时限<input aria-label="单标的筛选时限（小时）" className={field+' w-20'} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</label><p className="text-[10px] text-muted-foreground">从每个标的的筛选起点计时；首次满足即停在命中时间，到时仍未满足则结束。修改时限后从头重新筛选生效；可用行情更短时扫描至行情末尾。</p></div>
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
     <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border/50 bg-popover py-2"><button type="button" disabled={!state.ready||!monitor.ready} className={button} onClick={()=>save(false)}>保存三阶方案</button><button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' bg-primary text-primary-foreground'} onClick={()=>save(true)}>保存并开始三阶筛选</button></div>
   </div>;

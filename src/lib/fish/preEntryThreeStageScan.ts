@@ -1,3 +1,4 @@
+import {preEntryWindowLoader} from './preEntryWindowLoader';
 import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
 import { qualityMetricPlan, type QualityProgress, qualityGroupId, qualityMembers } from './quality';
@@ -61,8 +62,9 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       // 已存 v5 方案继续按 v5 顺序产出证据；新方案走 v6（⓪ 必要条件 → ① 防守线 → ② 排除段）。
       const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION;
       const row={...record.sample.source,timeMs:now},start=await bounds?.start?.(row.symbol),availableEnd=await bounds?.end?.(row.symbol)??now;
-      const load=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN):baseLoad;
+      const initializedLoad=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN):baseLoad;
       const end=record.endTime??Math.floor(Math.min(now,availableEnd,task.round.hours?record.startTime+task.round.hours*3600000:Infinity)/M)*M;
+      const load=v6&&task.round.hours>0?preEntryWindowLoader(initializedLoad,end):initializedLoad;
       const hardIndicators:EntryMarketCondition[]=config.hardVetoes.filter(v=>v.enabled&&v.kind==='indicator').map(v=>({id:'hard:'+v.id,label:v.label,metric:v.metric!,snapshot:v.snapshot!,enabled:true,direction:v.direction,threshold:v.threshold,timing:'intrabar'}));
       const required=config.required.filter(f=>f.enabled),sellers=config.sellRules.filter(r=>r.enabled);
       const originals=Object.values(record.sample.readings??Object.fromEntries(qualityMembers(record.sample.source).map(f=>[qualityGroupId(f),f])));
