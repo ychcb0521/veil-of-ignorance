@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor';
-import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
 import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -23,14 +23,66 @@ function loader(closes:number[]=Array(30).fill(100),zeroAt?:number):FishReconstr
     return {openTime,open,close,high:Math.max(open,close),low:Math.min(open,close),volume,quoteVolume:100*volume,takerBuyVolume:.5*volume,takerBuyQuoteVolume:50*volume};
   });
 }
-async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number}={}){
+async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number;start?:number}={}){
   let record:PreEntryRecord=options.old??{id:'r',roundId:'round',planId:p.id,sample,status:'queued',startTime:T,cursor:T,readings:[],updatedAt:T};
   const aborter=options.aborter??new AbortController();
-  try{await collectPreEntryMonitor({round:{id:'round',engine:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??0,state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn());}
+  const retry=p.preEntryThreeStage?.version===PRE_ENTRY_RETRY_VERSION;
+  try{await collectPreEntryMonitor({round:{id:'round',engine:retry?PRE_ENTRY_RETRY_VERSION:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
   catch(error){if(!aborter.signal.aborted)throw error;}
   return record;
 }
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
+function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
+it('v7 optional long-window drawdown cannot be cleared by restarting the local origin',async()=>{
+ const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',.8,'>','raw=C/100')];expect(await run(p)).toMatchObject({matchedAt:T+M});
+ p.preEntryThreeStage!.longDrawdown={enabled:true,hours:.1,pct:10,mode:'current'};const base=loader(),load:FishReconstructionLoader=async(...args)=>(await base(...args)).map(b=>b.openTime===T-2*M?{...b,high:200}:b);
+ const result=await run(p,{load});expect(result).toMatchObject({matchedAt:T+5*M,retry:{attempt:5,startedAt:T+4*M}});expect(result.exclusionProcess!.entries.some(e=>e.reason.includes('长周期回撤否决'))).toBe(true);
+});
+it('v7 does not wait for every OR algorithm to finish warming up before admitting a valid native event',async()=>{
+ const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('慢预热',.8,'>','raw=sma(C,300)')];const load=vi.fn(loader());
+ const result=await run(p,{start:T,load});expect(result).toMatchObject({status:'matched',matchedAt:T+5*M,threeStage:{admission:{met:['原生防守线新事件']}}});
+ expect(load.mock.calls.some(call=>call[3].def?.id==='fixture')).toBe(false);
+});
+it('v7 restarts the observation after a fast-drop veto while v6 keeps its original historical lock',async()=>{
+ const old=plan();old.preEntryThreeStage!.additionVetoes=[{kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5}]}];const before=structuredClone(old),next={...structuredClone(old),preEntryThreeStage:retryPreEntryThreeStage(old.preEntryThreeStage!)};
+ const load=loader([100,90,100,100,100,100,100,100,100,100]);
+ expect(await run(old,{load,hours:1})).toMatchObject({status:'unmatched',threeStage:{second:{status:'blocked'}}});
+ const result=await run(next,{load});expect(result).toMatchObject({status:'matched',matchedAt:T+5*M,retry:{attempt:2,startedAt:T+2*M},threeStage:{attempt:{index:2,startedAt:T+2*M}}});
+ expect(result.exclusionProcess!.entries.filter(e=>e.kind==='restart')).toHaveLength(1);expect(old).toEqual(before);
+});
+it('v7 OR admission accepts a state threshold without a native event, and rejects the exact threshold for a strict greater-than rule',async()=>{
+ mocked.events=[];const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',.8,'>','raw=C/100'),condition('另一算法',2,'>','raw=C/100')];
+ const result=await run(p,{load:loader([79,80,81,81])});expect(result).toMatchObject({status:'matched',matchedAt:T+3*M,threeStage:{admission:{join:'any',met:['状态 S']}}});expect(result.threeStage!.event).toBeUndefined();
+});
+it('v7 native guard admission still works when every parallel algorithm is false, and can be disabled independently',async()=>{
+ const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',2,'>','raw=C/100')];
+ expect(await run(p)).toMatchObject({status:'matched',matchedAt:T+5*M,threeStage:{admission:{met:['原生防守线新事件']}}});
+ p.preEntryThreeStage!.admission!.guardEnabled=false;expect(await run(p)).toMatchObject({status:'unmatched'});
+});
+it('v7 parallel admission cannot bypass required conditions or hard vetoes and cannot reuse an earlier guard event',async()=>{
+ const p=retryPlan();p.preEntryThreeStage!.required=[condition('必要条件',105)];
+ const result=await run(p,{load:loader([100,100,100,100,100,110,110,110,110,110])});expect(result).toMatchObject({matchedAt:T+10*M,missedGuard:{count:1,event:{at:T+5*M}}});
+ p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',.8,'>','raw=C/100')];p.preEntryThreeStage!.hardVetoes=[{id:'hard',kind:'indicator',label:'硬性否决',enabled:true,direction:'>=',threshold:.8,metric:'raw',snapshot:snapshot('raw=C/100')}];
+ expect(await run(p,{load:loader(Array(20).fill(110))})).toMatchObject({status:'unmatched',threeStage:{second:{status:'blocked'}}});
+});
+it('v7 never extends the original total deadline when repeatedly rebuilding the origin',async()=>{
+ mocked.events=[T+7*M];const p=retryPlan();p.preEntryThreeStage!.required=[condition('必要条件',105)];
+ const result=await run(p,{hours:.1,end:T+20*M,load:loader([100,100,100,100,100,100,110,110])});expect(result).toMatchObject({status:'unmatched',cursor:T+6*M,endTime:T+6*M});
+ expect(result.exclusionProcess!.entries.filter(e=>e.kind==='restart')).toHaveLength(5);expect(result.matchedAt).toBeUndefined();
+});
+it('v7 reconstructs attempts on resume without duplicate restarts or reused native events',async()=>{
+ let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);const p=retryPlan();p.preEntryThreeStage!.additionVetoes=[{kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5}]}];
+ const load=loader([100,90,100,100,100,100,100,100,100,100]),aborter=new AbortController();
+ const paused=await run(p,{load,aborter,onRecord:r=>{if(r.status==='scanning'&&r.cursor===T+3*M)aborter.abort();}}),saved=structuredClone(paused);
+ const resumed=await run(p,{load,old:paused}),whole=await run(p,{load});expect(resumed.matchedAt).toBe(whole.matchedAt);expect(resumed.retry).toEqual(whole.retry);expect(resumed.exclusionProcess!.entries.filter(e=>e.kind!=='paused')).toEqual(whole.exclusionProcess!.entries);expect(paused).toEqual(saved);
+});
+it('v7 keeps zero-trade data pending instead of resetting observations to evade missing readings',async()=>{
+ const p=retryPlan(),r=await run(p,{load:loader(undefined,4)});expect(r).toMatchObject({matchedAt:T+10*M,retry:{attempt:1,startedAt:T},missedGuard:{count:1}});expect(r.exclusionProcess!.entries.some(e=>e.kind==='restart')).toBe(false);
+});
+it('v7 reuses market histories during repeated rejections instead of fetching a warmup per attempt',async()=>{
+ const old=plan();old.preEntryThreeStage!.required=[condition('必要条件',1000)];const next={...old,preEntryThreeStage:retryPreEntryThreeStage(old.preEntryThreeStage!)},oldLoad=vi.fn(loader()),newLoad=vi.fn(loader());
+ await run(old,{hours:5,end:T+300*M,load:oldLoad});const result=await run(next,{hours:5,end:T+300*M,load:newLoad});expect(result.retry!.attempt).toBe(300);expect(newLoad.mock.calls.length).toBeLessThanOrEqual(oldLoad.mock.calls.length+1);
+});
 afterEach(()=>vi.restoreAllMocks());
 it('admits only at the first native event when both exclusion tiers pass',async()=>{
   const p=plan();p.preEntryThreeStage!.required=[condition('price',90)];

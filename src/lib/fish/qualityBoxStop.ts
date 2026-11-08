@@ -48,12 +48,13 @@ export const boxStopLabel = (r: BoxStopRule) => isBoxBreak(r)?'DBL-5 支撑断�
 
 /** Only already closed native 5m structures can place a stop for the next minute. */
 export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
+  let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).map(v=>{
     validateBoxStop(v.boxStop);
     const rule=v.boxStop,def=rule.structure.definition,plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
     const from=qualityHistoryFrom(o.load,Math.floor(o.entry/300000)*300000-Math.ceil(featureWindowMs(def)/300000)*300000,300000);
     if(from<0)throw Error('箱体硬止损初始化历史不足');
-    return {v,rule,def,plan,from,cursor:from,dbl:undefined as Dbl5Checkpoint|undefined,sbs:undefined as SbsCheckpoint|undefined,atr:undefined as ChartAtrState|undefined,state:{count:0,...o.previous?.[v.id]} as BoxStopState};
+    return {v,rule,def,plan,from,cursor:from,dbl:undefined as Dbl5Checkpoint|undefined,sbs:undefined as SbsCheckpoint|undefined,atr:undefined as ChartAtrState|undefined,latestLine:undefined as {line:number;at:number}|undefined,state:{count:0,...o.previous?.[v.id]} as BoxStopState};
   });
   const states=()=>Object.fromEntries(rules.map(r=>[r.v.id,{...r.state}]));
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
@@ -81,10 +82,10 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
           r.atr=advanceChartAtr(r.atr,bars[i]);
           const at=bars[i].openTime+300000;
           // Older history initializes the box/ATR, never moves an already saved stop backwards.
-          if(at<Math.floor(o.since/300000)*300000 || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
+          if(at<Math.floor(observationSince/300000)*300000 || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
           if(isBoxBreak(r.rule)){
             // Warmup breaks are historical. An unavailable/newly absent line is not a red cross.
-            if(at>o.entry&&at>=o.since&&(row as Dbl5Row).darvas_5m_guard_broken&&breakAt==null){breakAt=at;brokenBar=bars[i].openTime;r.state.confirmedAt=at;}
+            if(at>observationEntry&&at>=observationSince&&(row as Dbl5Row).darvas_5m_guard_broken&&breakAt==null){breakAt=at;brokenBar=bars[i].openTime;r.state.confirmedAt=at;}
             return;
           }
           const active=structureActiveBox(r.rule.structure,row);
@@ -92,6 +93,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
           if(base==null)return; // Keep an existing protective K when the box subsequently breaks.
           const line=base-(r.rule.structure.bufferUnit==='atr'?r.rule.structure.buffer*r.atr.value:base*r.rule.structure.buffer/100);
           if(!(line>0)||!Number.isFinite(line))throw Error('箱体硬止损 K 无效，请检查冗余');
+          r.latestLine={line,at};
           if(r.state.line==null||r.rule.update==='follow'||r.rule.update==='raise-only'&&line>r.state.line){r.state.line=line;r.state.count=0;r.state.confirmedAt=at;}
         });
         r.cursor=to;
@@ -113,5 +115,11 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
     }
     return candidates.sort((a,b)=>a.at-b.at||Number(!!b.atOpen)-Number(!!a.atOpen)||(b.fillPrice??0)-(a.fillPrice??0))[0];
   };
-  return {read,states,statesAt};
+  return {read,states,statesAt,restartObservation(at:number){
+    observationEntry=observationSince=at;
+    for(const r of rules){
+      r.state={count:0,...(r.latestLine?{line:r.latestLine.line,confirmedAt:r.latestLine.at}:{})};
+      record(r.v.id,at,r.state);
+    }
+  }};
 }

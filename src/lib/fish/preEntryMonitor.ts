@@ -16,6 +16,7 @@ export interface PreEntryRecord {
   threeStage?: import('./preEntryThreeStageScan').EntryStageEvidence;
   missedGuard?: { count:number; event:import('./preEntryGuardEvent').EntryGuardEvent; reason:string };
   lastVeto?: { at: number; reason: string; count: number };
+  retry?:{version:'retry-origin-v2';attempt:number;startedAt:number};
   zeroTradeWait?: { count: number; firstAt: number; lastAt: number };
   planId?: string;
   id: string; roundId: string; sample: QualitySample; status: PreEntryStatus;
@@ -79,7 +80,7 @@ export async function collectPreEntryMonitor(
   onProgress: (progress: QualityProgress) => void,
   bounds?: { start?: (symbol: string) => Promise<number | undefined>; end?: (symbol: string) => Promise<number> },
 ): Promise<void> {
-  if (task.round.engine === 'pre-entry-three-stage-v5' || task.round.engine === 'pre-entry-three-stage-v6') {
+  if (task.round.engine === 'pre-entry-three-stage-v5' || task.round.engine === 'pre-entry-three-stage-v6' || task.round.engine === 'pre-entry-three-stage-v7') {
     const { collectPreEntryThreeStage } = await import('./preEntryThreeStageScan');
     return collectPreEntryThreeStage(task, load, now, signal, onProgress, bounds);
   }

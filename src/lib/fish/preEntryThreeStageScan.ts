@@ -1,4 +1,5 @@
-import {recordEntryEvidence,recordEntryStop} from './preEntryExclusionProcess';
+import {recordEntryEvidence,recordEntryStop,recordEntryRestart} from './preEntryExclusionProcess';
+import {createEntryLongDrawdownReader} from './preEntryLongDrawdown';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -7,7 +8,7 @@ import { stricterAdditionThreshold } from './qualityAddition';
 import { planVersionChanges } from './qualityPlanVersions';
 import { withTuringInitialization } from './qualityInitialization';
 import { createPreEntryMarketReader, expressionResult, type EntryConditionReading } from './preEntryMarketReader';
-import { expressionConditions, validatePreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition } from './preEntryThreeStage';
+import { expressionConditions, validatePreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, type EntryMarketCondition } from './preEntryThreeStage';
 import { createPreEntryGuardReader, type EntryGuardEvent } from './preEntryGuardEvent';
 import { createPreEntryGate, preEntryGuardWarmBars } from './preEntryGate';
 import { emptyPreEntryConditions } from './preEntryConditions';
@@ -27,6 +28,8 @@ export interface EntryStageResult { status:'pass'|'blocked'|'pending'; reason?:s
  * 两种记录都读同一结构，展示层按版本的 `zero` 是否存在区分。
  */
 export interface EntryStageEvidence {
+  attempt?:{index:number;startedAt:number};
+  admission?:{join:'any';met:string[]};
   at:number; zero?:EntryStageResult; first:EntryStageResult; second:EntryStageResult; third?:EntryStageResult;
   state:'waiting-data'|'zero-blocked'|'first-blocked'|'second-blocked'|'waiting-guard'|'matched';
   event?:EntryGuardEvent; line?:number; regime?:string;
@@ -43,7 +46,12 @@ export function decideThreeStage(at:number,first:EntryStageResult,second:EntrySt
   const state=waiting?'waiting-data':first.status==='blocked'?'first-blocked':first.status==='pending'?'waiting-data':second.status==='blocked'?'second-blocked':second.status==='pending'?'waiting-data':guard.event?'matched':'waiting-guard';
   return {at,first,second,third,state,...guard,readings:[]};
 }
-export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶同刻通过，已进入入选库':e.state==='zero-blocked'?'⓪ 必要条件排除：'+e.zero?.reason:e.state==='first-blocked'?(e.zero?'① 防守线排除：'+e.first.reason:'一阶排除：'+e.first.reason):e.state==='second-blocked'?(e.zero?'② 排除门槛：':'二阶排除：')+e.second.reason:e.state==='waiting-data'?'等待数据：'+(e.zero?.status==='pending'?e.zero.reason:e.first.status==='pending'?e.first.reason:e.second.status==='pending'?e.second.reason:'零成交读数恢复中'):'等待新防守线';
+export function decideThreeStageV7(at:number,zero:EntryStageResult,second:EntryStageResult,guard:{event?:EntryGuardEvent;line?:number;regime?:string},met:string[],waiting=false):EntryStageEvidence {
+ const first:EntryStageResult=met.length?{status:'pass',reason:'准入满足：'+met.join('、')}:{status:'pending',reason:'等待任一准入算法满足'};
+ const state:EntryStageEvidence['state']=waiting?'waiting-data':zero.status==='blocked'?'zero-blocked':zero.status==='pending'?'waiting-data':second.status==='blocked'?'second-blocked':second.status==='pending'?'waiting-data':met.length?'matched':'waiting-guard';
+ return {at,zero,first,second,state,...guard,readings:[],admission:{join:'any',met}};
+}
+export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶同刻通过，已进入入选库'+(e.admission?'；准入：'+e.admission.met.join('、'):''):e.state==='zero-blocked'?'⓪ 必要条件排除：'+e.zero?.reason:e.state==='first-blocked'?(e.zero?'① 防守线排除：'+e.first.reason:'一阶排除：'+e.first.reason):e.state==='second-blocked'?(e.zero?'② 排除门槛：':'二阶排除：')+e.second.reason:e.state==='waiting-data'?'等待数据：'+(e.zero?.status==='pending'?e.zero.reason:e.first.status==='pending'?e.first.reason:e.second.status==='pending'?e.second.reason:'零成交读数恢复中'):e.admission?'等待任一准入算法满足':'等待新防守线';
 
 export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishReconstructionLoader,now:number,signal:AbortSignal,onProgress:(p:QualityProgress)=>void,
   bounds?:{start?:(symbol:string)=>Promise<number|undefined>;end?:(symbol:string)=>Promise<number>}) {
@@ -65,7 +73,10 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       if(planVersionChanges(selected).length)throw Error('三阶方案的冻结版本或参数已变化，请保留本轮');
       const config=selected.preEntryThreeStage;validatePreEntryThreeStage(config);
       // 已存 v5 方案继续按 v5 顺序产出证据；新方案走 v6（⓪ 必要条件 → ① 防守线 → ② 排除段）。
-      const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION;
+      const retry=config.version===PRE_ENTRY_RETRY_VERSION;
+      if(retry!==(task.round.engine===PRE_ENTRY_RETRY_VERSION))throw Error('重筛轮次与冻结方案版本不符，不能混用');
+      if(retry&&task.round.hours<=0)throw Error('否决重筛须设置有限总时限');
+      const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION||retry;
       const row={...record.sample.source,timeMs:now},start=await bounds?.start?.(row.symbol),availableEnd=await bounds?.end?.(row.symbol)??now;
       const initializedLoad=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN):baseLoad;
       const end=record.endTime??Math.floor(Math.min(now,availableEnd,task.round.hours?record.startTime+task.round.hours*3600000:Infinity)/M)*M;
@@ -77,20 +88,31 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         const direction=f.direction??'>';
         return {id:d.id+':'+i,label:(f.featureShort??f.featureName??'原探测算法')+' 探测值',metric:'capture',snapshot:f,enabled:true,direction,threshold:d.stricterPct===0?f.threshold:stricterAdditionThreshold(f.threshold,direction,d.stricterPct),timing:'closed',originalDetector:{constraints:f.constraints??[]}};
       })}));
-      const conditions=[...required,...detectorGroups.flatMap(g=>g.conditions),...sellers.flatMap(r=>expressionConditions(r.expression).filter(c=>c.enabled)),...hardIndicators];
+      const admissionAlgorithms=retry?config.admission!.algorithms.filter(c=>c.enabled):[],admissionIds=new Set(admissionAlgorithms.map(c=>c.id));
+      const conditions=[...required,...detectorGroups.flatMap(g=>g.conditions),...sellers.flatMap(r=>expressionConditions(r.expression).filter(c=>c.enabled)),...hardIndicators,...admissionAlgorithms];
       const warmPlans=conditions.map(c=>({c,...qualityMetricPlan(c.snapshot,c.metric)}));
       const firstConfig={...emptyPreEntryConditions(),entryVetoes:config.additionVetoes};
       const secondConfig={...emptyPreEntryConditions(),hardVetoes:config.hardVetoes.filter(v=>v.kind!=='indicator')};
       const readyAt=start==null||selected.initialization?record.startTime:Math.max(record.startTime,
-        ...warmPlans.map(({plan})=>Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step),
+        ...warmPlans.filter(({c})=>!retry||!admissionIds.has(c.id)).map(({plan})=>Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step),
         ...(preEntryGuardWarmBars(firstConfig)?[Math.ceil(start/300000)*300000+preEntryGuardWarmBars(firstConfig)*300000]:[]));
       publish({status:'scanning',endTime:end});
       if(readyAt>end){publish({status:'warming',detail:'行情不足以完成三阶条件预热，未判定入选'});continue;}
-      const readers=await Promise.all(conditions.map(condition=>createPreEntryMarketReader({condition,row,since:readyAt,origin:record.startTime,load,signal})));
+      const readers=await Promise.all(conditions.map(async condition=>{
+        const plan=warmPlans.find(p=>p.c===condition)!.plan;
+        const available=retry&&admissionIds.has(condition.id)&&start!=null&&!selected.initialization?Math.max(readyAt,Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step):readyAt;
+        if(available<=readyAt)return {...await createPreEntryMarketReader({condition,row,since:readyAt,origin:record.startTime,load,signal}),prepare:undefined};
+        // One slow OR branch must not postpone a ready guard/other algorithm.
+        // Construct its reader only when the required history is in the past.
+        let active:Awaited<ReturnType<typeof createPreEntryMarketReader>>|undefined,origin=record.startTime;
+        return {condition,plan,start:available,async prepare(at:number){if(!active&&at>=available)active=await createPreEntryMarketReader({condition,row,since:available,origin,load,signal});},push(minute:Parameters<NonNullable<typeof active>['push']>[0]){active?.push(minute);},read(at:number,minute:Parameters<NonNullable<typeof active>['read']>[1]):EntryConditionReading{return active?.read(at,minute)??{id:condition.id,at,pending:'等待准入算法预热'};},trim(){active?.trim();},resetObservationOrigin(at:number){origin=at;active?.resetObservationOrigin(at);}};
+      }));
       const firstGate=createPreEntryGate({conditions:firstConfig,start:record.startTime,row,load,signal});
       const secondGate=createPreEntryGate({conditions:secondConfig,start:record.startTime,row,load,signal});
-      const guardReader=createPreEntryGuardReader({config,row,start:record.startTime,load,signal});
+      const guardReader:(at:number)=>Promise<{event?:EntryGuardEvent;line?:number;regime?:string}>=!retry||config.admission!.guardEnabled?createPreEntryGuardReader({config,row,start:record.startTime,load,signal}):async()=>({});
       const confirmations=new Map<string,{count:number;lastAt?:number}>();
+      const longDrawdown=retry&&config.longDrawdown?.enabled?createEntryLongDrawdownReader({condition:config.longDrawdown,row,load,signal,availableStart:start}):undefined;
+      let attempt=1,observationStart=record.startTime;
       const resumeAt=original.cursor;
       let lastPaint=0,matched=false;
       const price=compileFishProgram({id:'three-stage-minutes',name:'筛选分钟',short:'分钟',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'1m'},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
@@ -111,12 +133,14 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         }
         for(const minute of chunk.bars){
           if(signal.aborted)throw new DOMException('已暂停','AbortError');
-          readers.forEach(r=>r.push(minute));
           const at=minute.openTime+M;
+          if(retry)await Promise.all(readers.map(r=>r.prepare?.(at)));
+          readers.forEach(r=>r.push(minute));
           if(at<readyAt||at<=record.startTime)continue;
           // Always advance ALL histories before applying the ordered admission decision.
           const firstGateResult=await firstGate(at,minute),secondGateResult=await secondGate(at,minute),guard=await guardReader(at);
-          const observations=readers.map(r=>({...r.read(at,minute),label:r.condition.label})),map=new Map(observations.map(r=>[r.id,r]));
+          const longResult=await longDrawdown?.(at,minute);
+          const observations=[...readers.map(r=>({...r.read(at,minute),label:r.condition.label})),...(longResult?.reading?[longResult.reading]:[])],map=new Map(observations.map(r=>[r.id,r]));
           const notMet=required.find(f=>map.get(f.id)?.met===false),unknown=required.find(f=>map.get(f.id)?.met==null);
           let detectorBlocked:string|undefined,detectorPending:string|undefined;
           for(const group of detectorGroups){
@@ -142,17 +166,30 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           const second:EntryStageResult=secondGateResult.blocked||hardHit?{status:'blocked',reason:secondGateResult.blocked??hardHit!.label}:sellerHit?{status:'blocked',reason:sellerHit}:secondGateResult.pending||sellerPending||hardUnknown?{status:'pending',reason:secondGateResult.pending??sellerPending??map.get(hardUnknown!.id)?.pending}:{status:'pass'};
           // v6：加仓共用否决属于排除段，与卖出／硬终止并列。
           const gateBlocked=firstGateResult.blocked;
-          const exclusion:EntryStageResult=v6&&gateBlocked?{status:'blocked',reason:gateBlocked}:second.status==='blocked'?second:second.status==='pending'||firstGateResult.pending?{status:'pending',reason:second.status==='pending'?second.reason:firstGateResult.pending}:{status:'pass'};
-          const waiting=isTuringCupSymbol(row.symbol)&&completeZeroTradeBar(minute)||observations.some(r=>r.zeroTrade);
-          const evidence={...(v6?decideThreeStageV6(at,zero,exclusion,guard,waiting):decideThreeStage(at,first,second,guard,waiting)),readings:observations};
+          const baseExclusion:EntryStageResult=v6&&gateBlocked?{status:'blocked',reason:gateBlocked}:second.status==='blocked'?second:second.status==='pending'||firstGateResult.pending?{status:'pending',reason:second.status==='pending'?second.reason:firstGateResult.pending}:{status:'pass'};
+          const exclusion:EntryStageResult=longResult?.blocked?{status:'blocked',reason:longResult.blocked}:baseExclusion.status==='blocked'?baseExclusion:longResult?.pending?{status:'pending',reason:longResult.pending}:baseExclusion;
+          const metAdmission=retry?[...(guard.event?['原生防守线新事件']:[]),...admissionAlgorithms.filter(c=>map.get(c.id)?.met===true).map(c=>c.label)]:[];
+          const waiting=isTuringCupSymbol(row.symbol)&&completeZeroTradeBar(minute)||observations.some(r=>r.zeroTrade&&(!admissionIds.has(r.id)||!metAdmission.length));
+          const evidence={...(retry?decideThreeStageV7(at,zero,exclusion,guard,metAdmission,waiting):v6?decideThreeStageV6(at,zero,exclusion,guard,waiting):decideThreeStage(at,first,second,guard,waiting)),readings:observations,...(retry?{attempt:{index:attempt,startedAt:observationStart}}:{})};
+          const restart=retry&&!waiting&&at<end&&(zero.status==='blocked'||exclusion.status==='blocked');
+          // Rebuild past attempt transitions even during resume replay. Native
+          // guard history stays continuous: a rejected event can never reappear.
+          if(restart){
+            firstGate.restart(at);secondGate.restart(at);confirmations.clear();readers.forEach(r=>r.resetObservationOrigin(at));
+            observationStart=at;attempt++;
+          }
           // Replaying up to the persisted cursor restores locks and confirmation
           // counts; it cannot admit or duplicate a previously observed event.
           if(at<=resumeAt)continue;
-          record={...record,cursor:at,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(condition?{threshold:condition.threshold,direction:condition.direction}:{})};})}),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
+          record={...record,cursor:at,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction}:{})};})}),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
           if(waiting&&at>(record.zeroTradeWait?.lastAt??-Infinity))record.zeroTradeWait={count:(record.zeroTradeWait?.count??0)+1,firstAt:record.zeroTradeWait?.firstAt??at,lastAt:at};
           if(v6){if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};}
           else if(first.status==='blocked'||second.status==='blocked')record.lastVeto={at,reason:first.status==='blocked'?first.reason!:second.reason!,count:(record.lastVeto?.count??0)+1};
           if(guard.event&&evidence.state!=='matched')record.missedGuard={count:(record.missedGuard?.count??0)+1,event:guard.event,reason:entryStageText(evidence)};
+          if(retry){
+            record.retry={version:'retry-origin-v2',attempt,startedAt:observationStart};
+            if(restart)record.exclusionProcess=recordEntryRestart(record.exclusionProcess!,at,attempt,end);
+          }
           if(evidence.state==='matched'){
             publish({status:'matched',matchedAt:at,detail:entryStageText(evidence)});matched=true;break;
           }

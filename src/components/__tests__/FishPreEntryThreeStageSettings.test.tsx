@@ -9,7 +9,7 @@ import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { newQualityStudy } from '@/lib/fish/quality';
 import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
-import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();localStorage.clear();});
@@ -72,6 +72,21 @@ function singleFixture(){
  const current=freezeQualityPlan(p),configure=vi.fn(),savePlanTemplate=vi.fn(),deletePlanTemplate=vi.fn(),state={ready:true,study:newQualityStudy(),savePlanTemplate,deletePlanTemplate,preEntry:{ready:true,configure,restart:vi.fn(),library:{version:1,records:[],rounds:[],settings:{updatedAt:1,plans:[{...structuredClone(current),id:'other-one',label:'状态S · 三阶副本'},current,{...structuredClone(current),id:'other-three',label:'三阶筛选 3'},{...structuredClone(current),id:'other-four',label:'三阶筛选 4'}],hours:12}}}} as unknown as FishQualityState;
  return {current,state,configure,savePlanTemplate,deletePlanTemplate};
 }
+it('explicitly copies the old plan into v7 with OR admission, state S default 0.8 and an editable algorithm list, retaining every saved asset',()=>{
+ const f=singleFixture();f.state.study.planTemplates=[{id:'protected',name:'旧模板',savedAt:1,updatedAt:1,plan:structuredClone(f.current)}];const before=structuredClone(f.state.preEntry!.library),templates=structuredClone(f.state.study.planTemplates);
+ render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));
+ expect(screen.getByRole('heading',{name:'① 并列准入（或）'})).toBeInTheDocument();expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 门槛')).toHaveValue(.8);expect(screen.getByLabelText('准入算法 1 指标')).toHaveValue('state:state');
+ fireEvent.click(screen.getByRole('button',{name:'添加准入算法'}));expect(screen.getByLabelText('准入算法 2 门槛')).toHaveValue(.8);fireEvent.change(screen.getByLabelText('准入算法 2 门槛'),{target:{value:'0.9'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));const next=f.configure.mock.calls[0][0][0];expect(next.id).not.toBe(f.current.id);expect(next.preEntryThreeStage).toMatchObject({version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:{guardEnabled:true,algorithms:[{threshold:.8},{threshold:.9}]}});expect(next.preEntryThreeStage.hardVetoes).toEqual(f.current.preEntryThreeStage!.hardVetoes);expect(next.preEntryThreeStage.required).toEqual(f.current.preEntryThreeStage!.required);expect(f.configure.mock.calls[0][1]).toBe(12);expect(f.state.preEntry!.library).toEqual(before);expect(f.state.study.planTemplates).toEqual(templates);
+});
+it('refuses a v7 plan with every admission route disabled',()=>{
+ const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));fireEvent.click(screen.getByLabelText('启用原生防守线准入'));fireEvent.click(screen.getByLabelText('准入算法 1 启用'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('至少启用一条');expect(f.configure).not.toHaveBeenCalled();
+});
+it('offers long-window drawdown as an opt-in veto and requires the user to enter its threshold',()=>{
+ const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));expect(screen.getByLabelText('启用长周期回撤否决')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用长周期回撤否决'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('回撤阈值');fireEvent.change(screen.getByLabelText('长周期回撤回看时长（小时）'),{target:{value:'72'}});fireEvent.change(screen.getByLabelText('长周期回撤阈值（%）'),{target:{value:'8'}});fireEvent.change(screen.getByLabelText('长周期回撤口径'),{target:{value:'maximum'}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.longDrawdown).toEqual({enabled:true,hours:72,pct:8,mode:'maximum'});
+});
 it('keeps the confirmed saved second scheme unchanged and removes the redundant scheme controls',()=>{
  const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
  expect(screen.getByLabelText('三阶方案名称')).toHaveValue('三阶筛选 2');for(const name of ['新增三阶方案','复制整套三阶方案','删除当前副本'])expect(screen.queryByRole('button',{name})).not.toBeInTheDocument();

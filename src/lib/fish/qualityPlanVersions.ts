@@ -62,7 +62,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [...initialization];
-  if (plan.preEntryThreeStage) out.push({key:'pre-entry-three-stage',part:'动态筛选',name:'三阶同刻准入',version:plan.preEntryThreeStage.version+' · 参数 #'+threeStageFingerprint(plan.preEntryThreeStage),summary:'加仓共用资格、完整卖出排除及原生防守线更新同刻判断；观察起点固定，旧事件不延期兑现。'});
+  if (plan.preEntryThreeStage) out.push({key:'pre-entry-three-stage',part:'动态筛选',name:'三阶同刻准入',version:plan.preEntryThreeStage.version+' · 参数 #'+threeStageFingerprint(plan.preEntryThreeStage),summary:plan.preEntryThreeStage.observationBasis==='retry-origin-v2'?'多条准入算法取或，必要条件和排除门槛仍须同刻通过；否决后从下一分钟重建观察起点；原门槛和总截止时间不变；指标保留预热，原生防守线不重启、旧事件不延期兑现。':'加仓共用资格、完整卖出排除及原生防守线更新同刻判断；观察起点固定，旧事件不延期兑现。'});
   if (plan.preEntryConditions) out.push({ key: 'pre-entry-conditions', part: '动态筛选', name: '入选条件与三组否决', version: preEntryConditionsVersion(plan), summary: '同一分钟入选条件全部满足且无否决；从筛选起点累计观察，不模拟持仓，旧轮次不升级。' });
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;

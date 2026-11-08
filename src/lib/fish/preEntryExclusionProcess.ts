@@ -2,21 +2,25 @@ import type {EntryStageEvidence} from './preEntryThreeStageScan';
 import type {EntryConditionReading} from './preEntryMarketReader';
 import type {EntryGuardEvent} from './preEntryGuardEvent';
 import {formatUTC8} from '../timeFormat';
-export type EntryProcessStage='necessary'|'guard'|'exclusion'|'first'|'second'|'data';
-export type EntryProcessReading=EntryConditionReading&{threshold?:number;direction?:string};
+export type EntryProcessStage='necessary'|'guard'|'admission'|'exclusion'|'first'|'second'|'data';
+export type EntryProcessReading=EntryConditionReading&{threshold?:number;direction?:string;role?:'admission'|'veto'};
 export interface EntryProcessItem {
-  kind:'observation'|'guard-rejected'|'matched'|'unmatched'|'warming'|'error'|'paused';
+  kind:'observation'|'guard-rejected'|'matched'|'unmatched'|'warming'|'error'|'paused'|'restart';
   from:number;through:number;count:number;reason:string;lastReason?:string;
   stage?:EntryProcessStage;status?:'blocked'|'pending';endedAt?:number;nextStatus?:'pass'|'blocked'|'pending';
   readings?:EntryProcessReading[];lastReadings?:EntryProcessReading[];event?:EntryGuardEvent;
 }
 export interface EntryExclusionProcess {version:1;startedAt:number;partialBefore?:number;entries:EntryProcessItem[]}
-export const entryProcessStageLabels:Record<EntryProcessStage,string>={necessary:'⓪ 必要条件',guard:'防守线新事件',exclusion:'② 排除门槛',first:'一阶门槛',second:'二阶门槛',data:'数据等待'};
+export function recordEntryRestart(process:EntryExclusionProcess,at:number,attempt:number,end:number):EntryExclusionProcess {
+ const entries=process.entries.map(e=>e.kind==='observation'&&!e.endedAt?{...e,endedAt:at,nextStatus:'pending' as const}:e);
+ return {...process,entries:[...entries,{kind:'restart',from:at,through:at,count:1,reason:`第 ${attempt} 次观察：重建起点 ${formatUTC8(at)}，首个新分钟结束后重新判断；原总截止时间 ${formatUTC8(end)} 不变。`}]};
+}
+export const entryProcessStageLabels:Record<EntryProcessStage,string>={necessary:'⓪ 必要条件',guard:'防守线新事件',admission:'① 并列准入（或）',exclusion:'② 排除门槛',first:'一阶门槛',second:'二阶门槛',data:'数据等待'};
 export const entryGuardKindLabels={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const ruleKey=(reason:string)=>reason.split('：')[0];
 export function recordEntryEvidence(process:EntryExclusionProcess,e:EntryStageEvidence):EntryExclusionProcess {
   const entries=[...process.entries];
-  const stages=e.zero?[['necessary',e.zero],['guard',e.first],['exclusion',e.second]] as const:[['first',e.first],['second',e.second],['guard',e.third??{status:'pending' as const,reason:'等待新的原生防守线事件'}]] as const;
+  const stages=e.zero?[['necessary',e.zero],[e.admission?'admission':'guard',e.first],['exclusion',e.second]] as const:[['first',e.first],['second',e.second],['guard',e.third??{status:'pending' as const,reason:'等待新的原生防守线事件'}]] as const;
   const observed=[...stages,...(e.state==='waiting-data'&&!stages.some(([,s])=>s.status==='pending')?[['data',{status:'pending',reason:'等待零成交分钟后的有效读数'}] as const]:[])];
   for(const [stage,state]of observed){
     let index=-1;for(let i=entries.length-1;i>=0;i--)if(entries[i].kind==='observation'&&entries[i].stage===stage){index=i;break;}

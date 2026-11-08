@@ -5,7 +5,7 @@ import {entryProcessStageLabels,entryGuardKindLabels} from '@/lib/fish/preEntryE
 import type {QualityScreeningResult} from '@/lib/fish/qualityScreeningResults';
 import {formatUTC8} from '@/lib/timeFormat';
 const time=(at?:number)=>at&&Number.isFinite(at)?formatUTC8(at):'—';
-const kinds={observation:'门槛观察','guard-rejected':'新防守线事件被否决',matched:'首次满足 · 入选',unmatched:'未入选 · 本轮结束',warming:'历史不足',error:'数据或运行异常',paused:'暂停'} as const;
+const kinds={observation:'门槛观察','guard-rejected':'新防守线事件被否决',matched:'首次满足 · 入选',unmatched:'未入选 · 本轮结束',warming:'历史不足',error:'数据或运行异常',paused:'暂停',restart:'重建起点 · 继续筛选'} as const;
 export function FishScreeningProcessButton({results}:{results:readonly QualityScreeningResult[]}){
   const [open,setOpen]=useState(false);
   if(!results.length)return <span className="text-muted-foreground">—</span>;
@@ -18,7 +18,8 @@ export function FishScreeningProcessButton({results}:{results:readonly QualitySc
           {r.exclusionProcess.entries.map((e,i)=>{
             const negative=e.status==='blocked'||e.kind==='guard-rejected'||e.kind==='unmatched';
             const readingSets=[{label:'首次',rows:e.readings??[]},...(e.lastReadings?[{label:'末次',rows:e.lastReadings}]:[])];
-            const unmet=readingSets.reduce((sum,set)=>sum+set.rows.filter(r=>r.met===false&&!r.pending).length,0);
+            const unmet=readingSets.reduce((sum,set)=>sum+set.rows.filter(r=>!r.pending&&(r.role==='veto'?r.met===true:r.met===false&&r.role!=='admission')).length,0);
+            const vetoHits=readingSets.reduce((sum,set)=>sum+set.rows.filter(r=>!r.pending&&r.role==='veto'&&r.met===true).length,0);
             return <article key={i} className={'space-y-2 rounded-md border-l-4 p-3 '+(negative?'border-destructive bg-destructive/5 ring-1 ring-destructive/20':'border-border/60 bg-muted/20')} data-testid="screening-process-item" data-negative={negative}>
               <p className={'flex flex-wrap items-center gap-2 font-semibold '+(negative?'text-destructive':'')}>
                 {negative&&<span className="inline-flex items-center gap-1 rounded bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground"><OctagonX aria-hidden className="h-3 w-3"/>{e.status==='blocked'?'否决':e.kind==='guard-rejected'?'事件未准入':'未入选'}</span>}
@@ -27,9 +28,9 @@ export function FishScreeningProcessButton({results}:{results:readonly QualitySc
               <p className="font-mono text-[10px] text-muted-foreground">{time(e.from)}{e.through!==e.from?' ～ '+time(e.through):''} · {e.count} 次观测</p>
               <p className={negative?'font-semibold text-destructive':''}>{e.reason}</p>{e.lastReason&&e.lastReason!==e.reason&&<p className={negative?'font-semibold text-destructive':''}>末次原因：{e.lastReason}</p>}
               {e.endedAt&&<p className="text-muted-foreground">{time(e.endedAt)} · {e.nextStatus==='pass'?'该门槛解除':'转为下一项原因'}</p>}{e.event&&<p className="text-muted-foreground">防守线 {e.event.price} · 事件 {entryGuardKindLabels[e.event.kind]} · 确认 {time(e.event.at)}</p>}
-              {!!(e.readings?.length||e.lastReadings?.length)&&<details open={unmet>0}><summary className={'cursor-pointer '+(unmet?'font-semibold text-destructive':'text-muted-foreground')}>观测读数{unmet>0?` · ${unmet} 项未满足`:''}</summary>{readingSets.map(({label,rows})=><div key={label} className="mt-2 space-y-1"><p className="text-muted-foreground">{label}</p>{rows.map((reading,j)=>{
-                const failed=reading.met===false&&!reading.pending;
-                return <p key={j} data-testid={failed?'screening-process-unmet':undefined} className={failed?'rounded border border-destructive/25 bg-destructive/10 px-2 py-1 font-semibold text-destructive':'px-2 py-1 text-muted-foreground'}>{failed&&<span className="mr-2 inline-block rounded bg-destructive px-1 text-[10px] text-destructive-foreground">未满足</span>}{reading.label??reading.id} = {reading.value??'—'}{reading.threshold!=null?`（${reading.direction??''} ${reading.threshold}）`:''} · {reading.pending??(reading.met==null?'未判定':reading.met?'满足':'未满足')}</p>;
+              {!!(e.readings?.length||e.lastReadings?.length)&&<details open={unmet>0}><summary className={'cursor-pointer '+(unmet?'font-semibold text-destructive':'text-muted-foreground')}>观测读数{vetoHits>0?` · ${vetoHits} 项触发否决`:''}{unmet>vetoHits?` · ${unmet-vetoHits} 项未满足`:''}</summary>{readingSets.map(({label,rows})=><div key={label} className="mt-2 space-y-1"><p className="text-muted-foreground">{label}</p>{rows.map((reading,j)=>{
+                const failed=!reading.pending&&(reading.role==='veto'?reading.met===true:reading.met===false&&reading.role!=='admission');
+                return <p key={j} data-testid={failed?'screening-process-unmet':undefined} className={failed?'rounded border border-destructive/25 bg-destructive/10 px-2 py-1 font-semibold text-destructive':'px-2 py-1 text-muted-foreground'}>{failed&&<span className="mr-2 inline-block rounded bg-destructive px-1 text-[10px] text-destructive-foreground">{reading.role==='veto'?'触发否决':'未满足'}</span>}{reading.label??reading.id} = {reading.value??'—'}{reading.threshold!=null?`（${reading.direction??''} ${reading.threshold}）`:''} · {reading.pending??(reading.met==null?'未判定':reading.role==='veto'?(reading.met?'触发否决':'未触发否决'):reading.met?'满足':reading.role==='admission'?'本路未满足（准入取或）':'未满足')}</p>;
               })}</div>)}</details>}
             </article>;
           })}

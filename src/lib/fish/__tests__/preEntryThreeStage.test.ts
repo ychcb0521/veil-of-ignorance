@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { computeDbl5, DBL5_STEP, type Dbl5Bar, type Dbl5Row } from '@/lib/dbl5m';
 import { definitionKey } from '@/lib/deepDig/features';
 import { nativeGuardEvent, createPreEntryGuardReader } from '../preEntryGuardEvent';
-import { emptyPreEntryThreeStage, threeStageFingerprint, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller } from '../preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, threeStageFingerprint, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller } from '../preEntryThreeStage';
 import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -13,6 +13,11 @@ import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor'
 import { PRE_ENTRY_THREE_STAGE_VERSION } from '../preEntryThreeStage';
 
 const T=Date.UTC(2026,0,5),F=DBL5_STEP;
+it('freezes a distinct v7 fingerprint without altering the original v6 observation basis or frozen parameters',()=>{
+ const original=emptyPreEntryThreeStage(),before=structuredClone(original),hash=threeStageFingerprint(original),copy=retryPreEntryThreeStage(original);
+ expect(copy).toMatchObject({version:'pre-entry-three-stage-v7',observationBasis:'retry-origin-v2',admission:{guardEnabled:true,algorithms:[]}});expect(threeStageFingerprint(copy)).not.toBe(hash);expect(original).toEqual(before);expect(threeStageFingerprint(original)).toBe(hash);
+ expect(()=>validatePreEntryThreeStage({...copy,version:'pre-entry-three-stage-v6'})).toThrow();expect(()=>validatePreEntryThreeStage({...original,observationBasis:'retry-origin-v2'})).toThrow();
+});
 const row=(patch:Partial<Dbl5Row>={}):Dbl5Row=>({at:T+F,data_valid:true,darvas_5m_guard:100,darvas_5m_guard_regime:'range',darvas_5m_guard_segment:0,darvas_5m_guard_broken:false,box_id:'a',tick_size:'1',algorithm_version:'dbl-5-v2',effective_parameters:{n:3},initialization_start:T-F,initialization_id:'test',data_checksum:'sum',...patch} as Dbl5Row);
 it.each([
   [null,100,'range','range','first'],

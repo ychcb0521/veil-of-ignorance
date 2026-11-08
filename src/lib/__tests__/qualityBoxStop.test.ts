@@ -39,6 +39,12 @@ it('fixed, raise-only and freely following lines are independent user choices',a
  support=at=>at<=T?90:80;
  for(const [update,expected] of [['fixed',90],['raise-only',90],['follow',80]] as const){const r=reader({...defaultBoxStop(),update});await r.read(bar(T));await r.read(bar(T+5*M));expect(r.states().box.line).toBe(expected);}
 });
+it('a v7 observation restart binds the current native line and clears confirmations without replaying native history',async()=>{
+ support=at=>at<=T?90:80;const rule={...defaultBoxStop(),update:'fixed' as const,confirmation:'close-1m' as const,closes:2};
+ const loaded=vi.fn(load()),r=createBoxStopReader({vetoes:[veto(rule)],row,entry:T,since:T,load:loaded,signal});
+ await r.read(bar(T,100,88,89));expect(r.states().box.count).toBe(1);await r.read(bar(T+5*M));expect(r.states().box.line).toBe(90);
+ const calls=loaded.mock.calls.length;r.restartObservation(T+6*M);expect(r.states().box).toMatchObject({line:80,count:0});await r.read(bar(T+6*M,100,90,100));expect(loaded.mock.calls).toHaveLength(calls);
+});
 it('waits when no confirmed structure exists; once placed, K survives a broken box',async()=>{
  support=()=>null;expect(await reader().read(bar(T,100,1,100))).toBeUndefined();
  support=at=>at<=T?90:null;const r=reader();await r.read(bar(T));expect(await r.read(bar(T+5*M,100,89,99))).toMatchObject({fillPrice:90});

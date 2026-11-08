@@ -30,7 +30,7 @@ export async function createPreEntryMarketReader(o:{condition:EntryMarketConditi
   if(from<0)throw Error(c.label+'：指标预热历史不足');
   let history=from<start?[...await o.load(o.row,from,start,plan,o.signal)]:[];
   if(from<start)validateFishBars(history,start,(start-from)/plan.step,plan.step);
-  let partial:ResearchBar|undefined,cache=createFormulaEvaluationCache(),hadValue=false;
+  let partial:ResearchBar|undefined,cache=createFormulaEvaluationCache(),hadValue=false,observationOrigin=o.origin??o.since;
   const read=(at:number,minute:ResearchBar):EntryConditionReading=>{
     const bars=c.timing==='closed'?history:partial?[...history,partial]:history;
     if(!bars.length)return {id:c.id,at,pending:'等待指标首根已收盘数据'};
@@ -50,12 +50,12 @@ export async function createPreEntryMarketReader(o:{condition:EntryMarketConditi
       if(missing.length){if(missing.every(x=>qualityInitializationPending(o.load,x,i)))return {id:c.id,at,value,pending:'等待原探测约束初始化'};throw Error(c.label+'：原探测约束读数缺失');}
       met=met&&!output.constraints.some(x=>!x[i]);
       if(plan.compiled.usesPrs6h&&!output.PRS6H_details?.find(r=>r.PRS6H_at===closedAt)?.PRS6H_event)met=false;
-      const first=Math.floor((o.origin??o.since)/plan.step)*plan.step+plan.step;
+      const first=Math.floor(observationOrigin/plan.step)*plan.step+plan.step;
       if(plan.stateHold&&!((plan.stateHoldAlternatives??[plan.stateHold]).some(route=>closedAt>=first+(route.samples-1)*plan.step&&i>=route.samples-1&&output.average.subarray(i-route.samples+1,i+1).every(v=>Number.isFinite(v)&&v>route.threshold))))met=false;
     }
     return {id:c.id,at,value,met};
   };
-  return {condition:c,plan,start,push(minute:ResearchBar){
+  return {condition:c,plan,start,resetObservationOrigin(at:number){observationOrigin=at;},push(minute:ResearchBar){
     if(minute.openTime<start)return;
     partial=aggregateQualityMinute(partial,minute,plan.step);
     const at=minute.openTime+60000;

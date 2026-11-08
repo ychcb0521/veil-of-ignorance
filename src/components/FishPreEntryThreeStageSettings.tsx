@@ -7,7 +7,7 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
-import { emptyPreEntryThreeStage, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
 import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
@@ -32,11 +32,13 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
 }
 export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state:FishQualityState;selectedCount:number;done:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
-  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=emptyPreEntryThreeStage();return [plan];});
+  const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
+  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=retryPreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(monitor.library.settings?.hours))),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
+  const retry=c?.version===PRE_ENTRY_RETRY_VERSION;
   const sources=state.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
@@ -79,6 +81,12 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
     {!active&&!!monitor.library.settings?.plans.length&&<label className="block text-[11px]">选择唯一保留的筛选方案<select aria-label="选择唯一保留的筛选方案" className={field+' mt-1 w-full'} value="" onChange={e=>{const saved=monitor.library.settings!.plans.find(p=>p.id===e.target.value);if(saved){const plan=copyAsThreeStage(saved);setPlans([plan]);setActiveId(plan.id);}}}><option value="">请选择要保留的已保存方案</option>{monitor.library.settings.plans.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
     {active&&c&&<>
       <input className={field+' w-full'} aria-label="三阶方案名称" value={active.label} onChange={e=>setPlans(plans.map(p=>p.id===active.id?{...p,label:e.target.value}:p))}/>
+      {!retry&&<div className="space-y-2 rounded border border-primary/30 bg-primary/5 p-3 text-[11px]"><p>当前保留固定起点的旧版规则。新副本支持多条准入取“或”，并在否决后重建观察起点，原总截止时间不变。</p><button type="button" className={button+' text-primary'} onClick={()=>guardAction(()=>{
+        const {frozenVersions:_old,...base}=active;
+        const config={...c,additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):c.hardVetoes};
+        const copy={...structuredClone(base),id:id(),label:active.label+' · 多准入重筛 v7',preEntryThreeStage:retryPreEntryThreeStage(config,[defaultAdmission()])};
+        setPlans([copy]);setActiveId(copy.id);setVetoDrafts({});setHardDrafts({});
+      })}>启用并列准入与否决重筛（另存副本）</button></div>}
       <details className="rounded border border-border/50 p-2 text-[11px]"><summary className="cursor-pointer">从持仓方案复制市场条件</summary>
         <div className="mt-2 flex flex-wrap gap-2"><select aria-label="复制条件来源方案" className={field} value={sourceId} onChange={e=>{setSourceId(e.target.value);setRoundIndex('0');}}><option value="">选择明确的来源方案</option>{sources.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select>
           <select aria-label="复制加仓轮次" className={field} value={roundIndex} onChange={e=>setRoundIndex(e.target.value)}>{rounds.map((_,i)=><option key={i} value={i}>第 {i+1} 次加仓 · 主分支</option>)}</select>
@@ -97,12 +105,19 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
         {c.additionSource&&<p className="text-[10px] text-muted-foreground">复制来源：{c.additionSource.label} · 第 {c.additionSource.round} 次加仓主分支；必要条件只读已收盘原周期。</p>}
       </section>
       <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-first">
-        <h4 className="text-xs font-medium">① 防守线新事件准入</h4><p className="text-[11px]">原生防守线首次产生、断裂后重建、价格上移或下移、实虚切换均算新事件。同价同型延续及仅换箱体编号不算。</p>
-        <FishQualityBoxStopEditor entry admission disabled={false} prefix="三阶准入 " definitions={definitions} rule={c.guard.rule} onChange={rule=>patch({guard:{...c.guard,rule}})}/>
-        <p className="text-[11px] text-muted-foreground">只读已收盘 5 分钟结构；新事件发生的同一时点，⓪ 与 ② 必须同时通过。被否决的事件不延期兑现，新线不清除历史锁定。</p>
+        <h4 className="text-xs font-medium">{retry?'① 并列准入（或）':'① 防守线新事件准入'}</h4>
+        {retry&&<><p className="text-[11px]">以下任一条满足即可通过准入；⓪ 必要条件与 ② 排除门槛仍须同刻通过。</p><label className="flex items-center gap-2 text-[11px]"><input type="checkbox" aria-label="启用原生防守线准入" checked={c.admission!.guardEnabled} onChange={e=>patch({admission:{...c.admission!,guardEnabled:e.target.checked}})}/>原生防守线新事件</label></>}
+        <p className="text-[11px]">原生防守线首次产生、断裂后重建、价格上移或下移、实虚切换均算新事件。同价同型延续及仅换箱体编号不算。</p>
+        <FishQualityBoxStopEditor entry admission disabled={retry&&!c.admission!.guardEnabled} prefix="三阶准入 " definitions={definitions} rule={c.guard.rule} onChange={rule=>patch({guard:{...c.guard,rule}})}/>
+        {retry&&<div className="space-y-2">{c.admission!.algorithms.map((algorithm,i)=><div key={algorithm.id}>{conditionEditor(algorithm,value=>patch({admission:{...c.admission!,algorithms:c.admission!.algorithms.map((old,j)=>j===i?value:old)}}),()=>patch({admission:{...c.admission!,algorithms:c.admission!.algorithms.filter((_,j)=>j!==i)}}),'准入算法 '+(i+1)+' ')}</div>)}<button type="button" className={button} disabled={!choices.length} onClick={()=>patch({admission:{...c.admission!,algorithms:[...c.admission!.algorithms,defaultAdmission()]}})}>添加准入算法</button></div>}
+        <p className="text-[11px] text-muted-foreground">{retry?'原生结构只读已收盘 5 分钟数据；指标按所选确认时点判断。任何一路准入都不能绕过必要条件或排除门槛，被否决的旧事件不补用。':'只读已收盘 5 分钟结构；新事件发生的同一时点，⓪ 与 ② 必须同时通过。被否决的事件不延期兑现，新线不清除历史锁定。'}</p>
       </section>
       <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="three-stage-second">
         <h4 className="text-xs font-medium">② 排除门槛</h4><p className="text-[11px] text-muted-foreground">加仓共用否决、任一完整普通卖出规则、任一硬性终止，三者任一成立即排除。硬性终止不等待普通卖出确认。</p>
+        {retry&&<div className="space-y-2 rounded border border-border/60 p-2 text-[11px]"><label className="flex items-center gap-2"><input type="checkbox" aria-label="启用长周期回撤否决" checked={!!c.longDrawdown?.enabled} onChange={e=>patch({longDrawdown:e.target.checked?{enabled:true,hours:24,pct:NaN,mode:'current'}:undefined})}/>可选：长周期回撤否决</label>
+          {c.longDrawdown?.enabled&&<div className="flex flex-wrap items-center gap-2"><label>回看时长<input aria-label="长周期回撤回看时长（小时）" className={field+' ml-1 w-20'} type="number" min="0.016666666666666666" max="8784" step="any" value={Number.isFinite(c.longDrawdown.hours)?c.longDrawdown.hours:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,hours:e.target.value.trim()?Number(e.target.value):NaN}})}/>小时</label><select aria-label="长周期回撤口径" className={field} value={c.longDrawdown.mode} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,mode:e.target.value as 'current'|'maximum'}})}><option value="current">当前距窗口高点的回撤</option><option value="maximum">窗口内最大回撤</option></select><label>达到<input aria-label="长周期回撤阈值（%）" className={field+' mx-1 w-20'} type="number" min="0" max="100" step="any" placeholder="填写阈值" value={Number.isFinite(c.longDrawdown.pct)?c.longDrawdown.pct:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,pct:e.target.value.trim()?Number(e.target.value):NaN}})}/>% 即否决</label></div>}
+          <p className="text-muted-foreground">默认关闭。检查截至筛选时点的历史窗口，包含本次观察起点之前的行情，不随重筛清空。当前回撤＝（窗口最高价－当前收盘价）÷窗口最高价；最大回撤按窗口内先高后低计算。历史不足时等待，不补造数据。</p>
+        </div>}
         <p className="text-[11px] font-medium">加仓共用一票否决（任一成立即排除）</p>
         <FishQualityEntryVetoEditor entry allowDoubleDrop draft={vetoDrafts[active.id]??vetoDraftOf(c.additionVetoes)} setDraft={draft=>setVetoDrafts({...vetoDrafts,[active.id]:draft})}/>
         {c.sellRules.map((rule,i)=>{
@@ -116,7 +131,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
         <button type="button" className={button} disabled={!choices.length} onClick={()=>patch({sellRules:[...c.sellRules,{id:id(),label:'普通卖出 '+(c.sellRules.length+1),enabled:true,expression:{join:'all',children:[{condition:newCondition()}]},confirmation:{samples:1,minutes:1}}]})}>添加完整卖出规则</button>
         <p className="text-[11px] font-medium">硬性终止</p><FishQualityHoldingVetoEditor entry compact labelPrefix="三阶硬性终止 " draft={hardDrafts[active.id]??holdingVetoDraft(c.hardVetoes)} setDraft={draft=>setHardDrafts({...hardDrafts,[active.id]:draft})}/>
       </section>
-      <details className="text-[11px]"><summary className="cursor-pointer">观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
+      <details className="text-[11px]"><summary className="cursor-pointer">观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">{retry?'否决后从下一分钟重建观察起点：峰值、回撤、急跌锁定与卖出连续确认重新累计，指标历史和原生结构保持因果连续；每次仍按原公式、阈值完整判断。总截止时间始终从原筛选起点计算，不延长；命中最早符合条件的时点即停止。':'峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。'}实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
       {active.frozenVersions&&<details className="text-[11px]"><summary className="cursor-pointer">已保存版本</summary><PlanVersionList plan={active} draft/></details>}
     </>}
     <div className="space-y-1"><label className="flex items-center gap-2 text-[11px]">单标的筛选时限<input aria-label="单标的筛选时限（小时）" className={field+' w-20'} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</label><p className="text-[10px] text-muted-foreground">从每个标的的筛选起点计时；首次满足即停在命中时间，到时仍未满足则结束。修改时限后从头重新筛选生效；可用行情更短时扫描至行情末尾。</p></div>

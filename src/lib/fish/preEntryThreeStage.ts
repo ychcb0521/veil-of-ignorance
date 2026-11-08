@@ -13,7 +13,11 @@ import { preEntryPositionOnly } from './preEntryConditions';
  */
 export const PRE_ENTRY_THREE_STAGE_V5 = 'pre-entry-three-stage-v5' as const;
 export const PRE_ENTRY_THREE_STAGE_VERSION = 'pre-entry-three-stage-v6' as const;
-export type PreEntryThreeStageVersion = typeof PRE_ENTRY_THREE_STAGE_V5 | typeof PRE_ENTRY_THREE_STAGE_VERSION;
+/** 2026-11-09: vetoes end one observation attempt; the next minute starts a new
+ * observation under identical conditions and the ORIGINAL overall deadline.
+ * v5/v6 retain fixed-origin locks, fingerprints and executable implementations. */
+export const PRE_ENTRY_RETRY_VERSION = 'pre-entry-three-stage-v7' as const;
+export type PreEntryThreeStageVersion = typeof PRE_ENTRY_THREE_STAGE_V5 | typeof PRE_ENTRY_THREE_STAGE_VERSION | typeof PRE_ENTRY_RETRY_VERSION;
 export const PRE_ENTRY_GUARD_EVENT_VERSION = 'pre-entry-guard-event-v1' as const;
 export interface EntryMarketCondition {
   id: string; label: string; metric: string; snapshot: FishSnapshot;
@@ -29,7 +33,10 @@ export interface EntrySellRule {
 }
 export interface PreEntryThreeStage {
   version: PreEntryThreeStageVersion;
-  observationBasis: 'scan-origin-v1';
+  observationBasis: 'scan-origin-v1'|'retry-origin-v2';
+  /** v7 only: native guard events and enabled algorithms are parallel OR routes. */
+  admission?:{guardEnabled:boolean;algorithms:EntryMarketCondition[]};
+  longDrawdown?:import('./preEntryLongDrawdown').EntryLongDrawdown;
   required: EntryMarketCondition[];
   detectors?: {id:string;featureId?:string;stricterPct:number;match:'all'|'any'}[];
   additionSource?: {planId:string;label:string;round:number;versions:QualityGroup['frozenVersions']};
@@ -48,15 +55,25 @@ export const emptyPreEntryThreeStage = (): PreEntryThreeStage => ({
   version: PRE_ENTRY_THREE_STAGE_VERSION, observationBasis: 'scan-origin-v1', required: [], additionVetoes: [], sellRules: [], hardVetoes: [],
   guard: { version: PRE_ENTRY_GUARD_EVENT_VERSION, rule: defaultBoxBreak() },
 });
+/** Only an explicit new plan/copy opts into different observation semantics. */
+export function retryPreEntryThreeStage(c:PreEntryThreeStage,algorithms:EntryMarketCondition[]=[]):PreEntryThreeStage {
+ validatePreEntryThreeStage(c);
+ return {...structuredClone(c),version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:c.admission?structuredClone(c.admission):{guardEnabled:true,algorithms:structuredClone(algorithms)}};
+}
 export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondition[] => 'condition' in e ? [e.condition] : e.children.flatMap(expressionConditions);
 export function validateEntryCondition(c: EntryMarketCondition) {
   if (!c.id || !c.metric || !c.snapshot?.definitionKey || !c.label.trim() || !Number.isFinite(c.threshold) || !['<','>','<=','>='].includes(c.direction) || !['intrabar','closed'].includes(c.timing)) throw Error('市场条件须选择指标、方向、有限门槛及确认方式');
 }
-/** v5 或 v6 都是可运行版本；更早的扩展一律拒绝。 */
+/** Old v5/v6 configurations retain their original basis; only v7 permits retries and OR routes. */
 export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is PreEntryThreeStage {
-  if (!c || (c.version !== PRE_ENTRY_THREE_STAGE_VERSION && c.version !== PRE_ENTRY_THREE_STAGE_V5) || c.observationBasis !== 'scan-origin-v1' || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
+  if (!c || !([PRE_ENTRY_THREE_STAGE_VERSION,PRE_ENTRY_THREE_STAGE_V5,PRE_ENTRY_RETRY_VERSION] as string[]).includes(c.version) || c.observationBasis !== (c.version===PRE_ENTRY_RETRY_VERSION?'retry-origin-v2':'scan-origin-v1') || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
   const ids = new Set<string>();
   const unique = (id: string) => { if (!id || ids.has(id)) throw Error('三阶条件编号重复'); ids.add(id); };
+  if(c.version===PRE_ENTRY_RETRY_VERSION){
+    if(!c.admission||typeof c.admission.guardEnabled!=='boolean'||!Array.isArray(c.admission.algorithms)||!c.admission.guardEnabled&&!c.admission.algorithms.some(f=>f.enabled))throw Error('至少启用一条并列准入算法');
+    c.admission.algorithms.forEach(f=>{unique(f.id);validateEntryCondition(f);});
+    if(c.longDrawdown?.enabled){unique('long-drawdown-v1');const d=c.longDrawdown;if(!Number.isFinite(d.hours)||d.hours<1/60||d.hours>8784||!Number.isFinite(d.pct)||d.pct<=0||d.pct>=100||!['current','maximum'].includes(d.mode))throw Error('长周期回撤须填写至少 1 分钟的有效回看时长和 0～100% 之间的回撤阈值');}
+  }else if(c.admission!==undefined||c.longDrawdown!==undefined)throw Error('新准入与回撤条件须另存为 v7 新方案');
   c.required.forEach(f => { unique(f.id); validateEntryCondition(f); });
   c.detectors?.forEach(d=>{unique(d.id);if(!Number.isFinite(d.stricterPct)||d.stricterPct<0||!['all','any'].includes(d.match))throw Error('原探测门槛提高幅度须为非负有限数');});
   validateAdditionVetoes(c.additionVetoes);

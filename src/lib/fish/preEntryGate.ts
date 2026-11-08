@@ -20,7 +20,7 @@ export const preEntryGuardWarmBars = (conditions?: PreEntryConditions) => {
 /** Price-path state is rebuilt causally from the original scan start on resume.
  * No position, quantity, fill, profit or account data is invented. */
 export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal }) {
-  const entry = Math.ceil(o.start / M) * M;
+  let entry = Math.ceil(o.start / M) * M;
   const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes);
   const priceVetoes = vetoes.filter(v=>v.kind!=='indicator'&&v.kind!=='box-stop');
   const boxes = vetoes.filter(v=>v.kind==='box-stop');
@@ -50,7 +50,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
     boxHit = stop?.cause?.label ? preEntryConditionText(stop.cause.label) : undefined;
     cursor += M;
   };
-  return async (at: number, minute?: ResearchBar): Promise<{blocked?:string;pending?:string}> => {
+  const read=async (at: number, minute?: ResearchBar): Promise<{blocked?:string;pending?:string}> => {
     if (o.signal.aborted) throw new DOMException('已暂停','AbortError');
     // The first call can be after indicator warmup or a pause. Restore the
     // reference path only through this observation, never through future bars.
@@ -103,4 +103,11 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
     if (boxes.some(v=>!isBoxBreak(v.boxStop!)&&states[v.id]?.line==null)) return {blocked,pending:'等待有效箱体 K 基准，尚不入选'};
     return {blocked};
   };
+  // v7 only: reuse causal indicator/ATR warmup, never reload the same market
+  // history for every rejection. All attempt-dependent paths and locks reset.
+  return Object.assign(read,{restart(at:number){
+    if(at!==cursor||at%M!==0)throw Error('重筛起点须位于已观察分钟的下一起点');
+    entry=at;path=undefined;minutes.length=0;fastHit=undefined;lockPeak=undefined;slowHit=undefined;boxHit=undefined;
+    boxReader.restartObservation(at);
+  }});
 }
