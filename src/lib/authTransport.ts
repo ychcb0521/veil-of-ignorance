@@ -1,4 +1,5 @@
 /** Bound auth connection + body reads. Other database/storage requests retain their existing behavior. */
+import {authGatewayUrl,productionAuthOrigin} from './authGateway';
 // A measured slow connection returned a normal credential response after 17s.
 // Keep a finite deadline, with time left for SDK/session persistence afterwards.
 export const AUTH_REQUEST_TIMEOUT_MS = 30_000;
@@ -12,10 +13,13 @@ export async function boundedAuthAction<T>(action:()=>Promise<T>, timeoutMs=AUTH
   try { return await Promise.race([Promise.resolve().then(action),timeout]); }
   finally { clearTimeout(timer!); }
 }
-export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,init),timeoutMs=AUTH_REQUEST_TIMEOUT_MS):typeof fetch {
+export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,init),timeoutMs=AUTH_REQUEST_TIMEOUT_MS,siteOrigin=productionAuthOrigin()):typeof fetch {
   return async(input,init)=>{
     const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
     if(!new URL(url).pathname.startsWith('/auth/v1/'))return fetcher(input,init);
+    const gateway=authGatewayUrl(url,siteOrigin),method=(init?.method??(input instanceof Request?input.method:'GET')).toUpperCase();
+    // Refresh rotation, signup and OTP requests must never be duplicated by this transport.
+    const repeatable=method==='GET'||method==='HEAD'||method==='POST'&&new URL(url).pathname==='/auth/v1/token'&&new URL(url).searchParams.get('grant_type')==='password';
     const controller=new AbortController(),external=init?.signal??(input instanceof Request?input.signal:undefined);
     let expired=false,timer:ReturnType<typeof setTimeout>;
     const abort=()=>controller.abort(external?.reason);
@@ -27,9 +31,22 @@ export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,i
     });
     try {
       return await Promise.race([(async()=>{
-        const response=await fetcher(input,{...init,signal:controller.signal});
-        const body=await response.arrayBuffer();
-        return new Response(body.byteLength?body:null,{status:response.status,statusText:response.statusText,headers:response.headers});
+        const read=async(target:string|URL|Request,routed:boolean)=>{
+          const request=input instanceof Request?new Request(typeof target==='string'?target:url,input.clone()):target;
+          const response=await fetcher(request,{...init,cache:'no-store',...(routed?{credentials:'omit' as const}:{}),signal:controller.signal});
+          const body=await response.arrayBuffer();
+          return new Response(body.byteLength?body:null,{status:response.status,statusText:response.statusText,headers:response.headers});
+        };
+        if(!gateway)return read(input,false);
+        let response:Response;
+        try{response=await read(gateway,true);}
+        catch(error){if(!repeatable||controller.signal.aborted)throw error;return read(input,false);}
+        // Credential/OTP rejection and rate limits remain authoritative. Only a broken
+        // gateway gets one alternate route, within the SAME overall deadline.
+        const broken=[404,405,502,503,504].includes(response.status)||response.headers.get('Content-Type')?.includes('text/html');
+        if(broken&&repeatable&&!controller.signal.aborted)return read(input,false);
+        if(response.headers.get('Content-Type')?.includes('text/html'))throw Error('登录通道暂不可用，请稍后重试。');
+        return response;
       })(),stopped]);
     } finally { clearTimeout(timer!);external?.removeEventListener('abort',abort); }
   };

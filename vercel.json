@@ -6,11 +6,23 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/((?!assets/).*)",
+      "source": "/auth-api/:path*",
+      "destination": "https://elynuzxnvjzypjgzkemc.supabase.co/auth/v1/:path*"
+    },
+    {
+      "source": "/((?!assets/|auth-api/).*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
+    {
+      "source": "/auth-api/:path*",
+      "headers": [
+        {"key": "Cache-Control", "value": "private, no-store, max-age=0"},
+        {"key": "CDN-Cache-Control", "value": "no-store"},
+        {"key": "Vercel-CDN-Cache-Control", "value": "no-store"}
+      ]
+    },
     {
       "source": "/assets/(.*)",
       "headers": [
