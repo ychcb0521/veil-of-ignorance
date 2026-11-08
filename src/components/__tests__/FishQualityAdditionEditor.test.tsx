@@ -10,6 +10,18 @@ afterEach(cleanup);
 function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
+it('offers the opt-in double-drop veto with confirmed defaults, saves per round, and roundtrips percentage-only settings',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('启用加仓否决 二次急跌未收复')).not.toBeChecked();
+ expect(screen.getByLabelText('二次急跌未收复 回落ATR倍数')).toHaveValue(2.5);
+ expect(screen.getByLabelText('二次急跌未收复 回落百分比')).toHaveValue(4);
+ fireEvent.click(screen.getByLabelText('启用加仓否决 二次急跌未收复'));
+ const saved=save();expect(saved.rounds[0].entryVetoes).toContainEqual({kind:'double-drop',enabled:true,atr:2.5,pct:4,join:'and'});
+ expect(saved.rounds[1].entryVetoes??[]).toEqual([]);
+ fireEvent.change(screen.getByLabelText('二次急跌未收复 回落ATR倍数'),{target:{value:''}});
+ const pctOnly=save();expect(pctOnly.rounds[0].entryVetoes).toContainEqual({kind:'double-drop',enabled:true,pct:4});
+ expect(parseAdditionDraft(additionDraft(pctOnly),BUILTIN_FEATURES)).toEqual(pctOnly);
+});
 it('shows the selected peak basis beside the dynamic stage condition without changing its 15% threshold',()=>{
  function StageEditor(){
   const [draft,setDraft]=useState(()=>additionDraft({...defaultQualityAddition(),enabled:true}));

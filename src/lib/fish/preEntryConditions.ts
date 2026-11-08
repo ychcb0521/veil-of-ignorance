@@ -18,6 +18,7 @@ export const preEntryPositionOnly = (kind: string) => kind === 'addition-geometr
 export function validatePreEntryConditions(value?: PreEntryConditions) {
   if (!value) return;
   if (value.version !== PRE_ENTRY_CONDITIONS_VERSION) throw Error('动态筛选条件版本不可用，请保留旧方案');
+  if(value.entryVetoes.some(v=>v.enabled&&v.kind==='double-drop'))throw Error('二次急跌目前用于新版加仓否决；动态筛选 v4 不支持，请保留原轮次');
   validateAdditionVetoes(value.entryVetoes);
   for (const veto of activeHoldingVetoes([...value.sellVetoes, ...value.hardVetoes])) {
     if (preEntryPositionOnly(veto.kind)) throw Error('买前筛选没有实际持仓，不能启用加仓仓位或盈亏比条件');

@@ -3,7 +3,8 @@
  * 新 C 出现也不加——ONTUSDT 第 3 次、STRKUSDT 第 2、3 次加仓都加在这类形态之后，扫损成了必然。
  * 只看加仓那一刻已收盘的 5 分钟 K 线；ATR 为 5 分钟 ATR(14)（Wilder，与加仓 K 同一序列）。任一条成立即这次不加，继续等下一个新 C。
  */
-export type AdditionEntryVetoKind = 'upper-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop';
+import { DOUBLE_DROP_VERSION, doubleDropState } from './qualityDoubleDrop';
+export type AdditionEntryVetoKind = 'upper-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop' | 'double-drop';
 /** 持仓期间急跌：任意 minutes 分钟内跌幅 ≥ pct%（与硬性终止「N 分钟内跌幅」同口径：窗口首根开盘 → 末根收盘）。 */
 export interface FastDropWindow { minutes: number; pct: number }
 export interface QualityAdditionEntryVeto {
@@ -35,15 +36,17 @@ export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditi
   'pullback-atr': { kind: 'pullback-atr', enabled: false, atr: 2.5 },
   // 【用户要求】2026-11-02 持仓期间曾出现任意 1 分钟跌超 5%、5 分钟超 7%、10 分钟超 10% 等，就不再加仓（PENGU 第 3 次加仓前那根长红线）
   'fast-drop': { kind: 'fast-drop', enabled: false, windows: [{ minutes: 1, pct: 5 }, { minutes: 5, pct: 7 }, { minutes: 10, pct: 10 }] },
+  'double-drop': { kind:'double-drop', enabled:false,atr:2.5,pct:4,join:'and' },
 };
 export const ADDITION_VETO_KINDS = Object.keys(ADDITION_VETO_DEFAULTS) as AdditionEntryVetoKind[];
-export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌' };
+export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌', 'double-drop':'二次急跌未收复' };
 export const activeAdditionVetoes = (vetoes?: readonly QualityAdditionEntryVeto[]) => (vetoes ?? []).filter(v => v.enabled);
 export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
   return baseVetoLabel(v) + ((v.kind === 'pullback' || v.kind === 'pullback-atr') && v.sticky ? '，未收复最高点前不再加仓' : '');
 }
 function baseVetoLabel(v: QualityAdditionEntryVeto): string {
   const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v };
+  if(v.kind==='double-drop')return `二次急跌未收复前高：回落 ${pullbackText(v)}，两次独立急跌后，5 分钟收盘收复前高才恢复`;
   return v.kind === 'upper-wick' ? `长上影线：近 ${d.lookbackBars} 根内上影 ≥ ${d.atr} ATR 且占整根 ≥ ${d.ratio}%`
     : v.kind === 'lower-spike' ? `向下大插针：近 ${d.lookbackBars} 根内下影 ≥ ${d.atr} ATR 或低于前收 ≥ ${d.pct}%`
       : v.kind === 'volatility' ? `高震荡：ATR ≥ 6 小时中位 ${d.ratio} 倍 或 ER(24) ≤ ${d.er}`
@@ -61,6 +64,13 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
   for (const v of activeAdditionVetoes(vetoes)) {
     if (!ADDITION_VETO_KINDS.includes(v.kind)) throw new Error('加仓否决条件类型无效');
     const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }, bad = (x: number | undefined, lo: number, hi: number) => x == null || !Number.isFinite(x) || x < lo || x > hi;
+    if(v.kind==='double-drop'){
+      if(v.atr==null&&v.pct==null)throw Error('二次急跌：请填写 ATR 倍数或回落百分比');
+      if(v.atr!=null&&(bad(v.atr,0,50)||v.atr===0))throw Error('二次急跌：ATR 倍数须大于 0 且不超过 50');
+      if(v.pct!=null&&(bad(v.pct,0,100)||v.pct===0))throw Error('二次急跌：回落百分比须大于 0 且不超过 100%');
+      if(v.join!=null&&!['and','or'].includes(v.join))throw Error('二次急跌：组合方式无效');
+      continue;
+    }
     if ((v.kind === 'upper-wick' || v.kind === 'lower-spike') && (bad(d.lookbackBars, 1, 288) || !Number.isInteger(d.lookbackBars))) throw new Error(`${ADDITION_VETO_LABELS[v.kind]}：回看根数须为 1–288 的整数`);
     if (v.kind === 'fast-drop') { if (!d.windows?.length) throw new Error('持仓期间急跌：至少填一组「N 分钟内跌幅」'); for (const w of d.windows) if (bad(w.minutes, 1, 240) || !Number.isInteger(w.minutes) || bad(w.pct, 0, 100)) throw new Error('持仓期间急跌：分钟须为 1–240 的整数，跌幅须为 0–100%'); continue; }
     if (v.kind === 'pullback') {
@@ -77,7 +87,7 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
     if (v.kind === 'volatility' && (bad(d.ratio, 0, 50) || bad(d.er, 0, 1))) throw new Error('高震荡：ATR 倍数须为 0–50，效率比须为 0–1');
   }
 }
-export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { if(v.kind==='double-drop')return [v.kind,DOUBLE_DROP_VERSION,v.atr??null,v.pct??null,v.join??'and']; const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
 export interface VetoBar { openTime: number; open: number; high: number; low: number; close: number }
 export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string;
@@ -107,11 +117,15 @@ export function evaluateAdditionVetoes(vetoes: readonly QualityAdditionEntryVeto
   const active = activeAdditionVetoes(vetoes), n = bars.length;
   if (!active.length || !n) return;
   const A = atr[n - 1], last = bars[n - 1];
-  if (!(A > 0) || !Number.isFinite(A)) return;
   const fmt = (x: number) => +x.toFixed(2);
   for (const raw of active) {
-    const v = { ...ADDITION_VETO_DEFAULTS[raw.kind], ...raw };
-    if (v.kind === 'upper-wick') {
+    const v = raw.kind==='double-drop'?raw:{ ...ADDITION_VETO_DEFAULTS[raw.kind], ...raw };
+    if(v.kind!=='double-drop'&&(!(A>0)||!Number.isFinite(A)))continue;
+    if(v.kind==='double-drop'){
+      validateAdditionVetoes([raw]);
+      const state=doubleDropState(bars,atr,entry,v);
+      if(state.count>=2&&state.lockedPeak!=null)return {kind:'double-drop',label:additionVetoLabel(v),reading:`${DOUBLE_DROP_VERSION} · 两次独立急跌 ${fmtTime(state.firstAt!)} / ${fmtTime(state.secondAt!)}；尚未以 5 分钟收盘收复 ${state.lockedPeak}`};
+    } else if (v.kind === 'upper-wick') {
       for (let i = Math.max(0, n - v.lookbackBars!); i < n; i++) { const b = bars[i], range = b.high - b.low, up = b.high - Math.max(b.open, b.close);
         if (range > 0 && up >= v.atr! * A && up / range * 100 >= v.ratio!) return { kind: v.kind, label: additionVetoLabel(v), reading: `${fmtTime(b.openTime)} 上影 ${fmt(up / A)} ATR，占整根 ${Math.round(up / range * 100)}%` }; }
     } else if (v.kind === 'lower-spike') {

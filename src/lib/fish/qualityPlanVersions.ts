@@ -3,6 +3,7 @@ import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryC
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
+import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -82,6 +83,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   vetoes.filter(v=>v.kind===BOX_STOP_KIND).forEach((v,i)=>{const r=v.boxStop!,versions=structureVersions(r.structure);add(`hard-stop-box-${i}`, '硬性终止',boxStopLabel(r),[r.version,versions.box,versions.guard].filter(Boolean).join(' · '),isBoxBreak(r)?'仅在原生 DBL-5 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂':'独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');});
   const a = plan.addition;
   if (a?.enabled) {
+    const doubleDrops=[a,...(a.rounds??[]),...(a.alternativeRounds??[])].map(r=>(r.entryVetoes??[]).filter(v=>v.enabled&&v.kind==='double-drop')).filter(r=>r.length);
+    if(doubleDrops.length)add('addition-support-quality','加仓否决','二次急跌未收复前高',DOUBLE_DROP_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(doubleDrops)), '首次急跌前高与 ATR 固定；连续下跌只计一次，反弹脱离急跌区后再跌计第二次；5 分钟收盘收复前高才恢复。原箱体和防守线输出不变。');
     if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
     const rounds = a.rounds?.length ? a.rounds : [a];
     // 加仓引擎本身（平衡公式、轮次、门槛、否决、减仓等），不含箱体——箱体按轮单列
