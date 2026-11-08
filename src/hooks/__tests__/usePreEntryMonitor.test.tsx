@@ -22,6 +22,17 @@ function study() {
     snapshot: { featureId: def.id, featureShort: def.short, definitionKey: definitionKey(def), statistic: 'raw', interval: '5m' as const, scale: 1, direction: '>' as const, threshold: 100, cutoffMs: t, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 } }] };
 }
 beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.v4Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v3Load.mockResolvedValue(emptyPreEntryLibrary()); });
+it('persists a table-only clear without deleting history or frozen settings, and retains results when saving fails',async()=>{
+ const input=study(),sample=qualityComparisonRows(input)[0],saved={...emptyPreEntryLibrary(),rounds:[{id:'r',state:'complete' as const,startedAt:t,updatedAt:t,filters:input.buyFilters,hours:1}],records:[{id:'record',roundId:'r',sample,status:'matched' as const,matchedAt:t+60000,startTime:t,cursor:t+60000,updatedAt:t+60000,readings:[{key:'f',value:101}]}]},before=structuredClone(saved);
+ storage.load.mockResolvedValue(saved);const run=vi.fn(),h=renderHook(()=>usePreEntryMonitor('clear-owner',true,run));await waitFor(()=>expect(h.result.current.ready).toBe(true));
+ storage.save.mockRejectedValueOnce(Error('保存失败'));await act(()=>h.result.current.clearTableResults());expect(h.result.current.library.records[0].tableClearedAt).toBeUndefined();
+ await act(()=>h.result.current.clearTableResults());const result=h.result.current.library.records[0];expect(result.tableClearedAt).toBeGreaterThan(before.records[0].updatedAt);expect(result.updatedAt).toBe(before.records[0].updatedAt);expect(result.readings).toEqual(before.records[0].readings);expect(result.sample).toEqual(before.records[0].sample);expect(result.status).toBe('matched');expect(result.matchedAt).toBe(t+60000);expect(h.result.current.library.rounds).toEqual(before.rounds);expect(run).not.toHaveBeenCalled();expect(storage.v4Save).not.toHaveBeenCalled();
+});
+it('stops the current screening task before clearing its final displayed observations',async()=>{
+ const run=vi.fn(async(task:QualityRunOptions)=>{const record=task.preEntry!.records[0];task.preEntry!.onRecord({...record,status:'scanning',readings:[{key:'f',value:123}],updatedAt:Date.now()});await new Promise<void>(resolve=>task.signal.addEventListener('abort',()=>resolve(),{once:true}));});
+ const h=renderHook(()=>usePreEntryMonitor('clear-running',true,run));await waitFor(()=>expect(h.result.current.ready).toBe(true));act(()=>{void h.result.current.start(study(),1);});await waitFor(()=>expect(run).toHaveBeenCalledOnce());await act(()=>h.result.current.clearTableResults());
+ expect(h.result.current.running).toBe(false);expect(h.result.current.library.records[0].tableClearedAt).toBeGreaterThan(h.result.current.library.records[0].updatedAt);expect(h.result.current.library.records[0].readings[0].value).toBe(123);expect(h.result.current.library.rounds[0].state).toBe('paused');
+});
 describe('买前监测独立任务', () => {
   it('retains both frozen settings when switching versions and can run the old set again',async()=>{
     const f=study().buyFilters[0],oldPlan=freezeQualityPlan({id:'old',label:'原版资产',metric:f.metric,snapshot:f.snapshot,rule:{metric:f.metric,direction:f.direction,threshold:f.threshold}});

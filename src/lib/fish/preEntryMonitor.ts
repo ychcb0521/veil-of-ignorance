@@ -9,6 +9,8 @@ import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
+  /** Clear only the working table display, retaining the complete scan history. */
+  tableClearedAt?:number;
   threeStage?: import('./preEntryThreeStageScan').EntryStageEvidence;
   missedGuard?: { count:number; event:import('./preEntryGuardEvent').EntryGuardEvent; reason:string };
   lastVeto?: { at: number; reason: string; count: number };
@@ -46,7 +48,8 @@ export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): 
   };
   const settings = !a.settings || (b.settings?.updatedAt ?? 0) >= a.settings.updatedAt ? b.settings : a.settings;
   const history=merge(a.settingsHistory??[],b.settingsHistory??[]);
-  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
+  const clearMarks=new Map<string,number>();for(const r of [...a.records,...b.records])if(r.tableClearedAt)clearMarks.set(r.id,Math.max(clearMarks.get(r.id)??0,r.tableClearedAt));
+  return { version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>clearMarks.has(r.id)?{...r,tableClearedAt:clearMarks.get(r.id)}:r), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) };
 }
 export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   if (record.status !== 'matched' || !record.matchedAt) return null;

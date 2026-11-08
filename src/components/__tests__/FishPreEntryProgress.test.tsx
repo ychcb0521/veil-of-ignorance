@@ -1,0 +1,37 @@
+import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
+import {afterEach,expect,it,vi} from 'vitest';
+import {FishPreEntryProgress} from '../FishPreEntryProgress';
+import {emptyPreEntryLibrary,type PreEntryRecord} from '@/lib/fish/preEntryMonitor';
+import type {FishQualityState} from '@/hooks/useFishQuality';
+const T=Date.UTC(2026,10,8),statuses=['matched','unmatched','warming','error','paused','queued','scanning'] as const;
+function monitor():NonNullable<FishQualityState['preEntry']>{
+ const records:PreEntryRecord[]=statuses.map((status,i)=>({id:status,roundId:'r',status,startTime:T,cursor:T+60000,matchedAt:status==='matched'?T+60000:undefined,updatedAt:T+60000,readings:[],detail:'原因-'+status,sample:{id:status,source:{id:status,symbol:`TEST${i}USDT`,timeMs:T,timeLabel:'',fallbackZone:''},enteredAt:T,basis:'signal',groups:[],importedAt:T}}));
+ return {library:{...emptyPreEntryLibrary(),rounds:[{id:'r',state:'running',startedAt:T,updatedAt:T,filters:[],hours:0}],records},ready:true,running:true,progress:{done:4,total:7,current:'TEST6USDT'},error:'',retry:vi.fn()} as unknown as NonNullable<FishQualityState['preEntry']>;
+}
+afterEach(cleanup);
+it('shows live processing, outcome counts and scan cursor without opening the action menu',()=>{
+ const state=monitor(),view=render(<FishPreEntryProgress monitor={state}/>);
+ const status=screen.getByRole('status');expect(status).toHaveTextContent('筛选中');expect(status).toHaveTextContent('已处理 4 / 7');expect(status).toHaveTextContent('入选 1 · 未入选 1 · 历史不足 1 · 缺数据 1');
+ expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','4');expect(screen.getByText(/扫描到 2026-11-08 08:01:00/)).toBeInTheDocument();
+ const next=structuredClone(state.library);next.records[6]={...next.records[6],status:'matched',cursor:T+120000,matchedAt:T+120000};view.rerender(<FishPreEntryProgress monitor={{...state,library:next}}/>);
+ expect(screen.getByRole('status')).toHaveTextContent('已处理 5 / 7');expect(screen.getByRole('status')).toHaveTextContent('入选 2');
+});
+it('opens every outcome, including rejected, waiting and missing-data records, while running',()=>{
+ const state=monitor(),before=structuredClone(state.library);render(<FishPreEntryProgress monitor={state}/>);fireEvent.click(screen.getByLabelText('查看本轮筛选结果'));
+ const dialog=screen.getByRole('dialog');expect(within(dialog).getAllByTestId('pre-entry-current-result-row')).toHaveLength(7);
+ for(const label of ['已入选','未入选','历史不足','缺数据','已暂停','待筛选','筛选中'])expect(within(dialog).getByText(label)).toBeInTheDocument();
+ expect(within(dialog).getByText('原因-error')).toBeInTheDocument();expect(state.library).toEqual(before);
+});
+it('recovers pause/completion summaries from saved records without ephemeral progress',()=>{
+ const state=monitor();state.running=false;state.progress=null;state.library.rounds[0].state='paused';const view=render(<FishPreEntryProgress monitor={state}/>);
+ expect(screen.getByRole('status')).toHaveTextContent('已暂停');expect(screen.getByRole('status')).toHaveTextContent('已处理 4 / 7');expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+ view.rerender(<FishPreEntryProgress monitor={{...state,library:{...state.library,rounds:[{...state.library.rounds[0],state:'complete'}]}}}/>);expect(screen.getByRole('status')).toHaveTextContent('已完成');
+});
+it('follows the active older round when resumed rather than presenting newer archived outcomes',()=>{
+ const state=monitor();state.library.rounds.push({id:'newer',state:'complete',startedAt:T+1,updatedAt:T+1,filters:[],hours:1});render(<FishPreEntryProgress monitor={state}/>);
+ expect(screen.getByRole('status')).toHaveTextContent('已处理 4 / 7');fireEvent.click(screen.getByLabelText('查看本轮筛选结果'));expect(within(screen.getByRole('dialog')).getAllByTestId('pre-entry-current-result-row')).toHaveLength(7);
+});
+it('shows preparation and loading errors directly even when no result has been admitted',()=>{
+ const state=monitor();state.library.records=[];render(<FishPreEntryProgress monitor={{...state,ready:false,error:'本机存储读取失败'}}/>);
+ expect(screen.getByRole('status')).toHaveTextContent('正在读取筛选库');expect(screen.getByRole('alert')).toHaveTextContent('本机存储读取失败');fireEvent.click(screen.getByText('重试读取'));expect(state.retry).toHaveBeenCalledOnce();
+});

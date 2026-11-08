@@ -42,11 +42,11 @@ it('hides what the table hides: the 买前过滤 group is left out once hidden',
   render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
   const shown = captured[0].leading[0];
-  const filterShown = shown.headerRows?.[0].some(c => c.text.startsWith('买前过滤'));
-  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的过滤结果' }));fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
+  const filterShown = shown.headerRows?.[0].some(c => c.text.startsWith('静态过滤'));
+  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的静态过滤结果' }));fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
   const hidden = captured[1].leading[0];
   expect(filterShown).toBe(true);
-  expect(hidden.headerRows?.[0].some(c => c.text.startsWith('买前过滤'))).toBe(false);
+  expect(hidden.headerRows?.[0].some(c => c.text.startsWith('静态过滤'))).toBe(false);
   expect(hidden.columns.map(c => c.header)).not.toContain('探测算法');
   expect(hidden.rows).toHaveLength(3);
 });

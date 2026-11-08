@@ -19,12 +19,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const current = useRef(library), runner = useRef(run), controller = useRef<AbortController | null>(null);
   const epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout>>();
   const execution = useRef<Promise<void> | null>(null);
+  const tableClearLock=useRef(false);
   const readyRef = useRef(false); runner.current = run;
   const commit = useCallback((value: PreEntryLibrary) => { current.current = value; setLibrary(value); }, []);
   useEffect(() => {
     const generation = ++epoch.current;
     readyRef.current = false; setReady(false); setRunning(false); setProgress(null); setError('');
-    commit(emptyPreEntryLibrary());
+    tableClearLock.current=false;commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
     void Promise.all([loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, v4, v3, v2, legacy]) => {
@@ -57,7 +58,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   }, [owner, enabled, reload, commit]);
 
   const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy) => {
-    if (!readyRef.current || controller.current) return;
+    if (!readyRef.current || controller.current||tableClearLock.current) return;
     const generation = epoch.current, aborter = new AbortController(); controller.current = aborter;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; }); execution.current = finished;
@@ -104,7 +105,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     }
   }, [owner, commit]);
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
-    if (!readyRef.current || controller.current) return;
+    if (!readyRef.current || controller.current||tableClearLock.current) return;
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
     const plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
     let filters;
@@ -151,6 +152,17 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next=archivePreEntrySettings(current.current,{plans:structuredClone(saved.plans),hours:saved.hours,updatedAt:Date.now()});
     commit(next);void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
   },[commit,owner]);
+  const clearTableResults=useCallback(async()=>{
+    if(!readyRef.current||tableClearLock.current)return false;
+    const generation=epoch.current;tableClearLock.current=true;
+    controller.current?.abort();await execution.current;
+    if(epoch.current!==generation)return false;
+    const at=current.current.records.reduce((at,r)=>Math.max(at,r.updatedAt+1),Date.now());
+    const next={...current.current,records:current.current.records.map(r=>({...r,tableClearedAt:at}))};
+    try{await savePreEntryLibrary(owner,next);if(epoch.current!==generation)return false;commit(mergePreEntryLibraries(current.current,next));setProgress(null);setError('');return true;}
+    catch(reason){if(epoch.current===generation)setError(reason instanceof Error?reason.message:'清除动态筛选结果未保存');return false;}
+    finally{if(epoch.current===generation)tableClearLock.current=false;}
+  },[owner,commit]);
   const importLibrary=useCallback(async(value:PreEntryLibrary)=>{
     if(!readyRef.current||controller.current)return false;
     const generation=epoch.current;
@@ -159,6 +171,6 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next={...mergePreEntryLibraries(current.current,historical),settings:current.current.settings};
     try{await savePreEntryLibrary(owner,next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
   },[owner,commit]);
-  return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,
+  return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

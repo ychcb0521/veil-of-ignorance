@@ -32,7 +32,8 @@ it('keeps scan controls compact and offers data retries inside the action menu',
     rounds: [{ id: 'r', engine: PRE_ENTRY_ZERO_TRADE_VERSION, state: 'complete', filters: [], hours: 0, startedAt: 1, updatedAt: 1 }] },
     ready: true, running: false, progress: { done: 1, total: 3 }, error: '', resume } } as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={0} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('已完成');
+  expect(screen.getByRole('status')).toHaveTextContent('入选 1');
   expect(screen.queryByLabelText('打开筛选记录')).not.toBeInTheDocument();
   expect(screen.queryByText(/本轮沿用/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));

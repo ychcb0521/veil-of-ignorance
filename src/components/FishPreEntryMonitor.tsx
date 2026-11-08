@@ -1,3 +1,4 @@
+import {FishPreEntryProgress} from './FishPreEntryProgress';
 import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
 import {entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
@@ -94,5 +95,6 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
       </PopoverContent>
     </Popover>
     {renderLibrary()}
+    <FishPreEntryProgress monitor={monitor}/>
   </div>;
 }

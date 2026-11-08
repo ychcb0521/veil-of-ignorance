@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, within, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
 import { importQualityFish, separateQualityFilters, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
@@ -58,7 +58,7 @@ it('saves a Turing copy without enabling default holding conditions or changing 
 },30000);
 it('keeps static and dynamic modules separate and opens the new three-stage settings', () => {
  const s=state();
- s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn(),importLibrary:vi.fn()};
+ s.preEntry={library:{version:1,rounds:[],records:[]},ready:true,running:false,error:'',progress:null,start:vi.fn(),resume:vi.fn(),restart:vi.fn(),pause:vi.fn(),retry:vi.fn(),configure:vi.fn(),useSavedSettings:vi.fn(),importLibrary:vi.fn(),clearTableResults:vi.fn()};
  render(<FishQuality state={s}/>);
  const fixed=within(screen.getByTestId('quality-static-controls')),dynamic=within(screen.getByTestId('quality-dynamic-controls')),holding=within(screen.getByTestId('quality-run-controls'));
  expect(fixed.getByRole('button',{name:'开始过滤'})).toBeInTheDocument();
@@ -1010,14 +1010,14 @@ it('groups detector, filter and entry columns under 买前过滤, renames 持仓
   s.clearFilterResults = vi.fn(); s.clearMonitorResults = vi.fn();
   render(<FishQuality state={s}/>);
   const categories = screen.getByTestId('quality-algorithm-categories'), plans = s.study.sellPlans!.length;
-  expect(categories).toHaveTextContent('买前过滤'); expect(categories).toHaveTextContent('持仓监测');
+  expect(categories).toHaveTextContent('静态过滤'); expect(categories).toHaveTextContent('持仓监测');
   expect(categories).not.toHaveTextContent('过滤算法'); expect(categories).not.toHaveTextContent('卖出算法');
   expect(screen.getByTestId('quality-filter-group')).toHaveAttribute('colspan', '4'); expect(screen.queryByTestId('quality-entry-header')).toBeNull();
   const firstSell = screen.getAllByTestId('quality-sell-column')[0];
   for (const header of [screen.getByTestId('quality-detector-value-column'), screen.getByTestId('quality-detector-column'), ...screen.getAllByTestId('quality-filter-column')])
     expect(header.compareDocumentPosition(firstSell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // 隐藏过滤：买前过滤整组（探测值、探测算法、捕捞过程、过滤读数）都不显示；监测不受影响
-  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的过滤结果' }));
+  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的静态过滤结果' }));
   expect(screen.queryAllByTestId('quality-filter-cell')).toHaveLength(0); expect(screen.queryByTestId('quality-filter-group')).toBeNull();
   for (const gone of ['quality-detector-value-column', 'quality-detector-column', 'quality-detector-value-cell', 'quality-detector-cell']) expect(screen.queryAllByTestId(gone)).toHaveLength(0);
   expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(plans);
@@ -1026,15 +1026,16 @@ it('groups detector, filter and entry columns under 买前过滤, renames 持仓
   fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的监测结果' }));
   expect(screen.queryAllByTestId('quality-sell-column')).toHaveLength(0); expect(screen.queryByTestId('quality-monitor-group')).toBeNull();
   cleanup(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('button', { name: '显示组合表中的过滤结果' })).toHaveAttribute('aria-pressed', 'true');
-  fireEvent.click(screen.getByRole('button', { name: '显示组合表中的过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '显示组合表中的监测结果' }));
+  expect(screen.getByRole('button', { name: '显示组合表中的静态过滤结果' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '显示组合表中的静态过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '显示组合表中的监测结果' }));
   expect(screen.getAllByTestId('quality-filter-cell').length).toBeGreaterThan(0); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(plans);
   // 清除要再确认一次，各清各的
   fireEvent.click(screen.getByRole('button', { name: '清除组合表中的监测结果' }));
   expect(s.clearMonitorResults).not.toHaveBeenCalled(); expect(screen.getByText(/交易战役与监测库保留/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '确认清除' }));
   expect(s.clearMonitorResults).toHaveBeenCalledTimes(1); expect(s.clearFilterResults).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '清除组合表中的过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '确认清除' }));
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'确认清除'})).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '清除组合表中的静态过滤结果' })); fireEvent.click(screen.getByRole('button', { name: '确认清除' }));
   expect(s.clearFilterResults).toHaveBeenCalledTimes(1); expect(s.clearMonitorResults).toHaveBeenCalledTimes(1);
   // 清除过滤之后（没有读数）过滤列整列不显示，不再满屏「待计算」
   cleanup(); render(<FishQuality state={{ ...s, study: { ...s.study, filterReadings: [] } }}/>);

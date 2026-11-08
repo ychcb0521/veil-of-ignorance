@@ -40,6 +40,8 @@ export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound)
     // Keep the first-match entry semantics used by the main combination table.
     out.samples.push({id:signal.id,source:{...signal,quality:record.sample.source.quality},enteredAt:signal.timeMs,basis:'signal',importedAt:record.updatedAt,groups:[],origin:'pre-entry',origins:['pre-entry']});
   }
+  out.screeningRounds=[structuredClone(round)];
+  out.screeningResults=structuredClone(library.records.filter(r=>r.roundId===round.id&&r.status==='matched').map(({tableClearedAt:_clear,...record})=>record));
   out.selectedRowIds=qualityComparisonRows(out).map(r=>r.id);return out;
 }
 export function downloadDirectoryTables(name:string,tables:readonly {id:string;study:FishQualityStudy}[],at=Date.now()){
