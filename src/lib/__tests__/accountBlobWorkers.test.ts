@@ -36,3 +36,5 @@ it('decodes very large archives on the page thread instead of the memory-capped 
  expect(text.length).toBeGreaterThan(2_000_000);
  expect(await decodeAccountBlob('json',text)).toEqual(value);expect(created).not.toHaveBeenCalled();
 });
+
+it('preserves a Unicode surrogate pair split across uncompressed cloud chunks',async()=>{const json=serializeAccountBlob({text:'🚀中文'}),cut=json.indexOf('🚀')+1;expect(await decodeAccountBlob('json',[json.slice(0,cut),json.slice(cut)])).toEqual({text:'🚀中文'});});

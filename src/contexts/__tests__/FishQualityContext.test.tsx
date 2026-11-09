@@ -8,11 +8,17 @@ import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, saveQualityStudy: storage.save }));
+vi.mock('@/lib/fish/preEntryMonitorV6Store',()=>({loadPreEntryLibraryV6:async()=>({version:1,rounds:[],records:[]}),savePreEntryLibraryV6:async()=>{}}));
+vi.mock('@/lib/fish/preEntryMonitorV5Store',()=>({loadPreEntryLibraryV5:async()=>({version:1,rounds:[],records:[]})}));
+vi.mock('@/lib/fish/preEntryMonitorV4Store',()=>({loadPreEntryLibraryV4:async()=>({version:1,rounds:[],records:[]})}));
+vi.mock('@/lib/fish/preEntryMonitorV3Store',()=>({loadPreEntryLibraryV3:async()=>({version:1,rounds:[],records:[]})}));
+vi.mock('@/lib/fish/preEntryMonitorV2Store',()=>({loadPreEntryLibraryV2:async()=>({version:1,rounds:[],records:[]})}));
+vi.mock('@/lib/fish/preEntryMonitorStore',()=>({loadPreEntryLibrary:async()=>({version:1,rounds:[],records:[]})}));
 const T = Date.UTC(2026, 9, 20), EMPTY = [];
 const fish = [{ id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>' as const, scale: 1 } }];
 function Controls() {
   const q = usePageFishQuality(fish, EMPTY), navigate = useNavigate();
-  return <><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); void q.start(); }}>更新收益</button><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); q.setFilters([makeQualityBuyFilter('state:state', '>', .7)]); void q.startFilter(); }}>开始过滤</button><button onClick={() => navigate('/other')}>其他页面</button><button onClick={q.cancel}>暂停监测</button><span>结果 {q.study.results.length}</span><span>{q.running ? '运行中' : '已结束'}</span></>;
+  return <><button disabled={!q.preEntry?.ready} onClick={()=>{const f=makeQualityBuyFilter('state:state','>',.8);q.setSelectedRows(qualityDisplayRows(q.study).map(r=>r.id));q.preEntry!.configure([{id:'frozen-entry',label:'状态S准入',metric:f.metric,snapshot:f.snapshot,rule:{metric:f.metric,direction:f.direction,threshold:f.threshold}}],12);void q.preEntry!.start(12);}}>开始动态筛选</button><span>{q.preEntry?.library.records[0]?.status}</span><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); void q.start(); }}>更新收益</button><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); q.setFilters([makeQualityBuyFilter('state:state', '>', .7)]); void q.startFilter(); }}>开始过滤</button><button onClick={() => navigate('/other')}>其他页面</button><button onClick={q.cancel}>暂停监测</button><span>结果 {q.study.results.length}</span><span>{q.running ? '运行中' : '已结束'}</span></>;
 }
 function Other() { const navigate = useNavigate(); return <button onClick={() => navigate('/')}>返回</button>; }
 beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockResolvedValue({ study: newQualityStudy(T) }); storage.save.mockReset().mockResolvedValue(true); });
@@ -76,4 +82,16 @@ it('does not pause on leaving the page, and records why a round was paused', asy
   fireEvent.click(screen.getByRole('button', { name: '更新收益' })); await flush();
   view.unmount(); await flush(1000);
   expect(lastRound()).toMatchObject({ state: 'paused', error: expect.stringContaining('页面关闭') });
+});
+
+it('keeps dynamic screening and its frozen conditions alive while another task runs and routes change',async()=>{
+ const tasks:QualityRunOptions[]=[],releases:(()=>void)[]=[];
+ const run=vi.fn(async(o:QualityRunOptions)=>{tasks.push(o);await new Promise<void>(resolve=>releases.push(resolve));});
+ render(<MemoryRouter><FishQualityProvider owner="a" run={run}><Routes><Route path="/" element={<Controls/>}/><Route path="/other" element={<Other/>}/></Routes></FishQualityProvider></MemoryRouter>);await flush();
+ fireEvent.click(screen.getByRole('button',{name:'开始动态筛选'}));await flush();const screening=tasks.find(t=>t.task==='pre-entry')!;expect(screening).toBeDefined();
+ fireEvent.click(screen.getByRole('button',{name:'更新收益'}));await flush();expect(tasks.some(t=>t.task==='monitor')).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'其他页面'}));await flush();expect(screening.signal.aborted).toBe(false);expect(screening.preEntry!.round.plans![0].rule!.threshold).toBe(.8);
+ act(()=>{screening.onProgress({done:1,total:1,current:''});screening.preEntry!.onRecord({...screening.preEntry!.records[0],status:'matched',matchedAt:T+60000,updatedAt:T+60000});});await flush();expect(screen.getByRole('status')).toHaveTextContent('买前筛选后台运行中 · 1/1');
+ fireEvent.click(screen.getByRole('button',{name:'返回'}));await flush();expect(screen.getByText('matched')).toBeInTheDocument();expect(screening.signal.aborted).toBe(false);expect(tasks.filter(t=>t.task==='pre-entry')).toHaveLength(1);
+ releases.forEach(resolve=>resolve());await flush();
 });

@@ -1232,3 +1232,13 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
 },60000);
 
 function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
+
+it('restores both table axes, measured row height and populated results on campaign return',async()=>{
+ const {saveQualityReturn,armQualityReturn,finishQualityReturn}=await import('@/lib/fish/qualityReturn');
+ window.history.replaceState({key:'complete-table-return',idx:4},'');
+ saveQualityReturn({ui:{open:true,query:'',month:'',origin:'',sort:'symbol',ascending:true,tableTop:660,tableLeft:1400,rowPx:66,screeningRunId:'frozen-screening'},scroll:[]});expect(armQualityReturn()).toBe(true);
+ const s=state(),p=s.study.sellPlans![0],row=qualityComparisonRows(s.study)[0];s.study.results=[{key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T,status:'closed',entryPrice:100,endPrice:110,returnPct:10,pnl:10}];
+ render(<FishQuality state={s}/>);const table=screen.getByTestId('quality-fish-table');
+ await waitFor(()=>expect(table.scrollLeft).toBe(1400));expect(table.scrollTop).toBe(660);
+ expect(screen.getAllByTestId('quality-fish-row')[0].style.height).toBe('66px');expect(s.study.results).toHaveLength(1);expect(s.setScope).toHaveBeenLastCalledWith(expect.any(Array),expect.objectContaining({workingRoundId:'frozen-screening'}));finishQualityReturn();
+});

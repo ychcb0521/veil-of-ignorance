@@ -7,7 +7,7 @@ function replacer(this: unknown, key: string, value: unknown): unknown {
   if (typeof raw === 'number' && !Number.isFinite(raw)) return { [TAG]: 'Num', v: String(raw) };
   return value;
 }
-function reviver(_key: string, value: unknown): unknown {
+export function reviveAccountBlobValue(_key: string, value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const tagged = value as { [TAG]?: unknown; v?: unknown };
   switch (tagged[TAG]) {
@@ -19,7 +19,7 @@ function reviver(_key: string, value: unknown): unknown {
   }
 }
 export const serializeAccountBlob = (value: unknown) => JSON.stringify(value, replacer);
-export const deserializeAccountBlob = (text: string): unknown => JSON.parse(text, reviver);
+export const deserializeAccountBlob = (text: string): unknown => JSON.parse(text, reviveAccountBlobValue);
 
 
 /** 内容指纹（FNV-1a，两轮不同种子拼成 64 位），只用来判断「和上次传的是不是同一份」。 */
@@ -81,13 +81,7 @@ function* batched(value: unknown): Generator<string> {
  * 分三遍流式处理（总长度 → 指纹 → gzip），任何时候都不生成整份 JSON 字符串。
  */
 export async function prepareAccountBlobEncoding(value:unknown,knownHash?:string):Promise<{hash:string;encoded?:{enc:'gzip'|'json';text:string;bytes:number}}>{
-  let length = 0;
-  for (const part of batched(value)) length += part.length;
-  let a = 0x811c9dc5, b = 0x01000193 ^ length;
-  for (const part of batched(value)) {
-    for (let i = 0; i < part.length; i += 1) { const c = part.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193); b = Math.imul(b ^ c, 0x5bd1e995); }
-  }
-  const hash = `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${length}`;
+  const {hash, length} = await fingerprintAccountBlobValue(value);
   if (hash === knownHash) return { hash };
   if (typeof CompressionStream === 'function') {
     try {
@@ -102,4 +96,19 @@ export async function prepareAccountBlobEncoding(value:unknown,knownHash?:string
     } catch { /* Preserve the existing uncompressed fallback. */ }
   }
   return { hash, encoded: { enc: 'json', text: serializeAccountBlob(value), bytes: length } };
+}
+
+/** Same content fingerprint, bounded intermediate strings and regular UI yields. */
+export async function fingerprintAccountBlobValue(value: unknown): Promise<{hash: string; length: number}> {
+  let yieldedAt = Date.now();
+  const yieldIfNeeded = async () => { if (Date.now() - yieldedAt >= 32) { await new Promise(resolve => setTimeout(resolve, 0)); yieldedAt = Date.now(); } };
+  let length = 0;
+  for (const part of batched(value)) { length += part.length; await yieldIfNeeded(); }
+  let a = 0x811c9dc5, b = 0x01000193 ^ length;
+  for (const part of batched(value)) {
+    for (let i = 0; i < part.length; i += 1) { const c = part.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193); b = Math.imul(b ^ c, 0x5bd1e995); }
+    await yieldIfNeeded();
+  }
+  const hash = `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${length}`;
+  return {hash, length};
 }

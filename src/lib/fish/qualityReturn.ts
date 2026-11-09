@@ -24,6 +24,8 @@ export interface QualityReturnUi {
   runState?: '' | 'pending' | 'done';
   sort: string; ascending: boolean;
   tableTop: number;
+  tableLeft?: number; rowPx?: number;
+  screeningRunId?: string;
 }
 export interface QualityReturnSnapshot {
   at: number;

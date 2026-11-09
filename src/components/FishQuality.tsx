@@ -481,7 +481,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const [manualOpen, setManualOpen] = useState(false);
   const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
   const [directoryChoice,setDirectoryChoice]=useState<QualitySourceDirectory|undefined>(ui?.directory);
-  const [screeningRunId,setScreeningRunId]=useState<string>();
+  const [screeningRunId,setScreeningRunId]=useState<string|undefined>(ui?.screeningRunId);
   const [directoryRequests,setDirectoryRequests]=useState<Partial<Record<QualitySourceDirectory['kind'],FishDirectoryRequest>>>({});
   const sourceDefaulted=useRef(!!ui),sourceAccount=useRef(state.account);
   const latestEntry=latestEntryDirectory(state.preEntry?.library,study.monitorLibrary?.directoryEdits),latestEntryId=latestEntry?.id;
@@ -509,7 +509,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const lastPause = lastRound?.state === 'paused' && lastRound.error ? { reason: lastRound.error, at: lastRound.finishedAt ?? lastRound.updatedAt } : null;
   /** 点进交易战役前记下界面状态与滚动位置，返回时原样恢复。 */
   const rememberReturn = () => saveQualityReturn({
-    ui: { open, query, month, algorithms: algorithmChoice, origin,directory:directoryChoice, detectorExpanded, labelExpanded, postExitExpanded, entryExpanded, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
+    ui: { open, query, month, algorithms: algorithmChoice, origin,directory:directoryChoice, detectorExpanded, labelExpanded, postExitExpanded, entryExpanded, sort, ascending, screeningRunId, rowPx, tableLeft: tableRef.current?.scrollLeft ?? 0, tableTop: tableRef.current?.scrollTop ?? scrollTop },
     scroll: ancestorScrolls(rootRef.current),
   });
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
@@ -675,7 +675,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const showMinedAt=rows.some(row=>qualityTableMinedAt(row)!=null);
   const columnWidths=[184,152,...(showMinedAt?[152]:[]),80,80,...(hideFilter?[]:[128,144,112]),...shownFilters.map(()=>176),...(showScreening?[176,176,176,112]:[]),...shownPlans.flatMap(p=>[312,128,128,128,128,128,...Array(postExitOpen.has(p.id)?10:1).fill(128)]),40];
   const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
-  const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
+  const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ui?.rowPx ?? ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
   const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
   const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy,ids?:string[])=>{
@@ -705,7 +705,8 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       const table = tableRef.current;
       let ok = true;
       if (table && Math.abs(table.scrollTop - back.ui.tableTop) > 1) { table.scrollTop = back.ui.tableTop; setScrollTop(table.scrollTop); ok = Math.abs(table.scrollTop - back.ui.tableTop) <= 1; }
-      if (!table && back.ui.tableTop > 0) ok = false;
+      if (table && Math.abs(table.scrollLeft - (back.ui.tableLeft ?? 0)) > 1) { table.scrollLeft = back.ui.tableLeft ?? 0; ok = Math.abs(table.scrollLeft - (back.ui.tableLeft ?? 0)) <= 1 && ok; }
+      if (!table && (back.ui.tableTop > 0 || (back.ui.tableLeft ?? 0) > 0)) ok = false;
       ok = applyAncestorScrolls(rootRef.current, back.scroll) && ok;
       stable = ok && readyRef.current ? stable + 1 : 0;
       if (stable >= 15 || performance.now() - started > 8000) { stop(); return; }

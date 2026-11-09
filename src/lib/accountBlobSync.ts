@@ -21,7 +21,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './accountSyncTransport';
-import { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
+import { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlobValue, prepareAccountBlobEncoding } from './accountBlobCodec';
 export { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
 
 export const ACCOUNT_BLOB_PREFIX = 'idb:';
@@ -145,16 +145,26 @@ export async function prepareAccountBlob(value:unknown,knownHash?:string):Promis
     worker.onerror=()=>{finish();reject(new Error('账号研究档案编码失败'));};
     try{worker.postMessage({value,knownHash});}catch(error){finish();reject(error);}
   });
-  const json=serializeAccountBlob(value),hash=fingerprintAccountBlob(json);
-  return {hash,...(hash===knownHash?{}:{encoded:await encodeAccountBlob(value,json)})};
+  return prepareAccountBlobEncoding(value, knownHash);
 }
-/**
- * Worker 只解中等大小的存档。Chrome 给 Worker 的 JS 内存上限约 470 MB，超了整个标签页一起崩溃（错误代码 5）；
- * 一份 2M 字的 gzip 存档解开后 JSON 可达几千万字（中文按 2 字节计），再加解析结果和回传拷贝就会越线。
- * 更大的在主线程解（上限约 4 GB）：卡一两秒，但不会崩。
- */
+/** Large archives parse bytes incrementally without an archive-sized string or worker-to-page copy. */
 const DECODE_IN_WORKER_MAX_CHARS = 2_000_000;
-export async function decodeAccountBlob(enc: Head['enc'], text: string): Promise<unknown> {
+export async function decodeAccountBlob(enc: Head['enc'], input: string | readonly string[]): Promise<unknown> {
+  const pieces = typeof input === 'string' ? [input] : input;
+  if (enc === 'json' && (pieces.length > 1 || pieces[0].length > DECODE_IN_WORKER_MAX_CHARS)) {
+    const { deserializeAccountBlobStream } = await import('./accountBlobStream');
+    let index = 0;
+    return deserializeAccountBlobStream(new ReadableStream<string>({
+      pull(controller) { if (index < pieces.length) controller.enqueue(pieces[index++]); else controller.close(); },
+    }).pipeThrough(new TextEncoderStream()));
+  }
+  const text = typeof input === 'string' ? input : input.join('');
+  if (enc === 'gzip') {
+    const { deserializeAccountBlobStream } = await import('./accountBlobStream');
+    const compressed = fromBase64(text);
+    const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(compressed); controller.close(); } });
+    return deserializeAccountBlobStream(stream.pipeThrough(new DecompressionStream('gzip')));
+  }
   if (typeof Worker === 'function' && text.length > 1_000_000 && text.length <= DECODE_IN_WORKER_MAX_CHARS) {
     return new Promise((resolve,reject) => {
       const worker = new Worker(new URL('./workers/accountBlobDecoder.worker.ts', import.meta.url), {type:'module'});
@@ -196,7 +206,7 @@ async function fetchValue(name: string, owner: string, head: Head): Promise<{ ok
     if (!part || part.rev !== head.rev || typeof part.data !== 'string') return { ok: false };
     parts.push(part.data);
   }
-  return { ok: true, value: await decodeAccountBlob(head.enc, parts.join('')) };
+  return { ok: true, value: await decodeAccountBlob(head.enc, parts) };
 }
 async function upsertRow(owner: string, key: string, value: unknown): Promise<void> {
   const result = await runAccountSyncRequest(() => (table() as any).upsert({ user_id: owner, key, value, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' }), { bytes: JSON.stringify(value).length });
@@ -326,7 +336,7 @@ async function adopt(adapter: AccountBlobAdapter<any>, owner: string, head: Head
     await putRecord(`replaced:${idOf(adapter.name, owner)}`, { replacedAt: Date.now(), value: local });
   }
   await adapter.write(owner, value);
-  const hash = value === undefined ? 'deleted' : fingerprintAccountBlob(serializeAccountBlob(value));
+  const hash = value === undefined ? 'deleted' : (await fingerprintAccountBlobValue(value)).hash;
   await writeMeta(adapter.name, owner, { savedAt: head.savedAt, syncedAt: head.savedAt, rev: head.rev, parts: head.parts, hash });
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('veil-account-blob-adopted', { detail: { name: adapter.name, owner } }));
 }

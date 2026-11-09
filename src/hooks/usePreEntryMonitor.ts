@@ -11,7 +11,7 @@ import { PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
-import { activeStandaloneBuyFilters, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
+import { activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
 export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
@@ -128,11 +128,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
     const base=current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
     commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
-    await execute(round, structuredClone(study));
+    // The screening engine reads its frozen round and records, never the research history.
+    // Do not duplicate hundreds of MB of unrelated results when starting a task.
+    await execute(round, newQualityStudy(study.startedAt));
   }, [execute, commit]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
     const round = current.current.rounds.find(r => r.id === roundId);
-    if (round) await execute(round, structuredClone(study));
+    if (round) await execute(round, newQualityStudy(study.startedAt));
   }, [execute]);
   const restart = useCallback(async (study: FishQualityStudy, hours: number) => {
     const generation = epoch.current, pending = execution.current;

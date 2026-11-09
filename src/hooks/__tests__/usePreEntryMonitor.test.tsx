@@ -110,6 +110,8 @@ describe('买前监测独立任务', () => {
     act(() => { started = result.current.start(input, 12); });
     await waitFor(() => expect(run).toHaveBeenCalledOnce());
     input.buyFilters[0].threshold = 999;
+    expect(task.study.results).toEqual([]);expect(task.study.samples).toEqual([]);
+    expect(task.study).not.toHaveProperty('campaignRuns');
     expect(task.preEntry!.round.filters[0].threshold).toBe(100);
     expect(task.preEntry!.records).toHaveLength(1);
     expect(task.preEntry!.round.engine).toBe(PRE_ENTRY_CONDITIONS_VERSION);

@@ -144,3 +144,16 @@ it('defaults an unlimited draft to 48 hours and blocks creating another unlimite
  fireEvent.click(screen.getByRole('button',{name:'保存并开始三阶筛选'}));
  expect(f.configure.mock.calls[0][1]).toBe(24);expect(f.restart).toHaveBeenCalledWith(24);expect(f.state.preEntry!.library).toEqual(before);
 });
+
+it('defaults all admission alternatives to selected and allows all/individual choices without changing saved plans',()=>{
+ const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);
+ render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));
+ expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 启用')).toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'添加其他准入标准'}));expect(screen.getByLabelText('准入算法 2 启用')).toBeChecked();
+ fireEvent.change(screen.getByLabelText('准入算法 2 指标'),{target:{value:'state:state'}});fireEvent.change(screen.getByLabelText('准入算法 2 方向'),{target:{value:'<='}});fireEvent.change(screen.getByLabelText('准入算法 2 门槛'),{target:{value:'0.4'}});
+ fireEvent.click(screen.getByRole('button',{name:'取消全选'}));expect(screen.getByLabelText('启用原生防守线准入')).not.toBeChecked();expect(screen.getByLabelText('准入算法 1 启用')).not.toBeChecked();expect(screen.getByLabelText('准入算法 2 启用')).not.toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'全选准入标准'}));expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 启用')).toBeChecked();expect(screen.getByLabelText('准入算法 2 启用')).toBeChecked();
+ fireEvent.click(screen.getByLabelText('启用原生防守线准入'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.admission).toMatchObject({guardEnabled:false,algorithms:[{enabled:true,threshold:.8},{enabled:true,direction:'<=',threshold:.4}]});expect(f.state.preEntry!.library).toEqual(before);
+});
