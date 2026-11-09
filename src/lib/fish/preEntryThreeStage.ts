@@ -6,7 +6,7 @@ import { defaultBoxBreak, freezeBoxStop, type BoxStopRule } from './qualityBoxSt
 import { validateStructureAddition } from './qualityAdditionStructure';
 import { qualityAdditionConditions, qualityAdditionPrerequisites, type QualityAdditionRoundRule } from './qualityAddition';
 import { preEntryPositionOnly } from './preEntryConditions';
-import { validateEntryStallTurn, type EntryStallTurn } from './preEntryStallTurn';
+import { validateEntryStallTurnRule, type EntryStallTurnRule } from './preEntryStallTurnRule';
 
 /**
  * 【用户要求】2026-11-08 三阶重排：必要条件提到最前（⓪），原生防守线新事件提前到 ①，加仓共用否决与卖出／硬终止合并为 ② 排除段。
@@ -38,7 +38,7 @@ export interface PreEntryThreeStage {
   /** v7 only: native guard events and enabled algorithms are parallel OR routes. */
   admission?:{guardEnabled:boolean;algorithms:EntryMarketCondition[]};
   longDrawdown?:import('./preEntryLongDrawdown').EntryLongDrawdown;
-  stallTurn?: EntryStallTurn;
+  stallTurn?: EntryStallTurnRule;
   required: EntryMarketCondition[];
   detectors?: {id:string;featureId?:string;stricterPct:number;match:'all'|'any'}[];
   additionSource?: {planId:string;label:string;round:number;versions:QualityGroup['frozenVersions']};
@@ -73,7 +73,7 @@ export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is
   const unique = (id: string) => { if (!id || ids.has(id)) throw Error('三阶条件编号重复'); ids.add(id); };
   if(c.stallTurn){
     if(c.version===PRE_ENTRY_THREE_STAGE_V5)throw Error('旧 v5 保持原样，滞涨转弱须在新方案中启用');
-    validateEntryStallTurn(c.stallTurn);unique('entry-stall-turn-v1');
+    validateEntryStallTurnRule(c.stallTurn);unique(c.stallTurn.version);
   }
   if(c.version===PRE_ENTRY_RETRY_VERSION){
     if(!c.admission||typeof c.admission.guardEnabled!=='boolean'||!Array.isArray(c.admission.algorithms)||!c.admission.guardEnabled&&!c.admission.algorithms.some(f=>f.enabled))throw Error('至少启用一条并列准入算法');

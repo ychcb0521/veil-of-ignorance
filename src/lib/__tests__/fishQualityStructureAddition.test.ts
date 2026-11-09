@@ -40,6 +40,14 @@ describe('native box decisions for holding additions',()=>{
   const wide=await findCalculatorAdditions({...base,load,entryVetoes:[{...original,historyHours:6}]});expect(wide.fills).toEqual([]);expect(wide.vetoed?.[0]).toMatchObject({at:market.fills[0].at,reading:expect.stringContaining('180')});
   const resumed=await findCalculatorAdditions({...base,load,since:o.entry+10*M,prices:o.prices.filter(b=>b.openTime>=o.entry+10*M),entryVetoes:[{...original,historyHours:6}]});expect(resumed.fills).toEqual([]);expect(resumed.vetoed?.[0].reading).toContain('180');
  });
+ it('applies the independently selected shared 5m pullback veto to actual holding additions and resumed candidates',async()=>{
+  const o=context(sample()),base={...o,structure:{...rule(),kSource:'current' as const},maxRounds:1};
+  const load:FishReconstructionLoader=async(...args)=>(await o.load(...args)).map(b=>args[3].step===STEP&&b.openTime===o.entry-2*3600000?{...b,high:180}:b);
+  const market=await findCalculatorAdditions({...base,load});expect(market.fills).toHaveLength(1);
+  const veto={kind:'pullback-new-high' as const,enabled:true,pct:30,historyHours:6};
+  const blocked=await findCalculatorAdditions({...base,load,entryVetoes:[veto]});expect(blocked.fills).toEqual([]);expect(blocked.vetoed?.[0]).toMatchObject({at:market.fills[0].at,kind:'pullback-new-high',reading:expect.stringContaining('180')});
+  const resumed=await findCalculatorAdditions({...base,load,since:o.entry+10*M,prices:o.prices.filter(b=>b.openTime>=o.entry+10*M),entryVetoes:[veto]});expect(resumed.fills).toEqual([]);expect(resumed.vetoed?.[0].kind).toBe('pullback-new-high');
+ });
  it('accepts only selected full confirmations and distinguishes raised support from baseline',()=>{
   const rows=dblRows();expect(rows.flatMap(r=>structureAdditionSignal(rule(),r,T)??[]).map(e=>[e.event,e.supportPrice])).toEqual([['UP_STEP',102]]);
   expect(rows.flatMap(r=>structureAdditionSignal(rule('dbl5','confirm'),r,T)??[]).map(e=>[e.event,e.supportPrice])).toEqual([['BASELINE',100],['UP_STEP',102]]);

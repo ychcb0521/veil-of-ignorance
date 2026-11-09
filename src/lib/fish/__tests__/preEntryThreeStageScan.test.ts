@@ -7,6 +7,7 @@ import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
 import { withTuringInitialization } from '../qualityInitialization';
 import { defaultEntryStallTurn } from '../preEntryStallTurn';
+import { ADDITION_VETO_DEFAULTS } from '../qualityAdditionVeto';
 
 const mocked=vi.hoisted(()=>({events:[] as number[],broken:[] as number[]}));
 vi.mock('../preEntryGuardEvent',async original=>{
@@ -35,6 +36,17 @@ async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:P
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it('uses only closed 5m bars through v7 retries and resume, admitting on the exact recovery close',async()=>{
+ const p=stateOnlyPlan();p.preEntryThreeStage!.additionVetoes=[{...ADDITION_VETO_DEFAULTS['stall-turn'],enabled:true}];
+ const closes=[101,102,103,104,105,106,107,108,109,110,111,112,112,112,112,111,110],price=(i:number)=>i < -17?100:i<0?closes[i+17]:i===0?111:112;
+ const load:FishReconstructionLoader=async(_r,a,b,program)=>Array.from({length:(b-a)/program.step},(_,i)=>{const openTime=a+i*program.step,k=(openTime-T)/(5*M),open=program.step===M?120:price(k-1),close=program.step===M?120:price(k);return {openTime,open,close,high:Math.max(open,close),low:Math.min(open,close),volume:1,takerBuyVolume:.5};});
+ let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);
+ const aborter=new AbortController(),paused=await run(p,{load,aborter,onRecord:r=>{if(r.status==='scanning'&&r.cursor===T+7*M)aborter.abort();}});
+ expect(paused.status).toBe('paused');expect(paused.threeStage?.second.reason).toContain('滞涨转弱·5分钟');
+ const resumed=await run(p,{load,old:paused}),whole=await run(p,{load});expect(resumed.matchedAt).toBe(T+10*M);expect(resumed.matchedAt).toBe(whole.matchedAt);
+ expect(resumed.exclusionProcess!.entries.filter(e=>e.kind!=='paused')).toEqual(whole.exclusionProcess!.entries);
+ expect(JSON.stringify(whole.exclusionProcess)).toContain('滞涨转弱');
+});
 it('retains the stall-turn veto through state-only retries and resume, then admits only after local recovery',async()=>{
  const p=stateOnlyPlan();p.preEntryThreeStage!.stallTurn={...defaultEntryStallTurn(),pullback:undefined,historyHours:1/12,riseMinutes:5,risePct:3,stallMinutes:4,turnMinutes:2};
  const prices=[101,102,103,104,105,105,105,105,105,104,103],price=(k:number)=>k < -12?100:k<=-2?prices[k+12]:k>=3?Math.min(106,104+k-3):103;

@@ -2,7 +2,7 @@ import type { QualityHoldingVeto } from './qualityVeto';
 import { holdingVetoIdentity } from './qualityVeto';
 import { shortFishHash } from './algorithm';
 import type { QualityGroup } from './quality';
-import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION } from './qualityAdditionVeto';
+import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
 
 /**
@@ -45,7 +45,7 @@ export function compatibleAdditionParameterOrder(plan: QualityGroup, key: string
   if (key === 'lower-wick-veto') {
     value = vetoes.filter(v => v.enabled && v.kind === 'lower-wick'); version = LOWER_WICK_VETO_VERSION;
   } else if (key === 'veto-history') {
-    value = vetoes.filter(v => v.enabled && v.historyHours != null); version = VETO_HISTORY_VERSION;
+    value = vetoes.filter(v => v.enabled && v.historyHours != null && !isFiveMinuteShapeVeto(v)); version = VETO_HISTORY_VERSION;
   } else if (key === 'addition-support-quality') {
     value = rounds.map(r => (r.entryVetoes ?? []).filter(v => v.enabled && v.kind === 'double-drop')).filter(r => r.length); version = DOUBLE_DROP_VERSION;
   } else return false;

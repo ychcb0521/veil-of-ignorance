@@ -2,7 +2,8 @@ import { advanceChartAtr, type ChartAtrState } from '../atr';
 import type { ResearchBar } from '../deepRsa/window';
 import type { TradeSignal } from '../signalLibrary';
 import { compileFishProgram } from './algorithm';
-import { evaluateAdditionVetoes, validateAdditionVetoes, type AdditionVetoHit, type QualityAdditionEntryVeto } from './qualityAdditionVeto';
+import { evaluateAdditionVetoes, validateAdditionVetoes, isFiveMinuteShapeVeto, ADDITION_VETO_LABELS, type AdditionVetoHit, type QualityAdditionEntryVeto } from './qualityAdditionVeto';
+import {createEntryStallTurn5mReader,createPullbackNewHigh5mReader,defaultEntryStallTurn5m} from './preEntryStallTurn5m';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { doubleDropState } from './qualityDoubleDrop';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -16,7 +17,22 @@ export interface HistoryVetoResult {hit?:AdditionVetoHit;pending?:string}
  * Each decision scans its rolling history; sticky damage survives retries and
  * window expiry until a CLOSED 5m candle recovers the recorded peak. Resume
  * replays the same fixed seed and the original entry's historical prefix. */
-export function createVetoHistoryReader(o:{rules:readonly QualityAdditionEntryVeto[];entry:number;row:TradeSignal;load:FishReconstructionLoader;signal:AbortSignal}){
+type VetoHistoryOptions={rules:readonly QualityAdditionEntryVeto[];entry:number;row:TradeSignal;load:FishReconstructionLoader;signal:AbortSignal};
+export function createVetoHistoryReader(o:VetoHistoryOptions){
+ const shapes=o.rules.filter(v=>v.enabled&&isFiveMinuteShapeVeto(v));
+ if(!shapes.length)return createLegacyVetoHistoryReader(o);
+ validateAdditionVetoes(shapes);
+ const original=createLegacyVetoHistoryReader({...o,rules:o.rules.filter(v=>!isFiveMinuteShapeVeto(v))});
+ const readers=shapes.map(v=>{const common={row:o.row,load:o.load,signal:o.signal,origin:o.entry};return {rule:v,read:v.kind==='stall-turn'?createEntryStallTurn5mReader({...common,condition:{...defaultEntryStallTurn5m(),historyHours:v.historyHours!,riseMinutes:v.riseMinutes!,risePct:v.risePct!,stallMinutes:v.stallMinutes!,maxProgressPct:v.maxProgressPct!,turnMinutes:v.turnMinutes!,pullback:undefined}}):createPullbackNewHigh5mReader({...common,historyHours:v.historyHours!,pct:v.pct!})};});
+ return async(at:number):Promise<HistoryVetoResult>=>{
+  // Advance every independent lock, even while another rule already blocks.
+  const results=[];for(const {rule,read} of readers)results.push({rule,result:await read(at,{openTime:at-M} as ResearchBar)});
+  const old=await original(at);if(old.hit)return old;
+  for(const {rule,result}of results)if(result.blocked)return {hit:{kind:rule.kind,label:ADDITION_VETO_LABELS[rule.kind],reading:result.blocked}};
+  return {pending:old.pending??results.find(r=>r.result.pending)?.result.pending};
+ };
+}
+function createLegacyVetoHistoryReader(o:VetoHistoryOptions){
  const rules=o.rules.filter(v=>v.enabled&&v.historyHours!=null);validateAdditionVetoes(rules);
  if(!rules.length)return async(_at:number):Promise<HistoryVetoResult>=>({});
  const timeSlice=screeningTimeSlice(o.signal);

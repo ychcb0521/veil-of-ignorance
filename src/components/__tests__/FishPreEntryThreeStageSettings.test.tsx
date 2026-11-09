@@ -11,19 +11,30 @@ import { newQualityStudy } from '@/lib/fish/quality';
 import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { emptyPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import type { FishQualityState } from '@/hooks/useFishQuality';
+import {defaultEntryStallTurn} from '@/lib/fish/preEntryStallTurn';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();localStorage.clear();});
-it('offers opt-in stall-turn controls, saves all parameters, and leaves the source plan and running task untouched',()=>{
- const f=setup(),before=structuredClone(f.plan);
- expect(screen.getByLabelText('启用上涨后滞涨转弱否决')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用上涨后滞涨转弱否决'));
- expect(screen.getByLabelText('滞涨转弱 上涨观察（分钟）')).toHaveValue(60);expect(screen.getByLabelText('滞涨转弱 滞涨观察（分钟）')).toHaveValue(10);expect(screen.getByLabelText('滞涨转弱 转弱确认（分钟）')).toHaveValue(3);
- expect(screen.getByLabelText('同时排除猛烈回调未创新高')).toBeChecked();expect(screen.getByLabelText('猛烈回调门槛（%）')).toHaveValue(3);
- fireEvent.change(screen.getByLabelText('猛烈回调门槛（%）'),{target:{value:'4'}});fireEvent.click(screen.getByLabelText('同时排除猛烈回调未创新高'));expect(screen.getByLabelText('猛烈回调门槛（%）')).toBeDisabled();fireEvent.click(screen.getByLabelText('同时排除猛烈回调未创新高'));expect(screen.getByLabelText('猛烈回调门槛（%）')).toHaveValue(4);
- fireEvent.change(screen.getByLabelText('滞涨转弱 前段涨幅至少（%）'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('滞涨转弱 推进速度不超过前段（%）'),{target:{value:'30'}});
- fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.stallTurn).toMatchObject({version:'entry-stall-turn-v1',enabled:true,historyHours:6,riseMinutes:60,risePct:2,stallMinutes:10,maxProgressPct:30,turnMinutes:3,pullback:{enabled:true,pct:4}});expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
+it('offers independent shared 5m vetoes and saves only the selected rule without touching the original',()=>{
+ const f=setup(),before=structuredClone(f.plan),stall='启用入选前否决 滞涨转弱（5分钟）',pullback='启用入选前否决 猛烈回调未创新高（5分钟）';
+ expect(screen.queryByLabelText('启用上涨后滞涨转弱否决')).toBeNull();expect(screen.getByLabelText(stall)).not.toBeChecked();expect(screen.getByLabelText(pullback)).not.toBeChecked();
+ fireEvent.click(screen.getByLabelText(stall));expect(screen.getByLabelText(pullback)).not.toBeChecked();
+ expect(screen.getByLabelText('滞涨转弱（5分钟） 上涨观察根数')).toHaveValue(12);expect(screen.getByLabelText('滞涨转弱（5分钟） 滞涨观察根数')).toHaveValue(3);expect(screen.getByLabelText('滞涨转弱（5分钟） 转弱确认根数')).toHaveValue(2);
+ fireEvent.change(screen.getByLabelText('滞涨转弱（5分钟） 上涨观察根数'),{target:{value:'18'}});fireEvent.change(screen.getByLabelText('滞涨转弱（5分钟） 前段涨幅至少'),{target:{value:'2'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));const saved=f.configure.mock.calls[0][0][0];expect(saved.preEntryThreeStage.stallTurn).toBeUndefined();expect(saved.preEntryThreeStage.additionVetoes).toEqual([{kind:'stall-turn',enabled:true,historyHours:6,riseMinutes:90,risePct:2,stallMinutes:15,maxProgressPct:20,turnMinutes:10}]);expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByLabelText(stall));fireEvent.click(screen.getByLabelText(pullback));fireEvent.change(screen.getByLabelText('猛烈回调未创新高（5分钟） 回调百分比'),{target:{value:'4'}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[1][0][0].preEntryThreeStage.additionVetoes).toEqual([{kind:'pullback-new-high',enabled:true,historyHours:6,pct:4}]);
 });
-it('refuses to save an incomplete enabled stall-turn rule',()=>{
- const f=setup();fireEvent.click(screen.getByLabelText('启用上涨后滞涨转弱否决'));fireEvent.change(screen.getByLabelText('滞涨转弱 转弱确认（分钟）'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('滞涨转弱参数无效');expect(f.configure).not.toHaveBeenCalled();
+it('refuses to save an incomplete enabled shared stall-turn rule',()=>{
+ const f=setup();fireEvent.click(screen.getByLabelText('启用入选前否决 滞涨转弱（5分钟）'));fireEvent.change(screen.getByLabelText('滞涨转弱（5分钟） 转弱确认根数'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('滞涨转弱参数无效');expect(f.configure).not.toHaveBeenCalled();
+});
+it('keeps saved v1 exact and converts only an explicit new copy to independently enabled shared 5m rules',()=>{
+ const f=singleFixture();f.current.preEntryThreeStage!.stallTurn={...defaultEntryStallTurn(),risePct:2,pullback:{enabled:true,pct:4}};
+ const original=freezeQualityPlan(f.current);f.state.preEntry!.library.settings!.plans=[original];const before=structuredClone(f.state.preEntry!.library);
+ render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ expect(screen.getByLabelText('滞涨转弱 转弱确认（分钟）')).toHaveValue(3);
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0]).toEqual([original]);expect(f.state.preEntry!.library).toEqual(before);
+ fireEvent.click(screen.getByRole('button',{name:'使用共用5分钟规则（另存副本）'}));expect(screen.queryByLabelText('滞涨转弱 转弱确认（分钟）')).toBeNull();expect(screen.getByLabelText('启用入选前否决 滞涨转弱（5分钟）')).toBeChecked();expect(screen.getByLabelText('启用入选前否决 猛烈回调未创新高（5分钟）')).toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));const saved=f.configure.mock.calls[1][0];expect(saved).toHaveLength(1);expect(saved[0].id).not.toBe(original.id);expect(saved[0].preEntryThreeStage.stallTurn).toBeUndefined();
+ expect(saved[0].preEntryThreeStage.additionVetoes).toEqual([{kind:'stall-turn',enabled:true,historyHours:6,riseMinutes:60,stallMinutes:15,turnMinutes:10,risePct:2,maxProgressPct:20},{kind:'pullback-new-high',enabled:true,historyHours:6,pct:4}]);expect(f.state.preEntry!.library).toEqual(before);expect(f.state.preEntry!.restart).not.toHaveBeenCalled();
 });
 function setup(){
   const plan=makeQualitySellPlan(qualityFilterChoices(BUILTIN_FEATURES)[0].key,'>',0,BUILTIN_FEATURES,undefined,'old');

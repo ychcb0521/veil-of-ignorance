@@ -1,6 +1,6 @@
 import {recordEntryEvidence,recordEntryStop,recordEntryRestart} from './preEntryExclusionProcess';
 import {createEntryLongDrawdownReader} from './preEntryLongDrawdown';
-import {createEntryStallTurnReader} from './preEntryStallTurn';
+import {createVersionedEntryStallTurnReader} from './preEntryStallTurnRule';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -117,7 +117,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const confirmations=new Map<string,{count:number;lastAt?:number}>();
       const longDrawdown=retry&&config.longDrawdown?.enabled?createEntryLongDrawdownReader({condition:config.longDrawdown,row,load,signal,availableStart:start}):undefined;
       // Independent history and recovery lock survive observation retries.
-      const stallTurn=config.stallTurn?.enabled?createEntryStallTurnReader({condition:config.stallTurn,row,load,signal,availableStart:start}):undefined;
+      const stallTurn=config.stallTurn?.enabled?createVersionedEntryStallTurnReader({condition:config.stallTurn,row,load,signal,availableStart:start}):undefined;
       let attempt=1,observationStart=record.startTime;
       const resumeAt=original.cursor;
       let lastPaint=0,matched=false;

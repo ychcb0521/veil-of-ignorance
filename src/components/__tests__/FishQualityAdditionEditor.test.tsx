@@ -18,6 +18,14 @@ it('defaults new addition vetoes to six history hours and independently edits or
  expect(save().rounds[0].entryVetoes[0].historyHours).toBe(12);tab(2);expect(save().rounds[1].entryVetoes??[]).toEqual([]);tab(1);
  fireEvent.change(screen.getByLabelText('冲高回落 扫描范围'),{target:{value:'original'}});expect(save().rounds[0].entryVetoes[0].historyHours).toBeUndefined();
 });
+it('saves the two shared 5m vetoes independently for each addition round and restores their exact parameters',()=>{
+ function NewEditor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>document.querySelector('output')!.textContent=JSON.stringify(parseAdditionDraft(draft,BUILTIN_FEATURES))}>验证保存</button><output/></>;}
+ render(<NewEditor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ const stall='启用加仓否决 滞涨转弱（5分钟）',pullback='启用加仓否决 猛烈回调未创新高（5分钟）';
+ fireEvent.click(screen.getByLabelText(stall));expect(screen.getByLabelText(pullback)).not.toBeChecked();fireEvent.change(screen.getByLabelText('滞涨转弱（5分钟） 上涨观察根数'),{target:{value:'18'}});
+ let saved=save();expect(saved.rounds[0].entryVetoes).toEqual([{kind:'stall-turn',enabled:true,historyHours:6,riseMinutes:90,risePct:1,stallMinutes:15,maxProgressPct:20,turnMinutes:10}]);
+ tab(2);expect(screen.getByLabelText(stall)).not.toBeChecked();fireEvent.click(screen.getByLabelText(pullback));saved=save();expect(saved.rounds[1].entryVetoes).toEqual([{kind:'pullback-new-high',enabled:true,historyHours:6,pct:3}]);expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+});
 it('offers the lower-wick veto in holding settings, saves it per round, and preserves the same parameters on reopen',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  expect(screen.getByLabelText('启用加仓否决 长下影线')).not.toBeChecked();expect(screen.getByLabelText('长下影线 回看根数')).toHaveValue(12);expect(screen.getByLabelText('长下影线 ATR倍数')).toHaveValue(1.5);expect(screen.getByLabelText('长下影线 下影占比')).toHaveValue(60);
