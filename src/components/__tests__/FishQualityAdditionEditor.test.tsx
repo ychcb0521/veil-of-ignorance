@@ -10,6 +10,12 @@ afterEach(cleanup);
 function Editor(){const [draft,setDraft]=useState(()=>additionDraft());return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
+it('offers the lower-wick veto in holding settings, saves it per round, and preserves the same parameters on reopen',()=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.getByLabelText('启用加仓否决 长下影线')).not.toBeChecked();expect(screen.getByLabelText('长下影线 回看根数')).toHaveValue(12);expect(screen.getByLabelText('长下影线 ATR倍数')).toHaveValue(1.5);expect(screen.getByLabelText('长下影线 下影占比')).toHaveValue(60);
+ fireEvent.click(screen.getByLabelText('启用加仓否决 长下影线'));fireEvent.change(screen.getByLabelText('长下影线 回看根数'),{target:{value:'9'}});fireEvent.change(screen.getByLabelText('长下影线 ATR倍数'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('长下影线 下影占比'),{target:{value:'75'}});
+ const saved=save();expect(saved.rounds[0].entryVetoes).toEqual([{kind:'lower-wick',enabled:true,lookbackBars:9,atr:2,ratio:75}]);expect(saved.rounds[1].entryVetoes??[]).toEqual([]);expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+});
 it('offers the opt-in double-drop veto with confirmed defaults, saves per round, and roundtrips percentage-only settings',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  expect(screen.getByLabelText('启用加仓否决 二次急跌未收复')).not.toBeChecked();

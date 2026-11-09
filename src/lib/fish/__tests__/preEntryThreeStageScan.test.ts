@@ -34,6 +34,11 @@ async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:P
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it('state-only admission cannot bypass an enabled lower-wick veto on the last completed 5m candle',async()=>{
+ const p=stateOnlyPlan();p.preEntryThreeStage!.additionVetoes=[{kind:'lower-wick',enabled:true,lookbackBars:1,atr:1,ratio:60}];
+ const base=loader([90]),load:FishReconstructionLoader=async(...args)=>(await base(...args)).map(b=>args[3].step===5*M&&b.openTime===T-5*M?{...b,low:70}:b);
+ expect(await run(p,{load,end:T+M})).toMatchObject({status:'unmatched',threeStage:{first:{status:'pass'},second:{status:'blocked',reason:expect.stringContaining('长下影线')},admission:{met:['状态 S']}}});
+});
 it.each(['necessary','addition-veto','ordinary-seller','indicator-hard-stop','price-hard-stop','long-drawdown'] as const)('state-only admission still enforces %s at the same minute',async kind=>{
  const p=stateOnlyPlan(),c=p.preEntryThreeStage!;
  if(kind==='necessary')c.required=[condition('必要条件',1,'>','raw=C/100')];

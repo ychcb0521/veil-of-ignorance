@@ -21,6 +21,15 @@ function setup(){
   render(<TooltipProvider><FishPreEntrySettings state={state} selectedCount={1} done={done}/></TooltipProvider>);
   return {plan,configure,restart,done,state};
 }
+it('offers an independent lower-wick veto in dynamic screening with symmetric defaults and saves only the opted-in rule',()=>{
+ const f=setup(),before=structuredClone(f.plan);
+ expect(screen.getByLabelText('启用入选前否决 长下影线')).not.toBeChecked();
+ for(const [label,value] of [['回看根数',12],['ATR倍数',1.5],['下影占比',60]] as const)expect(screen.getByLabelText('长下影线 '+label)).toHaveValue(value);
+ fireEvent.click(screen.getByLabelText('启用入选前否决 长下影线'));
+ fireEvent.change(screen.getByLabelText('长下影线 回看根数'),{target:{value:'8'}});fireEvent.change(screen.getByLabelText('长下影线 ATR倍数'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('长下影线 下影占比'),{target:{value:'70'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.additionVetoes).toEqual([{kind:'lower-wick',enabled:true,lookbackBars:8,atr:2,ratio:70}]);expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
+});
 it('shows the three-stage editor directly and groups it in the new ordered modules',()=>{
   const f=setup(),before=structuredClone(f.plan);
   // 旧版编辑器已下线：面板打开就是三阶编辑器，没有「新建三阶方案副本」引导。

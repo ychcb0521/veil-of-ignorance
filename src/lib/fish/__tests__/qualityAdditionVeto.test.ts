@@ -7,6 +7,32 @@ const T = Date.UTC(2026, 3, 1), STEP = 300000;
 const calm = (n: number, start = 100): VetoBar[] => Array.from({ length: n }, (_, i) => ({ openTime: T + i * STEP, open: start + i, high: start + i + 1.2, low: start + i - .2, close: start + i + 1 }));
 const atrOf = (bars: VetoBar[]) => bars.map(() => 1.4);
 const on = (kind: QualityAdditionEntryVeto['kind'], extra: Partial<QualityAdditionEntryVeto> = {}): QualityAdditionEntryVeto[] => [{ kind, enabled: true, ...extra }];
+it('long lower wick mirrors the upper rule for green and red candles and requires both ATR length and range share',()=>{
+ for(const [open,close] of [[104,105],[105,104]]){
+  const lower={openTime:T,open,close,low:101,high:106},upper={...lower,open:210-open,close:210-close,low:104,high:109};
+  const hit=evaluateAdditionVetoes(on('lower-wick'),[lower],[2],T);
+  expect(hit).toMatchObject({kind:'lower-wick',reading:expect.stringContaining('下影 1.5 ATR，占整根 60%')});
+  expect(evaluateAdditionVetoes(on('upper-wick'),[upper],[2],T)).toBeDefined();
+  expect(evaluateAdditionVetoes(on('lower-wick',{atr:1.51}),[lower],[2],T)).toBeUndefined();
+  expect(evaluateAdditionVetoes(on('lower-wick',{ratio:61}),[lower],[2],T)).toBeUndefined();
+ }
+});
+it('long lower wick respects its lookback and enabled flag and remains distinct from a downward price spike',()=>{
+ const bars=calm(15);bars[2]={...bars[2],low:bars[2].open-8};
+ expect(evaluateAdditionVetoes(on('lower-wick',{lookbackBars:13}),bars,atrOf(bars),T)).toMatchObject({kind:'lower-wick'});
+ expect(evaluateAdditionVetoes(on('lower-wick',{lookbackBars:12}),bars,atrOf(bars),T)).toBeUndefined();
+ expect(evaluateAdditionVetoes([{kind:'lower-wick',enabled:false}],bars,atrOf(bars),T)).toBeUndefined();
+ const spike=[{openTime:T,open:100,close:100,high:101,low:99},{openTime:T+STEP,open:100,close:60,high:101,low:59}];
+ expect(evaluateAdditionVetoes(on('lower-spike'),spike,[1,1],T)).toMatchObject({kind:'lower-spike'});
+ expect(evaluateAdditionVetoes(on('lower-wick'),spike,[1,1],T)).toBeUndefined();
+});
+it('versions only an enabled long-lower-wick rule and preserves every original upper-wick identity',()=>{
+ expect(additionVetoIdentity(on('upper-wick'))).toEqual([['upper-wick',12,1.5,60,null,null]]);
+ expect(additionVetoIdentity([{kind:'lower-wick',enabled:false}])).toEqual([]);
+ expect(additionVetoIdentity(on('lower-wick'))).toEqual([['lower-wick','addition-lower-wick-v1',12,1.5,60]]);
+ for(const invalid of [{lookbackBars:0},{lookbackBars:1.5},{atr:NaN},{ratio:101}])expect(()=>validateAdditionVetoes(on('lower-wick',invalid))).toThrow('长下影线');
+ expect(evaluateAdditionVetoes(on('lower-wick'),[{openTime:T,open:100,close:100,high:100,low:100}],[2],T)).toBeUndefined();
+});
 it('vetoes a long upper wick, a downward spike, a pullback from the high and choppy or expanding volatility; stays quiet in a clean climb', () => {
   const clean = calm(80);
   for (const kind of ['upper-wick', 'lower-spike', 'pullback'] as const) expect(evaluateAdditionVetoes(on(kind), clean, atrOf(clean), T)).toBeUndefined();

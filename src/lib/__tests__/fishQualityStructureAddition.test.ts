@@ -324,6 +324,13 @@ describe('native box decisions for holding additions',()=>{
   expect(all.fills).toEqual([]);expect(all.vetoed?.[0]).toMatchObject({at:plain.fills[0].at,round:1,kind:'volatility',label:expect.stringContaining('高震荡')});
   const off=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[{kind:'volatility',enabled:false,ratio:50,er:1}]});expect(off.fills).toHaveLength(1);
  });
+ it('blocks a holding addition with the new lower-wick veto and preserves the original fills when it is disabled',async()=>{
+  const o=context(sample()),plain=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1});expect(plain.fills).toHaveLength(1);
+  const veto={kind:'lower-wick' as const,enabled:true,lookbackBars:12,atr:.01,ratio:.01};
+  const blocked=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[veto]});
+  expect(blocked.fills).toEqual([]);expect(blocked.vetoed?.[0]).toMatchObject({at:plain.fills[0].at,kind:'lower-wick',label:expect.stringContaining('长下影线'),reading:expect.stringContaining('下影')});
+  const off=await findCalculatorAdditions({...o,structure:rule(),maxRounds:1,entryVetoes:[{...veto,enabled:false}]});expect(off.fills).toEqual(plain.fills);
+ });
  it('checks 方向 conditions at the box event itself: unmet conditions skip the event, met ones are recorded with the fill',async()=>{
   const price=(direction:'<'|'>',threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'add-dir-price',name:'价格',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction,threshold,constraints:[]}),scale:1,threshold,direction,metric:'结果',label:'收盘价'});
   const o=context(sample()),structure={...rule(),buffer:.5};
