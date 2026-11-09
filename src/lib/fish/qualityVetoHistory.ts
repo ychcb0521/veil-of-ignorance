@@ -6,7 +6,8 @@ import { evaluateAdditionVetoes, validateAdditionVetoes, type AdditionVetoHit, t
 import { qualityHistoryFrom } from './qualityInitialization';
 import { doubleDropState } from './qualityDoubleDrop';
 import type { FishReconstructionLoader } from './reconstruction';
-import { fishDelay, validateFishBars } from './shared';
+import { validateFishBars } from './shared';
+import { screeningTimeSlice } from './screeningYield';
 
 const M=60000,FIVE=5*M,WARM=87;
 const plan=(interval:'1m'|'5m')=>compileFishProgram({id:'veto-history-'+interval,name:'否决历史扫描',short:'历史',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
@@ -18,6 +19,7 @@ export interface HistoryVetoResult {hit?:AdditionVetoHit;pending?:string}
 export function createVetoHistoryReader(o:{rules:readonly QualityAdditionEntryVeto[];entry:number;row:TradeSignal;load:FishReconstructionLoader;signal:AbortSignal}){
  const rules=o.rules.filter(v=>v.enabled&&v.historyHours!=null);validateAdditionVetoes(rules);
  if(!rules.length)return async(_at:number):Promise<HistoryVetoResult>=>({});
+ const timeSlice=screeningTimeSlice(o.signal);
  const maxHours=Math.max(0,...rules.map(v=>v.historyHours!)),first=Math.floor((o.entry-maxHours*3600000)/FIVE)*FIVE;
  let cursor=qualityHistoryFrom(o.load,first-WARM*FIVE,FIVE),atrState:ChartAtrState|undefined,lastAt=-Infinity;
  const bars:ResearchBar[]=[],atr:number[]=[],minuteBars:ResearchBar[]=[];
@@ -43,11 +45,10 @@ export function createVetoHistoryReader(o:{rules:readonly QualityAdditionEntryVe
   if(at<lastAt)throw Error('否决历史扫描时间不能倒退');lastAt=at;
   if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
   const cut=Math.floor(at/FIVE)*FIVE;
-  let lastYield=performance.now();
   while(slow.length&&cursor<cut){
    const to=Math.min(cut,cursor+500*FIVE),chunk=await o.load(o.row,cursor,to,fivePlan,o.signal);validateFishBars(chunk,to,(to-cursor)/FIVE,FIVE);
    for(const bar of chunk){
-    if(performance.now()-lastYield>=16){await fishDelay(0,o.signal);lastYield=performance.now();}
+    const pause=timeSlice();if(pause)await pause;
     bars.push(bar);atrState=advanceChartAtr(atrState,bar);atr.push(atrState.value);const closed=bar.openTime+FIVE;
     for(const rule of slow){
      if(bar.openTime<o.entry-rule.historyHours!*3600000||!(atrState.value>0))continue;
@@ -67,14 +68,14 @@ export function createVetoHistoryReader(o:{rules:readonly QualityAdditionEntryVe
    const retainFrom=cursor-maxHours*3600000-WARM*FIVE;
    let remove=0;while(remove<bars.length&&bars[remove].openTime<retainFrom)remove++;
    if(remove){bars.splice(0,remove);atr.splice(0,remove);}
-   await fishDelay(0,o.signal);
+   const pause=timeSlice();if(pause)await pause;
   }
   while(fast.length&&minuteCursor<at){
    const to=Math.min(at,minuteCursor+500*M),chunk=await o.load(o.row,minuteCursor,to,minutePlan,o.signal);validateFishBars(chunk,to,(to-minuteCursor)/M,M);
    minuteBars.push(...chunk);minuteCursor=to;
    const retainFrom=minuteCursor-Math.max(...fast.map(v=>v.historyHours!))*3600000;
    let remove=0;while(remove<minuteBars.length&&minuteBars[remove].openTime<retainFrom)remove++;if(remove)minuteBars.splice(0,remove);
-   await fishDelay(0,o.signal);
+   const pause=timeSlice();if(pause)await pause;
   }
   let pending:string|undefined;
   for(const rule of rules){

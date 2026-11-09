@@ -15,7 +15,8 @@ import { emptyPreEntryConditions } from './preEntryConditions';
 import { compileFishProgram } from './algorithm';
 import { minuteTransport } from './qualityIntrabar';
 import { loadQualityScanChunk } from './qualityScanChunk';
-import { fishDelay, FishError } from './shared';
+import { FishError } from './shared';
+import { screeningTimeSlice } from './screeningYield';
 import { formatUTC8 } from '../timeFormat';
 import { completeZeroTradeBar } from './qualityZeroTrade';
 import { isTuringCupSymbol } from '../turingCupSymbol';
@@ -56,7 +57,9 @@ export const entryStageText=(e:EntryStageEvidence)=>e.state==='matched'?'三阶�
 export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishReconstructionLoader,now:number,signal:AbortSignal,onProgress:(p:QualityProgress)=>void,
   bounds?:{start?:(symbol:string)=>Promise<number|undefined>;end?:(symbol:string)=>Promise<number>}) {
   let done=0;
+  const timeSlice=screeningTimeSlice(signal);
   for(const original of task.records){
+    const pause=timeSlice();if(pause)await pause;
     if(signal.aborted)throw new DOMException('已暂停','AbortError');
     if(['matched','unmatched','warming'].includes(original.status)){onProgress({done:++done,total:task.records.length,current:original.sample.source.symbol});continue;}
     let record={...original,exclusionProcess:original.exclusionProcess??{version:1 as const,startedAt:original.cursor,...(original.cursor>original.startTime?{partialBefore:original.cursor}:{}),entries:[]}};
@@ -114,7 +117,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const longDrawdown=retry&&config.longDrawdown?.enabled?createEntryLongDrawdownReader({condition:config.longDrawdown,row,load,signal,availableStart:start}):undefined;
       let attempt=1,observationStart=record.startTime;
       const resumeAt=original.cursor;
-      let lastPaint=0,lastYield=performance.now(),matched=false;
+      let lastPaint=0,matched=false;
       const price=compileFishProgram({id:'three-stage-minutes',name:'筛选分钟',short:'分钟',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'1m'},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
       const transport=minuteTransport(price);
       transport.usesTaker=readers.some(r=>r.plan.usesTaker);
@@ -134,7 +137,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         for(const minute of chunk.bars){
           // Resume replays used to bypass the paint/yield branch below. Yield
           // independently of publishing, including warmup and already-saved time.
-          if(performance.now()-lastYield>=16){await fishDelay(0,signal);lastYield=performance.now();}
+          const pause=timeSlice();if(pause)await pause;
           if(signal.aborted)throw new DOMException('已暂停','AbortError');
           const at=minute.openTime+M;
           if(retry)await Promise.all(readers.map(r=>r.prepare?.(at)));
@@ -196,10 +199,10 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           if(evidence.state==='matched'){
             publish({status:'matched',matchedAt:at,detail:entryStageText(evidence)});matched=true;break;
           }
-          if(performance.now()-lastPaint>=150){lastPaint=performance.now();publish({detail:entryStageText(evidence)+' · '+formatUTC8(at)});onProgress({done,total:task.records.length,current:row.symbol});await fishDelay(0,signal);}
+          if(performance.now()-lastPaint>=150){lastPaint=performance.now();publish({detail:entryStageText(evidence)+' · '+formatUTC8(at)});onProgress({done,total:task.records.length,current:row.symbol});}
         }
         if(matched)break;
-        cursor=chunk.cut;readers.forEach(r=>r.trim());await fishDelay(0,signal);
+        cursor=chunk.cut;readers.forEach(r=>r.trim());const pause=timeSlice();if(pause)await pause;
       }
       if(!matched)publish({status:'unmatched',cursor:end,detail:record.threeStage?entryStageText(record.threeStage)+'；本轮未出现三阶同刻通过':'本轮无可判断时点'});
     }catch(error){
