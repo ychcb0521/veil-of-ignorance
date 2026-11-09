@@ -818,7 +818,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };
   }
 }
-export interface QualityProgress { done: number; total: number; current: string }
+export interface QualityProgress { done: number; total: number; current: string; waitingUntil?: number }
 /** 持仓监测同时计算的行数：取数是瓶颈（逐个等交易所返回），并行能把等待叠起来；请求总量仍由限频预算控制。 */
 export const QUALITY_CONCURRENCY = 4, QUALITY_CONCURRENCY_MAX = 8;
 export interface QualityRunTiming { sampleId: string; groupId: string; symbol: string; ms: number }

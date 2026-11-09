@@ -6,6 +6,7 @@ import {collectFishSuggestion,type FishSuggestionOptions,type FishSampleRow} fro
 import {collectSignalTurnover,TURNOVER_BARS,TURNOVER_STEP,type SignalTurnoverOptions} from '@/lib/signalTurnover';
 import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
+import {createQualityMarketRetry} from '@/lib/fish/qualityMarketRetry';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -197,19 +198,31 @@ export class FishScanner {
     const rows = options.task === 'pre-entry' ? options.preEntry?.records.map(r => r.sample) ?? []
       : options.task === 'entry' ? options.entryTargets ?? []
       : options.task === 'post-exit' ? options.postExitTargets ?? [] : qualityRunSamples(options.study);
-    const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal);
-    await collectFishQuality(marketEnd ? { ...options, marketEnd, marketStart } : options, load, now);
+    let progress = {done:0,total:rows.length,current:''}, waitingUntil:number|undefined;
+    const publish = () => options.onProgress({...progress,...(waitingUntil?{waitingUntil}:{})});
+    const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal, until=>{waitingUntil=until;publish();});
+    const activeOptions={...options,onProgress:(next:typeof progress)=>{progress=next;publish();}};
+    await collectFishQuality(marketEnd ? { ...activeOptions, marketEnd, marketStart } : activeOptions, load, now);
   }
 
-  private async qualityMarket(symbols: readonly string[], signal: AbortSignal) {
+  private async qualityMarket(symbols: readonly string[], signal: AbortSignal, onWaiting?: (until?:number)=>void) {
+    const retry=createQualityMarketRetry(signal,onWaiting);
+    const adapters=new Map(this.adapters);
+    const binance=adapters.get('binance');
+    if(binance)adapters.set('binance',{
+      exchange:'binance',btc:()=>binance.btc(),
+      list:s=>retry(()=>binance.list(s)),
+      candles:(...args)=>retry(()=>binance.candles(...args)),
+      taker:(...args)=>retry(()=>binance.taker(...args)),
+    });
     const hasOffline = symbols.some(isTuringCupSymbol);
     const onlineClock = async () => {
-      const response = await this.requests.get('binance')!('time', 1, signal) as { serverTime?: number };
+      const response = await retry(()=>this.requests.get('binance')!('time', 1, signal)) as { serverTime?: number };
       if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效', 'failed');
       return response.serverTime!;
     };
     const now = hasOffline ? Date.now() : await onlineClock();
-    const load = createFishReconstructionLoader(this.adapters, hasOffline ? onlineClock : async () => now);
+    const load = createFishReconstructionLoader(adapters, hasOffline ? onlineClock : async () => now);
     if (!hasOffline) return { now, load };
     const ends = new Map<string, Promise<number>>();
     async function marketEnd(symbol: string) {

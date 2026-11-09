@@ -19,10 +19,10 @@ export function FishPreEntryProgress({monitor,open:controlledOpen,onOpenChange}:
   const count=(status:string)=>records.filter(r=>r.status===status).length;
   const scanning=records.find(r=>r.status==='scanning');
   const current=monitor.running?(monitor.progress?.current||scanning?.sample.source.symbol||'准备筛选…'):'';
-  const label=!monitor.ready?'正在读取筛选库…':monitor.running?'筛选中':round?.state==='paused'?'已暂停':round?.state==='complete'?'已完成':round?'待继续':'尚未开始';
+  const label=!monitor.ready?'正在读取筛选库…':monitor.running?(monitor.progress?.waitingUntil?'行情限流 · 等待自动续跑':'筛选中'):round?.state==='paused'?'已暂停':round?.state==='complete'?'已完成':round?'待继续':'尚未开始';
   return <>
     {monitor.running&&<div className="ml-1 inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-[10px] text-muted-foreground" data-testid="pre-entry-progress">
-      <span role="status"><button type="button" className="inline-flex items-center gap-2 hover:text-foreground" aria-label={monitor.error?'查看筛选错误':'查看本轮筛选结果'} title="点击查看本轮筛选结果" onClick={()=>setOpen(true)}>
+      <span role="status"><button type="button" className="inline-flex items-center gap-2 hover:text-foreground" aria-label={monitor.error?'查看筛选错误':'查看本轮筛选结果'} title={monitor.progress?.waitingUntil?'等待至 '+formatUTC8(monitor.progress.waitingUntil)+'（UTC+8）后自动继续':'点击查看本轮筛选结果'} onClick={()=>setOpen(true)}>
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${monitor.error?'bg-destructive':monitor.running?'animate-pulse bg-primary':'bg-muted-foreground/40'}`} aria-hidden/>
         <span>{monitor.error?'筛选异常':label}</span>{round&&<span className="font-mono tabular-nums">{done} / {total}{monitor.running&&percent>0&&<span> · {percent.toFixed(percent<1?2:1)}%</span>}</span>}
       </button></span>

@@ -748,6 +748,20 @@ it('keeps filtering and monitoring in workflow order with controls on the left',
   expect(group.parentElement).not.toHaveClass('justify-between');
 });
 
+it('shows a holding market cooldown as automatic waiting while preserving progress and pause controls',()=>{
+ const s=state();s.running=true;s.progress={done:33,total:89,current:'RETRYUSDT',waitingUntil:T+180000};
+ render(<FishQuality state={s}/>);const group=screen.getByRole('region',{name:'持仓监测模块'});
+ expect(within(group).getByRole('status')).toHaveTextContent('行情限流 · 等待自动续跑');expect(within(group).getByRole('status')).toHaveTextContent('33 / 89');expect(within(group).getByRole('status')).toHaveTextContent('UTC+8');
+ fireEvent.click(within(group).getByRole('button',{name:'暂停监测'}));expect(s.cancel).toHaveBeenCalledOnce();
+});
+
+it('keeps a historical 429 result recoverable without a red permanent-error dump or changing its saved reason',()=>{
+ const s=state(),row=qualityRunSamples(s.study)[0],plan=s.study.sellPlans![0];
+ const saved={key:qualityResultKey(row,plan,s.study.observeHours),sampleId:row.id,groupId:plan.id,status:'error' as const,evaluatedAt:T,reason:'币安 · klines?symbol=AAAUSDT · 币安 HTTP 429：行情限频'};
+ s.study.results=[saved];render(<FishQuality state={s}/>);
+ expect(screen.getAllByTestId('quality-monitor-rate-wait')[0]).toHaveTextContent('行情限流 · 待续跑');expect(screen.queryByTestId('quality-monitor-error')).toBeNull();expect(s.study.results[0]).toEqual(saved);
+});
+
 it('starts and pauses filtering and monitoring independently while bulk mining is running', async () => {
   const { newMiningState } = await import('@/lib/fish/mining');
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
