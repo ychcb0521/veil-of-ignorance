@@ -4,7 +4,7 @@ import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
-import { LOWER_WICK_VETO_VERSION } from './qualityAdditionVeto';
+import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION } from './qualityAdditionVeto';
 import { compatibleHoldingParameterOrder } from './qualityPlanParameterCompatibility';
 import { freezePreEntryThreeStage, threeStageFingerprint } from './preEntryThreeStage';
 /**
@@ -63,6 +63,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [...initialization];
+  const historicalVetoes=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.historyHours!=null);
+  if(historicalVetoes.length)out.push({key:'veto-history',part:'一票否决',name:'独立历史扫描范围',version:VETO_HISTORY_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(historicalVetoes)),summary:'按每次判断时点向前回看，包含入选和持仓之前的行情；影线与插针扫描整个历史窗口，高震荡检查窗口内观测，急跌检查窗口内分钟线；未收复高点锁定不因重筛或窗口滑动清除。旧范围另行保留。'});
   const lowerWicks=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.kind==='lower-wick');
   if(lowerWicks.length)out.push({key:'lower-wick-veto',part:'一票否决',name:'长下影线',version:LOWER_WICK_VETO_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(lowerWicks)),summary:'只读已收盘 5 分钟 K 线；下影＝min(开盘,收盘)−最低价，长度达到 ATR 倍数且占整根振幅达到比例时否决，与长上影线对称。'});
   if (plan.preEntryThreeStage) out.push({key:'pre-entry-three-stage',part:'动态筛选',name:'三阶同刻准入',version:plan.preEntryThreeStage.version+' · 参数 #'+threeStageFingerprint(plan.preEntryThreeStage),summary:plan.preEntryThreeStage.observationBasis==='retry-origin-v2'?'多条准入算法取或，必要条件和排除门槛仍须同刻通过；否决后从下一分钟重建观察起点；原门槛和总截止时间不变；指标保留预热，原生防守线不重启、旧事件不延期兑现。':'加仓共用资格、完整卖出排除及原生防守线更新同刻判断；观察起点固定，旧事件不延期兑现。'});

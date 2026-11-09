@@ -6,11 +6,14 @@
 import { DOUBLE_DROP_VERSION, doubleDropState } from './qualityDoubleDrop';
 /** 2026-11-09：长下影线独立版本；与长上影线对称，原有规则及身份不变。 */
 export const LOWER_WICK_VETO_VERSION = 'addition-lower-wick-v1' as const;
+export const VETO_HISTORY_VERSION = 'addition-veto-history-v1' as const;
 export type AdditionEntryVetoKind = 'upper-wick' | 'lower-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop' | 'double-drop';
 /** 持仓期间急跌：任意 minutes 分钟内跌幅 ≥ pct%（与硬性终止「N 分钟内跌幅」同口径：窗口首根开盘 → 末根收盘）。 */
 export interface FastDropWindow { minutes: number; pct: number }
 export interface QualityAdditionEntryVeto {
   kind: AdditionEntryVetoKind; enabled: boolean;
+  /** Opt-in rolling history before each decision; independent of entry/retry origin. */
+  historyHours?: number;
   /** 回看根数（5 分钟）：长上影线 / 长下影线 / 下插针。 */
   lookbackBars?: number;
   /** ATR 倍数：上影 / 下影长度、冲高回落幅度。 */
@@ -45,7 +48,8 @@ export const ADDITION_VETO_KINDS = Object.keys(ADDITION_VETO_DEFAULTS) as Additi
 export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-wick': '长下影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌', 'double-drop':'二次急跌未收复' };
 export const activeAdditionVetoes = (vetoes?: readonly QualityAdditionEntryVeto[]) => (vetoes ?? []).filter(v => v.enabled);
 export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
-  return baseVetoLabel(v) + ((v.kind === 'pullback' || v.kind === 'pullback-atr') && v.sticky ? '，未收复最高点前不再加仓' : '');
+  const label=v.historyHours!=null?baseVetoLabel({...v,lookbackBars:Math.ceil(v.historyHours*12)}).replace(/持仓/g,'历史窗口'):baseVetoLabel(v);
+  return label + ((v.kind === 'pullback' || v.kind === 'pullback-atr') && v.sticky ? '，未收复最高点前不再加仓' : '') + (v.historyHours!=null?` · 历史回看 ${v.historyHours} 小时`:'');
 }
 function baseVetoLabel(v: QualityAdditionEntryVeto): string {
   const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v };
@@ -68,6 +72,7 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
   for (const v of activeAdditionVetoes(vetoes)) {
     if (!ADDITION_VETO_KINDS.includes(v.kind)) throw new Error('加仓否决条件类型无效');
     const d = { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }, bad = (x: number | undefined, lo: number, hi: number) => x == null || !Number.isFinite(x) || x < lo || x > hi;
+    if(v.historyHours!=null&&(!Number.isFinite(v.historyHours)||v.historyHours<1/12||v.historyHours>720))throw Error('否决历史回看须为 5 分钟至 720 小时');
     if(v.kind==='double-drop'){
       if(v.atr==null&&v.pct==null)throw Error('二次急跌：请填写 ATR 倍数或回落百分比');
       if(v.atr!=null&&(bad(v.atr,0,50)||v.atr===0))throw Error('二次急跌：ATR 倍数须大于 0 且不超过 50');
@@ -92,7 +97,7 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
     if (v.kind === 'volatility' && (bad(d.ratio, 0, 50) || bad(d.er, 0, 1))) throw new Error('高震荡：ATR 倍数须为 0–50，效率比须为 0–1');
   }
 }
-export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { if(v.kind==='lower-wick'){const d={...ADDITION_VETO_DEFAULTS['lower-wick'],...v};return [v.kind,LOWER_WICK_VETO_VERSION,d.lookbackBars,d.atr,d.ratio];} if(v.kind==='double-drop')return [v.kind,DOUBLE_DROP_VERSION,v.atr??null,v.pct??null,v.join??'and']; const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { if(v.historyHours!=null){const {historyHours,...original}=v;return [VETO_HISTORY_VERSION,historyHours,additionVetoIdentity([original])[0]];} if(v.kind==='lower-wick'){const d={...ADDITION_VETO_DEFAULTS['lower-wick'],...v};return [v.kind,LOWER_WICK_VETO_VERSION,d.lookbackBars,d.atr,d.ratio];} if(v.kind==='double-drop')return [v.kind,DOUBLE_DROP_VERSION,v.atr??null,v.pct??null,v.join??'and']; const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
 export interface VetoBar { openTime: number; open: number; high: number; low: number; close: number }
 export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string;

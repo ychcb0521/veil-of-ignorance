@@ -34,6 +34,12 @@ async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:P
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it('state-only screening rejects pre-start damage through repeated retries and deterministic resume only in the selected history scope',async()=>{
+ const p=stateOnlyPlan();p.preEntryThreeStage!.additionVetoes=[{kind:'pullback',enabled:true,pct:10,sticky:true,historyHours:6}];
+ const base=loader([100]),load:FishReconstructionLoader=async(...args)=>(await base(...args)).map(b=>args[3].step===5*M&&b.openTime===T-2*60*M?{...b,high:150}:b);
+ const result=await run(p,{load});expect(result.status).toBe('unmatched');expect(result.threeStage?.second.reason).toContain('150');expect(result.threeStage?.attempt!.index).toBeGreaterThan(1);
+ const old=structuredClone(p);delete old.preEntryThreeStage!.additionVetoes[0].historyHours;expect((await run(old,{load})).status).toBe('matched');
+});
 it('state-only admission cannot bypass an enabled lower-wick veto on the last completed 5m candle',async()=>{
  const p=stateOnlyPlan();p.preEntryThreeStage!.additionVetoes=[{kind:'lower-wick',enabled:true,lookbackBars:1,atr:1,ratio:60}];
  const base=loader([90]),load:FishReconstructionLoader=async(...args)=>(await base(...args)).map(b=>args[3].step===5*M&&b.openTime===T-5*M?{...b,low:70}:b);

@@ -1,3 +1,4 @@
+import { createVetoHistoryReader } from './qualityVetoHistory';
 import type { ResearchBar } from '../deepRsa/window';
 import type { TradeSignal } from '../signalLibrary';
 import { advanceChartAtr, type ChartAtrState } from '../atr';
@@ -13,7 +14,7 @@ import { preEntryConditionText, preEntryVetoes, type PreEntryConditions } from '
 const M = 60000, FIVE = 5 * M;
 const pricePlan = (interval: '1m' | '5m') => compileFishProgram({id:'pre-entry-price',name:'筛选价格',short:'价格',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval}, {statistic:'结果',direction:'>',threshold:0,constraints:[]});
 export const preEntryGuardWarmBars = (conditions?: PreEntryConditions) => {
-  const guards = activeAdditionVetoes(conditions?.entryVetoes).filter(v=>v.kind!=='fast-drop');
+  const guards = activeAdditionVetoes(conditions?.entryVetoes).filter(v=>v.kind!=='fast-drop'&&v.historyHours==null);
   return guards.length ? Math.max(87, ...guards.map(v=>v.lookbackBars??0)) : 0;
 };
 
@@ -21,7 +22,8 @@ export const preEntryGuardWarmBars = (conditions?: PreEntryConditions) => {
  * No position, quantity, fill, profit or account data is invented. */
 export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal }) {
   let entry = Math.ceil(o.start / M) * M;
-  const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes);
+  const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes).filter(v=>v.historyHours==null);
+  const history=createVetoHistoryReader({rules:o.conditions.entryVetoes,entry:o.start,row:o.row,load:o.load,signal:o.signal});
   const priceVetoes = vetoes.filter(v=>v.kind!=='indicator'&&v.kind!=='box-stop');
   const boxes = vetoes.filter(v=>v.kind==='box-stop');
   const boxReader = createBoxStopReader({vetoes:boxes,row:o.row,entry,since:entry,load:o.load,signal:o.signal});
@@ -61,7 +63,8 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
       validateFishBars(prefix,to,(to-cursor)/M,M);
       for (const bar of prefix) await consume(bar);
     }
-    let blocked = boxHit;
+    const historical=await history(at);
+    let blocked = boxHit??(historical.hit?`${historical.hit.label}：${historical.hit.reading}`:undefined);
     for (const veto of priceVetoes) {
       const n=minuteDropWindow(veto.kind);
       const reading=n?minuteDropReading(minutes,n,entry,at)?.reading:path?holdingVetoReading(path,veto.kind as 'static-drawdown'|'dynamic-drawdown'):undefined;
@@ -101,7 +104,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
     }
     const states=boxReader.states();
     if (boxes.some(v=>!isBoxBreak(v.boxStop!)&&states[v.id]?.line==null)) return {blocked,pending:'等待有效箱体 K 基准，尚不入选'};
-    return {blocked};
+    return {blocked,...(historical.pending?{pending:historical.pending}:{})};
   };
   // v7 only: reuse causal indicator/ATR warmup, never reload the same market
   // history for every rejection. All attempt-dependent paths and locks reset.

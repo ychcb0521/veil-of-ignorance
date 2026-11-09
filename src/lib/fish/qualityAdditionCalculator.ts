@@ -1,3 +1,4 @@
+import { createVetoHistoryReader } from './qualityVetoHistory';
 import { qualityHistoryFrom } from './qualityInitialization';
 import {advanceChartAtr,type ChartAtrState} from '@/lib/atr';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
@@ -64,6 +65,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
+ const historyReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createVetoHistoryReader>>();
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
  // 续算时从上一段最后一条锁住记录恢复（收复判断仍按之后的 5 分钟收盘）
  let pullbackLock:{peak:number;at:number}|undefined=(()=>{const r=[...(o.previousVetoes??[])].reverse().find(v=>v.lockPeak!=null&&v.lockAt!=null);return r?{peak:r.lockPeak!,at:r.lockAt!}:undefined;})();
@@ -246,9 +248,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   }
   if(round.entryVetoes?.some(v=>v.enabled)){
    await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
-   const minutes=additionVetoesNeedMinutes(round.entryVetoes)?await minutesUntil(hit.at):undefined;
-   const veto=evaluateAdditionVetoes(round.entryVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
+   const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
+   const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
    if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:fills.length+1,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
+   if(round.entryVetoes.some(v=>v.enabled&&v.historyHours!=null)){
+    let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes,entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
+    const result=await history(hit.at);if(result.hit||result.pending){vetoed.push({at:hit.at,round:fills.length+1,...(result.hit??{kind:'history-pending',label:'历史扫描等待',reading:result.pending!})});after=hit.at;continue;}
+   }
   }
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');

@@ -13,6 +13,12 @@ const plan = { id: 'p1', label: '组合算法1', metric: 'state', snapshot: snap
   vetoStages: [{ afterAdditions: 2, conditions: [{ id: 'c', label: '1分钟内跌幅', kind: 'drop-1m', direction: '>=', threshold: 5, enabled: true }] }], vetoStageMode: 'overlay' } as unknown as QualityGroup;
 
 describe('plan version manifest', () => {
+  it('freezes independent history scope without rewriting the old template manifest',()=>{
+    const saved=freezeQualityPlan(plan),before=structuredClone(saved),wide=freezeQualityPlan({...saved,addition:{...saved.addition!,entryVetoes:[{kind:'pullback',enabled:true,pct:10,historyHours:6}]}});
+    expect(wide.frozenVersions!.find(v=>v.key==='veto-history')?.version).toContain('addition-veto-history-v1');expect(planVersionChanges(wide)).toEqual([]);
+    const changed=structuredClone(wide);changed.addition!.entryVetoes![0].historyHours=12;expect(planVersionChanges(changed).some(c=>c.key==='veto-history')).toBe(true);
+    expect(planVersionChanges(saved)).toEqual([]);expect(saved).toEqual(before);
+  });
   it('versions the lower-wick algorithm only when enabled, preserves old manifests and rejects changed lower-wick parameters',()=>{
     const saved=freezeQualityPlan(plan),before=structuredClone(saved),withOff={...saved,addition:{...saved.addition!,entryVetoes:[{kind:'lower-wick' as const,enabled:false}]}};
     expect(qualityPlanVersions(withOff)).toEqual(saved.frozenVersions);expect(planVersionChanges(saved)).toEqual([]);

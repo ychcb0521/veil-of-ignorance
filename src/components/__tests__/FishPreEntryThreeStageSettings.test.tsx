@@ -24,11 +24,18 @@ function setup(){
 it('offers an independent lower-wick veto in dynamic screening with symmetric defaults and saves only the opted-in rule',()=>{
  const f=setup(),before=structuredClone(f.plan);
  expect(screen.getByLabelText('启用入选前否决 长下影线')).not.toBeChecked();
- for(const [label,value] of [['回看根数',12],['ATR倍数',1.5],['下影占比',60]] as const)expect(screen.getByLabelText('长下影线 '+label)).toHaveValue(value);
+ expect(screen.getByLabelText('长下影线 历史回看小时')).toHaveValue(6);
  fireEvent.click(screen.getByLabelText('启用入选前否决 长下影线'));
+ fireEvent.change(screen.getByLabelText('长下影线 扫描范围'),{target:{value:'original'}});
+ for(const [label,value] of [['回看根数',12],['ATR倍数',1.5],['下影占比',60]] as const)expect(screen.getByLabelText('长下影线 '+label)).toHaveValue(value);
  fireEvent.change(screen.getByLabelText('长下影线 回看根数'),{target:{value:'8'}});fireEvent.change(screen.getByLabelText('长下影线 ATR倍数'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('长下影线 下影占比'),{target:{value:'70'}});
  fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
  expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.additionVetoes).toEqual([{kind:'lower-wick',enabled:true,lookbackBars:8,atr:2,ratio:70}]);expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
+});
+it('saves independent history hours in screening without changing the original template or restarting a run',()=>{
+ const f=setup(),before=structuredClone(f.plan);fireEvent.click(screen.getByLabelText('启用入选前否决 冲高回落'));
+ expect(screen.getByLabelText('冲高回落 历史回看小时')).toHaveValue(6);fireEvent.change(screen.getByLabelText('冲高回落 历史回看小时'),{target:{value:'24'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.additionVetoes[0].historyHours).toBe(24);expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
 });
 it('shows the three-stage editor directly and groups it in the new ordered modules',()=>{
   const f=setup(),before=structuredClone(f.plan);
