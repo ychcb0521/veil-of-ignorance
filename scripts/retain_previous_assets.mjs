@@ -31,7 +31,13 @@ const origin = host ? `https://${host}` : '';
 
 async function get(url, timeoutMs = 15_000) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { return await fetch(url, { signal: controller.signal, headers: { 'cache-control': 'no-cache' } }); }
+  try {
+    const response = await fetch(url, { signal: controller.signal, headers: { 'cache-control': 'no-cache' } });
+    // Keep the deadline through body consumption. Headers can arrive while an
+    // old asset's body stalls indefinitely, otherwise blocking the whole release.
+    const body = await response.arrayBuffer();
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  }
   finally { clearTimeout(timer); }
 }
 /** 站点对不存在的路径会回首页 HTML（SPA 回退）；把它当成「没有」。 */
