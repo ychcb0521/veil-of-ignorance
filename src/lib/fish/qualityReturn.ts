@@ -25,10 +25,12 @@ export interface QualityReturnUi {
   sort: string; ascending: boolean;
   tableTop: number;
   tableLeft?: number; rowPx?: number;
+  anchor?: {id:string;fraction:number};
   screeningRunId?: string;
 }
 export interface QualityReturnSnapshot {
   at: number;
+  owner?: string;
   /** 离开时那条浏览记录（react-router 写在 history.state 里的 key）。 */
   entry: string | null;
   ui: QualityReturnUi;
@@ -67,8 +69,8 @@ let pending: QualityReturnSnapshot | null = null;
  * 交易页打开时调用：回到了离开时那条浏览记录、且记录不太旧，就取出（只用一次）并返回 true。
  * 可重复调用（StrictMode 下初始化函数会跑两次）。
  */
-export function armQualityReturn(now = Date.now()): boolean {
-  if (pending) return true;
+export function armQualityReturn(now = Date.now(), owner?: string): boolean {
+  if (pending) { if (owner && pending.owner && pending.owner !== owner) { pending = null; return false; } return true; }
   try {
     const raw = sessionStorage.getItem(QUALITY_RETURN_KEY);
     if (!raw) return false;
@@ -76,6 +78,7 @@ export function armQualityReturn(now = Date.now()): boolean {
     const entry = currentHistoryEntry();
     if (entry == null || snap.entry !== entry) return false;
     sessionStorage.removeItem(QUALITY_RETURN_KEY);
+    if (owner && snap.owner && snap.owner !== owner) return false;
     if (!snap.ui || !Array.isArray(snap.scroll) || !(now - snap.at < MAX_AGE_MS)) return false;
     pending = snap;
     return true;

@@ -70,7 +70,7 @@ import { downloadQualityComparison } from '@/lib/fish/qualityExport';
 import { rangeSelect } from '@/lib/listRangeSelect';
 import { collapseQualityTableRows, qualityTableMinedAt, qualityTableMembers, qualityTableRange, qualityTableSignalKey, type QualityTableRow } from '@/lib/fish/qualityTableRows';
 import { defaultQualityDetectorIds, qualityDetectorChoices, type QualityDetectorChoice } from '@/lib/fish/qualityDetectorSelection';
-import { ancestorScrolls, applyAncestorScrolls, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn, type QualityReturnUi } from '@/lib/fish/qualityReturn';
+import { ancestorScrolls, applyAncestorScrolls, currentHistoryEntry, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn, type QualityReturnUi } from '@/lib/fish/qualityReturn';
 
 const field = 'h-7 min-w-0 rounded-md border border-transparent bg-muted/50 px-2 text-[11px] outline-none hover:bg-muted focus-visible:border-ring/60';
 const button = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
@@ -477,7 +477,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const { study, ready, running, progress } = state;
   // 从交易战役返回：按离开时记下的状态打开（见 lib/fish/qualityReturn）
   const uid=useId(),titleId=archiveView?uid+'-title':'fish-quality-title',contentId=archiveView?uid+'-content':'fish-quality-content';
-  const [back] = useState(() => archiveView?undefined:pendingQualityReturn()), ui = back?.ui;
+  const [back] = useState(() => { const saved=archiveView?undefined:pendingQualityReturn(); if(saved?.owner&&state.account&&saved.owner!==state.account){finishQualityReturn();return undefined;}return saved; }), ui = back?.ui;
   const [manualOpen, setManualOpen] = useState(false);
   const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
   const [directoryChoice,setDirectoryChoice]=useState<QualitySourceDirectory|undefined>(ui?.directory);
@@ -508,10 +508,17 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const lastRound = study.monitorLibrary?.rounds.reduce<NonNullable<FishQualityStudy['monitorLibrary']>['rounds'][number] | undefined>((a, r) => !a || r.startedAt > a.startedAt ? r : a, undefined);
   const lastPause = lastRound?.state === 'paused' && lastRound.error ? { reason: lastRound.error, at: lastRound.finishedAt ?? lastRound.updatedAt } : null;
   /** 点进交易战役前记下界面状态与滚动位置，返回时原样恢复。 */
-  const rememberReturn = () => saveQualityReturn({
-    ui: { open, query, month, algorithms: algorithmChoice, origin,directory:directoryChoice, detectorExpanded, labelExpanded, postExitExpanded, entryExpanded, sort, ascending, screeningRunId, rowPx, tableLeft: tableRef.current?.scrollLeft ?? 0, tableTop: tableRef.current?.scrollTop ?? scrollTop },
-    scroll: ancestorScrolls(rootRef.current),
-  });
+  const rememberReturn = () => {
+    const top=tableRef.current?.scrollTop??scrollTop,index=Math.max(0,Math.min(rows.length-1,Math.floor(top/rowPx))),anchorRow=rows[index];
+    saveQualityReturn({owner:state.account,
+      ui:{open,query,month,algorithms:algorithmChoice,origin,directory:directoryChoice,detectorExpanded,labelExpanded,postExitExpanded,entryExpanded,sort,ascending,screeningRunId,rowPx,tableLeft:tableRef.current?.scrollLeft??0,tableTop:top,...(anchorRow?{anchor:{id:anchorRow.id,fraction:(top%rowPx)/rowPx}}:{})},
+      scroll:ancestorScrolls(rootRef.current),
+    });
+  };
+  const mountedEntry=useRef(currentHistoryEntry()),rememberLatestView=useRef(rememberReturn);rememberLatestView.current=rememberReturn;
+  // Going to a chart closes this panel without changing the route. Save its
+  // latest UI before removal; a campaign Link already saved the old route entry.
+  useLayoutEffect(()=>()=>{if(!archiveView&&currentHistoryEntry()===mountedEntry.current)rememberLatestView.current();},[archiveView]);
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
   const [statistics, setStatistics] = useState<QualityStatisticsRequest | null>(null);
   const allRows = useMemo(() => {
@@ -694,6 +701,7 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const expandDetectors = (expanded: boolean) => { setDetectorExpanded(expanded); selectAnchor.current = null; resetScroll(); };
   // 返回时把表格与外面各层滚回原处：数据是陆续载入的，逐帧重试到位置稳住（最多 8 秒）；用户一动滚轮 / 触屏 / 按键就停手
   const readyRef = useRef(ready); readyRef.current = ready;
+  const restoreRows=useRef(rows),restoreRowPx=useRef(rowPx);restoreRows.current=rows;restoreRowPx.current=rowPx;
   useLayoutEffect(() => {
     if (!back) return;
     let frame = 0, stable = 0, stopped = false;
@@ -704,7 +712,9 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
       if (stopped) return;
       const table = tableRef.current;
       let ok = true;
-      if (table && Math.abs(table.scrollTop - back.ui.tableTop) > 1) { table.scrollTop = back.ui.tableTop; setScrollTop(table.scrollTop); ok = Math.abs(table.scrollTop - back.ui.tableTop) <= 1; }
+      const anchor=back.ui.anchor,index=anchor&&Number.isFinite(anchor.fraction)?restoreRows.current.findIndex(row=>row.id===anchor.id):-1;
+      const targetTop=index>=0?(index+anchor!.fraction)*restoreRowPx.current:back.ui.tableTop;
+      if (table && Math.abs(table.scrollTop - targetTop) > 1) { table.scrollTop = targetTop; setScrollTop(table.scrollTop); ok = Math.abs(table.scrollTop - targetTop) <= 1; }
       if (table && Math.abs(table.scrollLeft - (back.ui.tableLeft ?? 0)) > 1) { table.scrollLeft = back.ui.tableLeft ?? 0; ok = Math.abs(table.scrollLeft - (back.ui.tableLeft ?? 0)) <= 1 && ok; }
       if (!table && (back.ui.tableTop > 0 || (back.ui.tableLeft ?? 0) > 0)) ok = false;
       ok = applyAncestorScrolls(rootRef.current, back.scroll) && ok;

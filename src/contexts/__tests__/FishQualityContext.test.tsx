@@ -1,3 +1,4 @@
+import {useState} from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -94,4 +95,11 @@ it('keeps dynamic screening and its frozen conditions alive while another task r
  act(()=>{screening.onProgress({done:1,total:1,current:''});screening.preEntry!.onRecord({...screening.preEntry!.records[0],status:'matched',matchedAt:T+60000,updatedAt:T+60000});});await flush();expect(screen.getByRole('status')).toHaveTextContent('买前筛选后台运行中 · 1/1');
  fireEvent.click(screen.getByRole('button',{name:'返回'}));await flush();expect(screen.getByText('matched')).toBeInTheDocument();expect(screening.signal.aborted).toBe(false);expect(tasks.filter(t=>t.task==='pre-entry')).toHaveLength(1);
  releases.forEach(resolve=>resolve());await flush();
+});
+
+it('continues dynamic screening while the trading panel is closed for chart operations',async()=>{
+ let task!:QualityRunOptions,finish!:()=>void;const run=vi.fn(async(options:QualityRunOptions)=>{task=options;await new Promise<void>(resolve=>finish=resolve);});
+ function ChartView(){const [panel,setPanel]=useState(true);return panel?<><Controls/><button onClick={()=>setPanel(false)}>查看盘面</button></>:<button onClick={()=>setPanel(true)}>返回组合表</button>;}
+ render(<MemoryRouter><FishQualityProvider owner="a" run={run}><ChartView/></FishQualityProvider></MemoryRouter>);await flush();fireEvent.click(screen.getByRole('button',{name:'开始动态筛选'}));await flush();fireEvent.click(screen.getByRole('button',{name:'查看盘面'}));await flush();expect(task.signal.aborted).toBe(false);
+ act(()=>{task.preEntry!.onRecord({...task.preEntry!.records[0],status:'matched',matchedAt:T+60000,updatedAt:T+60000});task.onProgress({done:1,total:1,current:''});});await flush(500);expect(task.signal.aborted).toBe(false);fireEvent.click(screen.getByRole('button',{name:'返回组合表'}));await flush();expect(screen.getByText('matched')).toBeInTheDocument();expect(run).toHaveBeenCalledOnce();finish();await flush();
 });

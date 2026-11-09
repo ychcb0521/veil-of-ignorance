@@ -106,7 +106,7 @@ export function TimeControl({
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [turing, setTuring] = useState(false);
   // 【用户要求】从鱼质量点进交易战役再返回：自动展开「渔」，鱼质量回到原来的位置（见 lib/fish/qualityReturn）
-  const [fishOpen, setFishOpen] = useState(() => armQualityReturn());
+  const [fishOpen, setFishOpen] = useState(() => armQualityReturn(Date.now(),user?.id));
   // 【用户要求】2026-10-26 打开「渔」时不弹「刚平了一笔 — 要现在做平仓评价吗？」，只记进消息列表
   useEffect(() => fishOpen ? beginCloseReviewQuiet() : undefined, [fishOpen]);
   const fishHostRef = useRef<HTMLDivElement>(null);
@@ -617,7 +617,7 @@ export function TimeControl({
           <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && turing ? 'rotate-180' : ''}`} />
         </button>
 
-        <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); setFishOpen(o => !o); }}
+        <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); setFishOpen(o => !o); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
           <Fish className="w-3 h-3" />渔
           <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{fish.signals.length}</span>

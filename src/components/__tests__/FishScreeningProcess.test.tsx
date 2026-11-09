@@ -20,14 +20,20 @@ it('places one quiet record icon after first-match time and opens the process wi
  expect(screen.getByText('观测读数 · 1 项未满足').closest('details')).toHaveAttribute('open');expect(screen.getByTestId('screening-process-unmet')).toHaveTextContent('状态 = 0.4 · 未满足');expect(screen.getByTestId('screening-process-item')).toHaveAttribute('data-negative','true');expect(results).toEqual(before);
  const sheet=screeningResultsSheet(results);expect(sheet.columns.map(c=>c.header)).toContain('排除过程');expect(sheet.rows[0].join(' ')).toContain('冲高回落锁定');
 });
-it('distinguishes unknown and pending readings from failed conditions and keeps chronological order',()=>{
+it('keeps only the last actual exclusion instead of later waiting noise',()=>{
  const results=result(),process=results[0].record.exclusionProcess!;
  process.entries.push({kind:'observation',stage:'necessary',status:'pending',from:T+180000,through:T+180000,count:1,reason:'等待读数',readings:[{id:'pending',at:T+180000,met:false,value:null,pending:'数据尚未就绪'}]});
  render(<FishScreeningProcessButton results={results}/>);fireEvent.click(screen.getByLabelText('排除过程'));
- expect(screen.getAllByTestId('screening-process-unmet')).toHaveLength(1);const items=screen.getAllByTestId('screening-process-item');expect(items[0]).toHaveTextContent('冲高回落锁定');expect(items[1]).toHaveAttribute('data-negative','false');expect(items[1]).toHaveTextContent('等待读数');
+ expect(screen.getAllByTestId('screening-process-unmet')).toHaveLength(1);const items=screen.getAllByTestId('screening-process-item');expect(items[0]).toHaveTextContent('冲高回落锁定');expect(items).toHaveLength(1);expect(screen.queryByText('等待读数')).toBeNull();
 });
 it('shows only the stored summary for a legacy record instead of inventing a historical process',()=>{
  const results=result();delete results[0].record.exclusionProcess;
  render(<FishScreeningProcessButton results={results}/>);fireEvent.click(screen.getByLabelText('排除过程'));
  expect(screen.getByRole('dialog')).toHaveTextContent('这条历史记录未保存完整排除过程');expect(screen.getByRole('dialog')).toHaveTextContent('最后摘要');expect(screen.queryByTestId('screening-process-item')).not.toBeInTheDocument();
+});
+
+it('shows the latest decision, latest veto readings and latest screening run without changing source history',()=>{
+ const results=result(),old=structuredClone(results[0]);old.round={...old.round,id:'older',startedAt:T-100000};old.record={...old.record,id:'older',exclusionProcess:{version:1,startedAt:T,entries:[{kind:'observation',stage:'exclusion',status:'blocked',from:T,through:T,count:1,reason:'旧轮次噪音'}]}};
+ const process=results[0].record.exclusionProcess!;process.entries.push({kind:'observation',stage:'exclusion',status:'blocked',from:T+180000,through:T+240000,count:2,reason:'此前的初始否决',lastReason:'最后否决：回撤 12% ≥ 10%',readings:[{id:'v',label:'回撤',at:T+180000,value:11,met:true,role:'veto',threshold:10,direction:'>='}],lastReadings:[{id:'v',label:'回撤',at:T+240000,value:12,met:true,role:'veto',threshold:10,direction:'>='}]},{kind:'restart',from:T+300000,through:T+300000,count:1,reason:'旧的重建过程'},{kind:'matched',from:T+360000,through:T+360000,count:1,reason:'最终入选'});const all=[old,...results],before=structuredClone(all);
+ render(<FishScreeningProcessButton results={all}/>);fireEvent.click(screen.getByLabelText('排除过程'));expect(screen.getAllByTestId('screening-process-item')).toHaveLength(1);const dialog=screen.getByTestId('screening-process-dialog');expect(dialog).toHaveTextContent('最后否决：回撤 12% ≥ 10%');expect(dialog).not.toHaveTextContent('此前的初始否决');expect(dialog).not.toHaveTextContent('旧轮次噪音');expect(dialog).not.toHaveTextContent('旧的重建过程');expect(screen.getByTestId('screening-process-unmet')).toHaveTextContent('回撤 = 12');expect(all).toEqual(before);
 });

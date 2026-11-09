@@ -1242,3 +1242,11 @@ it('restores both table axes, measured row height and populated results on campa
  await waitFor(()=>expect(table.scrollLeft).toBe(1400));expect(table.scrollTop).toBe(660);
  expect(screen.getAllByTestId('quality-fish-row')[0].style.height).toBe('66px');expect(s.study.results).toHaveLength(1);expect(s.setScope).toHaveBeenLastCalledWith(expect.any(Array),expect.objectContaining({workingRoundId:'frozen-screening'}));finishQualityReturn();
 });
+
+it('remembers the table on chart collapse and anchors the same signal when background rows arrive',async()=>{
+ const {armQualityReturn,finishQualityReturn}=await import('@/lib/fish/qualityReturn');finishQualityReturn();sessionStorage.clear();window.history.replaceState({key:'chart-return',idx:1},'');
+ const s=state(),signals=Array.from({length:45},(_,i)=>({id:'anchor-'+i,symbol:'RET'+String(i).padStart(3,'0'),timeMs:T+i*60000,timeLabel:'',fallbackZone:''}));s.study=importQualityLibrary(s.study,signals);let view=render(<FishQuality state={s}/>);
+ fireEvent.change(screen.getByLabelText('筛选鱼质量信号'),{target:{value:'RET'}});fireEvent.click(screen.getByRole('button',{name:'按标的排序'}));const table=screen.getByTestId('quality-fish-table');table.scrollTop=660;table.scrollLeft=1100;fireEvent.scroll(table);view.unmount();
+ s.study=importQualityLibrary(s.study,[{id:'background-new',symbol:'RET000A',timeMs:T,timeLabel:'',fallbackZone:''}]);expect(armQualityReturn()).toBe(true);view=render(<FishQuality state={s}/>);
+ await waitFor(()=>{expect(screen.getByTestId('quality-fish-table').scrollTop).toBe(693);expect(screen.getByTestId('quality-fish-table').scrollLeft).toBe(1100);});expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('RET');expect(screen.getByText('RET020')).toBeInTheDocument();view.unmount();finishQualityReturn();
+});

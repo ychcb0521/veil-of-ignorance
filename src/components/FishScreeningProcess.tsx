@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {ScrollText,OctagonX} from 'lucide-react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from './ui/dialog';
 import {entryProcessStageLabels,entryGuardKindLabels} from '@/lib/fish/preEntryExclusionProcess';
+import {latestScreeningExclusion,latestScreeningProcessResults} from '@/lib/fish/latestScreeningExclusion';
 import type {QualityScreeningResult} from '@/lib/fish/qualityScreeningResults';
 import {formatUTC8} from '@/lib/timeFormat';
 const time=(at?:number)=>at&&Number.isFinite(at)?formatUTC8(at):'—';
@@ -10,22 +11,21 @@ export function FishScreeningProcessButton({results}:{results:readonly QualitySc
   const [open,setOpen]=useState(false);
   if(!results.length)return <span className="text-muted-foreground">—</span>;
   return <><button type="button" aria-label="排除过程" title="查看动态筛选的排除过程" className="-my-1 -ml-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" data-testid="screening-process-open" onClick={()=>setOpen(true)}><ScrollText aria-hidden className="h-3.5 w-3.5"/></button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl flex-col gap-3 overflow-hidden p-0" data-testid="screening-process-dialog"><DialogHeader className="border-b border-border/60 px-5 pb-3 pt-5 text-left"><DialogTitle className="font-mono text-sm">{results[0].record.sample.source.symbol}<span className="ml-2 font-sans text-xs font-normal text-muted-foreground">排除过程</span></DialogTitle><DialogDescription className="text-[11px]">连续相同门槛合并，保留起止时间、首次与末次原因和读数；历史记录按实际保存内容展示。</DialogDescription></DialogHeader>
-      <div className="min-h-0 space-y-5 overflow-y-auto px-5 pb-5 text-[11px] leading-relaxed">{open&&results.map(({record:r,round})=><section key={r.id} className="space-y-3"><p className="font-medium">{round.plans?.find(p=>p.id===r.planId)?.label??'历史筛选方案'}</p><p className="text-muted-foreground">筛选起点 {time(r.startTime)} · 首次满足 {time(r.matchedAt)}</p><p className="text-muted-foreground">本轮时限 {round.hours>0?`${round.hours} 小时`:"当时未设固定时限"} · 扫描到 {time(r.cursor)}</p>
-        {!r.exclusionProcess?<div className="space-y-1 text-muted-foreground"><p>这条历史记录未保存完整排除过程，以下仅列已保存摘要。</p>{r.lastVeto&&<p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 font-semibold text-destructive">{time(r.lastVeto.at)} · 最后否决：{r.lastVeto.reason}</p>}{r.missedGuard&&<p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 font-semibold text-destructive">{time(r.missedGuard.event.at)} · 被否决的新防守线事件共 {r.missedGuard.count} 次；最后原因：{r.missedGuard.reason}</p>}<p>{r.detail??'暂无过程摘要'}</p></div>:<>
-          {r.exclusionProcess.partialBefore&&<p className="text-muted-foreground">{time(r.exclusionProcess.partialBefore)} 之前未保存完整过程，以下从恢复扫描处记录。</p>}
-          {!r.exclusionProcess.entries.length&&<p className="text-muted-foreground">等待本条开始观察。</p>}
-          {r.exclusionProcess.entries.map((e,i)=>{
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl flex-col gap-3 overflow-hidden p-0" data-testid="screening-process-dialog"><DialogHeader className="border-b border-border/60 px-5 pb-3 pt-5 text-left"><DialogTitle className="font-mono text-sm">{results[0].record.sample.source.symbol}<span className="ml-2 font-sans text-xs font-normal text-muted-foreground">排除过程</span></DialogTitle><DialogDescription className="text-[11px]">仅显示最新一轮筛选的最后一次排除原因与判定读数，重点标出触发的否决条件。</DialogDescription></DialogHeader>
+      <div className="min-h-0 space-y-5 overflow-y-auto px-5 pb-5 text-[11px] leading-relaxed">{open&&latestScreeningProcessResults(results).map(({record:r,round})=><section key={r.id} className="space-y-3"><p className="font-medium">{round.plans?.find(p=>p.id===r.planId)?.label??'历史筛选方案'}</p><p className="text-muted-foreground">筛选起点 {time(r.startTime)} · 首次满足 {time(r.matchedAt)}</p><p className="text-muted-foreground">本轮时限 {round.hours>0?`${round.hours} 小时`:"当时未设固定时限"} · 扫描到 {time(r.cursor)}</p>
+        {!r.exclusionProcess?<div className="space-y-1 text-muted-foreground"><p>这条历史记录未保存完整排除过程，以下仅列最后一次已保存摘要。</p>{(()=>{const last=[...(r.lastVeto?[{at:r.lastVeto.at,reason:r.lastVeto.reason}]:[]),...(r.missedGuard?[{at:r.missedGuard.event.at,reason:r.missedGuard.reason}]:[])].reduce<{at:number;reason:string}|undefined>((a,e)=>!a||e.at>=a.at?e:a,undefined);return last?<p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 font-semibold text-destructive">{time(last.at)} · 最后排除：{last.reason}</p>:<p>{r.detail??'暂无排除摘要'}</p>;})()}</div>:<>
+          {!latestScreeningExclusion(r.exclusionProcess).length&&<p className="text-muted-foreground">尚未记录排除原因。</p>}
+          {latestScreeningExclusion(r.exclusionProcess).map((e,i)=>{
             const negative=e.status==='blocked'||e.kind==='guard-rejected'||e.kind==='unmatched';
-            const readingSets=[{label:'首次',rows:e.readings??[]},...(e.lastReadings?[{label:'末次',rows:e.lastReadings}]:[])];
+            const readingSets=[{label:'本次',rows:e.readings??[]}];
             const unmet=readingSets.reduce((sum,set)=>sum+set.rows.filter(r=>!r.pending&&(r.role==='veto'?r.met===true:r.met===false&&r.role!=='admission')).length,0);
             const vetoHits=readingSets.reduce((sum,set)=>sum+set.rows.filter(r=>!r.pending&&r.role==='veto'&&r.met===true).length,0);
             return <article key={i} className={'space-y-2 rounded-md border-l-4 p-3 '+(negative?'border-destructive bg-destructive/5 ring-1 ring-destructive/20':'border-border/60 bg-muted/20')} data-testid="screening-process-item" data-negative={negative}>
               <p className={'flex flex-wrap items-center gap-2 font-semibold '+(negative?'text-destructive':'')}>
                 {negative&&<span className="inline-flex items-center gap-1 rounded bg-destructive px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground"><OctagonX aria-hidden className="h-3 w-3"/>{e.status==='blocked'?'否决':e.kind==='guard-rejected'?'事件未准入':'未入选'}</span>}
-                {e.stage?entryProcessStageLabels[e.stage]+' · ':''}{e.status==='blocked'?'排除':e.status==='pending'?'等待':kinds[e.kind]}
+                {e.stage?(e.stage==='admission'?'① 新事件准入':entryProcessStageLabels[e.stage])+' · ':''}{e.status==='blocked'?'排除':e.status==='pending'?'等待':kinds[e.kind]}
               </p>
-              <p className="font-mono text-[10px] text-muted-foreground">{time(e.from)}{e.through!==e.from?' ～ '+time(e.through):''} · {e.count} 次观测</p>
+              <p className="font-mono text-[10px] text-muted-foreground">判定时间 {time(e.through)}</p>
               <p className={negative?'font-semibold text-destructive':''}>{e.reason}</p>{e.lastReason&&e.lastReason!==e.reason&&<p className={negative?'font-semibold text-destructive':''}>末次原因：{e.lastReason}</p>}
               {e.endedAt&&<p className="text-muted-foreground">{time(e.endedAt)} · {e.nextStatus==='pass'?'该门槛解除':'转为下一项原因'}</p>}{e.event&&<p className="text-muted-foreground">防守线 {e.event.price} · 事件 {entryGuardKindLabels[e.event.kind]} · 确认 {time(e.event.at)}</p>}
               {!!(e.readings?.length||e.lastReadings?.length)&&<details open={unmet>0}><summary className={'cursor-pointer '+(unmet?'font-semibold text-destructive':'text-muted-foreground')}>观测读数{vetoHits>0?` · ${vetoHits} 项触发否决`:''}{unmet>vetoHits?` · ${unmet-vetoHits} 项未满足`:''}</summary>{readingSets.map(({label,rows})=><div key={label} className="mt-2 space-y-1"><p className="text-muted-foreground">{label}</p>{rows.map((reading,j)=>{

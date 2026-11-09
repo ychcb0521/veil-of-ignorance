@@ -39,3 +39,5 @@ it('records and reapplies the scroll offsets of every ancestor', () => {
   expect(inner.scrollTop).toBe(40); expect(outer.scrollTop).toBe(15);
   outer.remove();
 });
+
+it('does not restore another account view',()=>{saveQualityReturn({owner:'owner-a',ui,scroll:[]});expect(armQualityReturn(Date.now(),'owner-b')).toBe(false);expect(pendingQualityReturn()).toBeNull();});

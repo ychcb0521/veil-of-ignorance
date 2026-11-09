@@ -354,3 +354,14 @@ it.each([true, false])('鱼质量的信号库标的可点击定位盘面；跳�
   if (success) expect(screen.queryByTestId('fish-panel')).toBeNull();
   else expect(quality().getByRole('button', { name: '查看 LIBUSDT 盘面' })).toBeEnabled();
 }, 30000);
+
+it('从组合表进入盘面再打开时恢复筛选、展开状态和内外层滚动',async()=>{
+ window.history.replaceState({key:'chart-table-entry',idx:0},'');
+ const {newQualityStudy,importQualityLibrary,qualityDisplayRows,qualityComparisonRows,qualityResultKey}=await import('@/lib/fish/quality');const {enableQualityComparison}=await import('@/lib/fish/qualityComparison');
+ const T=Date.UTC(2026,9,20),signals=Array.from({length:45},(_,i)=>({id:'quality-chart-'+i,symbol:'RET'+String(i).padStart(3,'0')+'USDT',timeMs:T+i*60000,timeLabel:'',fallbackZone:''}));
+ const study=enableQualityComparison(importQualityLibrary(newQualityStudy(T),signals));study.selectedRowIds=qualityDisplayRows(study).map(r=>r.id);study.results=qualityComparisonRows(study).flatMap(row=>study.sellPlans!.map(p=>({key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T,status:'closed' as const,entryTime:T,entryPrice:100,endTime:T+600000,endPrice:110,returnPct:10,pnl:10})));
+ localStorage.setItem('fish-quality:time-control-test',JSON.stringify(study));const jump=vi.fn(async()=>({ok:true as const}));render(control(jump));const toggle=screen.getByRole('button',{name:/^渔/});fireEvent.click(toggle);await waitFor(()=>expect(screen.getByLabelText('筛选鱼质量信号')).not.toBeDisabled());
+ fireEvent.change(screen.getByLabelText('筛选鱼质量信号'),{target:{value:'RET'}});fireEvent.click(screen.getByRole('button',{name:'按标的排序'}));fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));const table=screen.getByTestId('quality-fish-table');table.scrollTop=660;table.scrollLeft=1100;fireEvent.scroll(table);screen.getByTestId('fish-panel').scrollTop=320;
+ const names=screen.getAllByTestId('quality-fish-row').map(row=>row.textContent);fireEvent.click(within(screen.getAllByTestId('quality-fish-row')[0]).getByRole('button',{name:/^查看 RET.*盘面$/}));await waitFor(()=>expect(screen.queryByTestId('fish-panel')).toBeNull());expect(jump).toHaveBeenCalledOnce();fireEvent.click(toggle);
+ await waitFor(()=>{expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('RET');expect(screen.getByTestId('quality-fish-table').scrollTop).toBe(660);expect(screen.getByTestId('quality-fish-table').scrollLeft).toBe(1100);});expect(screen.getByTestId('fish-panel').scrollTop).toBe(320);expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');expect(screen.getAllByTestId('quality-fish-row').map(row=>row.textContent)).toEqual(names);
+},30000);
