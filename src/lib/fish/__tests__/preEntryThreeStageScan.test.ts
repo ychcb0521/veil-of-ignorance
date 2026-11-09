@@ -33,6 +33,34 @@ async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:P
 }
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
+function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it.each(['necessary','addition-veto','ordinary-seller','indicator-hard-stop','price-hard-stop','long-drawdown'] as const)('state-only admission still enforces %s at the same minute',async kind=>{
+ const p=stateOnlyPlan(),c=p.preEntryThreeStage!;
+ if(kind==='necessary')c.required=[condition('必要条件',1,'>','raw=C/100')];
+ if(kind==='addition-veto')c.additionVetoes=[{kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5}]}];
+ if(kind==='ordinary-seller')c.sellRules=[{id:'seller',label:'普通卖出',enabled:true,expression:{condition:condition('卖出条件',.85,'>','raw=C/100')},confirmation:{samples:1,minutes:1}}];
+ if(kind==='indicator-hard-stop')c.hardVetoes=[{id:'hard',kind:'indicator',label:'指标硬性终止',enabled:true,direction:'>=',threshold:.85,metric:'raw',snapshot:snapshot('raw=C/100')}];
+ if(kind==='price-hard-stop')c.hardVetoes=[{id:'hard',kind:'drop-1m',label:'一分钟急跌',enabled:true,direction:'>=',threshold:5}];
+ if(kind==='long-drawdown')c.longDrawdown={enabled:true,hours:.1,pct:10,mode:'current'};
+ const before=structuredClone(p),base=loader([90]),load:FishReconstructionLoader=async(...args)=>(await base(...args)).map(b=>kind==='long-drawdown'&&b.openTime===T-2*M?{...b,high:200}:b);
+ const result=await run(p,{load,end:T+M});
+ expect(result.status).toBe('unmatched');expect(result.matchedAt).toBeUndefined();
+ expect(result.threeStage).toMatchObject({first:{status:'pass'},admission:{met:['状态 S']},[kind==='necessary'?'zero':'second']:{status:'blocked'}});
+ expect(result.threeStage!.event).toBeUndefined();expect(result.exclusionProcess!.entries.some(e=>e.status==='blocked')).toBe(true);expect(p).toEqual(before);
+});
+it('state-only admission passes when exclusions are off, but a triggered veto blocks that minute before a later retry',async()=>{
+ const p=stateOnlyPlan(),load=loader([90,90,90]);expect(await run(p,{load})).toMatchObject({status:'matched',matchedAt:T+M,threeStage:{second:{status:'pass'}}});
+ p.preEntryThreeStage!.additionVetoes=[{kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5}]}];
+ const result=await run(p,{load});expect(result).toMatchObject({status:'matched',matchedAt:T+2*M,retry:{attempt:2,startedAt:T+M},lastVeto:{at:T+M,reason:expect.stringContaining('急跌')}});
+ expect(result.exclusionProcess!.entries.some(e=>e.status==='blocked'&&e.through===T+M)).toBe(true);
+});
+it('state-only admission preserves ordinary seller consecutive confirmations and never waits for them to apply a hard stop',async()=>{
+ const p=stateOnlyPlan(),c=p.preEntryThreeStage!;
+ c.sellRules=[{id:'seller',label:'两次确认卖出',enabled:true,expression:{condition:condition('卖出条件',.7,'>','raw=C/100')},confirmation:{samples:2,minutes:1}}];
+ const confirmed=await run(p,{load:loader([79,90]),end:T+2*M});expect(confirmed).toMatchObject({status:'unmatched',threeStage:{first:{status:'pass'},second:{status:'blocked',reason:'两次确认卖出 完整成立'}}});
+ c.hardVetoes=[{id:'hard',kind:'drop-1m',label:'一分钟急跌',enabled:true,direction:'>=',threshold:5}];
+ const immediate=await run(p,{load:loader([90]),end:T+M});expect(immediate).toMatchObject({status:'unmatched',threeStage:{first:{status:'pass'},second:{status:'blocked',reason:expect.stringContaining('一分钟急跌')}}});
+});
 it('v7 optional long-window drawdown cannot be cleared by restarting the local origin',async()=>{
  const p=retryPlan();p.preEntryThreeStage!.admission!.algorithms=[condition('状态 S',.8,'>','raw=C/100')];expect(await run(p)).toMatchObject({matchedAt:T+M});
  p.preEntryThreeStage!.longDrawdown={enabled:true,hours:.1,pct:10,mode:'current'};const base=loader(),load:FishReconstructionLoader=async(...args)=>(await base(...args)).map(b=>b.openTime===T-2*M?{...b,high:200}:b);
