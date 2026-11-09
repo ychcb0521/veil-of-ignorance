@@ -28,7 +28,7 @@ it('shows the three-stage editor directly and groups it in the new ordered modul
   expect(screen.queryByRole('button',{name:'新建三阶方案副本'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'返回旧版设置'})).not.toBeInTheDocument();
   expect(screen.queryByLabelText('切换已存筛选方案集')).not.toBeInTheDocument();
-  expect(screen.getAllByRole('heading').map(e=>e.textContent)).toEqual(['⓪ 必要条件','① 防守线新事件准入','② 排除门槛']);
+  expect(screen.getAllByRole('heading').map(e=>e.textContent)).toEqual(['⓪ 必要条件','① 新事件准入','② 排除门槛']);
   // 加仓共用否决并入最后的排除段。
   expect(within(screen.getByTestId('three-stage-second')).getByLabelText('启用入选前否决 二次急跌未收复')).toBeInTheDocument();
   expect(within(screen.getByTestId('three-stage-zero')).queryByLabelText('启用入选前否决 二次急跌未收复')).not.toBeInTheDocument();
@@ -75,17 +75,17 @@ function singleFixture(){
 it('explicitly copies the old plan into v7 with OR admission, state S default 0.8 and an editable algorithm list, retaining every saved asset',()=>{
  const f=singleFixture();f.state.study.planTemplates=[{id:'protected',name:'旧模板',savedAt:1,updatedAt:1,plan:structuredClone(f.current)}];const before=structuredClone(f.state.preEntry!.library),templates=structuredClone(f.state.study.planTemplates);
  render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
- fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));
- expect(screen.getByRole('heading',{name:'① 并列准入（或）'})).toBeInTheDocument();expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 门槛')).toHaveValue(.8);expect(screen.getByLabelText('准入算法 1 指标')).toHaveValue('state:state');
+ fireEvent.click(screen.getByRole('button',{name:'配置新事件准入（另存副本）'}));
+ expect(screen.getByRole('heading',{name:'① 新事件准入'})).toBeInTheDocument();expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 门槛')).toHaveValue(.8);expect(screen.getByLabelText('准入算法 1 指标')).toHaveValue('state:state');
  fireEvent.click(screen.getByRole('button',{name:'添加准入算法'}));expect(screen.getByLabelText('准入算法 2 门槛')).toHaveValue(.8);fireEvent.change(screen.getByLabelText('准入算法 2 门槛'),{target:{value:'0.9'}});
  fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));const next=f.configure.mock.calls[0][0][0];expect(next.id).not.toBe(f.current.id);expect(next.preEntryThreeStage).toMatchObject({version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:{guardEnabled:true,algorithms:[{threshold:.8},{threshold:.9}]}});expect(next.preEntryThreeStage.hardVetoes).toEqual(f.current.preEntryThreeStage!.hardVetoes);expect(next.preEntryThreeStage.required).toEqual(f.current.preEntryThreeStage!.required);expect(f.configure.mock.calls[0][1]).toBe(12);expect(f.state.preEntry!.library).toEqual(before);expect(f.state.study.planTemplates).toEqual(templates);
 });
 it('refuses a v7 plan with every admission route disabled',()=>{
  const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
- fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));fireEvent.click(screen.getByLabelText('启用原生防守线准入'));fireEvent.click(screen.getByLabelText('准入算法 1 启用'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('至少启用一条');expect(f.configure).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'配置新事件准入（另存副本）'}));fireEvent.click(screen.getByLabelText('启用原生防守线准入'));fireEvent.click(screen.getByLabelText('准入算法 1 启用'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('至少启用一条');expect(f.configure).not.toHaveBeenCalled();
 });
 it('offers long-window drawdown as an opt-in veto and requires the user to enter its threshold',()=>{
- const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));expect(screen.getByLabelText('启用长周期回撤否决')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用长周期回撤否决'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('回撤阈值');fireEvent.change(screen.getByLabelText('长周期回撤回看时长（小时）'),{target:{value:'72'}});fireEvent.change(screen.getByLabelText('长周期回撤阈值（%）'),{target:{value:'8'}});fireEvent.change(screen.getByLabelText('长周期回撤口径'),{target:{value:'maximum'}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.longDrawdown).toEqual({enabled:true,hours:72,pct:8,mode:'maximum'});
+ const f=singleFixture();render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);fireEvent.click(screen.getByRole('button',{name:'配置新事件准入（另存副本）'}));expect(screen.getByLabelText('启用长周期回撤否决')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用长周期回撤否决'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('回撤阈值');fireEvent.change(screen.getByLabelText('长周期回撤回看时长（小时）'),{target:{value:'72'}});fireEvent.change(screen.getByLabelText('长周期回撤阈值（%）'),{target:{value:'8'}});fireEvent.change(screen.getByLabelText('长周期回撤口径'),{target:{value:'maximum'}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.longDrawdown).toEqual({enabled:true,hours:72,pct:8,mode:'maximum'});
 });
 it('keeps the confirmed saved second scheme unchanged and removes the redundant scheme controls',()=>{
  const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
@@ -148,7 +148,7 @@ it('defaults an unlimited draft to 48 hours and blocks creating another unlimite
 it('defaults all admission alternatives to selected and allows all/individual choices without changing saved plans',()=>{
  const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);
  render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
- fireEvent.click(screen.getByRole('button',{name:'启用并列准入与否决重筛（另存副本）'}));
+ fireEvent.click(screen.getByRole('button',{name:'配置新事件准入（另存副本）'}));
  expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 启用')).toBeChecked();
  fireEvent.click(screen.getByRole('button',{name:'添加其他准入标准'}));expect(screen.getByLabelText('准入算法 2 启用')).toBeChecked();
  fireEvent.change(screen.getByLabelText('准入算法 2 指标'),{target:{value:'state:state'}});fireEvent.change(screen.getByLabelText('准入算法 2 方向'),{target:{value:'<='}});fireEvent.change(screen.getByLabelText('准入算法 2 门槛'),{target:{value:'0.4'}});
@@ -156,4 +156,22 @@ it('defaults all admission alternatives to selected and allows all/individual ch
  fireEvent.click(screen.getByRole('button',{name:'全选准入标准'}));expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();expect(screen.getByLabelText('准入算法 1 启用')).toBeChecked();expect(screen.getByLabelText('准入算法 2 启用')).toBeChecked();
  fireEvent.click(screen.getByLabelText('启用原生防守线准入'));fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
  expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.admission).toMatchObject({guardEnabled:false,algorithms:[{enabled:true,threshold:.8},{enabled:true,direction:'<=',threshold:.4}]});expect(f.state.preEntry!.library).toEqual(before);
+});
+
+it('shows the common new-event stage and offers state admission directly on a saved guard-only scheme',()=>{
+ const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ const first=within(screen.getByTestId('three-stage-first'));expect(first.getByRole('heading',{name:'① 新事件准入'})).toBeInTheDocument();expect(first.getByLabelText('启用原生防守线准入')).toBeChecked();expect(first.getByLabelText('启用状态 S 新事件准入')).not.toBeChecked();expect(first.getByRole('button',{name:'添加其他准入标准'})).toBeInTheDocument();expect(f.configure).not.toHaveBeenCalled();
+ fireEvent.click(first.getByLabelText('启用状态 S 新事件准入'));expect(screen.getByLabelText('准入算法 1 指标')).toHaveValue('state:state');expect(screen.getByLabelText('准入算法 1 门槛')).toHaveValue(.8);expect(screen.getByLabelText('准入算法 1 启用')).toBeChecked();expect(screen.getByLabelText('启用原生防守线准入')).toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].id).not.toBe(f.current.id);expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.version).toBe(PRE_ENTRY_RETRY_VERSION);expect(f.state.preEntry!.library).toEqual(before);
+});
+it('creates a state-only independent copy when the saved guard admission is turned off',()=>{
+ const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ fireEvent.click(screen.getByLabelText('启用原生防守线准入'));expect(screen.getByLabelText('启用原生防守线准入')).not.toBeChecked();expect(screen.getByLabelText('准入算法 1 启用')).toBeChecked();fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.admission).toMatchObject({guardEnabled:false,algorithms:[{enabled:true,threshold:.8}]});expect(f.state.preEntry!.library).toEqual(before);
+});
+it('gives every stage a subtle clickable help symbol without changing any saved configuration',()=>{
+ const f=singleFixture(),before=structuredClone(f.state.preEntry!.library);render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ for(const [stage,label,text] of [['three-stage-zero','必要条件使用说明','所有已启用的必要条件都满足'],['three-stage-first','新事件准入使用说明','彼此是“或”的关系'],['three-stage-second','排除门槛使用说明','硬性终止一旦成立立即排除']] as const){
+  const trigger=within(screen.getByTestId(stage)).getByRole('button',{name:label});expect(trigger.className).toContain('text-muted-foreground/35');expect(trigger).toHaveAttribute('title',label);fireEvent.click(trigger);expect(screen.getByText(new RegExp(text))).toBeInTheDocument();fireEvent.click(trigger);
+ }
+ expect(f.configure).not.toHaveBeenCalled();expect(f.state.preEntry!.library).toEqual(before);
 });
