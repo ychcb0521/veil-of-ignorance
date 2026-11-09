@@ -17,6 +17,7 @@ import {mergeQualityPlanCatalogValues} from './qualityPlanCatalogMerge';
  * 网络错误只记日志不打扰交易。同步永远不能成为下单路径上的故障点。
  */
 import { supabase } from '@/integrations/supabase/client';
+import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './accountSyncTransport';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
 import { mergeMiningStates, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY } from '@/lib/fish/miningState';
@@ -182,6 +183,7 @@ const generation = new Map<string, number>();
  * 包括防抖、进行中与失败重试窗口；按账号隔离，成功也只解除同一代的保护。
  */
 const unsyncedGeneration = new Map<string, number>();
+const acknowledged = new Map<string, { raw: string; at: number }>();
 /**
  * 版本号必须按 **(用户, 键)** 记，不能只按键。
  * 只按键的话，切换用户时为了不让 A 的版本号压掉 B 的推送就得整张清空，
@@ -237,8 +239,19 @@ async function pushNow(userId: string, key: string, value: unknown, gen: number,
     // 与影子戳同源：这一行的 updated_at 必须是我们**自己**记下来的那个时刻，
     // 否则本地永远比远端「旧」1.5 秒（入队时刻 vs 推送时刻），
     // 「本地更新的操作不会被回滚」那道护栏就从来不会生效。
-    const updatedAt = new Date().toISOString();
-    const { error } = await supabase
+    const gk = genKey(userId, key);
+    const previous = acknowledged.get(gk);
+    if (previous && previous.raw === valueJson) {
+      if (unsyncedGeneration.get(gk) === gen) {
+        markPersistedStateSynced(storageKeyFor(key, userId), valueJson, previous.at);
+        unsyncedGeneration.delete(gk);
+      }
+      return;
+    }
+    let updatedAt = '';
+    const result = await runAccountSyncRequest(() => {
+      updatedAt = new Date().toISOString();
+      return supabase
       .from('user_sim_state' as never)
       .upsert(
         {
@@ -249,12 +262,15 @@ async function pushNow(userId: string, key: string, value: unknown, gen: number,
         } as never,
         { onConflict: 'user_id,key' },
       );
+    }, { bytes: approxBytes * 3, current: () => !tableMissing && generation.get(gk) === gen });
+    if (!result) return;
+    const { error } = result;
     if (!error) {
       // 云端成功不等于本地落盘成功（例如大数据写入遭遇 quota，而小影子戳仍能写）。
       // 也不能用旧推送的回调给期间出现的另一份本地内容盖章。
       writePersistedValueShadowTs(storageKeyFor(key, userId), valueJson, Date.parse(updatedAt));
-      const gk = genKey(userId, key);
       if (unsyncedGeneration.get(gk) === gen) {
+        if (valueJson !== undefined) acknowledged.set(gk, { raw: valueJson, at: Date.parse(updatedAt) });
         // 最新内存值已获云端确认，不再永久当作未提交的本地修改；磁盘影子戳仍须实际落盘。
         if (valueJson !== undefined) markPersistedStateSynced(storageKeyFor(key, userId), valueJson, Date.parse(updatedAt));
         unsyncedGeneration.delete(gk);
@@ -362,6 +378,8 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
   if (!userId) return { status: 'error', applied: 0 };
   // 水化发生在交易组件树挂载之前，是认定会话归属最早、也最可靠的时机。
   setActiveSyncUser(userId);
+  // A different device may have edited the server since our last acknowledgement.
+  for (const key of acknowledged.keys()) if (key.startsWith(`${userId}\u0000`)) acknowledged.delete(key);
   // Saved account preferences use the server row as authority, independent of device clock skew.
   const preferenceKey = 'fish-account-settings.v1';
   const preferenceGeneration = generation.get(genKey(userId, preferenceKey)) ?? 0;
@@ -495,6 +513,8 @@ export function __resetSimStateSyncForTests(): void {
   pending.clear();
   generation.clear();
   unsyncedGeneration.clear();
+  acknowledged.clear();
+  __resetAccountSyncTransportForTests();
   clearPersistedStateMemoryForTests();
   tableMissing = false;
   flushHooksInstalled = false;

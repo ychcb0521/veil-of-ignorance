@@ -48,6 +48,33 @@ afterEach(() => {
 });
 
 describe('queueSimStatePush', () => {
+  it('unchanged acknowledged snapshots are not rewritten on every autosave', async () => {
+    queueSimStatePush(UID, 'trade_history', [{id: 'protected-trade'}]);
+    await vi.advanceTimersByTimeAsync(1_600);
+    for (let i = 0; i < 20; i++) {
+      queueSimStatePush(UID, 'trade_history', [{id: 'protected-trade'}]);
+      await vi.advanceTimersByTimeAsync(1_600);
+    }
+    expect(mocks.upsert).toHaveBeenCalledTimes(1);
+    queueSimStatePush(UID, 'trade_history', [{id: 'protected-trade'}, {id: 'new-trade'}]);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(mocks.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes saves in flight and sends only the latest queued generation', async () => {
+    let finish!: (value: {error: null}) => void;
+    mocks.upsert.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    queueSimStatePush(UID, 'balance', 1);
+    await vi.advanceTimersByTimeAsync(1_600);
+    queueSimStatePush(UID, 'balance', 2);
+    await vi.advanceTimersByTimeAsync(1_600);
+    queueSimStatePush(UID, 'balance', 3);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(mocks.upsert).toHaveBeenCalledTimes(1);
+    finish({error: null}); await vi.advanceTimersByTimeAsync(10);
+    expect(mocks.upsert.mock.calls.map(([row]) => row.value)).toEqual([1, 3]);
+  });
+
   it('防抖合并：同一键连续写只推最后一版', async () => {
     queueSimStatePush(UID, 'balance', 100);
     queueSimStatePush(UID, 'balance', 200);

@@ -66,6 +66,27 @@ beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.stat
 afterEach(() => { vi.useRealTimers(); });
 
 describe('accountBlobSync', () => {
+  it('keeps local saves immediate but combines frequent research edits into one bounded cloud checkpoint', async () => {
+    const a = await device({items: [1]});
+    await a.reopen();
+    const uploads = cloud.state.upserts.length;
+    vi.useFakeTimers();
+    for (let i = 2; i <= 12; i++) {
+      a.local.value = {items: [1, i]};
+      await a.mod.noteAccountBlobSaved(a.adapter, 'u1');
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(cloud.state.upserts).toHaveLength(uploads);
+    await vi.advanceTimersByTimeAsync(50_000);
+    // CompressionStream completes on native IO, independently of fake timers.
+    await vi.waitFor(() => expect(cloud.state.upserts).toHaveLength(uploads + 2));
+    vi.useRealTimers();
+    await a.mod.flushAccountBlobPushesForTests();
+    const b = await device();
+    await b.reopen();
+    expect(b.local.value?.items).toEqual([1, 12]);
+  });
+
   it('checks an unchanged cloud revision without reading another full local research snapshot', async () => {
     const a = await device({ items: [1, 2, 3] });
     await a.reopen();

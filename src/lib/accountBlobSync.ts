@@ -20,12 +20,16 @@
  * 空白的本机数据永远不会盖掉云端已有内容（除非它是同步过之后用户自己清空的）。
  */
 import { supabase } from '@/integrations/supabase/client';
+import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './accountSyncTransport';
 import { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
 export { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
 
 export const ACCOUNT_BLOB_PREFIX = 'idb:';
 const CHUNK_CHARS = 900_000;
 const PUSH_DELAY_MS = 8_000;
+// Local saves stay immediate; a mutable multi-MB archive goes to Postgres at
+// most once a minute, even when visibility/online events repeatedly fire.
+const PUSH_INTERVAL_MS = 60_000;
 const LOAD_TIMEOUT_MS = 6_000;
 
 export interface AccountBlobAdapter<T = unknown> {
@@ -195,12 +199,14 @@ async function fetchValue(name: string, owner: string, head: Head): Promise<{ ok
   return { ok: true, value: await decodeAccountBlob(head.enc, parts.join('')) };
 }
 async function upsertRow(owner: string, key: string, value: unknown): Promise<void> {
-  const { error } = await (table() as any).upsert({ user_id: owner, key, value, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' });
+  const result = await runAccountSyncRequest(() => (table() as any).upsert({ user_id: owner, key, value, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' }), { bytes: JSON.stringify(value).length });
+  const error = result?.error;
   if (error) throw new Error(error.message);
 }
 async function deleteRows(owner: string, keys: string[]): Promise<void> {
   if (!keys.length) return;
-  const { error } = await (table() as any).delete().eq('user_id', owner).in('key', keys);
+  const result = await runAccountSyncRequest(() => (table() as any).delete().eq('user_id', owner).in('key', keys));
+  const error = result?.error;
   if (error) throw new Error(error.message);
 }
 /** 只替当前登录的账号读写云端；没登录（或换了账号）就只用本机，下次打开再对账。 */
@@ -220,13 +226,16 @@ function enqueue<T>(id: string, task: () => Promise<T>): Promise<T> {
   return run;
 }
 const adapters = new Map<string, AccountBlobAdapter<any>>();
-const pushTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; adapter: AccountBlobAdapter<any>; owner: string; settled: boolean }>();
+const pushTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; adapter: AccountBlobAdapter<any>; owner: string; settled: boolean; dueAt: number }>();
+const nextPushAt = new Map<string, number>();
+const pushing = new Map<string, Promise<boolean>>();
+let blobPushTail: Promise<unknown> = Promise.resolve();
 let hooksInstalled = false;
 function installFlushHooks(): void {
   if (hooksInstalled || typeof window === 'undefined') return;
   hooksInstalled = true;
   // 尽力而为：关页前没传完也不要紧，本机记着「改过未上传」，下次打开会补传。
-  const flush = () => { for (const [id, entry] of [...pushTimers]) { clearTimeout(entry.timer); pushTimers.delete(id); void runPush(entry.adapter, entry.owner, entry.settled); } };
+  const flush = () => { for (const entry of [...pushTimers.values()]) schedulePush(entry.adapter, entry.owner, 0, entry.settled); };
   window.addEventListener('pagehide', flush);
   window.addEventListener('online', flush);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
@@ -238,10 +247,26 @@ function schedulePush(adapter: AccountBlobAdapter<any>, owner: string, delay = P
   if (existing) clearTimeout(existing.timer);
   installFlushHooks();
   const keep = settled || !!existing?.settled;
-  pushTimers.set(id, { adapter, owner, settled: keep, timer: setTimeout(() => { pushTimers.delete(id); void runPush(adapter, owner, keep); }, delay) });
+  // Keep the first due time during continuous local saves; do not starve cloud
+  // backups with a debounce that is renewed indefinitely.
+  const dueAt = Math.max(nextPushAt.get(id) ?? 0, Math.min(existing?.dueAt ?? Infinity, Date.now() + delay));
+  pushTimers.set(id, { adapter, owner, settled: keep, dueAt, timer: setTimeout(() => { pushTimers.delete(id); void runPush(adapter, owner, keep); }, Math.max(0, dueAt - Date.now())) });
 }
 function runPush(adapter: AccountBlobAdapter<any>, owner: string, settled = false): Promise<boolean> {
-  return enqueue(idOf(adapter.name, owner), () => push(adapter, owner, settled)).catch(() => false);
+  const id = idOf(adapter.name, owner);
+  const active = pushing.get(id);
+  if (active) return active;
+  const task = enqueue(id, () => {
+    const run = blobPushTail.then(() => {
+      nextPushAt.set(id, Date.now() + PUSH_INTERVAL_MS);
+      return push(adapter, owner, settled);
+    });
+    blobPushTail = run.catch(() => undefined);
+    return run;
+  }).catch(() => false);
+  pushing.set(id, task);
+  void task.finally(() => { if (pushing.get(id) === task) pushing.delete(id); });
+  return task;
 }
 
 async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: boolean): Promise<boolean> {
@@ -424,4 +449,6 @@ export function __startNewPageForTests(): void { loads.clear(); }
 export function __resetAccountBlobSyncForTests(): void {
   for (const entry of pushTimers.values()) clearTimeout(entry.timer);
   pushTimers.clear(); queues.clear(); loads.clear(); memory.clear(); adapters.clear();
+  nextPushAt.clear(); pushing.clear(); blobPushTail = Promise.resolve();
+  __resetAccountSyncTransportForTests();
 }
