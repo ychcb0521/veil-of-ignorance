@@ -3,6 +3,7 @@ import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
 import { readPreEntrySnapshot as read, validPreEntryLibrary as valid } from './preEntryPersistence';
 import { persistPreEntrySnapshot } from './preEntryPersistenceClient';
+import { prepareStoredPreEntry } from './preEntryBackup';
 
 const queues = new Map<string, Promise<unknown>>();
 const keyOf = (owner?: string) => owner ? `user:${owner}` : 'anonymous';
@@ -20,6 +21,7 @@ function write(owner: string | undefined, library: PreEntryLibrary): Promise<voi
 export const preEntryV6AccountBlob: AccountBlobAdapter<PreEntryLibrary> = {
   name: 'pre-entry-monitor-v6',
   async read(owner) { await queues.get(keyOf(owner)); return read(owner); },
+  async prepareStored(owner, knownHash) { await queues.get(keyOf(owner)); return prepareStoredPreEntry(owner, knownHash); },
   async write(owner, value) { if (value) { if (!valid(value)) throw Error('入选库云端存档格式无效'); await write(owner, value); } },
   async mergeRemote(owner, value) { if (value) await preEntryV6AccountBlob.write(owner, value); },
   weight: library => library ? library.records.length + library.rounds.length + (library.settings ? 1 : 0) : 0,

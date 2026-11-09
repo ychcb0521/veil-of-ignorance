@@ -13,6 +13,18 @@ import { emptyPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE
 import type { FishQualityState } from '@/hooks/useFishQuality';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();localStorage.clear();});
+it('offers opt-in stall-turn controls, saves all parameters, and leaves the source plan and running task untouched',()=>{
+ const f=setup(),before=structuredClone(f.plan);
+ expect(screen.getByLabelText('启用上涨后滞涨转弱否决')).not.toBeChecked();fireEvent.click(screen.getByLabelText('启用上涨后滞涨转弱否决'));
+ expect(screen.getByLabelText('滞涨转弱 上涨观察（分钟）')).toHaveValue(60);expect(screen.getByLabelText('滞涨转弱 滞涨观察（分钟）')).toHaveValue(10);expect(screen.getByLabelText('滞涨转弱 转弱确认（分钟）')).toHaveValue(3);
+ expect(screen.getByLabelText('同时排除猛烈回调未创新高')).toBeChecked();expect(screen.getByLabelText('猛烈回调门槛（%）')).toHaveValue(3);
+ fireEvent.change(screen.getByLabelText('猛烈回调门槛（%）'),{target:{value:'4'}});fireEvent.click(screen.getByLabelText('同时排除猛烈回调未创新高'));expect(screen.getByLabelText('猛烈回调门槛（%）')).toBeDisabled();fireEvent.click(screen.getByLabelText('同时排除猛烈回调未创新高'));expect(screen.getByLabelText('猛烈回调门槛（%）')).toHaveValue(4);
+ fireEvent.change(screen.getByLabelText('滞涨转弱 前段涨幅至少（%）'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('滞涨转弱 推进速度不超过前段（%）'),{target:{value:'30'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.stallTurn).toMatchObject({version:'entry-stall-turn-v1',enabled:true,historyHours:6,riseMinutes:60,risePct:2,stallMinutes:10,maxProgressPct:30,turnMinutes:3,pullback:{enabled:true,pct:4}});expect(f.plan).toEqual(before);expect(f.restart).not.toHaveBeenCalled();
+});
+it('refuses to save an incomplete enabled stall-turn rule',()=>{
+ const f=setup();fireEvent.click(screen.getByLabelText('启用上涨后滞涨转弱否决'));fireEvent.change(screen.getByLabelText('滞涨转弱 转弱确认（分钟）'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(screen.getByRole('alert')).toHaveTextContent('滞涨转弱参数无效');expect(f.configure).not.toHaveBeenCalled();
+});
 function setup(){
   const plan=makeQualitySellPlan(qualityFilterChoices(BUILTIN_FEATURES)[0].key,'>',0,BUILTIN_FEATURES,undefined,'old');
   plan.label='旧版资产';plan.preEntryConditions=emptyPreEntryConditions();

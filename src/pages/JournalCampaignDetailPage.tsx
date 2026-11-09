@@ -1,5 +1,6 @@
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
+import { qualityProtectionOrders } from '@/lib/fish/qualityProtectionOrders';
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
@@ -2031,6 +2032,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     () => displayableReverseHedgeOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
     [displayableReverseHedgeOrders, hiddenReverseOrderSet],
   );
+  // Monitoring protection orders share the personal chart renderer/controls,
+  // but remain outside reverseHedgeOrders and every settlement/risk input.
+  const monitorProtectionOrders = useMemo(() => qualityProtectionOrders(campaign, legs), [campaign, legs]);
+  const visibleMonitorProtectionOrders = useMemo(
+    () => monitorProtectionOrders.filter(order => !hiddenReverseOrderSet.has(order.id)),
+    [monitorProtectionOrders, hiddenReverseOrderSet],
+  );
   // 「他场委托」（灰色）：与本场委托共用眼睛开关与隐藏列表，但不进黄色层、不进任何指标。
   const displayableForeignLiveOrders = useMemo(
     () => foreignLiveOrders.filter(isDisplayableReverseHedgeOrder),
@@ -2077,6 +2085,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   );
   const reverseOrderManagerItems = useMemo(() => [
     ...visibleReverseHedgeOrders.map(order => ({ order, manualLeg: undefined as HedgeShortLegExecution | undefined })),
+    ...visibleMonitorProtectionOrders.map(order => ({ order, manualLeg: undefined as HedgeShortLegExecution | undefined })),
     ...visibleManualHedgeShortLegs.map(leg => ({
       // 只适配管理色块，绝不进入委托、结算或风险数据。
       order: {
@@ -2087,15 +2096,15 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       manualLeg: leg,
     })),
   ].sort((a, b) => a.order.createdAt - b.order.createdAt || a.order.id.localeCompare(b.order.id)),
-  [visibleReverseHedgeOrders, visibleManualHedgeShortLegs]);
+  [visibleReverseHedgeOrders, visibleManualHedgeShortLegs, visibleMonitorProtectionOrders]);
   const hedgeLegOrdinals = useMemo(() => buildHedgeLegOrdinals(legs), [legs]);
   const hiddenReverseOrderCount = useMemo(
-    () => [...displayableReverseHedgeOrders, ...displayableForeignLiveOrders]
+    () => [...displayableReverseHedgeOrders, ...displayableForeignLiveOrders, ...monitorProtectionOrders]
       .filter(order => hiddenReverseOrderSet.has(order.id)).length
       + manualHedgeShortLegs.filter(leg => hiddenReverseOrderSet.has(manualHedgeSelectionId(leg.legId))).length,
-    [displayableReverseHedgeOrders, displayableForeignLiveOrders, manualHedgeShortLegs, hiddenReverseOrderSet],
+    [displayableReverseHedgeOrders, displayableForeignLiveOrders, manualHedgeShortLegs, hiddenReverseOrderSet, monitorProtectionOrders],
   );
-  const hasReverseOrders = displayableReverseHedgeOrders.length > 0;
+  const hasReverseOrders = displayableReverseHedgeOrders.length > 0 || monitorProtectionOrders.length > 0;
   const hasManualHedgeShorts = manualHedgeShortLegs.length > 0;
   const hasForeignLiveOrders = displayableForeignLiveOrders.length > 0;
   const hasYellowOrderLayer = hasReverseOrders || hasManualHedgeShorts;
@@ -2117,21 +2126,23 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       : (chartKlines.length > 0 ? chartKlines[chartKlines.length - 1].time : 0);
     return [
       ...buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd),
+      ...buildCampaignReverseOrderPriceLines(visibleMonitorProtectionOrders, [], fallbackEnd),
       // 「是不是触发单开出的腿」按全部可显示的委托判，隐藏某张委托不会让它的腿冒充手动单。
       ...buildManualHedgeShortPriceLines(visibleManualHedgeShortLegs, displayableReverseHedgeOrders, tradeRecords, fallbackEnd),
       // 他场委托：灰色淡虚线，跟着同一个眼睛开关，但不是黄色层的一部分
       ...buildForeignReplayOrderPriceLines(visibleForeignLiveOrders, fallbackEnd),
     ];
-  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, tradeRecords, chartKlines]);
+  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, tradeRecords, chartKlines, visibleMonitorProtectionOrders]);
   // 隐藏的委托、关掉的委托层都不再算选中——免得管理区里看不见的单子还挂着高亮。
   const activeSelectedReverseOrderSet = useMemo(() => {
     if (!showOrderInfo) return new Set<string>();
     const visibleIds = new Set([
       ...[...visibleReverseHedgeOrders, ...visibleForeignLiveOrders].map(order => order.id),
+      ...visibleMonitorProtectionOrders.map(order => order.id),
       ...visibleManualHedgeShortLegs.map(leg => manualHedgeSelectionId(leg.legId)),
     ]);
     return new Set(selectedReverseOrderIds.filter(id => visibleIds.has(id)));
-  }, [showOrderInfo, visibleReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, selectedReverseOrderIds]);
+  }, [showOrderInfo, visibleReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, selectedReverseOrderIds, visibleMonitorProtectionOrders]);
   const orderLineIdsBySelectId = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const line of orderInfoPriceLines) {
@@ -2277,6 +2288,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   // 管理区色块：本场的委托与「他场」委托共用同一套点选 / 隐藏，他场的整体压灰并带「他场」标签。
   const renderReverseOrderChip = (order: CampaignReverseHedgeOrder, foreign = false, manualLeg?: HedgeShortLegExecution) => {
     const selected = activeSelectedReverseOrderSet.has(order.id);
+    const protection = monitorProtectionOrders.find(item => item.id === order.id);
     const ordinal = manualLeg ? hedgeLegOrdinals.get(manualLeg.legId) : null;
     const hideLabel = manualLeg ? '从盘面隐藏这条手动对冲' : foreign ? '从盘面隐藏这条他场委托' : '从盘面隐藏这条委托空单';
     return (
@@ -2288,6 +2300,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         data-testid={manualLeg ? 'manual-hedge-chip' : foreign ? 'foreign-replay-order-chip' : 'reverse-order-chip'}
         data-leg-id={manualLeg?.legId}
         data-selected={selected ? 'true' : 'false'}
+        title={protection ? `${protection.protectionLabel} · ${protection.protectionDetail}` : undefined}
         onClick={() => toggleReverseOrderSelection(order.id)}
         onKeyDown={event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -2314,7 +2327,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         />
         {foreign && <span className="rounded-sm bg-muted/40 px-1 text-[9px] text-muted-foreground/70">他场</span>}
         <span className={foreign ? '' : selected ? 'font-medium text-[#F0B90B]' : 'text-[#F0B90B]/80'}>
-          {manualLeg ? `手动对冲${ordinal ? ` ${ordinal}` : ''}` : reverseOrderStatusText(order)}
+          {manualLeg ? `手动对冲${ordinal ? ` ${ordinal}` : ''}` : `${protection ? protection.protectionLabel+' · ' : ''}${reverseOrderStatusText(order)}`}
         </span>
         <span>{fmtReverseOrderChipTime(order.createdAt)}</span>
         <span>@ {fmtReverseOrderChipPrice(order.price)}</span>
@@ -3135,7 +3148,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                     </button>
                   )}
                 </div>
-                {showReverseOrderManager && showOrderInfo && (visibleReverseHedgeOrders.length > 0 || visibleManualHedgeShortLegs.length > 0) && (
+                {showReverseOrderManager && showOrderInfo && (visibleReverseHedgeOrders.length > 0 || visibleManualHedgeShortLegs.length > 0 || visibleMonitorProtectionOrders.length > 0) && (
                   <div data-viewport-fit-exclude className="flex flex-wrap gap-1.5 pl-5">
                     {reverseOrderManagerItems.map(({ order, manualLeg }) => renderReverseOrderChip(order, false, manualLeg))}
                   </div>

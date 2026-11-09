@@ -27,7 +27,7 @@ export function saveQualityPlanTemplate(study: FishQualityStudy, plan: QualityGr
   const trimmed = name.trim();
   if (!trimmed) throw new Error('请填写模板名称');
   // 模板存的是这套方案实际冻结的版本；方案本身的版本已与代码不符时不能存（否则会把新版本当成旧版本存档）
-  if (plan.frozenVersions && planVersionChanges(plan).length) throw new Error('这套方案冻结的算法版本与当前代码不同，不能存为模板；请先在条件设置里重新保存');
+  if (plan.frozenVersions && planVersionChanges(plan).length) throw new Error('这套方案冻结的算法版本与当前代码不同，不能存为模板；请保留原方案并核查版本差异，不要重新保存来覆盖原版本');
   // 没冻结过、又是 11-01 之前形态的方案（10-31 及更早的战役）：按旧引擎冻结，不能按当前代码记版本
   const frozen = plan.frozenVersions ? plan : !plan.engine && hasPreBoxAdditionShape(plan) ? withLegacyEngine(plan) : freezeQualityPlan(plan);
   const template: QualityPlanTemplate = { id: newTemplateId(), name: trimmed, savedAt: now, updatedAt: now, plan: structuredClone(frozen),...(scope?{entryHours:scope.entryHours}:{}) };

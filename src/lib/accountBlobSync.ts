@@ -37,6 +37,8 @@ export interface AccountBlobAdapter<T = unknown> {
   name: string;
   /** 读本机当前那份；没有返回 undefined。 */
   read(owner: string): Promise<T | undefined>;
+  /** Encode the durable copy in a worker without returning the full object to the page. */
+  prepareStored?(owner: string, knownHash?: string): Promise<PreparedAccountBlob | undefined>;
   /** 用云端那份覆盖本机；undefined = 清空本机。须排进该存储自己的写队列。 */
   write(owner: string, value: T | undefined): Promise<void>;
   /** Libraries opt into merging remote history/deletion marks while retaining local settings. */
@@ -288,12 +290,12 @@ function runPush(adapter: AccountBlobAdapter<any>, owner: string, settled = fals
 async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: boolean): Promise<boolean> {
   if (!(await signedInAs(owner))) return false;
   const meta = await readMeta(adapter.name, owner);
-  let value = await adapter.read(owner);
+  let value = adapter.prepareStored ? undefined : await adapter.read(owner);
   let savedAt = meta?.savedAt || Date.now();
   const head = await fetchHead(adapter.name, owner);
   if(head&&head.rev!==meta?.rev&&adapter.mergeRemote&&(meta?.rev||settled)){
     const cloud=await fetchValue(adapter.name,owner,head);if(!cloud.ok)return false;
-    await adapter.mergeRemote(owner,cloud.value,{preferRemote:head.savedAt>=savedAt});value=await adapter.read(owner);
+    await adapter.mergeRemote(owner,cloud.value,{preferRemote:head.savedAt>=savedAt});value=adapter.prepareStored?undefined:await adapter.read(owner);
     savedAt=Math.max(savedAt,head.savedAt+1);
   }
   if (head) {
@@ -301,11 +303,13 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
     if (head.rev !== meta?.rev && head.savedAt > savedAt) return false;
     // 从没同步过的本机数据（旧数据、新设备上的空白页）去留只由打开时的对账决定，后台上传不能直接盖云端。
     if (!meta?.rev && !settled) return false;
-  } else if (value === undefined) {
+  }
+  const knownHash=head?.rev===meta?.rev?meta?.hash:undefined;
+  const prepared=adapter.prepareStored?await adapter.prepareStored(owner,knownHash):value===undefined?undefined:await prepareAccountBlob(value,knownHash);
+  if (!head && !prepared) {
     await writeMeta(adapter.name, owner, { savedAt, syncedAt: savedAt, parts: 0 });
     return true;
   }
-  const prepared=value===undefined?undefined:await prepareAccountBlob(value,head?.rev===meta?.rev?meta?.hash:undefined);
   const hash=prepared?.hash??'deleted';
   if (head && meta?.rev && head.rev === meta.rev && meta.hash === hash) {
     // 云端仍是上次那一版、内容也一样：只记一笔已同步。
@@ -316,7 +320,7 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   }
   const rev = newRev();
   let parts = 0, nextHead: Head;
-  if (value === undefined) {
+  if (!prepared) {
     nextHead = { v: 1, rev, parts: 0, savedAt, enc: 'json', bytes: 0, deleted: true };
   } else {
     const encoded=prepared?.encoded;

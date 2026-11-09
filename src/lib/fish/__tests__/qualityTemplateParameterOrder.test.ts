@@ -10,6 +10,9 @@ import type {FishReconstructionLoader} from '../reconstruction';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 import {BUILTIN_FEATURES} from '@/lib/deepDig/features';
 import {buildFusionTemplatePlan} from '../qualityBuiltinTemplates';
+import {emptyPreEntryThreeStage} from '../preEntryThreeStage';
+import type {QualityAdditionEntryVeto} from '../qualityAdditionVeto';
+import {evaluateAdditionVetoes} from '../qualityAdditionVeto';
 const jsonb=<T,>(v:T):T=>{
  if(Array.isArray(v))return v.map(item=>jsonb(item)) as T;
  if(v&&typeof v==='object'){
@@ -86,4 +89,57 @@ it('produces the same native guard stop and fill after the cloud roundtrip',asyn
   return {hit,states:reader.states()};
  };
  expect(await replay(cloud)).toEqual(await replay(original));
+});
+
+const vetoFixture=(history=false):QualityAdditionEntryVeto[]=>[
+ {kind:'lower-wick',enabled:true,...(history?{historyHours:6}:{}),lookbackBars:100,atr:1,ratio:40},
+ {kind:'fast-drop',enabled:true,...(history?{historyHours:6}:{}),windows:[{minutes:1,pct:3},{minutes:5,pct:4}]},
+ {kind:'double-drop',enabled:true,...(history?{historyHours:6}:{}),atr:2.5,pct:4,join:'and'},
+];
+const entryFixture=(history=false)=>freezeQualityPlan({id:'p',label:'序列化兼容样本',snapshot:{},preEntryThreeStage:{...emptyPreEntryThreeStage(),additionVetoes:vetoFixture(history)}} as QualityGroup);
+it('reproduces the reported lower-wick fingerprints exactly, without altering the saved manifest',()=>{
+ const original=entryFixture(),cloud=jsonb(original),before=JSON.stringify(cloud);
+ expect(original.frozenVersions!.find(v=>v.key==='lower-wick-veto')?.version).toBe('addition-lower-wick-v1 · 参数 #13ebqeu14l5i7k');
+ expect(qualityPlanVersions(cloud).find(v=>v.key==='lower-wick-veto')?.version).toBe('addition-lower-wick-v1 · 参数 #1t9raau1jelkvk');
+ expect(planVersionChanges(cloud)).toEqual([]);
+ const copy=qualityPlanFromTemplate({id:'t',name:cloud.label,plan:cloud,savedAt:1,updatedAt:1},'copy');
+ expect(copy).toEqual({...cloud,id:'copy'});expect(JSON.stringify(cloud)).toBe(before);
+});
+it('accepts both historical editor and JSONB encodings of the full history window including nested drop windows',()=>{
+ const original=entryFixture(true),cloud=jsonb(original),before=JSON.stringify(cloud);
+ expect(planVersionChanges(cloud)).toEqual([]);
+ const cloudFrozen=freezeQualityPlan(cloud);
+ expect(planVersionChanges({...original,frozenVersions:cloudFrozen.frozenVersions})).toEqual([]);
+ expect(JSON.stringify(cloud)).toBe(before);
+});
+it.each([
+ ['ATR',(v:QualityAdditionEntryVeto[])=>{v[0].atr=2;}],
+ ['ratio',(v:QualityAdditionEntryVeto[])=>{v[0].ratio=50;}],
+ ['lookback',(v:QualityAdditionEntryVeto[])=>{v[0].lookbackBars=99;}],
+ ['history range',(v:QualityAdditionEntryVeto[])=>{v[0].historyHours=12;}],
+ ['disabled',(v:QualityAdditionEntryVeto[])=>{v[0].enabled=false;}],
+ ['nested drop threshold',(v:QualityAdditionEntryVeto[])=>{v[1].windows![0].pct=5;}],
+ ['array order',(v:QualityAdditionEntryVeto[])=>{v.reverse();}],
+ ['new unknown field',(v:QualityAdditionEntryVeto[])=>{Object.assign(v[0],{futureRule:true});}],
+] as const)('continues to reject actual %s changes after a JSONB reload',(_name,change)=>{
+ const cloud=jsonb(entryFixture(true));change(cloud.preEntryThreeStage!.additionVetoes);
+ expect(planVersionChanges(cloud).length).toBeGreaterThan(0);
+ expect(()=>qualityPlanFromTemplate({id:'t',name:'原模板',plan:cloud,savedAt:1,updatedAt:1},'copy')).toThrow('算法版本');
+});
+it('does not accept a changed engine tag merely because its parameters have a known order',()=>{
+ const cloud=jsonb(entryFixture(true));cloud.frozenVersions=cloud.frozenVersions!.map(v=>v.key==='lower-wick-veto'?{...v,version:v.version.replace('-v1','-v0')}:v);
+ expect(planVersionChanges(cloud).map(v=>v.key)).toEqual(['lower-wick-veto']);
+});
+it('restores double-drop manifests in holding rounds and routed branches while preserving parameter guards',()=>{
+ const routed=buildFusionTemplatePlan(BUILTIN_FEATURES,'router','原分流模板');
+ for(const branch of ['structure','attack'] as const)routed.router![branch].addition={...routed.router![branch].addition!,enabled:true,entryVetoes:vetoFixture(true)};
+ const original=freezeQualityPlan(routed),cloud=jsonb(original),before=JSON.stringify(cloud);
+ expect(planVersionChanges(cloud)).toEqual([]);expect(JSON.stringify(cloud)).toBe(before);
+ cloud.router!.structure.addition!.entryVetoes![2].pct=5;
+ expect(planVersionChanges(cloud).some(c=>c.key==='structure:addition-support-quality')).toBe(true);
+});
+it('keeps the exact historical lower-wick trigger and readings under both object orders',()=>{
+ const bars=[{openTime:T,open:100,high:101,low:96,close:100}],atr=[3],original=vetoFixture().slice(0,1);
+ const result=evaluateAdditionVetoes(original,bars,atr,T);
+ expect(result?.kind).toBe('lower-wick');expect(evaluateAdditionVetoes(jsonb(original),bars,atr,T)).toEqual(result);
 });

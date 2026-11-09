@@ -32,12 +32,12 @@ it('opens every outcome, including rejected, waiting and missing-data records, w
 it('hides the whole progress strip when paused or complete, while preserving results for the menu dialog',()=>{
  const state=monitor();state.running=false;state.progress=null;state.library.rounds[0].state='paused';const before=structuredClone(state.library),view=render(<FishPreEntryProgress monitor={state}/>);
  expect(screen.queryByTestId('pre-entry-progress')).not.toBeInTheDocument();expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();expect(screen.queryByText('4 / 7')).not.toBeInTheDocument();
- expect(screen.getByRole('button',{name:'查看本轮命中结果'})).toHaveTextContent('命中 1');
+ expect(screen.queryByTestId('pre-entry-hit-count')).not.toBeInTheDocument();
  view.rerender(<FishPreEntryProgress monitor={state} open/>);
  expect(screen.getByRole('dialog')).toHaveTextContent('已暂停');expect(screen.getAllByTestId('pre-entry-current-result-row')).toHaveLength(7);expect(state.library).toEqual(before);
  view.rerender(<FishPreEntryProgress monitor={{...state,library:{...state.library,rounds:[{...state.library.rounds[0],state:'complete'}]}}} open={false}/>);
  expect(screen.queryByTestId('pre-entry-progress')).not.toBeInTheDocument();expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
- expect(screen.getByTestId('pre-entry-hit-count')).toHaveTextContent('命中 1');
+ expect(screen.queryByTestId('pre-entry-hit-count')).not.toBeInTheDocument();
 });
 it('follows the active older round when resumed rather than presenting newer archived outcomes',()=>{
  const state=monitor();state.library.rounds.push({id:'newer',state:'complete',startedAt:T+1,updatedAt:T+1,filters:[],hours:1});render(<FishPreEntryProgress monitor={state}/>);

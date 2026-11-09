@@ -9,6 +9,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CampaignCounterfactual } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
+import { getCampaignFullData } from '@/lib/journalApi';
+import { qualityMirrorCampaignFixture } from '@/test/fixtures/qualityMirrorCampaign';
+import type { TimeBoundPriceLine } from '@/components/journal/ReplayCandleChart';
 
 const { listCounterfactualsMock } = vi.hoisted(() => ({
   listCounterfactualsMock: vi.fn(async (): Promise<CampaignCounterfactual[]> => []),
@@ -58,7 +61,7 @@ vi.mock('@/hooks/useReplayKlines', () => ({
   }),
 }));
 vi.mock('@/lib/emotionDiaryApi', () => ({ getDecisionEmotionDiaryByDate: vi.fn(async () => null) }));
-vi.mock('@/components/journal/ReplayKlineChart', () => ({ ReplayKlineChart: () => <div data-testid="campaign-chart" /> }));
+vi.mock('@/components/journal/ReplayKlineChart', () => ({ ReplayKlineChart: ({timeBoundPriceLines}:{timeBoundPriceLines?:TimeBoundPriceLine[]}) => <div data-testid="campaign-chart" data-lines={JSON.stringify(timeBoundPriceLines??[])} /> }));
 vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
 // 反事实编辑器只留一个探针：读它收到的盘面高度
 vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({
@@ -171,6 +174,19 @@ afterEach(() => {
 
 // 整页渲染较重：机器负载高时放宽超时，避免误报
 const LOAD = { timeout: 10_000 };
+
+it('shows, selects, hides and restores monitoring K protection using the shared order layer',async()=>{
+  const data=qualityMirrorCampaignFixture();vi.mocked(getCampaignFullData).mockResolvedValueOnce(data);
+  renderPage();await screen.findByTestId('campaign-chart',{},LOAD);
+  const protection=()=> (JSON.parse(screen.getByTestId('campaign-chart').getAttribute('data-lines')!) as TimeBoundPriceLine[]).filter(l=>l.orderIds?.some(id=>id.includes(':protection:')));
+  await waitFor(()=>expect(protection()).toHaveLength(1),LOAD);expect(protection()[0]).toMatchObject({price:107,color:'#F0B90B',dashed:true,title:'委托空'});
+  fireEvent.click(screen.getByRole('button',{name:'隐藏委托'}));expect(protection()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button',{name:'显示委托'}));expect(protection()).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button',{name:'管理'}));fireEvent.click(screen.getByTestId('reverse-order-chip'));expect(protection()[0].selected).toBe(true);
+  fireEvent.click(screen.getByRole('button',{name:'从盘面隐藏这条委托空单'}));expect(protection()).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button',{name:'恢复 1'}));expect(protection()).toHaveLength(1);
+  expect(data.reverseHedgeOrders).toEqual([]);
+},15_000);
 
 describe('战役详情页 · K 线盘面按可视区撑满', { timeout: 30_000 }, () => {
   it('盘面高度 = 可视区 − 页眉 − 上下空隙 − 工具栏 − 图例；窗口变高后主图跟着变高', async () => {

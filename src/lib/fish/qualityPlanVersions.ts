@@ -5,8 +5,9 @@ import { routerFingerprint, routerVersionSummary, validateQualityRouter, equival
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
 import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION } from './qualityAdditionVeto';
-import { compatibleHoldingParameterOrder } from './qualityPlanParameterCompatibility';
-import { freezePreEntryThreeStage, threeStageFingerprint } from './preEntryThreeStage';
+import { compatibleHoldingParameterOrder, compatibleAdditionParameterOrder } from './qualityPlanParameterCompatibility';
+import { freezePreEntryThreeStage, threeStageFingerprint, stableEntryJson } from './preEntryThreeStage';
+import { ENTRY_STALL_TURN_VERSION } from './preEntryStallTurn';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -63,6 +64,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   // 【用户要求】2026-11-03 旧引擎方案：整套交给冻结的 10-31 引擎，版本＝引擎＋全部参数指纹
   if (isLegacyQualityPlan(plan)) return legacyPlanVersions(plan);
   const out: PlanVersionEntry[] = [...initialization];
+  const stallTurn=plan.preEntryThreeStage?.stallTurn;
+  if(stallTurn?.enabled)out.push({key:'entry-stall-turn',part:'动态筛选·一票否决',name:'上涨后滞涨转弱／猛烈回调未创新高',version:ENTRY_STALL_TURN_VERSION+' · 参数 #'+shortFishHash(stableEntryJson(stallTurn)),summary:'上涨、滞涨、转弱依次成立时锁定，连续收盘递升且收复局部收盘高点才解除；可同时启用猛烈回调锁定，须分钟收盘严格突破冻结前高才解除。两者任一成立即否决，仅用已收盘分钟，独立历史重建。研究初值，不改变旧模板。'});
   const historicalVetoes=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.historyHours!=null);
   if(historicalVetoes.length)out.push({key:'veto-history',part:'一票否决',name:'独立历史扫描范围',version:VETO_HISTORY_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(historicalVetoes)),summary:'按每次判断时点向前回看，包含入选和持仓之前的行情；影线与插针扫描整个历史窗口，高震荡检查窗口内观测，急跌检查窗口内分钟线；未收复高点锁定不因重筛或窗口滑动清除。旧范围另行保留。'});
   const lowerWicks=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.kind==='lower-wick');
@@ -167,13 +170,13 @@ export function planVersionChanges(plan: QualityGroup): PlanVersionChange[] {
   const current = body(plan);
   return comparePlanVersions(plan.frozenVersions, qualityPlanVersions(current)).filter(change => {
     const path = change.key.split(':'), key = path.pop();
-    if (key !== 'hard-stop-params' || !change.from || !change.to) return true;
+    if (!key || !['hard-stop-params','lower-wick-veto','veto-history','addition-support-quality'].includes(key) || !change.from || !change.to) return true;
     let branch = current;
     for (const part of path) {
       if (!branch.router || (part !== 'structure' && part !== 'attack')) return true;
       branch = branch.router[part];
     }
-    return !compatibleHoldingParameterOrder(branch.holdingVetoes, change.from);
+    return !(key === 'hard-stop-params' ? compatibleHoldingParameterOrder(branch.holdingVetoes, change.from) : compatibleAdditionParameterOrder(branch, key, change.from));
   });
 }
 /**

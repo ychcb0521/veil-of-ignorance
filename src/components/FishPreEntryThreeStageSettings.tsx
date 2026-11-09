@@ -15,6 +15,7 @@ import { FishQualityBoxStopEditor } from './FishQualityBoxStopEditor';
 import { FishQualityInfo } from './FishQualityModule';
 import { PlanVersionList } from './FishQualityPlanVersions';
 import { planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { defaultEntryStallTurn, type EntryStallTurn } from '@/lib/fish/preEntryStallTurn';
 
 const field='h-7 min-w-0 rounded border border-border/60 bg-muted/40 px-2 text-[11px]';
 const button='rounded border border-border/60 px-2 py-1 text-[11px] disabled:opacity-40';
@@ -42,6 +43,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
   const retry=c?.version===PRE_ENTRY_RETRY_VERSION;
   const sources=state.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
+  const stallField=(key:Exclude<keyof EntryStallTurn,'version'|'enabled'|'pullback'>,label:string,min:number,max:number,step:number|'any')=><label className="inline-flex items-center gap-1">{label}<input aria-label={'滞涨转弱 '+label} className={field+' w-20'} type="number" min={min} max={max} step={step} disabled={!c?.stallTurn?.enabled} value={Number.isFinite(c?.stallTurn?.[key])?c!.stallTurn![key]:''} onChange={e=>patch({stallTurn:{...c!.stallTurn!,[key]:e.target.value.trim()?Number(e.target.value):NaN}})}/></label>;
   const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
@@ -146,6 +148,23 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
           {c.longDrawdown?.enabled&&<div className="flex flex-wrap items-center gap-2"><label>回看时长<input aria-label="长周期回撤回看时长（小时）" className={field+' ml-1 w-20'} type="number" min="0.016666666666666666" max="8784" step="any" value={Number.isFinite(c.longDrawdown.hours)?c.longDrawdown.hours:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,hours:e.target.value.trim()?Number(e.target.value):NaN}})}/>小时</label><select aria-label="长周期回撤口径" className={field} value={c.longDrawdown.mode} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,mode:e.target.value as 'current'|'maximum'}})}><option value="current">当前距窗口高点的回撤</option><option value="maximum">窗口内最大回撤</option></select><label>达到<input aria-label="长周期回撤阈值（%）" className={field+' mx-1 w-20'} type="number" min="0" max="100" step="any" placeholder="填写阈值" value={Number.isFinite(c.longDrawdown.pct)?c.longDrawdown.pct:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,pct:e.target.value.trim()?Number(e.target.value):NaN}})}/>% 即否决</label></div>}
           <p className="text-muted-foreground">默认关闭。检查截至筛选时点的历史窗口，包含本次观察起点之前的行情，不随重筛清空。当前回撤＝（窗口最高价－当前收盘价）÷窗口最高价；最大回撤按窗口内先高后低计算。历史不足时等待，不补造数据。</p>
         </div>}
+        <section className="space-y-2 rounded border border-border/60 p-2 text-[11px]" aria-label="上涨后滞涨转弱否决设置">
+          <label className="flex items-center gap-2 font-medium"><input type="checkbox" aria-label="启用上涨后滞涨转弱否决" disabled={c.version==='pre-entry-three-stage-v5'} checked={!!c.stallTurn?.enabled} onChange={e=>patch({stallTurn:{...(c.stallTurn??defaultEntryStallTurn()),enabled:e.target.checked}})}/>一票否决：上涨后滞涨转弱／猛烈回调未创新高</label>
+          <p className="text-muted-foreground">前段上涨后，眼前涨不动并开始转弱时暂不入选；也可同时排除猛烈回调后尚未突破前高的反弹。两种情况任一触发即否决，单纯横盘不会触发。默认关闭，参数为可调研究初值。</p>
+          {c.version==='pre-entry-three-stage-v5'&&<p className="text-muted-foreground">旧 v5 方案保持原样；使用上方“配置新事件准入（另存副本）”后可启用。</p>}
+          {c.stallTurn&&<div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">{stallField('historyHours','独立历史回看（小时）',1/12,72,'any')}<span className="text-muted-foreground">包含筛选起点之前；重筛不清除锁定。</span></div>
+            <div className="flex flex-wrap items-center gap-2"><span>① 此前上涨</span>{stallField('riseMinutes','上涨观察（分钟）',5,1440,1)}{stallField('risePct','前段涨幅至少（%）',0,100,.1)}</div>
+            <div className="flex flex-wrap items-center gap-2"><span>② 涨不动</span>{stallField('stallMinutes','滞涨观察（分钟）',2,240,1)}{stallField('maxProgressPct','推进速度不超过前段（%）',0,99,1)}</div>
+            <div className="flex flex-wrap items-center gap-2"><span>③ 开始转弱</span>{stallField('turnMinutes','转弱确认（分钟）',2,30,1)}<span className="text-muted-foreground">平均收盘低于此前等长区间，且末分钟收盘跌破此前区间最低价。</span></div>
+            <p className="text-muted-foreground">按“上涨段 → 滞涨段 → 转弱段”连续、不重叠地检查已收盘 1 分钟行情。推进速度＝该段开盘至收盘涨幅÷分钟数。触发后，须连续 {c.stallTurn.turnMinutes} 分钟收盘递升，并收复触发前等长区间的最高收盘，才解除否决。历史不足时等待，排除过程保留读数与原因。</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1"><input type="checkbox" aria-label="同时排除猛烈回调未创新高" disabled={!c.stallTurn.enabled} checked={!!c.stallTurn.pullback?.enabled} onChange={e=>patch({stallTurn:{...c.stallTurn!,pullback:{...(c.stallTurn!.pullback??{pct:3}),enabled:e.target.checked}}})}/>同时排除猛烈回调未创新高</label>
+              {c.stallTurn.pullback&&<label className="inline-flex items-center gap-1">回调门槛（%）<input aria-label="猛烈回调门槛（%）" className={field+' w-20'} type="number" min={0} max={100} step="any" disabled={!c.stallTurn.enabled||!c.stallTurn.pullback.enabled} value={Number.isFinite(c.stallTurn.pullback.pct)?c.stallTurn.pullback.pct:''} onChange={e=>patch({stallTurn:{...c.stallTurn!,pullback:{...c.stallTurn!.pullback!,pct:e.target.value.trim()?Number(e.target.value):NaN}}})}/></label>}
+            </div>
+            <p className="text-muted-foreground">在独立历史范围内，前高至已收盘价格回调达到门槛，即冻结该前高。之后反弹仍受否决，直到分钟收盘严格高于冻结前高；影线突破、收盘持平、重筛和历史窗口滑过都不解除。初值 3% 可调整；两种锁定须各自解除后才可入选。</p>
+          </div>}
+        </section>
         <p className="text-[11px] font-medium">加仓共用一票否决（任一成立即排除）</p>
         <FishQualityEntryVetoEditor entry allowDoubleDrop draft={vetoDrafts[active.id]??vetoDraftOf(c.additionVetoes)} setDraft={draft=>setVetoDrafts({...vetoDrafts,[active.id]:draft})}/>
         {c.sellRules.map((rule,i)=>{

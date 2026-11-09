@@ -62,6 +62,16 @@ async function device(initial?: Value) {
 }
 const head = () => cloud.state.rows.get('u1\u0000idb:test-blob')?.value as { rev: string; parts: number; savedAt: number } | undefined;
 
+it('backs up directly encoded durable snapshots without reading the full object on the page',async()=>{
+ const a=await device({items:[1]});await a.reopen();const read=vi.spyOn(a.adapter,'read');
+ const {prepareAccountBlobEncoding}=await import('../accountBlobCodec');
+ const prepareStored=vi.fn(async(_owner:string,knownHash?:string)=>a.local.value?prepareAccountBlobEncoding(a.local.value,knownHash):undefined);
+ (a.adapter as import('../accountBlobSync').AccountBlobAdapter<Value>).prepareStored=prepareStored;
+ await a.save({items:[1,2,3]});expect(read).not.toHaveBeenCalled();expect(prepareStored).toHaveBeenCalledWith('u1',expect.any(String));
+ const uploads=cloud.state.upserts.length;await a.save({items:[1,2,3]});expect(cloud.state.upserts).toHaveLength(uploads);
+ const b=await device();await b.reopen();expect(b.local.value).toEqual({items:[1,2,3]});
+});
+
 beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.state.failNext = false; cloud.state.signedOut = false; cloud.state.upserts = []; cloud.state.maxReadKeys = Infinity; });
 afterEach(() => { vi.useRealTimers(); });
 

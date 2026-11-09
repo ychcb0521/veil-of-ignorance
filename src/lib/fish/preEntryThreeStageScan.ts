@@ -1,5 +1,6 @@
 import {recordEntryEvidence,recordEntryStop,recordEntryRestart} from './preEntryExclusionProcess';
 import {createEntryLongDrawdownReader} from './preEntryLongDrawdown';
+import {createEntryStallTurnReader} from './preEntryStallTurn';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -115,6 +116,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const guardReader:(at:number)=>Promise<{event?:EntryGuardEvent;line?:number;regime?:string}>=!retry||config.admission!.guardEnabled?createPreEntryGuardReader({config,row,start:record.startTime,load,signal}):async()=>({});
       const confirmations=new Map<string,{count:number;lastAt?:number}>();
       const longDrawdown=retry&&config.longDrawdown?.enabled?createEntryLongDrawdownReader({condition:config.longDrawdown,row,load,signal,availableStart:start}):undefined;
+      // Independent history and recovery lock survive observation retries.
+      const stallTurn=config.stallTurn?.enabled?createEntryStallTurnReader({condition:config.stallTurn,row,load,signal,availableStart:start}):undefined;
       let attempt=1,observationStart=record.startTime;
       const resumeAt=original.cursor;
       let lastPaint=0,matched=false;
@@ -146,7 +149,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           // Always advance ALL histories before applying the ordered admission decision.
           const firstGateResult=await firstGate(at,minute),secondGateResult=await secondGate(at,minute),guard=await guardReader(at);
           const longResult=await longDrawdown?.(at,minute);
-          const observations=[...readers.map(r=>({...r.read(at,minute),label:r.condition.label})),...(longResult?.reading?[longResult.reading]:[])],map=new Map(observations.map(r=>[r.id,r]));
+          const stallResult=await stallTurn?.(at,minute);
+          const observations=[...readers.map(r=>({...r.read(at,minute),label:r.condition.label})),...(longResult?.reading?[longResult.reading]:[]),...(stallResult?.readings??[])],map=new Map(observations.map(r=>[r.id,r]));
           const notMet=required.find(f=>map.get(f.id)?.met===false),unknown=required.find(f=>map.get(f.id)?.met==null);
           let detectorBlocked:string|undefined,detectorPending:string|undefined;
           for(const group of detectorGroups){
@@ -173,7 +177,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           // v6：加仓共用否决属于排除段，与卖出／硬终止并列。
           const gateBlocked=firstGateResult.blocked;
           const baseExclusion:EntryStageResult=v6&&gateBlocked?{status:'blocked',reason:gateBlocked}:second.status==='blocked'?second:second.status==='pending'||firstGateResult.pending?{status:'pending',reason:second.status==='pending'?second.reason:firstGateResult.pending}:{status:'pass'};
-          const exclusion:EntryStageResult=longResult?.blocked?{status:'blocked',reason:longResult.blocked}:baseExclusion.status==='blocked'?baseExclusion:longResult?.pending?{status:'pending',reason:longResult.pending}:baseExclusion;
+          const exclusion:EntryStageResult=stallResult?.blocked?{status:'blocked',reason:stallResult.blocked}:longResult?.blocked?{status:'blocked',reason:longResult.blocked}:baseExclusion.status==='blocked'?baseExclusion:stallResult?.pending?{status:'pending',reason:stallResult.pending}:longResult?.pending?{status:'pending',reason:longResult.pending}:baseExclusion;
           const metAdmission=retry?[...(guard.event?['原生防守线新事件']:[]),...admissionAlgorithms.filter(c=>map.get(c.id)?.met===true).map(c=>c.label)]:[];
           const waiting=isTuringCupSymbol(row.symbol)&&completeZeroTradeBar(minute)||observations.some(r=>r.zeroTrade&&(!admissionIds.has(r.id)||!metAdmission.length));
           const evidence={...(retry?decideThreeStageV7(at,zero,exclusion,guard,metAdmission,waiting):v6?decideThreeStageV6(at,zero,exclusion,guard,waiting):decideThreeStage(at,first,second,guard,waiting)),readings:observations,...(retry?{attempt:{index:attempt,startedAt:observationStart}}:{})};

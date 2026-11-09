@@ -202,6 +202,12 @@ export class FishScanner {
     const publish = () => options.onProgress({...progress,...(waitingUntil?{waitingUntil}:{})});
     const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal, until=>{waitingUntil=until;publish();});
     const activeOptions={...options,onProgress:(next:typeof progress)=>{progress=next;publish();}};
+    if(options.task==='pre-entry'){
+      if(!options.preEntry)throw Error('缺少买前监测任务');
+      const {collectPreEntryInWorker}=await import('./fish/preEntryWorkerClient');
+      await collectPreEntryInWorker(options.preEntry,load,now,options.signal,activeOptions.onProgress,{start:marketStart,end:marketEnd});
+      return;
+    }
     await collectFishQuality(marketEnd ? { ...activeOptions, marketEnd, marketStart } : activeOptions, load, now);
   }
 

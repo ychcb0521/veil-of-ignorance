@@ -2,6 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from '../preEntryMonitor';
 import { readPreEntrySnapshot, writePreEntrySnapshot } from '../preEntryPersistence';
 import { persistPreEntrySnapshot } from '../preEntryPersistenceClient';
+import { encodeStoredPreEntry } from '../preEntryBackupEncoding';
+import { prepareStoredPreEntry } from '../preEntryBackup';
+import { prepareAccountBlobEncoding } from '@/lib/accountBlobCodec';
 
 const disk = new Map<string, unknown>();
 let fail = false;
@@ -40,4 +43,14 @@ it('writes in a dedicated worker and returns only an acknowledgement, releasing 
 it('reports worker failures without retrying a large write on the UI thread',async()=>{
  const stopped=vi.fn();class Writer{onerror:()=>void;terminate(){stopped();}postMessage(){queueMicrotask(()=>this.onerror());}}
  vi.stubGlobal('Worker',Writer);await expect(persistPreEntrySnapshot('alice',fixture())).rejects.toThrow('后台保存失败');expect(stopped).toHaveBeenCalledOnce();expect(disk.size).toBe(0);
+});
+it('encodes the durable library in a worker using only its owner key and the unchanged wire fingerprint',async()=>{
+ const value=fixture();await writePreEntrySnapshot('alice',value);
+ const expected=await prepareAccountBlobEncoding(await readPreEntrySnapshot('alice')),posted:unknown[]=[],stopped=vi.fn();
+ class Encoder{onmessage:(event:unknown)=>void;terminate=stopped;postMessage(body:{owner:string;knownHash?:string}){posted.push(body);queueMicrotask(async()=>this.onmessage({data:{ok:true,result:await encodeStoredPreEntry(body.owner,body.knownHash)}}));}}
+ vi.stubGlobal('Worker',Encoder);
+ expect(await prepareStoredPreEntry('alice')).toEqual(expected);
+ expect(await prepareStoredPreEntry('alice',expected.hash)).toEqual({hash:expected.hash});
+ expect(await prepareStoredPreEntry('bob')).toBeUndefined();
+ expect(posted).toEqual([{owner:'alice',knownHash:undefined},{owner:'alice',knownHash:expected.hash},{owner:'bob',knownHash:undefined}]);expect(stopped).toHaveBeenCalledTimes(3);expect(await readPreEntrySnapshot('alice')).toEqual(value);
 });
