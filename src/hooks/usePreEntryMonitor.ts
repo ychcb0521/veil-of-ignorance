@@ -1,5 +1,6 @@
+import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
@@ -18,6 +19,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const [ready, setReady] = useState(false), [running, setRunning] = useState(false);
   const [error, setError] = useState(''), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [reload, setReload] = useState(0);
+  const persistence = useMemo(() => createPreEntryCheckpoint(value => savePreEntryLibrary(owner, value)), [owner]);
   const current = useRef(library), runner = useRef(run), controller = useRef<AbortController | null>(null);
   const epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout>>();
   const execution = useRef<Promise<void> | null>(null);
@@ -51,14 +53,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         records: value.records.map(r => r.status === 'scanning' ? { ...r, status: 'paused' as const, updatedAt: at } : r) };
       commit(recovered); loaded = true; readyRef.current = true; setReady(true);
     }).catch(reason => { if (epoch.current === generation) setError(reason instanceof Error ? reason.message : '读取买前监测库失败'); });
-    const flush = () => { if (loaded) void savePreEntryLibrary(owner, current.current).catch(() => undefined); };
+    const flush = () => { if (loaded) void persistence.save(current.current).catch(() => undefined); };
     window.addEventListener('pagehide', flush);
     return () => {
       controller.current?.abort(); controller.current = null; flush(); epoch.current = generation + 1;
       if (timer.current) { clearTimeout(timer.current); timer.current = undefined; }
       window.removeEventListener('pagehide', flush);
     };
-  }, [owner, enabled, reload, commit]);
+  }, [owner, enabled, reload, commit, persistence]);
 
   const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy) => {
     if (!readyRef.current || controller.current||tableClearLock.current) return;
@@ -68,8 +70,23 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     let lastRecordPaint = 0, lastProgressPaint = 0;
     const live = () => epoch.current === generation;
     const save = async () => {
-      try { await savePreEntryLibrary(owner, current.current); }
+      try { await persistence.save(current.current); }
       catch (reason) { if (live()) setError(reason instanceof Error ? reason.message : '保存失败，请保留页面并重试'); }
+    };
+    const scheduleSave = () => {
+      if (timer.current) return;
+      const handle = setTimeout(() => {
+        const snapshot = current.current;
+        if (!live()) { if (timer.current === handle) timer.current = undefined; return; }
+        // Keep the timer occupied until storage settles. Slow disks cannot
+        // accumulate a queue of copies; the next checkpoint uses the latest data.
+        void save().finally(() => {
+          if (timer.current !== handle) return;
+          timer.current = undefined;
+          if (live() && controller.current === aborter && current.current !== snapshot) scheduleSave();
+        });
+      }, 1500);
+      timer.current = handle;
     };
     const accept = (record: PreEntryRecord) => {
       if (!live()) return;
@@ -79,13 +96,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (record.status !== 'scanning' || performance.now() - lastRecordPaint >= 150) {
         lastRecordPaint = performance.now(); setLibrary(next);
       }
-      if (!timer.current) timer.current = setTimeout(() => { timer.current = undefined; if (live()) void save(); }, 400);
+      scheduleSave();
     };
     setRunning(true); setProgress(null); setError('');
     commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id ? { ...r, state: 'running', updatedAt: Date.now() } : r) });
     try {
       // Save the frozen batch before executing it. Storage failure must not create an unrecorded run.
-      await savePreEntryLibrary(owner, current.current);
+      await persistence.save(current.current);
       if (!live() || aborter.signal.aborted) return;
       await runner.current({ study, signal: aborter.signal, task: 'pre-entry',
         preEntry: { round, records: current.current.records.filter(r => r.roundId === round.id), onRecord: accept },
@@ -95,6 +112,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     } catch (reason) { if (live() && !aborter.signal.aborted) setError(reason instanceof Error ? reason.message : '买前监测失败'); }
     finally {
       if (live()) {
+        if (timer.current) { clearTimeout(timer.current); timer.current = undefined; }
         const records = current.current.records.filter(r => r.roundId === round.id);
         const pending = records.some(preEntryRecordPending);
         commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id
@@ -106,7 +124,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (execution.current === finished) execution.current = null;
       finish();
     }
-  }, [owner, commit]);
+  }, [commit, persistence]);
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
     if (!readyRef.current || controller.current||tableClearLock.current) return;
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
@@ -153,15 +171,15 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const removedPlans=current.current.settings?.plans.some(old=>!plans.some(p=>p.id===old.id));
     const next = changedVersion||removedPlans?archivePreEntrySettings(current.current,settings):{...current.current,settings};
     commit(next);
-    void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));
-  }, [commit,owner]);
+    void persistence.save(next).catch(reason=>setError(reason instanceof Error?reason.message:'保存买入方案失败'));
+  }, [commit,persistence]);
   const useSavedSettings=useCallback((id:string)=>{
     if(!readyRef.current)throw Error('入选库尚未恢复完成');
     const saved=current.current.settingsHistory?.find(s=>s.id===id);
     if(!saved)throw Error('未找到已存筛选方案集');
     const next=archivePreEntrySettings(current.current,{plans:structuredClone(saved.plans),hours:saved.hours,updatedAt:Date.now()});
-    commit(next);void savePreEntryLibrary(owner,next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
-  },[commit,owner]);
+    commit(next);void persistence.save(next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
+  },[commit,persistence]);
   const clearTableResults=useCallback(async()=>{
     if(!readyRef.current||tableClearLock.current)return false;
     const generation=epoch.current;tableClearLock.current=true;
@@ -169,18 +187,18 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     if(epoch.current!==generation)return false;
     const at=current.current.records.reduce((at,r)=>Math.max(at,r.updatedAt+1),Date.now());
     const next={...current.current,records:current.current.records.map(r=>({...r,tableClearedAt:at}))};
-    try{await savePreEntryLibrary(owner,next);if(epoch.current!==generation)return false;commit(mergePreEntryLibraries(current.current,next));setProgress(null);setError('');return true;}
+    try{await persistence.save(next);if(epoch.current!==generation)return false;commit(mergePreEntryLibraries(current.current,next));setProgress(null);setError('');return true;}
     catch(reason){if(epoch.current===generation)setError(reason instanceof Error?reason.message:'清除动态筛选结果未保存');return false;}
     finally{if(epoch.current===generation)tableClearLock.current=false;}
-  },[owner,commit]);
+  },[commit,persistence]);
   const importLibrary=useCallback(async(value:PreEntryLibrary)=>{
     if(!readyRef.current||controller.current)return false;
     const generation=epoch.current;
     // Imported process records are historical; no task is started or resumed.
     const historical={...value,settings:undefined,rounds:value.rounds.map(r=>r.state==='running'?{...r,state:'paused' as const}:r),records:value.records.map(r=>r.status==='scanning'?{...r,status:'paused' as const}:r)};
     const next={...mergePreEntryLibraries(current.current,historical),settings:current.current.settings};
-    try{await savePreEntryLibrary(owner,next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
-  },[owner,commit]);
+    try{await persistence.save(next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
+  },[commit,persistence]);
   return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

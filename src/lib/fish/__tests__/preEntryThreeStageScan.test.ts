@@ -262,3 +262,13 @@ it('retains the first admitted node if pause arrives just after publishing the m
  expect(r).toMatchObject({status:'matched',cursor:T+5*M,matchedAt:T+5*M});
  expect(r.exclusionProcess!.entries.at(-1)?.kind).toBe('matched');
 });
+
+it('yields during already-saved resume history so a queued pause can interrupt before the next chunk',async()=>{
+ const p=retryPlan();p.preEntryThreeStage!.required=[condition('始终等待',200)];
+ const old:PreEntryRecord={id:'r',roundId:'round',planId:p.id,sample,status:'paused',startTime:T,cursor:T+450*M,readings:[],updatedAt:T};
+ const aborter=new AbortController();let clock=0;
+ const timing=vi.spyOn(performance,'now').mockImplementation(()=>clock+=20);
+ const abort=setTimeout(()=>aborter.abort(),0);
+ try{const result=await run(p,{old,aborter,end:T+500*M,hours:10});expect(aborter.signal.aborted).toBe(true);expect(result.status).toBe('paused');expect(result.cursor).toBe(old.cursor);}
+ finally{clearTimeout(abort);timing.mockRestore();}
+});

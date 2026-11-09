@@ -262,3 +262,23 @@ it('runs the complete batch from queued through admission, timeout and data fail
  expect(storage.save.mock.calls.at(-1)?.[1]).toMatchObject({rounds:[{state:'complete',hours:48}]});
  for(const save of [storage.v1Save,storage.v2Save,storage.v3Save,storage.v4Save,storage.v5Save])expect(save).not.toHaveBeenCalled();
 });
+
+it('checkpoints only changed records and never queues repeated whole-library saves behind a slow disk',async()=>{
+ let task!:QualityRunOptions,finish!:()=>void,release!:()=>void;
+ const run=vi.fn(async(options:QualityRunOptions)=>{task=options;await new Promise<void>(resolve=>{finish=resolve;});});
+ const h=renderHook(()=>usePreEntryMonitor('slow-disk',true,run));await waitFor(()=>expect(h.result.current.ready).toBe(true));
+ let started!:Promise<void>;act(()=>{started=h.result.current.start(study(),48);});await waitFor(()=>expect(run).toHaveBeenCalledOnce());
+ const record=task.preEntry!.records[0];
+ storage.save.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ vi.useFakeTimers();
+ try{
+  act(()=>task.preEntry!.onRecord({...record,status:'scanning',cursor:t+60000,updatedAt:t+1}));
+  await act(()=>vi.advanceTimersByTimeAsync(1500));expect(storage.save).toHaveBeenCalledTimes(2);
+  expect(storage.save.mock.calls[1][1].rounds).toEqual([]);expect(storage.save.mock.calls[1][1].records).toHaveLength(1);
+  for(let i=2;i<=12;i++){act(()=>task.preEntry!.onRecord({...record,status:'scanning',cursor:t+i*60000,updatedAt:t+i}));await act(()=>vi.advanceTimersByTimeAsync(1500));}
+  expect(storage.save).toHaveBeenCalledTimes(2);
+  act(()=>{finish();});await act(async()=>{release();await started;});
+  const latest=storage.save.mock.calls.at(-1)![1];expect(latest.records[0].cursor).toBe(t+12*60000);expect(latest.rounds[0].state).toBe('paused');
+  expect(h.result.current.running).toBe(false);
+ }finally{vi.useRealTimers();h.unmount();}
+});

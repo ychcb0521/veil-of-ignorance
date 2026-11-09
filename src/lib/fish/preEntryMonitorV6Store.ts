@@ -1,48 +1,20 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
-import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary } from './preEntryMonitor';
+import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
-// Isolate entry exclusions from v1/v2/v3/v4/v5 pages; only the new library is written.
-const DATABASE = 'veil-pre-entry-monitor-v6', STORE = 'libraries';
+import { readPreEntrySnapshot as read, validPreEntryLibrary as valid } from './preEntryPersistence';
+import { persistPreEntrySnapshot } from './preEntryPersistenceClient';
+
 const queues = new Map<string, Promise<unknown>>();
 const keyOf = (owner?: string) => owner ? `user:${owner}` : 'anonymous';
-function valid(value: unknown): value is PreEntryLibrary {
-  const data = value as PreEntryLibrary;
-  return data?.version === 1 && Array.isArray(data.rounds) && Array.isArray(data.records);
-}
-function open(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') { reject(Error('入选库存储不可用')); return; }
-    const request = indexedDB.open(DATABASE, 1);
-    let expired = false;
-    const timer = setTimeout(() => { expired = true; reject(Error('入选库存储超时')); }, 8000);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => { clearTimeout(timer); if (expired) request.result.close(); else resolve(request.result); };
-    request.onerror = request.onblocked = () => { expired = true; clearTimeout(timer); reject(Error('入选库存储不可用')); };
-  });
-}
-async function read(owner?: string): Promise<PreEntryLibrary | undefined> {
-  const db = await open();
-  try { return await new Promise((resolve, reject) => {
-    const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(keyOf(owner));
-    request.onsuccess = () => { if (request.result == null) resolve(undefined); else if (valid(request.result)) resolve(request.result); else reject(Error('入选库存档格式无效')); };
-    request.onerror = () => reject(request.error);
-  }); } finally { db.close(); }
-}
 function write(owner: string | undefined, library: PreEntryLibrary): Promise<void> {
+  // The live runner supplies changed records only. Freeze this small delta at
+  // submission, then merge it with the full library off the rendering thread.
   const key = keyOf(owner), copy = structuredClone(library);
-  const task = async () => {
-    const db = await open();
-    try { await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), request = store.get(key);
-      request.onsuccess = () => {
-        if (request.result != null && !valid(request.result)) { tx.abort(); return; }
-        store.put(mergePreEntryLibraries(request.result ?? emptyPreEntryLibrary(), copy), key);
-      };
-      tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error ?? Error('入选库保存失败'));
-    }); } finally { db.close(); }
-  };
+  const task = () => persistPreEntrySnapshot(owner, copy);
   const pending = (queues.get(key) ?? Promise.resolve()).then(task, task);
-  queues.set(key, pending.catch(() => undefined));
+  const settled = pending.catch(() => undefined);
+  queues.set(key, settled);
+  void settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
   return pending;
 }
 export const preEntryV6AccountBlob: AccountBlobAdapter<PreEntryLibrary> = {

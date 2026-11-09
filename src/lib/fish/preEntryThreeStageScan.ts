@@ -114,7 +114,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const longDrawdown=retry&&config.longDrawdown?.enabled?createEntryLongDrawdownReader({condition:config.longDrawdown,row,load,signal,availableStart:start}):undefined;
       let attempt=1,observationStart=record.startTime;
       const resumeAt=original.cursor;
-      let lastPaint=0,matched=false;
+      let lastPaint=0,lastYield=performance.now(),matched=false;
       const price=compileFishProgram({id:'three-stage-minutes',name:'筛选分钟',short:'分钟',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'1m'},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
       const transport=minuteTransport(price);
       transport.usesTaker=readers.some(r=>r.plan.usesTaker);
@@ -132,6 +132,9 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           }
         }
         for(const minute of chunk.bars){
+          // Resume replays used to bypass the paint/yield branch below. Yield
+          // independently of publishing, including warmup and already-saved time.
+          if(performance.now()-lastYield>=16){await fishDelay(0,signal);lastYield=performance.now();}
           if(signal.aborted)throw new DOMException('已暂停','AbortError');
           const at=minute.openTime+M;
           if(retry)await Promise.all(readers.map(r=>r.prepare?.(at)));

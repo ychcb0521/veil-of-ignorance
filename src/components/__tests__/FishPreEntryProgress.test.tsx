@@ -1,5 +1,6 @@
 import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
+import * as screening from '@/lib/fish/qualityScreeningResults';
 import {FishPreEntryProgress} from '../FishPreEntryProgress';
 import {emptyPreEntryLibrary,type PreEntryRecord} from '@/lib/fish/preEntryMonitor';
 import type {FishQualityState} from '@/hooks/useFishQuality';
@@ -45,4 +46,22 @@ it('follows the active older round when resumed rather than presenting newer arc
 it('shows preparation and loading errors directly even when no result has been admitted',()=>{
  const state=monitor();state.library.records=[];render(<FishPreEntryProgress monitor={{...state,ready:false,error:'本机存储读取失败'}}/>);
  expect(screen.getByRole('status')).toHaveTextContent('筛选异常');expect(screen.queryByRole('alert')).not.toBeInTheDocument();fireEvent.click(screen.getByLabelText('查看筛选错误'));expect(screen.getByRole('alert')).toHaveTextContent('本机存储读取失败');fireEvent.click(screen.getByText('重试读取'));expect(state.retry).toHaveBeenCalledOnce();
+});
+
+it('does no result-row formatting while closed and bounds open rows without dropping outcomes',()=>{
+ const state=monitor(),base=state.library.records[0];
+ state.library.records=Array.from({length:2500},(_,i)=>({...base,id:String(i),sample:{...base.sample,source:{...base.sample.source,symbol:`LOAD${i}USDT`}}}));
+ const formatter=vi.spyOn(screening,'screeningCell');
+ const view=render(<FishPreEntryProgress monitor={state}/>);
+ expect(formatter).not.toHaveBeenCalled();
+ view.rerender(<FishPreEntryProgress monitor={{...state,progress:{done:1,total:2500,current:'LOAD1USDT'}}}/>);
+ expect(formatter).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByLabelText('查看本轮筛选结果'));
+ expect(screen.getAllByTestId('pre-entry-current-result-row')).toHaveLength(100);
+ expect(screen.getByRole('navigation',{name:'筛选结果分页'})).toHaveTextContent('共 2500 项');
+ expect(screen.getByText('LOAD0USDT')).toBeInTheDocument();
+ fireEvent.click(screen.getByText('下一页'));expect(screen.getByText('LOAD100USDT')).toBeInTheDocument();
+ expect(screen.queryByText('LOAD0USDT')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByText('上一页'));expect(screen.getByText('LOAD0USDT')).toBeInTheDocument();
+ formatter.mockRestore();
 });
