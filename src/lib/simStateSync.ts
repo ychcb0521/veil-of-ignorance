@@ -411,6 +411,26 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
       const localTs = Math.max(readShadowTs(fullKey), memoryMetadata?.source === 'remote' ? memoryMetadata.updatedAt ?? 0 : 0);
       const localRaw = readPersistedStateRaw(fullKey);
       const hasLocal = localRaw != null;
+      // A default-only, unrated copy is a startup fallback, not a newer account
+      // edit. Its timestamp (or a queued default-version upgrade) must not hide
+      // ratings restored on the server.
+      let recoverSignalLibrary = false;
+      if (row.key === 'signal_library_v1' && hasLocal && Array.isArray(row.value)) {
+        try {
+          const local = JSON.parse(localRaw);
+          const rated = (s: { quality?: unknown }) => [1, 2, 3, 4, 5].includes(Number(s?.quality));
+          recoverSignalLibrary = Array.isArray(local) && local.length > 0
+            && local.every(s => typeof s?.id === 'string' && s.id.startsWith('default-') && !rated(s))
+            && row.value.some(rated);
+          if (recoverSignalLibrary) {
+            const pendingDefault = pending.get(row.key);
+            if (pendingDefault) clearTimeout(pendingDefault.timer);
+            pending.delete(row.key);
+            generation.set(genKey(userId, row.key), (generation.get(genKey(userId, row.key)) ?? 0) + 1);
+            unsyncedGeneration.delete(genKey(userId, row.key));
+          }
+        } catch { /* Malformed local data follows the normal recovery path. */ }
+      }
       const merge = UNION_MERGE_KEYS[row.key];
       if (merge && hasLocal) {
         // 并集合并与新旧无关：本地更新也不能丢远端独有的节点，远端更新也不能丢本地独有的。
@@ -437,7 +457,7 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
       }
       // 查询期间可能已有新操作；内存兜底与尚未推送成功的版本都比该查询更可信。
       // 历史登记表已在上方并集合并，不会以远端整键覆盖这些本地新节点。
-      if (memoryMetadata?.source === 'local' || unsyncedGeneration.has(genKey(userId, row.key))) continue;
+      if (!recoverSignalLibrary && (memoryMetadata?.source === 'local' || unsyncedGeneration.has(genKey(userId, row.key)))) continue;
       const remoteRaw = JSON.stringify(row.value);
       if (row.key === preferenceKey) {
         // A response started before a local Save cannot undo that Save after its acknowledgement.
@@ -446,7 +466,7 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
       }
       // 修复旧版本留下的「影子戳已追平云端，数据写入却失败」：等戳还须内容一致。
       // 真正更晚的本地写入仍然保留，正在推送的同毫秒本地写入已由上方保护。
-      if (row.key !== preferenceKey && hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
+      if (!recoverSignalLibrary && row.key !== preferenceKey && hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
       try {
         writePersistedStateRaw(fullKey, remoteRaw, { source: 'remote', updatedAt: remoteTs });
         writePersistedValueShadowTs(fullKey, remoteRaw, remoteTs);

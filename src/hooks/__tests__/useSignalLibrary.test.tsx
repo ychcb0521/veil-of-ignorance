@@ -14,6 +14,15 @@ it('does not upload bundled defaults while an account restore is still pending',
   expect(h.result.current[0].length).toBeGreaterThan(0);
   expect(queueSimStatePush).not.toHaveBeenCalled(); expect(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)).toBeNull();
 });
+it('does not publish or persist an old bundled default version during a read', () => {
+  const defaults = [{ ...original[0], id: 'default-AAAUSDT-100-0' }];
+  localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(defaults));
+  localStorage.setItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY, 'old-version');
+  renderHook(useSignalLibrary);
+  expect(queueSimStatePush).not.toHaveBeenCalled();
+  expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toEqual(defaults);
+  expect(localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY)).toBe('old-version');
+});
 it('reads restored ratings from session memory when full storage still contains an unrated old copy', () => {
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(original)); fullStorage();
   const rated = [{ ...original[0], quality: 4 }];

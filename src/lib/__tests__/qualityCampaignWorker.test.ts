@@ -2,9 +2,20 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const store = vi.hoisted(() => ({ prepare: vi.fn(), load: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ prepareQualityCampaignRead: store.prepare, loadQualityStudy: store.load }));
 vi.mock('@/lib/featureSource', () => ({ accountFeatureDefs: () => [] }));
-import { listQualityCampaignData, loadQualityCampaignData } from '@/lib/fish/qualityCampaigns';
+import { listQualityCampaignData, loadQualityCampaignData, loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { newQualityStudy } from '@/lib/fish/quality';
 beforeEach(() => { store.prepare.mockReset().mockResolvedValue({ durable: true }); store.load.mockReset(); });
+it('requests only a worker summary for detail account metrics, never a full campaign list', async () => {
+  const sent = vi.fn(), terminate = vi.fn();
+  class Reader {
+    onmessage: any; onerror: any; terminate = terminate;
+    postMessage(request: any) { sent(request); queueMicrotask(() => this.onmessage({ data: { ok: true, result: { kind: 'performance', data: { performance: {}, asymmetricRisk: {} } } } })); }
+  }
+  vi.stubGlobal('Worker', Reader);
+  await loadQualityCampaignPerformance('owner', 'quality', 'selected-key');
+  expect(sent).toHaveBeenCalledWith({ owner: 'owner', kind: 'performance', section: 'quality', sellKey: 'selected-key', warning: undefined });
+  expect(store.load).not.toHaveBeenCalled(); expect(terminate).toHaveBeenCalledOnce();
+});
 afterEach(() => vi.unstubAllGlobals());
 it('sends only a small read request, returns the campaign result and releases the archive worker', async () => {
   const sent = vi.fn(), terminate = vi.fn();

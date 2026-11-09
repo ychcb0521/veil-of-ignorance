@@ -3,19 +3,24 @@ import { applySourceDeletions } from './libraryDeletion';
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
 import { stopQualityRepair } from './qualityRepair';
+import { qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
 
 export type QualityCampaignReadRequest = { owner: string; warning?: string } & (
   | { kind: 'list'; section: 'sell' | 'detect' | 'quality'; definitions: readonly DeepDigFeatureDef[] }
   | { kind: 'detail'; id: string }
+  | { kind: 'performance'; section: 'sell' | 'detect' | 'quality'; sellKey: string }
 );
 export type QualityCampaignReadResult =
   | { kind: 'list'; data: ReturnType<typeof listQualityCampaignDataFromStudy> }
-  | { kind: 'detail'; data: QualityCampaignData };
+  | { kind: 'detail'; data: QualityCampaignData }
+  | { kind: 'performance'; data: ReturnType<typeof qualityCampaignPerformanceFromStudy> };
+// The summary contains numbers only, so even a very large study stays in the worker.
 
 /** Only derived campaign data crosses the worker boundary. Frozen tables stay on disk. */
 export function projectQualityCampaignStudy(study: FishQualityStudy, request: QualityCampaignReadRequest): QualityCampaignReadResult {
   const active = { ...study, monitorLibrary: study.monitorLibrary && { ...study.monitorLibrary, archives: undefined } };
   const clean = stopQualityRepair(applySourceDeletions(active), Date.now());
+  if (request.kind === 'performance') return { kind: 'performance', data: qualityCampaignPerformanceFromStudy(request.owner, clean, request.section, request.sellKey) };
   return request.kind === 'list'
     ? { kind: 'list', data: listQualityCampaignDataFromStudy(request.owner, clean, request.section, request.definitions) }
     : { kind: 'detail', data: qualityCampaignDetailFromStudy(request.owner, clean, request.id) };

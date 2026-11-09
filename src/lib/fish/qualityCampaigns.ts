@@ -2,6 +2,7 @@ import { accountFeatureDefs } from '@/lib/featureSource';
 import { loadQualityStudy, prepareQualityCampaignRead } from './qualityStore';
 import { listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
 import type { QualityCampaignReadRequest, QualityCampaignReadResult } from './qualityCampaignReader';
+import { qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -49,4 +50,15 @@ export async function loadQualityCampaignData(owner: string, id: string): Promis
     }
   }
   return qualityCampaignDetailFromStudy(owner, (await loadQualityStudy(owner)).study, id);
+}
+export async function loadQualityCampaignPerformance(owner: string, section: 'sell' | 'detect' | 'quality', sellKey: string) {
+  if (typeof Worker === 'function') {
+    const prepared = await prepareQualityCampaignRead(owner);
+    if (prepared.durable) {
+      const result = await projectInWorker({ owner, kind: 'performance', section, sellKey, warning: prepared.warning });
+      if (result.kind !== 'performance') throw new Error('持仓监测统计结果不匹配');
+      return result.data;
+    }
+  }
+  return qualityCampaignPerformanceFromStudy(owner, (await loadQualityStudy(owner)).study, section, sellKey);
 }

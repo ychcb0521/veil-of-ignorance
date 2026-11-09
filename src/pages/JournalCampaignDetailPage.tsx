@@ -4,7 +4,7 @@ import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
 import { isQualityCampaignId } from '@/lib/campaignSections';
-import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
+import { loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react';
@@ -788,15 +788,14 @@ async function loadAccountCampaignPerformance(
   snapshot?: CampaignBatchExportSnapshot,
   comparison?: TradeCampaign['comparison'],
 ): Promise<AccountCampaignMetrics> {
-  const paper = comparison ? (await listQualityCampaignData(ownerUserId, comparison.section)).rows.filter(row => row.campaign.comparison?.sellKey === comparison.sellKey) : null;
-  const paperById = new Map(paper?.map(row => [row.campaign.id, row]));
-  const campaigns = paper ? paper.map(row => row.campaign) : ownerUserId === viewerUserId
+  if (comparison) return loadQualityCampaignPerformance(ownerUserId, comparison.section, comparison.sellKey);
+  const campaigns = ownerUserId === viewerUserId
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
   const loadSample = async (item: TradeCampaign) => {
     // 账户级样本只是读：这里自己算校正后的口径，不需要（也不该）让每一场都走一遍回写。
     // 此前默认 heal 让打开一个详情页对全部 ~147 场各写一次库，还与本场的回写抢同一行。
-    const details = paperById.get(item.id) ?? (snapshot ? await loadBatchCampaignData(item.id, snapshot) : await getCampaignFullData(item.id, { heal: false }));
+    const details = snapshot ? await loadBatchCampaignData(item.id, snapshot) : await getCampaignFullData(item.id, { heal: false });
     const exitPriceCorrections = await fetchLegExitPriceCorrections(
       details.campaign.symbol,
       details.legs,

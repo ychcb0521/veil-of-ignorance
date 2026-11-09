@@ -404,7 +404,8 @@ export function loadSignals(): TradeSignal[] {
     const carriesBundledDefaults = localSignals.some(s => s.id.startsWith('default-'));
     if (localVersion !== SIGNAL_LIBRARY_DEFAULT_VERSION && carriesBundledDefaults) {
       const merged = mergeSignals(localSignals, getDefaultSignals());
-      saveSignals(merged);
+      // Reading/updating bundled defaults must not publish a replacement while
+      // account hydration is pending. Only an explicit edit calls saveSignals.
       return merged;
     }
     return localSignals;

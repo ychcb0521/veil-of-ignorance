@@ -24,6 +24,18 @@ import {
 } from '@/lib/simStateSync';
 
 const UID = 'u-1';
+it('recovers server ratings over a newer queued unrated bundled fallback', async () => {
+  const key = 'signal_library_v1', local = [{ id: 'default-AAA-1', symbol: 'AAAUSDT', timeMs: 1 }];
+  const remote = [{ ...local[0], quality: 4 }, { id: 'original-tut', symbol: 'TUTUSDT', timeMs: 2, quality: 3 }];
+  localStorage.setItem('veil.signalLibrary.v1', JSON.stringify(local));
+  queueSimStatePush(UID, key, local);
+  localStorage.setItem('veil.signalLibrary.v1__syncts', '9999999999999');
+  mocks.eq.mockResolvedValue({ data: [{ key, value: remote, updated_at: '2026-11-09T00:00:00Z' }], error: null } as never);
+  await hydrateSimState(UID);
+  expect(JSON.parse(localStorage.getItem('veil.signalLibrary.v1')!)).toEqual(remote);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(mocks.upsert).not.toHaveBeenCalled();
+});
 it('merges protected sell-plan snapshots and deletion tombstones during cross-device hydration',async()=>{
  const key='quality_sell_plans_v1',a={id:'structure',updatedAt:10,position:0,plan:{id:'structure',threshold:15}},b={id:'attack',updatedAt:20,position:1,plan:{id:'attack',threshold:7}},deleted={...a,updatedAt:30,deleted:true};
  localStorage.setItem(`sim_${UID}_${key}`,JSON.stringify([deleted,b]));

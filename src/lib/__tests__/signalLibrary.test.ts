@@ -357,7 +357,7 @@ describe('default signal library', () => {
     expect(serializeSignals(withIssue)).not.toContain('invalid_symbol');
   });
 
-  it('migrates an old saved bundled library by merging in the updated defaults', () => {
+  it('reads updated bundled defaults without publishing or persisting a replacement', () => {
     const oldBundled: TradeSignal[] = [
       {
         id: 'default-JTOUSDT-old',
@@ -374,7 +374,8 @@ describe('default signal library', () => {
 
     expect(migrated.some(s => s.symbol === 'JTOUSDT' && s.timeLabel === '2026-06-15 23:14:00')).toBe(true);
     expect(migrated.some(s => s.symbol === 'TAKEUSDT' && s.timeLabel === '2026-08-05 03:34:00')).toBe(true);
-    expect(window.localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY)).toBe(SIGNAL_LIBRARY_DEFAULT_VERSION);
+    expect(window.localStorage.getItem(SIGNAL_LIBRARY_DEFAULT_VERSION_KEY)).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toEqual(oldBundled);
   });
 
   it('does not merge bundled defaults into a legacy custom-only library', () => {
