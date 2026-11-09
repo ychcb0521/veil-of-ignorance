@@ -196,15 +196,21 @@ async function fetchHead(name: string, owner: string): Promise<Head | null> {
 async function fetchValue(name: string, owner: string, head: Head): Promise<{ ok: true; value: unknown } | { ok: false }> {
   if (head.deleted) return { ok: true, value: undefined };
   const keys = Array.from({ length: head.parts }, (_, i) => chunkKey(name, i));
-  const { data, error } = await (table().select('key, value') as any).eq('user_id', owner).in('key', keys);
-  if (error) throw new Error(error.message);
-  const byKey = new Map(((data ?? []) as { key: string; value: { rev?: string; data?: string } }[]).map(row => [row.key, row.value]));
   const parts: string[] = [];
-  for (const key of keys) {
-    const part = byKey.get(key);
-    // 另一台设备写到一半：分片和头行不是同一版，这次不取。
-    if (!part || part.rev !== head.rev || typeof part.data !== 'string') return { ok: false };
-    parts.push(part.data);
+  // PostgREST aggregates rows into one JSON response. A whole 50 MB archive can
+  // exceed the database statement deadline before any bytes reach the browser.
+  // Bound each request; all batches must still match the original frozen head.
+  const READ_PARTS_PER_REQUEST = 4;
+  for (let offset = 0; offset < keys.length; offset += READ_PARTS_PER_REQUEST) {
+    const batch = keys.slice(offset, offset + READ_PARTS_PER_REQUEST);
+    const { data, error } = await (table().select('key, value') as any).eq('user_id', owner).in('key', batch);
+    if (error) throw new Error(error.message);
+    const byKey = new Map(((data ?? []) as { key: string; value: { rev?: string; data?: string } }[]).map(row => [row.key, row.value]));
+    for (const key of batch) {
+      const part = byKey.get(key);
+      if (!part || part.rev !== head.rev || typeof part.data !== 'string') return { ok: false };
+      parts.push(part.data);
+    }
   }
   return { ok: true, value: await decodeAccountBlob(head.enc, parts) };
 }
@@ -403,7 +409,7 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
   if (!entry) {
     const gate: { state: 'open' | 'adopting' | 'closed' } = { state: 'open' };
     const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; return true; }))
-      .catch((): AccountBlobSyncStatus => 'failed');
+      .catch((error): AccountBlobSyncStatus => { console.warn('[账号研究] 恢复未完成', adapter.name, error instanceof Error ? error.message : '读取失败'); return 'failed'; });
     const created = { task, gate };
     loads.set(id, created);
     entry = created;

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const cloud = vi.hoisted(() => {
   type Row = { user_id: string; key: string; value: unknown; updated_at: string };
   const rows = new Map<string, Row>();
-  const state = { rows, delayMs: 0, failNext: false, signedOut: false, upserts: [] as string[] };
+  const state = { rows, delayMs: 0, failNext: false, signedOut: false, upserts: [] as string[], maxReadKeys: Infinity };
   const id = (user: string, key: string) => `${user}\u0000${key}`;
   const wait = () => new Promise(resolve => setTimeout(resolve, state.delayMs));
   const query = () => {
@@ -12,7 +12,7 @@ const cloud = vi.hoisted(() => {
     const run = async () => { await wait(); return [...rows.values()].filter(row => filters.every(f => f(row))); };
     const builder: any = {
       eq(col: keyof Row, value: string) { filters.push(row => row[col] === value); return builder; },
-      in(col: keyof Row, values: string[]) { filters.push(row => values.includes(row[col] as string)); return builder; },
+      in(col: keyof Row, values: string[]) { if(values.length>state.maxReadKeys)throw Error('canceling statement due to statement timeout'); filters.push(row => values.includes(row[col] as string)); return builder; },
       not(col: keyof Row, _op: 'like', pattern: string) { const prefix = pattern.replace(/%$/, ''); filters.push(row => !(row[col] as string).startsWith(prefix)); return builder; },
       async maybeSingle() { const found = await run(); return { data: found[0] ?? null, error: null }; },
       then(resolve: (v: unknown) => void, reject: (e: unknown) => void) { return run().then(data => ({ data, error: null })).then(resolve, reject); },
@@ -62,7 +62,7 @@ async function device(initial?: Value) {
 }
 const head = () => cloud.state.rows.get('u1\u0000idb:test-blob')?.value as { rev: string; parts: number; savedAt: number } | undefined;
 
-beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.state.failNext = false; cloud.state.signedOut = false; cloud.state.upserts = []; });
+beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.state.failNext = false; cloud.state.signedOut = false; cloud.state.upserts = []; cloud.state.maxReadKeys = Infinity; });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('accountBlobSync', () => {
@@ -260,4 +260,11 @@ it('provides the remote preference to merge adapters when restoring a blank new 
  expect(await b.mod.syncAccountBlobOnLoad(adapter,'u1')).toBe('adopted');
  expect(merge).toHaveBeenCalledWith('u1',expect.objectContaining({items:[1,2]}),{preferRemote:true});
  await b.mod.flushAccountBlobPushesForTests();expect(merge).toHaveBeenCalledTimes(1);b.mod.__resetAccountBlobSyncForTests();
+});
+
+it.each([false,true])('restores a 55-part archive under the server response limit, rejecting mixed revisions: %s',async mixed=>{
+ const value={items:Array.from({length:1000},(_,i)=>i)},json=JSON.stringify(value),size=Math.ceil(json.length/55),parts=Array.from({length:55},(_,i)=>json.slice(i*size,(i+1)*size)),rev='complete-revision';
+ const put=(key:string,value:unknown)=>cloud.state.rows.set('u1\u0000'+key,{user_id:'u1',key,value,updated_at:new Date().toISOString()});
+ put('idb:test-blob',{v:1,rev,parts:55,savedAt:Date.now(),enc:'json',bytes:json.length});parts.forEach((data,i)=>put('idb:test-blob#'+i,{rev:mixed&&i===30?'interrupted-revision':rev,data}));cloud.state.maxReadKeys=4;
+ const a=await device();expect(await a.mod.syncAccountBlobOnLoad(a.adapter,'u1',6000)).toBe(mixed?'failed':'adopted');expect(a.local.value).toEqual(mixed?undefined:value);expect(cloud.state.upserts).toHaveLength(0);
 });
