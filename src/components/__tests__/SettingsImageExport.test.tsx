@@ -25,12 +25,12 @@ it('exports every addition round without switching the selected round or mutatin
 it('includes complete special-feature parameters and their current values without grouping standards',async()=>{
   for(const id of ['darvas_5m_lower','sbs_5m','ati6h']){
     const def=structuredClone(BUILTIN_FEATURES.find(d=>d.id===id)!);expect(def).toBeTruthy();
-    if(id==='darvas_5m_lower')def.DBL5_config={n:7};
+    if(id==='darvas_5m_lower')def.DBL5_config={n:7,guard_trend_atr:.1234567890123456,guard_range_atr:1.9876543210987654,guard_range_closes:3};
     const before=JSON.stringify(def),save=vi.fn();
     render(<DefinitionPanel def={def} editing={false} onEditingChange={()=>{}} onSave={save} samples={{campaigns:[],signals:[]}}/>);
     fireEvent.click(screen.getByRole('button',{name:'生成图片'}));await screen.findByRole('status');
     const text=captured();expect(text).toContain(def.formula);expect(text).toContain('完整参数');expect(text).not.toContain('分组');
-    if(id==='darvas_5m_lower'){expect(text).toContain('"n": 7');expect(text).toContain('"window_minutes": 360');}
+    if(id==='darvas_5m_lower'){expect(text).toContain('"n": 7');expect(text).toContain('"window_minutes": 360');expect(text).toContain('防守线公式');expect(text).toContain('0.1234567890123456 × ATR');expect(text).toContain('1.9876543210987654 × ATR');expect(text).toContain('震荡期连续 3 根');}
     if(id==='sbs_5m')expect(text).toContain('"active_box_max_age": 6');
     if(id==='ati6h'){expect(text).toContain('"ATI6H_volume_mode": "taker"');expect(text).toContain('"WEIGHTS"');}
     expect(save).not.toHaveBeenCalled();expect(JSON.stringify(def)).toBe(before);cleanup();

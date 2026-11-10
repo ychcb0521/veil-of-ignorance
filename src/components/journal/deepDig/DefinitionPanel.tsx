@@ -1,4 +1,5 @@
 import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
+import {Dbl5GuardDefinition} from './Dbl5GuardDefinition';
 import {ATI6H_DEFAULTS} from '@/lib/ati6h';
 import {DBL5_ID,DBL5_DEFAULTS,dbl5Parameters} from '@/lib/dbl5m';
 import {SBS5M_DEFAULTS,SBS5M_PARAMETER_SPECS,sbsParameters} from '@/lib/sbs5m';
@@ -74,6 +75,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
       {def.chartTemplate===DBL5_ID&&<DblResearchScope def={def} samples={samples} onChange={patch=>onSave({...def,...patch})}/>}
       {def.chartTemplate==='sbs_5m'&&<SbsResearchSymbol def={def} samples={samples} onChange={v=>onSave({...def,SBS5M_research_symbol:v})}/>}
       {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.definition}</p>}
+      {featureTemplateId(def)===DBL5_ID&&<Dbl5GuardDefinition config={def.DBL5_config}/>}
       <div className="grid max-w-[720px] grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
         {def.chartTemplate===DBL5_ID?<details><summary className="cursor-pointer py-1 text-muted-foreground">输出字段与布尔事件变量</summary><FormulaEditor def={def} onSave={onSave}/></details>:<FormulaEditor def={def} onSave={onSave} />}
@@ -149,6 +151,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           {help && <FormulaHelp />}
         </div>
       </div>
+      {featureTemplateId(draft)===DBL5_ID&&<Dbl5GuardDefinition config={draft.DBL5_config}/>}
       <div className="flex gap-2">
         <span className={label}>参数</span>
         {draft.chartTemplate===DBL5_ID&&<details className="min-w-0 flex-1 text-xs" open><summary className="cursor-pointer">DBL-5 参数 · 研究初值</summary><textarea aria-label="DBL5 参数配置" value={dblText} rows={5} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setDblText(e.target.value);try{const p=JSON.parse(e.target.value);dbl5Parameters(p);set('DBL5_config',p);setDblError('');}catch(error){setDblError(error instanceof Error?error.message:'参数JSON无效');}}}/>{dblError&&<p role="alert" className={RED}>{dblError}</p>}<p className="mt-2 text-muted-foreground">timeframe 固定5m。n为回看及确认根数；window_minutes 为几何证据年龄，20–10080分钟且为5的倍数。须满足2n+1&lt;W；默认360分钟时n为1–35。到期从origin_time计算，触底不续期。</p></details>}
