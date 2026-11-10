@@ -11,6 +11,8 @@ import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
+  /** Private lightweight page view; restore before execution, persistence or export. */
+  processRef?:import('./preEntryArchive').PreEntryProcessRef;
   exclusionProcess?:import('./preEntryExclusionProcess').EntryExclusionProcess;
   /** Clear only the working table display, retaining the complete scan history. */
   tableClearedAt?:number;
@@ -54,11 +56,11 @@ export function mergePreEntryLibraries(a: PreEntryLibrary, b: PreEntryLibrary): 
   const history=merge(a.settingsHistory??[],b.settingsHistory??[]);
   const directoryEdits=mergeLibraryDirectoryEdits(a.directoryEdits,b.directoryEdits);
   // A newer status-only save must not discard the separately accumulated audit trail.
-  const processes=new Map<string,NonNullable<PreEntryRecord['exclusionProcess']>>();
+  const processes=new Map<string,PreEntryRecord>();
   const coverage=(p:NonNullable<PreEntryRecord['exclusionProcess']>)=>p.entries.reduce((at,e)=>Math.max(at,e.through,e.endedAt??0),p.startedAt);
-  for(const r of [...a.records,...b.records])if(r.exclusionProcess){const old=processes.get(r.id),next=r.exclusionProcess;if(!old||coverage(next)>coverage(old)||coverage(next)===coverage(old)&&next.entries.length>=old.entries.length)processes.set(r.id,next);}
+  for(const r of [...a.records,...b.records])if(r.exclusionProcess){const old=processes.get(r.id),next=r.exclusionProcess,previous=old?.exclusionProcess;if(!previous||coverage(next)>coverage(previous)||coverage(next)===coverage(previous)&&(r.processRef?.entries??next.entries.length)>=(old?.processRef?.entries??previous.entries.length))processes.set(r.id,r);}
   const clearMarks=new Map<string,number>();for(const r of [...a.records,...b.records])if(r.tableClearedAt)clearMarks.set(r.id,Math.max(clearMarks.get(r.id)??0,r.tableClearedAt));
-  return withPreEntryTableClears({ ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>{const process=processes.get(r.id),mark=clearMarks.get(r.id);return (!process||process===r.exclusionProcess)&&(!mark||mark===r.tableClearedAt)?r:{...r,...(process?{exclusionProcess:process}:{}),...(mark?{tableClearedAt:mark}:{})};}), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) }, mergePreEntryTableClears(a.tableClears,b.tableClears));
+  return withPreEntryTableClears({ ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, rounds: merge(a.rounds, b.rounds), records: merge(a.records, b.records).map(r=>{const source=processes.get(r.id),mark=clearMarks.get(r.id);if((!source||source.exclusionProcess===r.exclusionProcess&&source.processRef===r.processRef)&&(!mark||mark===r.tableClearedAt))return r;const {processRef:_ref,...plain}=r;return {...plain,...(source?{exclusionProcess:source.exclusionProcess,...(source.processRef?{processRef:source.processRef}:{})}:{}),...(mark?{tableClearedAt:mark}:{})};}), ...(settings ? {settings} : {}), ...(history.length?{settingsHistory:history}:{}) }, mergePreEntryTableClears(a.tableClears,b.tableClears));
 }
 export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   const matchedAt=record.matchedAt;

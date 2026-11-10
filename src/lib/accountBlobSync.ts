@@ -33,6 +33,8 @@ const PUSH_INTERVAL_MS = 60_000;
 const LOAD_TIMEOUT_MS = 6_000;
 
 export interface AccountBlobAdapter<T = unknown> {
+  /** Optional bounded decoder; original codec remains the default for all assets. */
+  decodeRemote?(owner:string,enc:'gzip'|'json',pieces:readonly string[]):Promise<unknown>;
   /** 云端键名（不含前缀），如 fish-quality。 */
   name: string;
   /** 读本机当前那份；没有返回 undefined。 */
@@ -195,7 +197,7 @@ async function fetchHead(name: string, owner: string): Promise<Head | null> {
   const value = (data as { value?: unknown } | null)?.value;
   return validHead(value) ? value : null;
 }
-async function fetchValue(name: string, owner: string, head: Head): Promise<{ ok: true; value: unknown } | { ok: false }> {
+async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote']): Promise<{ ok: true; value: unknown } | { ok: false }> {
   if (head.deleted) return { ok: true, value: undefined };
   const keys = Array.from({ length: head.parts }, (_, i) => chunkKey(name, i));
   const parts: string[] = [];
@@ -214,7 +216,7 @@ async function fetchValue(name: string, owner: string, head: Head): Promise<{ ok
       parts.push(part.data);
     }
   }
-  return { ok: true, value: await decodeAccountBlob(head.enc, parts) };
+  return { ok: true, value: await (decode?decode(owner,head.enc,parts):decodeAccountBlob(head.enc, parts)) };
 }
 async function upsertRow(owner: string, key: string, value: unknown): Promise<void> {
   const result = await runAccountSyncRequest(() => (table() as any).upsert({ user_id: owner, key, value, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' }), { bytes: JSON.stringify(value).length });
@@ -294,7 +296,7 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   let savedAt = meta?.savedAt || Date.now();
   const head = await fetchHead(adapter.name, owner);
   if(head&&head.rev!==meta?.rev&&adapter.mergeRemote&&(meta?.rev||settled)){
-    const cloud=await fetchValue(adapter.name,owner,head);if(!cloud.ok)return false;
+    const cloud=await fetchValue(adapter.name,owner,head,adapter.decodeRemote);if(!cloud.ok)return false;
     await adapter.mergeRemote(owner,cloud.value,{preferRemote:head.savedAt>=savedAt});value=adapter.prepareStored?undefined:await adapter.read(owner);
     savedAt=Math.max(savedAt,head.savedAt+1);
   }
@@ -376,12 +378,12 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
   if (meta?.rev) takeCloud = !dirty || head.savedAt >= meta.savedAt;
   else if (localWeight === 0) takeCloud = true;
   else {
-    cloud = await fetchValue(adapter.name, owner, head);
+    cloud = await fetchValue(adapter.name, owner, head,adapter.decodeRemote);
     if (!cloud.ok) return 'failed';
     takeCloud = adapter.weight(cloud.value) > localWeight;
   }
   if(adapter.mergeRemote){
-    cloud??=await fetchValue(adapter.name,owner,head);
+    cloud??=await fetchValue(adapter.name,owner,head,adapter.decodeRemote);
     if(!cloud.ok)return 'failed';
     if(!begin())return 'skipped';
     await adapter.mergeRemote(owner,cloud.value,{preferRemote:takeCloud});
@@ -393,7 +395,7 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
     return 'adopted';
   }
   if (!takeCloud) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
-  cloud ??= await fetchValue(adapter.name, owner, head);
+  cloud ??= await fetchValue(adapter.name, owner, head,adapter.decodeRemote);
   if (!cloud.ok) return 'failed';
   if (!begin()) return 'skipped';
   await adopt(adapter, owner, head, cloud.value, local);

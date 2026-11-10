@@ -33,7 +33,15 @@ export function preEntryCheckpointDelta(previous: PreEntryLibrary | undefined, n
 export function createPreEntryCheckpoint(write: (delta: PreEntryLibrary) => Promise<void>, displayMarksSavedSeparately=false) {
   let saved: PreEntryLibrary | undefined, pending: PreEntryLibrary | undefined;
   let active: Promise<void> | undefined;
+  const projections=new WeakMap<object,PreEntryLibrary['records'][number]>();
+  const projected=(value:PreEntryLibrary)=>({...value,records:value.records.map(record=>projections.get(record)??record)});
   return {
+    /** A persisted full process may be replaced by its private page view. This
+     * acknowledges identical durable content; it never queues a truncated save. */
+    project(before:PreEntryLibrary['records'],after:PreEntryLibrary['records']){
+      before.forEach((record,i)=>projections.set(record,after[i]));
+      if(saved)saved=projected(saved);
+    },
     /** Already durable v6 rows are not copied again when starting another round. */
     seed(value: PreEntryLibrary) { if (!active && !saved) saved = value; },
     save(value: PreEntryLibrary): Promise<void> {
@@ -44,7 +52,7 @@ export function createPreEntryCheckpoint(write: (delta: PreEntryLibrary) => Prom
             const snapshot = pending; pending = undefined;
             const delta = preEntryCheckpointDelta(saved, snapshot, displayMarksSavedSeparately);
             if (delta.records.length || delta.rounds.length || delta.settings || delta.settingsHistory || delta.directoryEdits || delta.tableClears) await write(delta);
-            saved = snapshot;
+            saved = projected(snapshot);
           } } finally { active = undefined; pending = undefined; }
         });
       }

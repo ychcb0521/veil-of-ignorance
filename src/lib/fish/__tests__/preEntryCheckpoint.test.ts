@@ -2,11 +2,18 @@ import { expect, it, vi } from 'vitest';
 import { createPreEntryCheckpoint, preEntryCheckpointDelta } from '../preEntryCheckpoint';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from '../preEntryMonitor';
 import {withPreEntryTableClears} from '../preEntryTableClears';
+import {projectPreEntryRecord} from '../preEntryArchive';
 
 const record = (id: string, at = 1): PreEntryRecord => ({ id, roundId: 'r', status: 'scanning', startTime: 1, cursor: at, updatedAt: at, readings: [],
   sample: { id, source: { id, symbol: 'TESTUSDT', timeMs: 1, timeLabel: '', fallbackZone: '' }, groups: [], importedAt: 1, enteredAt: 1, basis: 'signal' },
   exclusionProcess: { version: 1, startedAt: 1, entries: [{ kind: 'observation', stage: 'exclusion', status: 'blocked', from: 1, through: at, count: at, reason: '未收复高点' }] } });
 const library = (): PreEntryLibrary => ({ ...emptyPreEntryLibrary(), rounds: [{ id: 'r', state: 'running', startedAt: 1, updatedAt: 1, filters: [], hours: 48 }], records: [record('a'), record('b')] });
+it('keeps distinct history bodies separate even when timestamps, cursors and final observations are identical',()=>{
+ const before=record('immutable');before.exclusionProcess.entries=Array.from({length:20},(_,i)=>({...before.exclusionProcess.entries[0],from:i,through:i,reason:`original ${i}`}));
+ const after=structuredClone(before);after.exclusionProcess.entries[0].reason='different original evidence';
+ const a=projectPreEntryRecord(before,'alice',false).record,b=projectPreEntryRecord(after,'alice',false).record;
+ expect(a.processRef.key).not.toBe(b.processRef.key);expect(a.exclusionProcess.entries).toEqual(b.exclusionProcess.entries);expect(before.exclusionProcess.entries[0].reason).toBe('original 0');
+});
 it('does not resend cleared histories on the next start but still includes every real unsaved observation',async()=>{
  const before=library(),write=vi.fn(async(_delta:PreEntryLibrary)=>{}),checkpoint=createPreEntryCheckpoint(write,true);checkpoint.seed(before);
  const cleared=withPreEntryTableClears(before,{a:10,b:10});await checkpoint.save(cleared);expect(write.mock.calls[0][0].records).toEqual([]);expect(write.mock.calls[0][0].tableClears).toEqual({a:10,b:10});
@@ -65,4 +72,24 @@ it('does not lose a save submitted as the previous checkpoint resolves', async (
   await checkpoint.save(first);
   const next = { ...first, records: [record('a', 50), first.records[1]] };
   await checkpoint.save(next); expect(durable).toEqual(next);
+});
+
+it('releases persisted process graphs without re-posting them, while later real edits still save',async()=>{
+  const write=vi.fn(async(_delta:PreEntryLibrary)=>{}),checkpoint=createPreEntryCheckpoint(write),before=library();
+  await checkpoint.save(before);
+  const projected=before.records.map(record=>({...record,processRef:{key:'stored:'+record.id,entries:100},exclusionProcess:{...record.exclusionProcess!,entries:record.exclusionProcess!.entries.slice(-1)}}));
+  checkpoint.project(before.records,projected);
+  const view={...before,records:projected};await checkpoint.save(view);expect(write).toHaveBeenCalledTimes(1);
+  const edited={...view,records:[{...projected[0],cursor:99,updatedAt:99},projected[1]]};
+  await checkpoint.save(edited);expect(write).toHaveBeenCalledTimes(2);expect(write.mock.calls[1][0].records.map(r=>r.id)).toEqual([projected[0].id]);
+});
+
+it('keeps the full-process source and its private reference paired across stale status merges',()=>{
+  const original=record('paired',20),process=original.exclusionProcess!,entries=[...process.entries,{...process.entries[0],through:21}];
+  const full={...original,exclusionProcess:{...process,entries}},view={...full,processRef:{key:'full-body',entries:2},exclusionProcess:{...process,entries:entries.slice(-1)}};
+  const statusOnly={...original,updatedAt:30,exclusionProcess:undefined};
+  const merged=mergePreEntryLibraries({version:1,rounds:[],records:[view]},{version:1,rounds:[],records:[statusOnly]}).records[0];
+  expect(merged.processRef).toEqual(view.processRef);expect(merged.exclusionProcess).toEqual(view.exclusionProcess);
+  const restored=mergePreEntryLibraries({version:1,rounds:[],records:[merged]},{version:1,rounds:[],records:[full]}).records[0];
+  expect(restored.exclusionProcess).toEqual(full.exclusionProcess);expect(restored.processRef).toBeUndefined();
 });

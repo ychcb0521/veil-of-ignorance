@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from '../preEntryMonitor';
-import { readPreEntrySnapshot, writePreEntrySnapshot, readPreEntryTableClears, writePreEntryTableClears } from '../preEntryPersistence';
+import { readPreEntrySnapshot, writePreEntrySnapshot, readPreEntryTableClears, writePreEntryTableClears, readPreEntryReadModel, readPreEntryCacheRevision, cachePreEntryReadModel } from '../preEntryPersistence';
 import { withPreEntryTableClears } from '../preEntryTableClears';
 import { qualityScreeningResults } from '../qualityScreeningResults';
 import { persistPreEntrySnapshot } from '../preEntryPersistenceClient';
@@ -31,7 +31,7 @@ it('checkpoints only changed rows without reading or rewriting the legacy librar
  const initial=fixture(),legacy=structuredClone(initial);disk.set('user:alice',legacy);
  await writePreEntrySnapshot('alice',initial);reads.length=0;puts.length=0;
  const updated={...initial.records[0],cursor:4,updatedAt:4};await writePreEntrySnapshot('alice',{version:1,rounds:[],records:[updated]});
- expect(reads).toEqual(['incremental:user:alice:meta','incremental:user:alice:record:a']);expect(puts).toEqual(reads);expect(disk.get('user:alice')).toBe(legacy);expect((await readPreEntrySnapshot('alice'))!.records).toEqual([updated]);
+ expect(reads.filter(key=>!key.startsWith('read-model:'))).toEqual(['incremental:user:alice:meta','incremental:user:alice:record:a','incremental:user:alice:meta']);expect(puts.filter(key=>!key.startsWith('read-model:'))).toEqual(['incremental:user:alice:meta','incremental:user:alice:record:a']);expect(disk.get('user:alice')).toBe(legacy);expect((await readPreEntrySnapshot('alice'))!.records).toEqual([updated]);
  // An old tab can still update its original payload; the newer durable row wins.
  disk.set('user:alice',initial);expect((await readPreEntrySnapshot('alice'))!.records).toEqual([updated]);
 });
@@ -86,4 +86,15 @@ it('encodes the durable library in a worker using only its owner key and the unc
  expect(await prepareStoredPreEntry('alice',expected.hash)).toEqual({hash:expected.hash});
  expect(await prepareStoredPreEntry('bob')).toBeUndefined();
  expect(posted).toEqual([{owner:'alice',knownHash:undefined},{owner:'alice',knownHash:expected.hash},{owner:'bob',knownHash:undefined}]);expect(stopped).toHaveBeenCalledTimes(3);expect(await readPreEntrySnapshot('alice')).toEqual(value);
+});
+it('rejects a stale read index after an older page changes metadata or an overlapping checkpoint finishes',async()=>{
+ const initial=fixture();await writePreEntrySnapshot('alice',initial);
+ const revision=await readPreEntryCacheRevision('alice');await cachePreEntryReadModel('alice',initial,true,false,revision);
+ expect(await readPreEntryReadModel('alice')).toEqual(initial);
+ disk.set('incremental:user:alice:meta',{...initial,records:[],settings:{...initial.settings!,updatedAt:20,hours:24}});
+ expect(await readPreEntryReadModel('alice')).toBeUndefined();
+ const updated={...initial,records:[{...initial.records[0],updatedAt:30,cursor:30}]};await writePreEntrySnapshot('alice',updated);
+ await cachePreEntryReadModel('alice',initial,true,false,revision);
+ expect(await readPreEntryReadModel('alice')).toBeUndefined();
+ expect((await readPreEntrySnapshot('alice'))!.records[0].cursor).toBe(30);
 });

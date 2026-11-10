@@ -9,6 +9,7 @@ import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
 import { loadPreEntryLibraryV5 } from '@/lib/fish/preEntryMonitorV5Store';
 import { loadPreEntryLibraryV6, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
 import { withPreEntryTableClears } from '@/lib/fish/preEntryTableClears';
+import {projectPreEntryBatch} from '@/lib/fish/preEntryArchiveClient';
 import { PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
@@ -33,11 +34,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     tableClearLock.current=false;commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
-    void Promise.all([loadPreEntryLibraryV6(owner), loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(([newLibrary, v5, v4, v3, v2, legacy]) => {
+    void Promise.all([loadPreEntryLibraryV6(owner,preview=>{if(epoch.current===generation)commit(preview);},reload>0), loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(async([newLibrary, v5, v4, v3, v2, legacy]) => {
       const old = mergePreEntryLibraries(mergePreEntryLibraries(mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary()), v3 ?? emptyPreEntryLibrary()), v4);
       if(v4.settings) old.settings=v4.settings;
       const oldV5=mergePreEntryLibraries(old,v5);if(v5.settings)oldV5.settings=v5.settings;
       const value = mergePreEntryLibraries(oldV5, newLibrary);
+      const cold=value.records.filter(r=>!r.processRef&&(r.exclusionProcess?.entries.length??0)>16);
+      if(cold.length){const projected=await projectPreEntryBatch(owner,cold),byId=new Map(projected.map(r=>[r.id,r]));value.records=value.records.map(r=>byId.get(r.id)??r);}
       // Once v6 has its own settings, a still-open older page cannot replace
       // them merely by saving its older schema with a later timestamp.
       if (newLibrary.settings) value.settings = newLibrary.settings;
@@ -72,7 +75,19 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     let lastRecordPaint = 0, lastProgressPaint = 0;
     const live = () => epoch.current === generation;
     const save = async () => {
-      try { await persistence.save(current.current); }
+      try {
+        const snapshot=current.current;
+        await persistence.save(snapshot);
+        if(!live())return;
+        // Release finished histories throughout a long batch, after durability
+        // is acknowledged. A late callback must never replace a newer row.
+        const currentRows=new Map(current.current.records.map(r=>[r.id,r]));
+        const cold=snapshot.records.filter(r=>!preEntryRecordPending(r)&&!r.processRef&&(r.exclusionProcess?.entries.length??0)>16&&currentRows.get(r.id)===r);
+        if(cold.length){
+          const projected=await projectPreEntryBatch(owner,cold),byId=new Map(cold.map((r,i)=>[r.id,{before:r,after:projected[i]}]));
+          if(live()){persistence.project(cold,projected);commit({...current.current,records:current.current.records.map(r=>byId.get(r.id)?.before===r?byId.get(r.id)!.after:r)});}
+        }
+      }
       catch (reason) { if (live()) setError(reason instanceof Error ? reason.message : '保存失败，请保留页面并重试'); }
     };
     const scheduleSave = () => {
@@ -120,13 +135,14 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id
           ? { ...r, state: aborter.signal.aborted || pending ? 'paused' : 'complete', updatedAt: Date.now() } : r) });
         setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
-        await save(); setRunning(false);
+        await save();
+        setRunning(false);
       }
       if (controller.current === aborter) controller.current = null;
       if (execution.current === finished) execution.current = null;
       finish();
     }
-  }, [commit, persistence]);
+  }, [commit, persistence, owner]);
   const start = useCallback(async (study: FishQualityStudy, hours: number) => {
     if (!readyRef.current || controller.current||tableClearLock.current) return;
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);

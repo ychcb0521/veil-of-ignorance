@@ -1,3 +1,5 @@
+import {FishConditionSettings} from './FishConditionSettings';
+import {restorePreEntryRecord,restorePreEntryStudy} from '@/lib/fish/preEntryArchive';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {qualityMonitorEntryAt,qualitySignalTime} from '@/lib/fish/qualityAdmissionTime';
 import {ScreeningHeaders,ScreeningCells,ScreeningStatistics,type ScreeningSortKey} from './FishQualityScreeningResults';
@@ -178,8 +180,8 @@ function BuyFilterEditor({ state, done, scan = false }: { state: FishQualityStat
     catch (e) { setError(e instanceof Error ? e.message : '条件无效'); }
   };
   return <div className="space-y-3" data-testid="quality-buy-filter-editor">
-    <div className="space-y-0.5"><p className="text-xs font-medium">买前过滤</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">{scan ? '条件独立保存，不绑定卖出算法。按所设周期的已收盘 K 线向后筛选；全部启用条件首次同时满足时，保存该标的的入选时间节点。' : '过滤条件独立保存，不绑定卖出算法。读数取买入时刻之前最后一根已收盘的 5 分钟 K 线，全部启用的条件满足时标记为通过。'}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">{scan ? '保存后点击「开始筛选」运行。命中节点保存在入选库，可带入组合表进行持仓监测；继续暂停轮次仍沿用该轮条件，要使用新条件请从头重新筛选。' : '保存后点击「开始过滤」对已勾选信号运行；已有读数可复用。过滤不会运行、暂停或隐藏卖出监测结果。持仓一票否决在「持仓监测」中设置。'}</p></div>
-    {draft.length ? <div className="space-y-1.5">{draft.map((d, i) => <div key={i} className="flex items-center gap-1.5">
+    <div className="space-y-0.5"><h4 className="text-xs font-medium">买前过滤</h4><p className="text-[10.5px] leading-relaxed text-muted-foreground">{scan ? '条件独立保存，不绑定卖出算法。按所设周期的已收盘 K 线向后筛选；全部启用条件首次同时满足时，保存该标的的入选时间节点。' : '过滤条件独立保存，不绑定卖出算法。读数取买入时刻之前最后一根已收盘的 5 分钟 K 线，全部启用的条件满足时标记为通过。'}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">{scan ? '保存后点击「开始筛选」运行。命中节点保存在入选库，可带入组合表进行持仓监测；继续暂停轮次仍沿用该轮条件，要使用新条件请从头重新筛选。' : '保存后点击「开始过滤」对已勾选信号运行；已有读数可复用。过滤不会运行、暂停或隐藏卖出监测结果。持仓一票否决在「持仓监测」中设置。'}</p></div>
+    {draft.length ? <div className="space-y-1.5">{draft.map((d, i) => <div key={i} className="fish-static-condition flex items-center gap-1.5">
       <input type="checkbox" aria-label={`启用买入条件 ${i + 1}`} checked={d.enabled} onChange={e => patch(i, { enabled: e.target.checked })} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/>
       <select aria-label={`买入条件 ${i + 1} 指标`} className={`${field} min-w-0 flex-1`} value={d.choice} onChange={e => patch(i, { choice: e.target.value })}>{!choices.some(c=>c.key===d.choice)&&<option hidden disabled value={d.choice}>已保存指标：{d.choice}</option>}{groups.map(g => <optgroup key={g} label={g}>{choices.filter(c => c.group === g).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</optgroup>)}</select>
       <select aria-label={`买入条件 ${i + 1} 方向`} className={field} value={d.direction} onChange={e => patch(i, { direction: e.target.value as '<' | '>' })}><option value=">">&gt;</option><option value="<">&lt;</option></select>
@@ -761,19 +763,22 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
   const exportRows = () => { setError(''); setExportAll(true); };
   useLayoutEffect(() => {
     if (!exportAll) return;
-    try {
+    void(async()=>{try {
       const table = tableRef.current?.querySelector('table');
       if (!table) throw new Error('组合表还没显示，无法导出');
       const anySelected = rows.some(rowSelected), picked = anySelected ? rows.filter(rowSelected) : rows;
       const members = [...new Map(picked.flatMap(qualityTableMembers).map(m => [m.id, m])).values()], detailPlans = shownPlans.length ? shownPlans : plans;
-      downloadQualityComparison(study, rows.flatMap(qualityTableMembers), Date.now(), [
+      const restoredStudy=await restorePreEntryStudy(study);
+      const selectedScreening=[...new Map(members.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)).map(result=>[result.record.id,result])).values()];
+      const completeScreening=[];for(const result of selectedScreening)completeScreening.push({...result,record:await restorePreEntryRecord(result.record)});
+      downloadQualityComparison(restoredStudy, rows.flatMap(qualityTableMembers), Date.now(), [
         readQualityTableSheet(table, { selectedOnly: anySelected }),
         qualityPlanDetailSheet(detailPlans),
         qualityTradeDetailSheet(members, detailPlans, (m, p) => qualityRowResult(study, m, p, resultMap)),
-        ...(showScreening?[screeningResultsSheet([...new Map(members.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)).map(result=>[result.record.id,result])).values()])]:[]),
+        ...(showScreening?[screeningResultsSheet(completeScreening)]:[]),
       ]);
     } catch (e) { setError(e instanceof Error ? e.message : '导出失败'); }
-    finally { setExportAll(false); }
+    finally { setExportAll(false); }})();
   }, [exportAll]); // eslint-disable-line react-hooks/exhaustive-deps
   const body=<section ref={rootRef} className="min-w-0 border-t border-border/50 px-4 py-3" aria-labelledby={titleId} data-testid={archiveView?"quality-archive-board":"fish-quality"}>
     <div className="flex items-center justify-between gap-2">
@@ -812,8 +817,8 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
             : <button type="button" className={qualityPrimaryAction} disabled={!ready || !selectedCount || !filtersOn} title={!filtersOn ? '先设置并启用买入过滤条件' : selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号计算买入条件，不运行卖出监测；已完成的有效读数直接复用，只补算缺的` : '当前筛选下没有已勾选的信号'} onClick={() => void state.startFilter()}><Filter aria-hidden className="h-3 w-3"/>{state.filterError?'重试缺数据':state.filterProgress&&state.filterProgress.done<state.filterProgress.total?'继续过滤':'开始过滤'}</button>}
           {/* 【用户要求】2026-10-28 旁边已有「条件设置」，原「未设置过滤条件 · 点此设置」等行内提示纯属重复，已删除；为何不能开始见按钮悬停 */}
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
-            <BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={() => setFilterOpen(false)}/>
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
+            <FishConditionSettings title="静态过滤条件" description="固定入场前的已收盘读数 · 条件全部满足"><BuyFilterEditor key={JSON.stringify(standaloneBuyFilters(study))} state={state} done={() => setFilterOpen(false)}/></FishConditionSettings>
           </PopoverContent></Popover>
           <FishFilterLibrary onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={(id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={snapshot=><ArchivedQualityBoard key={snapshot.startedAt} study={snapshot} onJump={onJump} canJump={canJump}/>} onCopyStudy={state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           </FishQualityModule>
@@ -831,8 +836,8 @@ export function FishQuality({ state, mining, onJump, canJump,archiveView=false }
             <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !!state.archiving || !selectedCount || !plans.length} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" disabled={!!state.archiving} onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">先将当前全部结果独立归档到监测库，再按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。归档按时间排列，后续重算不会覆盖本次快照</span></button></PopoverContent></Popover>
           </div>
-          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
-            <HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/>
+          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
+            <FishConditionSettings title="持仓监测条件" description="按方案设置卖出、加仓、镜像和持仓否决"><HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/></FishConditionSettings>
           </PopoverContent></Popover>
           <FishMonitorLibrary onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>

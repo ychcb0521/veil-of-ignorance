@@ -1,3 +1,4 @@
+import './FishConditionSettings.css';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress} from './FishPreEntryProgress';
@@ -71,9 +72,9 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
           {!selectedOnly && (r.status === 'error' || rounds.get(r.roundId)?.state === 'paused') && <button type="button" disabled={monitor.running} className="text-primary disabled:opacity-40" onClick={() => void monitor.resume(r.roundId)}>{r.status === 'error' ? '重试本轮缺数据' : '继续本轮'}</button>}</td>
       </tr>;})}</tbody></table></div></details>;
   const directoryItems:FishDirectoryItem[]=[...rounds.values()].filter(round=>admitted.some(r=>r.roundId===round.id)).map(round=>({id:round.id,at:round.startedAt,label:'入选轮次',summary:admitted.filter(r=>r.roundId===round.id).length+' 条记录 · '+(round.state==='running'?'运行中':round.state==='paused'?'已暂停':'已完成'),revision:monitor.library,study:()=>entryDirectoryStudy(monitor.library,round),details:close=>renderEvidence(round.id,close)}));
-  const renderLibrary=()=> <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)} onRename={state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
-    description={`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮`}
-    dataActions={<FishEntryLibraryDataActions library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}
+  const renderLibrary=()=> <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)} onRename={state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
+    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮`}
+    dataActions={<FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}
     download={()=>downloadDirectoryTables('筛选库',directoryItems.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
     info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。仅收录已满足记录，原信号、冻结条件、首次满足时间和判定证据保留；未入选的扫描记录仍保存在原库。</p><p>新副本 v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开后可复制至组合表。复制前完整归档当前组合表，载入后不自动运行；完整下载与导入保留各版本历史，不改当前方案。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
@@ -95,7 +96,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
       </Popover>
     </div>
     <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="动态筛选条件" title="设置动态筛选条件与时长"><Settings2 aria-hidden className="h-3 w-3"/>条件设置</button></PopoverTrigger>
-      <PopoverContent align="start" collisionPadding={12} className="screening-settings-popover w-[52rem] max-w-[calc(100vw-2rem)] max-h-[min(88dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain p-0">
+      <PopoverContent align="start" collisionPadding={12} className="fish-condition-settings screening-settings-popover">
         {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
       </PopoverContent>
     </Popover>

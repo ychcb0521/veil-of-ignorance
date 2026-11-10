@@ -8,6 +8,15 @@ import { qualitySplitPrimaryAction, qualitySplitPauseAction } from '../FishQuali
 import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 
 afterEach(cleanup);
+it.each(['loading','failed'])('distinguishes an unfinished %s recovery from a truly empty library',state=>{
+  const retry=vi.fn(),api={ready:true,preEntry:{ready:false,running:false,error:state==='failed'?'历史读取超时':'',retry,library:emptyPreEntryLibrary()}} as unknown as FishQualityState;
+  render(<TooltipProvider><FishPreEntryMonitor state={api} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
+  fireEvent.click(screen.getByLabelText('打开筛选库'));const dialog=screen.getByRole('dialog');
+  expect(within(dialog).queryByText('暂无入选记录。满足全部条件后才会进入筛选库。')).toBeNull();
+  expect(within(dialog).getByLabelText('完整下载筛选库')).toBeDisabled();
+  if(state==='loading')expect(within(dialog).getByRole('status')).toHaveTextContent('正在读取筛选库');
+  else{fireEvent.click(within(dialog).getByRole('button',{name:'重试读取'}));expect(retry).toHaveBeenCalledOnce();}
+});
 it('renders a v5 admission with guard evidence even when no extra primary indicator is required',()=>{
   const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
   const record:PreEntryRecord={id:'v5',roundId:'r',planId:'p',status:'matched',startTime:time,cursor:time+300000,matchedAt:time+300000,updatedAt:1,readings:[],detail:'三阶同刻通过',sample:{id:'sample',source:{id:'source',symbol:'TESTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time},

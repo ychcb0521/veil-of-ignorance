@@ -53,7 +53,7 @@ export const preEntryV2AccountBlob: AccountBlobAdapter<PreEntryLibrary> = {
   weight: library => library ? library.records.length + library.rounds.length + (library.settings ? 1 : 0) : 0,
 };
 export async function loadPreEntryLibraryV2(owner?: string): Promise<PreEntryLibrary> {
-  const status = await syncAccountBlobOnLoad(preEntryV2AccountBlob, owner);
+  const status = await syncAccountBlobOnLoad(preEntryV2AccountBlob, owner,30_000);
   await queues.get(keyOf(owner));
   const local = await read(owner);
   if (!local && (status === 'failed' || status === 'timed_out')) throw Error('无法读取账号入选库，请重试');

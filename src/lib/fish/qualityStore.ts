@@ -11,6 +11,7 @@ import { preserveQualityFilterLibrary } from './qualityFilterLibrary';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, prepareAccountBlob, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import {serializeArchiveWork} from '../serializeArchiveWork';
 import {prepareStoredQuality} from './qualityBackup';
+import {restorePreEntryStudy} from './preEntryArchive';
 import { compactQualityStudyForStorage } from './qualityStudyCompact';
 import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies, withoutQualityArchiveBodies } from './qualityArchiveStore';
 
@@ -163,6 +164,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
   const merge = (previous: unknown) => applySavedQualityPlans(compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner, options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy))),readSavedQualityPlans(owner));
   let leftInline = false;
   const task = (writes.get(key) ?? Promise.resolve(true)).then(()=>serializeArchiveWork(async () => {
+    copy=await restorePreEntryStudy(copy);
     let durablePrevious: FishQualityStudy | undefined;
     // 新归档的正文先写进归档库，总表只存目录。
     copy = await detachQualityArchiveBodies(owner, copy);
@@ -264,7 +266,7 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
   write(owner, study) {
     const key = keyOf(owner);
     const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
-      const incoming = study && valid(study) ? await detachQualityArchiveBodies(owner, study) : study;
+      const incoming = study && valid(study) ? await detachQualityArchiveBodies(owner, await restorePreEntryStudy(study)) : study;
       const db = await open();
       try {
         await new Promise<void>((resolve, reject) => {

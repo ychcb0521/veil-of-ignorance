@@ -4,12 +4,13 @@ import { reviveAccountBlobValue, serializeAccountBlob } from './accountBlobCodec
 /** Parse decompressed bytes without allocating one archive-sized JSON string.
  * Values and special tags retain the existing codec's exact semantics.
  */
-export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8Array>): Promise<unknown> {
+export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8Array>, projection?:{record:(value:unknown,path:readonly (string|number|undefined)[])=>unknown;flush:()=>Promise<void>}): Promise<unknown> {
   const parser = new JSONParser({ keepStack: true, stringBufferSize: 64 * 1024 });
   const canonical = new Map<string, object>();
   let result: unknown, complete = false;
   parser.onValue = ({ value, key, parent, stack }) => {
     let next = reviveAccountBlobValue(String(key ?? ''), value);
+    if(projection)next=projection.record(next,[...stack.map(frame=>frame.key),key]);
     // IndexedDB can share these immutable frozen objects, avoiding thousands of
     // identical plan/formula copies after a cloud restore. Content is unchanged.
     if (['plan', 'snapshot', 'detectors'].includes(String(key)) && next && typeof next === 'object') {
@@ -32,9 +33,11 @@ export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8A
       const item = await reader.read();
       if (item.done) break;
       parser.write(item.value);
+      await projection?.flush();
       if (Date.now() - yieldedAt >= 32) { await new Promise(resolve => setTimeout(resolve, 0)); yieldedAt = Date.now(); }
     }
     if (!parser.isEnded) parser.end();
+    await projection?.flush();
     if (!complete) throw new Error('账号研究存档不完整，原数据仍保留');
     return result;
   } catch (error) {

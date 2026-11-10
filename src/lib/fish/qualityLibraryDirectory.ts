@@ -1,3 +1,4 @@
+import {preparePreEntryTables} from './preEntryArchiveClient';
 import {newQualityStudy,qualityComparisonRows,qualityFilterReadingKey,qualityEntryIdentity,qualityMembers,qualityGroupId,type FishQualityStudy,type QualitySample} from './quality';
 import {libraryRoundRecordIds} from './libraryRounds';
 import type {QualityFilterLibrary,QualityFilterRound} from './qualityFilterLibrary';
@@ -46,8 +47,11 @@ export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound)
 }
 export function downloadDirectoryTables(name:string,tables:readonly {id:string;study:FishQualityStudy}[],at=Date.now()){
   if(!tables.length)throw Error('暂无可导出的记录');
-  const sheets=tables.flatMap((t,i)=>buildQualitySheets(t.study,qualityComparisonRows(t.study)).map((sheet,j)=>({...sheet,name:`${i+1}-${j+1}-${sheet.name}`.slice(0,31)})));
-  const filename=`${name}-${formatUTC8(at).replace(/\D/g,'').slice(0,14)}.xlsx`,url=URL.createObjectURL(buildXlsx(sheets)),link=document.createElement('a');
+  const cold=tables.some(t=>t.study.screeningResults?.some(r=>r.processRef));
+  const download=(blob:Blob)=>{const filename=`${name}-${formatUTC8(at).replace(/\D/g,'').slice(0,14)}.xlsx`,url=URL.createObjectURL(blob),link=document.createElement('a');
   try{link.href=url;link.download=filename;document.body.appendChild(link);link.click();}finally{link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);}
-  return filename;
+  return filename;};
+  if(cold)return preparePreEntryTables([...tables]).then(download);
+  const sheets=tables.flatMap((t,i)=>buildQualitySheets(t.study,qualityComparisonRows(t.study)).map((sheet,j)=>({...sheet,name:`${i+1}-${j+1}-${sheet.name}`.slice(0,31)})));
+  return download(buildXlsx(sheets));
 }

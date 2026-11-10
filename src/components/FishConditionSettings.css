@@ -1,0 +1,101 @@
+div.fish-condition-settings {
+  width: 52rem;
+  max-width: calc(100vw - 2rem);
+  max-height: min(85dvh, var(--radix-popover-content-available-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  border-radius: 12px;
+  scrollbar-width: thin;
+  box-shadow: 0 18px 60px hsl(220 30% 8% / .14), 0 2px 8px hsl(220 30% 8% / .05);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.fish-condition-settings :is(div,label,span,summary,button,select),
+.fish-condition-settings .screening-settings :is(div,label,span,summary,button,select) { font-size: 12px; }
+.fish-condition-settings p,
+.fish-condition-settings .screening-settings p { font-size: 11px; line-height: 1.65; }
+.fish-condition-settings .text-muted-foreground { color: hsl(var(--foreground) / .65); }
+.fish-condition-settings :is(h4,h5),
+.fish-condition-settings .screening-settings :is(h4,h5) { font-size: 13px; line-height: 1.5; font-weight: 600; }
+.fish-condition-settings h5,
+.fish-condition-settings .screening-settings h5 { font-size: 12px; }
+.fish-condition-settings .fish-settings-header,
+.fish-condition-settings .screening-settings .screening-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--popover));
+}
+.fish-condition-settings .fish-settings-header h3,
+.fish-condition-settings .screening-settings .screening-title { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
+.fish-condition-settings .fish-settings-header p,
+.fish-condition-settings .screening-settings .screening-subtitle { margin-top: 4px; font-size: 11px; color: hsl(var(--foreground) / .6); }
+.fish-condition-settings .fish-settings-body { padding: 14px 16px 0; }
+.fish-condition-settings .screening-settings { padding: 0 16px; font-size: 12px; }
+.fish-condition-settings .screening-settings .screening-header { margin-inline: -16px; }
+.fish-condition-settings :is(.fish-settings-body,.screening-settings) input:not([type="checkbox"]),
+.fish-condition-settings :is(.fish-settings-body,.screening-settings) select {
+  height: 30px;
+  min-height: 30px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--popover));
+  padding-inline: 8px;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+.fish-condition-settings :is(.fish-settings-body,.screening-settings) input[type="number"] {
+  field-sizing: content;
+  width: auto;
+  min-width: 7rem;
+  max-width: 100%;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.fish-condition-settings input[type="checkbox"] { width: 14px; height: 14px; flex-shrink: 0; accent-color: hsl(var(--primary)); }
+.fish-condition-settings :is(input,select):focus-visible { outline: 2px solid hsl(var(--primary) / .45); outline-offset: 2px; }
+.fish-condition-settings :is(input,select):disabled { opacity: .6; background: hsl(var(--muted) / .4); }
+.fish-condition-settings .screening-settings .screening-stage { margin-top: 12px; padding: 12px; border-radius: 8px; }
+.fish-condition-settings .screening-settings .screening-condition-row { padding: 9px; gap: 6px; }
+.fish-condition-settings .screening-settings .screening-veto-card { padding: 10px 12px; gap: 8px; }
+.fish-condition-settings .screening-settings .screening-footer { margin: 14px -16px 0; padding: 12px 16px; }
+.fish-condition-settings .screening-settings .screening-button { min-height: 30px; padding: 5px 10px; font-size: 12px; }
+.fish-condition-settings .screening-settings .screening-detail { padding: 10px 12px; }
+.fish-condition-settings .screening-settings .screening-stage-note,
+.fish-condition-settings .screening-settings .screening-footer-meta { font-size: 11px; }
+.fish-condition-settings .fish-settings-body > :first-child > .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 12px; }
+.fish-condition-settings .fish-plan-condition { grid-template-columns: minmax(0,1fr) 3rem minmax(7rem,max-content); }
+.fish-condition-settings .fish-plan-header { flex-wrap: wrap; }
+.fish-condition-settings .fish-plan-header > input { flex: 1 1 12rem; min-width: 0; }
+.fish-condition-settings .fish-static-condition { display: grid; grid-template-columns: 14px minmax(0,1fr) 3rem max-content auto; padding: 9px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--muted) / .18); }
+.fish-condition-settings .fish-settings-body :is(.flex,.inline-flex):has(>input[type="number"],>select) { flex-wrap: wrap; }
+.fish-condition-settings .fish-settings-body select { min-width: 0; max-width: 100%; }
+.fish-condition-settings .fish-settings-body label { min-width: 0; max-width: 100%; white-space: normal; }
+.fish-condition-settings [data-testid^="addition-veto-"] { opacity: 1; }
+.fish-condition-settings [data-testid="quality-monitor-editor"],
+.fish-condition-settings [data-testid="quality-monitor-legacy-settings"] { display: contents; }
+.fish-condition-settings [data-testid^="addition-"][data-testid$="-panel"] { border-radius: 8px; }
+.fish-condition-settings .sticky.bottom-0 { z-index: 5; padding-block: 12px; background: hsl(var(--popover)); }
+.fish-condition-settings .sticky.bottom-0 button { min-height: 30px; border-radius: 6px; padding-inline: 10px; }
+@media (max-width: 600px) {
+  .fish-condition-settings .fish-static-condition { grid-template-columns: 14px 3rem minmax(7rem,max-content) auto; }
+  .fish-condition-settings .fish-static-condition > select:first-of-type { grid-column: 2 / -1; }
+  .fish-condition-settings .fish-static-condition > select:last-of-type { grid-column: 2; }
+  .fish-condition-settings .fish-static-condition > input[type="number"] { grid-column: 3; }
+  .fish-condition-settings .fish-static-condition > button { grid-column: 4; }
+  .fish-condition-settings .fish-plan-condition { grid-template-columns: minmax(0,1fr) minmax(7rem,max-content); }
+  .fish-condition-settings .fish-plan-condition > :first-child { grid-column: 1 / -1; }
+  .fish-condition-settings .fish-settings-header,
+  .fish-condition-settings .screening-settings .screening-header { padding: 14px 12px; }
+  .fish-condition-settings .fish-settings-body { padding: 12px 12px 0; }
+  .fish-condition-settings .fish-settings-body .sticky.bottom-0 { margin-inline: -12px; padding-inline: 12px; }
+  .fish-condition-settings .screening-settings { padding-inline: 12px; }
+  .fish-condition-settings .screening-settings .screening-header { margin-inline: -12px; }
+  .fish-condition-settings .screening-settings .screening-footer { margin-inline: -12px; padding-inline: 12px; }
+}

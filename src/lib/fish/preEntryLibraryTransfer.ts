@@ -3,17 +3,25 @@ import {type PreEntryLibrary} from './preEntryMonitor';
 import {validPreEntryTableClears} from './preEntryTableClears';
 /** Backup/import is additive. Current runnable settings are never replaced by import. */
 export function parsePreEntryLibraryBackup(text:string):PreEntryLibrary{
- const value=JSON.parse(text),library=value?.format==='veil-pre-entry-library'&&value.version===1?value.library:undefined;
+ return validatePreEntryLibraryBackupValue(JSON.parse(text));
+}
+export function validatePreEntryLibraryBackupValue(value:unknown,privateProjection=false):PreEntryLibrary{
+ const envelope=value as {format?:string;version?:number;library?:PreEntryLibrary},library=envelope?.format==='veil-pre-entry-library'&&envelope.version===1?envelope.library:undefined;
  if(!library||library.version!==1||!Array.isArray(library.rounds)||!Array.isArray(library.records))throw Error('入选库数据包格式无效');
  const ids=new Set<string>();
  for(const r of library.rounds){if(!r||typeof r.id!=='string'||ids.has(r.id)||!Number.isFinite(r.startedAt)||!Number.isFinite(r.updatedAt)||!Array.isArray(r.filters)||!['running','paused','complete'].includes(r.state)||r.plans!==undefined&&!Array.isArray(r.plans))throw Error('入选库轮次无效');ids.add(r.id);}
  const records=new Set<string>();
+ if(!privateProjection&&library.records.some(r=>r.processRef))throw Error('外部筛选库存档不能包含本机历史引用，请使用完整备份');
  for(const r of library.records){if(!r||typeof r.id!=='string'||records.has(r.id)||!ids.has(r.roundId)||typeof r.sample?.source?.symbol!=='string'||!Number.isFinite(r.sample?.source?.timeMs)||!Number.isFinite(r.updatedAt)||!Array.isArray(r.sample.groups)||!Array.isArray(r.readings)||!['queued','scanning','paused','matched','unmatched','warming','error'].includes(r.status)||r.status==='matched'&&!(r.matchedAt>0))throw Error('入选库记录无效');records.add(r.id);}
  if(library.directoryEdits!==undefined&&!validLibraryDirectoryEdits(library.directoryEdits))throw Error('目录标记无效');
  if(library.tableClears!==undefined&&!validPreEntryTableClears(library.tableClears))throw Error('筛选清除标记无效');
  return library;
 }
 export function downloadPreEntryLibraryBackup(library:PreEntryLibrary){
+ if(library.records.some(r=>r.processRef))return import('./preEntryArchiveClient').then(async({preparePreEntryDownload})=>{
+  const blob=await preparePreEntryDownload(library.records.find(r=>r.processRef)?.processRef?.owner,library),url=URL.createObjectURL(blob),link=document.createElement('a');
+  try{link.href=url;link.download='入选库完整备份.json';document.body.appendChild(link);link.click();}finally{link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ });
  const url=URL.createObjectURL(new Blob([JSON.stringify({format:'veil-pre-entry-library',version:1,exportedAt:Date.now(),library})],{type:'application/json'})),link=document.createElement('a');
  try{link.href=url;link.download='入选库完整备份.json';document.body.appendChild(link);link.click();}finally{link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);}
 }

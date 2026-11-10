@@ -1,7 +1,8 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
-import { readPreEntrySnapshot as read, validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears } from './preEntryPersistence';
+import { validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears } from './preEntryPersistence';
+import {readProjectedPreEntry as read,decodeProjectedPreEntry} from './preEntryArchiveClient';
 import { validPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 import { persistPreEntrySnapshot } from './preEntryPersistenceClient';
 import { prepareStoredPreEntry } from './preEntryBackup';
@@ -21,6 +22,7 @@ function write(owner: string | undefined, library: PreEntryLibrary): Promise<voi
 }
 export const preEntryV6AccountBlob: AccountBlobAdapter<PreEntryLibrary> = {
   name: 'pre-entry-monitor-v6',
+  decodeRemote:decodeProjectedPreEntry,
   async read(owner) { await queues.get(keyOf(owner)); return read(owner); },
   async prepareStored(owner, knownHash) { await queues.get(keyOf(owner)); return prepareStoredPreEntry(owner, knownHash); },
   async write(owner, value) { if (value) { if (!valid(value)) throw Error('入选库云端存档格式无效'); await write(owner, value); } },
@@ -43,11 +45,11 @@ export async function savePreEntryTableClears(owner: string | undefined, marks: 
   await writePreEntryTableClears(owner, marks);
   void noteAccountBlobSaved(preEntryTableClearsAccountBlob, owner);
 }
-export async function loadPreEntryLibraryV6(owner?: string): Promise<PreEntryLibrary> {
-  const [status, clearsStatus] = await Promise.all([syncAccountBlobOnLoad(preEntryV6AccountBlob, owner), syncAccountBlobOnLoad(preEntryTableClearsAccountBlob, owner)]);
+export async function loadPreEntryLibraryV6(owner?: string,preview?:(library:PreEntryLibrary)=>void,rebuild=false): Promise<PreEntryLibrary> {
+  const [status, clearsStatus] = await Promise.all([syncAccountBlobOnLoad(preEntryV6AccountBlob, owner,300_000), syncAccountBlobOnLoad(preEntryTableClearsAccountBlob, owner,30_000)]);
   if (clearsStatus === 'failed' || clearsStatus === 'timed_out') throw Error('无法恢复筛选清除标记，请重试');
   await queues.get(keyOf(owner));
-  const local = await read(owner);
+  const local = await read(owner,preview,rebuild);
   if (!local && (status === 'failed' || status === 'timed_out')) throw Error('无法读取账号入选库，请重试');
   return local ?? emptyPreEntryLibrary();
 }
