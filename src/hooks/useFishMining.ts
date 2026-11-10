@@ -20,10 +20,10 @@ import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
-type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules'>;
+type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'>;
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
   start: () => void; pause: () => void; setTarget: (target: number) => void;
@@ -145,7 +145,7 @@ export function useFishMining(o: {
     const run = () => { void tickRef.current(); };
     const timer = setInterval(run, TICK_MS);
     const onStorage = (event: StorageEvent) => {
-      if (event.key === miningKey(MINING_ROUND_LOGICAL_KEY) && readMiningState().round?.id !== stateRef.current.round?.id) run();
+      if ([MINING_ROUND_LOGICAL_KEY,MINING_RANGE_LOGICAL_KEY].some(key=>event.key===miningKey(key)) && readMiningState().round?.id !== stateRef.current.round?.id) run();
     };
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
@@ -166,13 +166,14 @@ export function useFishMining(o: {
     setState({ ...s, enabled: true, rules: s.rules.length ? s.rules : currentDefaultRules(), selection: s.selection ?? { ...latest.current.selection, exchanges: [...latest.current.selection.exchanges] }, retryAt:null,errorKind:undefined }); setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
   const pause = useCallback(() => { setState({ ...readMiningState(), enabled: false }); cancelScan(); }, [cancelScan, setState]);
-  const restart = useCallback(({ startMs, target, rules }: MiningRestart) => {
+  const restart = useCallback(({ startMs, endMs, target, rules }: MiningRestart) => {
+    if(!Number.isFinite(startMs)||startMs<=0||startMs>Date.now()||endMs!=null&&(!Number.isFinite(endMs)||endMs<=startMs||endMs>Date.now()))return;
     const previous = readMiningState();
     const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
     cancelScan();
     if (!previous.round && previous.enabled) saveMiningState({ ...previous, enabled: false });
     setState({
-      ...newMiningState(), enabled: true, startMs, cursorMs: startMs, target,
+      ...newMiningState(), enabled: true, startMs, ...(endMs!=null?{endMs}:{}), cursorMs: startMs, target,
       rules: structuredClone(rules), selection: structuredClone(latest.current.selection),
       round: { id: crypto.randomUUID(), startedAt },
     });

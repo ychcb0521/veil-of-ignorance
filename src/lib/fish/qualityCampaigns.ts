@@ -3,13 +3,14 @@ import { loadQualityStudy, prepareQualityCampaignRead } from './qualityStore';
 import { listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
 import type { QualityCampaignReadRequest, QualityCampaignReadResult } from './qualityCampaignReader';
 import { qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
+import { serializeArchiveWork } from '../serializeArchiveWork';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
-// Never hold two full IndexedDB snapshots at once, including list → detail navigation.
-let reads: Promise<unknown> = Promise.resolve();
+// Campaign navigation, saves and cloud encoders share the renderer's memory.
+// Their full IndexedDB snapshots must take turns across all of these features.
 function projectInWorker(request: QualityCampaignReadRequest): Promise<QualityCampaignReadResult> {
-  const task = reads.catch(() => undefined).then(() => new Promise<QualityCampaignReadResult>((resolve, reject) => {
+  return serializeArchiveWork(() => new Promise<QualityCampaignReadResult>((resolve, reject) => {
     const worker = new Worker(new URL('../workers/qualityCampaignReader.worker.ts', import.meta.url), { type: 'module' });
     const finish = () => { clearTimeout(timer); worker.terminate(); };
     const timer = setTimeout(() => { finish(); reject(new Error('持仓监测读取超时，原数据仍保留，请重试')); }, 180_000);
@@ -25,8 +26,6 @@ function projectInWorker(request: QualityCampaignReadRequest): Promise<QualityCa
     };
     try { worker.postMessage(request); } catch (error) { finish(); reject(error); }
   }));
-  reads = task.then(() => undefined, () => undefined);
-  return task;
 }
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' = 'quality') {
   if (typeof Worker === 'function') {

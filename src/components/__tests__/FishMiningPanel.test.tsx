@@ -119,12 +119,16 @@ it('edits a new round while a scan is running and waits for explicit confirmatio
   expect(restart).not.toHaveBeenCalled();
 
   fireEvent.change(date, { target: { value: '2026-01-15T07:30' } });
+  const end=form.getByLabelText('挖掘结束（北京时间）');
+  fireEvent.change(end,{target:{value:''}});fireEvent.click(submit);expect(restart).not.toHaveBeenCalled();expect(form.getByRole('alert')).toHaveTextContent('挖掘结束');
+  fireEvent.change(end,{target:{value:'2026-01-14T07:30'}});fireEvent.click(submit);expect(restart).not.toHaveBeenCalled();
+  fireEvent.change(end,{target:{value:'2026-01-16T07:30'}});
   fireEvent.change(form.getByLabelText('挖掘目标条数'), { target: { value: '80' } });
   fireEvent.change(form.getByLabelText('挖掘算法 1 特征值'), { target: { value: 'cba' } });
   fireEvent.change(form.getByLabelText('挖掘算法 1 门槛'), { target: { value: '9' } });
   fireEvent.click(submit);
   expect(restart).toHaveBeenCalledWith({
-    startMs: Date.parse('2026-01-15T07:30:00+08:00'), target: 80,
+    startMs: Date.parse('2026-01-15T07:30:00+08:00'), endMs:Date.parse('2026-01-16T07:30:00+08:00'), target: 80,
     rules: [{ ...rules[0], featureId: 'cba', statistic: '结果', threshold: '9' }],
   });
 });

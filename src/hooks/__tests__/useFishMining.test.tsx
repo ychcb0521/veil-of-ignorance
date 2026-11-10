@@ -3,7 +3,7 @@ import { noteBinanceRateLimit } from '@/lib/binanceRateLimit';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useFishMining } from '@/hooks/useFishMining';
-import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
+import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_RANGE_LOGICAL_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -14,6 +14,18 @@ const sig = (symbol: string, t: number): TradeSignal => ({ id: `${symbol}-${t}`,
 beforeEach(() => { localStorage.clear(); vi.useFakeTimers({ shouldAdvanceTime: false }); vi.setSystemTime(MINING_START_MS + 2 * MINING_STEP_MS + 1000); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+it('scans both interval boundaries, stops permanently after its last anchor and restores that bound',async()=>{
+ const {h,mine}=setup(),startMs=MINING_START_MS,endMs=startMs+MINING_STEP_MS;
+ act(()=>h.result.current.restart({startMs,endMs,target:100,rules:currentDefaultRulesForRange()}));await flush(20);
+ expect(mine.mock.calls.map(c=>c[0].anchorMs)).toEqual([startMs,endMs]);expect(h.result.current.state).toMatchObject({endMs,enabled:false,anchorsDone:2,cursorMs:endMs+MINING_STEP_MS});
+ expect(readMiningState()).toMatchObject({endMs,anchorsDone:2});expect(localStorage.getItem(miningKey(MINING_RANGE_LOGICAL_KEY))).not.toBeNull();
+ await flush(10*MINING_STEP_MS);expect(mine).toHaveBeenCalledTimes(2);
+});
+const currentDefaultRulesForRange=()=>newMiningState().rules.length?newMiningState().rules:[{id:'bounded',featureId:'cbi2',statistic:'结果',threshold:'0.04'}];
+it('rejects a reversed time range before stopping or replacing the current round',async()=>{
+ const {h,mine,stop}=setup();const before=readMiningState();act(()=>h.result.current.restart({startMs:MINING_START_MS,endMs:MINING_START_MS-1,target:100,rules:currentDefaultRulesForRange()}));await flush();
+ expect(readMiningState()).toEqual(before);expect(mine).not.toHaveBeenCalled();expect(stop).not.toHaveBeenCalled();
+});
 function setup(o: { mine?: (s: any) => Promise<TradeSignal[]>; busy?: () => boolean; definitions?: typeof defs } = {}) {
   const list = { current: [] as TradeSignal[] }, commit = vi.fn((next: TradeSignal[]) => { list.current = next; }), onMined = vi.fn(), stop = vi.fn();
   const mine = vi.fn(o.mine ?? (async (s: any) => [sig(`A${s.anchorMs}USDT`, s.anchorMs)]));

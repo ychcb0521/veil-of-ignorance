@@ -1,7 +1,8 @@
+import {serializeArchiveWork} from '../serializeArchiveWork';
 import { encodeStoredPreEntry } from './preEntryBackupEncoding';
 import type { PreparedAccountBlob } from '../accountBlobSync';
 
-export async function prepareStoredPreEntry(owner: string, knownHash?: string): Promise<PreparedAccountBlob | undefined> {
+async function prepareStored(owner: string, knownHash?: string): Promise<PreparedAccountBlob | undefined> {
   if (typeof Worker !== 'function') return encodeStoredPreEntry(owner, knownHash);
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/preEntryBackup.worker.ts', import.meta.url), {type:'module'});
@@ -16,3 +17,5 @@ export async function prepareStoredPreEntry(owner: string, knownHash?: string): 
     try {worker.postMessage({owner,knownHash});} catch(error) {finish(undefined,error instanceof Error?error:Error('入选库备份失败'));}
   });
 }
+
+export function prepareStoredPreEntry(owner:string,knownHash?:string):Promise<PreparedAccountBlob|undefined>{return serializeArchiveWork(()=>prepareStored(owner,knownHash));}

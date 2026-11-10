@@ -20,6 +20,23 @@ const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   act(() => { void h.result.current.start(); });
 };
+it('keeps one slow autosave in flight and saves the latest edit after it finishes', async () => {
+  let release!: (ok: boolean) => void;
+  storage.save.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const h = renderHook(() => useFishQuality('slow-storage', [], async () => {}));
+  await flush();
+  await flush(500);
+  expect(storage.save).toHaveBeenCalledTimes(1);
+  for (const hours of [12,24,48]) {
+    act(() => h.result.current.setObserveHours(hours));
+    await flush(500);
+  }
+  expect(storage.save).toHaveBeenCalledTimes(1);
+  await act(async () => { release(true); });
+  await flush(500);
+  expect(storage.save).toHaveBeenCalledTimes(2);
+  expect(storage.save.mock.calls[1][1].observeHours).toBe(48);
+});
 it('updates library rating metadata after hydration and later edits without starting a calculation',async()=>{
   const librarySignal={...signal,id:'library',fish:undefined},persisted=importQualityLibrary(newQualityStudy(T),[librarySignal],T);
   storage.load.mockResolvedValue({study:persisted});

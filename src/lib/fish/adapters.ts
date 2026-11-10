@@ -1,3 +1,4 @@
+import {ArrayLruCache} from '../arrayLruCache';
 import {ati6hTickSize} from '@/lib/ati6hMarketData';
 import { assertBinancePublicAllowed, noteBinanceRateLimit, publicRateLimitDeadline, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import {binanceStockMarket,bitgetStockMarket} from './stockMetadata';
@@ -87,10 +88,10 @@ export interface FishDataAdapter {
   taker(market: FishMarket, bars: ResearchBar[], signal: AbortSignal, query?: FishBarQuery): Promise<ResearchBar[]>;
 }
 export class FishAdapter implements FishDataAdapter {
-  private cache = new Map<string,ResearchBar[]>();
+  private cache = new ArrayLruCache<ResearchBar>(30_000);
   private remember(key:string,bars:ResearchBar[]):void {
     const byTime=new Map((this.cache.get(key)??[]).map(b=>[b.openTime,b]));for(const b of bars)byTime.set(b.openTime,b);
-    let rows=[...byTime.values()];const cap=Math.max(5000,bars.length,this.cache.get(key)?.length??0),cut=bars.at(-1)?.openTime??0;
+    let rows=[...byTime.values()];const cap=Math.min(30_000,Math.max(5000,bars.length)),cut=bars.at(-1)?.openTime??0;
     if(rows.length>cap)rows.sort((a,b)=>Math.abs(a.openTime-cut)-Math.abs(b.openTime-cut)).splice(cap);
     rows.sort((a,b)=>a.openTime-b.openTime);this.cache.set(key,rows);
   }

@@ -95,7 +95,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
       </Popover>
     </div>
     <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="动态筛选条件" title="设置动态筛选条件与时长"><Settings2 aria-hidden className="h-3 w-3"/>条件设置</button></PopoverTrigger>
-      <PopoverContent align="start" collisionPadding={12} className="w-[46rem] max-w-[calc(100vw-2rem)] max-h-[min(85dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+      <PopoverContent align="start" collisionPadding={12} className="screening-settings-popover w-[52rem] max-w-[calc(100vw-2rem)] max-h-[min(88dvh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain p-0">
         {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
       </PopoverContent>
     </Popover>

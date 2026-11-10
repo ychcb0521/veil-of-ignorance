@@ -1,7 +1,8 @@
+import {serializeArchiveWork} from '../serializeArchiveWork';
 import type { PreEntryLibrary } from './preEntryMonitor';
 import { writePreEntrySnapshot } from './preEntryPersistence';
 
-export async function persistPreEntrySnapshot(owner: string | undefined, delta: PreEntryLibrary): Promise<void> {
+async function persistSnapshot(owner: string | undefined, delta: PreEntryLibrary): Promise<void> {
   if (typeof Worker === 'undefined') return writePreEntrySnapshot(owner, delta);
   return new Promise<void>((resolve, reject) => {
     const worker = new Worker(new URL('../workers/preEntryPersistence.worker.ts', import.meta.url), { type: 'module' });
@@ -14,3 +15,5 @@ export async function persistPreEntrySnapshot(owner: string | undefined, delta: 
     try { worker.postMessage({ owner, delta }); } catch (error) { finish(error instanceof Error ? error : Error('入选库保存失败')); }
   });
 }
+
+export function persistPreEntrySnapshot(owner:string|undefined,delta:PreEntryLibrary):Promise<void>{return serializeArchiveWork(()=>persistSnapshot(owner,delta));}

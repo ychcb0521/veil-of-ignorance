@@ -4,6 +4,7 @@ vi.mock('@/lib/fish/qualityStore', () => ({ prepareQualityCampaignRead: store.pr
 vi.mock('@/lib/featureSource', () => ({ accountFeatureDefs: () => [] }));
 import { listQualityCampaignData, loadQualityCampaignData, loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { newQualityStudy } from '@/lib/fish/quality';
+import { serializeArchiveWork } from '@/lib/serializeArchiveWork';
 beforeEach(() => { store.prepare.mockReset().mockResolvedValue({ durable: true }); store.load.mockReset(); });
 it('requests only a worker summary for detail account metrics, never a full campaign list', async () => {
   const sent = vi.fn(), terminate = vi.fn();
@@ -17,6 +18,23 @@ it('requests only a worker summary for detail account metrics, never a full camp
   expect(store.load).not.toHaveBeenCalled(); expect(terminate).toHaveBeenCalledOnce();
 });
 afterEach(() => vi.unstubAllGlobals());
+it('waits for a shared archive backup before opening a campaign snapshot', async () => {
+  let release!: () => void;
+  const backup = serializeArchiveWork(() => new Promise<void>(resolve => { release = resolve; }));
+  await Promise.resolve();
+  const workers: any[] = [];
+  class Reader {
+    onmessage: any; onerror: any; terminate = vi.fn();
+    constructor() { workers.push(this); }
+    postMessage() { queueMicrotask(() => this.onmessage({data:{ok:true,result:{kind:'list',data:{rows:[]}}}})); }
+  }
+  vi.stubGlobal('Worker', Reader);
+  const list = listQualityCampaignData('owner');
+  await Promise.resolve(); await Promise.resolve();
+  expect(workers).toHaveLength(0);
+  release(); await backup; await list;
+  expect(workers).toHaveLength(1); expect(workers[0].terminate).toHaveBeenCalledOnce();
+});
 it('sends only a small read request, returns the campaign result and releases the archive worker', async () => {
   const sent = vi.fn(), terminate = vi.fn();
   class Reader {

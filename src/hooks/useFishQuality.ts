@@ -1,3 +1,4 @@
+import {qualityExecutionSnapshot} from '@/lib/fish/qualityExecutionSnapshot';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {editLibraryDirectory,renameLibraryDirectory} from '@/lib/fish/qualityMonitorArchive';
 import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
@@ -177,10 +178,23 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
     const epoch = generation.current;
-    // Throttle, not debounce: a continuous stream of catches/results must still be saved during the run.
-    saveTimer.current = setTimeout(() => { saveTimer.current = null; void saveQualityStudy(owner, current.current).then(ok => {
-      if (epoch === generation.current) setWarning(ok ? '' : '鱼质量未能保存到本机；请保留此页面，系统会继续重试。');
-    }); }, 400);
+    const schedule=()=>{
+      const handle=setTimeout(()=>{
+        if(epoch!==generation.current)return;
+        const snapshot=current.current;
+        void saveQualityStudy(owner,snapshot).then(ok=>{
+          if(epoch===generation.current)setWarning(ok?'':'鱼质量未能保存到本机；请保留此页面，系统会继续重试。');
+        }).catch(()=>{if(epoch===generation.current)setWarning('鱼质量未能保存到本机；请保留此页面，系统会继续重试。');}).finally(()=>{
+          if(saveTimer.current!==handle)return;
+          saveTimer.current=null;
+          // One save in flight, then the latest immutable state. Slow storage
+          // cannot accumulate deep copies while both engines publish results.
+          if(epoch===generation.current&&readyRef.current&&current.current!==snapshot)schedule();
+        });
+      },400);
+      saveTimer.current=handle;
+    };
+    schedule();
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
     if(archiveLock.current&&mode!=='restart')return;
@@ -199,7 +213,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
     change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const epoch = generation.current, revision = intentRevision.current, aborter = new AbortController(); controller.current = aborter;
-    const frozen = structuredClone(scoped(current.current));
+    const frozen = qualityExecutionSnapshot(scoped(current.current));
     const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
     const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
     const readingKeys = new Set([...frozenSamples.values()].flatMap(row => [...frozenGroups.values()].flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(qualityMonitoringSample(row), f)))));
@@ -261,7 +275,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!readyRef.current || filterController.current || !anyBuyFilters(current.current) || !qualityRunSamples(scoped(current.current)).length) return;
     change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const revision = ++filterRevision.current;
-    const frozen = structuredClone(scoped(current.current)), total = qualityRunSamples(frozen).length;
+    const frozen = qualityExecutionSnapshot(scoped(current.current)), total = qualityRunSamples(frozen).length;
     const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => activeStandaloneBuyFilters(frozen).map(f => qualityFilterReadingKey(row, f))));
     frozen.filterReadings = frozen.filterReadings?.filter(r => !r.error && Number.isFinite(r.value));
     setFilterError('');

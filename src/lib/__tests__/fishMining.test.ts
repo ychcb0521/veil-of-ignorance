@@ -2,11 +2,23 @@
 import { beforeEach, expect, it } from 'vitest';
 import { acceptMinedAnchor, currentDefaultRules, mergeMiningStates, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, saveMiningState, MINING_START_MS, MINING_STEP_MS, type FishMiningState } from '@/lib/fish/mining';
 import { LEGACY_FISH_DEFAULT_RULES } from '@/lib/fish/cards';
-import { normalizeMiningState } from '@/lib/fish/miningState';
+import { normalizeMiningState, MINING_ROUND_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { fishCatchKey } from '@/lib/fish/records';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 beforeEach(() => localStorage.clear());
+it('stores bounded rounds separately without rewriting the previous unlimited round', () => {
+  const old = {...newMiningState(), round:{id:'old-round',startedAt:100}};
+  saveMiningState(old, 100);
+  const original = localStorage.getItem(miningKey(MINING_ROUND_LOGICAL_KEY));
+  const bounded = {...old,endMs:old.startMs+MINING_STEP_MS,round:{id:'bounded-round',startedAt:200}};
+  saveMiningState(bounded, 200);
+  expect(localStorage.getItem(miningKey(MINING_ROUND_LOGICAL_KEY))).toBe(original);
+  expect(readMiningState()).toMatchObject({endMs:bounded.endMs,round:bounded.round});
+  for(const endMs of [NaN,old.startMs,old.startMs-1]) {
+    expect(normalizeMiningState({...bounded,endMs,enabled:true})).toMatchObject({enabled:false,errorKind:'configuration'});
+  }
+});
 const fish = (symbol: string, timeMs: number): TradeSignal => ({ id: `fish-${symbol}-${timeMs}`, symbol, timeMs, timeLabel: '', fallbackZone: '', freshCatch: true,
   fish: { featureId: 'cbi2', featureShort: 'CBI-2', statistic: '结果', algorithmKey: 'cbi2|结果|=|>|0.04|', cutoffMs: timeMs, threshold: .04, direction: '>', average: .1, cbi2: .1, startAverage: .1, previousAverage: 0, scale: 1 } as never });
 

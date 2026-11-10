@@ -1,3 +1,4 @@
+import {ArrayLruCache} from '../arrayLruCache';
 import { assertBinancePublicAllowed, noteBinanceRateLimit, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import { readTuringCupKlines } from '@/lib/turingCupMarketData';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
@@ -68,8 +69,8 @@ async function getJson(path: string, fetchFn: FetchFn, signal?: AbortSignal): Pr
   throw lastError;
 }
 
-const klineCache = new Map<string, ResearchBar[]>();
-const fundingCache = new Map<string, FundingEvent[]>();
+const klineCache = new ArrayLruCache<ResearchBar>(30_000);
+const fundingCache = new ArrayLruCache<FundingEvent>(20_000);
 
 /** 测试之间清缓存。 */
 export function clearMarketDataCache(): void {

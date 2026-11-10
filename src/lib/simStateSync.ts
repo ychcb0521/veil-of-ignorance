@@ -20,7 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './accountSyncTransport';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
-import { mergeMiningStates, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY } from '@/lib/fish/miningState';
+import { mergeMiningStates, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
 import {
   clearPersistedStateMemoryForTests,
@@ -68,6 +68,7 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
   // 持续挖掘采用最新轮次，同一轮内取挖得更远的进度。
   [MINING_LOGICAL_KEY]: mergeMiningStates,
   [MINING_ROUND_LOGICAL_KEY]: mergeMiningStates,
+  [MINING_RANGE_LOGICAL_KEY]: mergeMiningStates,
 };
 
 /**

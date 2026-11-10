@@ -18,7 +18,7 @@ export interface FishMiningRun {
   id: string; signature: string; rules: FishMiningRule[]; selection?: FishMiningState['selection'];
   /** 旧记录未填写时仍按原来的并集解释。 */
   combination?: 'and' | 'or';
-  startMs: number; stepMs: number; firstAt: number; updatedAt: number;
+  startMs: number; endMs?: number; stepMs: number; firstAt: number; updatedAt: number;
 }
 export interface FishMiningAnchor {
   id: string; runId: string; anchorMs: number; scannedAt: number; updatedAt: number;
@@ -52,14 +52,14 @@ const runSignature = (s: Pick<FishMiningState, 'rules' | 'selection' | 'startMs'
 ]);
 function withRun(library: FishMiningLibrary, state: FishMiningState, at: number, combination: 'and'|'or' = 'and'): { library: FishMiningLibrary; run: FishMiningRun } {
   // Keep legacy signatures stable and preserve each explicit restart, even with identical settings.
-  const signature = runSignature(state) + (combination === 'and' ? '|and' : '') + (state.round ? `|round:${state.round.id}` : '');
+  const signature = runSignature(state) + (combination === 'and' ? '|and' : '') + (state.endMs!=null?`|end:${state.endMs}`:'') + (state.round ? `|round:${state.round.id}` : '');
   const existing = library.runs.find(r => r.signature === signature);
   if (existing) {
     const run = { ...existing, updatedAt: Math.max(existing.updatedAt, at) };
     return { run, library: { ...library, runs: library.runs.map(r => r.id === run.id ? run : r) } };
   }
   const run: FishMiningRun = { id: `mine-run-${shortFishHash(signature)}`, signature, combination, rules: structuredClone(state.rules), ...(state.selection ? { selection: structuredClone(state.selection) } : {}),
-    startMs: state.startMs, stepMs: state.stepMs, firstAt: at, updatedAt: at };
+    startMs: state.startMs, ...(state.endMs!=null?{endMs:state.endMs}:{}), stepMs: state.stepMs, firstAt: at, updatedAt: at };
   return { run, library: { ...library, runs: [...library.runs, run] } };
 }
 const recordId = (runId: string, catchKey: string) => `${runId}|${catchKey}`;

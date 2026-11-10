@@ -4,6 +4,10 @@ import {payload} from '@/lib/fish/__tests__/libraryTransfer.fixture';
 import {markSourceDeletions} from '@/lib/fish/libraryDeletion';
 import {monitorArchiveFixture,ARCHIVE_T} from '@/lib/fish/__tests__/monitorArchive.fixture';
 import {archiveQualityMonitorStudy} from '@/lib/fish/qualityMonitorLibrary';
+import {qualityExecutionSnapshot} from '@/lib/fish/qualityExecutionSnapshot';
+import {encodeStoredQuality} from '@/lib/fish/qualityBackupEncoding';
+import {prepareAccountBlobEncoding} from '@/lib/accountBlobCodec';
+import {readSavedQualityPlans} from '@/lib/fish/qualitySavedPlans';
 const disk = new Map<string, unknown>();
 let fail = false;
 beforeEach(() => {
@@ -17,6 +21,16 @@ beforeEach(() => {
   vi.stubGlobal('indexedDB', { open() { const req:{result?:typeof db;onsuccess?:()=>void} = {}; queueMicrotask(() => { req.result = db; req.onsuccess?.(); }); return req; } });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('clones executable inputs without visiting historical archives, screening audits or template assets',()=>{
+ const study=monitorArchiveFixture(),before=structuredClone(study),blocked={get(){throw Error('Historical graph was copied');},enumerable:true};
+ const history=Object.defineProperty({},'entries',blocked);Object.assign(study,{screeningResults:history,monitorLibrary:history,planTemplates:history});
+ const snapshot=qualityExecutionSnapshot(study);expect(snapshot.samples).toEqual(before.samples);expect(snapshot.sellPlans).toEqual(before.sellPlans);expect(snapshot.results).toEqual(before.results);expect(snapshot.monitorLibrary).toBeUndefined();expect(snapshot.screeningResults).toBeUndefined();expect(snapshot.planTemplates).toBeUndefined();
+});
+it('encodes the durable holding snapshot with identical original wire content and catalog precedence',async()=>{
+ const store=await import('@/lib/fish/qualityStore'),study=monitorArchiveFixture();await store.saveQualityStudy('backup',study);
+ const value=await store.qualityAccountBlob.read('backup'),expected=await prepareAccountBlobEncoding(value);
+ expect(await encodeStoredQuality('backup',readSavedQualityPlans('backup'))).toEqual(expected);expect(await encodeStoredQuality('backup',[],expected.hash)).toEqual({hash:expected.hash});
+});
 it('restores protected split plans when an old tab overwrites the main study with one original plan',async()=>{
  const store=await import('@/lib/fish/qualityStore');
  const {makeQualitySellPlan}=await import('@/lib/fish/qualitySellPlans'),{BUILTIN_FEATURES}=await import('@/lib/deepDig/features');

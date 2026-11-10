@@ -9,6 +9,8 @@ export const MINING_DEFAULT_TARGET = 1000;
 export interface FishMiningRule { id: string; featureId: string; statistic: string; threshold: string }
 export interface FishMiningState {
   version: 1; enabled: boolean; startMs: number; stepMs: number;
+  /** Inclusive last scan anchor, only set by explicit bounded restarts. */
+  endMs?: number;
   /** Absent on rounds created before explicit restarts were supported. */
   round?: { id: string; startedAt: number };
   /** 下一档要扫的锚点（扫完才前进；被打断或出错就原地重试）。 */
@@ -34,6 +36,8 @@ export interface FishMiningState {
 export const MINING_LOGICAL_KEY = 'fish-mining.v1';
 // Explicit restarts use a separate slot so open older builds cannot advance a new round.
 export const MINING_ROUND_LOGICAL_KEY = 'fish-mining.v2';
+// Older tabs cannot enforce an end time, so bounded rounds use their own slot.
+export const MINING_RANGE_LOGICAL_KEY = 'fish-mining.v3';
 export const MINING_LEASE_LOGICAL_KEY = 'fish-mining-lease.v1';
 export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
   target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], presetRevision: MINING_PRESET_REVISION, lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });
@@ -51,6 +55,7 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
     retryCount: Number.isInteger(v.retryCount) && v.retryCount! > 0 ? Math.min(v.retryCount!,100) : 0,
     lastErrorAt: Number.isFinite(v.lastErrorAt) && v.lastErrorAt! > 0 ? v.lastErrorAt : null,
     errorKind: v.errorKind === 'configuration' || v.errorKind === 'transient' ? v.errorKind : undefined } as FishMiningState;
+  if(v.endMs!==undefined&&(!Number.isFinite(v.startMs)||!Number.isFinite(v.endMs)||v.endMs<=v.startMs!))return {...normalized,enabled:false,lastError:'挖掘时间区间无效，请重新设置起止时间',errorKind:'configuration'};
   if (!upgrade) return normalized;
   return { ...normalized, presetRevision: MINING_PRESET_REVISION, rules: FISH_DEFAULT_RULES.map(rule=>({...rule})),
     ruleRepairs: ['已替换为四项默认条件，旧挖掘要求已废除；已有进度和历史结果保留'],

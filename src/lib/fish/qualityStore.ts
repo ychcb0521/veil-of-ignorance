@@ -8,7 +8,9 @@ import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
 import { preserveQualityFilterLibrary } from './qualityFilterLibrary';
-import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import { noteAccountBlobSaved, syncAccountBlobOnLoad, prepareAccountBlob, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import {serializeArchiveWork} from '../serializeArchiveWork';
+import {prepareStoredQuality} from './qualityBackup';
 import { compactQualityStudyForStorage } from './qualityStudyCompact';
 import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies, withoutQualityArchiveBodies } from './qualityArchiveStore';
 
@@ -155,11 +157,12 @@ export function ensureQualityArchivesDetached(owner?: string, force = false): Pr
 }
 export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly?: boolean; remote?: {preferRemote:boolean} }): Promise<boolean> {
   const key = keyOf(owner);
-  // 先在内存那份上去重（同一对象只比一次），复制出来的副本也只带几十份方案，事务里的二次压实因此很便宜。
-  let copy = structuredClone(compactQualityStudyForStorage(study));
+  // App studies use immutable updates. IndexedDB already clones on put; making
+  // an eager deep copy for every queued save multiplies the entire archive.
+  let copy = compactQualityStudyForStorage(study);
   const merge = (previous: unknown) => applySavedQualityPlans(compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner, options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy))),readSavedQualityPlans(owner));
   let leftInline = false;
-  const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
+  const task = (writes.get(key) ?? Promise.resolve(true)).then(()=>serializeArchiveWork(async () => {
     let durablePrevious: FishQualityStudy | undefined;
     // 新归档的正文先写进归档库，总表只存目录。
     copy = await detachQualityArchiveBodies(owner, copy);
@@ -180,7 +183,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
         localStorage.setItem(key, JSON.stringify(merge(valid(saved) ? preserveStudy(durablePrevious,saved) : durablePrevious))); return true;
       } catch { return false; }
     }
-  });
+  }));
   writes.set(key, task);
   // 记录里还剩内嵌正文（旧标签页写回的、或这次没写进归档库的）：排在这次保存之后再迁一次。
   void task.then(() => { if (leftInline) void ensureQualityArchivesDetached(owner, true); });
@@ -230,6 +233,14 @@ export function backfillQualityArchiveCounts(owner: string | undefined, study: F
 /** 账号云端存档：本机那份原样上传；取回云端时排进同一条写队列，绝不和页面的保存交错。 */
 export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
   name: 'fish-quality',
+  async prepareStored(owner,knownHash){
+    await ensureQualityArchivesDetached(owner);await writes.get(keyOf(owner));
+    // A legacy emergency localStorage copy may be newer; retain that exact
+    // recovery path instead of bypassing it in the durable-only worker.
+    let fallback=false;try{fallback=localStorage.getItem(keyOf(owner))!=null;}catch{/* durable copy remains available */}
+    if(fallback){const value=await qualityAccountBlob.read(owner);return value?prepareAccountBlob(value,knownHash):undefined;}
+    return prepareStoredQuality(owner,readSavedQualityPlans(owner),knownHash);
+  },
   async mergeRemote(owner,value,context){if(value&&!await saveQualityStudy(owner,value,{remote:{preferRemote:context?.preferRemote??false}}))throw Error('鱼质量跨设备合并未保存');},
   async read(owner) {
     const key = keyOf(owner);
