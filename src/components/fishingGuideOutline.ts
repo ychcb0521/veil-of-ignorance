@@ -18,6 +18,16 @@ export function fishingChapter(label: string) {
   return number ? { number, level:number.split('.').length+1,
     id:anchors[number]??'fish-'+number.replace(/\./g, '-') } : undefined;
 }
+const topicNumbers:Record<string,string>={
+  '静态过滤':'3.3.4.2.1','动态筛选':'3.3.4.2.2',
+  '入场与方案':'3.3.4.3.1','条件设置':'3.3.4.3.2','镜像与加仓':'3.3.4.3.3','运行与保存':'3.3.4.3.4',
+  '来源与勾选':'3.3.4.4.1','结果与明细':'3.3.4.4.2','评分':'3.3.4.4.3','导出':'3.3.4.4.4',
+};
+/** Former deep-section links now land on ordinary paragraph leads. */
+export function fishingTopicAnchor(label:string){
+  const number=topicNumbers[label];
+  return number?fishingChapter(number+' ')?.id:undefined;
+}
 /** Navigation and body read the same numbered headings. */
 function outline(text:string):FishingGuideItem {
   const roots:FishingGuideItem[]=[], stack:{number:string;item:FishingGuideItem}[]=[];

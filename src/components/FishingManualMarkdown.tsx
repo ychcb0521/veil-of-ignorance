@@ -1,7 +1,7 @@
 import {createElement,type ReactNode} from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {fishingChapter} from './fishingGuideOutline';
+import {fishingChapter,fishingTopicAnchor} from './fishingGuideOutline';
 
 export function FishingManualMarkdown({text,guide=false,skipTitle=false,reference=false}:{text:string;guide?:boolean;skipTitle?:boolean;reference?:boolean}){
   const heading=(children:ReactNode,sourceLevel:number)=>{
@@ -16,7 +16,14 @@ export function FishingManualMarkdown({text,guide=false,skipTitle=false,referenc
   };
   return <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
     h1:({children})=>heading(children,1),h2:({children})=>heading(children,2),h3:({children})=>heading(children,3),
-    p:({children})=><p className={guide?'guide-copy':'my-3 leading-8'}>{children}</p>,
+    p:({children,node})=>{
+      const first=node?.children[0];
+      const lead=first?.type==='element'&&first.tagName==='strong'
+        ?first.children.map(part=>part.type==='text'?part.value:'').join('').replace(/[。:：]$/,''):'';
+      const anchor=reference?undefined:fishingTopicAnchor(lead);
+      return <p id={guide?anchor:undefined} data-manual-anchor={anchor}
+        className={(guide?'guide-copy':'my-3 leading-8')+(anchor?' scroll-mt-24':'')}>{children}</p>;
+    },
     ul:({children})=><ul className="my-4 list-disc space-y-2 pl-6">{children}</ul>,
     ol:({children,...props})=><ol {...props} className="my-4 list-decimal space-y-3 pl-6">{children}</ol>,
     li:({children})=><li className="pl-1 leading-8 marker:text-muted-foreground">{children}</li>,
