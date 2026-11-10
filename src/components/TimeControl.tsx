@@ -1,4 +1,5 @@
 import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
+import {setMatchingSourceQuality} from '@/lib/fish/qualitySourceRatings';
 import { readFishAccountSettings } from '@/lib/fish/accountSettings';
 import {FishBulkDeletionProvider} from './FishBulkDeletion';
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
@@ -18,7 +19,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
   parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
-  setSignalQuality, normalizeSignalQuality, signalChartSymbol,
+  normalizeSignalQuality, signalChartSymbol,signalDedupKey,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
@@ -443,6 +444,15 @@ export function TimeControl({
    * 云端恢复与首次展示不会回传旧缓存，所以「最新评分覆盖旧的」保持成立，
    * 不需要另开一条保存路径。
    */
+  const {ready:qualityRatingsReady,setSourceQuality:saveSourceRating}=fishQuality;
+  const {commit:commitFish,signalsRef:fishSourcesRef}=fish;
+  const handleRateQualitySource=useCallback((source:TradeSignal,value:number)=>{
+    const quality=normalizeSignalQuality(source.quality)===value?undefined:value,key=signalDedupKey(source);
+    if(qualityRatingsReady)saveSourceRating?.(source,quality);
+    if(fishSourcesRef.current.some(signal=>signalDedupKey(signal)===key))commitFish(setMatchingSourceQuality(fishSourcesRef.current,source,quality));
+    if(onlineSignals.some(signal=>signalDedupKey(signal)===key))setOnlineSignals(previous=>setMatchingSourceQuality(previous,source,quality));
+    if(turingSignals.some(signal=>signalDedupKey(signal)===key))setTuringSignals(previous=>setMatchingSourceQuality(previous,source,quality));
+  },[commitFish,fishSourcesRef,qualityRatingsReady,saveSourceRating,onlineSignals,setOnlineSignals,turingSignals,setTuringSignals]);
   const handleRateSignal = useCallback((id: string, next: number) => {
     // 记下打分前的评分：列表按它排、不跳位，直到用户点表头（见 frozenQuality）
     const before = normalizeSignalQuality(signalsRef.current.find(sig => sig.id === id)?.quality) ?? null;
@@ -451,8 +461,8 @@ export function TimeControl({
       const map = prev.key === key ? prev.map : new Map<string, number | null>();
       return map.has(id) ? prev : { key, map: new Map(map).set(id, before) };
     });
-    setSignals(prev => setSignalQuality(prev, id, next));
-  }, [setSignals]);
+    const source=signalsRef.current.find(signal=>signal.id===id);if(source)handleRateQualitySource(source,next);
+  }, [handleRateQualitySource]);
   const handleClearSignals = async () => {
     try {
       if (turing && visibleReplaySamples.length) {
@@ -526,7 +536,7 @@ export function TimeControl({
 
   // 手动删除走 fish.remove：记删除记号，别的设备 / 窗口的旧副本合并时不会把它带回来
   const handleDeleteFish = useCallback((id: string) => fish.remove(id), [fish.remove]);
-  const handleRateFish = useCallback((id: string, quality: number) => fish.commit(setSignalQuality(fish.signalsRef.current, id, quality)), [fish.commit, fish.signalsRef]);
+  const handleRateFish = useCallback((id:string,quality:number)=>{const source=fishSourcesRef.current.find(signal=>signal.id===id);if(source)handleRateQualitySource(source,quality);},[fishSourcesRef,handleRateQualitySource]);
   const handleJumpFish = useCallback(async (id: string, qualitySource?: TradeSignal) => {
     const fishSignal = fish.signalsRef.current.find(s => s.id === id);
     const sig = fishSignal ?? qualitySource;
@@ -685,7 +695,7 @@ export function TimeControl({
       </div>
 
       <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={onlineReconstruction} librarySignals={onlineSignals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
-        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
+        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onRateQuality={handleRateQualitySource} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (

@@ -23,6 +23,17 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('rates a merged signal inline, toggles the same star off, and leaves frozen archive ratings read-only',async()=>{
+ const {rateQualitySource}=await import('@/lib/fish/qualitySourceRatings');
+ const s=state(),plans=JSON.stringify(s.study.sellPlans),jump=vi.fn();
+ s.setSourceQuality=vi.fn((source,quality)=>{s.study=rateQualitySource(s.study,source,quality);});
+ const view=render(<FishQuality state={s} onJump={jump}/>);
+ let row=screen.getAllByTestId('quality-fish-row')[0];fireEvent.click(within(row).getByRole('radio',{name:'4 星'}));
+ expect(s.setSourceQuality).toHaveBeenLastCalledWith(expect.objectContaining({symbol:'AAAUSDT'}),4);expect(jump).not.toHaveBeenCalled();
+ view.rerender(<FishQuality state={s} onJump={jump}/>);row=screen.getAllByTestId('quality-fish-row')[0];expect(within(row).getByRole('radio',{name:'4 星'})).toHaveAttribute('aria-checked','true');
+ fireEvent.click(within(row).getByRole('radio',{name:'4 星'}));expect(s.setSourceQuality).toHaveBeenLastCalledWith(expect.any(Object),undefined);
+ view.rerender(<FishQuality state={s} archiveView/>);expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByRole('radio',{name:'4 星'})).toBeNull();expect(JSON.stringify(s.study.sellPlans)).toBe(plans);expect(s.start).not.toHaveBeenCalled();
+});
 it('applies multiple screening directories to the main table and keeps holding plans while exposing both entries',async()=>{
  const {firstMatchFixture}=await import('@/lib/fish/__tests__/qualityFirstMatch.fixture'),{library}=firstMatchFixture(),second={...library.rounds[0],id:'second',startedAt:library.rounds[0].startedAt+60000};
  library.rounds.push(second);library.records.push({...structuredClone(library.records[0]),id:'other-record',roundId:'second',sample:{...structuredClone(library.records[0].sample),source:{...library.records[0].sample.source,id:'other',symbol:'OTHERUSDT'}},matchedAt:library.records[0].matchedAt!+60000});

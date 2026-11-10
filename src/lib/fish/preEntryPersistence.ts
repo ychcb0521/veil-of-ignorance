@@ -1,5 +1,5 @@
 import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary } from './preEntryMonitor';
-import {restorePreEntryLibrary,projectPreEntryRecords} from './preEntryArchive';
+import {restorePreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
 import { mergePreEntryTableClears, validPreEntryTableClears, withPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 
 // Same database/version/store. Keep the legacy key intact, add independent
@@ -109,37 +109,61 @@ export async function writePreEntryTableClears(owner: string | undefined, marks:
  * with these durable rows. A stale legacy save cannot erase the new histories. */
 export async function writePreEntrySnapshot(owner: string | undefined, delta: PreEntryLibrary): Promise<void> {
   if (!validPreEntryLibrary(delta)) throw Error('入选库存档格式无效');
-  delta=await restorePreEntryLibrary(delta);
   let completeIndex=false;
   const generation=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let checkpointMeta='null';
   let previousMeta='null';
   const db = await open();
-  try { await new Promise<void>((resolve, reject) => {
+  const staged=delta.records.some(record=>!!record.processRef);
+  const stageKey=(index:number)=>`staging:${keyOf(owner)}:${generation}:${index}`;
+  try {
+    // Imported/resumed directories can reference hundreds of MB of histories.
+    // Stage one restored row at a time on disk, keeping the original public
+    // records untouched until the following atomic transaction commits them all.
+    if(staged)for(let i=0;i<delta.records.length;i++){
+      const record=await restorePreEntryRecord(delta.records[i]);
+      await new Promise<void>((resolve,reject)=>{
+        const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).put(record,stageKey(i));
+        tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error??Error('筛选恢复暂存失败，原库保留'));
+      });
+    }
+    await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
     let failure: unknown;
-    const update = (key: string, incoming: PreEntryLibrary, row = false) => {
+    const update = (key: string, incoming: PreEntryLibrary, row = false, next?:()=>void) => {
       const request = store.get(key);
       request.onsuccess = () => { try {
         const previous = row && request.result ? {version:1 as const,rounds:[],records:[request.result]} : request.result;
         if (previous != null && !validPreEntryLibrary(previous)) throw Error('入选库存档格式无效');
         const merged = mergePreEntryLibraries(previous ?? emptyPreEntryLibrary(), incoming);
         if(!row){previousMeta=JSON.stringify(previous??null);checkpointMeta=JSON.stringify(merged);}
-        store.put(row ? merged.records[0] : merged, key);
+        const saved=store.put(row ? merged.records[0] : merged, key);
+        if(next)saved.onsuccess=next;
       } catch (error) { failure=error; tx.abort(); } };
     };
     update(metaKey(owner), {...delta, records:[]});
-    for (const record of delta.records) update(rowPrefix(owner)+record.id, {version:1,rounds:[],records:[record]}, true);
+    const updateRow=(index:number)=>{
+      if(index>=delta.records.length)return;
+      const save=(record:PreEntryLibrary['records'][number])=>update(rowPrefix(owner)+record.id,{version:1,rounds:[],records:[record]},true,()=>updateRow(index+1));
+      if(!staged){save(delta.records[index]);return;}
+      const request=store.get(stageKey(index));
+      request.onsuccess=()=>{try{const record=request.result;if(!record||record.id!==delta.records[index].id||record.processRef)throw Error('筛选恢复暂存不完整，原库保留');save(record);}catch(error){failure=error;tx.abort();}};
+    };
+    updateRow(0);
     const cached=store.get(viewKey(owner));
     cached.onsuccess=()=>{try{const previous=validReadModel(cached.result)?cached.result:undefined;completeIndex=!!previous?.complete&&previous.meta===previousMeta;store.put({version:1,generation,complete:false,library:previous?.library??emptyPreEntryLibrary()},viewKey(owner));}catch(error){failure=error;tx.abort();}};
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? Error('入选库保存失败'));
-  }); } finally { db.close(); }
+  }); } finally {
+    if(staged){try{await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);for(let i=0;i<delta.records.length;i++)store.delete(stageKey(i));tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});}catch{/* Only this attempt's private staging keys; canonical history is untouched. */}}
+    db.close();
+  }
   // Canonical data is durable FIRST. A cache/quota failure cannot undo a saved
   // result; the incomplete flag makes the next read rebuild from the original.
   try{
-    const terminal=delta.records.filter(r=>!['queued','scanning','paused'].includes(r.status));
-    const projected=terminal.length?await projectPreEntryRecords(terminal,owner):[],views=new Map(projected.map(record=>[record.id,record]));
+    // An active/paused row is just as large as a completed one. This private
+    // directory is never an engine input; restore its acknowledged body on use.
+    const projected=await projectPreEntryRecords(delta.records,owner),views=new Map(projected.map(record=>[record.id,record]));
     await cachePreEntryReadModel(owner,{...delta,records:delta.records.map(record=>views.get(record.id)??record)},completeIndex,true,{generation,meta:checkpointMeta});
   }catch{/* The canonical checkpoint remains saved and the read index incomplete. */}
 }

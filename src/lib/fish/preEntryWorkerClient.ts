@@ -1,6 +1,6 @@
-import { collectPreEntryMonitor, type PreEntryRun } from './preEntryMonitor';
+import {type PreEntryRun} from './preEntryMonitor';
 import {preEntryRecordPending} from './preEntryMonitor';
-import {restorePreEntryRecord} from './preEntryArchive';
+import {collectPreEntryWithLazyHistory} from './preEntryLazyHistory';
 import type { FishReconstructionLoader } from './reconstruction';
 import type { QualityProgress } from './quality';
 import { applyScreeningRecordDelta, screeningError, restoreScreeningError, type ScreeningWorkerInput, type ScreeningWorkerOutput } from './preEntryWorkerProtocol';
@@ -8,8 +8,7 @@ import { applyScreeningRecordDelta, screeningError, restoreScreeningError, type 
 /** Same frozen engine and shared market loader; only calculation moves off the UI thread. */
 export async function collectPreEntryInWorker(task:PreEntryRun,load:FishReconstructionLoader,now:number,signal:AbortSignal,onProgress:(p:QualityProgress)=>void,bounds?:{start?:(symbol:string)=>Promise<number|undefined>;end?:(symbol:string)=>Promise<number>}):Promise<void>{
   if(signal.aborted)throw new DOMException('已暂停','AbortError');
-  if(task.records.some(r=>r.processRef&&preEntryRecordPending(r))){const records=[];for(const r of task.records)records.push(preEntryRecordPending(r)?await restorePreEntryRecord(r):r);task={...task,records};}
-  if(typeof Worker!=='function')return collectPreEntryMonitor(task,load,now,signal,onProgress,bounds);
+  if(typeof Worker!=='function')return collectPreEntryWithLazyHistory(task,load,now,signal,onProgress,bounds);
   return new Promise((resolve,reject)=>{
     const worker=new Worker(new URL('../workers/preEntryScan.worker.ts',import.meta.url),{type:'module'});
     const records=new Map(task.records.map(r=>[r.id,r]));

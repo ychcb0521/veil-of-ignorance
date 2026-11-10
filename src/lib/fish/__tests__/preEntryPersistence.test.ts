@@ -7,19 +7,21 @@ import { persistPreEntrySnapshot } from '../preEntryPersistenceClient';
 import { encodeStoredPreEntry } from '../preEntryBackupEncoding';
 import { prepareStoredPreEntry } from '../preEntryBackup';
 import { prepareAccountBlobEncoding } from '@/lib/accountBlobCodec';
+import {serializeArchiveWork} from '@/lib/serializeArchiveWork';
 
 const disk = new Map<string, unknown>();
 const reads: string[] = [], puts: string[] = [];
-let fail = false;
+let fail = false,failCanonical=false;
 beforeEach(() => {
- disk.clear(); reads.length=0; puts.length=0; fail=false;
+ disk.clear(); reads.length=0; puts.length=0; fail=false;failCanonical=false;
  vi.stubGlobal('IDBKeyRange',{bound:(lower:string,upper:string)=>({lower,upper})});
  const db={close:vi.fn(),createObjectStore:vi.fn(),transaction(){
-  const staged=new Map<string,unknown>();let timer:ReturnType<typeof setTimeout>,aborted=false;
-  const complete=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(aborted)return;if(fail&&staged.size){tx.onabort?.();return;}for(const [k,v]of staged)disk.set(k,v);tx.oncomplete?.();},0);};
+  const staged=new Map<string,unknown>(),deleted=new Set<string>();let timer:ReturnType<typeof setTimeout>,aborted=false;
+  const complete=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(aborted)return;if(fail&&staged.size||failCanonical&&[...staged.keys()].some(k=>k.startsWith('incremental:'))){tx.onabort?.();return;}for(const key of deleted)disk.delete(key);for(const [k,v]of staged)disk.set(k,v);tx.oncomplete?.();},0);};
   const tx={oncomplete:undefined as (()=>void)|undefined,onabort:undefined as (()=>void)|undefined,abort(){aborted=true;clearTimeout(timer);queueMicrotask(()=>tx.onabort?.());},objectStore:()=>({
    get(key:string){reads.push(key);const request:{result?:unknown;onsuccess?:()=>void}={};queueMicrotask(()=>{request.result=structuredClone(disk.get(key));request.onsuccess?.();complete();});return request;},
-   put(value:unknown,key:string){puts.push(key);staged.set(key,structuredClone(value));complete();},
+   put(value:unknown,key:string){puts.push(key);staged.set(key,structuredClone(value));const request:{onsuccess?:()=>void}={};queueMicrotask(()=>{request.onsuccess?.();complete();});complete();return request;},
+   delete(key:string){deleted.add(key);complete();},
    openCursor(range:{lower:string;upper:string}){const entries=[...disk].filter(([k])=>k>=range.lower&&k<=range.upper).sort(([a],[b])=>a.localeCompare(b));const request:{result?:unknown;onsuccess?:()=>void}={};let i=0;const step=()=>queueMicrotask(()=>{const item=entries[i++];request.result=item?{value:structuredClone(item[1]),continue:step}:null;request.onsuccess?.();complete();});step();return request;}
   })};return tx;
  }};
@@ -87,6 +89,15 @@ it('encodes the durable library in a worker using only its owner key and the unc
  expect(await prepareStoredPreEntry('bob')).toBeUndefined();
  expect(posted).toEqual([{owner:'alice',knownHash:undefined},{owner:'alice',knownHash:expected.hash},{owner:'bob',knownHash:undefined}]);expect(stopped).toHaveBeenCalledTimes(3);expect(await readPreEntrySnapshot('alice')).toEqual(value);
 });
+it('allows checkpoints after a bounded immutable backup snapshot is ready, before cloud encoding finishes',async()=>{
+ const workers:Encoder[]=[];
+ class Encoder{onmessage:(e:unknown)=>void;terminate=vi.fn();constructor(){workers.push(this);}postMessage(){queueMicrotask(()=>this.onmessage({data:{snapshotReady:true}}));}}
+ vi.stubGlobal('Worker',Encoder);
+ let finished=false;const backup=prepareStoredPreEntry('alice').then(value=>{finished=true;return value;});
+ await serializeArchiveWork(async()=>{expect(finished).toBe(false);await writePreEntrySnapshot('alice',fixture());});
+ expect((await readPreEntrySnapshot('alice'))!.records).toHaveLength(1);
+ workers[0].onmessage({data:{ok:true,result:{hash:'frozen-snapshot'}}});expect(await backup).toEqual({hash:'frozen-snapshot'});expect(workers[0].terminate).toHaveBeenCalledOnce();
+});
 it('rejects a stale read index after an older page changes metadata or an overlapping checkpoint finishes',async()=>{
  const initial=fixture();await writePreEntrySnapshot('alice',initial);
  const revision=await readPreEntryCacheRevision('alice');await cachePreEntryReadModel('alice',initial,true,false,revision);
@@ -97,4 +108,26 @@ it('rejects a stale read index after an older page changes metadata or an overla
  await cachePreEntryReadModel('alice',initial,true,false,revision);
  expect(await readPreEntryReadModel('alice')).toBeUndefined();
  expect((await readPreEntrySnapshot('alice'))!.records[0].cursor).toBe(30);
+});
+it('stages projected histories one row at a time and commits their complete public records atomically',async()=>{
+ const initial=fixture();await writePreEntrySnapshot('alice',initial);
+ const process={...initial.records[0].exclusionProcess!,entries:Array.from({length:100},(_,i)=>({...initial.records[0].exclusionProcess!.entries[0],through:i+1,reason:'Original '+i}))};
+ disk.set('body-a',process);disk.set('body-b',process);
+ const rows=['a','b'].map(id=>({...initial.records[0],id,updatedAt:200,cursor:200,processRef:{key:'body-'+id,entries:100},exclusionProcess:{...process,entries:process.entries.slice(-1)}}));
+ const next={...initial,rounds:initial.rounds.map(r=>({...r,updatedAt:200})),records:rows};
+ await writePreEntrySnapshot('alice',next);
+ const stored=(await readPreEntrySnapshot('alice'))!;
+ expect(stored.records).toEqual(rows.map(({processRef,...row})=>({...row,exclusionProcess:process})));
+ expect(stored.rounds).toEqual(next.rounds);expect([...disk.keys()].filter(k=>k.startsWith('staging:'))).toEqual([]);
+ expect(rows.every(r=>r.processRef&&r.exclusionProcess.entries.length===1)).toBe(true);
+});
+it('keeps the entire old checkpoint when a later body is missing or the atomic commit fails, and cleans only its private staging keys',async()=>{
+ const initial=fixture();await writePreEntrySnapshot('alice',initial);
+ const body=initial.records[0].exclusionProcess!;disk.set('body-a',body);
+ const next={...initial,settings:{...initial.settings!,updatedAt:10,hours:24},records:['a','b'].map(id=>({...initial.records[0],id,updatedAt:20,processRef:{key:'body-'+id,entries:body.entries.length}}))};
+ await expect(writePreEntrySnapshot('alice',next)).rejects.toThrow('正文');
+ expect(await readPreEntrySnapshot('alice')).toEqual(initial);expect([...disk.keys()].filter(k=>k.startsWith('staging:'))).toEqual([]);expect(disk.get('body-a')).toEqual(body);
+ disk.set('body-b',body);failCanonical=true;
+ await expect(writePreEntrySnapshot('alice',next)).rejects.toThrow();failCanonical=false;
+ expect(await readPreEntrySnapshot('alice')).toEqual(initial);expect([...disk.keys()].filter(k=>k.startsWith('staging:'))).toEqual([]);expect(disk.get('body-b')).toEqual(body);
 });

@@ -1,4 +1,5 @@
-import { collectPreEntryMonitor, type PreEntryRecord } from '../fish/preEntryMonitor';
+import {type PreEntryRecord} from '../fish/preEntryMonitor';
+import {collectPreEntryWithLazyHistory} from '../fish/preEntryLazyHistory';
 import { screeningRecordDelta, screeningError, restoreScreeningError, type ScreeningWorkerInput, type ScreeningWorkerOutput, type ScreeningRequest } from '../fish/preEntryWorkerProtocol';
 import type { FishReconstructionLoader } from '../fish/reconstruction';
 
@@ -27,10 +28,10 @@ async function run(input:Extract<ScreeningWorkerInput,{type:'start'}>){
   load.turingInitialization=input.initialization;
   let error;
   try{
-    await collectPreEntryMonitor({round:input.round,records:input.records,onRecord:record=>{pending.set(record.id,record);drain();}},load,input.now,aborter.signal,value=>send({type:'progress',value}),{
+    await collectPreEntryWithLazyHistory({round:input.round,records:input.records,onRecord:record=>{pending.set(record.id,record);drain();}},load,input.now,aborter.signal,value=>send({type:'progress',value}),{
       start:input.bounds.start?async symbol=>await request({method:'start',symbol}) as number|undefined:undefined,
       end:input.bounds.end?async symbol=>await request({method:'end',symbol}) as number:undefined,
-    });
+    },async()=>{if(inFlight!=null||pending.size)await new Promise<void>(resolve=>{drained=resolve;});});
   }catch(cause){error=screeningError(cause);}
   if(inFlight!=null||pending.size)await new Promise<void>(resolve=>{drained=resolve;});
   send({type:'done',error});

@@ -2,7 +2,7 @@ import {beforeEach,expect,it,vi} from 'vitest';
 import {FishScanner,combineFishRound,deriveFishRound,type FishCombinationRound} from '@/lib/fishScanner';
 import {CBI2_DEF} from '@/lib/deepDig/features';
 import {compileFishProgram} from '@/lib/fish/algorithm';
-import {fishProgramForLookback,readFishLookback,saveFishLookback,fishLookbackKey} from '@/lib/fish/lookback';
+import {fishProgramForLookback,readFishLookback,saveFishLookback,fishLookbackKey,limitFishLookback} from '@/lib/fish/lookback';
 import {buildFishScanSettings} from '@/lib/fish/scanPlan';
 import type {FishDataAdapter} from '@/lib/fish/adapters';
 const T=Date.UTC(2026,9,28),H=3600000,step=300000;
@@ -61,4 +61,27 @@ it('upgrades only the previous 12h default once and preserves other custom choic
  saveFishLookback(12);expect(readFishLookback()).toBe(12);
  localStorage.clear();localStorage.setItem(fishLookbackKey(),'10');expect(readFishLookback()).toBe(10);
  localStorage.clear();saveFishLookback(12);expect(readFishLookback()).toBe(12);
+});
+it('bounds November 10 13:35 to its own preceding hour, rejects invalid dates and stale cutoff evidence, and never clamps an old start into the window',async()=>{
+ const anchor=Date.UTC(2026,10,10,5,35),valid=(await scan(1)).hits[0];
+ const member=(timeMs:number,cutoffMs=anchor)=>({outcome:'hit',signal:{...valid,timeMs,fish:{...valid.fish,cutoffMs,lookbackAnchorMs:anchor}}});
+ for(const timeMs of [anchor-H,anchor])expect(limitFishLookback(member(timeMs),anchor,1,anchor).outcome).toBe('hit');
+ for(const timeMs of [anchor-H-1,anchor+1,Date.UTC(2026,10,6,7,45)]){
+  const original=member(timeMs),before=JSON.stringify(original);expect(limitFishLookback(original,anchor,1,anchor)).toMatchObject({outcome:'outside'});expect(JSON.stringify(original)).toBe(before);
+ }
+ for(const timeMs of [NaN,Infinity,0])expect(limitFishLookback(member(timeMs),anchor,1,anchor).outcome).toBe('readings');
+ expect(limitFishLookback(member(anchor-300000,anchor-H),anchor,1,anchor).outcome).toBe('readings');
+});
+it('rechecks every saved member before union, intersection and subset recombination',async()=>{
+ const scanned=await scan(1,true),old={...scanned.hits[0],timeMs:T-4*24*H};
+ const round={...scanned.round,results:new Map([['binance|crypto|OLDUSDT',new Map([[0,{outcome:'hit',signal:old}],[1,{outcome:'hit',signal:old}]])]])};
+ expect(combineFishRound(round,'and').signals).toEqual([]);expect(combineFishRound(round,'or').signals).toEqual([]);
+ const {selectFishRound}=await import('@/lib/fishScanner');expect(combineFishRound(selectFishRound(round,[round.plans[0].algorithmKey])!,'or').signals).toEqual([]);
+});
+it('uses a newly sampled frozen server anchor for each blank-time checkpoint rather than reusing earlier live conclusions',async()=>{
+ let clock=T+1;const candles=vi.fn(adapter.candles),checkpoint=new Map();
+ const scanner=new FishScanner(async()=>new Response(JSON.stringify({serverTime:clock})),undefined,undefined,{binance:{...adapter,candles}});
+ const options={feature,algorithm,lookbackHours:1,includeDuplicates:true,checkpoint,signal:new AbortController().signal,onProgress:()=>{},onSignal:()=>{}};
+ await scanner.scan(options);const count=candles.mock.calls.length;clock+=2*H;await scanner.scan(options);
+ expect(checkpoint.size).toBe(2);expect(candles.mock.calls.length).toBeGreaterThan(count);
 });

@@ -1,4 +1,5 @@
 import {qualityExecutionSnapshot} from '@/lib/fish/qualityExecutionSnapshot';
+import {preserveQualitySourceRatings,rateQualitySource} from '@/lib/fish/qualitySourceRatings';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {editLibraryDirectory,renameLibraryDirectory} from '@/lib/fish/qualityMonitorArchive';
 import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
@@ -85,7 +86,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; screeningScope.current = {}; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy,persistPlans=true) => {
     const previous=current.current;
-    let next = preserveSourceDeletions(previous,apply(previous));
+    let next = preserveQualitySourceRatings(previous,preserveSourceDeletions(previous,apply(previous)));
     if(next!==previous&&persistPlans&&readyRef.current&&next.sellPlansConfigured&&next.sellPlans!==previous.sellPlans&&JSON.stringify(next.sellPlans)!==JSON.stringify(previous.sellPlans)){
       const entries=editSavedQualityPlans(readSavedQualityPlans(account.current),previous.sellPlans??[],next.sellPlans??[]);
       next=applySavedQualityPlans(next,savedPlansWriter.current(entries));
@@ -529,6 +530,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(()=>next);
     if(typeof BroadcastChannel!=='undefined'){const channel=new BroadcastChannel('veil-fish-quality-deletions');channel.postMessage({owner:savedOwner,deletedSources:next.deletedSources,deletedReadings:next.deletedReadings});channel.close();}
   },[change]);
+  const setSourceQuality=useCallback((source:TradeSignal,quality:number|undefined)=>{
+    if(!readyRef.current)throw Error('鱼质量尚未恢复完成，请稍后评分');
+    change(study=>rateQualitySource(study,source,quality));
+  },[change]);
   const selectPreEntryRecords = useCallback((ids: readonly string[]) => {
     const chosen = new Set(ids);
     const signals = preEntry.library.records.filter(r => chosen.has(r.id)).map(preEntrySignal).filter((s): s is TradeSignal => !!s);
@@ -544,9 +549,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
     restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
     resume: (roundId: string) => preEntry.resume(roundId, current.current) };
-  return { preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+  return {setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
-type CompleteFishQualityState=ReturnType<typeof useFishQuality>;
+type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'>>;
 export type FishQualityState=Omit<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'> & Partial<Pick<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'>>;
 
 /**

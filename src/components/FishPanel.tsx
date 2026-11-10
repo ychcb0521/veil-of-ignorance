@@ -3,6 +3,7 @@ import type { FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
+import {fishSignalInRoundWindow} from '@/lib/fish/roundWindow';
 import { downloadFishCabin } from '@/lib/fish/export';
 import { toast } from 'sonner';
 import { readFishDownwardWick, saveFishDownwardWick, FISH_WICK_HOURS, FISH_WICK_ATR_MULTIPLES, type FishDownwardWick } from '@/lib/fish/downwardWick';
@@ -73,6 +74,7 @@ export interface FishPanelProps {
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
   onStart: (settings: FishScanSettings) => void; onCancel: () => void;
   onJumpQuality?: (source: TradeSignal) => void;
+  onRateQuality?: (source:TradeSignal,value:number)=>void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
   jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
 }
@@ -274,8 +276,8 @@ export function FishPanel(p: FishPanelProps) {
     for(const plan of plans){const checked=fishProgramForLookback(plan,hours,FISH_TURNOVER_FLOORS);if(checked.unavailable)throw new Error(checked.unavailable);}
     setWickChanged(false);
     p.onStart({...settings,lookbackHours:hours,downwardWick,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
-  const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
-  const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
+  const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
+  const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
   const x = p.progress;
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
   const [menuOpen,setMenuOpen]=useState(false);
@@ -347,7 +349,8 @@ export function FishPanel(p: FishPanelProps) {
           </>}
         </>}
       </div>
-      {x&&lookbackHours!==x.lookbackHours&&<p className="px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间改为过去 {lookbackHours} 小时，下一轮生效；以下仍是过去 {x.lookbackHours} 小时的结果。</p>}
+      {x&&lookbackHours!==x.lookbackHours&&<p className="px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间改为过去 {lookbackHours} 小时，下一轮生效；{x.lookbackHours===undefined?'上一轮未设置覆盖时长。':`以下仍是过去 ${x.lookbackHours} 小时的结果。`}</p>}
+      {x?.anchorMs!=null&&Number.isFinite(x.anchorMs)&&x.lookbackHours!==undefined&&<p className="flex flex-wrap gap-x-1 px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-scan-window"><span>本轮信号起点范围（北京时间，含边界）：</span><span className="font-mono tabular-nums">{formatUTC8(x.anchorMs-x.lookbackHours*3600000)} ～ {formatUTC8(x.anchorMs)}</span><span>；只使用已收盘 K 线</span></p>}
       {x && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2.5 text-[11px]">
         <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="fish-status" title={[...(x.lookbackHours!==undefined?[`本轮覆盖过去 ${x.lookbackHours} 小时${x.counts.outside?`，${x.counts.outside} 个起点超出范围`:''}`]:[]),...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.wickSkipped?[`向下大插针已过滤 ${x.wickSkipped} 个`]:[]),...(x.thin?[`成交额不够（截止前或信号前 1h < 100 万、12h < 800 万或 24h < 1000 万）、跳过 ${x.thin} 个`]:[])].join('；')||undefined}>
           <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
@@ -442,6 +445,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} info={<><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onJump={source => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id)} canJump={source => !p.jumpingSignalId && !!signalChartSymbol(source) && (!!p.onJumpQuality || p.signals.some(s => s.id === source.id))}/></ModuleErrorBoundary>}
+    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onRate={p.onRateQuality} onJump={source => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id)} canJump={source => !p.jumpingSignalId && !!signalChartSymbol(source) && (!!p.onJumpQuality || p.signals.some(s => s.id === source.id))}/></ModuleErrorBoundary>}
   </section>;
 }

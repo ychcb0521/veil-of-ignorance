@@ -8,6 +8,8 @@ import type { FishCombination } from '@/lib/fish/intersection';
 import { backupFishSignals, restoreFishSignals, loadFishSignals, loadFishTombstones, saveFishSignals, recordFishDeletion, FISH_STORAGE_KEY, FISH_DELETED_KEY } from '@/lib/fishSignals';
 import { loadFishLibraryBackup } from '@/lib/fish/libraryStore';
 import { applyFishTombstones } from '@/lib/fish/tombstones';
+import {mergeFishLists} from '@/lib/fish/tombstones';
+import {fishSignalInRoundWindow,reconcileFreshFish,type FishRoundWindow} from '@/lib/fish/roundWindow';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
@@ -69,10 +71,12 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   const combinationRef=useRef<FishCombination>('and');
   const liveRef=useRef<{round:FishCombinationRound;keys?:readonly string[]}|null>(null);
   const progressRef=useRef(progress);progressRef.current=progress;
+  const captureWindow=useRef<FishRoundWindow|null>(null);
+  const reconcile=useCallback((list:TradeSignal[])=>reconcileFreshFish(list,captureWindow.current?new Set([...writesRef.current.added,...writesRef.current.refreshed.keys()]):null,captureWindow.current??undefined),[]);
   const persist=useCallback(()=>{const r=roundRef.current,owner=ownerRef.current,version=generation.current;if(r)void saveFishSession(owner,{...r,added:[...writesRef.current.added],refreshed:[...writesRef.current.refreshed],edits:[...edits.current],progress:progressRef.current}).catch(()=>{if(owner===ownerRef.current&&version===generation.current)setProgress(p=>p?{...p,notice:'本机结果保存失败，刷新后需要重新捕捞'}:p);});},[]);
   const commit = useCallback((input: TradeSignal[]) => {
     // 整行显示相同的（同一信号、不同算法键）只留一条
-    const next = collapseVisibleFish(input);
+    const next = collapseVisibleFish(reconcile(input));
     if(roundRef.current&&!controller.current){
       const before=new Map(signalsRef.current.map(s=>[fishDedupKey(s),s]));
       const after=new Map(next.map(s=>[fishDedupKey(s),s]));
@@ -83,26 +87,26 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     }
     signalsRef.current = next; setSignals(next); saveFishSignals(next, ownerRef.current ?? null);
     persist();
-  }, [persist]);
+  }, [persist,reconcile]);
   useEffect(() => {
     let cancelled = false;
-    recoveryArchiveBefore.current = undefined;
-    const refresh = () => { const next = loadFishSignals(); signalsRef.current = next; setSignals(next); };
+    recoveryArchiveBefore.current = undefined;captureWindow.current=null;progressRef.current=null;
+    const refresh = (merge=true) => {const loaded=loadFishSignals(),next=reconcile(merge?mergeFishLists(signalsRef.current,loaded,loadFishTombstones()):loaded);signalsRef.current=next;setSignals(next);};
     const hydrated = () => { refresh(); backupFishSignals(signalsRef.current, userId ?? null); };
     // Read the durable library before mirroring a possibly stale localStorage cache into it.
-    refresh(); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
+    refresh(false); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
     const version=++generation.current;
     void loadFishLibraryBackup(userId).then(backup => {
       if (cancelled || ownerRef.current !== userId) return;
       const next = restoreFishSignals(backup, signalsRef.current, userId ?? null, recoveryArchiveBefore.current);
-      signalsRef.current = next; setSignals(next);
+      const recovered=reconcile(next);signalsRef.current = recovered; setSignals(recovered);
       return loadFishSession(userId);
-    }).then(saved=>{if(!saved||cancelled||version!==generation.current)return;if(saved.needsRescan){setProgress({...(saved.progress??initialFishProgress()),status:'complete',notice:saved.needsRescan});return;}roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
+    }).then(saved=>{if(!saved||cancelled||version!==generation.current)return;captureWindow.current={anchorMs:saved.data?.anchorMs,lookbackHours:saved.data?.lookbackHours};if(saved.needsRescan){const next={...(saved.progress??initialFishProgress()),status:'complete' as const,notice:saved.needsRescan};progressRef.current=next;setProgress(next);signalsRef.current=reconcile(signalsRef.current);setSignals(signalsRef.current);return;}roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);signalsRef.current=reconcile(signalsRef.current);setSignals(signalsRef.current);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
     const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, hydrated), unsubscribeDeleted = subscribePersistedStateHydration(FISH_DELETED_KEY, hydrated);
     const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === FISH_DELETED_KEY || e.key === null) hydrated(); };
     window.addEventListener('storage', storage);
     return () => { cancelled = true; ++generation.current; controller.current?.abort(); controller.current = null; mineController.current?.abort(); scanner.current = null; unsubscribe(); unsubscribeDeleted(); window.removeEventListener('storage', storage); };
-  }, [userId]);
+  }, [userId,reconcile]);
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current) return;
@@ -118,6 +122,8 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     }
     ++generation.current;roundRef.current=null;setHasRound(false);setRoundPlans(null);edits.current.clear();void saveFishSession(ownerRef.current,null).catch(()=>{});
     writesRef.current = emptyWrites(); roundRef.current = null;
+    captureWindow.current={anchorMs:settings.anchorMs,lookbackHours:settings.lookbackHours};
+    const starting={...initialFishProgress(),anchorMs:settings.anchorMs??null,lookbackHours:settings.lookbackHours};progressRef.current=starting;setProgress(starting);
     scanner.current ??= pageScanner ??= new FishScanner();
     combinationRef.current = settings.combination ?? 'and'; liveRef.current = null;
     const mine = new AbortController(); controller.current = mine;
@@ -126,14 +132,14 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     try {
       await scanner.current.scan({ ...settings, signal: mine.signal, combinationRef,
         onLiveRound: round => { if (valid()) liveRef.current = { round, keys: settings.displayAlgorithmKeys }; },
-        onProgress: value => { if (valid()) {progressRef.current=value;setProgress(value);} },
+        onProgress: value => { if (valid()) {captureWindow.current={anchorMs:value.anchorMs??settings.anchorMs,lookbackHours:settings.lookbackHours};progressRef.current=value;setProgress(value);} },
         onSignal: signal => {
-          if (valid() && !mine.signal.aborted) { const next = applyCatch(signalsRef.current, signal, writesRef.current); if (next) commit(next); }
+          if (valid() && !mine.signal.aborted&&fishSignalInRoundWindow(signal,captureWindow.current??undefined)) { const next = applyCatch(signalsRef.current, signal, writesRef.current); if (next) commit(next); }
         },
         onRound: round => { if (valid()) {roundRef.current = { data: round, mode: combinationRef.current,keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);setRoundPlans(round.plans);} },
       });
     } catch (error) {
-      if (valid()) setProgress({ ...initialFishProgress(), status: 'aborted', error: error instanceof Error ? error.message : String(error) });
+      if (valid()){const next={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};progressRef.current=next;setProgress(next);}
     } finally { if (controller.current === mine) {controller.current = null;liveRef.current=null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(combinationRef.current,settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
       // 每轮结束把新鱼列表交给邮件提醒（有没有变化由提醒那边比对上一封）；切换交集 / 并集、调严阈值不会走到这里
       if(ownerRef.current===owner){const added=writesRef.current.added,caught=signalsRef.current.filter(s=>added.has(fishDedupKey(s))),mail=unionRef.current();if(caught.length||mail.length)onCaughtRef.current?.(caught,mail);}
@@ -202,15 +208,15 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const writes = emptyWrites(), { signals: combined, counts } = combineFishRound(selected, mode);
     for (const raw of combined) { const edit=edits.current.get(fishDedupKey(raw));if(edit?.deleted)continue;const signal=edit?.signal?{...raw,quality:edit.signal.quality}:raw; const next = applyCatch(list, signal, writes); if (next) list = next; }
     writesRef.current = writes; roundRef.current = { ...round, mode,keys:[...algorithmKeys] };
-    list=collapseVisibleFish(list);
+    list=collapseVisibleFish(reconcile(list));
     signalsRef.current=list;setSignals(list);saveFishSignals(list,ownerRef.current??null);
     saveFishCombinationRound(selected, mode);
     selected.plans.forEach((p,j)=>{if(!round.data.plans.includes(p))saveFishMemberRound(selected,j);});
     const rule = selected.plans.map(p => fishRuleText(p.def, p.settings.direction, p.settings.threshold, p.texts.length, p.settings.statistic)).join(mode === 'or' ? ' 或 ' : ' 且 ');
     const previous=progressRef.current;
-    if(previous){const next={...previous,rule,algorithmHits:selected.memberHits,cutoffMs:selected.plans[0]?Math.floor(selected.anchorMs/selected.plans[0].step)*selected.plans[0].step:previous.cutoffMs,counts:{...previous.counts,hit:combined.length,unknown:counts.unknown??0,outside:counts.outside??0}};progressRef.current=next;setProgress(next);}
+    if(previous){const next={...previous,anchorMs:selected.anchorMs,lookbackHours:selected.lookbackHours,rule,algorithmHits:selected.memberHits,cutoffMs:selected.plans[0]?Math.floor(selected.anchorMs/selected.plans[0].step)*selected.plans[0].step:previous.cutoffMs,counts:{...previous.counts,hit:combined.length,unknown:counts.unknown??0,outside:counts.outside??0}};progressRef.current=next;setProgress(next);}
     persist();return true;
-  }, [persist]);
+  }, [persist,reconcile]);
   recombineRef.current=recombine;
   /**
    * 捕捞中切换交集 / 并集：之后判完的币按新组合出；已判完的当场按新组合重排「新鱼」（本轮刚进来、新组合不要的移进「鱼」，不丢）。
@@ -228,13 +234,13 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const combined = combineFishRound(picked, mode).signals;
     for (const raw of combined) { if (edits.current.get(fishDedupKey(raw))?.deleted) continue; const next = applyCatch(list, raw, writes); if (next) list = next; }
     writesRef.current = writes;
-    list = collapseVisibleFish(list);
+    list = collapseVisibleFish(reconcile(list));
     signalsRef.current = list; setSignals(list); saveFishSignals(list, ownerRef.current ?? null);
     // 规则文字与命中数当场换过来（扫描下一次报进度时也会按新组合算）
     const prev = progressRef.current;
     if (prev) { const next = { ...prev, rule: prev.rule?.split(mode === 'or' ? ' 且 ' : ' 或 ').join(mode === 'or' ? ' 或 ' : ' 且 '), counts: { ...prev.counts, hit: combined.length } }; progressRef.current = next; setProgress(next); }
     return true;
-  }, []);
+  }, [reconcile]);
   /**
    * 邮件用的鱼：本轮所选算法的并集（任一算法命中就算），不管面板上选的是交集还是并集；没有本轮结果时用「新鱼」列表。
    * 【用户要求】2026-10-21「我希望发邮件时，默认为并集里的鱼」。用户删过的不发；整行显示相同的只留一条。

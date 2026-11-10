@@ -51,6 +51,18 @@ it('updates library rating metadata after hydration and later edits without star
   expect(h.result.current.study.sellPlans).toBe(plans);expect(run).not.toHaveBeenCalled();
   expect(persisted.samples[0].source.quality).toBeUndefined();
 });
+it('saves combination-table ratings through reload and stale source imports, including explicit removal, without changing plans or running engines',async()=>{
+ const source={...signal,quality:2},run=vi.fn(async()=>{}),h=renderHook(({fish})=>useFishQuality('rating-owner',fish,run),{initialProps:{fish:[source]}});
+ await flush();const plans=JSON.stringify(h.result.current.study.sellPlans);
+ act(()=>h.result.current.setSourceQuality(source,5));await flush(500);
+ expect(qualityComparisonRows(h.result.current.study)[0].source.quality).toBe(5);
+ h.rerender({fish:[{...source}]});await flush();expect(qualityComparisonRows(h.result.current.study)[0].source.quality).toBe(5);
+ const saved=storage.save.mock.calls.at(-1)![1];h.unmount();storage.load.mockResolvedValue({study:saved});
+ const restored=renderHook(()=>useFishQuality('rating-owner',[source],run));await flush();expect(qualityComparisonRows(restored.result.current.study)[0].source.quality).toBe(5);
+ act(()=>restored.result.current.setSourceQuality(source,undefined));await flush(500);
+ expect(qualityComparisonRows(restored.result.current.study)[0].source.quality).toBeUndefined();
+ expect(Object.values(restored.result.current.study.sourceRatings!)[0].quality).toBeNull();expect(JSON.stringify(restored.result.current.study.sellPlans)).toBe(plans);expect(run).not.toHaveBeenCalled();
+});
 it('retains explicitly saved split plans across an old-study reload and honors later edits and removals',async()=>{
  const {readSavedQualityPlans,qualitySavedPlansKey}=await import('@/lib/fish/qualitySavedPlans');
  const {notifyPersistedStateHydrated,writePersistedStateRaw}=await import('@/lib/persistedStateStorage');

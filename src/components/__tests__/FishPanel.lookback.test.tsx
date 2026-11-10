@@ -1,5 +1,5 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {FishPanel} from '@/components/FishPanel';
 import {CBI2_DEF} from '@/lib/deepDig/features';
 import {readFishLookback} from '@/lib/fish/lookback';
@@ -39,4 +39,12 @@ it('autosaves coverage over an older fixed account value without resetting algor
  view.unmount();render(<FishPanel {...props}/>);
  expect(screen.getByLabelText('扫描覆盖时间（小时）')).toHaveValue(1);
  expect(screen.getByLabelText('捕捞阈值')).toHaveValue(.7);
+});
+it('shows the actual frozen Beijing window and keeps a four-day-old hydrated fresh flag out of the current new-fish table without deleting it',()=>{
+ const anchor=Date.UTC(2026,10,10,5,35),signal={id:'stale',symbol:'ICNTUSDT',timeMs:Date.UTC(2026,10,6,7,45),timeLabel:'2026-11-06 15:45:00',fallbackZone:'',freshCatch:true};
+ const original=JSON.stringify(signal);
+ render(<FishPanel {...props} signals={[signal]} progress={{...initialFishProgress(),anchorMs:anchor,cutoffMs:anchor,lookbackHours:1,status:'complete'}}/>);
+ expect(screen.getByTestId('fish-scan-window')).toHaveTextContent('2026-11-10 12:35:00 ～ 2026-11-10 13:35:00');
+ expect(within(screen.getByTestId('fish-new')).queryByText('ICNTUSDT')).toBeNull();
+ expect(screen.getByTestId('fish-old')).toHaveTextContent('1');expect(JSON.stringify(signal)).toBe(original);
 });

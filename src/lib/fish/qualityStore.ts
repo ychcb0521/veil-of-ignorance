@@ -1,4 +1,5 @@
 import { mergeQualityPlanTemplates } from './qualityPlanTemplates';
+import {preserveQualitySourceRatings,applyQualitySourceRatings} from './qualitySourceRatings';
 import {applySavedQualityPlans,readSavedQualityPlans} from './qualitySavedPlans';
 import {loadDurableQualityPlans} from './qualitySavedPlansStore';
 import {preserveSourceDeletions,applySourceDeletions} from './libraryDeletion';
@@ -18,7 +19,7 @@ import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQu
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
 // 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
-const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveSourceDeletions(saved,preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming)))));
+const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualitySourceRatings(saved,preserveSourceDeletions(saved,preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming))))));
 const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => {
   const next = preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
   // 旧标签页或后台监测写回总表时，保留新存模板和删除墓碑。
@@ -46,7 +47,7 @@ const pendingReads = new Map<string, Promise<{ study: FishQualityStudy; warning?
 export function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   const key = keyOf(owner), pending = pendingReads.get(key);
   if (pending) return pending;
-  const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner)) }));
+  const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: applyQualitySourceRatings(applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner))) }));
   pendingReads.set(key, task);
   void task.then(loaded => { void backfillQualityArchiveCounts(owner, loaded.study).finally(() => syncStoredQualityArchiveBodies(owner, loaded.study)); }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };

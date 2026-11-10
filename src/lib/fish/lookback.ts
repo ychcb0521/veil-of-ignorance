@@ -35,10 +35,17 @@ export function fishProgramForLookback(plan:FishProgram,hours?:number,floors?:re
  return {...plan,N,unavailable:plan.unavailable??(N>FISH_MAX_HISTORY_BARS?`扫描过去 ${hours} 小时需要 ${N} 根历史（含指标预热），超过 ${FISH_MAX_HISTORY_BARS} 根上限，请缩短覆盖时间`:undefined)};
 }
 /** Each algorithm must independently produce a recent known start, preserving intersection/union consistency. */
-export function limitFishLookback(result:FishMemberResult,anchorMs:number,hours?:number):FishMemberResult {
- if(hours===undefined||result.outcome!=='hit'||!result.signal)return result;
- const start=result.signal.timeMs;
- if(start<anchorMs-validateFishLookback(hours)*3600000||start>anchorMs){
+export function limitFishLookback(result:FishMemberResult,anchorMs:number,hours?:number,expectedCutoff?:number):FishMemberResult {
+ if(hours===undefined||result.outcome!=='hit')return result;
+ const span=validateFishLookback(hours),start=result.signal?.timeMs;
+ if(!Number.isFinite(anchorMs)||anchorMs<=0||!Number.isFinite(start)||start!<=0){
+  const {signal,...rest}=result;return {...rest,outcome:'readings',...(signal?.fish?{snapshot:{...signal.fish,outcome:'readings',lookbackHours:span,lookbackAnchorMs:anchorMs}}:{})};
+ }
+ const evidence=result.signal!.fish;
+ if(expectedCutoff!==undefined&&evidence?.cutoffMs!==expectedCutoff||evidence?.lookbackAnchorMs!==undefined&&evidence.lookbackAnchorMs!==anchorMs||evidence?.lookbackHours!==undefined&&evidence.lookbackHours!==span){
+  const {signal,...rest}=result;return {...rest,outcome:'readings',snapshot:{...signal.fish!,outcome:'readings',lookbackHours:span,lookbackAnchorMs:anchorMs}};
+ }
+ if(start!<anchorMs-span*3600000||start!>anchorMs){
   const {signal,...rest}=result;
   return {...rest,outcome:'outside',snapshot:{...signal.fish!,outcome:'outside',lookbackHours:hours,lookbackAnchorMs:anchorMs}};
  }

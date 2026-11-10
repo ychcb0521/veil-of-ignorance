@@ -75,17 +75,23 @@ export async function loadFishSession(owner: string | undefined): Promise<FishSe
     const [raw,view]=await Promise.all([read(store.get(key)),read(store.get([key,'view']))]);
     const value=raw as StoredSession|undefined;
     if(!value||value.version!==1)return null;
+    const span=value.data.lookbackHours,invalidSpan=span!==undefined&&(!Number.isFinite(span)||span<=0||span>8784);
     const data:FishCombinationRound={...value.data,
-      plans:value.data.plans.map(p=>fishProgramForLookback(compileFishProgram(p.def,p.settings),value.data.lookbackHours)),
+      plans:value.data.plans.map(p=>fishProgramForLookback(compileFishProgram(p.def,p.settings),invalidSpan?undefined:span)),
       results:new Map(value.data.results.map(([id,members])=>[id,new Map(members)])),
     };
     const changed=data.plans.some((plan,i)=>{
       const previous=value.data.plans[i].algorithmKey;
       return previous!==undefined?previous!==plan.algorithmKey:!!plan.stateHold;
     });
-    const needsRescan=changed?'捕捞规则已更新，上一轮未按当前规则核验。请重新捕捞，已有鱼记录保留。':undefined;
+    const restored={...value,...view as Omit<FishSession,'data'>},progress=restored.progress;
+    const mismatch=invalidSpan||!Number.isFinite(data.anchorMs)||data.anchorMs<=0
+      ||progress?.anchorMs!=null&&progress.anchorMs!==data.anchorMs
+      ||progress?.lookbackHours!==undefined&&progress.lookbackHours!==data.lookbackHours
+      ||progress?.cutoffMs!=null&&!data.plans.some(plan=>Math.floor(data.anchorMs/plan.step)*plan.step===progress.cutoffMs);
+    const needsRescan=changed?'捕捞规则已更新，上一轮未按当前规则核验。请重新捕捞，已有鱼记录保留。':mismatch?'捕捞结果与显示的时间范围不一致，请重新捕捞；历史鱼记录保留在鱼舱。':undefined;
     savedRounds.set(key,data);
-    return {...value,...view as Omit<FishSession,'data'>,data,needsRescan};
+    return {...restored,progress:mismatch?value.progress:progress,data,needsRescan};
   } finally { database.close(); }
 }
 

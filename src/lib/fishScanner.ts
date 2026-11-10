@@ -102,7 +102,13 @@ export const fishSelectionKey = (p: FishProgram): string => JSON.stringify([p.al
 export function selectFishRound(round: FishCombinationRound, keys: readonly string[]): FishCombinationRound | null {
   const available = round.plans.map((_,i)=>i), indices:number[]=[];
   for(const key of keys){const at=available.findIndex(i=>fishSelectionKey(round.plans[i])===key||round.plans[i].algorithmKey===key);if(at<0)return null;indices.push(available.splice(at,1)[0]);}
-  return {...round,plans:indices.map(i=>round.plans[i]),memberHits:indices.map(i=>round.memberHits[i]),results:new Map([...round.results].map(([key,members])=>[key,new Map(indices.flatMap((i,j)=>members.has(i)?[[j,members.get(i)!] as const]:[]))]))};
+  const plans=indices.map(i=>round.plans[i]),memberHits=indices.map(()=>0),results=new Map<string,Map<number,FishMemberResult>>();
+  for(const [key,members]of round.results){
+    const selected=new Map<number,FishMemberResult>();
+    indices.forEach((i,j)=>{const raw=members.get(i);if(!raw)return;const bounded=limitFishLookback(raw,round.anchorMs,round.lookbackHours,Math.floor(round.anchorMs/plans[j].step)*plans[j].step);selected.set(j,bounded);if(bounded.outcome==='hit')memberHits[j]++;});
+    results.set(key,selected);
+  }
+  return {...round,plans,memberHits,results};
 }
 /**
  * 按当前卡片的算法取本轮结果：设置没变的直接用；只把阈值往严里调了的，用留下的读数当场重判（refilter.ts）。
@@ -126,14 +132,14 @@ export function deriveFishRound(round: FishCombinationRound, targets: readonly F
       const r = members.get(pick.index);
       if (!r) continue;
       const raw = pick.exact ? r : tightenFishResult(r, pick.plan);
-      const derived = raw && limitFishLookback(raw,round.anchorMs,round.lookbackHours);
+      const derived = raw && limitFishLookback(raw,round.anchorMs,round.lookbackHours,Math.floor(round.anchorMs/pick.plan.step)*pick.plan.step);
       if (!derived) return null;
       if (derived.outcome === 'hit') hits[j]++;
       next.set(j, derived);
     }
     results.set(key, next);
   }
-  return { ...round, plans: picks.map(p => p.plan), results, memberHits: picks.map((p, j) => p.exact ? round.memberHits[p.index] ?? hits[j] : hits[j]) };
+  return { ...round, plans: picks.map(p => p.plan), results, memberHits:hits };
 }
 /** 「捕捞过程」里单个算法这一轮的摘要（重判出来的阈值没扫过，按重判后的逐币结论补一份）。 */
 export function saveFishMemberRound(round: FishCombinationRound, j: number): void {
@@ -157,9 +163,12 @@ export function combineFishRound(round: FishCombinationRound, mode: FishCombinat
   for (const members of round.results.values()) {
     if (mode === 'and' && members.size !== round.plans.length) continue;
     if (mode === 'or' && members.size !== round.plans.length && !round.complete) continue;
-    const r = combineFishResults(round.plans.map((_, i) => members.get(i)), round.plans, mode);
+    // Persisted pools, live combinations and threshold refinement must obey
+    // the same frozen window as a fresh scan, independently for every member.
+    const bounded=round.plans.map((plan,i)=>{const value=members.get(i);return value&&limitFishLookback(value,round.anchorMs,round.lookbackHours,Math.floor(round.anchorMs/plan.step)*plan.step);});
+    const r = limitFishLookback(combineFishResults(bounded,round.plans,mode),round.anchorMs,round.lookbackHours);
     counts[r.outcome] = (counts[r.outcome] ?? 0) + 1;
-    if (r.signal) signals.push(r.signal);
+    if (r.outcome==='hit'&&r.signal) signals.push(r.signal);
   }
   return { signals, counts };
 }
@@ -421,7 +430,7 @@ export class FishScanner {
       if (checks === null) return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：成交额读数不全或 K 线不够覆盖 24 小时，无法判断成交额门槛`] };
       if (checks.some(c => !c.ok)) return { outcome: 'skipped', cutoffMs: cut, lines: [head, `${name}：截止前${describeTurnoverMiss(checks)} USDT，没达到成交额门槛，不判定（成不了鱼）`] };
     }
-    const r = evaluateFishProgram(bars, plan), result = limitFishLookback(classifyFishProgram(market.symbol, bars, r, cut, plan),options.anchorMs??clock.serverTime!,options.lookbackHours);
+    const r = evaluateFishProgram(bars, plan), result = limitFishLookback(classifyFishProgram(market.symbol, bars, r, cut, plan),options.anchorMs??clock.serverTime!,options.lookbackHours,cut);
     const end = bars.length - 1, first = plan.warm - 1, scale = plan.scale;
     const avgName = fishStatisticName(plan.def, plan.settings.statistic);
     const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
@@ -553,9 +562,7 @@ export class FishScanner {
     try {plan=fishProgramForLookback(compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]}),options.lookbackHours,options.turnoverFloors);if(plan.unavailable)throw new Error(plan.unavailable);}
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
     const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N,...((plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{})};
-    const cacheKey = JSON.stringify([anchorMs, definitionKey(plan.def), plan.algorithmKey, options.exchanges, options.includeDuplicates, options.includeUsStocks, options.downwardWick, options.turnoverFloors, options.lookbackHours]);
-    const completed = options.checkpoint?.get(cacheKey) ?? new Map<string, FishMemberResult>();
-    options.checkpoint?.set(cacheKey, completed);
+    let completed = new Map<string, FishMemberResult>();
     const reportResult = (key: string, member: FishMemberResult) => {
       if (options.checkpoint && ['hit', 'below', 'unknown', 'blocked', 'wick', 'thin', 'history', 'outside'].includes(member.outcome)) completed.set(key, member);
       options.onResult?.(key, member);
@@ -606,6 +613,11 @@ export class FishScanner {
       this.latestServerTime=Math.max(this.latestServerTime,clock.serverTime!);
       if(anchorMs!==undefined&&anchorMs>clock.serverTime!) throw new Error('捕捞时间不能晚于币安服务器当前时间');
       const node=anchorMs??clock.serverTime!,cut=Math.floor(node/plan.step)*plan.step;
+      // A blank time means this run's sampled server time, not an undefined key
+      // that could reuse an earlier run's conclusions with a new timestamp.
+      const cacheKey=JSON.stringify([node,definitionKey(plan.def),plan.algorithmKey,options.exchanges,options.includeDuplicates,options.includeUsStocks,options.downwardWick,options.turnoverFloors,options.lookbackHours]);
+      completed=options.checkpoint?.get(cacheKey)??new Map<string,FishMemberResult>();
+      options.checkpoint?.set(cacheKey,completed);
       progress.lookbackHours=options.lookbackHours;progress.anchorMs=node;progress.cutoffMs=cut;roundCut=cut;roundAnchor=node;
       for(const exchange of selected){const reason=options.skipReasons?.[exchange]??fishRetentionReason(exchange,cut,clock.serverTime!,plan.N,plan.step,plan.usesTaker,query.interval);if(reason){venues[exchange]!.status='skipped';venues[exchange]!.skippedReason=reason;}}
       for(const p of Object.values(venues)){p.anchorMs=node;p.cutoffMs=cut;}
@@ -652,7 +664,9 @@ export class FishScanner {
             while(!local.signal.aborted){
               const index=next++;if(index>=markets.length)return;const market=markets[index],p=venues[exchange]!.markets![market.market??'crypto']!;let stage='K线（candlesticks / history-candles）';p.current=market.symbol;progress.current=market.symbol;publish();
               try{
-                const cachedKey = `${exchange}|${market.market??'crypto'}|${market.symbol}`, cached = completed.get(cachedKey);
+                const cachedKey = `${exchange}|${market.market??'crypto'}|${market.symbol}`,rawCached=completed.get(cachedKey);
+                const boundedCached=rawCached&&limitFishLookback(rawCached,node,options.lookbackHours,cut),cached=boundedCached?.outcome==='readings'?undefined:boundedCached;
+                if(rawCached&&!cached)completed.delete(cachedKey);
                 if (cached) {
                   if (cached.outcome === 'history') p.history = (p.history ?? 0) + 1;
                   else if (cached.outcome === 'wick') p.wickSkipped = (p.wickSkipped ?? 0) + 1;
@@ -661,7 +675,7 @@ export class FishScanner {
                   else p.counts[cached.outcome]++;
                   roundRows.push({ symbol: market.symbol, exchange, market: market.market, reading: cached.reading ?? NaN, outcome: cached.outcome });
                   memberResults.set(cachedKey, new Map([[0, cached]])); reportResult(cachedKey, cached);
-                  if (cached.signal) options.onSignal(placeFishSignal(cached.signal, { symbol: market.symbol, exchange, ...(market.market === 'us_stock' ? { market: 'us_stock', underlying: market.underlying ?? market.base } : {}), ...(exchange !== 'binance' && market.market !== 'us_stock' ? { binanceSymbol: binanceByBase.get(fishBase(market.base)) ?? null } : {}) }, plan.algorithmKey));
+                  if (cached.outcome==='hit'&&cached.signal) options.onSignal(placeFishSignal(cached.signal, { symbol: market.symbol, exchange, ...(market.market === 'us_stock' ? { market: 'us_stock', underlying: market.underlying ?? market.base } : {}), ...(exchange !== 'binance' && market.market !== 'us_stock' ? { binanceSymbol: binanceByBase.get(fishBase(market.base)) ?? null } : {}) }, plan.algorithmKey));
                   p.done++; publish(); await fishDelay(0, local.signal); continue;
                 }
                 const raw=btc&&market.instrument===adapter.btc().instrument?btc:await adapter.candles(market,cut,local.signal,query);
@@ -698,7 +712,7 @@ export class FishScanner {
                 let readings=evaluateFishProgram(bars,plan);
                 // Optional numerical fixture injection used by transport tests; production always evaluates the composed program.
                 if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:(plan.settings.direction==='>'?a>threshold/plan.scale:a<threshold/plan.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
-                const result=limitFishLookback(classifyFishProgram(market.symbol,bars,readings,cut,plan),node,options.lookbackHours);
+                const result=limitFishLookback(classifyFishProgram(market.symbol,bars,readings,cut,plan),node,options.lookbackHours,cut);
                 if(local.signal.aborted)return;
                 // 命中的币再查「信号前」成交额（截止前达标、起点前没达标 = 起点之后才放量，成不了鱼）；读数仍留着，调严阈值时起点后移可能达标
                 if(result.outcome==='hit'){
@@ -718,7 +732,7 @@ export class FishScanner {
                 if(result.outcome==='readings'&&p.failures!.readings.length<10)p.failures!.readings.push({symbol:market.symbol,reason:`${plan.def.short}计算：截止处结果、均值或约束不是有限数`});
 
                 const place:FishPlace={symbol:market.symbol,exchange,...(market.market==='us_stock'?{market:'us_stock',underlying:market.underlying??market.base}:{}),...(exchange!=='binance'&&market.market!=='us_stock'?{binanceSymbol:binanceByBase.get(fishBase(market.base))??null}:{})};
-                if(result.signal)options.onSignal(placeFishSignal(result.signal,place,plan.algorithmKey));
+                if(result.outcome==='hit'&&result.signal)options.onSignal(placeFishSignal(result.signal,place,plan.algorithmKey));
                 // 留下截止读数；命中 / 起点不明的币再留可用区间的读数，扫完把阈值往严里调时当场重判（refilter.ts）
                 const member:FishMemberResult={...result,reading:readings.average[bars.length-1]};
                 if(result.outcome==='hit'||result.outcome==='unknown'||result.outcome==='outside'){const tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;}

@@ -1,8 +1,9 @@
 import {readPreEntrySnapshot,validPreEntryLibrary,readPreEntryReadModel,readPreEntryCacheRevision,cachePreEntryReadModel,readPreEntryTableClears} from '../fish/preEntryPersistence';
 import {withPreEntryTableClears} from '../fish/preEntryTableClears';
-import {projectPreEntryRecord,projectPreEntryRecords,restorePreEntryLibrary} from '../fish/preEntryArchive';
+import {projectPreEntryRecord,projectPreEntryRecords} from '../fish/preEntryArchive';
 import {deserializeAccountBlobStream} from '../accountBlobStream';
-import {serializeAccountBlobChunks} from '../accountBlobCodec';
+import {serializePreEntryLibraryChunks} from '../fish/preEntryArchiveStream';
+import {accountBlobChunkBatches} from '../accountBlobChunkEncoding';
 import {validatePreEntryLibraryBackupValue} from '../fish/preEntryLibraryTransfer';
 import type {PreEntryLibrary,PreEntryRecord} from '../fish/preEntryMonitor';
 import type {FishQualityStudy} from '../fish/quality';
@@ -20,8 +21,11 @@ self.onmessage=async(event:MessageEvent<Request>)=>{
       for(let i=0;i<request.tables.length;i++){const study=await restorePreEntryStudy(request.tables[i].study);sheets.push(...buildQualitySheets(study,qualityComparisonRows(study)).map((sheet,j)=>({...sheet,name:`${i+1}-${j+1}-${sheet.name}`.slice(0,31)})));}
       value=buildXlsx(sheets);
     }else if(request.kind==='backup'){
-      const library=await restorePreEntryLibrary(request.library),encoder=new TextEncoder(),parts:BlobPart[]=[];
-      for(const chunk of serializeAccountBlobChunks({format:'veil-pre-entry-library',version:1,exportedAt:Date.now(),library}))parts.push(encoder.encode(chunk) as Uint8Array<ArrayBuffer>);
+      const encoder=new TextEncoder(),parts:BlobPart[]=[`{"format":"veil-pre-entry-library","version":1,"exportedAt":${Date.now()},"library":`];
+      // Blob parts can be disk backed by the browser. Do not keep the complete
+      // restored object graph or all UTF-8 ArrayBuffers reachable until the end.
+      for await(const chunk of accountBlobChunkBatches(()=>serializePreEntryLibraryChunks(request.library)))parts.push(new Blob([encoder.encode(chunk) as Uint8Array<ArrayBuffer>]));
+      parts.push('}');
       value=new Blob(parts,{type:'application/json'});
     }else if(request.kind==='project')value=await projectPreEntryRecords(request.records,request.owner);
     else if(request.kind==='load'){

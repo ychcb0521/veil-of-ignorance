@@ -69,3 +69,11 @@ it('round conclusions and progress retain frozen wick evidence after durable rel
  expect(loaded?.data.results.get('binance|crypto|WICKUSDT')?.get(0)?.wick).toEqual(wick);
  wick.rule.atrMultiple=1;expect(loaded?.progress?.wickDetails?.[0].rule.atrMultiple).toBe(3);
 });
+it('rejects a newer view attached to an older result pool without relabeling or rewriting the stored conclusions',async()=>{
+ const saved=session('结果');saved.data.anchorMs=Date.UTC(2026,10,6,7,45);saved.data.lookbackHours=1;
+ saved.progress={...initialFishProgress(),status:'complete',anchorMs:saved.data.anchorMs,lookbackHours:1,cutoffMs:Math.floor(saved.data.anchorMs/saved.data.plans[0].step)*saved.data.plans[0].step};
+ await saveFishSession('mixed',saved);
+ const view=rows.get(key(['mixed','view'])) as {progress:typeof saved.progress};view.progress={...saved.progress,anchorMs:Date.UTC(2026,10,10,5,35),cutoffMs:Date.UTC(2026,10,10,5,35)};
+ const original=structuredClone([...rows]);
+ const loaded=await loadFishSession('mixed');expect(loaded!.needsRescan).toContain('时间范围不一致');expect(loaded!.data.anchorMs).toBe(saved.data.anchorMs);expect(loaded!.progress).toEqual(saved.progress);expect([...rows]).toEqual(original);
+});

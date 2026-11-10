@@ -23,6 +23,17 @@ const a={statistic:'结果',direction:'>' as const,threshold:100,constraints:[]}
 const keys=[compileFishProgram(def,a).algorithmKey,compileFishProgram(def,b).algorithmKey];
 const old={id:'old',symbol:'OLDUSDT',timeMs:1,timeLabel:'',fallbackZone:'',quality:3,fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,threshold:1,cutoffMs:1,algorithmKey:'old-key'}};
 beforeEach(()=>{sessions.clear();candleRequests=0;localStorage.clear();localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([old]));gate=null;});
+it('a zero-hit one-hour scan cannot acquire a four-day-old fresh fish from late cloud/storage hydration',async()=>{
+ const view=renderHook(()=>useFish(undefined));
+ await act(async()=>{await view.result.current.start({feature:def,algorithm:{...a,threshold:1000},anchorMs:cut,lookbackHours:1,includeDuplicates:true});});
+ expect(view.result.current.progress?.counts.hit).toBe(0);
+ const stale={...old,id:'late-ICNT',symbol:'ICNTUSDT',timeMs:cut-4*24*3600000,freshCatch:true,caughtAt:cut-4*24*3600000,fish:{...old.fish,cutoffMs:cut-4*24*3600000}};
+ act(()=>{localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([stale]));window.dispatchEvent(new StorageEvent('storage',{key:FISH_STORAGE_KEY}));});
+ expect(view.result.current.progress?.counts.hit).toBe(0);
+ expect(view.result.current.signals.filter(s=>s.freshCatch)).toEqual([]);
+ expect(view.result.current.signals.some(s=>s.symbol==='ICNTUSDT'&&!s.freshCatch)).toBe(true);
+ expect(view.result.current.signals.some(s=>s.symbol==='OLDUSDT')).toBe(true);
+});
 it('恢复旧规则的结果时提示重捕，保留已有鱼，也不允许用旧结果重排新规则',async()=>{
  sessions.set(undefined,{needsRescan:'捕捞规则已更新，请重新捕捞',progress:null});
  const {result}=renderHook(()=>useFish(undefined));
