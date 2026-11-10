@@ -9,9 +9,10 @@ it('does no comparison loading for the personal board and isolates board/account
   // 【用户要求】2026-10-26 卖出比较与探测比较合并为「卖出与探测（控制变量法）」一个板块
   const h = renderHook(({ owner, section }) => useQualityCampaignList(owner, section), { initialProps: { owner: 'a', section: 'personal' as 'personal' | 'quality' } });
   expect(load).not.toHaveBeenCalled();
-  h.rerender({ owner: 'a', section: 'quality' }); await waitFor(() => expect(h.result.current.complete).toBe(true)); expect(load).toHaveBeenLastCalledWith('a', 'quality');
+  h.rerender({ owner: 'a', section: 'quality' }); await waitFor(() => expect(h.result.current.complete).toBe(true)); expect(load).toHaveBeenLastCalledWith('a', 'quality',expect.any(AbortSignal));
+  const previousSignal=load.mock.calls.at(-1)![2]!;
   h.rerender({ owner: 'b', section: 'quality' }); expect(h.result.current.rows).toEqual([]);
-  await waitFor(() => expect(load).toHaveBeenLastCalledWith('b', 'quality'));
+  await waitFor(() => expect(load).toHaveBeenLastCalledWith('b', 'quality',expect.any(AbortSignal)));expect(previousSignal.aborted).toBe(true);
   const n = load.mock.calls.length;
   act(() => { window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'a' } })); }); expect(load).toHaveBeenCalledTimes(n);
   act(() => { window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'b' } })); }); await waitFor(() => expect(load).toHaveBeenCalledTimes(n + 1));

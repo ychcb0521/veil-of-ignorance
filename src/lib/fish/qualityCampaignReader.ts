@@ -18,16 +18,22 @@ export type QualityCampaignReadResult =
 
 /** Only derived campaign data crosses the worker boundary. Frozen tables stay on disk. */
 export function projectQualityCampaignStudy(study: FishQualityStudy, request: QualityCampaignReadRequest): QualityCampaignReadResult {
-  const active = { ...study, monitorLibrary: study.monitorLibrary && { ...study.monitorLibrary, archives: undefined } };
-  const clean = stopQualityRepair(applySourceDeletions(active), Date.now());
+  const clean = cleanQualityCampaignStudy(study);
   if (request.kind === 'performance') return { kind: 'performance', data: qualityCampaignPerformanceFromStudy(request.owner, clean, request.section, request.sellKey) };
   return request.kind === 'list'
     ? { kind: 'list', data: listQualityCampaignDataFromStudy(request.owner, clean, request.section, request.definitions) }
     : { kind: 'detail', data: qualityCampaignDetailFromStudy(request.owner, clean, request.id) };
 }
+export function cleanQualityCampaignStudy(study: FishQualityStudy): FishQualityStudy {
+  const active = { ...study, monitorLibrary: study.monitorLibrary && { ...study.monitorLibrary, archives: undefined } };
+  return stopQualityRepair(applySourceDeletions(active), Date.now());
+}
 
 /** Read the existing schema without ever copying the full study into the UI thread. */
 export async function readQualityCampaignProjection(request: QualityCampaignReadRequest): Promise<QualityCampaignReadResult> {
+  return withStoredQualityCampaignStudy(request, study=>projectQualityCampaignStudy(study, request));
+}
+export async function withStoredQualityCampaignStudy<T>(request: QualityCampaignReadRequest, project:(study:FishQualityStudy)=>T|Promise<T>):Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const open = indexedDB.open('veil-fish-quality-v1', 1);
     open.onupgradeneeded = () => open.result.createObjectStore('studies');
@@ -49,6 +55,6 @@ export async function readQualityCampaignProjection(request: QualityCampaignRead
       && !value.monitorLibrary?.rounds.length && !value.filterLibrary?.rounds.length && !value.monitorLibrary?.archives?.length
       && !value.entryReadings?.length && !value.postExitReadings?.length && !Object.keys(value.deletedSources ?? {}).length
       && !Object.keys(value.monitorLibrary?.directoryEdits ?? {}).length) throw new Error(request.warning);
-    return projectQualityCampaignStudy(value ?? newQualityStudy(), request);
+    return await project(value ?? newQualityStudy());
   } finally { db.close(); }
 }

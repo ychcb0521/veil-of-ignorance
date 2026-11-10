@@ -157,10 +157,13 @@ function buildMonitorCampaignData(owner:string,record:QualityMonitorRecord,setti
 }
 
 /** Pure projections shared by the UI fallback and the read-only storage worker. */
-export function listQualityCampaignDataFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect' | 'quality', definitions?: readonly import('@/lib/deepDig/features').DeepDigFeatureDef[]) {
+export function qualityCampaignListMetadata(study: FishQualityStudy, section: 'sell' | 'detect' | 'quality', definitions?: readonly import('@/lib/deepDig/features').DeepDigFeatureDef[]) {
   const selected = syncQualitySellDefinitions(study, definitions).sellPlans?.find(plan => plan.id === study.selectedSellId && hasQualityExit(plan));
-  return { rows: qualityCampaignDataFromStudy(owner, study, section), buyFilterLabel: section !== 'detect' ? qualityBuyFilterSummary(study) : '', repair: study.campaignRepair,
+  return { buyFilterLabel: section !== 'detect' ? qualityBuyFilterSummary(study) : '', repair: study.campaignRepair,
     selectedSellKey: selected ? JSON.stringify([qualitySellKey(selected), study.observeHours]) : undefined };
+}
+export function listQualityCampaignDataFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect' | 'quality', definitions?: readonly import('@/lib/deepDig/features').DeepDigFeatureDef[]) {
+  return { rows: qualityCampaignDataFromStudy(owner, study, section), ...qualityCampaignListMetadata(study, section, definitions) };
 }
 export function qualityCampaignDetailFromStudy(owner: string, study: FishQualityStudy, id: string): QualityCampaignData {
   if (!isQualityCampaignId(id)) throw new Error('比较战役链接无效');

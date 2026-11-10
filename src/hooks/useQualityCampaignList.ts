@@ -10,6 +10,7 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
   useEffect(() => {
     if (!owner || section === 'personal') return;
     let active = true, generation = 0, inFlight = false, queued = false;
+    const controller=new AbortController();
     let observedRepair: { id: string; state: string } | undefined;
     const load = async () => {
       if (!active) return;
@@ -17,7 +18,7 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
       if (inFlight) { queued = true; return; }
       inFlight = true;
       try {
-        const data = await listQualityCampaignData(owner, 'quality');
+        const data = await listQualityCampaignData(owner, 'quality',controller.signal);
         if (active && epoch === generation) observedRepair = data.repair;
         if (active && epoch === generation) setSnapshot({ owner, section, rows: data.rows.map(row => ({ ...buildCampaignCardData(row), peakPriceChangePct: row.campaign.peak_unrealized_pnl })), complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel });
       } catch (error) { if (active && epoch === generation) setSnapshot(previous => ({ ...(previous.owner === owner && previous.section === section ? previous : { owner, section, rows: [], selectedSellKey: undefined, buyFilterLabel: '' }), complete: true, error: error instanceof Error ? error.message : String(error) })); }
@@ -37,7 +38,7 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
       void load();
     };
     void load(); window.addEventListener('fish-quality-saved', saved); window.addEventListener('focus', load);
-    return () => { active = false; window.removeEventListener('fish-quality-saved', saved); window.removeEventListener('focus', load); };
+    return () => { active = false;controller.abort();window.removeEventListener('fish-quality-saved', saved); window.removeEventListener('focus', load); };
   }, [owner, section, revision]);
   const visible = snapshot.owner === owner && snapshot.section === section;
   const rows = useMemo(() => visible ? snapshot.rows : [], [visible, snapshot.rows]);

@@ -5,12 +5,14 @@ vi.mock('@/lib/featureSource', () => ({ accountFeatureDefs: () => [] }));
 import { listQualityCampaignData, loadQualityCampaignData, loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { newQualityStudy } from '@/lib/fish/quality';
 import { serializeArchiveWork } from '@/lib/serializeArchiveWork';
+import {encodeQualityCampaignPacket} from '@/lib/fish/qualityCampaignTransfer';
+function reply(worker:any,result:any){let sequence=0;for(const chunk of encodeQualityCampaignPacket({kind:'result',result}))worker.onmessage({data:{type:'chunk',sequence:sequence++,...chunk}});worker.onmessage({data:{type:'complete'}});}
 beforeEach(() => { store.prepare.mockReset().mockResolvedValue({ durable: true }); store.load.mockReset(); });
 it('requests only a worker summary for detail account metrics, never a full campaign list', async () => {
   const sent = vi.fn(), terminate = vi.fn();
   class Reader {
     onmessage: any; onerror: any; terminate = terminate;
-    postMessage(request: any) { sent(request); queueMicrotask(() => this.onmessage({ data: { ok: true, result: { kind: 'performance', data: { performance: {}, asymmetricRisk: {} } } } })); }
+    postMessage(request: any) { if(request.type==='ack')return;sent(request); queueMicrotask(() => reply(this,{ kind: 'performance', data: { performance: {}, asymmetricRisk: {} } })); }
   }
   vi.stubGlobal('Worker', Reader);
   await loadQualityCampaignPerformance('owner', 'quality', 'selected-key');
@@ -18,6 +20,27 @@ it('requests only a worker summary for detail account metrics, never a full camp
   expect(store.load).not.toHaveBeenCalled(); expect(terminate).toHaveBeenCalledOnce();
 });
 afterEach(() => vi.unstubAllGlobals());
+it('cancels an obsolete read and releases the shared archive queue immediately',async()=>{
+ const workers:any[]=[];
+ class Reader{onmessage:any;onerror:any;terminate=vi.fn();constructor(){workers.push(this);}postMessage(){}}
+ vi.stubGlobal('Worker',Reader);const controller=new AbortController();
+ const read=listQualityCampaignData('old','quality',controller.signal),rejected=expect(read).rejects.toMatchObject({name:'AbortError'});
+ await vi.waitFor(()=>expect(workers).toHaveLength(1));controller.abort();await rejected;
+ expect(workers[0].terminate).toHaveBeenCalledOnce();
+ const next=listQualityCampaignData('new');await vi.waitFor(()=>expect(workers).toHaveLength(2));
+ reply(workers[1],{kind:'list',data:{rows:[]}});await next;
+ expect(store.load).not.toHaveBeenCalled();
+});
+it('rejects a mid-transfer failure without publishing a partial list or rereading on the main thread',async()=>{
+ class Reader{
+  onmessage:any;onerror:any;terminate=vi.fn();
+  postMessage(body:any){if(body.type==='ack')return;queueMicrotask(()=>{
+   let sequence=0;for(const chunk of encodeQualityCampaignPacket({kind:'list',data:{buyFilterLabel:'',repair:undefined,selectedSellKey:undefined}}))this.onmessage({data:{type:'chunk',sequence:sequence++,...chunk}});
+   this.onmessage({data:{type:'error',error:'Data cannot be cloned, out of memory.'}});
+  });}
+ }
+ vi.stubGlobal('Worker',Reader);await expect(listQualityCampaignData('owner')).rejects.toThrow('out of memory');expect(store.load).not.toHaveBeenCalled();
+});
 it('waits for a shared archive backup before opening a campaign snapshot', async () => {
   let release!: () => void;
   const backup = serializeArchiveWork(() => new Promise<void>(resolve => { release = resolve; }));
@@ -26,7 +49,7 @@ it('waits for a shared archive backup before opening a campaign snapshot', async
   class Reader {
     onmessage: any; onerror: any; terminate = vi.fn();
     constructor() { workers.push(this); }
-    postMessage() { queueMicrotask(() => this.onmessage({data:{ok:true,result:{kind:'list',data:{rows:[]}}}})); }
+    postMessage(request:any) { if(request.type==='ack')return;queueMicrotask(() => reply(this,{kind:'list',data:{rows:[]}})); }
   }
   vi.stubGlobal('Worker', Reader);
   const list = listQualityCampaignData('owner');
@@ -39,7 +62,7 @@ it('sends only a small read request, returns the campaign result and releases th
   const sent = vi.fn(), terminate = vi.fn();
   class Reader {
     onmessage: any; onerror: any; terminate = terminate;
-    postMessage(request: any) { sent(request); queueMicrotask(() => this.onmessage({ data: { ok: true, result: { kind: 'list', data: { rows: [], buyFilterLabel: '过滤', selectedSellKey: undefined } } } })); }
+    postMessage(request: any) { if(request.type==='ack')return;sent(request); queueMicrotask(() => reply(this,{ kind: 'list', data: { rows: [], buyFilterLabel: '过滤', selectedSellKey: undefined } })); }
   }
   vi.stubGlobal('Worker', Reader);
   expect((await listQualityCampaignData('owner')).buyFilterLabel).toBe('过滤');
@@ -51,15 +74,15 @@ it('serializes list and detail reads so navigation cannot hold concurrent full a
   class Reader {
     onmessage: any; onerror: any; body: any; terminate = vi.fn();
     constructor() { workers.push(this); }
-    postMessage(body: any) { this.body = body; }
+    postMessage(body: any) { if(body.type!=='ack')this.body = body; }
   }
   vi.stubGlobal('Worker', Reader);
   const list = listQualityCampaignData('owner'), detail = loadQualityCampaignData('other', 'fish-sell-example');
   await vi.waitFor(() => expect(workers).toHaveLength(1));
-  workers[0].onmessage({ data: { ok: true, result: { kind: 'list', data: { rows: [] } } } }); await list;
+  reply(workers[0],{ kind: 'list', data: { rows: [] } }); await list;
   await vi.waitFor(() => expect(workers).toHaveLength(2));
   expect(workers[0].terminate).toHaveBeenCalledOnce(); expect(workers[1].body.owner).toBe('other');
-  workers[1].onmessage({ data: { ok: true, result: { kind: 'detail', data: { campaign: { id: 'fish-sell-example' } } } } });
+  reply(workers[1],{ kind: 'detail', data: { campaign: { id: 'fish-sell-example' } } });
   expect((await detail).campaign.id).toBe('fish-sell-example'); expect(workers[1].terminate).toHaveBeenCalledOnce();
 });
 it('surfaces worker errors without trying another huge UI-thread read', async () => {
