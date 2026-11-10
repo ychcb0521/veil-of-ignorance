@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/notificationCenter';
 import { boundedAuthAction } from '@/lib/authTransport';
 import { reloadPage } from '@/lib/authBootRecovery';
+import { authErrorText } from '@/lib/authErrorText';
 
 type AuthStep = 'form' | 'verify';
 
@@ -12,7 +13,7 @@ function describeAuthError(error: string): string {
   if (/invalid login credentials/i.test(error)) return '邮箱或密码不对';
   if (/failed to fetch|network|load failed/i.test(error)) return '连不上登录服务，检查网络后再试';
   if (/rate limit|too many/i.test(error)) return '尝试太频繁，稍等一会儿再试';
-  return error;
+  return authErrorText(error);
 }
 
 export default function AuthPage() {

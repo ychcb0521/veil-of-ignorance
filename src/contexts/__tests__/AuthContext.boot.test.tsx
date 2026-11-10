@@ -250,6 +250,11 @@ describe('登录时令牌存不进去', () => {
     auth.signInWithPassword.mockResolvedValueOnce({ data: {}, error: { message: 'Invalid login credentials' } });
     await expect(latest.signIn('a@b.c', 'pw')).resolves.toEqual({ error: 'Invalid login credentials' });
   });
+  it('preserves server status and replaces empty-object errors without misreporting a credential failure',async()=>{
+    await signedOut();auth.signInWithPassword.mockResolvedValueOnce({data:{},error:{message:'{}',status:500,code:'unexpected_failure'}});
+    const result=await latest.signIn('a@b.c','pw');expect(result.error).toContain('HTTP 500');expect(result.error).toContain('unexpected_failure');expect(result.error).not.toContain('密码');
+    auth.signInWithPassword.mockResolvedValueOnce({data:{},error:{message:'{}'}});expect((await latest.signIn('a@b.c','pw')).error).toContain('无法识别');
+  });
 
   it('令牌落盘之后把给令牌留的位置占回去：恢复出登录态时、登录成功时、退出之后', async () => {
     const RESERVE = 'veil.storage.auth-reserve';

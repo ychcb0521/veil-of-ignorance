@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import { setActiveSyncUser } from '@/lib/simStateSync';
 import { boundedAuthAction, AuthActionTimeout } from '@/lib/authTransport';
+import { authErrorText } from '@/lib/authErrorText';
 import { ensureCriticalStorageHeadroom, restoreAuthStorageReserve, type StorageHeadroom } from '@/lib/persistedStateStorage';
 import {
   AUTH_BOOT_TIMEOUT_MS, authBootReason, claimAuthBootAutoReload, classifyAuthBootError,
@@ -147,13 +148,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
       options: { emailRedirectTo: window.location.origin },
     }));
-    return { error: error?.message ?? null };
-    } catch(error) { return {error:error instanceof Error?error.message:String(error),...(error instanceof AuthActionTimeout?{requiresReload:true}:{})}; }
+    return { error: error ? authErrorText(error) : null };
+    } catch(error) { return {error:authErrorText(error),...(error instanceof AuthActionTimeout?{requiresReload:true}:{})}; }
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const attempt = async () => {
-      const failure = (await boundedAuthAction(()=>supabase.auth.signInWithPassword({ email:email.trim(), password }))).error?.message ?? null;
+      const {error}=await boundedAuthAction(()=>supabase.auth.signInWithPassword({ email:email.trim(), password }));
+      const failure = error ? authErrorText(error) : null;
       // 登录成功、令牌已落盘：把给令牌留的位置占回去
       if (failure === null) restoreAuthStorageReserve();
       return failure;
@@ -166,14 +168,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if(error instanceof AuthActionTimeout)return {error:error.message,requiresReload:true};
       // 令牌签发了却存不进本地存储时登录库直接抛错：不接住的话登录按钮会一直转圈。
-      if (classifyAuthBootError(error) !== 'storage-full') return { error: error instanceof Error ? error.message : String(error) };
+      if (classifyAuthBootError(error) !== 'storage-full') return { error: authErrorText(error) };
       // 腾出多少算多少，一定再试一次：令牌只要约 3 KB，未必需要腾满
       ensureCriticalStorageHeadroom();
       try {
         return { error: await attempt() };
       } catch (again) {
         if(again instanceof AuthActionTimeout)return {error:again.message,requiresReload:true};
-        return { error: classifyAuthBootError(again) === 'storage-full' ? storageFull() : again instanceof Error ? again.message : String(again) };
+        return { error: classifyAuthBootError(again) === 'storage-full' ? storageFull() : authErrorText(again) };
       }
     }
   }, []);

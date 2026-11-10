@@ -1,5 +1,18 @@
 /** Bound auth connection + body reads. Other database/storage requests retain their existing behavior. */
 import {authGatewayUrl,productionAuthOrigin} from './authGateway';
+import {authServiceFailure} from './authErrorText';
+/** The installed SDK serializes a 5xx Response itself instead of reading its
+ * JSON body, yielding "{}". Supply a safe message while preserving status,
+ * headers and body, so retry/session handling retains its original semantics. */
+class DescribedAuthResponse extends Response {
+  readonly message:string;
+  constructor(body:ArrayBuffer,source:Response){
+    super(body.byteLength?body:null,{status:source.status,statusText:source.statusText,headers:source.headers});
+    let data:{code?:unknown;error_code?:unknown;message?:unknown;msg?:unknown}|undefined;
+    try{data=JSON.parse(new TextDecoder().decode(body));}catch{/* Non-JSON upstream failures still have an HTTP status. */}
+    this.message=authServiceFailure(source.status,data?.error_code??data?.code,data?.message??data?.msg);
+  }
+}
 // A measured slow connection returned a normal credential response after 17s.
 // Keep a finite deadline, with time left for SDK/session persistence afterwards.
 export const AUTH_REQUEST_TIMEOUT_MS = 30_000;
@@ -35,6 +48,7 @@ export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,i
           const request=input instanceof Request?new Request(typeof target==='string'?target:url,input.clone()):target;
           const response=await fetcher(request,{...init,cache:'no-store',...(routed?{credentials:'omit' as const}:{}),signal:controller.signal});
           const body=await response.arrayBuffer();
+          if(response.status>=500)return new DescribedAuthResponse(body,response);
           return new Response(body.byteLength?body:null,{status:response.status,statusText:response.statusText,headers:response.headers});
         };
         if(!gateway)return read(input,false);

@@ -22,6 +22,10 @@ async function submit(view: ReturnType<typeof render>) {
  * 登录失败在页面上什么都看不到，分不清是密码不对还是本地存储写满。
  */
 describe('登录页直接写出失败原因', () => {
+  it('never presents an empty object as the entire failure reason',async()=>{
+    signIn.mockResolvedValueOnce({error:'{}'});const view=render(<AuthPage/>);await submit(view);
+    expect(view.getByTestId('auth-form-error')).toHaveTextContent('无法识别');expect(view.getByTestId('auth-form-error')).not.toHaveTextContent('{}');expect(view.container.querySelector('button[type="submit"]')).toBeEnabled();
+  });
   it('unexpected rejection still restores the button; an unresponsive SDK offers a safe reload instead of overlapping attempts',async()=>{
     signIn.mockRejectedValueOnce(new Error('unexpected error'));
     const view=render(<AuthPage/>);await submit(view);

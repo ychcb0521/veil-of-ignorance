@@ -7,6 +7,17 @@ import {createAuthFetch,AUTH_REQUEST_TIMEOUT_MS} from '../authTransport';
 const site='https://veil-of-ignorance-ten.vercel.app',token=AUTH_BACKEND_ORIGIN+'/auth/v1/token?grant_type=password';
 afterEach(()=>{vi.useRealTimers();vi.unstubAllEnvs();vi.unstubAllGlobals();});
 const reply=(status=200,body='{}')=>new Response(body,{status,headers:{'Content-Type':'application/json'}});
+it('keeps a server 500 retryable but gives the real SDK readable diagnostics rather than the empty Response serialization',async()=>{
+ const fetcher=vi.fn<typeof fetch>(async()=>reply(500,'{"code":"unexpected_failure","msg":"Database error creating new session"}'));
+ const storage=new Map<string,string>(),client=createClient(AUTH_BACKEND_ORIGIN,'fixture-anon',{global:{fetch:createAuthFetch(fetcher,30000,site)},auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{storage.set(k,v)},removeItem:k=>{storage.delete(k)}}}});
+ const result=await client.auth.signInWithPassword({email:'fixture@example.invalid',password:'test-only'});
+ expect(result.error?.message).toContain('HTTP 500');expect(result.error?.message).toContain('unexpected_failure');expect(result.error?.status).toBe(500);expect(result.error?.message).not.toBe('{}');expect(result.data.session).toBeNull();expect(fetcher).toHaveBeenCalledOnce();expect(storage.size).toBe(0);
+});
+it('preserves the original server failure body/status and never duplicates a refresh or verification action',async()=>{
+ const body='{"code":"unexpected_failure","msg":"cannot execute INSERT in a read-only transaction"}',fetcher=vi.fn<typeof fetch>(async()=>reply(500,body));
+ const response=await createAuthFetch(fetcher,30000,site)(AUTH_BACKEND_ORIGIN+'/auth/v1/token?grant_type=refresh_token',{method:'POST',body:'{"refresh_token":"fixture"}'});
+ expect(response.status).toBe(500);expect(await response.text()).toBe(body);expect((response as Response&{message:string}).message).toContain('只读');expect(fetcher).toHaveBeenCalledOnce();
+});
 it('automatically selects the gateway in a hosted production build without changing the SDK client URL',async()=>{
  vi.stubEnv('PROD',true);vi.stubGlobal('window',{location:{origin:site}});
  const fetcher=vi.fn<typeof fetch>(async()=>reply());await createAuthFetch(fetcher)(token,{method:'POST'});
