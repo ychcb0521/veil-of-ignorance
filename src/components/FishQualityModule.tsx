@@ -1,3 +1,4 @@
+import {useSettingsImageCapture} from './SettingsImageExport';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { useId, useState, type ReactNode } from 'react';
 import { ChevronDown, CircleHelp, Filter, type LucideIcon } from 'lucide-react';
@@ -18,7 +19,8 @@ export const qualitySplitMenuAction = 'inline-flex w-4 shrink-0 items-center jus
 export const qualitySettingsAction = 'inline-flex h-7 w-[5.5rem] shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
 
 export function FishQualityInfo({ label, children }: { label: string; children: ReactNode }) {
-  return <Popover><PopoverTrigger asChild><button type="button" aria-label={label} title={label} className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} aria-label={label} className="w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(80dvh,var(--radix-popover-content-available-height))] space-y-2 overflow-y-auto overscroll-contain p-3 text-[11px] leading-relaxed">{children}</PopoverContent></Popover>;
+  const imageCapture=useSettingsImageCapture();
+  return <><span hidden data-settings-image-include="">{imageCapture&&<><h5>{label}</h5>{children}</>}</span><Popover><PopoverTrigger asChild><button type="button" aria-label={label} title={label} className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} aria-label={label} className="w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(80dvh,var(--radix-popover-content-available-height))] space-y-2 overflow-y-auto overscroll-contain p-3 text-[11px] leading-relaxed">{children}</PopoverContent></Popover></>;
 }
 
 /** 鱼质量的三个工作模块共用尺寸、留白和标题层级。 */

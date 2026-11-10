@@ -1,4 +1,5 @@
 import './FishPreEntryThreeStageSettings.css';
+import {SettingsImageButton} from './SettingsImageExport';
 import {selectedPreEntryPlan,newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {SaveTemplateButton,TemplatePicker} from './FishQualitySellPlansEditor';
 import {activeQualityPlanTemplates,qualityPlanFromTemplate} from '@/lib/fish/qualityPlanTemplates';
@@ -183,6 +184,6 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
     {!active&&<label className="screening-form-label mt-4">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>}
     <p className="mt-4 text-muted-foreground">首次满足即停止；到达时限仍未满足则结束。修改时限后，从头重新筛选生效。</p>
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
-    <div className="screening-footer"><span className="screening-footer-meta">已选择 {selectedCount} 个标的</span><div className="screening-footer-actions"><button type="button" disabled={!state.ready||!monitor.ready} className={button} onClick={()=>save(false)}>保存三阶方案</button><button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' screening-save-primary'} onClick={()=>save(true)}>保存并开始三阶筛选</button></div></div>
+    <div className="screening-footer"><span className="screening-footer-meta">已选择 {selectedCount} 个标的</span><div className="screening-footer-actions"><SettingsImageButton/><button type="button" disabled={!state.ready||!monitor.ready} className={button} onClick={()=>save(false)}>保存三阶方案</button><button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' screening-save-primary'} onClick={()=>save(true)}>保存并开始三阶筛选</button></div></div>
   </div>;
 }

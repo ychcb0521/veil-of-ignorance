@@ -4,6 +4,7 @@ import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { defaultBreakevenFloor, defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
+import {useSettingsImageCapture} from './SettingsImageExport';
 import { qualityFilterMenuChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { orderedSellStages, type QualitySellStage } from '@/lib/fish/qualitySellStages';
@@ -152,10 +153,11 @@ function Part({title,role,info,children,testId}:{title:string;role:string;info:R
  </section>;
 }
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
-export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void}) {
+export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number}) {
+ const imageCapture=useSettingsImageCapture();
  const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(defs),[defs]);
  const features=[...new Map(choices.map(c=>[c.featureId,c.group])).entries()];
- const [selectedRound,setSelectedRound]=useState(0),count=Math.min(100,Math.max(1,Math.floor(Number(all.maxRounds)||1))),index=Math.min(selectedRound,count-1);
+ const [selectedRound,setSelectedRound]=useState(0),count=Math.min(100,Math.max(1,Math.floor(Number(all.maxRounds)||1))),index=imageRound??Math.min(selectedRound,count-1);
  const current=index?all.otherRounds[index-1]??all:all,d={...all,...current};
  const patch=(p:Partial<AdditionDraft>)=>{if('enabled' in p){setDraft({...all,...p});return;}if(!index){setDraft({...all,...p});return;}const others=Array.from({length:Math.max(count-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));others[index-1]={...current,...p};setDraft({...all,otherRounds:others});};
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
@@ -326,5 +328,6 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </Part>
   {!!all.laterSellStages?.length&&<p className="text-[10px] text-muted-foreground">另有 {all.laterSellStages.length} 个卖出切换设在第 {all.laterSellStages.map(s=>s.afterAdditions).join('、')} 次加仓后，超过最多加仓次数，暂不生效（已保留）。</p>}
   {!!vetoStages?.stages.some(s=>Number(s.afterAdditions)>count)&&<p className="text-[10px] text-muted-foreground">另有否决条件设在第 {vetoStages.stages.filter(s=>Number(s.afterAdditions)>count).map(s=>s.afterAdditions).join('、')} 次加仓后，超过最多加仓次数，暂不生效（已保留）。</p>}
+  {imageCapture&&imageRound==null&&<div hidden data-settings-image-include="">{Array.from({length:count},(_,i)=>i===index?null:<div key={i}><h4>第 {i+1} 次加仓 · 完整条件</h4><FishQualityAdditionEditor draft={all} setDraft={()=>{}} vetoStages={vetoStages} setVetoStages={()=>{}} imageRound={i}/></div>)}</div>}
  </section>;
 }

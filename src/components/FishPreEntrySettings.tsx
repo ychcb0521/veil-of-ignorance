@@ -1,5 +1,6 @@
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { FishPreEntryThreeStageSettings } from './FishPreEntryThreeStageSettings';
+import {SettingsImageScope} from './SettingsImageExport';
 
 /**
  * 动态筛选的条件设置面板：只剩三阶准入。
@@ -7,5 +8,5 @@ import { FishPreEntryThreeStageSettings } from './FishPreEntryThreeStageSettings
  * 已保存的旧方案由 FishPreEntryThreeStageSettings 自动转成「三阶副本」再编辑。
  */
 export function FishPreEntrySettings(props: { state: FishQualityState; selectedCount: number; done: () => void }) {
-  return <FishPreEntryThreeStageSettings key={props.state.preEntry?.library.settings?.updatedAt ?? 'new'} {...props} />;
+  return <SettingsImageScope title="动态筛选条件"><FishPreEntryThreeStageSettings key={props.state.preEntry?.library.settings?.updatedAt ?? 'new'} {...props} /></SettingsImageScope>;
 }

@@ -1,8 +1,10 @@
+import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
+import {ATI6H_DEFAULTS} from '@/lib/ati6h';
 import {DBL5_ID,DBL5_DEFAULTS,dbl5Parameters} from '@/lib/dbl5m';
 import {SBS5M_DEFAULTS,SBS5M_PARAMETER_SPECS,sbsParameters} from '@/lib/sbs5m';
 import {prsParameters,PRS6H_DEFAULTS} from '@/lib/prs6h';
 import { mbi2HoursOf, mbi2NOf, mbi2BandOf, mbi2ConfirmOf, type Mbi2Params } from '@/lib/mbi2';
-import { featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
+import { ati6hDependencyOf, featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
 /**
  * Deep dig 特征值的定义区：平时显示定义、公式、分组标准；点「编辑定义」就地改。
  * 【用户要求】2026-10-16「每个特征值的这里都可以人为输入定义概念、公式、分组标准，然后运行的时候，就按照这里的公式提取因变量，
@@ -42,14 +44,28 @@ export interface DefinitionPanelProps {
 }
 
 export function DefinitionPanel(props: DefinitionPanelProps) {
-  return props.editing ? <DefinitionForm {...props} /> : <DefinitionView {...props} />;
+  return <SettingsImageScope title={`Deep Dig · ${props.def.name}`}>{props.editing ? <DefinitionForm {...props} /> : <DefinitionView {...props} />}</SettingsImageScope>;
+}
+
+function DefinitionImageParameters({def}:{def:DeepDigFeatureDef}) {
+  const capture=useSettingsImageCapture();
+  if(!capture)return null;
+  const {id:_id,formula:_formula,...parameters}=paramsOf(def);
+  const saved=Object.fromEntries(Object.entries(def).filter(([key])=>/^(DBL5_|SBS5M_|PRS6H_|ATI6H_|MBI_|MBI2_)/.test(key)||['researchWindowHours','chartCore','btcFreeSourceId','retentionVersion','focusVersion'].includes(key)));
+  const template=featureTemplateId(def);
+  const complete={...parameters,...saved,
+    ...(template===DBL5_ID?{DBL5_config:{...DBL5_DEFAULTS,...def.DBL5_config}}:{}),
+    ...(template==='sbs_5m'?{SBS5M_config:{...SBS5M_DEFAULTS,...def.SBS5M_config}}:{}),
+    ...(template==='prs6h'?{PRS6H_config:{...PRS6H_DEFAULTS,...def.PRS6H_config}}:{}),
+    ...(template==='ati6h'?{ATI6H_parameters:{...ATI6H_DEFAULTS,HALF_LIFE_HOURS:halfLifeOf(def),...def.ATI6H_parameters,WEIGHTS:{...ATI6H_DEFAULTS.WEIGHTS,...def.ATI6H_parameters?.WEIGHTS}},ATI6H_volume_mode:def.ATI6H_volume_mode??'taker',ATI6H_dependency:ati6hDependencyOf(def)}:{})};
+  return <div hidden data-settings-image-include=""><h4>完整参数</h4><pre>{JSON.stringify(complete,null,2)}</pre></div>;
 }
 
 function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPanelProps) {
   return (
     <div className="space-y-2.5" data-testid="deep-dig-definition">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-[15px] font-medium">{def.name}</h2>
+        <h2 className="text-[15px] font-medium">{def.name}</h2><SettingsImageButton/>
         <button type="button" onClick={() => onEditingChange(true)} data-testid="deep-dig-def-edit"
           className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground">
           <Pencil className="h-3 w-3" />编辑定义
@@ -63,11 +79,12 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
         {def.chartTemplate===DBL5_ID?<details><summary className="cursor-pointer py-1 text-muted-foreground">输出字段与布尔事件变量</summary><FormulaEditor def={def} onSave={onSave}/></details>:<FormulaEditor def={def} onSave={onSave} />}
         <span className="pt-1 text-muted-foreground">参数</span>
         {def.chartTemplate===DBL5_ID?<span className="py-1 text-muted-foreground">固定5m · n={def.DBL5_config?.n??3} · 几何证据 {def.DBL5_config?.window_minutes??360} 分钟</span>:def.chartTemplate==='sbs_5m'?<span className="py-1 text-muted-foreground">固定5m已收盘 · 有效期 {def.SBS5M_config?.active_box_max_age??6} 小时 · 编辑定义可调整完整结构参数</span>:<KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />}
-        <span className="pt-px text-muted-foreground">分组</span>
-        <GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" />
+        <span data-settings-image-skip="" className="pt-px text-muted-foreground">分组</span>
+        <div data-settings-image-skip=""><GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" /></div>
         <span className="text-muted-foreground">显示</span>
         <span className="font-mono tabular-nums text-muted-foreground">× {def.scale}{def.unit ? ` · ${def.unit}` : ''}</span>
       </div>
+      <DefinitionImageParameters def={def}/>
     </div>
   );
 }
@@ -149,7 +166,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
         </div>
       </div>
       {check.scale && <div className={cn('pl-[64px]', RED)}>{check.scale}</div>}
-      <div className="flex gap-2">
+      <div data-settings-image-skip="" className="flex gap-2">
         <span className={label}>分组</span>
         <GroupFields
           value={{ source: draft.source ?? 'campaigns', positive: draft.positive, control: draft.control }}
@@ -158,7 +175,9 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           testId="deep-dig-def"
         />
       </div>
+      <DefinitionImageParameters def={draft}/>
       <div className="flex flex-wrap items-center gap-2 pl-[64px]">
+        <SettingsImageButton/>
         <button type="button" className={cn(BTN, 'border-foreground/30 font-medium')} onClick={save} data-testid="deep-dig-def-save">保存</button>
         <button type="button" className={BTN} onClick={() => onEditingChange(false)}>取消</button>
         {onReset && modifiedFromDefault && builtin && (

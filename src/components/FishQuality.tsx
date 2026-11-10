@@ -1,6 +1,7 @@
 import {FishCombinationHelp} from './FishCombinationHelp';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {FishConditionSettings} from './FishConditionSettings';
+import {SettingsImageButton,useSettingsImageCapture} from './SettingsImageExport';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {qualityMonitorEntryAt,qualitySignalTime} from '@/lib/fish/qualityAdmissionTime';
 import {ScreeningHeaders,ScreeningCells,ScreeningStatistics,type ScreeningSortKey} from './FishQualityScreeningResults';
@@ -219,7 +220,7 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span><FishQualityInfo label="硬性终止说明"><p>与「加仓细节 · 卖出」并列：硬性终止的任一启用条件、或某次加仓的卖出条件，任何一个先达标，都立即卖出全部仓位（含各次加仓买入的部分），不等普通卖出算法。某次加仓后另加或收紧的否决条件，在「③ 加仓细节 · 卖出」里按次设置。</p></FishQualityInfo></div>
       <FishQualityHoldingVetoEditor draft={draft.vetoes} setDraft={vetoes => setDraft({...draft,vetoes})}/>
     </section>
-    {!hideSave && <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案` : `保存到「${plan.label}」`}</button></div>}
+    {!hideSave && <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案` : `保存到「${plan.label}」`}</button></div>}
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
 }
@@ -262,6 +263,7 @@ type RouterDraftHandle = { build: () => import('@/lib/fish/qualityPlanRouter').Q
 function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
   plan: QualityGroup; ready: boolean; controller: { current: RouterDraftHandle | null }; onDirtyChange: (id: string, dirty: boolean) => void;
 }) {
+  const imageCapture=useSettingsImageCapture();
   const router = plan.router!, definitions = useFeatureDefinitions();
   const [branch, setBranch] = useState<'structure' | 'attack'>('structure');
   const [visited, setVisited] = useState({ structure: true, attack: false });
@@ -304,9 +306,10 @@ function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
       : `这是独立工作副本，修改后可保存、运行，再存为新模板。初始卖出、镜像、止损、加仓通用设置和${routerPrefixText(router)}加仓为公共设置；修改一边后，保存时同步到另一边。第${routerNextOrdinal(router)}次及之后的加仓、卖出切换和否决阶段可分别修改。`}</p>
     <div role="tablist" aria-label="编辑条件分支" className="flex gap-2">{(['structure', 'attack'] as const).map(key => <button type="button" role="tab" aria-selected={branch === key} key={key} onClick={() => { setBranch(key); setVisited(old => ({ ...old, [key]: true })); }} className={`rounded px-2 py-1 ${branch === key ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{key === 'structure' ? '结构分支' : '进攻分支'}</button>)}</div>
     {(['structure', 'attack'] as const).map(key => {
-      if (!visited[key]) return null;
+      if (!visited[key] && !imageCapture) return null;
       const original = router[key], monitorDirty = JSON.stringify(drafts[key]) !== JSON.stringify(monitorDraftOf(original));
-      return <div key={key} hidden={branch !== key} data-testid={`router-branch-${key}`}>
+      return <div key={key} hidden={branch !== key} data-settings-image-include="" data-testid={`router-branch-${key}`}>
+        {imageCapture&&<h3 hidden data-settings-image-include="">{key==='structure'?'结构分支':'进攻分支'}</h3>}
         <FishQualitySellPlansEditor plans={branchPlans[key]} ready={ready} embedded onSave={() => {}} extraDirty={monitorDirty}
           onDirtyChange={branchDirtyCallbacks[key]}
           prepare={plans => monitorDirty ? plans.map(p => ({ ...p, ...parseRouterMonitorDraft(original, drafts[key], definitions) })) : plans}
@@ -319,6 +322,7 @@ function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
 
 /** The tab list and algorithm cards are projections of the same draft IDs and order. */
 function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outsideHint}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number;outsideHint?:ReactNode}) {
+  const imageCapture=useSettingsImageCapture();
   const definitions=useFeatureDefinitions(),plans=state.study.sellPlans??[];
   const [drafts,setDrafts]=useState<Record<string,{base:string;draft:MonitorDraft}>>({});
   const forPlan=(p:QualityGroup)=>drafts[p.id]?.base===monitorBaseKey(p)?drafts[p.id].draft:monitorDraftOf(p);
@@ -347,18 +351,19 @@ function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outs
         const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+[d.addition,...d.addition.otherRounds].slice(0,Math.max(1,Number(d.addition.maxRounds)||1)).filter(r=>r.sellSwitch?.enabled).length+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
         return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>onSelect(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{p.label}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
-      {view.plans.filter(p=>p.router).map(p=><div key={p.id+':'+JSON.stringify(p.router)} hidden={active?.id!==p.id}>
+      {view.plans.filter(p=>p.router).map(p=><div key={p.id+':'+JSON.stringify(p.router)} hidden={active?.id!==p.id} data-settings-image-include="">
         <EditableQualityRouter plan={p} ready={state.ready} controller={controllers.current[p.id]??(controllers.current[p.id]={current:null})} onDirtyChange={setRouterDirtyFlag}/>
       </div>)}
       {active&&isLegacyQualityPlan(active)?<div className="space-y-3" data-testid="quality-monitor-legacy" data-plan-id={active.id}>
         <p className="text-xs font-medium">持仓监测 · {active.label}</p>
         <FishQualityMonitorSettingsView plan={active} holdingOnly/>
-        <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
+        <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
         {view.error&&<p role="alert" className="text-[11px] text-destructive">{view.error}</p>}
       </div>:active?.router?<div className="contents" data-testid="quality-monitor-router-settings">
         <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5">
           {view.error&&<p role="alert" className="w-full text-[11px] text-destructive">{view.error}</p>}
           <span className="mr-auto text-[10.5px] text-muted-foreground">{view.dirty?'方案尚未保存':'当前方案已保存'} · 本轮已勾选 {selectedCount} 条{outsideHint&&<> · {outsideHint}</>}</span>
+          <SettingsImageButton/>
           <button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md border border-primary/30 px-2.5 text-[11px] text-primary disabled:opacity-40">保存方案</button>
           <button type="button" disabled={!state.ready||!selectedCount} title={selectedCount?'保存完整方案，然后监测当前筛选下已勾选的信号':'请先在组合表中勾选本轮要监测的信号'} onClick={()=>{if(view.save()){done();void state.start();}}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存并开始监测</button>
         </div>
@@ -370,7 +375,8 @@ function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outs
             try { return {...p,...parseMonitorDraft(forPlan(active),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
           }));
           if(saved)done();
-        }}/>:<p className="pb-3 text-[11px] text-muted-foreground">暂无监测方案；新增上方算法后即可设置加仓条件。</p>}
+        }}/>:<p className="pb-3 text-[11px] text-muted-foreground">暂无监测方案；新增上方算法后即可设置加仓条件。<SettingsImageButton className="ml-2"/></p>}
+      {imageCapture&&<div hidden data-settings-image-include="">{view.plans.filter(p=>p.id!==active?.id&&!p.router).map(p=><div key={p.id}><h3>持仓监测 · {p.label}</h3>{isLegacyQualityPlan(p)?<FishQualityMonitorSettingsView plan={p} holdingOnly/>:<HoldingMonitorEditor ready={false} plan={p} draft={forPlan(p)} setDraft={()=>{}} save={()=>{}} error="" allDirty={false} count={view.plans.length} hideSave/>}</div>)}</div>}
     </>;
   }}/>;
 }
@@ -863,7 +869,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" disabled={!!state.archiving} onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">先将当前全部结果独立归档到监测库，再按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。归档按时间排列，后续重算不会覆盖本次快照</span></button></PopoverContent></Popover>
           </div>
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
-            <FishConditionSettings title="持仓监测条件" description="按方案设置卖出、加仓、镜像和持仓否决"><HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/></FishConditionSettings>
+            <FishConditionSettings imageExport title="持仓监测条件" description="按方案设置卖出、加仓、镜像和持仓否决"><HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/></FishConditionSettings>
           </PopoverContent></Popover>
           <FishMonitorLibrary onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>

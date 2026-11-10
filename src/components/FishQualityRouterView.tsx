@@ -1,9 +1,11 @@
+import {useSettingsImageCapture} from './SettingsImageExport';
 import { useState } from 'react';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { qualityPlanTemplateSummary } from '@/lib/fish/qualityPlanTemplates';
 import { isRaceRouter, raceFromText, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
 import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
 export function FishQualityRouterView({plan}:{plan:QualityGroup}) {
+ const imageCapture=useSettingsImageCapture();
  const [branch,setBranch]=useState<'structure'|'attack'>('structure');
  if(!plan.router)return null;
  const r=plan.router;
@@ -15,5 +17,6 @@ export function FishQualityRouterView({plan}:{plan:QualityGroup}) {
   <div role="tablist" aria-label="查看条件分支" className="flex gap-2">{(['structure','attack'] as const).map(b=><button type="button" role="tab" aria-selected={b===branch} key={b} onClick={()=>setBranch(b)} className={`rounded px-2 py-1 ${branch===b?'bg-primary text-primary-foreground':'bg-muted'}`}>{b==='structure'?'结构分支':'进攻分支'}</button>)}</div>
   <p>{qualityPlanTemplateSummary(r[branch])}</p>
   <FishQualityMonitorSettingsView key={branch} plan={r[branch]}/>
+  {imageCapture&&<div hidden data-settings-image-include=""><h4>{branch==='structure'?'进攻分支':'结构分支'}</h4><FishQualityMonitorSettingsView plan={r[branch==='structure'?'attack':'structure']}/></div>}
  </section>;
 }
