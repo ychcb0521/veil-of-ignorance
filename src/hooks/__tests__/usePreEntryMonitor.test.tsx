@@ -9,11 +9,11 @@ import { definitionKey } from '@/lib/deepDig/features';
 import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 
-const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), v5Load: vi.fn(), v5Save: vi.fn(), v4Load: vi.fn(), v4Save: vi.fn(), v2Load: vi.fn(), v2Save: vi.fn(), v1Load: vi.fn(), v1Save: vi.fn(), v3Load: vi.fn(), v3Save: vi.fn() }));
+const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), clear: vi.fn(), v5Load: vi.fn(), v5Save: vi.fn(), v4Load: vi.fn(), v4Save: vi.fn(), v2Load: vi.fn(), v2Save: vi.fn(), v1Load: vi.fn(), v1Save: vi.fn(), v3Load: vi.fn(), v3Save: vi.fn() }));
 vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: storage.v1Load, savePreEntryLibrary: storage.v1Save }));
 vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: storage.v2Load, savePreEntryLibraryV2: storage.v2Save }));
 vi.mock('@/lib/fish/preEntryMonitorV3Store', () => ({ loadPreEntryLibraryV3: storage.v3Load, savePreEntryLibraryV3: storage.v3Save }));
-vi.mock('@/lib/fish/preEntryMonitorV6Store', () => ({ loadPreEntryLibraryV6: storage.load, savePreEntryLibraryV6: storage.save }));
+vi.mock('@/lib/fish/preEntryMonitorV6Store', () => ({ loadPreEntryLibraryV6: storage.load, savePreEntryLibraryV6: storage.save, savePreEntryTableClears: storage.clear }));
 vi.mock('@/lib/fish/preEntryMonitorV5Store', () => ({ loadPreEntryLibraryV5: storage.v5Load, savePreEntryLibraryV5: storage.v5Save }));
 vi.mock('@/lib/fish/preEntryMonitorV4Store', () => ({ loadPreEntryLibraryV4: storage.v4Load, savePreEntryLibraryV4: storage.v4Save }));
 const t = Date.UTC(2026, 2, 29, 5);
@@ -23,12 +23,12 @@ function study() {
   return { ...s, independentFilters: true as const, selectedRowIds: qualityComparisonRows(s).map(r => r.id), buyFilters: [{ id: 'f', label: '买盘', enabled: true, metric: 'raw', direction: '>' as const, threshold: 100,
     snapshot: { featureId: def.id, featureShort: def.short, definitionKey: definitionKey(def), statistic: 'raw', interval: '5m' as const, scale: 1, direction: '>' as const, threshold: 100, cutoffMs: t, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 } }] };
 }
-beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.v5Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v4Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v3Load.mockResolvedValue(emptyPreEntryLibrary()); });
+beforeEach(() => { vi.clearAllMocks(); storage.load.mockImplementation(async () => emptyPreEntryLibrary()); storage.save.mockResolvedValue(undefined); storage.clear.mockResolvedValue(undefined); storage.v5Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v4Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v1Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v2Load.mockResolvedValue(emptyPreEntryLibrary()); storage.v3Load.mockResolvedValue(emptyPreEntryLibrary()); });
 it('persists a table-only clear without deleting history or frozen settings, and retains results when saving fails',async()=>{
  const input=study(),sample=qualityComparisonRows(input)[0],saved={...emptyPreEntryLibrary(),rounds:[{id:'r',state:'complete' as const,startedAt:t,updatedAt:t,filters:input.buyFilters,hours:1}],records:[{id:'record',roundId:'r',sample,status:'matched' as const,matchedAt:t+60000,startTime:t,cursor:t+60000,updatedAt:t+60000,readings:[{key:'f',value:101}]}]},before=structuredClone(saved);
  storage.load.mockResolvedValue(saved);const run=vi.fn(),h=renderHook(()=>usePreEntryMonitor('clear-owner',true,run));await waitFor(()=>expect(h.result.current.ready).toBe(true));
- storage.save.mockRejectedValueOnce(Error('保存失败'));await act(()=>h.result.current.clearTableResults());expect(h.result.current.library.records[0].tableClearedAt).toBeUndefined();
- await act(()=>h.result.current.clearTableResults());const result=h.result.current.library.records[0];expect(result.tableClearedAt).toBeGreaterThan(before.records[0].updatedAt);expect(result.updatedAt).toBe(before.records[0].updatedAt);expect(result.readings).toEqual(before.records[0].readings);expect(result.sample).toEqual(before.records[0].sample);expect(result.status).toBe('matched');expect(result.matchedAt).toBe(t+60000);expect(h.result.current.library.rounds).toEqual(before.rounds);expect(run).not.toHaveBeenCalled();expect(storage.v4Save).not.toHaveBeenCalled();
+ storage.clear.mockRejectedValueOnce(Error('保存失败'));await act(()=>h.result.current.clearTableResults());expect(h.result.current.library.records[0].tableClearedAt).toBeUndefined();
+ await act(()=>h.result.current.clearTableResults());const result=h.result.current.library.records[0];expect(result.tableClearedAt).toBeGreaterThan(before.records[0].updatedAt);expect(result.updatedAt).toBe(before.records[0].updatedAt);expect(result.readings).toEqual(before.records[0].readings);expect(result.sample).toEqual(before.records[0].sample);expect(result.status).toBe('matched');expect(result.matchedAt).toBe(t+60000);expect(h.result.current.library.rounds).toEqual(before.rounds);expect(run).not.toHaveBeenCalled();expect(storage.v4Save).not.toHaveBeenCalled();expect(storage.save).not.toHaveBeenCalled();expect(storage.clear).toHaveBeenLastCalledWith('clear-owner',{record:result.tableClearedAt});
 });
 it('stops the current screening task before clearing its final displayed observations',async()=>{
  const run=vi.fn(async(task:QualityRunOptions)=>{const record=task.preEntry!.records[0];task.preEntry!.onRecord({...record,status:'scanning',readings:[{key:'f',value:123}],updatedAt:Date.now()});await new Promise<void>(resolve=>task.signal.addEventListener('abort',()=>resolve(),{once:true}));});
@@ -227,7 +227,7 @@ it('starts an existing frozen v5 plan with its v5 round label and leaves its par
 it('keeps v6 settings authoritative when an older v5 page saves later, while retaining its history read-only',async()=>{
  const f=study().buyFilters[0],config=emptyPreEntryThreeStage(),p=freezeQualityPlan({id:'v6',label:'新版',metric:f.metric,snapshot:f.snapshot,preEntryThreeStage:config}),newer={updatedAt:1,plans:[p],hours:2};
  storage.load.mockResolvedValue({...emptyPreEntryLibrary(),settings:newer});storage.v5Load.mockResolvedValue({...emptyPreEntryLibrary(),settings:{updatedAt:Date.now()+10000,plans:[{...p,id:'old-page',preEntryThreeStage:{...config,version:PRE_ENTRY_THREE_STAGE_V5}}],hours:88}});
- const h=renderHook(()=>usePreEntryMonitor('split-storage',true,vi.fn()));await waitFor(()=>expect(h.result.current.ready).toBe(true));expect(h.result.current.library.settings).toEqual(newer);await act(()=>h.result.current.clearTableResults());expect(storage.save).toHaveBeenCalled();expect(storage.v5Save).not.toHaveBeenCalled();
+ const h=renderHook(()=>usePreEntryMonitor('split-storage',true,vi.fn()));await waitFor(()=>expect(h.result.current.ready).toBe(true));expect(h.result.current.library.settings).toEqual(newer);await act(()=>h.result.current.clearTableResults());expect(storage.clear).toHaveBeenCalled();expect(storage.save).not.toHaveBeenCalled();expect(storage.v5Save).not.toHaveBeenCalled();
 });
 
 it('starts only the confirmed saved second screening plan and archives every excluded setting intact',async()=>{

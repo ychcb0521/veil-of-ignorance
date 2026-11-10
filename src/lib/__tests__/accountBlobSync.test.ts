@@ -42,6 +42,17 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
 
 type Mod = typeof import('../accountBlobSync');
 type Value = { items: number[]; map?: Map<string, number>; nan?: number };
+it('merges small screening-clear markers across devices without uploading the screening audit',async()=>{
+ const create=async(initial:Record<string,number>)=>{
+  vi.resetModules();const mod:Mod=await import('../accountBlobSync'),{mergePreEntryTableClears}=await import('../fish/preEntryTableClears');
+  const local={value:initial},adapter:import('../accountBlobSync').AccountBlobAdapter<Record<string,number>>={name:'pre-entry-table-clears-v1',read:async()=>local.value,write:async(_owner,value)=>{local.value=mergePreEntryTableClears(local.value,value);},mergeRemote:async(_owner,value)=>{local.value=mergePreEntryTableClears(local.value,value);},weight:value=>Object.keys(value??{}).length};
+  return {mod,local,adapter,async sync(){await mod.syncAccountBlobOnLoad(adapter,'u1');await mod.flushAccountBlobPushesForTests();},async save(value:Record<string,number>){local.value=mergePreEntryTableClears(local.value,value);await mod.noteAccountBlobSaved(adapter,'u1');await mod.flushAccountBlobPushesForTests();}};
+ };
+ const a=await create({r1:10});await a.sync();const b=await create({});await b.sync();expect(b.local.value).toEqual({r1:10});
+ await a.save({r1:20});await b.save({r2:30});const c=await create({});await c.sync();expect(c.local.value).toEqual({r1:20,r2:30});
+ expect(cloud.state.upserts.every(key=>key.startsWith('idb:pre-entry-table-clears-v1'))).toBe(true);
+ a.mod.__resetAccountBlobSyncForTests();b.mod.__resetAccountBlobSyncForTests();c.mod.__resetAccountBlobSyncForTests();
+});
 /** 一台「设备」= 一份全新加载的同步模块 + 自己的本机存储。 */
 async function device(initial?: Value) {
   vi.resetModules();

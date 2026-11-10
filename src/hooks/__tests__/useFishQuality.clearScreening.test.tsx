@@ -13,7 +13,7 @@ const flush=async()=>{await act(async()=>{await vi.advanceTimersByTimeAsync(0);}
 it('clears dynamic table snapshots while preserving static readings, holdings and saved plan assets',async()=>{
  const runner=vi.fn(),h=renderHook(()=>useFishQuality('a',[],runner));await flush();const before=structuredClone(h.result.current.study);
  await act(async()=>{expect(await h.result.current.clearScreeningResults()).toBe(true);});
- expect(storage.clear).toHaveBeenCalledOnce();expect(h.result.current.study.screeningResults).toEqual([]);
+ expect(storage.clear).toHaveBeenCalledOnce();expect(storage.clear).toHaveBeenCalledWith(before.screeningResults??[]);expect(h.result.current.study).toEqual(before);
  for(const key of ['filterReadings','results','sellPlans','buyFilters','planTemplates','monitorLibrary','filterLibrary'] as const)expect(h.result.current.study[key]).toEqual(before[key]);expect(runner).not.toHaveBeenCalled();
 });
 it('retains the study when clearing cannot persist and refuses an old account completion',async()=>{

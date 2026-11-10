@@ -5,6 +5,7 @@ import {qualityTableMembers,qualityTableRange,type QualityTableRow} from './qual
 import {formatUTC8} from '@/lib/timeFormat';
 import type {XlsxSheet} from '@/lib/xlsxWorkbook';
 import type {QualityMonitorEntry} from './qualityAdmissionTime';
+import {clearedPreEntryRecord} from './preEntryTableClears';
 
 export interface QualityScreeningResult {record:PreEntryRecord;round:PreEntryRound}
 export const screeningStatus={queued:'待筛选',scanning:'筛选中',paused:'已暂停',matched:'已入选',unmatched:'未入选',warming:'历史不足',error:'缺数据'} as const;
@@ -12,9 +13,9 @@ export const hasScreeningTableResult=(record:PreEntryRecord)=>!record.tableClear
 /** Canonical history remains in its library. A saved table may also own a frozen display snapshot. */
 export function qualityScreeningResults(study:Pick<FishQualityStudy,'screeningResults'|'screeningRounds'>,library?:PreEntryLibrary,includeCleared=false):QualityScreeningResult[]{
  const rounds=new Map(library?.rounds.map(r=>[r.id,r])),results=new Map<string,QualityScreeningResult>();
- for(const record of library?.records??[]){const round=rounds.get(record.roundId);if(round&&(includeCleared||hasScreeningTableResult(record)))results.set(record.id,{record,round});}
+ for(const original of library?.records??[]){const record=clearedPreEntryRecord(original,library?.tableClears),round=rounds.get(record.roundId);if(round&&(includeCleared||hasScreeningTableResult(record)))results.set(record.id,{record,round});}
  const savedRounds=new Map(study.screeningRounds?.map(r=>[r.id,r]));
- for(const record of study.screeningResults??[]){const round=savedRounds.get(record.roundId);if(round&&(includeCleared||hasScreeningTableResult(record))&&(!results.has(record.id)||results.get(record.id)!.record.updatedAt<=record.updatedAt))results.set(record.id,{record,round});}
+ for(const original of study.screeningResults??[]){const record=clearedPreEntryRecord(original,library?.tableClears),round=savedRounds.get(record.roundId);if(round&&(includeCleared||hasScreeningTableResult(record))&&(!results.has(record.id)||results.get(record.id)!.record.updatedAt<=record.updatedAt))results.set(record.id,{record,round});}
  return [...results.values()];
 }
 export function screeningResultIndex(results:readonly QualityScreeningResult[]){

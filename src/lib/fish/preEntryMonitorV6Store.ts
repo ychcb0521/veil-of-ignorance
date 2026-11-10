@@ -1,17 +1,18 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
-import { readPreEntrySnapshot as read, validPreEntryLibrary as valid } from './preEntryPersistence';
+import { readPreEntrySnapshot as read, validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears } from './preEntryPersistence';
+import { validPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 import { persistPreEntrySnapshot } from './preEntryPersistenceClient';
 import { prepareStoredPreEntry } from './preEntryBackup';
 
 const queues = new Map<string, Promise<unknown>>();
 const keyOf = (owner?: string) => owner ? `user:${owner}` : 'anonymous';
 function write(owner: string | undefined, library: PreEntryLibrary): Promise<void> {
-  // The live runner supplies changed records only. Freeze this small delta at
-  // submission, then merge it with the full library off the rendering thread.
-  const key = keyOf(owner), copy = structuredClone(library);
-  const task = () => persistPreEntrySnapshot(owner, copy);
+  // Callers use immutable snapshots. postMessage/IndexedDB already clone at
+  // the storage boundary; an extra JS clone doubled every checkpoint's heap.
+  const key = keyOf(owner);
+  const task = () => persistPreEntrySnapshot(owner, library);
   const pending = (queues.get(key) ?? Promise.resolve()).then(task, task);
   const settled = pending.catch(() => undefined);
   queues.set(key, settled);
@@ -26,8 +27,25 @@ export const preEntryV6AccountBlob: AccountBlobAdapter<PreEntryLibrary> = {
   async mergeRemote(owner, value) { if (value) await preEntryV6AccountBlob.write(owner, value); },
   weight: library => library ? library.records.length + library.rounds.length + (library.settings ? 1 : 0) : 0,
 };
+/** Independent small backup; a display-only erase must not re-encode the full audit. */
+export const preEntryTableClearsAccountBlob: AccountBlobAdapter<PreEntryTableClears> = {
+  name: 'pre-entry-table-clears-v1',
+  read: readPreEntryTableClears,
+  async write(owner, value) {
+    if (value === undefined) return;
+    if (!validPreEntryTableClears(value)) throw Error('筛选清除标记格式无效');
+    await writePreEntryTableClears(owner, value);
+  },
+  async mergeRemote(owner, value) { await preEntryTableClearsAccountBlob.write(owner, value); },
+  weight: value => Object.keys(value ?? {}).length,
+};
+export async function savePreEntryTableClears(owner: string | undefined, marks: PreEntryTableClears): Promise<void> {
+  await writePreEntryTableClears(owner, marks);
+  void noteAccountBlobSaved(preEntryTableClearsAccountBlob, owner);
+}
 export async function loadPreEntryLibraryV6(owner?: string): Promise<PreEntryLibrary> {
-  const status = await syncAccountBlobOnLoad(preEntryV6AccountBlob, owner);
+  const [status, clearsStatus] = await Promise.all([syncAccountBlobOnLoad(preEntryV6AccountBlob, owner), syncAccountBlobOnLoad(preEntryTableClearsAccountBlob, owner)]);
+  if (clearsStatus === 'failed' || clearsStatus === 'timed_out') throw Error('无法恢复筛选清除标记，请重试');
   await queues.get(keyOf(owner));
   const local = await read(owner);
   if (!local && (status === 'failed' || status === 'timed_out')) throw Error('无法读取账号入选库，请重试');

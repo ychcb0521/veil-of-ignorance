@@ -1,11 +1,23 @@
 import { expect, it, vi } from 'vitest';
 import { createPreEntryCheckpoint, preEntryCheckpointDelta } from '../preEntryCheckpoint';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from '../preEntryMonitor';
+import {withPreEntryTableClears} from '../preEntryTableClears';
 
 const record = (id: string, at = 1): PreEntryRecord => ({ id, roundId: 'r', status: 'scanning', startTime: 1, cursor: at, updatedAt: at, readings: [],
   sample: { id, source: { id, symbol: 'TESTUSDT', timeMs: 1, timeLabel: '', fallbackZone: '' }, groups: [], importedAt: 1, enteredAt: 1, basis: 'signal' },
   exclusionProcess: { version: 1, startedAt: 1, entries: [{ kind: 'observation', stage: 'exclusion', status: 'blocked', from: 1, through: at, count: at, reason: '未收复高点' }] } });
 const library = (): PreEntryLibrary => ({ ...emptyPreEntryLibrary(), rounds: [{ id: 'r', state: 'running', startedAt: 1, updatedAt: 1, filters: [], hours: 48 }], records: [record('a'), record('b')] });
+it('does not resend cleared histories on the next start but still includes every real unsaved observation',async()=>{
+ const before=library(),write=vi.fn(async(_delta:PreEntryLibrary)=>{}),checkpoint=createPreEntryCheckpoint(write,true);checkpoint.seed(before);
+ const cleared=withPreEntryTableClears(before,{a:10,b:10});await checkpoint.save(cleared);expect(write.mock.calls[0][0].records).toEqual([]);expect(write.mock.calls[0][0].tableClears).toEqual({a:10,b:10});
+ const progress={...cleared,records:[{...cleared.records[0],cursor:20,updatedAt:20},cleared.records[1],record('c')]};await checkpoint.save(progress);expect(write.mock.calls[1][0].records.map(r=>r.id)).toEqual(['a','c']);
+});
+
+it('seeds the durable library so starting a round does not resend already saved histories',async()=>{
+ const before=library(),write=vi.fn(async(_delta:PreEntryLibrary)=>{}),checkpoint=createPreEntryCheckpoint(write);checkpoint.seed(before);
+ const round={id:'new',state:'running' as const,startedAt:3,updatedAt:3,filters:[],hours:48},next=mergePreEntryLibraries(before,{version:1,rounds:[round],records:[{...record('c'),roundId:'new'}]});
+ expect(next.records[0]).toBe(before.records[0]);await checkpoint.save(next);expect(write.mock.calls[0][0].records.map(r=>r.id)).toEqual(['c']);expect(write.mock.calls[0][0].rounds).toEqual([round]);
+});
 
 it('merges changed rows without copying untouched histories or changing frozen settings', () => {
   const before = library(); before.settings = { updatedAt: 1, plans: [], hours: 48 };

@@ -7,7 +7,8 @@ import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
 import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
 import { loadPreEntryLibraryV5 } from '@/lib/fish/preEntryMonitorV5Store';
-import { loadPreEntryLibraryV6, savePreEntryLibraryV6 as savePreEntryLibrary } from '@/lib/fish/preEntryMonitorV6Store';
+import { loadPreEntryLibraryV6, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
+import { withPreEntryTableClears } from '@/lib/fish/preEntryTableClears';
 import { PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
@@ -19,7 +20,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const [ready, setReady] = useState(false), [running, setRunning] = useState(false);
   const [error, setError] = useState(''), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [reload, setReload] = useState(0);
-  const persistence = useMemo(() => createPreEntryCheckpoint(value => savePreEntryLibrary(owner, value)), [owner]);
+  const persistence = useMemo(() => createPreEntryCheckpoint(value => savePreEntryLibrary(owner, value), true), [owner]);
   const current = useRef(library), runner = useRef(run), controller = useRef<AbortController | null>(null);
   const epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout>>();
   const execution = useRef<Promise<void> | null>(null);
@@ -41,6 +42,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       // them merely by saving its older schema with a later timestamp.
       if (newLibrary.settings) value.settings = newLibrary.settings;
       if (epoch.current !== generation) return;
+      persistence.seed(newLibrary);
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
       const recovered = { ...value, rounds: value.rounds.map(r => {
@@ -180,17 +182,18 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next=archivePreEntrySettings(current.current,{plans:structuredClone(saved.plans),hours:saved.hours,updatedAt:Date.now()});
     commit(next);void persistence.save(next).catch(reason=>setError(reason instanceof Error?reason.message:'保存方案集选择失败'));
   },[commit,persistence]);
-  const clearTableResults=useCallback(async()=>{
+  const clearTableResults=useCallback(async(extraRecords:readonly Pick<PreEntryRecord,'id'|'updatedAt'>[]=[])=>{
     if(!readyRef.current||tableClearLock.current)return false;
     const generation=epoch.current;tableClearLock.current=true;
     controller.current?.abort();await execution.current;
     if(epoch.current!==generation)return false;
-    const at=current.current.records.reduce((at,r)=>Math.max(at,r.updatedAt+1),Date.now());
-    const next={...current.current,records:current.current.records.map(r=>({...r,tableClearedAt:at}))};
-    try{await persistence.save(next);if(epoch.current!==generation)return false;commit(mergePreEntryLibraries(current.current,next));setProgress(null);setError('');return true;}
+    const records=[...current.current.records,...extraRecords];
+    const at=records.reduce((at,r)=>Math.max(at,r.updatedAt+1,current.current.tableClears?.[r.id]??0),Date.now());
+    const marks=Object.fromEntries(records.map(r=>[r.id,at]));
+    try{await savePreEntryTableClears(owner,marks);if(epoch.current!==generation)return false;commit(withPreEntryTableClears(current.current,marks));setProgress(null);setError('');return true;}
     catch(reason){if(epoch.current===generation)setError(reason instanceof Error?reason.message:'清除动态筛选结果未保存');return false;}
     finally{if(epoch.current===generation)tableClearLock.current=false;}
-  },[commit,persistence]);
+  },[commit,owner]);
   const importLibrary=useCallback(async(value:PreEntryLibrary)=>{
     if(!readyRef.current||controller.current)return false;
     const generation=epoch.current;

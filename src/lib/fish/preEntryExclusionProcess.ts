@@ -22,6 +22,9 @@ export function recordEntryEvidence(process:EntryExclusionProcess,e:EntryStageEv
   const entries=[...process.entries];
   const stages=e.zero?[['necessary',e.zero],[e.admission?'admission':'guard',e.first],['exclusion',e.second]] as const:[['first',e.first],['second',e.second],['guard',e.third??{status:'pending' as const,reason:'等待新的原生防守线事件'}]] as const;
   const observed=[...stages,...(e.state==='waiting-data'&&!stages.some(([,s])=>s.status==='pending')?[['data',{status:'pending',reason:'等待零成交分钟后的有效读数'}] as const]:[])];
+  // All stages describe this same immutable minute. Share its readings instead
+  // of making three identical copies in every saved observation.
+  const readings=e.readings.map(r=>({...r}));
   for(const [stage,state]of observed){
     let index=-1;for(let i=entries.length-1;i>=0;i--)if(entries[i].kind==='observation'&&entries[i].stage===stage){index=i;break;}
     const previous=entries[index],consecutive=previous?.through===e.at-60000&&!previous.endedAt,reason=state.reason??'条件尚未通过';
@@ -29,7 +32,6 @@ export function recordEntryEvidence(process:EntryExclusionProcess,e:EntryStageEv
       if(consecutive)entries[index]={...previous,endedAt:e.at,nextStatus:'pass'};
       continue;
     }
-    const readings=e.readings.map(r=>({...r}));
     if(consecutive&&previous.status===state.status&&ruleKey(previous.reason)===ruleKey(reason)){
       entries[index]={...previous,through:e.at,count:previous.count+1,lastReason:reason,lastReadings:readings};
     }else{
@@ -37,7 +39,7 @@ export function recordEntryEvidence(process:EntryExclusionProcess,e:EntryStageEv
       entries.push({kind:'observation',stage,status:state.status,from:e.at,through:e.at,count:1,reason,readings});
     }
   }
-  if(e.event&&e.state!=='matched')entries.push({kind:'guard-rejected',from:e.at,through:e.at,count:1,reason:stages.filter(([,s])=>s.status!=='pass').map(([stage,s])=>entryProcessStageLabels[stage]+'：'+(s.reason??'未通过')).join('；')||'本分钟数据未就绪，未准入',event:structuredClone(e.event),readings:e.readings.map(r=>({...r}))});
+  if(e.event&&e.state!=='matched')entries.push({kind:'guard-rejected',from:e.at,through:e.at,count:1,reason:stages.filter(([,s])=>s.status!=='pass').map(([stage,s])=>entryProcessStageLabels[stage]+'：'+(s.reason??'未通过')).join('；')||'本分钟数据未就绪，未准入',event:structuredClone(e.event),readings});
   return {...process,entries};
 }
 export function recordEntryStop(process:EntryExclusionProcess,kind:Exclude<EntryProcessItem['kind'],'observation'|'guard-rejected'>,at:number,reason:string):EntryExclusionProcess {

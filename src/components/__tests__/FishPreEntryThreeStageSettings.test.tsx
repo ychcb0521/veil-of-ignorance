@@ -30,7 +30,7 @@ it('keeps saved v1 exact and converts only an explicit new copy to independently
  const f=singleFixture();f.current.preEntryThreeStage!.stallTurn={...defaultEntryStallTurn(),risePct:2,pullback:{enabled:true,pct:4}};
  const original=freezeQualityPlan(f.current);f.state.preEntry!.library.settings!.plans=[original];const before=structuredClone(f.state.preEntry!.library);
  render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
- expect(screen.getByLabelText('滞涨转弱 转弱确认（分钟）')).toHaveValue(3);
+ expect(screen.queryByLabelText('启用上涨后滞涨转弱否决')).toBeNull();expect(screen.queryByLabelText('滞涨转弱 转弱确认（分钟）')).toBeNull();expect(screen.getByTestId('legacy-stall-turn-note')).toHaveTextContent('原1分钟规则仍已启用');
  fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0]).toEqual([original]);expect(f.state.preEntry!.library).toEqual(before);
  fireEvent.click(screen.getByRole('button',{name:'使用共用5分钟规则（另存副本）'}));expect(screen.queryByLabelText('滞涨转弱 转弱确认（分钟）')).toBeNull();expect(screen.getByLabelText('启用入选前否决 滞涨转弱（5分钟）')).toBeChecked();expect(screen.getByLabelText('启用入选前否决 猛烈回调未创新高（5分钟）')).toBeChecked();
  fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));const saved=f.configure.mock.calls[1][0];expect(saved).toHaveLength(1);expect(saved[0].id).not.toBe(original.id);expect(saved[0].preEntryThreeStage.stallTurn).toBeUndefined();

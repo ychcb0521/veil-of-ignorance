@@ -444,12 +444,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const clearPreEntryTable=preEntry.clearTableResults;
   const clearScreeningResults=useCallback(async()=>{
     if(!readyRef.current||archiveLock.current)return false;const savedOwner=account.current,epoch=generation.current;
-    if(!await clearPreEntryTable()||account.current!==savedOwner||generation.current!==epoch)return false;
-    try{if(!await saveQualityStudy(savedOwner,{...current.current,screeningResults:[]}))return false;
-      if(account.current!==savedOwner||generation.current!==epoch)return false;
-      change(s=>({...s,screeningResults:[]}));return true;
-    }catch{return false;}
-  },[clearPreEntryTable,change]);
+    // Frozen copied-table snapshots use the same small tombstones. Do not clone
+    // or save the unrelated holding study just to hide its screening cells.
+    return await clearPreEntryTable(current.current.screeningResults??[])&&account.current===savedOwner&&generation.current===epoch;
+  },[clearPreEntryTable]);
   const clearMonitorResults = useCallback(() => {
     if (controller.current) cancel('清除了组合表中的监测结果');
     setProgress(null);

@@ -1,5 +1,6 @@
 import {validLibraryDirectoryEdits} from './libraryDirectoryEdits';
 import {type PreEntryLibrary} from './preEntryMonitor';
+import {validPreEntryTableClears} from './preEntryTableClears';
 /** Backup/import is additive. Current runnable settings are never replaced by import. */
 export function parsePreEntryLibraryBackup(text:string):PreEntryLibrary{
  const value=JSON.parse(text),library=value?.format==='veil-pre-entry-library'&&value.version===1?value.library:undefined;
@@ -9,6 +10,7 @@ export function parsePreEntryLibraryBackup(text:string):PreEntryLibrary{
  const records=new Set<string>();
  for(const r of library.records){if(!r||typeof r.id!=='string'||records.has(r.id)||!ids.has(r.roundId)||typeof r.sample?.source?.symbol!=='string'||!Number.isFinite(r.sample?.source?.timeMs)||!Number.isFinite(r.updatedAt)||!Array.isArray(r.sample.groups)||!Array.isArray(r.readings)||!['queued','scanning','paused','matched','unmatched','warming','error'].includes(r.status)||r.status==='matched'&&!(r.matchedAt>0))throw Error('入选库记录无效');records.add(r.id);}
  if(library.directoryEdits!==undefined&&!validLibraryDirectoryEdits(library.directoryEdits))throw Error('目录标记无效');
+ if(library.tableClears!==undefined&&!validPreEntryTableClears(library.tableClears))throw Error('筛选清除标记无效');
  return library;
 }
 export function downloadPreEntryLibraryBackup(library:PreEntryLibrary){
