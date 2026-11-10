@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import { FishQualityRouterView } from './FishQualityRouterView';
 /**
  * 【用户要求】2026-11-02 交易战役「战役元数据」底部的「持仓监测」：点开后在卡片上完整呈现这场战役当时的条件设置，
@@ -28,14 +29,14 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false }: { 
   const plans = useMemo(() => [plan], [plan]);
   if(plan.router)return <FishQualityRouterView plan={plan}/>;
   const mirror = mirrorDraft(plan.mirrorTakeProfit ?? { enabled: false, gainPct: 5, sellPct: 50 });
-  const addition = additionDraft(plan.addition ?? defaultQualityAddition(), plan.sellStages);
+  const addition = additionDraft(plan.addition, plan.sellStages);
   const vetoStages = { enabled: !!plan.vetoStages?.length, mode: plan.vetoStageMode ?? 'overlay', peakBasis: plan.vetoPeakBasis ?? 'stage', stages: (plan.vetoStages ?? []).map(s => ({ afterAdditions: String(s.afterAdditions), conditions: holdingVetoDraft(s.conditions) })) };
   // 输入框、下拉、勾选一律不可操作；按钮（加仓轮次标签、ⓘ 说明）可点，改动回调为空操作
   return <div className="space-y-3 text-[11px] [&_input]:pointer-events-none [&_select]:pointer-events-none [&_textarea]:pointer-events-none" data-testid="quality-monitor-settings-view">
     {!holdingOnly && <p className="text-[10.5px] text-muted-foreground">这场战役运行时冻结的设置 · 只读</p>}
     {legacy && <LegacyEngineNote/>}
     {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly onSave={ignore}/>}
-    <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled}/>
+    <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled} holdingLedger={addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>
     {/* 旧引擎方案的加仓按 10-31 原始参数显示：新版编辑器会把它换算成箱体，显示的就不是当时的规则了 */}
     {legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span></div>

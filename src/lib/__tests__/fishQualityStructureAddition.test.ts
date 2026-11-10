@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {describe,it,expect} from 'vitest';
 import {computeDbl5} from '../dbl5m';
 import {computeSbs5m} from '../sbs5m';
@@ -454,5 +455,14 @@ describe('per-round race between the conservative box rule and the attack altern
   expect(gated.fills).toHaveLength(1);expect(gated.fills[0]).toEqual(plain.fills[0]);expect(gated.fills[0].lane).toBeUndefined();
   const open=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules,attackFromRound:1});
   expect(open.fills[0].lane).toBe('attack');
+ });
+});
+
+describe('optional-mirror execution shares both primary and attack candidate paths',()=>{
+ it('keeps conservative and attack rounds executable with no mirror fill',async()=>{
+  const o={...context(sample()),mirror:undefined,positionVersion:HOLDING_LEDGER_ADDITION_VERSION},structure={...rule(),buffer:.5};
+  const price=(threshold:number):AdditionCandidate=>({plan:compileFishProgram({id:'ledger-race',name:'价',short:'价',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'},{statistic:'结果',direction:'>',threshold,constraints:[]}),scale:1,threshold,direction:'>',metric:'结果',label:'价格'});
+  const conservative=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure,alternative:{candidates:[price(1e9)],supportOffsetAtr:1.5}}]});expect(conservative.fills).toHaveLength(1);expect(conservative.fills[0].lane).toBe('structure');
+  const attack=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure,alternative:{candidates:[price(0)],supportOffsetAtr:1.5}}]});expect(attack.fills).toHaveLength(1);expect(attack.fills[0].lane).toBe('attack');expect(attack.fills[0].at).toBeLessThan(conservative.fills[0].at);
  });
 });

@@ -16,5 +16,8 @@ describe('【用户要求】使用说明目录：悬停不在左下角弹网址'
     fireEvent.click(item);
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(scrollIntoView.mock.contexts[0]).toBe(document.getElementById('s3-0'));
+    fireEvent.click(within(toc).getByRole('button',{name:'鱼质量：评分与导出'}));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.getElementById('fq-table'));
+    expect(document.getElementById('fq-table')?.tagName).toBe('H3');
   });
 });

@@ -2,8 +2,10 @@ export const ADDITION_K_TOUCH_VERSION='addition-k-touch-v1' as const;
 /** Conditional paper additions; disabled and legacy rules retain their frozen identities. */
 import { activeAdditionVetoes, additionVetoIdentity, validateAdditionVetoes } from './qualityAdditionVeto';
 import type { QualityBuyFilter } from './quality';
+import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 import {validateStructureAddition,structureAdditionIdentity,structureAdditionLabel,type StructureAdditionRule,type StructureAdditionEvidence} from './qualityAdditionStructure';
 export interface QualityAdditionRule {
+  positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
   /** Opt-in execution upgrade; missing keeps the original guard close confirmation. */
   kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
   enabled: boolean; source: 'detector' | 'custom' | 'structure';
@@ -97,6 +99,8 @@ const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(ru
 export const qualityAdditionRoundLimit=(rule:QualityAdditionRule)=>rule.maxRounds??(rule.repeat===false?1:Infinity);
 export const qualityAdditionRound=(rule:QualityAdditionRule,index:number):QualityAdditionRoundRule=>rule.rounds?.[index]??rule;
 export interface QualityAdditionFill {
+  positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
+  ledger?:{costBefore:number;realizedBefore:number;mirrorQuantityBefore:number;breakevenBefore:number};
   kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
  advantage?: import('./qualityAdvantage').QualityAdvantageObservation;
   /** 每轮分流时这一次成交走的是保守（rounds）还是进攻（alternativeRounds）；没有备选的轮次不写。 */
@@ -136,9 +140,9 @@ const timingIdentity=(r:QualityAdditionRoundRule)=>{const base=r.source==='struc
  */
 export const isPartialMirror=(fill?:{fraction:number}):fill is {fraction:number}&{at:number;price:number}=>!!fill&&fill.fraction>0&&fill.fraction<1;
 /** 镜像卖出比例不是 50% 的方案，旧结果是「未加仓」口径，须重算；50% 方案身份不变、结果照旧复用。 */
-export const additionMirrorIdentity=(addition?:Pick<QualityAdditionRule,'enabled'|'quantityMode'>,mirror?:{enabled:boolean;sellPct:number}):unknown[]=>addition?.enabled&&addition.quantityMode&&mirror?.enabled&&mirror.sellPct!==50?[['addition-after-partial-mirror-v1']]:[];
+export const additionMirrorIdentity=(addition?:Pick<QualityAdditionRule,'enabled'|'quantityMode'|'positionVersion'>,mirror?:{enabled:boolean;sellPct:number}):unknown[]=>addition?.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION&&addition?.enabled&&addition.quantityMode&&mirror?.enabled&&mirror.sellPct!==50?[['addition-after-partial-mirror-v1']]:[];
 export const defaultQualityAddition = (): QualityAdditionRule => ({ enabled: false, source: 'detector', stricterPct: 10, quantityMode: 'calculator', quantity: 1, repeat:true });
-export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule?.enabled ? [] : [rule.quantityMode==='calculator'?'holding-add-after-half-2atr-balance-v3':rule.quantityMode?'holding-add-once-after-half-quantity-v2':'holding-add-once-v1',rule.source,
+export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule?.enabled ? [] : [rule.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?HOLDING_LEDGER_ADDITION_VERSION:rule.quantityMode==='calculator'?'holding-add-after-half-2atr-balance-v3':rule.quantityMode?'holding-add-once-after-half-quantity-v2':'holding-add-once-v1',rule.source,
   rule.source === 'structure' ? rule.structure&&structureAdditionIdentity(rule.structure) : rule.source === 'detector' ? rule.stricterPct : qualityAdditionConditions(rule)[0] && conditionIdentity(qualityAdditionConditions(rule)[0]),
   rule.quantityMode??rule.amountMode,...(rule.quantityMode==='calculator'?[rule.repeat!==false]:[]),rule.quantityMode?(rule.quantityMode==='fixed'?rule.quantity:null):(rule.amountMode==='fixed'?rule.amountUsdt:null),
   ...(rule.source==='custom'&&qualityAdditionConditions(rule).length>1?[['all-indicators-v1',...qualityAdditionConditions(rule).slice(1).map(conditionIdentity)]]:[]),
@@ -164,6 +168,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule?.kStopVersion!=null&&rule.kStopVersion!==ADDITION_K_TOUCH_VERSION)throw new Error('加仓 K 止损执行版本不可用，请保留原方案并选择受支持的新版');
   if (!rule?.enabled) return;
+  if(rule.positionVersion!==undefined&&(rule.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION||rule.quantityMode!=='calculator'))throw Error('加仓持仓账版本不可用');
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
   if(rule.source==='structure'){validateStructureAddition(rule.structure);if(rule.quantityMode!=='calculator')throw Error('箱体加仓须使用按平衡公式定量');}
   if(rule.quantityMode){if(rule.quantityMode==='fixed'&&(!(rule.quantity!>0)||!Number.isFinite(rule.quantity)))throw new Error('加仓数量须为大于 0 的有限数字');}
@@ -207,12 +212,20 @@ function additionFormulaLabel(rule:QualityAdditionRule){
   const same=rounds.every(r=>qualityAdditionAtrSettings(r).supportOffsetAtr===first.supportOffsetAtr&&r.entryDistanceAtr===rounds[0].entryDistanceAtr);
   return !same?'逐轮 ATR 倍数独立设置':`${rounds[0].entryDistanceAtr!=null?`T≥S+${rounds[0].entryDistanceAtr}ATR · `:''}K=T−${first.supportOffsetAtr}ATR`;
 }
-export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${activeDetectorPrerequisite(rule)?` 且 ${activeDetectorPrerequisite(rule)!.featureId??'原探测算法'} 探测值达原门槛再提高 ${activeDetectorPrerequisite(rule)!.stricterPct}%`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`镜像止盈后按余仓平衡定量 · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损${rule.geometricLock?.enabled?` · 几何仓位 > ${rule.geometricLock.multiple} 保住有效涨幅 ${rule.geometricLock.pct}%`:''}${rule.supportReduction?.enabled?` · 支撑下移 ≥ ${rule.supportReduction.minDropAtr} ATR 减仓（单次 ≤ ${rule.supportReduction.maxPct}%）${rule.supportReduction.exitAfterDrops!=null?`，连续下移 ${rule.supportReduction.exitAfterDrops} 次全仓卖出`:''}`:''}`:rule.quantityMode==='entry'?'与镜像止盈后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
+export const additionLabel = (rule?: QualityAdditionRule) => rule?.enabled ? `${rule.maxRounds!=null?`最多加仓 ${rule.maxRounds} 次（逐轮独立条件）`:rule.quantityMode==='calculator'&&rule.repeat!==false?'多轮加仓':'加仓一次'}：${rule.source === 'structure'&&rule.structure ? structureAdditionLabel(rule.structure) : rule.source === 'detector' ? `原探测门槛严格 ${rule.stricterPct}%` : qualityAdditionConditions(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}${rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?` 且 方向 ${qualityAdditionPrerequisites(rule).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`:''}${activeDetectorPrerequisite(rule)?` 且 ${activeDetectorPrerequisite(rule)!.featureId??'原探测算法'} 探测值达原门槛再提高 ${activeDetectorPrerequisite(rule)!.stricterPct}%`:''}${rule.minGainPct!=null?` 且 相对最新成本线 S 上涨 ≥ ${rule.minGainPct}%`:''} · ${rule.quantityMode?(rule.quantityMode==='calculator'?`${rule.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'通用持仓账定量（不依赖镜像）':'镜像止盈后按余仓平衡定量'} · ${additionFormulaLabel(rule)} · ${rule.repeat===false?'一次':'多轮'} · K止损${rule.geometricLock?.enabled?` · 几何仓位 > ${rule.geometricLock.multiple} 保住有效涨幅 ${rule.geometricLock.pct}%`:''}${rule.supportReduction?.enabled?` · 支撑下移 ≥ ${rule.supportReduction.minDropAtr} ATR 减仓（单次 ≤ ${rule.supportReduction.maxPct}%）${rule.supportReduction.exitAfterDrops!=null?`，连续下移 ${rule.supportReduction.exitAfterDrops} 次全仓卖出`:''}`:''}`:rule.quantityMode==='entry'?'与镜像止盈后余仓币数相同':rule.quantity+' 枚'):(rule.amountMode==='entry'?'与开仓等额':rule.amountUsdt+' USDT')}` : '';
 /** Mirror partial sales retain their original-coin sizing; 100% closes every coin then held. */
 export function qualityAdditionFills(result:{additionFill?:QualityAdditionFill;additionFills?:readonly QualityAdditionFill[]}):readonly QualityAdditionFill[]{return result.additionFills?.length?result.additionFills:result.additionFill?[result.additionFill]:[];}
 export function additionPosition(notional: number, entry: number, mark: number, closed: boolean, addition: QualityAdditionFill|readonly QualityAdditionFill[],
-  mirror?: { at:number;price:number;fraction:number }, reductions: readonly QualityReductionFill[] = []) {
+  mirror?: { at:number;price:number;fraction:number;atOpen?:boolean }, reductions: readonly QualityReductionFill[] = [],entryAt?:number) {
   const fills=Array.isArray(addition)?addition:[addition as QualityAdditionFill];
+  if(fills.some(f=>f.positionVersion===HOLDING_LEDGER_ADDITION_VERSION)){
+    if(!Number.isFinite(mark)||mark<=0)throw Error('持仓估值价格无效');
+    const at=entryAt??Math.max(1,Math.min(...fills.map(f=>f.at),mirror?.at??Infinity,...reductions.map(r=>r.at))-1);
+    const ledger=replayQualityHoldingLedger({notional,entryPrice:entry,entryAt:at,additions:fills,mirror,reductions,includeIntraminute:true,details:false});
+    const remainingPnl=ledger.held*mark-ledger.cost,totalPnl=ledger.realized+remainingPnl;
+    if(![remainingPnl,totalPnl].every(Number.isFinite))throw Error('持仓账盈亏超出可计算范围');
+    return {totalInvested:ledger.totalInvested,totalQuantity:ledger.totalQuantity,mirrorQuantity:ledger.mirrorQuantity,mirrorCost:ledger.mirrorCost,mirrorPnl:ledger.mirrorProfit,reductionPnl:ledger.reductionProfit,remainingPnl,totalPnl,returnPct:totalPnl/ledger.totalInvested*100,averageEntryPrice:ledger.held>0?ledger.cost/ledger.held:ledger.totalInvested/ledger.totalQuantity,remainingQuantity:closed?0:ledger.held,remainingCost:closed?0:ledger.cost,realizedPnl:ledger.realized+(closed?remainingPnl:0),exitQuantity:closed?ledger.held:0};
+  }
   const totalInvested = notional + fills.reduce((n,a)=>n+a.notional,0), totalQuantity = notional / entry + fills.reduce((n,a)=>n+a.quantity,0);
   const fullMirror = mirror?.fraction === 1;
   const mirrorQuantity = mirror ? fullMirror ? totalQuantity : notional / entry * mirror.fraction : 0;

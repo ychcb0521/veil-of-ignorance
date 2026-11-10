@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_K_TOUCH_VERSION} from '@/lib/fish/qualityAddition';
 import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
 import { useMemo, useState, type ReactNode } from 'react';
@@ -56,7 +57,7 @@ export function BreakevenFloorNotes({immediate=false}:{immediate?:boolean}={}){i
  <p><b className="font-medium text-foreground">例外</b>：开盘直接跳空到 F 下方时，按开盘价卖出。</p>
  <p><b className="font-medium text-foreground">取舍</b>：m 越大，F 离 K 越远，防守线的噪音容忍度保留越多，但加仓量也越小。只对 K 取防守线的那几次生效，各次通用。</p>
 </div>;}
-export interface AdditionDraft extends RoundDraft {kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
+export interface AdditionDraft extends RoundDraft {positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 支撑线下移减仓（各次加仓通用）。 */
   supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string;exitEnabled?:boolean;exitAfterDrops?:string;version?:2};
   /** 几何仓位 > 门槛时保住 x% 开仓价有效涨幅（各次通用）。 */
@@ -86,10 +87,11 @@ const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=f
   ...conditionDraft(undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),...common};
 };
 const copyRound=(d:RoundDraft):RoundDraft=>({entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
-export function additionDraft(rule=defaultQualityAddition(),sellStages?:readonly QualitySellStage[]):AdditionDraft {
+export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellStages?:readonly QualitySellStage[]):AdditionDraft {
+ rule??={...defaultQualityAddition(),positionVersion:HOLDING_LEDGER_ADDITION_VERSION};
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1),rule.enabled),later=stages.filter(s=>s.afterAdditions>count);
- return {...first,...(rule.kStopVersion?{kStopVersion:rule.kStopVersion}:{}),enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled)),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct),exitEnabled:r.exitAfterDrops!=null,exitAfterDrops:String(r.exitAfterDrops??3),...(r.version===2?{version:2 as const}:{})}))(rule.supportReduction??defaultSupportReduction()),geometricLock:(g=>({enabled:g.enabled,multiple:String(g.multiple),pct:String(g.pct)}))(rule.geometricLock??defaultGeometricLock()),breakevenFloor:(f=>({enabled:f.enabled,atr:String(f.atr)}))(rule.breakevenFloor??defaultBreakevenFloor()),...(later.length?{laterSellStages:later}:{})};
+ return {...first,...(rule.positionVersion?{positionVersion:rule.positionVersion}:{}),...(rule.kStopVersion?{kStopVersion:rule.kStopVersion}:{}),enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled)),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct),exitEnabled:r.exitAfterDrops!=null,exitAfterDrops:String(r.exitAfterDrops??3),...(r.version===2?{version:2 as const}:{})}))(rule.supportReduction??defaultSupportReduction()),geometricLock:(g=>({enabled:g.enabled,multiple:String(g.multiple),pct:String(g.pct)}))(rule.geometricLock??defaultGeometricLock()),breakevenFloor:(f=>({enabled:f.enabled,atr:String(f.atr)}))(rule.breakevenFloor??defaultBreakevenFloor()),...(later.length?{laterSellStages:later}:{})};
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
@@ -115,7 +117,7 @@ export function parseAdditionDraft(d:AdditionDraft,defs:readonly DeepDigFeatureD
  // 【用户要求】2026-11-02 保存时冻结箱体算法版本（防守线参数写成明确值）
  const rounds=Array.from({length:n},(_,i)=>{try{const r=parseRound(i?d.otherRounds[i-1]??d:d,d.enabled,defs);return r.structure?{...r,structure:freezeStructureVersions(r.structure)}:r;}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}});
  const cut=d.supportReduction,num=(x:string)=>x.trim()?Number(x):NaN;
- const rule:QualityAdditionRule={enabled:d.enabled,...(d.kStopVersion?{kStopVersion:d.kStopVersion}:{}),quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct),...(cut.exitEnabled?{exitAfterDrops:num(cut.exitAfterDrops??'')}:{}),...(cut.version===2?{version:2 as const}:{})}}:{}),...(d.geometricLock?.enabled?{geometricLock:{enabled:true,multiple:num(d.geometricLock.multiple),pct:num(d.geometricLock.pct)}}:{}),...(d.breakevenFloor?.enabled?{breakevenFloor:{enabled:true,atr:num(d.breakevenFloor.atr)}}:{})};validateQualityAddition(rule);return rule;
+ const rule:QualityAdditionRule={enabled:d.enabled,...(d.positionVersion?{positionVersion:d.positionVersion}:{}),...(d.kStopVersion?{kStopVersion:d.kStopVersion}:{}),quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct),...(cut.exitEnabled?{exitAfterDrops:num(cut.exitAfterDrops??'')}:{}),...(cut.version===2?{version:2 as const}:{})}}:{}),...(d.geometricLock?.enabled?{geometricLock:{enabled:true,multiple:num(d.geometricLock.multiple),pct:num(d.geometricLock.pct)}}:{}),...(d.breakevenFloor?.enabled?{breakevenFloor:{enabled:true,atr:num(d.breakevenFloor.atr)}}:{})};validateQualityAddition(rule);return rule;
 }
 /** 各次加仓「卖出」里设置的改用卖出算法 → 方案的 sellStages；没有任何切换时返回 undefined。 */
 export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFeatureDef[]):QualitySellStage[]|undefined{
@@ -184,20 +186,20 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
      <p>各次加仓独立设置，改一次不影响其他次。</p>
     </InfoBlock>
     <InfoBlock title="加仓量（均衡公式）">
-     <p className="rounded bg-muted/60 px-2 py-1 text-center font-mono text-foreground">Q × (K − S) + P = 新增币数 × (T − K)</p>
+     <p className="rounded bg-muted/60 px-2 py-1 text-center font-mono text-foreground">{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'Q × K − C成本 + G已实现 = 新增币数 × (T − K)':'Q × (K − S) + P = 新增币数 × (T − K)'}</p>
      <dl className="grid grid-cols-[1.25rem_1fr] gap-x-2 gap-y-0.5">
       <dt className="font-mono text-foreground">T</dt><dd>加仓价</dd>
       <dt className="font-mono text-foreground">K</dt><dd>均衡线，也是加仓后的止损线：K = 旧C 或新C − n×ATR（每次加仓自选）</dd>
       <dt className="font-mono text-foreground">C</dt><dd>箱体支撑：新 C 触发加仓；旧 C 是上一箱体的支撑，多留一个箱体作冗余</dd>
       <dt className="font-mono text-foreground">防</dt><dd>防守线（DBL-5）：新箱底抬高且与上一箱体重叠不到一半为上涨期，线＝箱底 − a×ATR、只升不降；否则为震荡期，线＝震荡区最低箱底 − b×ATR，区间内的小箱体不抬线。跌破须按 5 分钟收盘确认（上涨期 1 根、震荡期连续 2 根），确认后下一分钟开盘卖出。图上蓝色实线＝上涨期、虚线＝震荡期，都是防守线；细节见「位置」里防守线旁的 ⓘ</dd>
       <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后为上一次的 K</dd>
-      <dt className="font-mono text-foreground">Q</dt><dd>加仓前持币数（首轮为镜像止盈后的剩余币数）</dd>
-      <dt className="font-mono text-foreground">P</dt><dd>本轮可用落袋利润：首轮含镜像止盈利润，用过的不再重复用</dd>
+      <dt className="font-mono text-foreground">Q</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'加仓前实际持币数，未卖出时为全部建仓数量':'加仓前持币数（首轮为镜像止盈后的剩余币数）'}</dd>
+      <dt className="font-mono text-foreground">账</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'C成本为剩余仓位的取得成本；G已实现为镜像及减仓的净盈亏（亏损保留负号）。历次加仓成本已计入，不能重复使用落袋。':'P为本轮可用落袋利润，用过的不再重复使用。'}</dd>
      </dl>
     </InfoBlock>
     <InfoBlock title="时序">
      <ul className="list-disc space-y-0.5 pl-4">
-      <li>首次加仓须在镜像止盈成交之后（卖出比例不限，须留有余仓），最早从下一分钟起检查。</li>
+      <li>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'不等待镜像成交；从建仓后的合格新机会开始检查。镜像成交的同一分钟不加仓，不借用未来落袋盈亏。':'历史口径：首次加仓须在镜像止盈成交之后（卖出比例不限，须留有余仓），最早从下一分钟起检查。'}</li>
       <li>卖出与加仓同时触发时先卖出；同一分钟先后不明时优先止损，跳空按开盘价。</li>
       <li>只用新确认的收盘读数；ATR 为加仓时已收盘的 5 分钟 ATR(14)；续算不会重复加仓。</li>
      </ul>
@@ -207,6 +209,8 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     </InfoBlock>
    </div>
   </FishQualityInfo></div><label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"><input aria-label="启用条件加仓" type="checkbox" checked={d.enabled} onChange={e=>patch({enabled:e.target.checked})} className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"/>启用</label></div>
+  <label className="flex flex-wrap items-center gap-2 text-[11px]">加仓执行口径<select aria-label="加仓执行口径" className={field} value={all.positionVersion??'legacy-mirror'} onChange={e=>setDraft({...all,positionVersion:e.target.value==='legacy-mirror'?undefined:HOLDING_LEDGER_ADDITION_VERSION})}><option value={HOLDING_LEDGER_ADDITION_VERSION}>通用持仓账 · 镜像可选</option><option value="legacy-mirror">历史口径 · 镜像成交后</option></select></label>
+  <p className="text-[10.5px] leading-relaxed text-muted-foreground">{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'镜像不是加仓前提。未发生卖出时，按全部实际持仓、落袋盈亏 0 计算；发生镜像或减仓后，按当时余仓、剩余成本及已实现净盈亏计算。预算不足或已清仓时不加仓。':'此方案保留历史镜像前置规则。需要无镜像加仓时，选择通用持仓账并保存新方案或副本；旧模板和历史轮次不变。'}</p>
   <div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-[11px] text-muted-foreground">最多加仓<input aria-label="最多加仓次数" type="number" min="1" max="100" step="1" disabled={!d.enabled} value={all.maxRounds} onChange={e=>setLimit(e.target.value)} className={field+' w-16'}/>次</label>
    <div role="tablist" aria-label="选择加仓轮次" className="flex flex-wrap gap-1">{Array.from({length:count},(_,i)=><button key={i} type="button" role="tab" aria-selected={index===i} className={`rounded px-2 py-1 text-[11px] ${index===i?'bg-primary/15 text-primary':'bg-muted/40 text-muted-foreground hover:bg-muted'}`} onClick={()=>setSelectedRound(i)}>第 {i+1} 次</button>)}</div></div>
 

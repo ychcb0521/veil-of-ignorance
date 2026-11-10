@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 import type {TradeRecord} from '@/types/trading';
 import {qualityAdditionFills} from './qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
@@ -25,16 +26,17 @@ export function qualityMirrorBoard(campaign: TradeCampaign) {
   const gainPct = mirrorFillGainPct(entryPrice ?? undefined, fill);
   const originalQuantity = initialNotional != null && entryPrice != null && entryPrice > 0 ? initialNotional / entryPrice : null;
   const totalQuantity = originalQuantity != null ? originalQuantity + additions.reduce((n,a)=>n+a.quantity,0) : null;
-  const quantity = fill && totalQuantity != null ? fill.fraction === 1 ? totalQuantity : originalQuantity! * fill.fraction : null;
+  const ledger=additions.some(a=>a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION)&&initialNotional&&entryPrice?replayQualityHoldingLedger({notional:initialNotional,entryPrice,entryAt:Date.parse(campaign.opened_at),additions,mirror:fill,reductions:evidence.additionReductions,includeIntraminute:true,details:false}):undefined;
+  const quantity = ledger&&fill?ledger.mirrorQuantity:fill && totalQuantity != null ? fill.fraction === 1 ? totalQuantity : originalQuantity! * fill.fraction : null;
   const mirrorPnl = fill && initialNotional != null && gainPct != null ? finite(metrics?.mirrorRealizedPnl) ?? initialNotional * fill.fraction * gainPct / 100 : null;
-  const remainingPnl = mirrorPnl != null && totalPnl != null ? finite(metrics?.remainingPnl) ?? totalPnl - mirrorPnl : null;
+  const remainingPnl = mirrorPnl != null && totalPnl != null ? ledger?totalPnl-mirrorPnl:finite(metrics?.remainingPnl) ?? totalPnl - mirrorPnl : null;
   const soldFraction = fill?.fraction ?? 0;
-  const remainingFraction = campaign.closed_at ? 0 : addition && totalQuantity ? (totalQuantity - (quantity ?? 0)) / totalQuantity : 1 - soldFraction;
+  const remainingFraction = campaign.closed_at ? 0 : ledger&&totalQuantity?ledger.held/totalQuantity:addition && totalQuantity ? (totalQuantity - (quantity ?? 0)) / totalQuantity : 1 - soldFraction;
   const title = (fill ? soldFraction === .5 : evidence.mirrorTakeProfit?.sellPct === 50) ? '半仓止盈' : '镜像止盈';
   const status = fill ? '已成交' : campaignHalfMirror(campaign)?.label ?? '待评估';
   return { title, status, fill, rule: evidence.mirrorTakeProfit, entryPrice, initialNotional, totalInvested, addition, additions, gainPct, mirrorPnl, remainingPnl, totalPnl, returnPct, quantity,
     soldFraction, remainingFraction, closed: !!campaign.closed_at, valuedAt: campaign.comparison?.valuedAt,
-    remainingText: fill ? campaign.closed_at ? soldFraction === 1 ? '全部币数已止盈' : addition?`原始余仓＋全部加仓共 ${+((totalQuantity??0)-(quantity??0)).toPrecision(8)} 币已全部卖出`:`余仓 ${mirrorPercentText(1-soldFraction)}% 已按原卖出条件卖出` : `余仓 ${mirrorPercentText(remainingFraction)}% 继续按原卖出条件运行` : campaign.closed_at ? '未触发镜像止盈，按原卖出条件结束' : '尚未触发，原仓位继续运行' };
+    remainingText: fill ? campaign.closed_at ? soldFraction === 1 ? '全部币数已止盈' : addition?`原始余仓＋全部加仓共 ${+(ledger?.held??(totalQuantity??0)-(quantity??0)).toPrecision(8)} 币已全部卖出`:`余仓 ${mirrorPercentText(1-soldFraction)}% 已按原卖出条件卖出` : `余仓 ${mirrorPercentText(remainingFraction)}% 继续按原卖出条件运行` : campaign.closed_at ? '未触发镜像止盈，按原卖出条件结束' : '尚未触发，原仓位继续运行' };
 }
 
 export function qualityMirrorChartArtifacts(campaign: TradeCampaign): { markers: ChartMarker[]; timeBoundPriceLines: TimeBoundPriceLine[]; verticalLines: VerticalLine[] } {

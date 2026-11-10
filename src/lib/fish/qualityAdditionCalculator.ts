@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
 import { createVetoHistoryReader } from './qualityVetoHistory';
 import { qualityHistoryFrom } from './qualityInitialization';
 import {advanceChartAtr,type ChartAtrState} from '@/lib/atr';
@@ -18,6 +19,7 @@ interface SupportStop {at:number;price:number;support:number;atOpen:boolean;caus
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
+ positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
  kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
  advantage?: import('./qualityAdvantage').QualityAdvantageRule;
  readAdvantage?: (at:number)=>Promise<import('./qualityAdvantage').QualityAdvantageObservation>;
@@ -61,9 +63,9 @@ export interface AdditionVetoRecord {at:number;round:number;kind:string;label:st
  lockPeak?:number;lockAt?:number}
 export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[]}>{
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
- const halfMirror=o.mirror;if(!isPartialMirror(halfMirror))return {fills:[]};
+ const independent=o.positionVersion===HOLDING_LEDGER_ADDITION_VERSION,halfMirror=o.mirror;if(!independent&&!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
- let after=Math.max(o.entry,o.since-MINUTE,halfMirror.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
+ let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
  const historyReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createVetoHistoryReader>>();
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
@@ -146,7 +148,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   }
   const stop0=locked?lockStop:findStop(support,from),payoffHit=findPayoff(from),stop=payoffHit&&(!stop0||payoffHit.at<stop0.at||payoffHit.at===stop0.at&&payoffHit.atOpen&&!stop0.atOpen)?payoffHit:stop0;
   if(!fills.length||support==null||!profitRules.length)return stop;
-  const initialCoins=o.notional/o.entryPrice,heldCoins=initialCoins*(1-halfMirror.fraction)+fills.reduce((n,a)=>n+a.quantity,0)-reductions.reduce((n,r)=>n+r.quantity,0),multiple=heldCoins/initialCoins;
+  const initialCoins=o.notional/o.entryPrice,heldCoins=initialCoins*(1-(halfMirror?.fraction??0))+fills.reduce((n,a)=>n+a.quantity,0)-reductions.reduce((n,r)=>n+r.quantity,0),multiple=heldCoins/initialCoins;
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
   let profit:SupportStop|undefined;
   for(const v of profitRules){
@@ -168,12 +170,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const currentK=():{k?:number;at?:number;guard?:number}=>{const f=fills.at(-1),r=reductions.at(-1);if(r&&(!f||r.at>=f.at))return {k:r.newK,at:r.at,guard:r.newGuardK};return f?{k:f.sizing?.support,at:f.at,guard:f.sizing?.guardK}:{};};
  /** 某时刻的持仓（含镜像、加仓、此前减仓）：币数、按均价的持仓成本、已实现利润。 */
  const holdings=(at:number)=>{
+  if(independent)return replayQualityHoldingLedger({notional:o.notional,entryPrice:o.entryPrice,entryAt:o.entry,additions:fills,mirror:o.mirror,reductions,through:at,details:false});
   const coins0=o.notional/o.entryPrice,m=o.mirror&&(o.mirror.at<at||o.mirror.at===at&&o.mirror.atOpen)?o.mirror:undefined;
   let held=coins0,cost=o.notional,mirrorProfit=0,reductionProfit=0;
   if(m){held-=coins0*m.fraction;cost-=o.notional*m.fraction;mirrorProfit=coins0*m.fraction*(m.price-o.entryPrice);}
   for(const f of fills)if(f.at<=at){held+=f.quantity;cost+=f.notional;}
   for(const r of reductions)if(r.at<=at){held-=r.quantity;cost-=r.costRemoved;reductionProfit+=r.realizedPnl;}
-  return {held,cost,mirrorProfit,reductionProfit,realized:mirrorProfit+reductionProfit};
+  return {held,cost,mirrorProfit,reductionProfit,realized:mirrorProfit+reductionProfit,mirrorQuantity:coins0*(m?.fraction??0)};
  };
  const dropRule=o.supportReduction?.enabled?o.supportReduction:undefined;
  interface SupportDrop {at:number;support:number;atr:number;evidence:import('./qualityAdditionStructure').StructureAdditionEvidence;basis:number}
@@ -204,7 +207,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  while(after<o.end){
   if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
   const {k:support,at:supportAt}=currentK(),stop=findPositionExit(support,Math.max(o.since,supportAt??o.since));
-  const scanEnd=stop?Math.min(o.end,stop.at+(stop.atOpen?0:MINUTE)):o.end;
+  const pendingMirror=independent&&o.mirror&&o.mirror.at>after&&o.mirror.at<o.end?o.mirror.at:undefined;
+  const scanEnd=Math.min(stop?Math.min(o.end,stop.at+(stop.atOpen?0:MINUTE)):o.end,pendingMirror!=null?pendingMirror+MINUTE:Infinity);
   if(scanEnd<=after)return done(stop);
   // 【用户要求】2026-11-02 支撑线下移减仓：先找下移事件；比它早的加仓照常处理，否则在下移那一刻按减仓计算器减仓
   const drop=await findSupportDrop(Math.max(after,supportAt??after),scanEnd);
@@ -212,9 +216,11 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const addsDone=fills.length>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
   if(addsDone||addEnd<=after){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   let round:RoundScan|Options=primaryRule;
-  const soldBefore=o.notional/o.entryPrice*halfMirror.fraction;
+  const soldBefore=o.notional/o.entryPrice*(halfMirror?.fraction??0);
   const coinsBefore=o.notional/o.entryPrice+fills.reduce((n,f)=>n+f.quantity,0)-soldBefore;
-  const realAverageBefore=(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror.fraction)/coinsBefore;
+  const roundHolding=independent?holdings(after+MINUTE):undefined;
+  if(roundHolding&&!(roundHolding.held>0))return done(stop);
+  const realAverageBefore=roundHolding?roundHolding.cost/roundHolding.held:(o.notional+fills.reduce((n,f)=>n+f.notional,0)-o.notional*halfMirror!.fraction)/coinsBefore;
   // 【用户要求】2026-11-01 涨幅门槛相对最新成本线 S（首轮为首次买入价，之后为上一次的 K），不是持仓均价、也不是首仓
   // 2026-11-04 可选「相对持仓均价」（10-31 版口径）：gainBasis＝'average'
   const basis=round.gainBasis==='average'?'real-average' as const:'cost-line' as const,referencePrice=basis==='real-average'?realAverageBefore:support??o.entryPrice;
@@ -232,7 +238,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    if(alt&&(!hit||alt.at<hit.at)){for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>alt.at)skipped.splice(i,1);hit=alt;round=alternative;hit.lane='attack';}
    else if(hit)hit.lane='structure';
   }
-  if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
+  if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}if(pendingMirror!=null&&addEnd===pendingMirror+MINUTE){after=pendingMirror;continue;}return done(stop);}
+  if(independent&&o.mirror?.at===hit.at){after=hit.at;skip({at:hit.at,round:roundNo,kind:'mirror-minute',label:'镜像成交分钟不加仓',reading:'同一分钟不借用尚未完成的镜像成交与落袋盈亏，等待下一次机会'});continue;}
   // 箱体时机的「方向」指标条件（必要不充分）：事件那一刻不全满足，就跳过这个事件、继续等下一个。
   if(hit.structureEvidence&&round.required?.length){
    let read=prerequisiteReaders.get(round.required);if(!read)prerequisiteReaders.set(round.required,read=requiredConditionsReader(round.required,o));
@@ -284,11 +291,12 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 没有减仓时两种算法相等（平衡公式保证成本线＝上一次 K），仍用原式，旧结果逐位不变。
   // 只有 v2（version＝2）这样算；v1 的方案与模板照旧（2026-11-03 用户要求模板必须原样复原）。
   const reduced=o.supportReduction?.version===2&&reductions.some(r=>r.at<=hit.at),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
-  const Sb=reduced?(cost-(held.mirrorProfit+held.reductionProfit))/Q:S;
+  const Sb=independent?(cost-held.realized)/Q:reduced?(cost-(held.mirrorProfit+held.reductionProfit))/Q:S;
   const state=reduced?{...initialAddPositionState(Sb,Q,profit,cost/Q),mirrorProfitAllocated:profit,mirrorProfitAvailable:0}:{...initialAddPositionState(S,Q,profit,cost/Q),mirrorProfitAllocated:used,mirrorProfitAvailable:Math.max(0,profit-used)};
-  const sized=calculateAddPosition({currentPrice:hit.price,support:K,state});after=hit.at;
+  const sized=independent?calculateHoldingLedgerAddition(held,hit.price,K):calculateAddPosition({currentPrice:hit.price,support:K,state});after=hit.at;
+  if(sized.error==='position_closed')return done(stop);
   if(sized.error==='invalid_input')throw Error('加仓支撑线或持仓状态无效');
-  if(sized.error||!(sized.addCoins>0)){skip({at:hit.at,round:roundNo,support:hit.structureEvidence?.supportPrice,kind:'sizing',label:sized.error==='mirror_profit_insufficient'?'落袋利润不够':sized.error==='price_not_above_support'?'价格不高于 K':'加仓量为 0',reading:sized.error==='mirror_profit_insufficient'?`K ${p8(K)} 低于成本线 S ${p8(S)}，旧仓碰 K 的亏损比可用落袋利润多 ${p8(sized.oldLossShortfall)} USDT`:sized.error==='price_not_above_support'?`T ${p8(hit.price)} ≤ K ${p8(K)}`:`按平衡公式算出的加仓量 ${p8(sized.addCoins)} 枚`});continue;}
+  if(sized.error||!(sized.addCoins>0)){skip({at:hit.at,round:roundNo,support:hit.structureEvidence?.supportPrice,kind:'sizing',label:sized.error==='risk_budget_insufficient'?'持仓风险预算不足':sized.error==='mirror_profit_insufficient'?'落袋利润不够':sized.error==='price_not_above_support'?'价格不高于 K':'加仓量为 0',reading:sized.error==='risk_budget_insufficient'?`Q×K−持仓成本＋已实现净盈亏仍差 ${p8(sized.oldLossShortfall)} USDT，不能增加风险`:sized.error==='mirror_profit_insufficient'?`K ${p8(K)} 低于成本线 S ${p8(S)}，旧仓碰 K 的亏损比可用落袋利润多 ${p8(sized.oldLossShortfall)} USDT`:sized.error==='price_not_above_support'?`T ${p8(hit.price)} ≤ K ${p8(K)}`:`按平衡公式算出的加仓量 ${p8(sized.addCoins)} 枚`});continue;}
   const notional=sized.addCoins*hit.price;if(!Number.isFinite(notional)||!Number.isFinite(sized.addCoins))throw Error('加仓币数超出可计算范围');
   // Reject only the opportunity; original sizing inputs, successful rounds and mirror allocations stay intact.
   const advantage=o.readAdvantage?await o.readAdvantage(hit.at):undefined;
@@ -297,7 +305,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   }
   if(advantage?.grade==='U')skip({at:hit.at,round:roundNo,kind:'advantage-unavailable',label:'优势辅助数据缺失，沿用原规则',reading:advantage.reason??'缺辅助数据'});
   if(advantage)hit={...hit,advantage};
-  fills.push({...hit,...(o.kStopVersion?{kStopVersion:o.kStopVersion}:{}),quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(floorRule?{guardK:selected!.k,floorAtr:floorRule.atr}:{})}});
+  fills.push({...hit,...(independent?{positionVersion:HOLDING_LEDGER_ADDITION_VERSION,ledger:{costBefore:cost,realizedBefore:held.realized,mirrorQuantityBefore:held.mirrorQuantity,breakevenBefore:Sb}}:{}),...(o.kStopVersion?{kStopVersion:o.kStopVersion}:{}),quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:independent?S:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:independent?0:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(floorRule?{guardK:selected!.k,floorAtr:floorRule.atr}:{})}});
   if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }
  return done(findPositionExit(currentK().k,Math.max(o.since,currentK().at??o.since)));

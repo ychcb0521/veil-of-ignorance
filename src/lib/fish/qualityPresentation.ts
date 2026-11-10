@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 import {qualityAdditionFills} from './qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
 /** Presentation of frozen monitor results; never infer a fill from a price peak. */
@@ -36,6 +37,7 @@ export function qualityGeometricPosition(result?:QualityResult):number|null{
  if(!result||(result.status!=='open'&&result.status!=='closed'))return null;
  const E=result.entryPrice,notional=result.initialNotional;if(!(E!>0)||!(notional!>0)||!Number.isFinite(E)||!Number.isFinite(notional))return null;
  const fills=qualityAdditionFills(result),mirror=result.mirrorFill,initial=notional!/E!;
+ if(fills.some(f=>f.positionVersion===HOLDING_LEDGER_ADDITION_VERSION)){const p=replayQualityHoldingLedger({notional:notional!,entryPrice:E!,entryAt:result.entryTime!,additions:fills,mirror,reductions:result.additionReductions,includeIntraminute:true,details:false});return p.held/p.initialQuantity;}
  const reduction=fills.length?(mirror&&mirror.at<=fills[0].at?mirror.fraction:0):result.status==='closed'&&mirror?mirror.fraction:0;
  if(!(reduction>=0&&reduction<=1))return null;
  let held=initial*(1-reduction),value=1-reduction;

@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
@@ -102,7 +103,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     const rounds = a.rounds?.length ? a.rounds : [a];
     // 加仓引擎本身（平衡公式、轮次、门槛、否决、减仓等），不含箱体——箱体按轮单列
     add('addition', '加仓规则', `最多 ${a.maxRounds ?? rounds.length} 次`, join([...versionTags(additionIdentity({ ...a, structure: undefined, rounds: a.rounds?.map(r => ({ ...r, structure: undefined })) })), ...versionTags(additionMirrorIdentity(a, plan.mirrorTakeProfit))]),
-      '镜像止盈后按平衡公式 Q×(K−S)+P＝新增币数×(T−K) 定量，碰到 K 卖出');
+      a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'通用持仓账：Q×K−剩余成本＋已实现净盈亏＝新增币数×(T−K)；镜像可选，实际成交后才计入账本':'镜像止盈后按平衡公式 Q×(K−S)+P＝新增币数×(T−K) 定量，碰到 K 卖出');
     rounds.forEach((r, i) => {
       if (r.source === 'structure' && r.structure) {
         const v = structureVersions(r.structure), box = boxAlgorithmVersion(v.box), guard = v.guard ? boxAlgorithmVersion(v.guard) : undefined;

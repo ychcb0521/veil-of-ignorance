@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,type QualityMonitorEntry} from './qualityAdmissionTime';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
@@ -718,7 +719,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let additionFill=prior?.additionFill,additionFills=[...qualityAdditionFills(prior??{})], additionNote: string | undefined, additionVetoes=prior?.additionVetoes,additionReductions=prior?.additionReductions,additionSkips=prior?.additionSkips,additionSkipsFrom=prior?.additionSkipsFrom;
     if(group.addition?.enabled && (!additionFill||group.addition.quantityMode==='calculator')) {
       const config=group.addition;
-      if(config.quantityMode&&!isPartialMirror(mirrorFill)){
+      if(config.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION&&config.quantityMode&&!isPartialMirror(mirrorFill)){
         additionNote=!group.mirrorTakeProfit?.enabled?'首次加仓须先启用镜像止盈':group.mirrorTakeProfit.sellPct>=100?'镜像止盈卖出 100% 后没有余仓，不能加仓':'等待镜像止盈实际成交后再加仓';
       }else{
         const buildAdditionCandidates=(condition:QualityAdditionRoundRule)=>{
@@ -751,7 +752,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map((r,i)=>({...buildAdditionCandidates(r),...(config.alternativeRounds?.[i]?{alternative:buildAdditionCandidates(config.alternativeRounds[i])}:{})}));
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             advantage:group.advantage,readAdvantage,ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           additionSkipsFrom=prior?(prior.additionSkipsFrom??since):entry;
@@ -766,6 +767,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       }
     }
     if(boxStopStateAt)boxStopStates=boxStopStateAt(finalTime);
+    // New additions may precede a mirror found by the initial price replay.
+    // Earlier K exits/stage pauses cannot retain that speculative future sale.
+    if(group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION&&mirrorFill&&(mirrorFill.at>finalTime||mirrorFill.at===finalTime&&(sellStageBoundary||closed&&trigger?.cause?.kind!=='mirror-take-profit')&&(trigger?.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
     const held = prices.filter(b => b.openTime < finalTime);
     // Truncate speculative soft confirmations at the actual earlier addition/K/hard exit.
     const savedAdvantage=advantageChecks.filter(s=>s.at<=finalTime).at(-1)??prior?.advantageState;
@@ -773,7 +777,8 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
     const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
     const breakdown = mirrorPnlBreakdown(QUALITY_NOTIONAL, entryPrice, finalPrice, mirrorFill);
-    const position=additionFills.length?additionPosition(QUALITY_NOTIONAL,entryPrice,finalPrice,closed,additionFills,mirrorFill,additionReductions):undefined;
+    const trackLedger=group.addition?.enabled&&group.addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION;
+    const position=additionFills.length||trackLedger?additionPosition(QUALITY_NOTIONAL,entryPrice,finalPrice,closed,additionFills,mirrorFill,additionReductions,entry):undefined;
     const returnPct = position?.returnPct ?? breakdown.returnPct;
     let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
@@ -799,8 +804,8 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base,...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
-      ...(additionFill && position ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
-        initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
+      ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
+        initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?position.remainingPnl+position.reductionPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
       ...(additionNote?{additionNote}:{}),...(savedAdvantage?{advantageState:savedAdvantage}:{}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,

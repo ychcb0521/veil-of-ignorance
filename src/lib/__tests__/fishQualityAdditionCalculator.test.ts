@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from '@/lib/fish/qualityHoldingLedger';
 import {findCalculatorAdditions} from '@/lib/fish/qualityAdditionCalculator';
 import {positionGeometricMultiple} from '@/lib/campaignGeometricMetrics';
 import {makeQualityHoldingVeto} from '@/lib/fish/qualityFilters';
@@ -236,4 +237,37 @@ it('evaluates multiple addition-profit rules independently and preserves the ear
 it('rejects invalid minute highs instead of treating a missing high as a profit-target touch',async()=>{
  const mirror=(await run(group(),loader(rising),2)).mirrorFill!;
  for(const high of [NaN,Infinity,90])await expect(findCalculatorAdditions({candidates:[],row:sample.source,entry:T,entryPrice:100,notional:100,end:T+2*M,since:T,prices:[rising(0),{...rising(1),high}],previous:[],mirror,repeat:true,load:loader(rising),signal:new AbortController().signal})).rejects.toThrow('加仓行情读数无效');
+});
+
+// New execution is explicit; every mirror-first test above keeps its old version.
+describe('general holding-ledger additions, mirror optional',()=>{
+ const general=()=>{const g=group();g.addition={...g.addition!,positionVersion:HOLDING_LEDGER_ADDITION_VERSION};return g;};
+ it.each([undefined,{enabled:false,gainPct:5,sellPct:50},{enabled:true,gainPct:1000,sellPct:50}])('adds before a mirror exists or triggers (%j)',async mirrorTakeProfit=>{
+  const g={...general(),mirrorTakeProfit},r=await run(g,loader(rising),3);expect(r.additionFills).toHaveLength(2);expect(r.additionNote).toBeUndefined();expect(r.mirrorFill).toBeUndefined();expect(r.additionFills![0]).toMatchObject({positionVersion:HOLDING_LEDGER_ADDITION_VERSION,sizing:{coinsBefore:1},ledger:{costBefore:100,realizedBefore:0,mirrorQuantityBefore:0}});
+  const p=replayQualityHoldingLedger({notional:100,entryPrice:100,entryAt:T,additions:r.additionFills!});expect(r.pnl).toBeCloseTo(p.held*r.endPrice!-p.cost+p.realized,8);
+ });
+ it('handles additions on both sides of a partial mirror and resumes with identical evidence',async()=>{
+  const g=general();g.mirrorTakeProfit={enabled:true,gainPct:35,sellPct:67};g.addition!.maxRounds=3;
+  const load=loader(m=>{const open=100+m*10;return bar(T+m*M,open,[0,1,3,4].includes(m)?1:0,open-1,m===3?136:open+1);});
+  const r=await run(g,load,6);expect(r.mirrorFill?.at).toBe(T+3*M);expect(r.additionFills).toHaveLength(3);expect(r.additionFills!.map(f=>f.at)).toEqual([T+M,T+2*M,T+4*M]);
+  const beforeThird=replayQualityHoldingLedger({notional:100,entryPrice:100,entryAt:T,additions:r.additionFills!.slice(0,2),mirror:r.mirrorFill,through:T+4*M});expect(r.additionFills![2].ledger!.costBefore).toBeCloseTo(beforeThird.cost,9);expect(r.additionFills![2].ledger!.realizedBefore).toBeCloseTo(beforeThird.realized,9);
+  const resumed=await run(g,load,6,await run(g,load,3));expect(resumed.additionFills).toEqual(r.additionFills);expect(resumed.pnl).toBeCloseTo(r.pnl!,9);
+  const data=campaign(g,r),mirrorTrades=data.tradeRecords.filter(t=>t.exit_reason_text==='镜像止盈');expect(mirrorTrades.reduce((n,t)=>n+t.quantity,0)).toBeCloseTo(.67,10);expect(mirrorTrades.reduce((n,t)=>n+t.pnl,0)).toBeCloseTo(r.mirrorRealizedPnl!,8);
+  const checks=evaluateCampaignAddSizing(data);expect([...checks.values()].every(c=>c.status==='ok')).toBe(true);
+ });
+ it('does not retain a future mirror after an earlier K exit',async()=>{
+  const g=general();g.mirrorTakeProfit={enabled:true,gainPct:500,sellPct:50};const load=loader(m=>bar(T+m*M,100+m*10,m<2?1:0,m===2?90:99+m*10,m===5?700:101+m*10));const r=await run(g,load,7);expect(r.status).toBe('closed');expect(r.endTime).toBeLessThan(T+5*M);expect(r.mirrorFill).toBeUndefined();expect(campaign(g,r).tradeRecords.some(t=>t.exit_reason_text==='镜像止盈')).toBe(false);
+ });
+ it('full mirror closes the actual inventory including all preceding additions',async()=>{
+  const g=general();g.mirrorTakeProfit={enabled:true,gainPct:35,sellPct:100};const r=await run(g,loader(m=>bar(T+m*M,100+m*10,m<2?1:0,99+m*10,m===3?136:101+m*10)),5);expect(r.status).toBe('closed');expect(r.additionFills).toHaveLength(2);expect(r.mirrorFill?.fraction).toBe(1);expect(r.remainingQuantity).toBe(0);expect(r.mirrorRealizedPnl).toBeCloseTo(r.pnl!,8);const data=campaign(g,r);expect(data.tradeRecords.filter(t=>t.action==='CLOSE').every(t=>t.exit_reason_text==='镜像止盈')).toBe(true);expect(computeCampaignRealizedPnl(data.campaign,data.legs,data.tradeRecords).total).toBeCloseTo(r.pnl!,8);
+ });
+ it('supports add-only closed-bar monitoring without mirror or ordinary sell rules',async()=>{
+  const g=general();g.rule=undefined;g.execution=undefined;g.mirrorTakeProfit=undefined;const r=await run(g,loader(rising),3);expect(r.status).toBe('open');expect(r.additionFills).toHaveLength(2);
+ });
+ it('keeps the shared fast-drop veto independently effective without mirror',async()=>{
+  const g=general();g.mirrorTakeProfit=undefined;const load=loader(m=>m===0?bar(T,100,1,89,101,90):rising(m));const plain=await run(g,load,3);expect(plain.additionFills).toHaveLength(2);
+  g.addition!.entryVetoes=[{kind:'fast-drop',enabled:true,windows:[{minutes:1,pct:5}]}];const blocked=await run(g,load,3);expect(blocked.additionFills??[]).toHaveLength(0);expect(blocked.additionVetoes?.some(v=>v.kind==='fast-drop')).toBe(true);expect(blocked).toMatchObject({initialNotional:100,remainingQuantity:1,remainingCost:100,realizedPnl:0});
+  g.addition!.entryVetoes[0].enabled=false;const restored=await run(g,load,3);expect(restored.additionFills).toHaveLength(2);
+ });
+
 });

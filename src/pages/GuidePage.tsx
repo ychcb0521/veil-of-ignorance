@@ -1,3 +1,4 @@
+import {FishQualityGuideContent} from '@/components/FishQualityGuideContent';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowDown, ArrowRight, ChevronDown, Download, List } from 'lucide-react';
@@ -31,6 +32,13 @@ const TOC: TocItem[] = [
       { id: 's3-0', label: '3.1 交易模式与持仓限制' },
       { id: 's3-1', label: '3.2 时光机与行情' },
       { id: 's3-fish', label: '渔：特征值手动捕捞' },
+      { id: 's3-fish-quality', label: '鱼质量：目的与模块' },
+      { id: 'fq-workflow', label: '鱼质量：完整操作流程' },
+      { id: 'fq-time', label: '鱼质量：时间与来源' },
+      { id: 'fq-screening', label: '鱼质量：动态筛选' },
+      { id: 'fq-monitor', label: '鱼质量：持仓监测' },
+      { id: 'fq-table', label: '鱼质量：评分与导出' },
+      { id: 'fq-notes', label: '鱼质量：注意事项与常见问题' },
       { id: 's3-1b', label: '3.3 P_gap 优势边际' },
       { id: 's3-1c', label: '3.4 宽框架与严框架' },
       { id: 's3-2', label: '3.5 下单前快照' },
@@ -836,6 +844,11 @@ export default function GuidePage() {
                 <P><strong>信号成交额</strong>：点信号库导出旁的柱状图图标，再点「开始统计」。切换 24 / 12 / 6 / 4 / 2 / 1 小时，查看信号出现前的成交额区间、分布和评分关系；评分图每点一条信号，菱形是各评分档中位数。比较时同时看样本数，未评分或缺成交额的不入图；上市时间不足的样本按实际覆盖时段计。CSV 包含六个时长成交额和当前评分。已有结果直接查看，修改评分不必重算；信号库变化后按过期提示更新。捕捞、复原、成交额统计不能同时运行。</P>
               </details>
               <P>捕捞结果用于筛选和研究；是否交易，还要回到盘面判断。</P>
+            </section>
+
+            <section id="s3-fish-quality" className="scroll-mt-20">
+              <SectionTitle>鱼质量：使用说明</SectionTitle>
+              <FishQualityGuideContent guide/>
             </section>
 
             <section id="s3-1b" className="scroll-mt-20">

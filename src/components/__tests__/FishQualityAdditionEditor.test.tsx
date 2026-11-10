@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import { afterEach,expect,it } from 'vitest';
 import { useState } from 'react';
@@ -8,7 +9,7 @@ import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qua
 import type {VetoStagesDraft} from '../FishQualityVetoStagesEditor';
 afterEach(cleanup);
 // The original editor regressions intentionally exercise the preserved legacy scope.
-function Editor(){const [draft,setDraft]=useState(()=>{const d=additionDraft();for(const r of [d,...d.otherRounds])for(const v of Object.values(r.entryVetoes))v.historyHours=undefined;return d;});return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
+function Editor(){const [draft,setDraft]=useState(()=>{const d=additionDraft(defaultQualityAddition());for(const r of [d,...d.otherRounds])for(const v of Object.values(r.entryVetoes))v.historyHours=undefined;return d;});return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
 it('defaults new addition vetoes to six history hours and independently edits or restores their original scope',()=>{
@@ -280,4 +281,9 @@ it('restores the S/T/K position: indicator trigger, entry distance T ≥ S + n A
  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
  // 入场距离留空＝不检查；不写字段，方案身份与 11-01 以来的自选指标方案相同
  fireEvent.change(screen.getByLabelText('入场距离ATR倍数'),{target:{value:''}});expect(save().rounds[0].entryDistanceAtr).toBeUndefined();
+});
+
+it('defaults new drafts to optional-mirror execution while explicitly preserving legacy drafts and templates',()=>{
+ const old=defaultQualityAddition(),before=JSON.stringify(old);expect(additionDraft(old).positionVersion).toBeUndefined();expect(additionDraft().positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);
+ render(<Editor/>);expect(screen.getByLabelText('加仓执行口径')).toHaveValue('legacy-mirror');fireEvent.change(screen.getByLabelText('加仓执行口径'),{target:{value:HOLDING_LEDGER_ADDITION_VERSION}});const saved=save();expect(saved.positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);expect(additionDraft(saved).positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);expect(JSON.stringify(old)).toBe(before);
 });

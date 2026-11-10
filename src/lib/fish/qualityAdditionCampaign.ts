@@ -1,3 +1,4 @@
+import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 /** Preserve each acquisition lot in campaign events, partial closes and realized profit. */
 import type { QualityCampaignData } from './qualityCampaigns';
 import type { QualityCampaignRun } from './qualityCampaignArchive';
@@ -9,7 +10,8 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
  const {result:r,plan}=run,adds=qualityAdditionFills(r);
  const entry=r.entryTime!,closed=r.status==='closed',end=r.endTime!,id=data.campaign.id;
  const reductions=adds.length?r.additionReductions??[]:[];
- const summary=additionPosition(100,r.entryPrice!,r.endPrice!,closed,adds,r.mirrorFill,reductions);
+ const summary=additionPosition(100,r.entryPrice!,r.endPrice!,closed,adds,r.mirrorFill,reductions,entry);
+ const ledger=adds.some(a=>a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION)?replayQualityHoldingLedger({notional:100,entryPrice:r.entryPrice!,entryAt:entry,additions:adds,mirror:r.mirrorFill,reductions,includeIntraminute:true}):undefined;
  const lots=[{at:entry,price:r.entryPrice!,notional:100,quantity:100/r.entryPrice!,role:'main_open' as const,id:data.legs[0].id},
    ...adds.map((add,i)=>({at:add.at,price:add.price,notional:add.notional,quantity:add.quantity,role:`main_add_${i+1}` as LegRole,id:id+'-add-'+(i+1)}))];
  const tradeRecords:TradeRecord[]=[],events:CampaignEvent[]=[],legs:TradeJournal[]=[];
@@ -18,28 +20,38 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
    const fraction=mirror?(mirror.fraction===1?1:index===0?mirror.fraction:0):0;
    const mirrorQty=lot.quantity*fraction,remaining=lot.quantity-mirrorQty;
    const add=adds[index-1];
-   const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price} · S=${add.sizing.previousSupport} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}${add.structureEvidence?` · ${add.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${add.structureEvidence.event} · 新C ${add.structureEvidence.supportPrice} · 旧C ${add.structureEvidence.previousSupportPrice??'—'} · 冗余 ${add.structureEvidence.buffer}${add.structureEvidence.bufferUnit==='atr'?'ATR':'%'}`:''}`:''}`;
+   const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price}${add.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?` · 成本线 S=${add.sizing.previousSupport} · 剩余成本=${add.ledger?.costBefore} · 已实现净盈亏=${add.ledger?.realizedBefore} · 整笔保本价 b=${add.ledger?.breakevenBefore}`:` · S=${add.sizing.previousSupport}`} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}${add.structureEvidence?` · ${add.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${add.structureEvidence.event} · 新C ${add.structureEvidence.supportPrice} · 旧C ${add.structureEvidence.previousSupportPrice??'—'} · 冗余 ${add.structureEvidence.buffer}${add.structureEvidence.bufferUnit==='atr'?'ATR':'%'}`:''}`:''}`;
    const leg:TradeJournal={...data.legs[0],id:lot.id,trade_record_id:positionId,leg_role:lot.role,leg_sequence:index+1,
      quality_addition_fill:add,pre_simulated_time:iso(lot.at),pre_real_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
      pre_account_equity_usdt:summary.totalInvested,post_realized_pnl:closed?lot.quantity*r.endPrice!-lot.notional:null};
-   let realized=0;
+   let realized=0,eventCoins=lot.quantity;
    const opening:CampaignEvent={...data.campaign.actual_evolution[0],id:lot.id+'-entry',timestamp:iso(lot.at),event_type:'main_opened',journal_id:lot.id,leg_role:lot.role,leg_sequence:index+1,
      trade_record_id:positionId,price:lot.price,size_usdt:lot.notional,open_time:iso(lot.at),entry_price:lot.price,notes:note};
    events.push(opening);
    const close=(at:number,price:number,quantity:number,kind:'mirror'|'exit'|'reduce',seq=0)=>{
+     const fullEvent=ledger&&quantity>=eventCoins-1e-12*Math.max(1,eventCoins);eventCoins-=quantity;
      const pnl=quantity*(price-lot.price),recordId=lot.id+'-'+kind+(kind==='reduce'?'-'+seq:'');realized+=pnl;
      const why=kind==='mirror'?'镜像止盈':kind==='reduce'?'支撑线下移减仓':r.reason??'卖出';
      tradeRecords.push({id:recordId,positionId,symbol:data.campaign.symbol,side:'LONG',type:kind==='mirror'?'LIMIT':'MARKET',action:'CLOSE',entryPrice:lot.price,exitPrice:price,
        quantity,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl,fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,
        openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:why});
-     events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:kind==='reduce'||kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
+     events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:ledger?(fullEvent?'main_fully_closed':'main_partial_closed'):kind==='reduce'||kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
        price,size_usdt:quantity*lot.price,realized_pnl:pnl,close_time:iso(at),exit_price:price,notes:why,recorded_at:iso(r.evaluatedAt)});
    };
+   if(ledger){
+     let left=lot.quantity;
+     for(const [n,sale]of ledger.sales.entries()){
+       const part=sale.lots.find(p=>p.index===index);if(!part||!(part.quantity>0))continue;
+       close(sale.at,sale.price,part.quantity,sale.kind==='mirror'?'mirror':'reduce',n);left-=part.quantity;
+     }
+     if(closed&&left>1e-12*Math.max(1,lot.quantity))close(end,r.endPrice!,left,'exit');
+   }else{
    if(mirror&&mirrorQty>0)close(mirror.at,mirror.price,mirrorQty,'mirror');
    // 支撑线下移减仓：整个持仓按同一比例减，落到每一笔已买入的仓位上（各自按自己的买入价算盈亏，合计与按均价算一致）
    let left=remaining;
    for(const [n,cut] of reductions.entries()){if(cut.at<lot.at||!(cut.fraction>0))continue;const q=left*cut.fraction;if(q>0){close(cut.at,cut.price,q,'reduce',n+1);left-=q;}}
    if(closed&&left>0)close(end,r.endPrice!,left,'exit');
+   }
    if(closed){leg.post_realized_pnl=realized;leg.post_outcome=realized>0?'win':realized<0?'loss':'breakeven';}
    legs.push(leg);
  }
