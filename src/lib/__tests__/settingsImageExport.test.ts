@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {readSettingsImage,wrapSettingsImageText} from '../settingsImageExport';
+import {readSettingsImage,wrapSettingsImageText,settingsImageLayout} from '../settingsImageExport';
 
 describe('complete settings image snapshot',()=>{
   it('reads live unsaved controls, full multiline text, closed details and explicit hidden projections',()=>{
@@ -22,5 +22,19 @@ describe('complete settings image snapshot',()=>{
   it('includes selected segmented parameters but excludes action buttons',()=>{
     const root=document.createElement('div');root.innerHTML='<button aria-pressed="false">1m</button><button aria-pressed="true">5m</button><button role="tab" aria-selected="true">第 3 次</button><button>删除</button>';
     expect(readSettingsImage(root).map(b=>b.text).join('')).toBe('5m 第 3 次');
+  });
+  it('shares identical explanatory notes once and retains every repeated control and changed note',()=>{
+    const root=document.createElement('div');root.innerHTML='<h3>第一轮</h3><div data-settings-image-shared-help>相同完整说明</div><input aria-label="本轮门槛" value="0.123456789"><h3>第二轮</h3><div data-settings-image-shared-help>相同完整说明</div><input aria-label="本轮门槛" value="0.123456789"><div data-settings-image-shared-help>本轮不同说明</div><div data-settings-image-shared-help><input aria-label="独立启用" type="checkbox"></div><div data-settings-image-shared-help><input aria-label="独立启用" type="checkbox"></div>';
+    const text=readSettingsImage(root).map(b=>b.text).join('\n');
+    expect(text.match(/相同完整说明/g)).toHaveLength(1);expect(text.match(/本轮门槛：0.123456789/g)).toHaveLength(2);expect(text.match(/独立启用/g)).toHaveLength(2);expect(text).toContain('本轮不同说明');
+  });
+  it('keeps a long set of conditions in one readable image and bounds extreme exports without losing rows',()=>{
+    const single=settingsImageLayout(1200,130);expect(single.pages).toBe(1);expect(single.scale).toBeGreaterThanOrEqual(1);
+    const huge=settingsImageLayout(10000,130);expect(huge.pages).toBeGreaterThan(1);expect(huge.perPage*huge.pages).toBeGreaterThanOrEqual(10000);
+    for(const layout of [single,huge]){
+      const height=160+(layout===single?1200:layout.perPage)*layout.rowHeight;
+      const widthPixels=Math.floor(1440*layout.scale),heightPixels=Math.floor(height*layout.scale);
+      expect(heightPixels).toBeLessThanOrEqual(30000);expect(widthPixels*heightPixels).toBeLessThanOrEqual(48_000_000);
+    }
   });
 });

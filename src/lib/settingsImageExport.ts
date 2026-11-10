@@ -4,6 +4,7 @@ export interface SettingsImageBlock {text:string; heading:boolean}
 /** Read live form properties, not serialized attributes or clipped innerText. Closed details are included. */
 export function readSettingsImage(root:HTMLElement):SettingsImageBlock[] {
   const blocks:SettingsImageBlock[] = [];
+  const sharedHelp=new Set<string>();
   let text = '', heading = false;
   const flush = () => {
     const value = text.replace(/[ \t]+/g, ' ').trim();
@@ -15,6 +16,11 @@ export function readSettingsImage(root:HTMLElement):SettingsImageBlock[] {
     if (!(node instanceof HTMLElement)) return;
     if (node.hasAttribute('data-settings-image-skip') || ['SCRIPT','STYLE','OPTION'].includes(node.tagName)) return;
     if (node.hidden && !node.hasAttribute('data-settings-image-include')) return;
+    if(node.hasAttribute('data-settings-image-shared-help')&&!node.querySelector('input,select,textarea')){
+      const key=node.textContent??'';
+      if(sharedHelp.has(key))return;
+      sharedHelp.add(key);
+    }
     if (node.tagName === 'PRE') { flush(); blocks.push({text:node.textContent??'',heading:false}); return; }
     if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
       if (node instanceof HTMLInputElement && node.type === 'hidden') return;
@@ -42,7 +48,16 @@ export function readSettingsImage(root:HTMLElement):SettingsImageBlock[] {
   return blocks;
 }
 
-const WIDTH = 1200, MARGIN = 40, MAX_HEIGHT = 14000;
+const WIDTH = 1440, MARGIN = 40, MAX_SIDE = 30000, MAX_AREA = 48_000_000, MIN_SCALE = .75;
+/** Prefer one readable long image; split only at the bounded backing-store limit. */
+export function settingsImageLayout(rows:number,header:number) {
+  // Even the longest single image keeps body text at least 12 physical pixels high.
+  const rowHeight=22,maxHeight=Math.min(MAX_SIDE/MIN_SCALE,MAX_AREA/(WIDTH*MIN_SCALE**2));
+  const perPage=Math.max(1,Math.floor((maxHeight-header-40)/rowHeight));
+  const pages=Math.ceil(rows/perPage),height=header+30+Math.min(rows,perPage)*rowHeight;
+  const scale=Math.min(1.5,MAX_SIDE/height,MAX_SIDE/WIDTH,Math.sqrt(MAX_AREA/(WIDTH*height)));
+  return {rowHeight,perPage,pages,scale};
+}
 const FONT = '"Microsoft YaHei", "PingFang SC", system-ui, sans-serif';
 export function wrapSettingsImageText(ctx:CanvasRenderingContext2D, text:string, width:number):string[] {
   const lines:string[] = [];
@@ -57,7 +72,7 @@ export function wrapSettingsImageText(ctx:CanvasRenderingContext2D, text:string,
   return lines;
 }
 
-/** Native canvas + PNG Blob, as in campaign image export. Long content is paged, never cropped. */
+/** Native canvas + PNG Blob, as in campaign image export. Content remains complete. */
 export async function downloadSettingsImage(title:string, blocks:readonly SettingsImageBlock[]):Promise<number> {
   await document.fonts?.ready;
   const measure = document.createElement('canvas'), ctx = measure.getContext('2d');
@@ -66,11 +81,10 @@ export async function downloadSettingsImage(title:string, blocks:readonly Settin
   for (const block of blocks) {
     ctx.font = `${block.heading ? '600' : '400'} ${block.heading ? 18 : 16}px ${FONT}`;
     rows.push(...wrapSettingsImageText(ctx, block.text, WIDTH - MARGIN * 2 - 24).map(text=>({text, heading:block.heading})));
-    rows.push({text:'', heading:false});
   }
   ctx.font = `600 24px ${FONT}`;
   const titles=wrapSettingsImageText(ctx,title,WIDTH-MARGIN*2), header=130+(titles.length-1)*32;
-  const rowHeight = 26, perPage = Math.max(1,Math.floor((MAX_HEIGHT - header - 40) / rowHeight)), pages = Math.ceil(rows.length / perPage);
+  const {rowHeight,perPage,pages,scale}=settingsImageLayout(rows.length,header);
   const time = formatUTC8(Date.now()), filename = `${title.replace(/[<>:"/\\|?*]/g,'-').replace(/\p{Cc}/gu,'-').slice(0,100)}-${time.replace(/[<>:"/\\|?*\s]/g,'-')}`;
   const files:{name:string;blob:Blob}[]=[];
   try {
@@ -78,11 +92,11 @@ export async function downloadSettingsImage(title:string, blocks:readonly Settin
       const slice = rows.slice(page * perPage, (page + 1) * perPage);
       const height = header + 30 + slice.length * rowHeight, canvas = document.createElement('canvas');
       // Keep each backing store bounded; release it before creating the next image.
-      canvas.width = WIDTH * 1.5; canvas.height = Math.ceil(height * 1.5);
+      canvas.width = Math.floor(WIDTH * scale); canvas.height = Math.floor(height * scale);
       try {
         const paint = canvas.getContext('2d');
         if (!paint) throw Error('无法创建图片画布');
-        paint.scale(1.5,1.5); paint.fillStyle = '#f8fafc'; paint.fillRect(0,0,WIDTH,height);
+        paint.scale(scale,scale); paint.fillStyle = '#f8fafc'; paint.fillRect(0,0,WIDTH,height);
         paint.fillStyle = '#111827'; paint.font = `600 24px ${FONT}`;
         titles.forEach((line,index)=>paint.fillText(line,MARGIN,42+index*32));
         paint.font = `14px ${FONT}`; paint.fillStyle = '#64748b';
