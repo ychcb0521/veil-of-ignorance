@@ -1,64 +1,56 @@
-// 【用户要求】2026-11-03 组合表下载：第一个子表＝当时组合表呈现的内容与形式（隐藏的不出现、表头一样、只含选中的标的），
-// 其后是「组合算法」和「买入·加仓·卖出」，再往后照旧
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
-import type { XlsxSheet } from '@/lib/xlsxWorkbook';
-const captured: { leading: XlsxSheet[] }[] = [];
-vi.mock('@/lib/fish/qualityExport', async original => ({ ...(await original() as object), downloadQualityComparison: (_s: unknown, _r: unknown, _at: unknown, leading: XlsxSheet[]) => { captured.push({ leading }); return 'x.xlsx'; } }));
-import { FishQuality } from '@/components/FishQuality';
-import { importQualityLibrary, newQualityStudy, qualityDisplayRows } from '@/lib/fish/quality';
-import { enableQualityComparison } from '@/lib/fish/qualityComparison';
-import type { FishQualityState } from '@/hooks/useFishQuality';
-const T = Date.UTC(2026, 9, 20);
-function state(selected: number, mined = false): FishQualityState {
-  const study = enableQualityComparison(importQualityLibrary(newQualityStudy(T + 1), ['AAAUSDT', 'BBBUSDT', 'CCCUSDT'].map((symbol, i) => ({ id: `l${i}`, symbol, timeMs: T - i * 3600000, timeLabel: '', fallbackZone: '', quality: 3 }))));
-  if (mined) study.samples[0].source = { ...study.samples[0].source, mined: { anchorMs: T - 86400000 }, caughtAt: Date.UTC(2026, 10, 3, 2, 15) };
-  study.selectedRowIds = qualityDisplayRows(study).slice(0, selected).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setCombo: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn(), setSellPlans: vi.fn() } as FishQualityState;
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {FishQuality} from '../FishQuality';
+import {importQualityLibrary,newQualityStudy,qualityDisplayRows} from '@/lib/fish/quality';
+import type {FishQualityState} from '@/hooks/useFishQuality';
+import {enableQualityComparison} from '@/lib/fish/qualityComparison';
+import type {XlsxSheet} from '@/lib/xlsxWorkbook';
+const capture=vi.hoisted(()=>({download:vi.fn(),restore:vi.fn(()=>new Promise(()=>{}))}));
+vi.mock('@/lib/fish/qualityTableExport',async original=>({...await original<object>(),downloadQualityTableSheet:capture.download}));
+vi.mock('@/lib/fish/preEntryArchive',async original=>({...await original<object>(),restorePreEntryStudy:capture.restore}));
+const T=Date.UTC(2026,10,10);
+function state(count=140):FishQualityState{
+ const study=enableQualityComparison(importQualityLibrary(newQualityStudy(T),Array.from({length:count},(_,i)=>({id:'s'+i,symbol:`COIN${String(i).padStart(3,'0')}USDT`,timeMs:T-i*60000,timeLabel:'',fallbackZone:'',quality:i===0?4:undefined}))));
+ const noop=vi.fn();return {study,ready:true,running:false,progress:null,filterRunning:false,filterProgress:null,filterError:'',warning:'',error:'',start:noop,restart:noop,cancel:noop,startFilter:noop,cancelFilter:noop,setRule:noop,setCombo:noop,setObserveHours:noop,selectSell:noop,setSelectedRows:noop,setPriority:noop,setScope:noop,setFilters:noop,setHoldingVetoes:noop,setSellPlans:noop};
 }
-afterEach(() => { cleanup(); captured.length = 0; });
-it('puts the table exactly as shown, with only the selected rows, first; then the plan details and per-trade buys, adds and sells', { timeout: 30000 }, () => {
-  const s = state(2);
-  render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
-  expect(captured).toHaveLength(1);
-  const [table, plans, trades] = captured[0].leading;
-  expect(table.name).toBe('组合表');
-  // 表头与界面一致：分组表头按导出后的列数合并；列名行「标的」前加行号；运行状态已移除
-  expect(table.headerRows?.[0][0]).toEqual({ text: '入场信息', span: 5 });
-  expect(table.columns.slice(0, 5).map(c => c.header)).toEqual(['行号', '标的', '信号时间', '市场', '评分']);
-  const sellHeaders = table.columns.map(c => c.header);
-  for (const h of ['加仓次数', '几何仓位', '相对涨幅', '盈亏比', '静态最大回撤', '峰值涨幅', '首仓涨幅', '半仓镜像', '持仓时间']) expect(sellHeaders).toContain(h);
-  expect(sellHeaders).not.toContain('跳转');
-  // 只导出选中的两行，行号、标的、评分照界面
-  expect(table.rows).toHaveLength(2);
-  expect(table.rows.map(r => r[1])).toEqual(['AAAUSDT', 'BBBUSDT']);
-  expect(table.rows[0][0]).toBe(1);expect(table.rows[0][4]).toBe('★★★☆☆');
-  expect(plans.name).toBe('组合算法');expect(plans.rows.some(r => r[2] === '卖出算法')).toBe(true);
-  expect(trades.name).toBe('买入·加仓·卖出');expect(new Set(trades.rows.map(r => r[0]))).toEqual(new Set(['AAAUSDT', 'BBBUSDT']));
+beforeEach(()=>{capture.download.mockReset();capture.restore.mockClear();});
+afterEach(cleanup);
+it('places export beside the table title, disables an empty selection, and removes three-library data',()=>{
+ const s=state(3);s.study.selectedRowIds=[];render(<FishQuality state={s}/>);
+ const bar=screen.getByTestId('quality-combination-toolbar');expect(within(bar).getByText('组合表')).toBeInTheDocument();expect(within(bar).getByRole('button',{name:'导出已选组合表数据'})).toBeDisabled();
+ expect(screen.queryByRole('button',{name:/三库数据/})).toBeNull();expect(screen.queryByLabelText('上传鱼质量三库JSON数据包')).toBeNull();expect(capture.download).not.toHaveBeenCalled();
 });
-it('hides what the table hides: the 买前过滤 group is left out once hidden', { timeout: 30000 }, () => {
-  const s = state(3);
-  render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
-  const shown = captured[0].leading[0];
-  const filterShown = shown.headerRows?.[0].some(c => c.text.startsWith('静态过滤'));
-  fireEvent.click(screen.getByRole('button', { name: '隐藏组合表中的静态过滤结果' }));fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
-  const hidden = captured[1].leading[0];
-  expect(filterShown).toBe(true);
-  expect(hidden.headerRows?.[0].some(c => c.text.startsWith('静态过滤'))).toBe(false);
-  expect(hidden.columns.map(c => c.header)).not.toContain('探测算法');
-  expect(hidden.rows).toHaveLength(3);
+it('exports selected offscreen rows exactly once in display order with original row numbers, never restoring histories',async()=>{
+ const s=state(),all=qualityDisplayRows(s.study);s.study.selectedRowIds=[all[0].id,all[90].id];render(<FishQuality state={s}/>);
+ const live=screen.getByTestId('quality-fish-table');expect(within(live).getAllByTestId('quality-fish-row').length).toBeLessThan(140);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));
+ const sheet=capture.download.mock.calls[0][0] as XlsxSheet;expect(sheet.name).toBe('组合表');expect(sheet.rows).toHaveLength(2);expect(sheet.rows.map(row=>row[0])).toEqual([1,91]);expect(sheet.rows.map(row=>row[1])).toEqual([all[0].source.symbol,all[90].source.symbol]);
+ expect(sheet.headerRows?.[0][0]).toEqual({text:'入场信息',span:5});expect(sheet.columns.slice(0,5).map(c=>c.header)).toEqual(['行号','标的','信号时间','市场','评分']);
+ for(const label of ['加仓次数','几何仓位','相对涨幅','盈亏比','静态最大回撤','峰值涨幅','首仓涨幅','半仓镜像','持仓时间'])expect(sheet.columns.map(c=>c.header)).toContain(label);expect(sheet.columns.map(c=>c.header)).not.toContain('跳转');
+ const rating=sheet.columns.findIndex(c=>c.header==='评分');expect(sheet.rows[0][rating]).toBe('★★★★☆');expect(capture.restore).not.toHaveBeenCalled();expect(screen.queryByTestId('quality-export-batch')).toBeNull();
 });
-// 【用户要求】2026-11-03 批量挖掘的数据显示挖掘时间（真实物理时间）；表里没有挖掘记录时不多出这一列
-it('shows the real mining time for mined rows only when the table has mined records', { timeout: 30000 }, () => {
-  render(<FishQuality state={state(3, true)}/>);
-  expect(screen.getByTestId('quality-mined-at-column')).toHaveTextContent('挖掘时间');
-  const cells = screen.getAllByTestId('quality-mined-at-cell').map(c => c.textContent);
-  expect(cells.filter(t => t !== '—')).toHaveLength(1);expect(cells.find(t => t !== '—')).toContain('2026-11-03 10:15');
-  fireEvent.click(screen.getByRole('button', { name: '导出鱼质量数据' }));
-  expect(captured[0].leading[0].columns.map(c => c.header)).toContain('挖掘时间');
-  cleanup();
-  render(<FishQuality state={state(3)}/>);
-  expect(screen.queryByTestId('quality-mined-at-column')).toBeNull();
+it('uses bounded batches without changing the virtual table or exporting unchecked rows',async()=>{
+ const s=state(),all=qualityDisplayRows(s.study);s.study.selectedRowIds=all.slice(0,125).map(row=>row.id);render(<FishQuality state={s}/>);
+ const live=screen.getByTestId('quality-fish-table'),before=within(live).getAllByTestId('quality-fish-row').length;live.scrollLeft=77;
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));expect(within(screen.getByTestId('quality-export-batch')).getAllByTestId('quality-fish-row')).toHaveLength(40);
+ expect(within(live).getAllByTestId('quality-fish-row')).toHaveLength(before);await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1),{timeout:10000});expect(capture.download.mock.calls[0][0].rows).toHaveLength(125);expect(live.scrollLeft).toBe(77);
+});
+it('does not export selected rows outside the current table filter',async()=>{
+ const s=state(5);s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);
+ fireEvent.change(screen.getByPlaceholderText('筛选标的…'),{target:{value:'COIN003'}});fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));expect(capture.download.mock.calls[0][0].rows).toHaveLength(1);expect(capture.download.mock.calls[0][0].rows[0][1]).toBe('COIN003USDT');
+});
+it('shows download errors and allows a retry instead of silently remaining busy',async()=>{
+ const s=state(2);s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);capture.download.mockImplementationOnce(()=>{throw Error('下载失败测试');});render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(screen.getByText('下载失败测试')).toBeInTheDocument());expect(screen.getByRole('button',{name:'导出已选组合表数据'})).toBeEnabled();
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(2));
+});
+it('exports only the column groups currently shown in the combination table',async()=>{
+ const s=state(3);s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));expect(capture.download.mock.calls[0][0].columns.map(c=>c.header)).toContain('探测算法');
+ fireEvent.click(screen.getByRole('button',{name:'隐藏组合表中的静态过滤结果'}));fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(2));expect(capture.download.mock.calls[1][0].columns.map(c=>c.header)).not.toContain('探测算法');expect(capture.download.mock.calls[1][0].rows).toHaveLength(3);
+});
+it('retains the actual mining time column only when it appears on the table',async()=>{
+ const s=state(3);s.study.samples[0].source={...s.study.samples[0].source,mined:{anchorMs:T-86400000},caughtAt:T};s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);
+ expect(screen.getByTestId('quality-mined-at-column')).toHaveTextContent('挖掘时间');fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));const sheet=capture.download.mock.calls[0][0] as XlsxSheet,at=sheet.columns.findIndex(c=>c.header==='挖掘时间');expect(at).toBeGreaterThan(0);expect(sheet.rows[0][at]).toBe('2026-11-10 08:00:00');
+ cleanup();render(<FishQuality state={state(3)}/>);expect(screen.queryByTestId('quality-mined-at-column')).toBeNull();
 });

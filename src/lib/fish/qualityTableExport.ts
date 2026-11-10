@@ -1,13 +1,14 @@
 /**
- * 【用户要求】2026-11-03 组合表下载：第一个子表＝当时组合表呈现的内容与形式——隐藏的模块不出现、表头文字一样、
+ * 【用户要求】2026-11-03 组合表下载：唯一子表＝当时组合表呈现的内容与形式——隐藏的模块不出现、表头文字一样、
  * 只含正在被选中的标的；「呈现了什么就下载什么」。
  *
- * 做法：组合表渲染出全部行之后，直接按页面上的表头与单元格读取（不另写一套列定义，避免与界面不一致）。
+ * 做法：已选行复用页面的单元格渲染，分批读取表头与单元格（不另写一套列定义，避免与界面不一致）。
  * - 分组表头（入场信息 / 买前过滤 / 持仓监测、变量 / 水平）按原来的跨列合并；
  * - 列名行：「标的」拆成行号 + 标的；「运行状态」拆成过滤 / 监测；「加仓次数 · 几何仓位 · 相对涨幅 · 盈亏比」拆成四列；
  * - 评分写成星号；排序箭头、「展开 / 收起」按钮、图标不算内容；跳转列不导出。
  */
-import type { XlsxCell, XlsxSheet } from '@/lib/xlsxWorkbook';
+import {buildXlsx,type XlsxCell,type XlsxSheet} from '@/lib/xlsxWorkbook';
+import {formatUTC8} from '@/lib/timeFormat';
 
 const SELL_PART_IDS = ['quality-sell-additions', 'quality-sell-geometric', 'quality-sell-relative-gain', 'quality-sell-payoff'];
 
@@ -54,7 +55,7 @@ function cellValues(td: HTMLTableCellElement, labels: readonly string[]): XlsxCe
 }
 
 /**
- * 读取组合表。selectedOnly：只要勾选了的行（行首复选框打勾）；没有任何勾选时调用方传 false，导出表里全部行。
+ * 读取组合表。默认只读已勾选行；没有勾选时结果为空，绝不自动扩大到全部行。
  */
 export function readQualityTableSheet(table: HTMLTableElement, { name = '组合表', selectedOnly = true }: { name?: string; selectedOnly?: boolean } = {}): XlsxSheet {
   const headRows = [...(table.tHead?.rows ?? [])];
@@ -79,4 +80,16 @@ export function readQualityTableSheet(table: HTMLTableElement, { name = '组合�
     rows.push([...tr.cells].flatMap((td, i) => labelsByUnit[i].length ? cellValues(td as HTMLTableCellElement, labelsByUnit[i]) : []));
   }
   return { name, columns, rows, headerRows };
+}
+
+/** Only the selected on-screen table representation. No archive hydration or
+ * supplementary algorithm/trade/history worksheets are needed for this download. */
+export function downloadQualityTableSheet(sheet:XlsxSheet,at=Date.now()){
+  if(!sheet.rows.length)throw Error('请先勾选组合表中要导出的行');
+  const blob=buildXlsx([{...sheet,name:'组合表'}]);
+  const filename=`鱼质量-组合表-${formatUTC8(at).replace(/\D/g,'').slice(0,14)}.xlsx`;
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  try{link.href=url;link.download=filename;document.body.appendChild(link);link.click();}
+  finally{link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),60000);}
+  return filename;
 }
