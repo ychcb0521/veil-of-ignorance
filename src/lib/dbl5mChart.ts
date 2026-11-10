@@ -5,12 +5,23 @@ export function dbl5StepPath(points:readonly {x:number;y:number|null;episode:str
  for(const p of points){if(p.y===null||!Number.isFinite(p.y)||p.episode===null){previous=undefined;continue;}d+=previous&&previous.episode===p.episode?` H${p.x} V${p.y}`:` M${p.x},${p.y}`;previous=p;}
  return d.trim();
 }
+/** Read the latest publication inside this viewport, never a result plotted to its right. */
+export function dbl5VisibleGuardRegime(result:readonly Record<string,number>[],from:number,to:number,width:number,pixel:(index:number)=>number):'趋势'|'震荡'|null {
+ if(!(width>0)||!(to>from))return null;
+ for(let i=Math.min(result.length-1,Math.ceil(to));i>=Math.max(0,Math.floor(from)-2);i--){
+  const x=pixel(i+1);if(!Number.isFinite(x)||x>width)continue;if(x<0)return null;
+  const row=result[i];
+  if(!Number.isFinite(row?._DBL5_guard)||!Number.isFinite(row?._DBL5_guard_segment)||![0,1].includes(row?._DBL5_guard_trend)||row._pending===1||row._DBL5_invalid===1||row._DBL5_warmup===1)return null;
+  return row._DBL5_guard_trend===1?'趋势':'震荡';
+ }
+ return null;
+}
 export function registerDbl5Indicator(item:ResearchIndicator){
  const price=!!item.priceOverlay;
  registerIndicator<Record<string,number>>({name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:price?12:2,
   figures:(price?['value','DBL5_upper','_DBL5_guard']:['value']).map(key=>({key,title:(key==='value'?item.short:key==='_DBL5_guard'?'防守线':'固定上轨')+': ',type:'line' as const})),
   calc:(bars,indicator)=>{const out=researchChartSeries(bars,item,indicator.calcParams[0]);return out.core.map((value,i)=>({...((value!==null&&Number.isFinite(value))?{value}:{}),...Object.fromEntries(Object.entries(out.components??{}).map(([k,a])=>[k,a[i]??undefined])),_pending:out.pending?1:0}));},
-  draw:({ctx,indicator,visibleRange,xAxis,yAxis}:IndicatorDrawParams<Record<string,number>>)=>{
+  draw:({ctx,indicator,visibleRange,xAxis,yAxis,bounding,defaultStyles}:IndicatorDrawParams<Record<string,number>>)=>{
     ctx.save();ctx.setLineDash([]);
     for(const field of price?['value','DBL5_upper']:['value']){
       let previous:{x:number;y:number;identity:number}|undefined;
@@ -55,6 +66,18 @@ export function registerDbl5Indicator(item:ResearchIndicator){
       for(let i=Math.max(0,visibleRange.from-1);i<Math.min(indicator.result.length,visibleRange.to+1);i++){
         const row=indicator.result[i],old=indicator.result[i-1]?._DBL5_guard;if(row?._DBL5_guard_broken!==1||!Number.isFinite(old))continue;
         const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(old);ctx.strokeStyle='#dc2626';ctx.lineWidth=1.6;ctx.beginPath();ctx.moveTo(x-4,y-4);ctx.lineTo(x+4,y+4);ctx.moveTo(x-4,y+4);ctx.lineTo(x+4,y-4);ctx.stroke();
+      }
+      // A small, unboxed key in the pane margin leaves candles and line geometry untouched.
+      if(bounding?.width>=140&&bounding.height>=80){
+        const regime=dbl5VisibleGuardRegime(indicator.result,visibleRange.from,visibleRange.to,bounding.width,i=>xAxis.convertToPixel(i));
+        if(regime){
+          ctx.save();ctx.font='10.5px sans-serif';ctx.textAlign='right';ctx.globalAlpha=.78;
+          ctx.fillStyle=defaultStyles?.tooltip?.text?.color??'#64748b';
+          const text='防守线 · '+regime,right=bounding.width-8,y=bounding.height-10;
+          ctx.fillText(text,right,y);
+          const lineRight=right-ctx.measureText(text).width-6;
+          ctx.strokeStyle='#2563eb';ctx.lineWidth=1.4;ctx.setLineDash(regime==='趋势'?[]:[5,3]);ctx.beginPath();ctx.moveTo(lineRight-18,y-3);ctx.lineTo(lineRight,y-3);ctx.stroke();ctx.restore();
+        }
       }
     }
     const visible=indicator.result.slice(Math.max(0,visibleRange.from),Math.min(indicator.result.length,visibleRange.to));

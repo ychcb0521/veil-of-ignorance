@@ -26,5 +26,10 @@ describe('【用户要求】使用说明目录：悬停不在左下角弹网址'
     expect(within(toc).queryByRole('button',{name:'3.3.4.4 组合表'})).toBeNull();
     expect(document.getElementById('fq-static')?.tagName).toBe('P');
     expect(document.getElementById('s3-fish-quality')?.tagName).toBe('H4');
+    fireEvent.click(within(toc).getByRole('button',{name:'4.8.2 CDA'}));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.getElementById('deep-dig-cda'));
+    expect(document.getElementById('deep-dig-cda')?.closest('#s4')).not.toBeNull();
+    expect(within(toc).getByRole('button',{name:'4.8.4 DBL-5'})).toBeInTheDocument();
+    expect(within(toc).queryByRole('button',{name:'4.8.4.1 防守线'})).toBeNull();
   });
 });

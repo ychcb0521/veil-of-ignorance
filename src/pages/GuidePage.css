@@ -1276,6 +1276,19 @@
 .guide-page h5.fishing-manual-heading { font-size: 17px; }
 .guide-page h6.fishing-manual-heading { font-size: var(--fs-body); }
 .guide-page .fishing-manual-heading + * { --flow-step: var(--gap-tight); }
+.guide-page .deep-dig-manual h3.fishing-manual-heading { font-size: var(--fs-h3); }
+.guide-page .deep-dig-manual pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  padding: 14px;
+  background: hsl(var(--muted) / .45);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.guide-page .deep-dig-manual pre code { background: transparent; padding: 0; font-size: inherit; }
 .guide-page .fishing-manual li { line-height: var(--lh); }
 
 /* 键盘焦点。原来完全没有——只剩 UA 默认焦点环，而侧栏是 bg-card + p-3，

@@ -3,14 +3,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {fishingChapter,fishingTopicAnchor} from './fishingGuideOutline';
 
-export function FishingManualMarkdown({text,guide=false,skipTitle=false,reference=false}:{text:string;guide?:boolean;skipTitle?:boolean;reference?:boolean}){
+export function FishingManualMarkdown({text,guide=false,skipTitle=false,reference=false,chapterOf=fishingChapter,topicAnchorOf=fishingTopicAnchor,headingIds=true}:{text:string;guide?:boolean;skipTitle?:boolean;reference?:boolean;chapterOf?:typeof fishingChapter;topicAnchorOf?:typeof fishingTopicAnchor;headingIds?:boolean}){
   const heading=(children:ReactNode,sourceLevel:number)=>{
     if(reference)return <p className="mb-2 mt-6 leading-8"><strong>{children}</strong></p>;
-    const chapter=reference?undefined:fishingChapter(String(children));
+    const chapter=reference?undefined:chapterOf(String(children));
     if(skipTitle&&chapter?.number==='3.3')return null;
     const level=chapter?(guide?chapter.level:chapter.level-2):Math.min(6,sourceLevel+2);
     return createElement('h'+Math.max(2,Math.min(6,level)),{
-      id:guide?chapter?.id:undefined,'data-manual-anchor':chapter?.id,
+      id:guide&&headingIds?chapter?.id:undefined,'data-manual-anchor':chapter?.id,
       className:guide?'fishing-manual-heading':'mb-3 mt-8 scroll-mt-24 font-semibold leading-8 '+(sourceLevel===1?'text-xl':sourceLevel===2?'text-lg':'text-base'),
     },children);
   };
@@ -20,7 +20,7 @@ export function FishingManualMarkdown({text,guide=false,skipTitle=false,referenc
       const first=node?.children[0];
       const lead=first?.type==='element'&&first.tagName==='strong'
         ?first.children.map(part=>part.type==='text'?part.value:'').join('').replace(/[。:：]$/,''):'';
-      const anchor=reference?undefined:fishingTopicAnchor(lead);
+      const anchor=reference?undefined:topicAnchorOf(lead);
       return <p id={guide?anchor:undefined} data-manual-anchor={anchor}
         className={(guide?'guide-copy':'my-3 leading-8')+(anchor?' scroll-mt-24':'')}>{children}</p>;
     },

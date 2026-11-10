@@ -1,7 +1,7 @@
 import {expect,it,vi} from 'vitest';
 interface ChartTemplate {name:string;draw:(params:unknown)=>void;createTooltipDataSource:(params:unknown)=>{values:{title:string;value:string}[]}}
 const registered=vi.hoisted(()=>new Map<string,ChartTemplate>());vi.mock('klinecharts',()=>({registerIndicator:(v:ChartTemplate)=>registered.set(v.name,v)}));
-import {registerDbl5Indicator} from '../dbl5mChart';
+import {registerDbl5Indicator,dbl5VisibleGuardRegime} from '../dbl5mChart';
 import {accountResearchIndicators} from '../researchIndicators';
 // 【用户要求】2026-11-02 颜色太多分不清：防守线是唯一主线（蓝色），上涨期实线、震荡期虚线；箱底箱顶淡色细线；只有防守线跌破画红叉
 it('draws the guard as the single blue main line, dashed only in ranges, with faint box lines and a red cross only for a confirmed guard break',()=>{
@@ -22,6 +22,25 @@ function drawGuard(result:Record<string,number>[],spacing=3,from=0){
  return strokes.filter(s=>s.color==='#2563eb'&&s.alpha===1);
 }
 const guard=(trend=0,segment=0)=>({_DBL5_guard:98,_DBL5_guard_trend:trend,_DBL5_guard_segment:segment});
+
+it('labels the published regime at the visible right edge without reading future candles or mutating results',()=>{
+ const rows=[guard(1),guard(0),guard(1)],before=JSON.stringify(rows),pixel=(i:number)=>i*100;
+ expect(dbl5VisibleGuardRegime(rows,0,3,199,pixel)).toBe('趋势');
+ expect(dbl5VisibleGuardRegime(rows,0,3,210,pixel)).toBe('震荡');
+ expect(dbl5VisibleGuardRegime(rows,0,3,310,pixel)).toBe('趋势');
+ expect(JSON.stringify(rows)).toBe(before);
+ for(const last of [{_DBL5_guard_broken:1},{_DBL5_guard:98},{...guard(),_DBL5_guard_trend:NaN},{...guard(),_pending:1},{...guard(),_DBL5_invalid:1}])expect(dbl5VisibleGuardRegime([guard(1),last],0,2,210,pixel)).toBeNull();
+});
+it.each([1,0])('draws a small unboxed regime key inside the pane margin (trend=%s)',trend=>{
+ registerDbl5Indicator(accountResearchIndicators().find(i=>i.id==='DBL5')!);
+ const ctx={save:vi.fn(),restore:vi.fn(),setLineDash:vi.fn(),beginPath:vi.fn(),moveTo:vi.fn(),lineTo:vi.fn(),stroke:vi.fn(),fillText:vi.fn(),measureText:()=>({width:80})};
+ const args={ctx,indicator:{result:[{...guard(trend),value:100,DBL5_upper:104,_DBL5_episode:1,_DBL5_box:1}]},visibleRange:{from:0,to:1},bounding:{width:400,height:300},xAxis:{convertToPixel:(i:number)=>i*10},yAxis:{convertToPixel:(v:number)=>v},defaultStyles:{tooltip:{text:{color:'#8895a5'}}}};
+ registered.get('DBL5_CUSTOM')!.draw(args);
+ expect(ctx.fillText).toHaveBeenCalledWith('防守线 · '+(trend?'趋势':'震荡'),392,290);
+ expect(ctx.setLineDash).toHaveBeenCalledWith(trend?[]:[5,3]);expect(ctx.moveTo).toHaveBeenCalledWith(288,287);
+ ctx.fillText.mockClear();registered.get('DBL5_CUSTOM')!.draw({...args,bounding:{width:120,height:70}});expect(ctx.fillText).not.toHaveBeenCalled();
+ registerDbl5Indicator(accountResearchIndicators().find(i=>i.id==='DBL5_DISTANCE')!);registered.get('DBL5_DISTANCE_CUSTOM')!.draw(args);expect(ctx.fillText).not.toHaveBeenCalled();
+});
 
 it.each([1,3,4,12])('keeps visible dash gaps across candles spaced only %s pixels apart',spacing=>{
  const strokes=drawGuard(Array.from({length:30},()=>guard()),spacing);

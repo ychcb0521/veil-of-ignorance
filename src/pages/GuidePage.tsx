@@ -1,5 +1,7 @@
 import {FishingGuideContent} from '@/components/FishingGuideContent';
 import {FISHING_GUIDE_TOC} from '@/components/fishingGuideOutline';
+import {DeepDigGuideContent} from '@/components/DeepDigGuideContent';
+import {DEEP_DIG_GUIDE_TOC} from '@/components/deepDigGuideOutline';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowDown, ArrowRight, ChevronDown, Download, List } from 'lucide-react';
@@ -52,6 +54,7 @@ const TOC: TocItem[] = [
       { id: 's4-diary', label: '4.5 情绪日记' },
       { id: 's4-3', label: '4.6 交易战役' },
       { id: 's4-5', label: '4.7 规则' },
+      DEEP_DIG_GUIDE_TOC,
     ],
   },
   { id: 's7', label: '5. 数据边界与硬约束' },
@@ -200,6 +203,7 @@ function buildGuideExport(items: TocItem[]): string {
       const section = document.getElementById(node.id);
       const clone = section?.cloneNode(true) as HTMLElement | undefined;
       clone?.querySelectorAll('section[id]').forEach(child => child.remove());
+      clone?.querySelectorAll('details').forEach(details=>{details.open=true;});
       const body = normalizeExportText(clone?.innerText ?? '');
 
       lines.push(`${'#'.repeat(Math.min(depth + 1, 6))} ${node.label}`, '');
@@ -2107,6 +2111,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 规则的价值不在于写得完整，而在于能否前置到下一次决策点，并在元监控中看到对应错误频次下降。
               </Highlight>
             </section>
+            <DeepDigGuideContent/>
           </section>
 
           <section id="s7" className="scroll-mt-20">
