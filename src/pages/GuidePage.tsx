@@ -1,6 +1,7 @@
-import {FishQualityGuideContent} from '@/components/FishQualityGuideContent';
+import {FishingGuideContent} from '@/components/FishingGuideContent';
+import {FISHING_GUIDE_TOC} from '@/components/fishingGuideOutline';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowDown, ArrowRight, ChevronDown, Download, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -31,19 +32,12 @@ const TOC: TocItem[] = [
     children: [
       { id: 's3-0', label: '3.1 交易模式与持仓限制' },
       { id: 's3-1', label: '3.2 时光机与行情' },
-      { id: 's3-fish', label: '渔：特征值手动捕捞' },
-      { id: 's3-fish-quality', label: '鱼质量：目的与模块' },
-      { id: 'fq-workflow', label: '鱼质量：完整操作流程' },
-      { id: 'fq-time', label: '鱼质量：时间与来源' },
-      { id: 'fq-screening', label: '鱼质量：动态筛选' },
-      { id: 'fq-monitor', label: '鱼质量：持仓监测' },
-      { id: 'fq-table', label: '鱼质量：评分与导出' },
-      { id: 'fq-notes', label: '鱼质量：注意事项与常见问题' },
-      { id: 's3-1b', label: '3.3 P_gap 优势边际' },
-      { id: 's3-1c', label: '3.4 宽框架与严框架' },
-      { id: 's3-2', label: '3.5 下单前快照' },
-      { id: 's3-3', label: '3.6 平仓评价复盘' },
-      { id: 's3-4', label: '3.7 持仓与历史' },
+      FISHING_GUIDE_TOC,
+      { id: 's3-1b', label: '3.4 P_gap 优势边际' },
+      { id: 's3-1c', label: '3.5 宽框架与严框架' },
+      { id: 's3-2', label: '3.6 下单前快照' },
+      { id: 's3-3', label: '3.7 平仓评价复盘' },
+      { id: 's3-4', label: '3.8 持仓与历史' },
     ],
   },
   {
@@ -65,7 +59,8 @@ const TOC: TocItem[] = [
   { id: 's9', label: '7. 判断标准' },
 ];
 
-const FLAT_TOC = TOC.flatMap(t => [t, ...(t.children ?? [])]);
+const flattenToc = (items:TocItem[]):TocItem[] => items.flatMap(item=>[item,...flattenToc(item.children??[])]);
+const FLAT_TOC = flattenToc(TOC);
 
 function Highlight({ children }: { children: ReactNode }) {
   return (
@@ -133,42 +128,22 @@ function jumpToSection(id: string) {
 }
 
 function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }) {
-  const jump = (id: string) => {
-    jumpToSection(id);
-    onJump?.();
-  };
-  return (
-    <nav className="guide-toc">
-      <div className="guide-toc-label">目录</div>
-      {TOC.map(item => (
-        <div key={item.id}>
-          <button
-            type="button"
-            onClick={() => jump(item.id)}
-            aria-current={activeId === item.id ? 'location' : undefined}
-            className={`guide-toc-link ${
-              activeId === item.id ? 'is-active' : ''
-            }`}
-          >
-            {item.label}
-          </button>
-          {item.children?.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => jump(c.id)}
-              aria-current={activeId === c.id ? 'location' : undefined}
-              className={`guide-toc-link guide-toc-link--child ${
-                activeId === c.id ? 'is-active' : ''
-              }`}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-      ))}
-    </nav>
-  );
+  const jump = (id: string) => { jumpToSection(id); onJump?.(); };
+  const branch = (items:TocItem[],depth=0):ReactNode => <ol className="guide-toc-items">
+    {items.map(item=>{
+      const parts=item.label.match(/^(\d+(?:\.\d+)*\.?)\s+(.+)$/);
+      return <li key={item.id} data-toc-section={item.id}>
+        <button type="button" aria-label={item.label} title={item.label}
+          onClick={()=>jump(item.id)} aria-current={activeId===item.id?'location':undefined}
+          className={'guide-toc-link '+(depth?'guide-toc-link--child ':'')+(activeId===item.id?'is-active':'')}
+          style={{paddingLeft:12+depth*8}}>
+          {parts?<><span className="guide-toc-number">{parts[1]}</span><span className="guide-toc-text">{parts[2]}</span></>:item.label}
+        </button>
+        {item.children?.length?branch(item.children,depth+1):null}
+      </li>;
+    })}
+  </ol>;
+  return <nav className="guide-toc" aria-label="使用说明目录"><div className="guide-toc-label">目录</div>{branch(TOC)}</nav>;
 }
 
 function KeyGrid({ children }: { children: ReactNode }) {
@@ -243,7 +218,15 @@ const GUIDE_PAGE_FRAME = 'mx-auto max-w-[1680px] px-4 sm:px-6';
 const GUIDE_LAYOUT_GRID = `${GUIDE_PAGE_FRAME} grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)]`;
 
 export default function GuidePage() {
+  const {hash}=useLocation();
+  useEffect(()=>{
+    if(!hash)return;
+    let id=hash.slice(1);try{id=decodeURIComponent(id);}catch{/* Keep malformed fragments inert. */}
+    const frame=requestAnimationFrame(()=>jumpToSection(id));
+    return ()=>cancelAnimationFrame(frame);
+  },[hash]);
   const [activeId, setActiveId] = useState<string>('s1');
+  const [tocOpen,setTocOpen]=useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [charCount, setCharCount] = useState<number | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -332,15 +315,15 @@ export default function GuidePage() {
         <div className={`${GUIDE_PAGE_FRAME} flex h-14 items-center gap-3`}>
 
           <div className="md:hidden">
-            <Sheet>
+            <Sheet open={tocOpen} onOpenChange={setTocOpen}>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 px-2">
                   <List className="h-4 w-4 mr-1" /> 目录
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-[260px] bg-card border-border">
+              <SheetContent side="left" className="w-[min(320px,calc(100vw-2rem))] max-h-dvh overflow-y-auto overscroll-contain bg-card border-border">
                 <div className="mt-4">
-                  <TocList activeId={activeId} />
+                  <TocList activeId={activeId} onJump={()=>setTocOpen(false)} />
                 </div>
               </SheetContent>
             </Sheet>
@@ -811,48 +794,12 @@ export default function GuidePage() {
             </section>
 
             <section id="s3-fish" className="scroll-mt-20">
-              <SubTitle anchor>渔：特征值手动捕捞</SubTitle>
-              <P>在指定时刻筛选符合算法条件的标的，找到这一轮条件开始成立的时间。按下面的顺序操作。</P>
-
-              <P><strong>1. 选时间与范围</strong>：在 Time Machine 旁打开「渔」。时间留空就是现在；回看历史时输入 UTC+8 时间，不能选未来。点滑杆图标「捕捞范围」选择交易所，默认只选币安；「美股」默认不选，需要时勾选，目前支持币安和 Bitget 的美股永续。默认排除较高优先级交易所已上线的重复币，想比较不同交易所时勾选「含重复币」。</P>
-              <P><strong>2. 设置算法</strong>：每行依次选特征值、序列、方向，填阈值。「结果」是该公式的最终输出；选到 avg_X 就直接比较 avg_X，不再额外取平均。选「结果」时按界面显示单位填阈值，选中间序列时按原值填写。&gt; 和 &lt; 都是严格比较，等于阈值不算满足。</P>
-              <P><strong>新鱼邮件提醒</strong>：在「渔 → ⋯ → 邮件提醒」打开设置。勾选「新鱼发到邮箱」，添加收件邮箱（可加多个，一次输入多个用逗号或空格隔开，最多 20 个；逐个独立发送，收件人互不可见），再填 EmailJS 的 Service ID、Template ID、Public Key（在 emailjs.com 免费注册、连上自己的 Gmail / QQ / 163 等邮箱、按设置里的三步建模板即可；模板 To Email 用 <code>{'{{private_to_email}}'}</code>，Cc、Bcc、Reply To 留空；每位收件人单独计一次请求）。之后每轮捕捞结束（手动或自动），邮件从本轮实际捕获的算法并集中，按已保存的「来源算法」与交集 / 并集筛选，只要和上一封邮件里的不一样（多了或少了），就发一封：内容是整张表，和面板里一样按信号时间最近的在上，列为标的、信号时间、算法类型、市场，比上一封多出来的那几行标「新」；列表没变或空了不发（邮件设置里会写「和上一封一样，未重复发」）；发送失败不记，下一轮再比。表格最多列 60 行，其余写「还有 N 条」，保证不超过 EmailJS 免费版的大小上限。模板正文写 <code>{'{{{message_html}}}'}</code>（三层大括号）显示表格，写 <code>{'{{message}}'}</code> 是纯文字版。「发测试邮件」按同一来源规则筛选当前列表发一份（没有符合的信号时发示例）。设置跟账号同步，换电脑也在；邮件从开着网站的那台电脑发出。</P>
-              <P>渔的「… → 邮件提醒 → 来源算法」可手动多选邮件信号来源，并设置交集或并集；修改后随账号保存，刷新或重新打开不重置。未手动设置时沿用 CBI-2·avg₂ 与 CBA·avg₂ 共振；清空来源后自动提醒暂停，直到重新选择。来源只筛选捕捞实际命中的记录，不改变捕捞算法、门槛或扫描频率。</P>
-              <P><strong>手动 / 自动捕捞</strong>：默认「自动」，每 1 小时捕捞一次；首次使用默认「自动、每 1 小时」。手动调整算法、阈值、合并方式、扫描时长、捕捞范围、插针过滤和自动捕捞设置后，点击算法区域的「保存参数」；看到保存到账号的提示后，同账号在其他电脑打开也会恢复整套配置，直到下次手动修改并保存。尚未保存的调整为临时设置。手动时点「开始捕捞」才捕。自动：选间隔（每 0.5 / 1 / 2 / 4 / 8 / 16 / 32 / 64 小时），切到自动时立刻捕第一次，之后每隔这么久按当前时间自动捕一次，用的算法卡、合并方式、交易所范围、成交额门槛与「开始捕捞」完全相同；旁边写着下次的时刻。前提是网站开着（放在后台标签页也行，「渔」面板收起也照常捕）：电脑睡眠、断网或浏览器关着时错过的那次，恢复后马上补一次（不会连补好几轮）；断网时显示「等待联网」，取数器正被捕捞 / 复原占用时等它结束再捕；同一台电脑开多个标签页只有一个去捕。自动模式下手动点「开始捕捞」也算一次，下次从这次往后数。自动模式下时间框默认是「现在」：打开页面或从手动切到自动时都清空，不沿用以前输过的时间；在自动模式里自己输了时间，只用于那次手动点「开始捕捞」，自动到点的那几次始终按当前时间。已保存的模式和间隔随账号同步；每台电脑的运行进度与定时租约仍各自保留。</P>
-              <P><strong>鱼只要没删就一直留着</strong>：「鱼舱」和「新鱼」里的记录只有你手动删除才会去掉。每轮开始前，先将全部新鱼保存为鱼舱快照；同一信号再次命中会进入本轮「新鱼」，已有鱼舱记录仍保留；入舱时相同内容合并为一条，读数取最近一次，评分沿用。点击后立即入舱并继续捕捞，不等待保存；完整记录由本机 IndexedDB 后台保存，并同步到账号，localStorage 空间不足也不会阻止启动。换浏览器、Lovable 预览窗口或另一台设备时，各处的鱼列表在同步时取并集，谁也盖不掉谁（以前是后同步的一份整份覆盖，另一处的少量鱼会把这里的鱼冲掉）；手动删除会留一个删除记号，别处的旧副本带不回来，之后重新捕到同一条照常保留。刷新或重新打开「渔」后，上一轮的新鱼保持原样；只有你改了勾选、交集 / 并集或阈值，才按新的组合重新排「新鱼」；交集 / 并集在捕捞进行中也能切换：已判完的币当场按新组合重排，还没扫到的直接按新组合出，扫完以最后选的为准；新组合不要的那几条移进「鱼舱」继续保留，不会消失。鱼舱中标的、市场、信号时间和算法类型相同的记录只留最近一次，评分沿用；不同轮次也不重复列出，入舱时间可在捕捞过程中查看。删除要点两下：行末 × 先变成红色「确认删除」，3 秒内再点才删（不点或点别处就恢复），避免点跳转箭头时误删。</P>
-              <P><strong>默认六条规则</strong>：仅首次使用时建立初始规则；此后每次打开都沿用最后保存的算法、顺序、勾选、序列、方向、阈值和交集 / 并集，不因默认配置更新而重置。旧版初始规则曾按 CBI-2、az、CDA、BSS、S 原值、S 的 avg₂ 排列。默认条件依次为 avg_CBI2_2 &gt; 0.04、avg_a_2 &gt; 15（归一化×100）、avg_CDA_2 &gt; 8、avg_BSS_2 &gt; 0.08、state &gt; 0.7，且「连续高于 0.55 至少 6 小时」或「连续高于 0.66 至少 3 小时」任一满足、avg_state_2 &gt; 0.6，默认<strong>并集</strong>，满足任一条就留下；前四条通过「结果」读取账号公式的最终输出。S 原值按已收盘读数判定：两条持续路径分别计时，从首次高于各自门槛的收盘时刻计起；期间等于或低于对应门槛，该路径就重新计时。当前还须高于 0.7，不要求持续期间一直高于 0.7。信号起点为两项条件首次同时满足的时刻。S 的 avg₂ 保持原规则。两条 S 规则独立保存，修改一条不会覆盖另一条。已保存的设置优先，不再用新版默认规则覆盖；Deep dig 中已移除的算法跳过。手动和自动捕捞使用同一份设置。每行淡色问号收纳算法说明、持续时间条件、阈值单位、参考区间和计算状态；底部问号查看完整组合规则。行尾「…」用于删除规则；删除后可用「+ 算法」添加一行，最多 6 条。</P>
-              <P><strong>3. 选择组合</strong>：勾选要显示的算法，再选「交集」或「并集」。组合按交易所、市场和标的分别判断。每个算法使用自己的周期，只看截止前已收盘的数据；截止会自动对齐到各自周期。</P>
-              <ul className="my-2 space-y-1 pl-5 text-sm leading-relaxed text-muted-foreground list-disc">
-                <li><strong className="text-foreground">交集</strong>：所选算法都命中才留下，信号时间取各算法起点中最晚的一个。</li>
-                <li><strong className="text-foreground">并集</strong>：任一所选算法命中就留下，信号时间取命中算法起点中最早的一个。</li>
-              </ul>
-              <P><strong>命中不只看截止读数。</strong>截止时须满足条件，并能找到本轮越线起点：前一根不满足、这一根满足，此后持续满足到截止。信号时间是起点那根的收盘时间。如果历史一开始就已满足、无法确认何时越线，会记为「起点不明」，不算命中，也不进入交集或并集。</P>
-              <P><strong>4. 开始捕捞</strong>：点击「开始捕捞」，运行时设置锁定，可点「取消」。状态行看命中数、已扫 / 总数与实际截止；悬停可看各算法命中和成交额不足的跳过数。取消后只保留已经完成判定的结果。</P>
-              <P><strong>向下大插针过滤</strong>：默认开启，设置收在「更多 → 捕捞范围」。默认检查截止前 48 小时已收盘的 5m K 线；任一根从开盘价到最低价的跌幅严格大于该根之前 ATR(14) 的 3 倍，即过滤该币，不参与任何算法的交集或并集。ATR(14) 为该根之前 14 根真实波幅的简单均值，不含该根和之后的数据；大阴线和下影线都计入，不要求下影占比或实体比例。旧版 24 小时 / 3 倍的默认配置会升级为 48 小时，此后手动选择的回看时长保留。回看可选 6 / 12 / 24 / 48 / 72 小时，ATR 倍数可选 1 / 1.5 / 2 / 3；设置按账号保存在本机，手动、自动及单币查询共用，各算法无论自身周期都使用同一 5m 过滤窗口。缺少该窗口数据时跳过并说明原因，不直接放行。修改后下次捕捞生效，已保存的鱼继续保留。</P>
-              <P>点击捕捞进度中的「插针过滤 n」可查看本轮明细：标的、交易所、触发时间、开盘至最低价跌幅、此前 ATR 与当轮门槛；每个交易所、标的只记首根触发线，多算法不重复计数。「查看 K 线」展示原交易所快照，金色框标明触发线，并可打开该根收盘时刻的历史盘面（保留主盘面当前周期）。非币安标的若存在映射，另标为「币安参考盘面」，价格可能不同；没有映射仍可看原始快照。明细随本轮结果保存，旧版只留了数量的记录需重新捕捞才能补齐。</P>
-              <P><strong>注意捕捞范围的硬门槛</strong>：稳定币始终排除；截止前 <strong>24 小时成交额至少 1000 万、1 小时至少 100 万、12 小时至少 800 万 USDT</strong>，三项都够才参与判定（K 线不够覆盖 24 小时的短周期算法记为读数不全，不按少算的成交额误判）。命中之后在<strong>信号起点之前</strong>再按同样三项查一次：截止前达标、起点前不达标（起点之后才放量）的币也成不了鱼，这样回放到信号时刻，盘口的「24h 成交额」也在 1000 万以上。捕捞完把阈值调严重判时，新起点照样查。缺口、历史不足、读数不全、超出可取历史或请求失败的标的会跳过；这些情况不等于算法未达标。某家所需数据不可用时会提示原因，其余可用交易所继续。</P>
-              <P><strong>5. 检查结果</strong>：本轮结果在「新鱼」，下次开始捕捞时上一轮归入「鱼舱」。「算法类型」显示实际命中的算法，可点表头排序或用下拉筛选。点每条鱼的「捕捞过程」，重点看越线前后读数、起点、连续满足情况和截止读数，核对它为什么入选。可以评分、删除或跳转盘面；没有可用币安盘面的标的不能跳转。鱼舱和新鱼与「信号库」分开，不提供加入信号库功能。</P>
-              <P><strong>6. 调整与比较</strong>：每轮会计算所有设置有效的算法卡，包括未勾选的卡。扫完后可自由勾选、取消，并切换交集 / 并集，「新鱼」和命中数即时变化，不必重扫；全不选时为零，重新勾选会恢复。结果在当前浏览器保留，刷新后仍可组合，直到开始下一轮。</P>
-              <P>阈值<strong>调严</strong>可以即时过滤：&gt; 调大、&lt; 调小；调回本轮阈值可恢复。<strong>调宽、换特征值、换序列、换方向、换时间，或新增本轮没算过的算法，都要重新捕捞。</strong>出现「下面仍是上一轮的结果」时，先看提示，别把旧结果当成新设置的结果。</P>
-
-              <details className="my-3 rounded-lg border border-border/60 px-3 py-2 text-sm text-muted-foreground">
-                <summary className="cursor-pointer font-medium text-foreground">按需：查单个币、复原、信号成交额</summary>
-                <P><strong>查单个币</strong>：点顶栏放大镜，输入标的并选交易所，按当前算法、阈值与时间查看结论。想知道某个币为什么没入选，先用它；会分别说明各算法及最终组合是否命中，或是成交额不足、起点不明、数据不可用。查询不保存为鱼。</P>
-                <P><strong>复原</strong>：想比较哪套算法更贴近已有信号时再点。样本只认 Time Machine 旁「信号库」，不含鱼和新鱼；每条信号只用它发生之前已收盘的数据。先配好算法卡的「结果 · avg_X」与阈值，再点击「复原」（统一按 &gt; 评估），可取消。</P>
-                <P>结果先看有效 / 总信号数，再看捕获率、精确率、噪音率与 F1。捕获率看已知信号抓到了多少；精确率看越线中有多少对应已知信号；F1 兼顾严格捕获率和精确率，噪音率则越低越好。严格捕获要求本轮起点落在信号前一根到信号时刻之间，宽松捕获放宽到前 1 小时；此前 3 天的越线若不对应同币任何信号的前 1 小时窗口，就算噪音。噪音率按次 / 币·天计，缺数据的信号不进分母。门槛用较早的 70% 信号选择，表中表现用较晚的 30% 检验；可展开比较候选门槛。「最可能」只是历史匹配，不能证明当初实际用了哪套算法，也不代表未来收益。</P>
-                <P>复原后，信号库「匹配」列会列出算法与门槛，宽松匹配用淡色；悬停看当时读数和起点。可切换最佳门槛 / 当前阈值；切换本身不启动计算。显示「—」或「已过期」时，先复原或重新评估。复原的结果表默认收起：点「复原」两个字（后面有个很淡的箭头）展开或收起，这次浏览里记住；复原进行中的进度照常显示在外面。复原结果只存本机，不修改信号记录：先存浏览器的 IndexedDB（容量大，刷新、重开后还在，同一套设置下次直接显示、不重算），存不进才退回 localStorage；两处都存不下时才提示「本机存储空间不足」。</P>
-                <P><strong>信号成交额</strong>：点信号库导出旁的柱状图图标，再点「开始统计」。切换 24 / 12 / 6 / 4 / 2 / 1 小时，查看信号出现前的成交额区间、分布和评分关系；评分图每点一条信号，菱形是各评分档中位数。比较时同时看样本数，未评分或缺成交额的不入图；上市时间不足的样本按实际覆盖时段计。CSV 包含六个时长成交额和当前评分。已有结果直接查看，修改评分不必重算；信号库变化后按过期提示更新。捕捞、复原、成交额统计不能同时运行。</P>
-              </details>
-              <P>捕捞结果用于筛选和研究；是否交易，还要回到盘面判断。</P>
-            </section>
-
-            <section id="s3-fish-quality" className="scroll-mt-20">
-              <SectionTitle>鱼质量：使用说明</SectionTitle>
-              <FishQualityGuideContent guide/>
+              <SubTitle anchor>{FISHING_GUIDE_TOC.label}</SubTitle>
+              <FishingGuideContent/>
             </section>
 
             <section id="s3-1b" className="scroll-mt-20">
-              <SubTitle anchor>3.3 P_gap 优势边际</SubTitle>
+              <SubTitle anchor>3.4 P_gap 优势边际</SubTitle>
               <P>
                 P_gap 是交易页右栏最上方的常驻仪表，<strong>默认完整显示</strong>。它只回答一个问题：<strong>你自认的胜率，比市场白送的那一份高出多少。</strong>它只读不写——不落库、不记历史、不做校准统计、不给仓位建议，读数即全部功能。
               </P>
@@ -983,7 +930,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-1c" className="scroll-mt-20">
-              <SubTitle anchor>3.4 宽框架与严框架</SubTitle>
+              <SubTitle anchor>3.5 宽框架与严框架</SubTitle>
               <P>标的入选走哪套框架，决定了这笔仓位后续的全部待遇——<strong>建仓之前就要定，不在持仓中途换</strong>。</P>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
@@ -1157,7 +1104,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-2" className="scroll-mt-20">
-              <SubTitle anchor>3.5 下单前快照</SubTitle>
+              <SubTitle anchor>3.6 下单前快照</SubTitle>
               <P>开仓快照是系统的核心记录点。它固定“下单前的你”看到什么、相信什么、愿意亏多少、处在什么心态。但这里有一个必须先讲清的底层原则：<strong>主力单与对冲单不是同一类决策，不能用同一套问题去问。</strong> 主力单是在分布右尾下注，核心是“这次机会为什么值得押”；对冲单是在分布左尾买保险，核心是“什么时候裸拿已经变成负期望，应该让保险接管”。</P>
 
               <SubTitle>零号关 · Stop Doing List：开仓前先过这张「我决心不做」</SubTitle>
@@ -1458,7 +1405,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-3" className="scroll-mt-20">
-              <SubTitle anchor>3.6 平仓评价复盘</SubTitle>
+              <SubTitle anchor>3.7 平仓评价复盘</SubTitle>
               <P>决策记录模式下，平仓会打开一个与开仓快照同规格的<strong>居中评价弹窗</strong>，不完成评价不能离开。评价的重心不是重新讲一遍故事，而是把快照时的预测和最终实际结果对上：预设的证伪信号兑现没有，结构破坏信号出现没有，进场时钉下的置信度有没有被验证。</P>
               <P>弹窗按这条主线展开：<strong>事实模块</strong>逐条核验快照里押的<strong>反 / 止 / 结构 / 置信</strong>四条腿 → <strong>决策质量</strong>（入场 / 持仓 / 离场三栏）→ 系统自动归纳<strong>结构 × 结果四象限</strong> → <strong>路径</strong>（滚仓 / 镜像止盈 + 交易主动权）→ <strong>体检模块</strong>（过程纠结度 / 小机会仓位记账 / 踏空高盈亏比结构）→ <strong>反对者陈述追踪</strong>（条件触发）→ <strong>情绪侧七问</strong>。先对账，再判读，最后翻动机，避免复盘变成事后重新叙述。</P>
 
@@ -1658,7 +1605,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s3-4" className="scroll-mt-20">
-              <SubTitle anchor>3.7 持仓与历史</SubTitle>
+              <SubTitle anchor>3.8 持仓与历史</SubTitle>
               <P>底部历史区用于检查执行结果。重点关注三类记录：未评价交易、仓位历史记录、平仓方式。</P>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>未评价交易</strong>：优先补齐。已平仓未评价会硬阻塞下一次开仓。</li>

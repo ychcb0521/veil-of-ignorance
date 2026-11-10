@@ -16,8 +16,18 @@ describe('【用户要求】使用说明目录：悬停不在左下角弹网址'
     fireEvent.click(item);
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(scrollIntoView.mock.contexts[0]).toBe(document.getElementById('s3-0'));
-    fireEvent.click(within(toc).getByRole('button',{name:'鱼质量：评分与导出'}));
+    fireEvent.click(within(toc).getByRole('button',{name:'3.3.4.4 组合表'}));
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(document.getElementById('fq-table'));
-    expect(document.getElementById('fq-table')?.tagName).toBe('H3');
+    expect(document.getElementById('fq-table')?.tagName).toBe('H5');
+    const fish=toc.querySelector('[data-toc-section="s3-fish"]')!;
+    const quality=fish.querySelector('[data-toc-section="s3-fish-quality"]')!;
+    const modules=quality.querySelector(':scope > ol')!;
+    expect(Array.from(modules.children).map(li=>li.querySelector('button')?.textContent)).toEqual([
+      '3.3.4.1批量挖掘','3.3.4.2买前过滤','3.3.4.3持仓监测','3.3.4.4组合表',
+    ]);
+    const filter=quality.querySelector<HTMLElement>('[data-toc-section="fq-pre-entry"]')!;
+    expect(within(filter).getByRole('button',{name:'3.3.4.2.1 静态过滤：设置原时点条件'})).toBeInTheDocument();
+    expect(document.getElementById('fq-static')?.tagName).toBe('H6');
+    expect(document.getElementById('s3-fish-quality')?.tagName).toBe('H4');
   });
 });

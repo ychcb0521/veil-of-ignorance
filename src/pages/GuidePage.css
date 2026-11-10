@@ -1239,6 +1239,45 @@
   color: hsl(var(--toc-ink));
 }
 
+/* 多级目录按正文层级递归展示。长标题换行，不靠横向滚动读完编号。 */
+.guide-toc .guide-toc-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.guide-toc .guide-toc-link {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  height: auto;
+  min-height: 2rem;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+  line-height: 1.55;
+  white-space: normal;
+}
+.guide-toc-number { flex: none; font-variant-numeric: tabular-nums; }
+.guide-toc-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* 3.3 渔沿用交易页 H3；模块 H4、功能 H5、静态/动态等下属项 H6。 */
+.guide-page .fishing-manual-heading {
+  --flow-step: var(--gap-topic);
+  scroll-margin-top: 96px;
+  line-height: 1.65;
+  font-weight: var(--w-bold);
+  text-wrap: pretty;
+}
+.guide-page h4.fishing-manual-heading {
+  --flow-step: var(--gap-sub);
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+  padding-bottom: 0.5rem;
+  font-size: var(--fs-h4);
+}
+.guide-page h5.fishing-manual-heading { font-size: 17px; }
+.guide-page h6.fishing-manual-heading { font-size: var(--fs-body); }
+.guide-page .fishing-manual-heading + * { --flow-step: var(--gap-tight); }
+.guide-page .fishing-manual li { line-height: var(--lh); }
+
 /* 键盘焦点。原来完全没有——只剩 UA 默认焦点环，而侧栏是 bg-card + p-3，
    链接紧贴容器内壁，默认环在暗色卡上几乎看不出。用 --ring 并推离内壁；
    焦点在框外、阅读位置在框内，两者不打架。 */
