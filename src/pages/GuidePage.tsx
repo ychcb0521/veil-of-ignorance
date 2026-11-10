@@ -59,8 +59,13 @@ const TOC: TocItem[] = [
   { id: 's9', label: '7. 判断标准' },
 ];
 
+// 目录最多三级；正文的完整编号、锚点和说明继续保留。
+const visibleToc = (items:TocItem[],level=1):TocItem[] => items.map(({children,...item})=>({
+  ...item,...(children&&level<3?{children:visibleToc(children,level+1)}:{}),
+}));
+const VISIBLE_TOC = visibleToc(TOC);
 const flattenToc = (items:TocItem[]):TocItem[] => items.flatMap(item=>[item,...flattenToc(item.children??[])]);
-const FLAT_TOC = flattenToc(TOC);
+const FLAT_TOC = flattenToc(VISIBLE_TOC);
 
 function Highlight({ children }: { children: ReactNode }) {
   return (
@@ -143,7 +148,7 @@ function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }
       </li>;
     })}
   </ol>;
-  return <nav className="guide-toc" aria-label="使用说明目录"><div className="guide-toc-label">目录</div>{branch(TOC)}</nav>;
+  return <nav className="guide-toc" aria-label="使用说明目录"><div className="guide-toc-label">目录</div>{branch(VISIBLE_TOC)}</nav>;
 }
 
 function KeyGrid({ children }: { children: ReactNode }) {
