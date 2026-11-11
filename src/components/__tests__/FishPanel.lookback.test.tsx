@@ -19,7 +19,7 @@ it('defaults to 1 hour, sends the custom hours to manual capture and restores th
 it('shows the frozen range of the previous round and prevents invalid or mid-run edits',()=>{
  const progress={...initialFishProgress(),lookbackHours:12,status:'complete' as const};const h=render(<FishPanel {...props} progress={progress}/>);
  fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'2'}});fireEvent.blur(screen.getByLabelText('扫描覆盖时间（小时）'));
- expect(screen.getByTestId('fish-status')).toHaveAttribute('title',expect.stringContaining('本轮覆盖过去 12 小时'));expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('下一轮生效');expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('过去 12 小时的结果');
+ expect(screen.getByTestId('fish-status')).toHaveAttribute('title',expect.stringContaining('本轮覆盖过去 12 小时'));expect(screen.getByTestId('fish-status')).toHaveAttribute('title',expect.stringContaining('覆盖时间改为过去 2 小时，下一轮生效'));
  fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'0'}});fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(props.onStart).not.toHaveBeenCalled();expect(screen.getByText('扫描覆盖时间须大于 0 且不超过 8784 小时')).toBeInTheDocument();
  h.rerender(<FishPanel {...props} progress={{...progress,status:'running'}}/>);expect(screen.getByLabelText('扫描覆盖时间（小时）')).toBeDisabled();
 });
@@ -44,7 +44,9 @@ it('shows the actual frozen Beijing window and keeps a four-day-old hydrated fre
  const anchor=Date.UTC(2026,10,10,5,35),signal={id:'stale',symbol:'ICNTUSDT',timeMs:Date.UTC(2026,10,6,7,45),timeLabel:'2026-11-06 15:45:00',fallbackZone:'',freshCatch:true};
  const original=JSON.stringify(signal);
  render(<FishPanel {...props} signals={[signal]} progress={{...initialFishProgress(),anchorMs:anchor,cutoffMs:anchor,lookbackHours:1,status:'complete'}}/>);
- expect(screen.getByTestId('fish-scan-window')).toHaveTextContent('2026-11-10 12:35:00 ～ 2026-11-10 13:35:00');
+ const range = screen.getByTestId('fish-scan-window');
+ expect(range).toHaveTextContent(/^2026-11-10 12:35:00 ～ 13:35:00$/);
+ expect(range).toHaveAttribute('title','2026-11-10 12:35:00 ～ 2026-11-10 13:35:00（UTC+8）');
  expect(within(screen.getByTestId('fish-new')).queryByText('ICNTUSDT')).toBeNull();
  expect(screen.getByTestId('fish-old')).toHaveTextContent('1');expect(JSON.stringify(signal)).toBe(original);
 });

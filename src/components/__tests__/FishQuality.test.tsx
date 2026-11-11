@@ -441,13 +441,13 @@ it('sorts by every header, keeping empty values last in both directions', () => 
   fireEvent.click(screen.getByRole('button', { name: '按标的排序' })); expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
   expect(screen.getByRole('columnheader', { name: /标的/ })).toHaveAttribute('aria-sort', 'ascending');
 });
-it('sorts the combination table by actual mining time in both directions, with missing times last', () => {
+it('sorts ordinary and batch catches by actual capture time in both directions, with missing times last', () => {
   const s = state();
   s.study.samples = s.study.samples.map((sample, index) => ({
-    ...sample, origin: 'mined', origins: ['mined'],
+    ...sample, origin: index < 2 ? 'mined' : 'fish', origins: index < 2 ? ['mined'] : ['fish'],
     source: {
       ...sample.source, symbol: index < 2 ? 'AAAUSDT' : 'BBBUSDT',
-      timeMs: index < 2 ? T : T - 60_000, mined: { anchorMs: T },
+      timeMs: index < 2 ? T : T - 60_000, mined: index < 2 ? { anchorMs: T } : undefined,
       caughtAt: T + (index < 2 ? 10_000 : 30_000),
     },
   }));
@@ -455,7 +455,7 @@ it('sorts the combination table by actual mining time in both directions, with m
   render(<FishQuality state={s}/>);
   const symbols = () => screen.getAllByTestId('quality-fish-row').map(row => row.textContent!.match(/[A-Z]{3}USDT/)![0]);
   const heading = screen.getByTestId('quality-mined-at-column');
-  const button = within(heading).getByRole('button', { name: '按挖掘时间排序' });
+  const button = within(heading).getByRole('button', { name: '按捕捞时间排序' });
   expect(symbols()).toEqual(['CCCUSDT', 'AAAUSDT', 'BBBUSDT']);
   fireEvent.click(button);
   expect(heading).toHaveAttribute('aria-sort', 'descending');
@@ -738,16 +738,16 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   expect(screen.queryByRole('tab')).toBeNull();
   expect(screen.getByTestId('quality-mode')).toHaveTextContent('持仓监测');
   expect(screen.getByTestId('fish-mining-panel')).toBeVisible();
-  expect(screen.getByRole('region', { name: '批量挖掘模块' })).toBeVisible();
+  expect(screen.getByRole('region', { name: '批量捕捞模块' })).toBeVisible();
   expect(screen.getByRole('region', { name: '买前过滤模块' })).toBeVisible();
   expect(screen.getByRole('region', { name: '持仓监测模块' })).toBeVisible();
   const modules = screen.getByTestId('quality-modules');
-  expect(Array.from(modules.children).map(el => el.getAttribute('aria-label'))).toEqual(['批量挖掘模块', '买前过滤模块', '持仓监测模块']);
-  fireEvent.click(within(screen.getByRole('region', { name: '批量挖掘模块' })).getByRole('button', { name: '批量挖掘' }));
-  expect(screen.getByRole('region', { name: '批量挖掘模块' })).toBeVisible();
-  expect(screen.queryByRole('button', { name: /开始挖掘/ })).toBeNull();
-  fireEvent.click(within(screen.getByRole('region', { name: '批量挖掘模块' })).getByRole('button', { name: '批量挖掘' }));
-  expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
+  expect(Array.from(modules.children).map(el => el.getAttribute('aria-label'))).toEqual(['批量捕捞模块', '买前过滤模块', '持仓监测模块']);
+  fireEvent.click(within(screen.getByRole('region', { name: '批量捕捞模块' })).getByRole('button', { name: '批量捕捞', exact: true }));
+  expect(screen.getByRole('region', { name: '批量捕捞模块' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: '开始批量捕捞' })).toBeNull();
+  fireEvent.click(within(screen.getByRole('region', { name: '批量捕捞模块' })).getByRole('button', { name: '批量捕捞', exact: true }));
+  expect(screen.getByRole('button', { name: '开始批量捕捞' })).toBeInTheDocument();
   expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
 });
 // 【用户要求】2026-10-27「这个地方属于同一个模块，放在一起」「卖出改成：监测」「把过滤独立出来，与监测并列」

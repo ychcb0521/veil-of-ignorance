@@ -84,11 +84,13 @@ it('shows validation errors and preserves the previously saved rule', async () =
   expect(readFishDownwardWick().atrMultiple).toBe(3);
 });
 
-it('locks edits during scans and keeps the rejection count visible', async () => {
+it('locks edits during scans and shows the rejection count inside filter details', async () => {
   render(<FishPanel {...props} progress={{...initialFishProgress(),wickSkipped:3}}/>);
   const settings = await openSettings();
   expect(settings.getByLabelText('过滤向下大插针')).toBeDisabled();
   expect(settings.getByLabelText('插针幅度（ATR 倍数）')).toBeDisabled();
   expect(settings.getByLabelText('1 小时成交额（USDT）')).toBeDisabled();
-  expect(screen.getByTestId('fish-wick-skipped')).toHaveTextContent('插针过滤 3');
+  expect(screen.getByTestId('fish-toolbar')).not.toHaveTextContent('插针过滤');
+  fireEvent.click(screen.getByRole('button', { name: '过滤详情' }));
+  expect(screen.getByRole('dialog', { name: /插针过滤/ })).toHaveTextContent('本轮已过滤 3 个标的');
 });

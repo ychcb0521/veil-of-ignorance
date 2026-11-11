@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowUpRight, CandlestickChart, ChevronDown, Search } from 'lucide-react';
+import { ArrowUpRight, CandlestickChart, ChevronDown, Filter, Search } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { fishWickDuration, type FishWickRejection } from '@/lib/fish/downwardWick';
@@ -88,15 +88,11 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
   const cutoff=rows[0]?.cutoffMs??progress.cutoffMs;
   useEffect(()=>{if(selected&&open)document.getElementById('fish-wick-chart')?.scrollIntoView?.({behavior:'smooth',block:'nearest'});},[selected,open]);
   return <Dialog open={open} onOpenChange={next => { setOpen(next); if (!next) setThresholdsOpen(false); }}>
-    {sections.filter(section => section.count > 0).map(section => <span key={section.key} className="inline-flex items-center gap-2">
-      <span aria-hidden className="text-muted-foreground/40">·</span>
-      <button type="button" aria-haspopup="dialog" data-testid={section.key === 'wick' ? 'fish-wick-skipped' : 'fish-turnover-skipped'}
-        aria-label={`查看${section.label}详情（${section.count} 个）`}
-        onClick={event => { triggerRef.current = event.currentTarget; setTab(section.key); setOpen(true); }}
-        className="rounded-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-        {section.label} {section.count}
-      </button>
-    </span>)}
+    <button type="button" aria-haspopup="dialog" aria-label="过滤详情" title="过滤详情"
+      onClick={event => { triggerRef.current = event.currentTarget; setTab(wickCount > 0 ? 'wick' : 'turnover'); setOpen(true); }}
+      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+      <Filter aria-hidden className="h-3.5 w-3.5"/>
+    </button>
     <DialogContent
       className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0"
       onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus(); } }}

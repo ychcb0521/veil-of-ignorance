@@ -277,6 +277,9 @@ export function FishPanel(p: FishPanelProps) {
     for(const plan of plans){const checked=fishProgramForLookback(plan,hours,turnoverFloors);if(checked.unavailable)throw new Error(checked.unavailable);}
     p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
+  const scanWindow = windowAnchor != null && Number.isFinite(windowAnchor) && windowHours !== undefined
+    ? { start: formatUTC8(windowAnchor - windowHours * 3_600_000), end: formatUTC8(windowAnchor) }
+    : null;
   const captureHitRateSettings = (): FishHitRateSettings => ({
     version: 1,
     cards: [{ id: 'first', featureId: selected, enabled: firstEnabled, pref }, ...extraCards],
@@ -378,7 +381,7 @@ export function FishPanel(p: FishPanelProps) {
     <div className={`${fishRail} space-y-3`} data-testid="fish-catching-parts">
     <section aria-labelledby="fish-capture-progress-title" className="min-w-0 space-y-2">
       <header className="sticky top-0 z-10 min-w-0 bg-background" data-testid="fish-toolbar">
-      <div className="flex min-w-0 flex-wrap items-center gap-2 pb-2.5 pt-1 text-[11px]">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 pb-2 pt-1 text-[11px]">
         <h3 id="fish-capture-progress-title" className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap font-medium text-foreground/80">
           <Activity aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞进程
         </h3>
@@ -399,18 +402,26 @@ export function FishPanel(p: FishPanelProps) {
           <ChevronDown aria-hidden className={`h-3 w-3 transition-transform ${open.settings ? 'rotate-180' : ''}`}/>
         </button>
         {p.auto?.mode === 'auto' && <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>}
-      </div>
-      {x&&lookbackHours!==x.lookbackHours&&<p className="pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间改为过去 {lookbackHours} 小时，下一轮生效；{x.lookbackHours===undefined?'上一轮未设置覆盖时长。':`以下仍是过去 ${x.lookbackHours} 小时的结果。`}</p>}
-      {x?.anchorMs!=null&&Number.isFinite(x.anchorMs)&&x.lookbackHours!==undefined&&<p className="flex flex-wrap gap-x-1 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-scan-window"><span>本轮信号起点范围（北京时间，含边界）：</span><span className="font-mono tabular-nums">{formatUTC8(x.anchorMs-x.lookbackHours*3600000)} ～ {formatUTC8(x.anchorMs)}</span><span>；只使用已收盘 K 线</span></p>}
-      {x && <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pb-2.5 text-[11px]" data-testid="fish-status" title={[...(x.lookbackHours!==undefined?[`本轮覆盖过去 ${x.lookbackHours} 小时${x.counts.outside?`，${x.counts.outside} 个起点超出范围`:''}`]:[]),...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.wickSkipped?[`向下大插针已过滤 ${x.wickSkipped} 个`]:[]),...(x.thin?[`有 ${x.thin} 个标的出现成交额未达标`]:[])].join('；')||undefined}>
-          <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
-          <span className="text-muted-foreground/40">·</span>
-          <span className="text-muted-foreground">命中 <span className="font-mono text-[12px] font-semibold tabular-nums text-primary">{x.counts.hit}</span></span>
-          <span className="text-muted-foreground/40">·</span>
-          <span className="font-mono tabular-nums text-muted-foreground">{x.done} / {x.total}</span>
+        {x && <div className="inline-flex shrink-0 items-center gap-1.5">
+          <p role="status" aria-live="polite" className="inline-flex items-center gap-1.5 whitespace-nowrap" data-testid="fish-status" title={[
+            ...(x.lookbackHours !== undefined ? [`本轮覆盖过去 ${x.lookbackHours} 小时${x.counts.outside ? `，${x.counts.outside} 个起点超出范围` : ''}`] : []),
+            ...(lookbackHours !== x.lookbackHours ? [`覆盖时间改为过去 ${lookbackHours} 小时，下一轮生效`] : []),
+            ...(x.algorithmHits?.map((n, i) => `算法 ${enabledCardNumbers[i] ?? i+1} 命中 ${n}`) ?? []),
+          ].join('\n') || undefined}>
+            <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
+            <span aria-hidden className="text-muted-foreground/40">·</span>
+            <span className="text-muted-foreground">命中 <span className="font-mono font-semibold tabular-nums text-primary">{x.counts.hit}</span></span>
+            <span aria-hidden className="text-muted-foreground/40">·</span>
+            <span className="font-mono tabular-nums text-muted-foreground">{x.done} / {x.total}</span>
+          </p>
           {!!(x.wickSkipped || x.thin) && <FishWickDetails progress={x} onJump={p.onJumpQuality} jumpingSignalId={p.jumpingSignalId}/>}
-          {x.cutoffMs!=null&&<><span className="text-muted-foreground/40">·</span><span className="font-mono tabular-nums text-muted-foreground" data-testid="fish-cutoff" title="本轮实际使用的截止时刻（时间留空 = 币安服务器当前时间）">截止 {formatUTC8(x.cutoffMs).slice(0,16)}</span></>}
-      </p>}
+        </div>}
+        {scanWindow && <p className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1 font-mono text-[10.5px] tabular-nums text-muted-foreground"
+          data-testid="fish-scan-window" title={`${scanWindow.start} ～ ${scanWindow.end}（UTC+8）`}>
+          <span>{scanWindow.start}</span><span>{' ～ '}</span>
+          <span>{scanWindow.start.slice(0,10) === scanWindow.end.slice(0,10) ? scanWindow.end.slice(11) : scanWindow.end}</span>
+        </p>}
+      </div>
       <div className="relative h-px bg-border/60">{scanning && x && x.total > 0 && <span role="progressbar" aria-label="捕捞进度" aria-valuemin={0} aria-valuemax={x.total} aria-valuenow={Math.min(x.done, x.total)} className="absolute bottom-0 left-0 h-[2px] rounded-r-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />}</div>
       </header>
     <section id="fish-capture-settings" aria-label="捕捞设置" hidden={!open.settings}

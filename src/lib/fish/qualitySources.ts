@@ -24,9 +24,12 @@ export function resolveLegacySourceMemberships<T extends {deletedSources?:Record
 
 
 /** Wall-clock capture time. A historical scan anchor is never a capture time. */
-export function miningCaptureTime(signal: TradeSignal): number | null {
-  if (!signal.mined) return null;
+export function fishCaptureTime(signal: TradeSignal): number | null {
   const archive = signal.fishArchive;
-  const at = signal.caughtAt ?? (archive?.id.startsWith('mine-') ? archive.at : undefined);
+  const at = signal.caughtAt ?? (signal.mined && archive?.id.startsWith('mine-') ? archive.at : undefined);
   return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null;
+}
+
+export function miningCaptureTime(signal: TradeSignal): number | null {
+  return signal.mined ? fishCaptureTime(signal) : null;
 }

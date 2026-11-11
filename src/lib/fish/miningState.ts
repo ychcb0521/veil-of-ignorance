@@ -67,7 +67,7 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
     retryCount: Number.isInteger(v.retryCount) && v.retryCount! > 0 ? Math.min(v.retryCount!,100) : 0,
     lastErrorAt: Number.isFinite(v.lastErrorAt) && v.lastErrorAt! > 0 ? v.lastErrorAt : null,
     errorKind: v.errorKind === 'configuration' || v.errorKind === 'transient' ? v.errorKind : undefined } as FishMiningState;
-  if(v.endMs!==undefined&&(!Number.isFinite(v.startMs)||!Number.isFinite(v.endMs)||v.endMs<=v.startMs!))return {...normalized,enabled:false,lastError:'挖掘时间区间无效，请重新设置起止时间',errorKind:'configuration'};
+  if(v.endMs!==undefined&&(!Number.isFinite(v.startMs)||!Number.isFinite(v.endMs)||v.endMs<=v.startMs!))return {...normalized,enabled:false,lastError:'批量捕捞的扫描区间无效，请重新设置起止时间',errorKind:'configuration'};
   if (!upgrade) return normalized;
   return { ...normalized, presetRevision: MINING_PRESET_REVISION, rules: FISH_DEFAULT_RULES.map(rule=>({...rule})),
     ruleRepairs: ['已替换为四项默认条件，旧挖掘要求已废除；已有进度和历史结果保留'],

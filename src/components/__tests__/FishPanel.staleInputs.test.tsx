@@ -25,8 +25,9 @@ it('后台建议算完自动填阈值，不会把之后才填的捕捞时间冲�
  await waitFor(()=>expect(screen.getByLabelText('捕捞阈值')).toHaveValue(0.01));
  expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveValue('2026-04-09 23:03:00');
 });
-it('进度行写出本轮实际使用的截止时刻，时间框留空时一眼能看出用的是「现在」',()=>{
- render(<Harness progress={{...initialFishProgress(),status:'complete',cutoffMs:Date.UTC(2026,3,9,15),anchorMs:Date.UTC(2026,3,9,15,3)}}/>);
- expect(screen.getByTestId('fish-cutoff')).toHaveTextContent('截止 2026-04-09 23:00');
+it('跨日扫描显示两端日期，进度行省去单独的截止时刻',()=>{
+ render(<Harness progress={{...initialFishProgress(),status:'complete',cutoffMs:Date.UTC(2026,3,9,16),anchorMs:Date.UTC(2026,3,9,16,3),lookbackHours:1}}/>);
+ expect(screen.getByTestId('fish-scan-window')).toHaveTextContent(/^2026-04-09 23:03:00 ～ 2026-04-10 00:03:00$/);
+ expect(screen.getByTestId('fish-status')).not.toHaveTextContent('截止');
  expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveAttribute('placeholder','留空 = 现在');
 });

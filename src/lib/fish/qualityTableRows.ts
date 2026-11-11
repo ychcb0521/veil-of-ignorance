@@ -1,14 +1,14 @@
 import { signalDedupKey } from '@/lib/signalLibrary';
 import type { QualitySample } from './quality';
-import { miningCaptureTime, qualityOrigins } from './qualitySources';
+import { fishCaptureTime, qualityOrigins } from './qualitySources';
 
 /** Display-only grouping by signal and buy time. Preserve every entry, source and detector ID for execution and selection. */
 export interface QualityTableRow extends QualitySample { members?: QualitySample[] }
 export const qualityTableMembers = (row: QualityTableRow): QualitySample[] => row.members ?? [row];
-export function qualityTableMinedAt(row: QualityTableRow): number | null {
+export function qualityTableCaptureTime(row: QualityTableRow): number | null {
   let latest: number | null = null;
   for (const member of qualityTableMembers(row)) {
-    const at = member.minedAt ?? miningCaptureTime(member.source);
+    const at = Math.max(member.minedAt ?? 0, fishCaptureTime(member.source) ?? 0) || null;
     if (at !== null && (latest === null || at > latest)) latest = at;
   }
   return latest;

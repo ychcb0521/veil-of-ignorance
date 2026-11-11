@@ -21,7 +21,7 @@ import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { compileFishProgram, evaluateFishProgram, shortFishHash, FISH_STATE_HOLD_TEXT, type FishSnapshot, type FishProgram } from './algorithm';
 import { fishSourceLabel, fishMetricLabel } from './records';
 import { signalDedupKey, normalizeSignalQuality } from '@/lib/signalLibrary';
-import {isSignalLibraryOrigin,miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
+import {isSignalLibraryOrigin,fishCaptureTime,miningCaptureTime,qualityOrigins,resolveLegacySourceMemberships,type QualityOrigin,type LegacySourceResolutions} from './qualitySources';
 import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import type { FishReconstructionLoader } from './reconstruction';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
@@ -89,7 +89,7 @@ export interface QualitySample {
   origin?: QualityOrigin; origins?:QualityOrigin[];
   /** Derived per-row capture readings; never replaces any saved source snapshot. */
   readings?: Record<string, FishSnapshot>;
-  /** Most recent actual mining time among captures represented by this display row. */
+  /** Most recent actual capture time on this display row. Keep the legacy field name for saved rows. */
   minedAt?: number;
   /** Derived display rows share one signalId / paper trade; detectorId selects their attribution. */
   signalId?: string; detectorId?: string;
@@ -442,7 +442,7 @@ function buildComparisonRows(study: FishQualityStudy): QualitySample[] {
     const prior = rows.get(identity);
     const readings = Object.fromEntries(qualityMembers(sample.source).filter(f => sample.groups.includes(qualityGroupId(f))).map(f => [qualityGroupId(f), f]));
     const origins=[...new Set([...(prior?qualityOrigins(prior):[]),...qualityOrigins(sample)])];
-    const minedAt = Math.max(prior?.minedAt ?? 0, miningCaptureTime(sample.source) ?? 0) || undefined;
+    const minedAt = Math.max(prior?.minedAt ?? 0, sample.minedAt ?? 0, fishCaptureTime(sample.source) ?? 0) || undefined;
     const preferDetector=prior&&!prior.groups.length&&sample.groups.length;
     const preferredSource=preferDetector?sample.source:prior?.source??sample.source;
     // Detector provenance may supply the row body, while the library owns its

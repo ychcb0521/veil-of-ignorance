@@ -7,7 +7,7 @@ import {useFishBulkDelete} from './FishBulkDeletion';
 import { miningRecordDeleteTargets } from '@/lib/fish/libraryDeletion';
 import { miningLibraryConditions, libraryConditionSearch } from '@/lib/fish/libraryConditions';
 import { FishLibraryCondition, libraryReading } from '@/components/FishLibraryConditions';
-/** 挖掘库：批量挖掘每一档的扫描与挖到的信号（数据见 lib/fish/miningLibrary，存 IndexedDB 并随账号同步）。 */
+/** 挖掘库：批量捕捞每一档的扫描与挖到的信号（数据见 lib/fish/miningLibrary，存 IndexedDB 并随账号同步）。 */
 import { useCallback, useEffect,useRef, useMemo, useState, type ReactNode } from 'react';
 import { FishLibraryDialog, libraryCell } from '@/components/FishLibraryDialog';
 import { emptyMiningLibrary, miningRecordSignal, type FishMiningLibrary, type FishMiningRecord, type FishMiningRun } from '@/lib/fish/miningLibrary';
@@ -40,7 +40,7 @@ export function FishMiningLibrary(props:MiningDirectoryProps){
  return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="挖掘库" prefix="mining" kind="algorithm" items={items} edits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
   description={`${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`} dataActions={<FishLibraryDataActions scope="mining"/>} download={()=>downloadDirectoryTables('挖掘库',directories.map(d=>({id:d.id,study:miningDirectoryStudy(d.records,d.family)})))}
   info={<><p>与监测库共用目录布局和操作，按实际命中的算法大类归档。CDA、BSS、CBI-2 等同系列的门槛、周期和版本放在同一个目录，原始条件和读数分别保留。</p><p>一个记录命中多个系列时，可在对应目录分别查看；原始信号不复制入库。展开后展示组合表，可复制至主组合表，复制前先完整归档当前表。</p>{loadError&&<p role="alert">{loadError}</p>}</>}
-  empty={loadError||'暂无挖掘记录。开始批量挖掘后，每一档会自动保存。'}/>;
+  empty={loadError||'暂无挖掘记录。开始批量捕捞后，每一档会自动保存。'}/>;
 }
 function FishMiningRecords({ onJump, canJump, onSelectInTable,librarySource,onClose }: MiningDirectoryProps & {librarySource:FishMiningLibrary;onClose:()=>void}) {
   const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());
@@ -91,11 +91,11 @@ function FishMiningRecords({ onJump, canJump, onSelectInTable,librarySource,onCl
     setTableError('这批记录暂未在组合表中找到，请刷新挖掘库后重试。');
     return false;
   };
-  return <FishLibraryDialog embedded name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { if(!next)onClose(); setTableError(''); if (!next) setSelected(new Set()); }}
+  return <FishLibraryDialog embedded name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、捕捞时间、指标或门槛…" onOpenChange={next => { if(!next)onClose(); setTableError(''); if (!next) setSelected(new Set()); }}
     description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}`}
-    info={<><p>批量挖掘逐档记录：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起，{latestRun.scan?.continuous ? '连续挖掘' : `每 ${latestRun.stepMs / 3_600_000} 小时一档`}</p>}</>}
-    headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '挖掘时间']}
-    sortColumn={{ label: '挖掘时间', direction, toggle: () => setDirection(current => current === 'descending' ? 'ascending' : 'descending') }}
+    info={<><p>批量捕捞逐档记录：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「捕捞时间」是实际捕捞到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">批量捕捞方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起，{latestRun.scan?.continuous ? '连续扫描' : `每 ${latestRun.stepMs / 3_600_000} 小时一档`}</p>}</>}
+    headers={['标的', '信号时间', '扫描档位', '命中算法', '读数', '捕捞时间']}
+    sortColumn={{ label: '捕捞时间', direction, toggle: () => setDirection(current => current === 'descending' ? 'ascending' : 'descending') }}
     items={items} match={match} detail={tableError && <p role="alert" className="text-xs text-destructive">{tableError}</p>}
     selection={bulk || onSelectInTable ? {
       selected: new Set(selectedItems.map(row => row.id)),
@@ -106,7 +106,7 @@ function FishMiningRecords({ onJump, canJump, onSelectInTable,librarySource,onCl
         bulk({ kind: 'mining', ids, targets: miningRecordDeleteTargets(library.records, new Set(ids)) });
       } : undefined,
     } : undefined}
-    empty={{ none: '暂无挖掘记录。开始批量挖掘后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
+    empty={{ none: '暂无挖掘记录。开始批量捕捞后，每一档会自动保存。', unmatched: '没有匹配的挖掘记录。' }}
     row={(r, onCheck) => {
       const saved=evidence.get(r.id)!;
       return <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="mining-library-row">

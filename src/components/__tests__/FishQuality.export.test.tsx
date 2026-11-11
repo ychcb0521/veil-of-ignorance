@@ -54,8 +54,8 @@ it('exports only the column groups currently shown in the combination table',asy
  fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));expect(capture.download.mock.calls[0][0].columns.map(c=>c.header)).toContain('探测算法');
  fireEvent.click(screen.getByRole('button',{name:'隐藏组合表中的静态过滤结果'}));fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(2));expect(capture.download.mock.calls[1][0].columns.map(c=>c.header)).not.toContain('探测算法');expect(capture.download.mock.calls[1][0].rows).toHaveLength(3);
 });
-it('retains the actual mining time column only when it appears on the table',async()=>{
- const s=state(3);s.study.samples[0].source={...s.study.samples[0].source,mined:{anchorMs:T-86400000},caughtAt:T};s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);
- expect(screen.getByTestId('quality-mined-at-column')).toHaveTextContent('挖掘时间');fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));const sheet=capture.download.mock.calls[0][0] as XlsxSheet,at=sheet.columns.findIndex(c=>c.header==='挖掘时间');expect(at).toBeGreaterThan(0);expect(sheet.rows[0][at]).toBe('2026-11-10 08:00:00');
+it('exports the actual capture time column only when it appears on the table',async()=>{
+ const s=state(3);s.study.samples[0].source={...s.study.samples[0].source,mined:{anchorMs:T-86400000},caughtAt:T};s.study.samples[1].source={...s.study.samples[1].source,caughtAt:T+60_000};s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);
+ expect(screen.getByTestId('quality-mined-at-column')).toHaveTextContent('捕捞时间');fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));const sheet=capture.download.mock.calls[0][0] as XlsxSheet,at=sheet.columns.findIndex(c=>c.header==='捕捞时间');expect(at).toBeGreaterThan(0);expect(sheet.rows.map(row=>row[at])).toEqual(expect.arrayContaining(['2026-11-10 08:00:00','2026-11-10 08:01:00']));
  cleanup();render(<FishQuality state={state(3)}/>);expect(screen.queryByTestId('quality-mined-at-column')).toBeNull();
 });

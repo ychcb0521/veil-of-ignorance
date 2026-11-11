@@ -9,7 +9,7 @@ const evidence:FishWickRejection={symbol:'WICKUSDT',exchange:'binance',cutoffMs:
 beforeEach(()=>vi.clearAllMocks());
 it('opens frozen rejection details, the exact candle snapshot and the historical chart at its close',()=>{
  const onJump=vi.fn();render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:1,wickDetails:[evidence]}} onJump={onJump} jumpingSignalId={null}/>);
- fireEvent.click(screen.getByRole('button',{name:'查看插针过滤详情（1 个）'}));
+ fireEvent.click(screen.getByRole('button',{name:'过滤详情'}));
  expect(screen.getByText(/扫描中，明细持续更新/)).toBeInTheDocument();
  const table=screen.getByRole('table',{name:'插针过滤明细'});expect(within(table).getByText('−9.00%')).toBeInTheDocument();expect(within(table).getByText('4.50×')).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'查看 WICKUSDT 币安 的触发 K 线'}));
@@ -21,7 +21,7 @@ it('opens frozen rejection details, the exact candle snapshot and the historical
 });
 it('reflects new live records, searches and uses frozen thresholds after settings change',()=>{
  const view=render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:1,wickDetails:[evidence]}} jumpingSignalId={null}/>);
- fireEvent.click(screen.getByRole('button',{name:'查看插针过滤详情（1 个）'}));
+ fireEvent.click(screen.getByRole('button',{name:'过滤详情'}));
  const other={...evidence,symbol:'OTHERUSDT',rule:{...evidence.rule,atrMultiple:1.5}};
  view.rerender(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:2,wickDetails:[evidence,other]}} jumpingSignalId={null}/>);
  expect(screen.getByRole('table')).toHaveTextContent('OTHERUSDT');
@@ -43,13 +43,13 @@ it('reflects new live records, searches and uses frozen thresholds after setting
 });
 it('legacy counts never invent symbols or candle times',()=>{
  render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:20}} jumpingSignalId={null}/>);
- fireEvent.click(screen.getByRole('button',{name:'查看插针过滤详情（20 个）'}));
+ fireEvent.click(screen.getByRole('button',{name:'过滤详情'}));
  expect(screen.getByTestId('fish-wick-legacy')).toHaveTextContent('20 条旧版记录仅保存了过滤数量');
  expect(screen.queryByRole('table')).not.toBeInTheDocument();
 });
 it('non-Binance snapshots identify their source; no mapped symbol never opens a different market',()=>{
  render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:1,wickDetails:[{...evidence,exchange:'okx',binanceSymbol:null}]}} onJump={vi.fn()} jumpingSignalId={null}/>);
- fireEvent.click(screen.getByRole('button',{name:'查看插针过滤详情（1 个）'}));fireEvent.click(screen.getByRole('button',{name:'查看 WICKUSDT OKX 的触发 K 线'}));
+ fireEvent.click(screen.getByRole('button',{name:'过滤详情'}));fireEvent.click(screen.getByRole('button',{name:'查看 WICKUSDT OKX 的触发 K 线'}));
  expect(screen.getByRole('img',{name:/OKX 原始/})).toBeInTheDocument();expect(screen.queryByRole('button',{name:/打开.*盘面/})).not.toBeInTheDocument();
  expect(screen.getByText(/此标的暂无可用的币安盘面/)).toBeInTheDocument();
 });
@@ -61,8 +61,10 @@ it('switches to actual turnover readings, searches by symbol and marks every fai
    algorithms:['CBI-2·avg > 0.07'],
  }];
  render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:1,wickDetails:[evidence],thin:1,turnoverDetails:details}} jumpingSignalId={null}/>);
- fireEvent.click(screen.getByRole('button',{name:'查看插针过滤详情（1 个）'}));
+ fireEvent.click(screen.getByRole('button',{name:'过滤详情'}));
  const tabs=within(screen.getByRole('group',{name:'过滤类型'}));
+ expect(tabs.getByRole('button',{name:/插针过滤/})).toHaveTextContent('1');
+ expect(tabs.getByRole('button',{name:/成交额过滤/})).toHaveTextContent('1');
  fireEvent.click(tabs.getByRole('button',{name:/成交额过滤/}));
  const table=within(screen.getByRole('table',{name:'成交额过滤'}));
  expect(table.getByText('LOWUSDT')).toBeInTheDocument();
@@ -75,8 +77,8 @@ it('switches to actual turnover readings, searches by symbol and marks every fai
 });
 it('opens a count-only turnover round directly without filling in missing amounts',()=>{
  render(<FishWickDetails progress={{...initialFishProgress(),thin:3}} jumpingSignalId={null}/>);
- expect(screen.queryByTestId('fish-wick-skipped')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'查看成交额过滤详情（3 个）'}));
+ expect(screen.getByRole('button',{name:'过滤详情'}).textContent).toBe('');
+ fireEvent.click(screen.getByRole('button',{name:'过滤详情'}));
  expect(screen.getByRole('note')).toHaveTextContent('3 个标的仅保存了过滤数量');
  expect(screen.queryByRole('table',{name:'成交额过滤'})).toBeNull();
 });

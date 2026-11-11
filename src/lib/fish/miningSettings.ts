@@ -119,7 +119,7 @@ export function buildConfiguredMiningScan(settings: FishMiningSettings, defs: re
   const turnover = validateFishTurnoverSettings(settings.scan.turnover);
   if (!settings.selection.exchanges.length) throw new Error('请至少选择一家交易所');
   if (!settings.rules.some(rule => rule.enabled !== false)) throw new Error('请启用至少一个挖掘算法');
-  if (!schema.safeParse(settings).success) throw new Error('挖掘设置无效，请检查输入');
+  if (!schema.safeParse(settings).success) throw new Error('批量捕捞设置无效，请检查输入');
   const enabled = settings.rules.filter(rule => rule.enabled !== false);
   const missing = enabled.find(rule => !defs.some(def => def.id === rule.featureId));
   if (missing) throw new Error(`挖掘算法 ${missing.featureId} 已不可用`);

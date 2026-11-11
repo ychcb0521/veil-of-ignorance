@@ -72,7 +72,7 @@ it('shows exact Beijing mining times, sorts repeated captures separately, and se
   fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
   await screen.findAllByTestId('mining-library-mined-at');
   const dates = () => screen.getAllByTestId('mining-library-mined-at').map(cell => cell.textContent);
-  const sort = screen.getByRole('button', { name: '按挖掘时间排序' });
+  const sort = screen.getByRole('button', { name: '按捕捞时间排序' });
   fireEvent.click(sort);
   expect(dates()).toEqual(['2026-05-16 12:00:35', '2026-05-16 12:00:23', '2026-05-16 12:00:11', '—']);
   fireEvent.click(sort);
@@ -103,7 +103,7 @@ it('bulk selects a sorted, filtered range across the scroll window and supports 
   await screen.findAllByTestId('mining-library-row');
 
   fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: 'KEEP' } });
-  fireEvent.click(screen.getByRole('button', { name: '按挖掘时间排序' }));
+  fireEvent.click(screen.getByRole('button', { name: '按捕捞时间排序' }));
   const first = screen.getByRole('checkbox', { name: '选择挖掘记录 KEEP19USDT 19' });
   const last = screen.getByRole('checkbox', { name: '选择挖掘记录 KEEP00USDT 0' });
   const header = screen.getByRole('checkbox', { name: '全选当前筛选的挖掘库记录' });

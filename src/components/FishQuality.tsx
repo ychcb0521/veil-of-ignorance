@@ -70,7 +70,7 @@ import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQual
 import { qualityResultMap, qualityRowResult, qualitySellSuggestions } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
 import { rangeSelect } from '@/lib/listRangeSelect';
-import { collapseQualityTableRows, qualityTableMinedAt, qualityTableMembers, qualityTableRange, qualityTableSignalKey, type QualityTableRow } from '@/lib/fish/qualityTableRows';
+import { collapseQualityTableRows, qualityTableCaptureTime, qualityTableMembers, qualityTableRange, qualityTableSignalKey, type QualityTableRow } from '@/lib/fish/qualityTableRows';
 import { defaultQualityDetectorIds, qualityDetectorChoices, type QualityDetectorChoice } from '@/lib/fish/qualityDetectorSelection';
 import { ancestorScrolls, applyAncestorScrolls, currentHistoryEntry, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn, type QualityReturnUi } from '@/lib/fish/qualityReturn';
 
@@ -589,7 +589,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
     const value = (r: QualitySample): number | string | null => {
       if(sort.startsWith('screening:')){const value=screeningCell(screeningRowResults(r,screeningIndex,screeningRoundId,screeningRunId));return sort==='screening:time'?value.time:sort==='screening:plan'?value.plan==='—'?null:value.plan:value.status==='—'?null:value.status;}
       if (sort === 'time') return qualitySignalTime(r.source);
-      if (sort === 'mined-at') return qualityTableMinedAt(r);
+      if (sort === 'mined-at') return qualityTableCaptureTime(r);
       if (sort === 'symbol') return r.source.symbol;
       if (sort === 'market') return r.source.market === 'us_stock' ? '美股' : '加密';
       if (sort === 'detector-value') return qualityDetectorReading(r).value;
@@ -694,9 +694,9 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
     const ids = new Set(selectedIds); displayedRows.flatMap(qualityTableMembers).forEach(row => { if (checked) ids.add(row.id); else ids.delete(row.id); });
     state.setSelectedRows([...ids]);
   };
-  // 【用户要求】2026-11-03 批量挖掘的数据显示挖掘时间（真实物理时间，挖到这条信号的那一刻）：表里有挖掘库记录时才多这一列
-  const showMinedAt=rows.some(row=>qualityTableMinedAt(row)!=null);
-  const columnWidths=[184,152,...(showMinedAt?[152]:[]),80,80,...(hideFilter?[]:[128,144,112]),...shownFilters.map(()=>176),...(showScreening?[176,176,176,112]:[]),...shownPlans.flatMap(p=>[312,128,128,128,128,128,...Array(postExitOpen.has(p.id)?10:1).fill(128)]),40];
+  // Capture time is display metadata. It does not affect entry or execution.
+  const showCaptureTime=rows.some(row=>qualityTableCaptureTime(row)!=null);
+  const columnWidths=[184,152,...(showCaptureTime?[152]:[]),80,80,...(hideFilter?[]:[128,144,112]),...shownFilters.map(()=>176),...(showScreening?[176,176,176,112]:[]),...shownPlans.flatMap(p=>[312,128,128,128,128,128,...Array(postExitOpen.has(p.id)?10:1).fill(128)]),40];
   const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ui?.rowPx ?? ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
@@ -784,7 +784,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
           <td className={`${cell} sticky left-0 z-10 border-t border-border/40 bg-background font-mono group-hover:bg-accent`} title={`${(isTuringCupSymbol(row.source.symbol) ? '离线行情' : EXCHANGE_NAMES[row.source.exchange ?? 'binance'])} · 来源：${qualitySourceLabel(row)}`}><span className="inline-flex items-center gap-2"><span className={`w-6 shrink-0 select-none text-right text-[9px] tabular-nums ${rowSelected(row) ? 'font-medium text-primary' : 'text-muted-foreground/55'}`} data-testid="quality-row-number">{index + 1}</span><input type="checkbox" aria-label={`选择 ${row.source.symbol} ${date(qualitySignalTime(row.source))}${row.detectorId ? ` ${detectorMap.get(row.detectorId)?.label} ${detectorMap.get(row.detectorId)?.snapshot.threshold}` : detectorExpanded ? ' 信号库' : ' 合并信号'}`} title="按住 Shift 点另一行可连续选择" checked={rowSelected(row)} ref={el => { if (el) el.indeterminate = !rowSelected(row) && qualityTableMembers(row).some(member => selectedIds.has(member.id)); }} disabled={!ready} onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }} onChange={e => toggleRow(row.id, e.target.checked, (e.nativeEvent as MouseEvent).shiftKey === true)} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/><button type="button" aria-label={`查看 ${row.source.symbol} 盘面`} title={`查看 ${row.source.symbol} 在 ${date(row.source.timeMs)} 的盘面`} disabled={!onJump || !!canJump && !canJump(row.source)} onClick={() => onJump?.(row.source)} className="rounded-sm text-left transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:no-underline disabled:hover:text-inherit">{turingCupTicker(row.source.symbol)}</button>{row.source.turingReplaySample && <span className="font-sans text-[9px] text-muted-foreground" title="图灵杯行情的模拟入场点">回放样本</span>}</span>{!isTuringCupSymbol(row.source.symbol) && row.source.exchange && row.source.exchange !== 'binance' && <span className="ml-1 font-sans text-[9px] text-muted-foreground">{EXCHANGE_NAMES[row.source.exchange]}</span>}</td>
 
           <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} title={`模拟买入：${date(qualityMonitorEntryAt(row))}（${row.source.preEntryMonitor||row.monitorEntry?'动态筛选首次满足':row.basis === 'detected' ? '实际发现' : row.basis === 'capture' ? '捕捞时刻' : row.basis === 'missing' ? '时间缺失' : isLibrary(row) ? qualitySourceLabel(row) + '信号时间' : '原始信号'}）`}>{date(qualitySignalTime(row.source))}</td>
-          {showMinedAt && (() => { const at = qualityTableMinedAt(row); return <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} data-testid="quality-mined-at-cell" title={at ? `挖掘档位：${date(row.enteredAt)}` : '不是批量挖掘的记录'}>{at ? date(at) : '—'}</td>; })()}
+          {showCaptureTime && (() => { const at = qualityTableCaptureTime(row); return <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} data-testid="quality-mined-at-cell">{at ? date(at) : '—'}</td>; })()}
           <td className={`${cell} border-t border-border/40 text-muted-foreground`}>{row.source.market === 'us_stock' ? '美股' : ''}</td>
           <td className={`${cell} border-t border-border/40`}><span className="flex gap-px" aria-label={`评分 ${normalizeSignalQuality(row.source.quality) ?? 0} 星`}>{!archiveView&&ready&&(onRate||state.setSourceQuality)?<SignalQualityStars signalId={`quality-${row.id}`} value={normalizeSignalQuality(row.source.quality)} onChange={value=>rateSource(row.source,value)}/>: [1, 2, 3, 4, 5].map(i => <Star key={i} className={`h-3 w-3 ${i <= (normalizeSignalQuality(row.source.quality) ?? 0) ? 'fill-[#F0B90B] text-[#F0B90B]' : 'text-muted-foreground/35'}`}/>)}</span></td>
           {!hideFilter && <><td className={`${cell} border-l border-t border-border/40`} data-testid="quality-detector-value-cell">{!detectorExpanded ? (() => { const count = qualityTableMembers(row).filter(member => member.detectorId).length; return count ? <button type="button" className="text-primary hover:underline" title="展开每个探测算法在发现此信号时保存的读数" onClick={() => expandDetectors(true)}>{count} 项 · 展开</button> : <span className="text-muted-foreground/60" title="信号库的信号没有探测读数">—</span>; })() : (() => { const reading = qualityDetectorReading(row); return <span className="inline-flex items-center gap-2" title={reading.detail}><span className="font-mono tabular-nums">{reading.text}</span>{row.detectorId && <span className="text-[9px] text-muted-foreground/65">{reading.label}</span>}</span>; })()}</td>
@@ -830,8 +830,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
       </div>
     </div>
     <FishQualityManual open={manualOpen} onOpenChange={setManualOpen}><>
-      <p>批量挖掘、买前过滤、持仓监测独立运行和暂停。买前过滤分为静态过滤、动态筛选。开始过滤、筛选和监测，只处理当前来源、月份、探测算法和标的范围内已勾选的记录；本轮清单和条件在开始时冻结。</p>
-      <p>批量挖掘按设定算法与阈值找信号，任一算法满足即可挖到。开始按钮右侧的 ▾ 中可选「重新开始」。挖掘库按算法家族分目录，目录表格沿用组合表形式。</p>
+      <p>批量捕捞、买前过滤、持仓监测独立运行和暂停。买前过滤分为静态过滤、动态筛选。开始过滤、筛选和监测，只处理当前来源、月份、探测算法和标的范围内已勾选的记录；本轮清单和条件在开始时冻结。</p>
+      <p>批量捕捞按设置中的算法、门槛与组合方式扫描信号。开始按钮右侧的 ▾ 中可选「重新开始」。挖掘库按算法家族分目录，目录表格沿用组合表形式。</p>
       <p>静态过滤只检查原入场时点之前最后一根已收盘的 5 分钟 K 线，不移动入场时间。动态筛选须让必要条件、准入与排除门槛同分钟共同通过。v7 支持防守线新事件与多条指标准入取或，否决后重建观察起点，原总截止时间不变；旧版方案保留原口径。</p>
       <p>动态筛选在条件设置中填写「单标的筛选时限（小时）」，新筛选默认 48 小时，已有正数设置保留。首次满足即停在命中时间；到时未满足则结束并继续下一条。时限从每个标的的筛选起点计，不是现实运行耗时。行情更短、缺数据或历史不足会按实际状态显示。</p>
       <p>动态筛选运行时显示完成条数与实际扫描进度；暂停或完成后收起进度提示。运行时点击进度、停止后从开始按钮右侧的 ▾ 选择「本轮筛选结果」，可查看全部状态、原因和首次满足时间。筛选库按时间目录保存入选记录，组合表随新轮开始更新。静态过滤与动态筛选的显示和擦除各自独立。</p>
@@ -923,14 +923,14 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground">
           <tr className="bg-muted/35" data-testid="quality-algorithm-categories">
             {/* 【用户要求】2026-11-02 探测值、探测算法、捕捞过程、过滤读数和入场读数都归「买前过滤」；「卖出算法」改名「持仓监测」 */}
-            <th colSpan={showMinedAt?5:4} className="px-2 py-1.5 text-[9px] font-normal text-muted-foreground/70">入场信息</th>
+            <th colSpan={showCaptureTime?5:4} className="px-2 py-1.5 text-[9px] font-normal text-muted-foreground/70">入场信息</th>
             {!hideFilter && <><th colSpan={3+shownFilters.length} className="relative border-l border-border/40 px-2 py-1.5 pr-8 font-medium" aria-label="过滤类别统计" data-testid="quality-filter-group">静态过滤<QualityStatisticsButton label="全部静态过滤算法" onClick={() => setStatistics({category:'filter'})}/></th></>}
             {showScreening&&<th colSpan={4} className="relative border-l border-border/40 px-2 py-1.5 pr-8 font-medium" aria-label="动态筛选类别统计" data-testid="quality-screening-group">动态筛选<QualityStatisticsButton label="全部动态筛选算法" onClick={()=>setScreeningStatistics(true)}/></th>}
             {shownPlans.length > 0 && <th colSpan={qualitySellSpan(shownPlans,postExitOpen)} className="relative border-l border-border/40 px-2 py-1.5 pr-8 font-medium" aria-label="卖出类别统计" data-testid="quality-monitor-group">持仓监测<QualityStatisticsButton label="全部卖出算法" onClick={() => setStatistics({category:'sell'})}/></th>}
             <th aria-hidden="true"/>
           </tr>
           <tr className="bg-muted/20" data-testid="quality-algorithm-variables">
-            <th colSpan={showMinedAt?5:4} className="px-2 py-1 text-[9px] font-normal text-muted-foreground/50">变量 / 水平</th>
+            <th colSpan={showCaptureTime?5:4} className="px-2 py-1 text-[9px] font-normal text-muted-foreground/50">变量 / 水平</th>
             {!hideFilter && <><th aria-hidden="true" className="border-l border-border/40"/>
             <th className="relative px-2 py-1 pr-8 font-normal text-muted-foreground/60" aria-label="探测变量数量">{detectorChoices.length ? `${detectorChoices.length} 个默认算法` : ''}<QualityStatisticsButton label="全部探测算法" onClick={() => setStatistics({category:'detect'})}/></th>
             <th aria-hidden="true"/></>}
@@ -942,7 +942,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
           <tr className="bg-muted/40">
           <th className={`${cell} sticky left-0 z-30 min-w-[184px] bg-muted font-medium`} aria-sort={ariaSort('symbol')}><span className="flex items-center gap-2"><span aria-hidden className="w-6 shrink-0"/><input type="checkbox" aria-label={hideUnselected ? "全选显示的行" : "全选当前筛选信号"} title={hideUnselected ? "只作用于当前显示的行" : "全选当前筛选下的所有行；按住 Shift 点两行可连续选择"} checked={allSelected} ref={el => { if (el) el.indeterminate = selectedRows.length > 0 && !allSelected; }} disabled={!ready} onChange={e => selectVisible(e.target.checked)} className="h-3 w-3 accent-[hsl(var(--primary))]"/>{sortButton('symbol', '标的')}</span></th>
           <th className={`${cell} min-w-[140px] font-medium`} aria-sort={ariaSort('time')}>{sortButton('time', '信号时间')}</th>
-          {showMinedAt && <th className={`${cell} min-w-[140px] font-medium`} data-testid="quality-mined-at-column" aria-sort={ariaSort('mined-at')} title="批量挖掘挖到这条信号时的真实时间（UTC+8）；不是挖掘的历史档位，也不是信号时间。同一入场有多次挖掘时显示最近一次。">{sortButton('mined-at', '挖掘时间')}</th>}
+          {showCaptureTime && <th className={`${cell} min-w-[140px] font-medium`} data-testid="quality-mined-at-column" aria-sort={ariaSort('mined-at')} title="实际捕捞到该信号的时间（北京时间）。同一入场有多次捕捞时显示最近一次。">{sortButton('mined-at', '捕捞时间')}</th>}
           <th className={`${cell} font-medium`} aria-sort={ariaSort('market')}>{sortButton('market', '市场')}</th>
           <th className={`${cell} font-medium`} aria-sort={ariaSort('quality')}>{sortButton('quality', '评分')}</th>
           {!hideFilter && <><th className={`${cell} border-l border-border/40 font-medium ${detectorExpanded ? 'min-w-[190px]' : 'min-w-[110px]'}`} data-testid="quality-detector-value-column" aria-sort={ariaSort('detector-value')} title="当次探测快照的读数，按捕获时的倍率显示；展开后每个探测算法各占一行"><span className="inline-flex items-center gap-2">{sortButton('detector-value', '探测值')}<button type="button" aria-label="展开探测值明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)} className="inline-flex items-center gap-1 text-primary hover:underline">{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th>
