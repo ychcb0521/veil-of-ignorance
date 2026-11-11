@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ScanSearch } from 'lucide-react';
+import { ChevronDown, ScanSearch } from 'lucide-react';
+import { FishWickEvidence } from '@/components/FishWickDetails';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
@@ -23,7 +24,7 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
   run: (options: FishHitRateOptions) => Promise<void>;
   disabled?: boolean;
 }) {
-  const sourceName = useId(), modeName = useId();
+  const sourceName = useId(), modeName = useId(), wickDetailId = useId();
   const [open, setOpen] = useState(false);
   const [source, setSource] = useState<'library' | 'paste'>('library');
   const [minRating, setMinRating] = useState(3);
@@ -33,12 +34,15 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
   const [resultMode, setResultMode] = useState<FishHitRateMode>('targets');
   const [filter, setFilter] = useState<'all' | FishHitRateRow['status']>('all');
   const [selectedWindow, setSelectedWindow] = useState<number>();
+  const [wickRowId, setWickRowId] = useState<string>();
   const [progress, setProgress] = useState<FishHitRateProgress>();
   const [running, setRunning] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [error, setError] = useState('');
   const controller = useRef<AbortController>();
+  const wickDetail = useRef<HTMLElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => { if (wickRowId) wickDetail.current?.scrollIntoView?.({ block: 'nearest' }); }, [wickRowId]);
 
   const pasted = useMemo(() => source === 'paste' ? parseSignalText(text) : null, [source, text]);
   const samples = useMemo(() => source === 'library'
@@ -51,6 +55,7 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
   const verified = hitCount + missCount;
   const visible = filter === 'all' ? rows : rows.filter(row => row.status === filter);
   const selected = windows.find(window => window.anchorMs === selectedWindow);
+  const activeWick = visible.find(row => row.sample.id === wickRowId)?.wick;
 
   const start = async () => {
     if (controller.current || !samples.length || pasted?.errors.length) return;
@@ -65,6 +70,7 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
     setWindows([]);
     setResultMode(mode);
     setSelectedWindow(undefined);
+    setWickRowId(undefined);
     setFilter('all');
     setProgress(undefined);
     try {
@@ -87,12 +93,12 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
   return <Dialog open={open} onOpenChange={next => { if (next || !running) setOpen(next); }}>
     <DialogTrigger asChild>
       <button type="button" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-        <ScanSearch aria-hidden className="h-3.5 w-3.5"/>命中率测试
+        <ScanSearch aria-hidden className="h-3.5 w-3.5"/>漏报测试
       </button>
     </DialogTrigger>
     <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-4xl overflow-y-auto p-4 text-xs sm:p-5">
       <DialogHeader className="pr-7 text-left">
-        <DialogTitle>捕捞命中率测试</DialogTitle>
+        <DialogTitle>捕捞漏报测试</DialogTitle>
         <DialogDescription>每个样本时间后延 2.5 小时作为扫描截止，向前扫描 5 小时。使用当前勾选的捕捞算法和过滤条件，信号在截止时仍须达标。</DialogDescription>
       </DialogHeader>
       <div className="grid gap-4 rounded-lg border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
@@ -134,7 +140,7 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="tabular-nums">
             <strong>{verified ? `命中率 ${(100 * hitCount / verified).toFixed(1)}%` : '暂无可判定样本'}</strong>
-            <span className="ml-2 text-muted-foreground">{hitCount} 命中 / {verified} 已判定 · {rows.length - verified} 无法判定</span>
+            <span className="ml-2 text-muted-foreground">{hitCount} 命中 · {missCount} 未命中 · {rows.length - verified} 无法判定</span>
           </p>
           <select className={inputClass} aria-label="筛选测试结果" value={filter} onChange={event => setFilter(event.target.value as typeof filter)}>
             <option value="all">全部结果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="unverified">无法判定</option>
@@ -144,19 +150,32 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
           <table className="w-full min-w-[46rem] text-xs">
             <thead className="sticky top-0 bg-muted"><tr>{['标的 / 市场','样本时间','扫描截止','判定','命中起点','相对样本','说明'].map(label => <th scope="col" className={cellClass} key={label}>{label}</th>)}</tr></thead>
             <tbody>
-              {visible.map(({ sample, hit, status, reason, window }) => <tr key={sample.id} className="border-t border-border/50">
+              {visible.map(({ sample, hit, status, reason, wick, window }) => <tr key={sample.id} className="border-t border-border/50">
                 <td className={cellClass}><div className="font-medium">{sample.symbol}</div><div className="text-muted-foreground">{marketLabel(sample)}{sample.quality ? ` · ${sample.quality} 星` : ''}</div></td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(sample.timeMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(window.anchorMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap ${status === 'hit' ? 'text-primary' : 'text-muted-foreground'}`}>{statusText[status]}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{hit ? formatUTC8(hit.timeMs) : '—'}</td>
                 <td className={`${cellClass} whitespace-nowrap`}>{hit ? offsetText(hit.timeMs - sample.timeMs) : '—'}</td>
-                <td className={cellClass}>{reason && <div className="min-w-32 text-muted-foreground">{reason}</div>}{resultMode === 'market' && <button type="button" className="whitespace-nowrap text-primary hover:underline" onClick={() => setSelectedWindow(window.anchorMs)}>本窗命中 {window.hits.length} 条</button>}</td>
+                <td className={cellClass}>{wick
+                  ? <button type="button" aria-expanded={wickRowId === sample.id} aria-controls={wickDetailId}
+                    className="inline-flex min-w-32 items-center gap-1 text-left text-primary underline-offset-2 hover:underline"
+                    onClick={() => { setSelectedWindow(undefined); setWickRowId(current => current === sample.id ? undefined : sample.id); }}>
+                    {reason}<ChevronDown aria-hidden className={`h-3 w-3 shrink-0 ${wickRowId === sample.id ? 'rotate-180' : ''}`}/>
+                  </button>
+                  : reason && <div className="min-w-32 text-muted-foreground">{reason}</div>}{resultMode === 'market' && <button type="button" className="whitespace-nowrap text-primary hover:underline" onClick={() => { setWickRowId(undefined); setSelectedWindow(window.anchorMs); }}>本窗命中 {window.hits.length} 条</button>}</td>
               </tr>)}
             </tbody>
           </table>
           {!visible.length && <p className="p-3 text-muted-foreground">没有符合筛选的结果。</p>}
         </div>
+        {activeWick && <section ref={wickDetail} id={wickDetailId} className="space-y-2 rounded-md border border-border/60 p-3" aria-label="插针过滤详情">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-medium">{activeWick.symbol} · {EXCHANGE_NAMES[activeWick.exchange]} · 5 分钟 K 线</h3>
+            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setWickRowId(undefined)}>收起</button>
+          </div>
+          <FishWickEvidence row={activeWick}/>
+        </section>}
         {selected && <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="本窗口全部命中">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-medium">窗口截止 {formatUTC8(selected.anchorMs)} · 命中 {selected.hits.length} 条</h3>

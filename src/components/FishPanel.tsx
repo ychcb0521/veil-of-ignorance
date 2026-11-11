@@ -28,7 +28,7 @@ import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type Fish
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, History, ListChecks, Mail, MoreHorizontal, PanelTop, Play, Plus, Settings, SlidersHorizontal, Square, Timer } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Gauge, History, ListChecks, Mail, MoreHorizontal, PanelTop, Play, Plus, Settings, ShieldAlert, SlidersHorizontal, Square, Timer } from 'lucide-react';
 import { fishInfoTrigger, fishRail, fishSectionHeading, fishSubHeading } from './FishSection';
 import { FishQualityInfo } from './FishQualityModule';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
@@ -349,7 +349,6 @@ export function FishPanel(p: FishPanelProps) {
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
-        {p.onTestHitRate && <FishHitRateTest key={owner} library={library} buildSettings={buildHitRateSettings} run={p.onTestHitRate} disabled={running}/>}
         <Popover open={menuOpen} onOpenChange={next => { if (next) setCaptureSetting(null); setMenuOpen(next); }}>
           <PopoverTrigger asChild><button type="button" aria-label="更多" title="更多捕捞选项" className={`${iconBtn} ${menuOpen||open.scope?'bg-muted text-foreground':''}`} data-testid="fish-more"><MoreHorizontal className="h-4 w-4"/></button></PopoverTrigger>
           <PopoverContent align="start" sideOffset={4}
@@ -473,6 +472,17 @@ export function FishPanel(p: FishPanelProps) {
     {p.reconstruction&&<FishReconstructionResults state={p.reconstruction}/>}
       </div>
     </section>
+    {p.onTestHitRate && <section aria-labelledby="fish-capture-quality-title" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+      <h3 id="fish-capture-quality-title" className="flex h-7 items-center gap-1.5 font-medium text-foreground/80">
+        <Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞质量
+      </h3>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <FishHitRateTest key={owner} library={library} buildSettings={buildHitRateSettings} run={p.onTestHitRate} disabled={running}/>
+        <button type="button" disabled className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground">
+          <ShieldAlert aria-hidden className="h-3.5 w-3.5"/>误报测试<span className="text-[10px] font-normal text-muted-foreground/75">待开放</span>
+        </button>
+      </div>
+    </section>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼舱」 */}
     <FishLibrary key={owner+'new'} rememberViewKey={owner+'new'} level="sub" title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} info={<p>最近一次捕捞捕到的鱼。下次点「开始捕捞」时，这些会归入鱼舱。</p>} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼。'}
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />

@@ -40,6 +40,29 @@ function WickChart({ row }: { row: FishWickRejection }) {
   </svg>;
 }
 
+export function FishWickEvidence({ row }: { row: FishWickRejection }) {
+  const threshold = row.atr * row.rule.atrMultiple;
+  const values = [
+    ['触发 K 线开盘（北京时间）', formatUTC8(row.openTime)],
+    ['插针回看截止（北京时间）', formatUTC8(row.cutoffMs)],
+    ['开盘价 → 最低价', `${price(row.open)} → ${price(row.low)}`],
+    ['开盘至最低跌幅', `${price(row.drop)}（${percent(row)}）`],
+    ['此前 ATR(14)', price(row.atr)],
+    ['实际 / 门槛倍数', `${multiple(row)} / ${row.rule.atrMultiple}×`],
+  ];
+
+  return <div className="space-y-2">
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-md bg-muted/35 p-2.5 sm:grid-cols-2 lg:grid-cols-3">
+      {values.map(([label, value]) => <div key={label}>
+        <dt className="text-muted-foreground">{label}</dt>
+        <dd className="font-mono tabular-nums">{value}</dd>
+      </div>)}
+    </dl>
+    <p className="leading-relaxed text-muted-foreground">本次回看 {fishWickDuration(row.rule.hours)}。实际跌幅 {price(row.drop)} &gt; 此前 ATR(14) × {row.rule.atrMultiple} = {price(threshold)}，触发过滤。ATR 取触发前 14 根已收盘 K 线。</p>
+    <div className="overflow-x-auto"><WickChart row={row}/></div>
+  </div>;
+}
+
 export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
   progress: FishProgress; onJump?: (source: TradeSignal) => void; jumpingSignalId: string | null;
 }) {

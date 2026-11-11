@@ -10,7 +10,7 @@ const HOUR = 3_600_000, STEP = 300_000;
 const sampleTime = Date.UTC(2026, 10, 1, 8);
 const startTime = sampleTime - 2.5 * HOUR;
 const anchor = sampleTime + 2.5 * HOUR;
-const symbols = ['EARLY', 'EDGE', 'ENDED', 'STALE', 'OTHER', 'BROKEN'];
+const symbols = ['EARLY', 'EDGE', 'ENDED', 'STALE', 'OTHER', 'BROKEN', 'WICK'];
 const markets = symbols.map(base => ({ symbol: base + 'USDT', instrument: base, base, multiplier: 1 }));
 const feature = { ...CBI2_DEF, id: 'hit-rate-test', interval: '5m' as const, formula: 'X = C\nX', scale: 1, unit: '' };
 const algorithm = { statistic: '结果', direction: '>' as const, threshold: 1, constraints: [] };
@@ -20,18 +20,22 @@ function setup(stopAfterFirst = false) {
   const firstHit: Record<string, number> = { EARLY: sampleTime - HOUR, EDGE: startTime, ENDED: sampleTime, STALE: startTime - STEP, OTHER: sampleTime + HOUR };
   const candles = vi.fn<FishDataAdapter['candles']>(async (market, cut, _signal, query) => {
     if (market.base === 'BROKEN') throw new Error('模拟取数失败');
-    return Array.from({ length: query.count }, (_, index) => {
-      const openTime = cut - (query.count - index) * STEP;
+    const count = query?.count ?? 400;
+    return Array.from({ length: count }, (_, index) => {
+      const openTime = cut - (count - index) * STEP;
+      if (market.base === 'WICK') {
+        return { openTime, open: 10, high: 10.125, low: openTime === sampleTime ? 9 : 9.875, close: 10, volume: 100, takerBuyVolume: 50, quoteVolume: 1e9 };
+      }
       const close = openTime + STEP >= firstHit[market.base] && !(market.base === 'ENDED' && openTime + STEP === cut) ? 2 : 0.5;
-      return { openTime, open: close, high: close, low: close, close, volume: 100, quoteVolume: 1e9 };
+      return { openTime, open: close, high: close, low: close, close, volume: 100, takerBuyVolume: 50, quoteVolume: 1e9 };
     });
   });
   const adapter: FishDataAdapter = { exchange: 'binance', list: async () => markets, btc: () => markets[0], taker: async (_market, bars) => bars, candles };
   const scanner = new FishScanner(async () => new Response(JSON.stringify({ serverTime: anchor + HOUR })), undefined, undefined, { binance: adapter });
   const controller = new AbortController(), windows: FishHitRateWindow[] = [];
-  const run = (mode: FishHitRateMode, samples: TradeSignal[], combination: 'and' | 'or' = 'and') => runFishHitRate(scanner, {
+  const run = (mode: FishHitRateMode, samples: TradeSignal[], combination: 'and' | 'or' = 'and', wick = false) => runFishHitRate(scanner, {
     samples, mode, signal: controller.signal, onProgress: () => {},
-    settings: { exchanges: ['binance'], combination, algorithms: [{ feature, algorithm }, { feature: { ...feature, id: 'second' }, algorithm }] },
+    settings: { exchanges: ['binance'], combination, downwardWick: { enabled: wick, hours: 4, atrMultiple: 3 }, algorithms: [{ feature, algorithm }, { feature: { ...feature, id: 'second' }, algorithm }] },
     onWindow: window => { windows.push(window); if (stopAfterFirst) controller.abort(); },
   });
   return { run, windows, candles, controller };
@@ -70,4 +74,16 @@ it('stops before another window and retains windows that were already published'
   expect(candles.mock.calls.map(([market]) => market.base)).toEqual(['EARLY']);
   expect(windows).toHaveLength(1);
   expect(windows[0].rows[0].status).toBe('hit');
+});
+
+it('retains the original 5-minute candle and rule for an insertion filtered by the batch test', async () => {
+  const { run, windows } = setup();
+  await run('targets', [sample('WICK')], 'or', true);
+  const row = windows[0].rows[0];
+  expect(row).toMatchObject({
+    status: 'miss', reason: '被插针过滤排除',
+    wick: { symbol: 'WICKUSDT', exchange: 'binance', openTime: sampleTime, cutoffMs: anchor,
+      open: 10, low: 9, drop: 1, atr: 0.25, rule: { enabled: true, hours: 4, atrMultiple: 3 } },
+  });
+  expect(row.wick?.candles.some(candle => candle.openTime === sampleTime && candle.low === 9)).toBe(true);
 });

@@ -1,6 +1,7 @@
 import type { FishCombinationRound, FishProgress, FishScanner, FishScanSettings } from '@/lib/fishScanner';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { AUDITED_EXCHANGES } from './exchanges';
+import type { FishWickRejection } from './downwardWick';
 
 export const FISH_HIT_RATE_HOURS = 5;
 const halfWindowMs = FISH_HIT_RATE_HOURS * 3_600_000 / 2;
@@ -27,6 +28,7 @@ export interface FishHitRateRow {
   status: 'hit' | 'miss' | 'unverified';
   hit?: TradeSignal;
   reason?: string;
+  wick?: FishWickRejection;
 }
 export interface FishHitRateWindow {
   anchorMs: number;
@@ -107,7 +109,8 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
       const reasons = [...new Set(outcomes.flatMap(outcome => misses[outcome] ? [misses[outcome]] : []))];
       // One confirmed rejection is enough for an intersection. A union needs every member ruled out.
       if (reasons.length && (settings.combination !== 'or' || outcomes.every(outcome => misses[outcome]))) {
-        return { sample, status: 'miss', reason: reasons.join('、') };
+        const wick = [...members.values()].find(member => member.outcome === 'wick' && member.wick)?.wick;
+        return { sample, status: 'miss', reason: reasons.join('、'), wick };
       }
       const gaps = [...new Set(outcomes.flatMap(outcome => incomplete[outcome] ? [incomplete[outcome]] : []))];
       return { sample, status: 'unverified', reason: gaps.join('、') || '未取得完整判定' };
