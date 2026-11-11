@@ -781,3 +781,83 @@ it('selects every requested mining entry, preserves distinct anchors and shows t
   expect(importQualityFish(study, [first, repeated, later], Date.now(), 'mined')).toBe(study);
   expect(run).not.toHaveBeenCalled();
 });
+
+it('continues paused monitoring and filtering in place with frozen rows and completed work', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const other = { ...signal, id: 'b', symbol: 'BBBUSDT', timeMs: T - 60_000 };
+  const tasks: QualityRunOptions[] = [];
+  const releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('resume-587', [signal, other], async task => {
+    tasks.push(task);
+    await new Promise<void>(resolve => releases.push(resolve));
+  }));
+  await flush();
+  const rows = qualityDisplayRows(h.result.current.study);
+  const filter = makeQualityBuyFilter('state:state', '>', .7);
+  act(() => {
+    h.result.current.setSelectedRows(rows.map(row => row.id));
+    h.result.current.setFilters([filter]);
+    void h.result.current.start();
+    void h.result.current.startFilter();
+  });
+  await flush();
+  const [monitor, filtering] = tasks;
+  const sample = qualityRunSamples(monitor.study)[0];
+  const group = monitor.study.sellPlans![0];
+  const result = {
+    key: qualityResultKey(sample, group, monitor.study.observeHours),
+    sampleId: sample.id, groupId: group.id, status: 'closed' as const, evaluatedAt: T, returnPct: 5,
+  };
+  const reading = { key: qualityFilterReadingKey(qualityRunSamples(filtering.study)[0], filter), value: .9 };
+  const before = {
+    monitor: h.result.current.study.monitorLibrary!.rounds.at(-1)!,
+    filter: h.result.current.study.filterLibrary!.rounds.at(-1)!,
+    plans: JSON.stringify(h.result.current.study.sellPlans),
+  };
+  act(() => {
+    monitor.onResult(result);
+    filtering.onFilterReading?.(reading);
+    monitor.onProgress({ done: 1, total: 2, current: '' });
+    filtering.onProgress({ done: 1, total: 2, current: '' });
+    h.result.current.cancel();
+    h.result.current.cancelFilter();
+    h.result.current.setSelectedRows([]);
+    h.result.current.setScope([]);
+  });
+  expect(monitor.signal.aborted).toBe(true);
+  expect(filtering.signal.aborted).toBe(true);
+  expect(h.result.current.study.monitorLibrary!.rounds.at(-1)?.state).toBe('paused');
+  expect(h.result.current.study.filterLibrary!.rounds.at(-1)?.state).toBe('paused');
+  expect(h.result.current.resumeMonitoring).toBeTypeOf('function');
+  expect(h.result.current.resumeFiltering).toBeTypeOf('function');
+  act(() => {
+    void h.result.current.resumeMonitoring!();
+    void h.result.current.resumeFiltering!();
+  });
+  const [, , resumedMonitor, resumedFilter] = tasks;
+  expect(qualityRunSamples(resumedMonitor.study).map(row => row.id)).toEqual(qualityRunSamples(monitor.study).map(row => row.id));
+  expect(qualityRunSamples(resumedFilter.study).map(row => row.id)).toEqual(qualityRunSamples(filtering.study).map(row => row.id));
+  expect(resumedMonitor.study.results).toContainEqual(result);
+  expect(resumedFilter.study.filterReadings).toContainEqual(reading);
+  expect(h.result.current.study.monitorLibrary!.rounds).toEqual([expect.objectContaining({ id: before.monitor.id, startedAt: before.monitor.startedAt, state: 'running' })]);
+  expect(h.result.current.study.filterLibrary!.rounds).toEqual([expect.objectContaining({ id: before.filter.id, startedAt: before.filter.startedAt, state: 'running' })]);
+  act(() => {
+    resumedMonitor.onProgress({ done: 0, total: 2, current: '' });
+    resumedFilter.onProgress({ done: 0, total: 2, current: '' });
+    monitor.onProgress({ done: 2, total: 2, current: 'old callback' });
+    filtering.onProgress({ done: 2, total: 2, current: 'old callback' });
+  });
+  expect(h.result.current.progress?.done).toBe(1);
+  expect(h.result.current.filterProgress?.done).toBe(1);
+  const next = qualityRunSamples(resumedFilter.study).find(row => qualityFilterReadingKey(row, filter) !== reading.key)!;
+  act(() => resumedFilter.onFilterReading?.({ key: qualityFilterReadingKey(next, filter), value: .8 }));
+  releases.forEach(release => release());
+  await flush();
+  expect(h.result.current.study.monitorLibrary!.rounds.at(-1)?.state).toBe('complete');
+  expect(h.result.current.study.filterLibrary!.rounds.at(-1)?.state).toBe('complete');
+  expect(h.result.current.resumeMonitoring).toBeUndefined();
+  expect(h.result.current.resumeFiltering).toBeUndefined();
+  expect(h.result.current.study.selectedRowIds).toEqual([]);
+  expect(JSON.stringify(h.result.current.study.sellPlans)).toBe(before.plans);
+});

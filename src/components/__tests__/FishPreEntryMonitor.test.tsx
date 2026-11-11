@@ -106,7 +106,7 @@ it('continues a frozen paused round from the main action and exposes restart in 
   const library = { ...emptyPreEntryLibrary(), rounds: [{ id: 'paused', startedAt: 1, updatedAt: 1, filters: [], hours: 12, state: 'paused' as const }] };
   const state = { ready: true, preEntry: { library, ready: true, running: false, error: '', progress: null, start, resume, restart } } as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={state} selectedCount={2} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
-  fireEvent.click(screen.getByText('开始筛选'));
+  fireEvent.click(screen.getByRole('button',{name:'继续筛选'}));
   expect(resume).toHaveBeenCalledWith('paused'); expect(start).not.toHaveBeenCalled();
   fireEvent.click(screen.getByLabelText('开始筛选的其他方式'));
   fireEvent.click(screen.getByText('从头重新筛选'));

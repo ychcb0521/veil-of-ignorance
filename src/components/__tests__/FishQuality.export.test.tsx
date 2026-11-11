@@ -28,6 +28,11 @@ it('exports selected offscreen rows exactly once in display order with original 
  expect(sheet.headerRows?.[0][0]).toEqual({text:'入场信息',span:5});expect(sheet.columns.slice(0,5).map(c=>c.header)).toEqual(['行号','标的','信号时间','市场','评分']);
  for(const label of ['加仓次数','几何仓位','相对涨幅','盈亏比','静态最大回撤','峰值涨幅','首仓涨幅','半仓镜像','持仓时间'])expect(sheet.columns.map(c=>c.header)).toContain(label);expect(sheet.columns.map(c=>c.header)).not.toContain('跳转');
  const rating=sheet.columns.findIndex(c=>c.header==='评分');expect(sheet.rows[0][rating]).toBe('★★★★☆');expect(capture.restore).not.toHaveBeenCalled();expect(screen.queryByTestId('quality-export-batch')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'隐藏未选行'}));
+ expect(within(live).getAllByTestId('quality-row-number').map(cell=>cell.textContent)).toEqual(['1','91']);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));
+ await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(2));
+ expect(capture.download.mock.calls[1][0]).toEqual(sheet);
 });
 it('uses bounded batches without changing the virtual table or exporting unchecked rows',async()=>{
  const s=state(),all=qualityDisplayRows(s.study);s.study.selectedRowIds=all.slice(0,125).map(row=>row.id);render(<FishQuality state={s}/>);

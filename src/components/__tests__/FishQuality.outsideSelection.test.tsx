@@ -39,3 +39,33 @@ it('只清挡住勾选的标的搜索，不动别的筛选', () => {
 });
 
 function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
+
+it('隐藏未选行只改变当前视图，仍可清除显示行的勾选并保留筛选外的勾选', () => {
+  const s = state();
+  const rows = qualityDisplayRows(s.study);
+  const outside = rows.find(row => row.source.symbol === 'CCCUSDT')!.id;
+  s.study.selectedRowIds = rows.filter(row => row.source.symbol !== 'BBBUSDT').map(row => row.id);
+  const view = render(<FishQuality state={s}/>);
+  const row = (symbol: string) => screen.queryByRole('checkbox', { name: new RegExp('^选择 ' + symbol) });
+  const search = screen.getByLabelText('筛选鱼质量信号');
+  fireEvent.change(search, { target: { value: 'AAA' } });
+  const scope = vi.mocked(s.setScope!).mock.calls.at(-1);
+  fireEvent.click(screen.getByRole('button', { name: '隐藏未选行' }));
+  expect(vi.mocked(s.setScope!).mock.calls.at(-1)).toBe(scope);
+  expect(s.setSelectedRows).not.toHaveBeenCalled();
+  expect(row('AAAUSDT')).toBeChecked();
+  fireEvent.change(search, { target: { value: 'BBB' } });
+  expect(screen.getByText(/当前筛选内没有已选行/)).toBeInTheDocument();
+  fireEvent.change(search, { target: { value: 'AA' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: '全选显示的行' }));
+  expect(s.setSelectedRows).toHaveBeenCalledWith([outside]);
+  s.study = {...s.study, selectedRowIds: [outside]};
+  view.rerender(<FishQuality state={s}/>);
+  expect(row('AAAUSDT')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '显示未选行' }));
+  expect(row('AAAUSDT')).not.toBeChecked();
+  expect(search).toHaveValue('AA');
+  fireEvent.change(search, { target: { value: '' } });
+  expect(row('CCCUSDT')).toBeChecked();
+  expect(row('BBBUSDT')).not.toBeChecked();
+});

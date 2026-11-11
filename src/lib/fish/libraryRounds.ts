@@ -45,7 +45,14 @@ export function newLibraryRound(rounds: readonly LibraryRound[], id: string, at:
 }
 
 export function finishLibraryRound(rounds: readonly LibraryRound[], id: string, state: Exclude<LibraryRoundState, 'running'>, at: number, error?: string): LibraryRound[] {
-  return rounds.map(r => r.id === id ? { ...r, state, updatedAt: at, finishedAt: at, ...(error ? { error } : {}) } : r);
+  return rounds.map(r => r.id === id ? { ...r, state, updatedAt: Math.max(at, r.updatedAt), finishedAt: Math.max(at, r.updatedAt), ...(error ? { error } : {}) } : r);
+}
+
+/** Resume a paused round in place, retaining its original selection and start time. */
+export function resumeLibraryRound<T extends LibraryRound>(rounds: readonly T[], id: string, at: number): T[] {
+  return rounds.map(round => round.id === id && round.state === 'paused' ? {
+    ...round, state: 'running', updatedAt: Math.max(at, round.updatedAt + 1), finishedAt: undefined, error: undefined,
+  } : round);
 }
 
 /** 打开时还挂着「运行中」的轮次不可能还在跑（页面关过）：改成已暂停，保留已存的记录。 */

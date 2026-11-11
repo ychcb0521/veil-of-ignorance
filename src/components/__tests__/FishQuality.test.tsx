@@ -170,6 +170,13 @@ it('defaults to one row per symbol/time, toggles detector details from the heade
  expect(toggle).toHaveAttribute('aria-expanded','false');expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
  const checkbox=()=>within(screen.getAllByTestId('quality-fish-row')[0]).getByRole('checkbox') as HTMLInputElement;
  expect(checkbox().indeterminate).toBe(true);expect(checkbox()).not.toBeChecked();
+ fireEvent.click(screen.getByRole('button',{name:'隐藏未选行'}));
+ expect(checkbox().indeterminate).toBe(true);
+ fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+ expect(screen.getByTestId('quality-row-count')).toHaveTextContent('已隐藏 2 行');
+ fireEvent.click(toggle);expect(checkbox().indeterminate).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'显示未选行'}));
+ expect(s.setSelectedRows).not.toHaveBeenCalled();
  fireEvent.click(checkbox());expect(s.setSelectedRows).toHaveBeenLastCalledWith(expect.arrayContaining(ids));
  s.study={...s.study,selectedRowIds:vi.mocked(s.setSelectedRows).mock.calls.at(-1)![0]};view.rerender(<FishQuality state={s}/>);
  expect(qualityRunSamples(s.study)).toHaveLength(1);expect(checkbox()).toBeChecked();
@@ -886,7 +893,7 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  expect(screen.queryByText(/点此设置/)).toBeNull();expect(screen.getByRole('button',{name:'开始过滤'})).toHaveAttribute('title','先设置并启用买入过滤条件');
  fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
  cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
- render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.startFilter).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
+ s.resumeFiltering=vi.fn();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.resumeFiltering).toHaveBeenCalledOnce();expect(s.startFilter).not.toHaveBeenCalled();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
  cleanup();render(<FishQuality state={{...s,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
 });
 

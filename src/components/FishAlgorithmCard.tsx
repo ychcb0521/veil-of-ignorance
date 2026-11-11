@@ -20,6 +20,42 @@ export function FishCheck({className='',...props}:InputHTMLAttributes<HTMLInputE
  return <span className={`relative inline-flex h-3.5 w-3.5 shrink-0 ${className}`}><input {...props} type="checkbox" className="peer h-3.5 w-3.5 cursor-pointer appearance-none rounded-[4px] border border-muted-foreground/40 bg-background transition-colors checked:border-primary checked:bg-primary hover:border-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"/><Check aria-hidden strokeWidth={3} className="pointer-events-none absolute inset-0.5 hidden h-2.5 w-2.5 text-primary-foreground peer-checked:block"/></span>;
 }
 export interface FishCard {id:string;featureId:string;enabled:boolean;pref:FishPreference}
+interface FishAlgorithmOption {
+  value: string;
+  def: DeepDigFeatureDef;
+  label: string;
+  statistic?: string;
+  reason?: string;
+}
+
+const isBtcFreeOption = (def: DeepDigFeatureDef) =>
+  Boolean(def.btcFreeSourceId) || /-no-btc(?:-|$)/i.test(def.id) || /无\s*BTC/i.test(def.short + ' ' + def.name);
+const optionCache = new WeakMap<DeepDigFeatureDef[], FishAlgorithmOption[]>();
+function fishAlgorithmOptions(defs: DeepDigFeatureDef[]): FishAlgorithmOption[] {
+  const cached = optionCache.get(defs);
+  if (cached) return cached;
+  const options = defs.filter(def => !isBtcFreeOption(def)).flatMap(def => {
+    const reason = (statistic?: string) => {
+      try {
+        return compileFishProgram(def, { statistic, direction: '>', threshold: 0, constraints: [] }).unavailable;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    const base: FishAlgorithmOption = { value: def.id, def, label: def.short || def.name, reason: reason() };
+    let statistics: ReturnType<typeof fishStatistics>;
+    try { statistics = fishStatistics(def); } catch { return [base]; }
+    const averages = algorithmMetricMenu(def, statistics).filter(metric => metric.label === 'avg' || metric.label === 'avg_2');
+    return [base, ...averages.map(({ name }) => ({
+      value: JSON.stringify([def.id, name]), def, statistic: name,
+      label: fishSourceLabel({ featureId: def.id, featureShort: def.short, statistic: name }),
+      reason: reason(name),
+    }))];
+  });
+  optionCache.set(defs, options);
+  return options;
+}
+
 export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canDelete=true,suggestion=null,computing='',queued=false,librarySize=0,footer,onRecalculate,recalculateDisabled=false,recalculating=false}:{card:FishCard;defs:DeepDigFeatureDef[];locked:boolean;index:number;onChange:(card:FishCard)=>void;onDelete:()=>void;canDelete?:boolean;suggestion?:FishSuggestion|null;computing?:string;queued?:boolean;librarySize?:number;footer?:ReactNode;onRecalculate?:()=>void;recalculateDisabled?:boolean;recalculating?:boolean}) {
  const def=defs.find(d=>d.id===card.featureId),p=card.pref,recorded=RECORDED_RANGES[card.featureId];
  const update=(patch:Partial<FishPreference>)=>onChange({...card,pref:{...p,...patch,constraints:[]}});
@@ -31,7 +67,17 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  // 每行只保留操作字段；条件、单位、区间和计算状态统一收进淡色说明入口。
  const field='h-7 min-w-0 w-full rounded-md border border-transparent bg-muted/50 text-[11px] text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60 focus-visible:bg-background';
  const cls=`${field} appearance-none pl-2 pr-6`;
- const options=useMemo(()=>defs.map(d=>{try{const plan=compileFishProgram(d,{direction:'>',threshold:0,constraints:[]});return {def:d,reason:plan.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
+ const options = useMemo(() => fishAlgorithmOptions(defs), [defs]);
+ const selectedOption = options.find(option => option.def.id === card.featureId && option.statistic != null && option.statistic === p.statistic);
+ const selectAlgorithm = (value: string) => {
+   const option = options.find(choice => choice.value === value);
+   if (!option || option.reason) return;
+   const prior = option.statistic != null && option.def.id === card.featureId ? p : readFishPreference(option.def.id);
+   const pref = option.statistic != null && option.statistic !== prior.statistic
+     ? { ...prior, statistic: option.statistic, threshold: '', lastSuggestion: undefined }
+     : prior;
+   onChange({ ...card, featureId: option.def.id, pref: { ...pref, constraints: [] } });
+ };
  const label=(field:string)=>index===1?`捕捞${field==='特征值'?'算法':field}`:`算法 ${index} ${field}`;
  const refresh=onRecalculate?<button type="button" aria-label={index===1?'计算建议':`重新计算算法 ${index} 的区间`} title="重新计算区间（点击后才取数）" disabled={recalculateDisabled} className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded align-middle text-muted-foreground/35 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30" onClick={onRecalculate}><RotateCw className={`h-2.5 w-2.5 ${recalculating?'animate-spin':''}`}/></button>:null;
  const suggestionText=footer??<>{suggestion?<span className="text-[10px] text-muted-foreground" data-testid={`fish-suggestion-${index}`} title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {librarySize} 条）</span>:computing?<span className="text-[10px] text-muted-foreground/70" data-testid={`fish-suggestion-auto-${index}`}>信号库建议计算中 {computing}</span>:queued&&card.enabled&&librarySize>0?<span className="text-[10px] text-muted-foreground/50">信号库建议排队中</span>:null}</>;
@@ -45,7 +91,19 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  return <fieldset disabled={locked} className="relative min-w-0 py-1 pl-2 pr-8 text-[11px] transition-colors hover:bg-muted/20" aria-label={`算法 ${index}`}>
  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
  <label className="flex w-8 shrink-0 items-center gap-1.5 pl-0.5" title={`算法 ${index}`}><FishCheck aria-label={`启用算法 ${index}`} checked={card.enabled} onChange={e=>onChange({...card,enabled:e.target.checked})}/><span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{index}</span></label>
- <span className={`relative w-24 shrink-0 ${dim}`}><select aria-label={label('特征值')} title={def?.name} className={`${cls} font-medium`} value={card.featureId} onChange={e=>onChange({...card,featureId:e.target.value,pref:{...readFishPreference(e.target.value),constraints:[]}})}>{options.map(({def:d,reason})=><option key={d.id} value={d.id} label={`${d.id===card.featureId?selectedName:d.short||d.name}${reason?' · 不可用':''}`} aria-label={`${d.short} · ${d.name}${reason?`（${reason}）`:''}`} disabled={!!reason}>{d.short} · {d.name}{reason?`（${reason}）`:''}</option>)}</select>{chevron}</span>
+ <span className={`relative w-24 shrink-0 ${dim}`}>
+   <select aria-label={label('特征值')} title={def?.name} className={`${cls} font-medium`} value={selectedOption?.value ?? card.featureId} onChange={e => selectAlgorithm(e.target.value)}>
+     {def && isBtcFreeOption(def) && <option hidden disabled value={def.id} label={selectedName} data-feature-id={def.id}>{selectedName}</option>}
+     {options.map(option => {
+       const {def: item, value, label: optionLabel, statistic, reason} = option;
+       const baseSelected = !selectedOption && statistic == null && item.id === card.featureId;
+       const savedAlias = baseSelected && options.some(choice => choice.def.id === item.id && choice.statistic && choice.label === selectedName);
+       const display = baseSelected ? (selectedName ?? optionLabel) + (savedAlias ? ' · 已保存' : '') : optionLabel;
+       const fullLabel = `${optionLabel} · ${item.name}${reason ? `（${reason}）` : ''}`;
+       return <option key={value} value={value} label={display + (reason ? ' · 不可用' : '')} aria-label={fullLabel} data-feature-id={item.id} disabled={!!reason}>{fullLabel}</option>;
+     })}
+   </select>{chevron}
+ </span>
  <span className={`relative w-32 shrink-0 ${dim}`}><select aria-label={label('统计量')} title={stats.find(s=>s.name===(p.statistic??'结果'))?.label} className={cls} value={p.statistic??'结果'} onChange={e=>{const next=withFishDefaultThreshold(card.featureId,{...p,statistic:e.target.value,threshold:'',lastSuggestion:undefined});update({statistic:next.statistic,threshold:next.threshold,lastSuggestion:undefined});}}>{!menuStats.some(s=>s.name===(p.statistic??'结果'))&&<option hidden disabled value={p.statistic??'结果'}>已保存指标：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</option>}{menuStats.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select>{chevron}</span>
  <span className={`relative w-11 shrink-0 ${dim}`}><select aria-label={label('方向')} className={`${cls} pl-2.5 pr-5 font-medium`} value={p.direction} onChange={e=>{const direction=e.target.value as '>'|'<',fill=suggestion?suggestedFishThreshold(suggestion,direction):null;if(fill!==null&&p.lastSuggestion!==undefined&&mayFillFishThreshold(p.threshold,p.lastSuggestion))update({direction,threshold:String(fill),lastSuggestion:String(fill)});else update({direction});}}><option value=">">&gt;</option><option value="<">&lt;</option></select>{chevron}</span>
  <span className={`relative w-24 shrink-0 ${dim}`}><input aria-label={label('阈值')} title={unit} className={`${field} px-2 pt-0.5 font-mono font-medium tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/></span>

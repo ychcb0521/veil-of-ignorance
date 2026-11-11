@@ -162,7 +162,7 @@ export function finishQualityMonitorRound(study: FishQualityStudy, capture: Qual
   const library = study.monitorLibrary; if (!library?.rounds.some(r => r.id === capture.roundId)) return study;
   const records = new Map(library.records.map(r => [r.id, r]));
   for (const task of capture.tasks.values()) records.set(task.id, recordFor(task, capture.readings, capture.results.get(task.resultKey), at, records.get(task.id)));
-  return { ...study, monitorLibrary: { ...library, records: [...records.values()], rounds: library.rounds.map(r => r.id === capture.roundId ? { ...r, state, updatedAt: at, finishedAt: at, error } : r) } };
+  return { ...study, monitorLibrary: { ...library, records: [...records.values()], rounds: library.rounds.map(r => r.id === capture.roundId ? { ...r, state, updatedAt: Math.max(at, r.updatedAt), finishedAt: Math.max(at, r.updatedAt), error } : r) } };
 }
 /** Adopt only original frozen history. Unknown old buy conditions remain explicitly unknown. */
 export function adoptQualityMonitorHistory(study: FishQualityStudy): FishQualityStudy {
