@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FishScreeningSamplePicker } from './FishScreeningSamplePicker';
+import { FishMonitorSamplePicker, FishScreeningSamplePicker } from './FishLibrarySamplePickers';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { mergeLibraryDirectoryEdits } from '@/lib/fish/libraryDirectoryEdits';
 import { FishHitRateMissLibrary } from './FishHitRateMissLibrary';
@@ -44,8 +44,9 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
   const savedSettings = useMemo(() => readFishHitRateSettings(storedSettings), [storedSettings]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const currentWindow = savedSettings?.window ?? DEFAULT_FISH_HIT_RATE_WINDOW;
-  const [source, setSource] = useState<'screening' | 'misses' | 'paste'>('screening');
+  const [source, setSource] = useState<'screening' | 'monitor' | 'misses' | 'paste'>('screening');
   const [selectedRecords, setSelectedRecords] = useState<readonly string[]>([]);
+  const [monitorSamples, setMonitorSamples] = useState<TradeSignal[]>([]);
   const [missSamples, setMissSamples] = useState<TradeSignal[]>([]);
   const [activeRevision, setActiveRevision] = useState(0);
   const [failedUpdates, setFailedUpdates] = useState<MissLibraryWrite[]>([]);
@@ -79,7 +80,7 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
   const screeningSamples = useMemo(() => screening?.ready
     ? screeningHitRateSamples(screening.library.records, selectedRecords, screeningEdits)
     : [], [screening?.ready, screening?.library.records, selectedRecords, screeningEdits]);
-  const samples = source === 'screening' ? screeningSamples : source === 'misses' ? missSamples : pasted?.signals ?? [];
+  const samples = { screening: screeningSamples, monitor: monitorSamples, misses: missSamples, paste: pasted?.signals ?? [] }[source];
   const checkedWindows = useMemo(() => new Set(samples.map(sample => sample.timeMs)).size, [samples]);
   const runningWindowCount = useMemo(() => new Set(testedSamples.map(sample => sample.timeMs)).size, [testedSamples]);
   const marketHits = useMemo(() => resultMode === 'market' ? fishMarketHits(windows, testedSamples) : [], [resultMode, testedSamples, windows]);
@@ -206,6 +207,16 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
           </div>
           {source === 'screening' && <p className="text-muted-foreground">
             {screening ? '按所选标的的信号时间建立测试窗口。' : '筛选库暂不可用。'}
+          </p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-2">
+              <input type="radio" name={sourceName} checked={source === 'monitor'} onChange={() => setSource('monitor')}/>检测库
+            </label>
+            {source === 'monitor' && quality?.ready && <FishMonitorSamplePicker state={quality} selected={monitorSamples}
+              onSelect={setMonitorSamples} onJump={onJump} canJump={canJump}/>}
+          </div>
+          {source === 'monitor' && <p className="text-muted-foreground">
+            {quality?.ready ? '按所选标的的信号时间建立测试窗口。' : '检测库暂不可用。'}
           </p>}
           <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex items-center gap-2">

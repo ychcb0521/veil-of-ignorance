@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { FishPreEntryLibrary } from './FishPreEntryMonitor';
+import { FishMonitorLibrary } from './FishMonitorLibrary';
 import { ArchivedQualityBoard } from './FishQuality';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { qualityDisplayRows, qualityEntryIdentity, type FishQualityStudy, type QualitySample } from '@/lib/fish/quality';
 import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
-import { screeningHitRateSamples } from '@/lib/fish/hitRate';
+import { monitorHitRateSample, screeningHitRateSamples } from '@/lib/fish/hitRate';
 import type { LibraryDirectoryEdits } from '@/lib/fish/libraryDirectoryEdits';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -66,15 +67,72 @@ export function FishScreeningSamplePicker({ state, edits, selectedIds, onSelect,
       selected: draft,
       setSelected: setDraft,
       onOpenChange: open => { if (open) setDraft([...selectedIds]); },
-      footer: close => <>
-        <span className="pl-1 text-muted-foreground">已选 {sampleCount} 条测试样本</span>
-        <div className="flex gap-2">
-          <button type="button" onClick={close} className="rounded-md border border-border/60 px-3 py-1.5 hover:bg-muted">取消</button>
-          <button type="button" disabled={!ready || (!sampleCount && !selectedIds.length)} onClick={() => { onSelect(sampleCount ? draft : []); close(); }}
-            className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40">
-            {sampleCount || !selectedIds.length ? '使用所选样本' : '清空测试样本'}
-          </button>
-        </div>
-      </>,
+      footer: close => <SamplePickerFooter count={sampleCount} hadSelection={selectedIds.length > 0} ready={!!ready} close={close}
+        apply={() => onSelect(sampleCount ? draft : [])}/>,
+    }}/>
+}
+
+function SamplePickerFooter({ count, hadSelection, ready = true, close, apply }: {
+  count: number;
+  hadSelection: boolean;
+  ready?: boolean;
+  close: () => void;
+  apply: () => void;
+}) {
+  return <>
+    <span className="pl-1 text-muted-foreground">已选 {count} 条测试样本</span>
+    <div className="flex gap-2">
+      <button type="button" onClick={close} className="rounded-md border border-border/60 px-3 py-1.5 hover:bg-muted">取消</button>
+      <button type="button" disabled={!ready || (!count && !hadSelection)} onClick={() => { apply(); close(); }}
+        className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40">
+        {count || !hadSelection ? '使用所选样本' : '清空测试样本'}
+      </button>
+    </div>
+  </>;
+}
+
+interface MonitorPickerProps {
+  state: FishQualityState;
+  selected: TradeSignal[];
+  onSelect: (samples: TradeSignal[]) => void;
+  onJump?: (signal: TradeSignal) => void;
+  canJump?: (signal: TradeSignal) => boolean;
+}
+
+function MonitorSampleBoard({ study, draft, setDraft, onJump, canJump }: Pick<MonitorPickerProps, 'onJump' | 'canJump'> & {
+  study: FishQualityStudy;
+  draft: ReadonlyMap<string, TradeSignal>;
+  setDraft: Dispatch<SetStateAction<Map<string, TradeSignal>>>;
+}) {
+  const samplesByRow = useMemo(() => qualityDisplayRows(study).flatMap(row => {
+    const sample = monitorHitRateSample(row.source);
+    return sample ? [[row.id, sample] as const] : [];
+  }), [study]);
+  const rowIds = useMemo(() => samplesByRow.filter(([, sample]) => draft.has(sample.id)).map(([rowId]) => rowId), [samplesByRow, draft]);
+  const onChange = useCallback((nextRowIds: readonly string[]) => {
+    const nextRows = new Set(nextRowIds);
+    setDraft(previous => {
+      const next = new Map(previous);
+      for (const [rowId, sample] of samplesByRow) {
+        const checked = nextRows.has(rowId);
+        if (checked === previous.has(sample.id)) continue;
+        if (checked) next.set(sample.id, sample);
+        else next.delete(sample.id);
+      }
+      return next;
+    });
+  }, [samplesByRow, setDraft]);
+  return <ArchivedQualityBoard study={study} selection={{ rowIds, onChange }} onJump={onJump} canJump={canJump}/>;
+}
+
+export function FishMonitorSamplePicker({ state, selected, onSelect, onJump, canJump }: MonitorPickerProps) {
+  const [draft, setDraft] = useState(new Map<string, TradeSignal>());
+  return <FishMonitorLibrary study={state.study} loadArchive={state.loadMonitorArchive}
+    onOpenChange={open => { if (open) setDraft(new Map(selected.map(sample => [sample.id, sample]))); }}
+    renderStudy={study => <MonitorSampleBoard study={study} draft={draft} setDraft={setDraft} onJump={onJump} canJump={canJump}/>}
+    picker={{
+      triggerLabel: '从检测库选择标的',
+      footer: close => <SamplePickerFooter count={draft.size} hadSelection={selected.length > 0} close={close}
+        apply={() => onSelect([...draft.values()].sort((a, b) => b.timeMs - a.timeMs))}/>,
     }}/>;
 }

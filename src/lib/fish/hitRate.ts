@@ -7,6 +7,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import type { PreEntryRecord } from './preEntryMonitor';
 import type { LibraryDirectoryEdits } from './libraryDirectoryEdits';
 import { fishSourceLabel } from './records';
+import { qualitySignalTime } from './qualityAdmissionTime';
 
 export interface FishHitRateTimeWindow { beforeHours: number; afterHours: number }
 export const DEFAULT_FISH_HIT_RATE_WINDOW: Readonly<FishHitRateTimeWindow> = { beforeHours: 2.5, afterHours: 2.5 };
@@ -19,6 +20,16 @@ export function validateFishHitRateWindow({ beforeHours, afterHours }: FishHitRa
   return duration;
 }
 const marketKey = (signal: Pick<TradeSignal, 'symbol' | 'exchange' | 'market'>) => `${signal.exchange ?? 'binance'}|${signal.market ?? 'crypto'}|${signal.symbol}`;
+export function monitorHitRateSample(source: TradeSignal): TradeSignal | undefined {
+  const { symbol, exchange, market, underlying, binanceSymbol, fallbackZone, quality } = source;
+  const timeMs = qualitySignalTime(source);
+  if (!Number.isFinite(timeMs) || timeMs <= 0) return;
+  return {
+    id: `monitor-sample:${marketKey(source)}|${timeMs}`, symbol, exchange, market,
+    underlying, binanceSymbol, timeMs, timeLabel: formatUTC8(timeMs), fallbackZone, quality,
+  };
+}
+
 export function screeningHitRateSamples(records: readonly PreEntryRecord[], selectedIds: readonly string[], edits?: LibraryDirectoryEdits): TradeSignal[] {
   if (!selectedIds.length) return [];
   const selected = new Set(selectedIds);

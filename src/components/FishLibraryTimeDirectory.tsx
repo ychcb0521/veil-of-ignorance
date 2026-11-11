@@ -15,14 +15,15 @@ export interface FishDirectoryItem {
   study:()=>FishQualityStudy|Promise<FishQualityStudy>;
 }
 export interface FishDirectoryRequest {key:number;selectedId?:string;selectedIds?:string[]}
+export interface FishDirectoryPicker {
+  triggerLabel: string;
+  footer: (close: () => void) => ReactNode;
+}
 export const libraryDirectoryAction='inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
 export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,items,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
   loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string;info:ReactNode;dataActions?:ReactNode;items:FishDirectoryItem[];
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
-  picker?: {
-    triggerLabel: string;
-    footer: (close: () => void) => ReactNode;
-  };
+  picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
   renderStudy?:(study:FishQualityStudy)=>ReactNode;
   onCopyStudy?:(study:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;
