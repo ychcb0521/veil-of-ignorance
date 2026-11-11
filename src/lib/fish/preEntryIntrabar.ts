@@ -3,7 +3,7 @@ import { findQualityIntrabarExit } from './qualityIntrabar';
 import { withTuringInitialization } from './qualityInitialization';
 import { planVersionChanges } from './qualityPlanVersions';
 import type { FishReconstructionLoader } from './reconstruction';
-import { PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
+import { automaticPreEntryWindow, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
 import { formatUTC8 } from '../timeFormat';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions, hasPreEntryVetoes, preEntryVetoes } from './preEntryConditions';
 import { createPreEntryGate, preEntryGuardWarmBars } from './preEntryGate';
@@ -39,7 +39,8 @@ export async function collectPreEntryIntrabar(task: PreEntryRun, load: FishRecon
       const filters = preEntryPlanFilters(selected), plans = filters.map(f => qualityMetricPlan(f.snapshot, f.metric));
       const start = await bounds?.start?.(record.sample.source.symbol), availableEnd = await bounds?.end?.(record.sample.source.symbol) ?? now;
       const initialized = selected.initialization ? withTuringInitialization(load, record.sample.source.symbol, start ?? NaN) : load;
-      const end = record.endTime ?? Math.floor(Math.min(now, availableEnd, task.round.hours ? record.startTime + task.round.hours * 3600000 : Infinity) / 60000) * 60000;
+      const liveWindow = task.round.automatic ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
+      const end = liveWindow?.end ?? record.endTime ?? Math.floor(Math.min(now, availableEnd, task.round.hours ? record.startTime + task.round.hours * 3600000 : Infinity) / 60000) * 60000;
       const readyAt = start == null || selected.initialization ? record.startTime : Math.max(record.startTime,
         ...[...plans,...excluded].map(({plan}) => Math.ceil(start / plan.step) * plan.step + plan.warm * plan.step),
         ...(v4 && preEntryGuardWarmBars(selected.preEntryConditions) ? [Math.ceil(start/300000)*300000+preEntryGuardWarmBars(selected.preEntryConditions)*300000] : []));
@@ -50,7 +51,9 @@ export async function collectPreEntryIntrabar(task: PreEntryRun, load: FishRecon
       const since = gated ? readyAt : Math.max(record.cursor, readyAt);
       const gate = gated ? createPreEntryGate({conditions:selected.preEntryConditions!,start:record.startTime,row:{...record.sample.source,timeMs:now},load:initialized,signal}) : undefined;
       publish({ status: 'scanning', endTime: end, cursor: Math.max(since,resumeAt) });
-      if (since >= end) {
+      if (liveWindow?.waiting && Math.max(since,resumeAt) >= end) {
+        publish({ status: 'queued', cursor: resumeAt, detail: '等待下一根已收盘分钟线' });
+      } else if (since >= end) {
         publish({status: readyAt >= end ? 'warming' : 'unmatched', detail: readyAt >= end ? `当前行情无法完成本方案预热；最早可判断 ${formatUTC8(readyAt)}。可另建图灵杯专用副本，原方案保留。` : '本轮行情范围已结束'});
       } else {
         let lastPaint = 0;
@@ -74,6 +77,7 @@ export async function collectPreEntryIntrabar(task: PreEntryRun, load: FishRecon
         if (result.trigger) publish({status: 'matched', cursor: result.trigger.at, matchedAt: result.trigger.at,
           readings: (result.trigger.readings ?? []).map(r => ({key:r.id, value:r.value, at:r.at})),
           detail: v4 ? '入选算法和确认条件同分钟满足，且全部启用否决均未触发；已停在该入选节点' : '按持仓监测同一套分钟盘中复原流程，买入算法和启用的确认条件首次同时满足；已停在该买入节点'});
+        else if (liveWindow?.waiting) publish({ status: 'queued', cursor: end, detail: '等待后续已收盘行情' });
         else publish({status:'unmatched', cursor:end, detail:waitingForTrade?'行情末尾仍在等待零成交后的有效读数，未判定入选':v4?'本轮范围内，未出现入选条件全部满足且没有否决的时点':'本轮范围内，买入算法和确认条件未同时满足'});
       }
     } catch (cause) {

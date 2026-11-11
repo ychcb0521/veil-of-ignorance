@@ -22,9 +22,6 @@ import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
 import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
 import type {FishNotify} from '@/hooks/useFishNotify';
-import { fishEmailAlgorithm } from '@/lib/fish/notify';
-import { qualityMembers } from '@/lib/fish/quality';
-import { definitionKey } from '@/lib/deepDig/features';
 import {FishNotifySettings} from './FishNotifySettings';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
@@ -522,10 +519,7 @@ export function FishPanel(p: FishPanelProps) {
       </details>
       {p.notify && <details className="rounded-md border border-border/60 p-3">
         <summary className="cursor-pointer font-medium">邮件提醒</summary>
-        <div className="pt-2"><FishNotifySettings notify={p.notify} algorithms={[
-          ...pool.map(plan => fishEmailAlgorithm({ featureId: plan.def.id, featureShort: plan.def.short, statistic: plan.settings.statistic, definitionKey: definitionKey(plan.def) })),
-          ...p.signals.flatMap(signal => qualityMembers(signal).map(fishEmailAlgorithm)),
-        ].filter((a): a is NonNullable<typeof a> => Boolean(a))}/></div>
+        <div className="pt-2"><FishNotifySettings notify={p.notify}/></div>
       </details>}
     </section>
     {(error||multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}

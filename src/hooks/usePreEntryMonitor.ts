@@ -1,5 +1,5 @@
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
-import {selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
+import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
@@ -9,6 +9,7 @@ import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
 import { loadPreEntryLibraryV5 } from '@/lib/fish/preEntryMonitorV5Store';
 import { loadPreEntryLibraryV6, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
 import { withPreEntryTableClears } from '@/lib/fish/preEntryTableClears';
+import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import {projectPreEntryBatch} from '@/lib/fish/preEntryArchiveClient';
 import { PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
@@ -20,6 +21,7 @@ import { activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type Fi
 export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
   const [ready, setReady] = useState(false), [running, setRunning] = useState(false);
+  const [automaticRunning, setAutomaticRunning] = useState(false);
   const [error, setError] = useState(''), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [reload, setReload] = useState(0);
   const persistence = useMemo(() => createPreEntryCheckpoint(value => savePreEntryLibrary(owner, value), true), [owner]);
@@ -31,7 +33,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const commit = useCallback((value: PreEntryLibrary) => { current.current = value; setLibrary(value); }, []);
   useEffect(() => {
     const generation = ++epoch.current;
-    readyRef.current = false; setReady(false); setRunning(false); setProgress(null); setError('');
+    readyRef.current = false; setReady(false); setRunning(false); setAutomaticRunning(false); setProgress(null); setError('');
     tableClearLock.current=false;commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
@@ -116,7 +118,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       }
       scheduleSave();
     };
-    setRunning(true); setProgress(null); setError('');
+    setRunning(true); setAutomaticRunning(!!round.automatic); setProgress(null); setError('');
     commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id ? { ...r, state: 'running', updatedAt: Date.now() } : r) });
     try {
       // Save the frozen batch before executing it. Storage failure must not create an unrecorded run.
@@ -137,19 +139,35 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
           ? { ...r, state: aborter.signal.aborted || pending ? 'paused' : 'complete', updatedAt: Date.now() } : r) });
         setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
         await save();
-        setRunning(false);
+        setRunning(false); setAutomaticRunning(false);
       }
       if (controller.current === aborter) controller.current = null;
       if (execution.current === finished) execution.current = null;
       finish();
     }
   }, [commit, persistence, owner]);
-  const start = useCallback(async (study: FishQualityStudy, hours: number) => {
+  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false) => {
     if (!readyRef.current || controller.current||tableClearLock.current) return;
+    if (automaticId) {
+      if (owner && recover) {
+        const generation = epoch.current;
+        const saved = await readAutomaticPreEntryCheckpoint(owner, automaticId);
+        if (generation !== epoch.current || !readyRef.current || controller.current || tableClearLock.current) return;
+        if (saved) commit(mergePreEntryLibraries(current.current, saved));
+      }
+      const existing = current.current.rounds.find(round => round.id === automaticId);
+      if (existing) {
+        if (current.current.records.some(record => record.roundId === automaticId && (preEntryRecordPending(record) || record.status === 'error'))) {
+          await execute(existing, newQualityStudy(study.startedAt));
+        }
+        return;
+      }
+      if (!current.current.settings?.plans.length) return;
+    }
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
     let plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
     const chosen=selectedPreEntryPlan(plans);
-    if(plans.length>1&&plans.some(p=>!!p.preEntryThreeStage)){if(!chosen){setError('请在条件设置中选择并保存唯一的三阶筛选方案');return;}plans=[chosen];}
+    if(plans.length>1&&(automaticId||plans.some(p=>!!p.preEntryThreeStage))){if(!chosen){setError('请在条件设置中选择并保存唯一的筛选方案');return;}plans=[chosen];}
     let filters;
     const threeStage=plans.some(p=>!!p.preEntryThreeStage);
     try {
@@ -159,19 +177,19 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : '筛选条件无效'); return; }
     if (!plans.length || !threeStage&&!filters.length || !samples.length) { setError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
-    const at = Date.now(), id = `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
+    const at = Date.now(), id = automaticId ?? `pre-entry-${crypto.randomUUID()}`;
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? { automatic: true } : {}) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => {
       const startTime = round.engine === PRE_ENTRY_SIGNAL_GATE_VERSION ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
       return { id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
         status: 'queued' as const, startTime, cursor: startTime, readings: [], updatedAt: at };
     }));
-    const base=current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
+    const base=!automaticId&&current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
     commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
     // The screening engine reads its frozen round and records, never the research history.
     // Do not duplicate hundreds of MB of unrelated results when starting a task.
     await execute(round, newQualityStudy(study.startedAt));
-  }, [execute, commit]);
+  }, [execute, commit, owner]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
     const round = current.current.rounds.find(r => r.id === roundId);
     if (round) await execute(round, newQualityStudy(study.startedAt));
@@ -222,6 +240,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next={...mergePreEntryLibraries(current.current,historical),settings:current.current.settings};
     try{await persistence.save(next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
   },[commit,persistence]);
-  return { library, ready, running, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
+  return { library, ready, running, automaticRunning, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
+    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean) => start(study, newPreEntryHours(current.current.settings?.hours), id, recover),
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

@@ -25,17 +25,36 @@ function loader(closes:number[]=Array(30).fill(100),zeroAt?:number):FishReconstr
     return {openTime,open,close,high:Math.max(open,close),low:Math.min(open,close),volume,quoteVolume:100*volume,takerBuyVolume:.5*volume,takerBuyQuoteVolume:50*volume};
   });
 }
-async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number;start?:number}={}){
+async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number;start?:number;automatic?:boolean}={}){
   let record:PreEntryRecord=options.old??{id:'r',roundId:'round',planId:p.id,sample,status:'queued',startTime:T,cursor:T,readings:[],updatedAt:T};
   const aborter=options.aborter??new AbortController();
   const retry=p.preEntryThreeStage?.observationBasis==='retry-origin-v2';
-  try{await collectPreEntryMonitor({round:{id:'round',engine:retry?p.preEntryThreeStage!.version:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
+  try{await collectPreEntryMonitor({round:{id:'round',engine:retry?p.preEntryThreeStage!.version:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T,automatic:options.automatic},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
   catch(error){if(!aborter.signal.aborted)throw error;}
   return record;
 }
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it('keeps an automatic catch queued at the live boundary and admits on the later closed minute',async()=>{
+ const p=stateOnlyPlan();
+ p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);
+ p.preEntryThreeStage.required=[condition('信号资格',95)];
+ const load=loader([75,90]);
+ const first=await run(p,{automatic:true,end:T+M,load});
+ expect(first).toMatchObject({status:'queued',cursor:T+M,endTime:T+M,signalGate:{status:'pass'}});
+ const resumed=await run(p,{automatic:true,end:T+2*M,load,old:first});
+ expect(resumed).toMatchObject({status:'matched',matchedAt:T+2*M,signalGate:first.signalGate});
+ expect((await run(p,{end:T+M,load})).status).toBe('unmatched');
+});
+it('ends an automatic catch at the frozen deadline and ignores later opportunities',async()=>{
+ const p=stateOnlyPlan();
+ p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);
+ const load=loader([75,75,90]);
+ const first=await run(p,{automatic:true,end:T+M,hours:2/60,load});
+ expect(first.status).toBe('queued');
+ expect(await run(p,{automatic:true,end:T+3*M,hours:2/60,load,old:first})).toMatchObject({status:'unmatched',cursor:T+2*M});
+});
 it('retains a passing signal-time gate across later price changes, a veto and resumption',async()=>{
  const original=stateOnlyPlan();
  original.preEntryThreeStage!.required=[condition('必要条件',95)];

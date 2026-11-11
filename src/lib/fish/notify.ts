@@ -16,6 +16,8 @@ import { fishCaughtBy, fishVisibleCatchKey, fishMetricLabel, fishSourceLabel } f
 import type { FishSnapshot } from './algorithm';
 import { qualityMembers } from './quality';
 import { focusDetector, FOCUS_DETECTORS } from './qualityFocusSignals';
+import type { PreEntryRecord, PreEntryRound } from './preEntryMonitor';
+import { qualitySignalTime } from './qualityAdmissionTime';
 
 /**
  * 【用户要求】2026-10-27「推送的邮件内容只包括 avg_CBI2_2、avg_CBA_2 共振的信号，也就是两者捕捉到的信号的交集」。
@@ -144,6 +146,25 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   return { subject, message, message_html, count: rows.length };
 }
 
+export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' | 'matchedAt' | 'planId'>, round?: Pick<PreEntryRound, 'plans'>) {
+  const source = record.sample.source;
+  const plan = round?.plans?.find(plan => plan.id === record.planId)?.label ?? '动态筛选';
+  const rows = [
+    ['标的', source.symbol],
+    ['市场', source.market === 'us_stock' ? '美股' : EXCHANGE_NAMES[source.exchange ?? 'binance']],
+    ['原信号时间', formatUTC8(qualitySignalTime(source))],
+    ['首次满足时间', formatUTC8(record.matchedAt!)],
+    ['筛选方案', plan],
+  ];
+  const esc = (value: string) => value.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+  const subject = `动态筛选已入选 · ${source.symbol}`;
+  const message = ['新鱼已通过动态筛选。', ...rows.map(([label, value]) => `${label}　${value}`), '时间为 UTC+8。'].join('\n');
+  const message_html = '<div style="font:14px sans-serif;color:#111827"><p>新鱼已通过动态筛选。</p><table style="border-collapse:collapse">'
+    + rows.map(([label,value]) => `<tr><th style="padding:6px 12px;text-align:left">${esc(label)}</th><td style="padding:6px 12px">${esc(value)}</td></tr>`).join('')
+    + '</table><p>时间为 UTC+8。</p></div>';
+  return { subject, message, message_html, count: 1 };
+}
+
 /**
  * EmailJS 自带「Contact Us」模板的变量（{{name}} {{title}} {{time}} {{email}}）也一并填上：
  * 使用中性的名称和主题，正文 {{message}} 就是信号列表。
@@ -165,7 +186,8 @@ async function privateDelivery(task: () => Promise<void>): Promise<void> {
   return run;
 }
 /** Each request contains one recipient; the private template parameter also blocks legacy group-send pages. */
-export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch): Promise<void> {
+export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch,
+  delivery?: { onRecipient: (recipient: string) => void; signal: AbortSignal }): Promise<void> {
   // Normalize again at the network boundary: a manually altered saved string cannot inject a recipient list.
   const normalized = normalizeFishNotify(config), missing = fishNotifyMissing(normalized);
   if (missing) throw new Error(missing);
@@ -173,8 +195,10 @@ export async function sendFishEmail(config: FishNotifyConfig, content: { subject
   for (const [index, recipient] of normalized.emails.entries()) {
     try {
       await privateDelivery(async () => {
+        delivery?.signal.throwIfAborted();
         const response = await request(EMAILJS_ENDPOINT, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
+          ...(delivery ? { signal: AbortSignal.any([delivery.signal, AbortSignal.timeout(20000)]) } : {}),
           body: JSON.stringify({ service_id: normalized.serviceId, template_id: normalized.templateId, user_id: normalized.publicKey,
             template_params: { ...content, count: String(content.count), ...contactUsParams(recipient, content.subject), to_email: recipient, private_to_email: recipient } }),
         });
@@ -182,6 +206,7 @@ export async function sendFishEmail(config: FishNotifyConfig, content: { subject
           const detail = (await response.text().catch(() => '')).slice(0, 200);
           throw new Error(`EmailJS 拒绝发送（${response.status}）${detail ? `：${detail}` : ''}`);
         }
+        delivery?.onRecipient(recipient);
       });
     } catch (error) {
       failures.push(`第 ${index + 1} 个邮箱：${error instanceof Error ? error.message : String(error)}`);

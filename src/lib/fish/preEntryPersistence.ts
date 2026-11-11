@@ -17,6 +17,28 @@ export function validPreEntryLibrary(value: unknown): value is PreEntryLibrary {
   const data = value as PreEntryLibrary;
   return data?.version === 1 && Array.isArray(data.rounds) && Array.isArray(data.records);
 }
+/** Read just one automatic round and its row when another tab handed off the job. */
+export async function readAutomaticPreEntryCheckpoint(owner: string, id: string): Promise<PreEntryLibrary | undefined> {
+  const db = await open();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly'), store = tx.objectStore(STORE);
+      const meta = store.get(metaKey(owner));
+      let value: PreEntryLibrary | undefined;
+      meta.onsuccess = () => {
+        const round = validPreEntryLibrary(meta.result) ? meta.result.rounds.find(round => round.id === id && round.automatic) : undefined;
+        const plan = round?.plans?.[0];
+        if (!round || !plan) return;
+        const row = store.get(rowPrefix(owner) + `${id}:0:${plan.id}`);
+        row.onsuccess = () => {
+          if (row.result) value = { version: 1, rounds: [round], records: [row.result] };
+        };
+      };
+      tx.oncomplete = () => resolve(value);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('读取自动筛选进度失败'));
+    });
+  } finally { db.close(); }
+}
 /** Complete lightweight index is an additive private cache. Existing canonical
  * keys and old-page writes remain intact; explicit recovery can always rebuild it. */
 export async function readPreEntryReadModel(owner?:string):Promise<PreEntryLibrary|undefined>{

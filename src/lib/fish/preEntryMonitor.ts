@@ -38,6 +38,13 @@ export interface PreEntryRound {
   engine?: typeof PRE_ENTRY_INTRABAR_VERSION | typeof PRE_ENTRY_ZERO_TRADE_VERSION | typeof PRE_ENTRY_CONDITIONS_VERSION | import('./preEntryThreeStage').PreEntryThreeStageVersion; plans?: QualityGroup[];
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
+  automatic?: boolean;
+}
+/** A live catch can still have unopened minutes inside its frozen screening window. */
+export function automaticPreEntryWindow(round: PreEntryRound, record: PreEntryRecord, now: number, availableEnd: number) {
+  const deadline = Math.floor((record.startTime + round.hours * 3600000) / 60000) * 60000;
+  const end = Math.floor(Math.min(now, availableEnd, deadline) / 60000) * 60000;
+  return { end, waiting: end < deadline };
 }
 export interface PreEntryLibrary { tableClears?:PreEntryTableClears; directoryEdits?:LibraryDirectoryEdits; settings?: PreEntrySettings; settingsHistory?: (PreEntrySettings & {id:string})[]; version: 1; rounds: PreEntryRound[]; records: PreEntryRecord[] }
 /** Explicit version switching retains both frozen setting sets for later reuse. */

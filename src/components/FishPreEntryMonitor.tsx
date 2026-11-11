@@ -103,16 +103,18 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const monitor = state.preEntry;
   const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [resultsOpen,setResultsOpen]=useState(false);
   if (!monitor) return null;
-  const latestRound = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt).at(-1);
-  const missingCount = monitor.library.records.filter(r => r.roundId === latestRound?.id && r.status === 'error').length;
-  const canResume = latestRound && (latestRound.state === 'paused' || missingCount > 0)
-    && (state.canResumeScreening?.(latestRound.id) ?? true);
-  const resumable = canResume && latestRound.state === 'paused' && latestRound.hours > 0 ? latestRound : undefined;
+  const rounds = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt);
+  const latestRound = rounds.at(-1), manualRound = rounds.filter(round => !round.automatic).at(-1);
+  const automatic = state.automaticScreening;
+  const missingCount = monitor.library.records.filter(r => r.roundId === manualRound?.id && r.status === 'error').length;
+  const canResume = manualRound && (manualRound.state === 'paused' || missingCount > 0)
+    && (state.canResumeScreening?.(manualRound.id) ?? true);
+  const resumable = canResume && manualRound.state === 'paused' && manualRound.hours > 0 ? manualRound : undefined;
   const hours = newPreEntryHours(monitor.library.settings?.hours);
   const canStart = monitor.ready && state.ready && selectedCount > 0 && filtersOn;
   return <div className="contents" data-testid="pre-entry-controls">
     <div role="group" aria-label="筛选运行" className="inline-flex h-6 shrink-0 items-stretch">
-      {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={monitor.pause}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
+      {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={() => monitor.automaticRunning && automatic ? automatic.setAutoPaused(true) : monitor.pause()}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
         : <button type="button" className={qualitySplitPrimaryAction} disabled={resumable ? !monitor.ready || !state.ready : !canStart}
           title={resumable ? '继续上轮：沿用已冻结的信号和条件，从暂停处继续筛选' : !filtersOn ? '先设置并启用筛选条件' : !selectedCount ? '当前筛选下没有已勾选的信号' : `对已勾选的 ${selectedCount} 条信号向后筛选，首次满足全部条件时保存到筛选库`}
           onClick={() => void (resumable ? monitor.resume(resumable.id) : monitor.start(Number(hours)))}><Filter aria-hidden className="h-3 w-3"/>{resumable ? "继续筛选" : "开始筛选"}</button>}
@@ -121,7 +123,8 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         <PopoverContent align="start" className="w-64 p-1"><button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新筛选</span><span className="text-[10px] leading-relaxed text-muted-foreground">保留历史轮次，按当前勾选和条件重新开始{monitor.running ? '；先停止当前批次' : ''}。</span></button>
           {latestRound&&<button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={()=>{setMenuOpen(false);setResultsOpen(true);}}>本轮筛选结果</button>}
-          {latestRound && canResume && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
+          {manualRound && canResume && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(manualRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
+          {automatic && <button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={() => { setMenuOpen(false); automatic.setAutoPaused(!automatic.paused); }}>{automatic.paused ? '恢复新鱼自动筛选' : '暂停新鱼自动筛选'}</button>}
           {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取筛选库…</p>}
           {monitor.error && <p role="alert" className="px-2 py-1.5 text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</p>}
         </PopoverContent>
@@ -134,6 +137,11 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
     </Popover>
     <FishPreEntryLibrary state={state} onSelected={onSelected} onJump={onJump} openRequest={openRequest}
       onSelectDirectory={onSelectDirectory} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy}/>
+    {automatic && (automatic.pending > 0 || automatic.awaitingMail > 0 || automatic.paused || automatic.storageIssue) && <span className="text-[10px] text-muted-foreground" role="status">
+      {automatic.paused ? '新鱼自动筛选已暂停' : automatic.pending > 0 ? '自动筛选待处理 ' + automatic.pending + (!monitor.library.settings?.plans.length ? ' · 请先保存筛选方案' : '') : ''}
+      {automatic.awaitingMail > 0 && ' · ' + automatic.awaitingMail + ' 条已入选待发邮件'}
+      {automatic.storageIssue && ' · 本机队列保存遇到问题，请保留页面'}
+    </span>}
     <FishPreEntryProgress monitor={monitor} open={resultsOpen} onOpenChange={setResultsOpen}/>
   </div>;
 }

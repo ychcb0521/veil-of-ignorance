@@ -2,7 +2,7 @@ import {recordEntryEvidence,recordEntryStop,recordEntryRestart,type EntryProcess
 import {createEntryLongDrawdownReader} from './preEntryLongDrawdown';
 import {createVersionedEntryStallTurnReader} from './preEntryStallTurnRule';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
-import type { PreEntryRun, PreEntryRecord } from './preEntryMonitor';
+import { automaticPreEntryWindow, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
 import { qualityMetricPlan, type QualityProgress, qualityGroupId, qualityMembers } from './quality';
 import { stricterAdditionThreshold } from './qualityAddition';
@@ -158,7 +158,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION||retry;
       const row={...record.sample.source,timeMs:now},start=await bounds?.start?.(row.symbol),availableEnd=await bounds?.end?.(row.symbol)??now;
       const initializedLoad=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN):baseLoad;
-      const end=record.endTime??Math.floor(Math.min(now,availableEnd,task.round.hours?record.startTime+task.round.hours*3600000:Infinity)/M)*M;
+      const liveWindow = task.round.automatic ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
+      const end=liveWindow?.end??record.endTime??Math.floor(Math.min(now,availableEnd,task.round.hours?record.startTime+task.round.hours*3600000:Infinity)/M)*M;
       const load=v6&&task.round.hours>0?preEntryWindowLoader(initializedLoad,end):initializedLoad;
       const hardIndicators:EntryMarketCondition[]=config.hardVetoes.filter(v=>v.enabled&&v.kind==='indicator').map(v=>({id:'hard:'+v.id,label:v.label,metric:v.metric!,snapshot:v.snapshot!,enabled:true,direction:v.direction,threshold:v.threshold,timing:'intrabar'}));
       const required=config.required.filter(f=>f.enabled),sellers=config.sellRules.filter(r=>r.enabled);
@@ -185,6 +186,10 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         ...warmPlans.filter(({c})=>!retry||!admissionIds.has(c.id)).map(({plan})=>Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step),
         ...(preEntryGuardWarmBars(firstConfig)?[Math.ceil(start/300000)*300000+preEntryGuardWarmBars(firstConfig)*300000]:[]));
       publish({status:'scanning',endTime:end});
+      if (liveWindow?.waiting && end <= Math.max(readyAt, record.cursor)) {
+        publish({status:'queued',detail:'等待下一根已收盘分钟线'});
+        continue;
+      }
       if(readyAt>end){publish({status:'warming',detail:'行情不足以完成三阶条件预热，未判定入选'});continue;}
       const readers=await Promise.all(conditions.map(async condition=>{
         const plan=warmPlans.find(p=>p.c===condition)!.plan;
@@ -305,7 +310,8 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         if(matched)break;
         cursor=chunk.cut;readers.forEach(r=>r.trim());const pause=timeSlice();if(pause)await pause;
       }
-      if(!matched)publish({status:'unmatched',cursor:end,detail:record.threeStage?entryStageText(record.threeStage)+(signalGate?'；本轮无通过排除检查的新事件':'；本轮未出现三阶同刻通过'):'本轮无可判断时点'});
+      if (!matched && liveWindow?.waiting) publish({status:'queued',cursor:end,detail:'等待后续已收盘行情'});
+      else if(!matched)publish({status:'unmatched',cursor:end,detail:record.threeStage?entryStageText(record.threeStage)+(signalGate?'；本轮无通过排除检查的新事件':'；本轮未出现三阶同刻通过'):'本轮无可判断时点'});
     }catch(error){
       if(signal.aborted){publish({status:'paused',detail:'已暂停，继续时恢复本轮三阶条件和历史状态'});throw error;}
       publish({status:'error',detail:error instanceof Error?error.message:'三阶筛选失败'});

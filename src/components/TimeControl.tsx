@@ -3,7 +3,6 @@ import {setMatchingSourceQuality} from '@/lib/fish/qualitySourceRatings';
 import { readFishAccountSettings } from '@/lib/fish/accountSettings';
 import {FishBulkDeletionProvider} from './FishBulkDeletion';
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
-import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishAutoScan } from '@/hooks/useFishAutoScan';
 import { useFishMining } from '@/hooks/useFishMining';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
@@ -28,7 +27,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
-import { usePageFishQuality } from '@/contexts/FishQualityContext';
+import { useFishCaptureAutomation, usePageFishQuality } from '@/contexts/FishQualityContext';
 import { armQualityReturn } from '@/lib/fish/qualityReturn';
 import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
@@ -130,13 +129,8 @@ export function TimeControl({
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>(() => readFishAccountSettings()?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
   useEffect(() => { setFishSelection(fishAccountSettings?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false }); }, [fishAccountSettings, user?.id]);
-  // 新鱼邮件提醒：每轮捕捞结束把第一次捕到的鱼发到所填邮箱
-  // 测试邮件发的和正式邮件一样：本轮所选算法的并集（没有本轮结果时用新鱼列表）
-  const mailFishRef = useRef<() => TradeSignal[]>(() => []);
-  const getMailFish = useCallback(() => mailFishRef.current(), []);
-  const fishNotify = useFishNotify(user?.id, undefined, getMailFish);
-  const fish = useFish(user?.id, { onCaught: fishNotify.send });
-  mailFishRef.current = fish.unionFish;
+  const { enqueue, notify: fishNotify } = useFishCaptureAutomation();
+  const fish = useFish(user?.id, { onNewFish: enqueue });
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
   const needsTuringArchive = (turing && signalLibOpen) || fishOpen || isTuringCupSymbol(activeSymbol ?? '');
