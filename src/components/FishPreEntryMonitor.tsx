@@ -67,7 +67,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       if (!samplePicker) { setSelected(e.target.checked ? [...roundIds] : []); return; }
       setSelected(e.target.checked ? ids => [...new Set([...ids, ...roundIds])] : ids => ids.filter(id=>!roundIds.has(id)));
     }}/> 全选本轮</label>
-    {!samplePicker && <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected?.();close();}}>在组合表中勾选</button>}</div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
+    {!samplePicker && !state.lockedBatch && <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected?.();close();}}>在组合表中勾选</button>}</div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
     <div className="overflow-auto"><table className="w-full text-[11px]"><thead><tr>{['选择','标的','原信号 / 监测起点','监测条件','状态与原因','扫描到','首次满足时间','命中读数','操作'].map(h=><th key={h} className={libraryCell}>{h}</th>)}</tr></thead><tbody>{admitted.filter(r=>r.roundId===roundId).map(r=>{const onCheck=(checked:boolean,_shift?:boolean)=>setSelected(ids=>checked?[...new Set([...ids,r.id])]:ids.filter(id=>id!==r.id));return <tr key={r.id} data-testid={selectedOnly ? "pre-entry-library-row" : "pre-entry-scan-row"} className="border-t border-border/40">
         {selectedOnly && <td className={libraryCell}><input type="checkbox" aria-label={`选择入选记录 ${r.sample.source.symbol} ${r.id}`} checked={selectedSet.has(r.id)} onChange={e => onCheck?.(e.target.checked, (e.nativeEvent as MouseEvent).shiftKey)}/></td>}
         <td className={`${libraryCell} font-mono`}>{r.sample.source.symbol}</td>
@@ -104,8 +104,10 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [resultsOpen,setResultsOpen]=useState(false);
   if (!monitor) return null;
   const latestRound = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt).at(-1);
-  const resumable = latestRound?.state === 'paused' && latestRound.hours>0 ? latestRound : undefined;
   const missingCount = monitor.library.records.filter(r => r.roundId === latestRound?.id && r.status === 'error').length;
+  const canResume = latestRound && (latestRound.state === 'paused' || missingCount > 0)
+    && (state.canResumeScreening?.(latestRound.id) ?? true);
+  const resumable = canResume && latestRound.state === 'paused' && latestRound.hours > 0 ? latestRound : undefined;
   const hours = newPreEntryHours(monitor.library.settings?.hours);
   const canStart = monitor.ready && state.ready && selectedCount > 0 && filtersOn;
   return <div className="contents" data-testid="pre-entry-controls">
@@ -119,7 +121,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         <PopoverContent align="start" className="w-64 p-1"><button type="button" disabled={!canStart} className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.restart(Number(hours)); }}>
           <span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新筛选</span><span className="text-[10px] leading-relaxed text-muted-foreground">保留历史轮次，按当前勾选和条件重新开始{monitor.running ? '；先停止当前批次' : ''}。</span></button>
           {latestRound&&<button type="button" className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted" onClick={()=>{setMenuOpen(false);setResultsOpen(true);}}>本轮筛选结果</button>}
-          {latestRound && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
+          {latestRound && canResume && missingCount > 0 && <button type="button" disabled={monitor.running || !monitor.ready} className="w-full rounded px-2 py-1.5 text-left text-[11px] hover:bg-muted disabled:opacity-40" onClick={() => { setMenuOpen(false); void monitor.resume(latestRound.id); }}>重试本轮缺数据（{missingCount}）</button>}
           {!monitor.ready && !monitor.error && <p role="status" className="px-2 py-1.5 text-[10px] text-muted-foreground">正在读取筛选库…</p>}
           {monitor.error && <p role="alert" className="px-2 py-1.5 text-[10px] text-destructive">{monitor.error}{!monitor.ready && <button type="button" className="ml-1 underline" onClick={monitor.retry}>重试读取</button>}</p>}
         </PopoverContent>

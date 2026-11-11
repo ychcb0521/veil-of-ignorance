@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, cleanup, within, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
+import type { QualityBatchLock } from '@/lib/fish/qualityBatchScope';
 import { importQualityFish, separateQualityFilters, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, CBA_DEF, CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
@@ -1290,4 +1291,37 @@ it('remembers the table on chart collapse and anchors the same signal when backg
  fireEvent.change(screen.getByLabelText('筛选鱼质量信号'),{target:{value:'RET'}});fireEvent.click(screen.getByRole('button',{name:'按标的排序'}));const table=screen.getByTestId('quality-fish-table');table.scrollTop=660;table.scrollLeft=1100;fireEvent.scroll(table);view.unmount();
  s.study=importQualityLibrary(s.study,[{id:'background-new',symbol:'RET000A',timeMs:T,timeLabel:'',fallbackZone:''}]);expect(armQualityReturn()).toBe(true);view=render(<FishQuality state={s}/>);
  await waitFor(()=>{expect(screen.getByTestId('quality-fish-table').scrollTop).toBe(693);expect(screen.getByTestId('quality-fish-table').scrollLeft).toBe(1100);});expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('RET');expect(screen.getByText('RET020')).toBeInTheDocument();view.unmount();finishQualityReturn();
+});
+
+it('locks only checked rows in the current scope and keeps new signals outside until unlocked', () => {
+  const base = state();
+  const b = { id: 'new-b', symbol: 'BBBUSDT', timeMs: T + 60_000, timeLabel: '', fallbackZone: '' };
+  const c = { ...b, id: 'new-c', symbol: 'CCCUSDT', timeMs: T + 120_000 };
+  const study = importQualityLibrary(base.study, [b], T + 1);
+  const selected = { ...study, selectedRowIds: qualityDisplayRows(study).map(row => row.id) };
+  const setLockedBatch = vi.fn<(batch: QualityBatchLock | null) => void>();
+  const view = render(<FishQuality state={{ ...base, study: selected, setLockedBatch }}/>);
+  fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'AAA' } });
+  fireEvent.click(screen.getByRole('button', { name: '锁定所选' }));
+  const lockedBatch = setLockedBatch.mock.calls[0][0]!;
+  expect(new Set(lockedBatch.rowIds)).toEqual(new Set(qualityDisplayRows(selected).filter(row => row.source.symbol === 'AAAUSDT').map(row => row.id)));
+
+  const incoming = importQualityLibrary(selected, [c], T + 2);
+  view.rerender(<FishQuality state={{ ...base, study: { ...incoming, selectedRowIds: [] }, lockedBatch, setLockedBatch }}/>);
+  expect(screen.getByTestId('quality-locked-batch')).toHaveTextContent('1 条信号');
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+  expect(screen.queryByText('BBBUSDT')).toBeNull();
+  expect(screen.queryByText('CCCUSDT')).toBeNull();
+  const box = screen.getByRole('checkbox', { name: /选择 AAAUSDT/ });
+  expect(box).toBeChecked();
+  expect(box).toBeDisabled();
+  expect(screen.getByRole('button', { name: '开始监测' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '导出已选组合表数据' })).toBeEnabled();
+  expect(base.setScope).toHaveBeenLastCalledWith(expect.arrayContaining(lockedBatch.rowIds), expect.any(Object));
+  fireEvent.click(screen.getByRole('button', { name: '解除锁定' }));
+  expect(setLockedBatch).toHaveBeenLastCalledWith(null);
+  view.rerender(<FishQuality state={{ ...base, study: incoming, lockedBatch: null, setLockedBatch }}/>);
+  expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
+  fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: '' } });
+  expect(screen.getByText('CCCUSDT')).toBeVisible();
 });

@@ -9,6 +9,7 @@ import {applySavedQualityPlans,editSavedQualityPlans,seedSavedQualityPlans,readS
 import { usePreEntryMonitor } from './usePreEntryMonitor';
 import { preEntrySignal } from '@/lib/fish/preEntryMonitor';
 import {withQualityScreeningEntries,type QualityScreeningScope} from '@/lib/fish/qualityScreeningResults';
+import { readQualityBatchLock, saveQualityBatchLock, sameQualityBatch, type QualityBatchLock } from '@/lib/fish/qualityBatchScope';
 import {qualityMonitoringSample} from '@/lib/fish/qualityAdmissionTime';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
@@ -52,7 +53,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const preEntry = usePreEntryMonitor(owner, enabled, run);
   const screeningLibrary = useRef(preEntry.library); screeningLibrary.current = preEntry.library;
   const screeningReady = useRef(preEntry.ready); screeningReady.current = preEntry.ready;
-  const screeningScope = useRef<QualityScreeningScope>({});
+  const [lockedBatch, setLockedBatchState] = useState(() => readQualityBatchLock(owner));
+  const screeningScope = useRef<QualityScreeningScope>(lockedBatch ?? {});
   const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
   const [savedPlans,setSavedPlans]=useQualitySavedPlans(owner);
   const savedPlansWriter=useRef(setSavedPlans);savedPlansWriter.current=setSavedPlans;
@@ -91,10 +93,20 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
    * （来源、月份、探测算法、标的搜索）。界面经 setScope 告知可见行；null = 不限（尚未告知时按勾选）。
    */
   const scopeRef = useRef<ReadonlySet<string> | null>(null);
-  const scoped = (s: FishQualityStudy): FishQualityStudy => scopeRef.current ? { ...s, selectedRowIds: (s.selectedRowIds ?? []).filter(id => scopeRef.current!.has(id)) } : s;
+  const lockedBatchRef = useRef(lockedBatch);
+  const setLockedBatch = useCallback((batch: QualityBatchLock | null) => {
+    lockedBatchRef.current = batch;
+    saveQualityBatchLock(account.current, batch);
+    setLockedBatchState(batch);
+    selectionApproved.current = false;
+    rerun.current = false;
+  }, []);
+  const canResumeBatch = (frozen: FishQualityStudy) =>
+    !lockedBatchRef.current || sameQualityBatch(lockedBatchRef.current.rowIds, frozen.selectedRowIds ?? []);
+  const scoped = (s: FishQualityStudy): FishQualityStudy => lockedBatchRef.current ? { ...s, selectedRowIds: lockedBatchRef.current.rowIds } : scopeRef.current ? { ...s, selectedRowIds: (s.selectedRowIds ?? []).filter(id => scopeRef.current!.has(id)) } : s;
   const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
-  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; screeningScope.current = {}; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
+  if (account.current !== owner) { markPause('切换了账号'); void monitorFinalizer.current?.('paused', false, takePause()); account.current = owner; scopeRef.current = null; const nextBatch = readQualityBatchLock(owner); lockedBatchRef.current = nextBatch; setLockedBatchState(nextBatch); screeningScope.current = nextBatch ?? {}; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy,persistPlans=true) => {
     const previous=current.current;
     let next = preserveQualitySourceRatings(previous,preserveSourceDeletions(previous,apply(previous)));
@@ -212,7 +224,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode'], resume = false) => {
     if (!readyRef.current || archiveLock.current && mode !== 'restart') return;
     const paused = resume && monitorBatch.current?.paused ? monitorBatch.current : null;
-    if (resume && (!paused || controller.current || !current.current.monitorLibrary?.rounds.some(round => round.id === paused.capture.roundId && round.state === 'paused'))) return;
+    if (resume && (!paused || !canResumeBatch(paused.frozen) || controller.current || !current.current.monitorLibrary?.rounds.some(round => round.id === paused.capture.roundId && round.state === 'paused'))) return;
     if (!paused && !screeningReady.current) { if (!automatic) setError('筛选记录尚未恢复，暂不能确定买入时间，请稍后开始监测。'); return; }
     if (!paused) {
       change(s => withQualityScreeningEntries(s, screeningLibrary.current, screeningScope.current));
@@ -299,7 +311,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const startFilter = useCallback(async (resume = false) => {
     if (!readyRef.current || filterController.current) return;
     const paused = resume && filterBatch.current?.paused ? filterBatch.current : null;
-    if (resume && (!paused || !current.current.filterLibrary?.rounds.some(round => round.id === paused.capture.roundId && round.state === 'paused'))) return;
+    if (resume && (!paused || !canResumeBatch(paused.frozen) || !current.current.filterLibrary?.rounds.some(round => round.id === paused.capture.roundId && round.state === 'paused'))) return;
     if (!paused) {
       if (!anyBuyFilters(current.current) || !qualityRunSamples(scoped(current.current)).length) return;
       change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
@@ -458,6 +470,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     scopeRef.current = ids ? new Set(ids) : null;
     const changed = screeningScope.current.roundId !== screening.roundId || screeningScope.current.workingRoundId !== screening.workingRoundId;
     screeningScope.current = screening;
+    const batch = lockedBatchRef.current;
+    if (batch && batch.workingRoundId !== screening.workingRoundId) {
+      const next = { ...batch, workingRoundId: screening.workingRoundId };
+      lockedBatchRef.current = next;
+      setLockedBatchState(next);
+      saveQualityBatchLock(account.current, next);
+    }
     if (readyRef.current && changed) change(s => withQualityScreeningEntries(s, screeningLibrary.current, screening));
   }, [change]);
   useEffect(() => {
@@ -602,14 +621,20 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
     return signals.length;
   }, [preEntry.library.records, change]);
+  const canResumeScreening = (roundId: string) => {
+    if (!lockedBatchRef.current) return true;
+    const samples = qualityRunSamples(scoped(current.current)).map(sample => sample.id);
+    const prior = screeningLibrary.current.records.filter(record => record.roundId === roundId).map(record => record.sample.id);
+    return samples.length > 0 && sameQualityBatch(samples, prior);
+  };
   const preEntryState = { ...preEntry,
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
     restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
-    resume: (roundId: string) => preEntry.resume(roundId, current.current) };
-  return {setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+    resume: async (roundId: string) => { if (canResumeScreening(roundId)) await preEntry.resume(roundId, current.current); } };
+  return {lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
 type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'>>;
-export type FishQualityState=Omit<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'> & Partial<Pick<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'>>;
+export type FishQualityState=Omit<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'> & Partial<Pick<CompleteFishQualityState,'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'>>;
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，

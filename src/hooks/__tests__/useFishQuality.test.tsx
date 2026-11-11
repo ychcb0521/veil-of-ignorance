@@ -9,8 +9,9 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, saveQualityStudy: storage.save }));
 // These holding tests assume upstream history has loaded; loading races have a dedicated regression.
+const screeningStart=vi.hoisted(()=>vi.fn(async (_study: unknown, _hours: number)=>{}));
 const screeningLibrary=vi.hoisted(()=>({version:1,rounds:[],records:[]}));
-vi.mock('@/hooks/usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:true,library:screeningLibrary})}));
+vi.mock('@/hooks/usePreEntryMonitor',()=>({usePreEntryMonitor:()=>({ready:true,library:screeningLibrary,start:screeningStart})}));
 const T = Date.UTC(2026, 9, 20);
 const signal: TradeSignal = { id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>', scale: 1 } };
 beforeEach(() => { __resetNotificationCenterForTests(); vi.useFakeTimers(); storage.load.mockReset().mockImplementation(async () => ({ study: newQualityStudy() })); storage.save.mockReset().mockResolvedValue(true); });
@@ -831,6 +832,12 @@ it('continues paused monitoring and filtering in place with frozen rows and comp
   expect(h.result.current.study.filterLibrary!.rounds.at(-1)?.state).toBe('paused');
   expect(h.result.current.resumeMonitoring).toBeTypeOf('function');
   expect(h.result.current.resumeFiltering).toBeTypeOf('function');
+  act(() => h.result.current.setLockedBatch({ rowIds: [rows[0].id], groupBySignal: false }));
+  expect(h.result.current.resumeMonitoring).toBeUndefined();
+  expect(h.result.current.resumeFiltering).toBeUndefined();
+  act(() => h.result.current.setLockedBatch({ rowIds: rows.map(row => row.id), groupBySignal: false }));
+  expect(h.result.current.resumeMonitoring).toBeTypeOf('function');
+  expect(h.result.current.resumeFiltering).toBeTypeOf('function');
   act(() => {
     void h.result.current.resumeMonitoring!();
     void h.result.current.resumeFiltering!();
@@ -860,4 +867,46 @@ it('continues paused monitoring and filtering in place with frozen rows and comp
   expect(h.result.current.resumeFiltering).toBeUndefined();
   expect(h.result.current.study.selectedRowIds).toEqual([]);
   expect(JSON.stringify(h.result.current.study.sellPlans)).toBe(before.plans);
+  act(() => h.result.current.setLockedBatch(null));
+});
+
+it('runs all three stages on the locked batch despite later selection changes and restores it for the same tab', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const other = { ...signal, id: 'locked-b', symbol: 'BBBUSDT', timeMs: T + 60_000 };
+  const newcomer = { ...signal, id: 'locked-c', symbol: 'CCCUSDT', timeMs: T + 120_000 };
+  const owner = 'locked-scope-test';
+  const run = vi.fn(async (_options: QualityRunOptions) => {});
+  screeningStart.mockClear();
+  const h = renderHook(({ fish }) => useFishQuality(owner, fish, run), { initialProps: { fish: [signal, other] } });
+  await flush();
+  const rowIds = qualityDisplayRows(h.result.current.study).filter(row => row.source.symbol === signal.symbol).map(row => row.id);
+  act(() => {
+    h.result.current.setLockedBatch({ rowIds, groupBySignal: false });
+    h.result.current.setFilters([makeQualityBuyFilter('state:state', '>', .7)]);
+  });
+  h.rerender({ fish: [signal, other, newcomer] });
+  await flush();
+  const all = qualityDisplayRows(h.result.current.study).map(row => row.id);
+  act(() => {
+    h.result.current.setSelectedRows(all.filter(id => !rowIds.includes(id)));
+    h.result.current.setScope(all);
+  });
+  await act(async () => {
+    await h.result.current.start();
+    await h.result.current.startFilter();
+    await h.result.current.preEntry.start(48);
+  });
+  expect(run).toHaveBeenCalledTimes(2);
+  for (const [options] of run.mock.calls) {
+    expect(qualityRunSamples(options.study).map(row => row.source.symbol)).toEqual([signal.symbol]);
+  }
+  expect(screeningStart).toHaveBeenCalledOnce();
+  expect(qualityRunSamples(screeningStart.mock.calls[0][0] as QualityRunOptions['study']).map(row => row.source.symbol)).toEqual([signal.symbol]);
+  h.unmount();
+
+  const restored = renderHook(() => useFishQuality(owner, [signal, other, newcomer], run));
+  await flush();
+  expect(restored.result.current.lockedBatch?.rowIds).toEqual(rowIds);
+  act(() => restored.result.current.setLockedBatch(null));
+  expect(restored.result.current.lockedBatch).toBeNull();
 });
