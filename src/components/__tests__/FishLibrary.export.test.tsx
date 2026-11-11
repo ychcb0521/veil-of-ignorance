@@ -55,9 +55,33 @@ it('新鱼和鱼舱在算法类型左侧显示实际列出的命中类型数量'
  const cabin = within(screen.getByTestId('fish-cabin'));
  for (const list of [newList,cabin]) {
   const head = within(list.getByTestId('signal-library-header'));
-  expect(head.getByText('算法数量').nextElementSibling).toBe(head.getByRole('button',{name:'算法类型'}));
+  expect(head.getByRole('button',{name:'算法数量'}).nextElementSibling).toBe(head.getByRole('button',{name:'算法类型'}));
  }
  expect(newList.getByTestId('fish-algorithm-count')).toHaveTextContent(/^2$/);
  expect(newList.getByTestId('fish-algorithm-type')).toHaveTextContent('CBA · BSS');
  expect(cabin.getByTestId('fish-algorithm-count')).toHaveTextContent(/^1$/);
+});
+
+it('按实际命中的不同算法数量双向排序，同数时较新的信号在前，重开鱼舱后保留排序', () => {
+ const base = { featureShort:'CBA', average:2, cbi2:2, startAverage:2, previousAverage:1, threshold:1, cutoffMs:2 };
+ const many: TradeSignal = {...a,timeMs:10,fish:{...base,combination:'or',hitAlgorithms:[1,3,4],algorithms:[
+  base, {...base,featureShort:'未命中'}, {...base,featureShort:'BSS'}, base,
+ ]}};
+ const signals = [many, {...b,timeMs:20}, {...a,id:'c',symbol:'CCCUSDT',timeMs:30}];
+ const view = render(panel(signals));
+ const cabin = within(screen.getByTestId('fish-cabin'));
+ const header = cabin.getByRole('button', { name: '算法数量' });
+ const counts = () => cabin.getAllByTestId('fish-algorithm-count').map(node => node.textContent);
+ const symbols = () => cabin.getAllByText(/^(AAA|BBB|CCC)USDT$/).map(node => node.textContent);
+ fireEvent.click(header);
+ expect(header).toHaveAttribute('aria-sort', 'descending');
+ expect(counts()).toEqual(['2','1','1']);
+ expect(symbols()).toEqual(['AAAUSDT','CCCUSDT','BBBUSDT']);
+ fireEvent.click(header);
+ expect(header).toHaveAttribute('aria-sort', 'ascending');
+ expect(counts()).toEqual(['1','1','2']);
+ expect(symbols()).toEqual(['CCCUSDT','BBBUSDT','AAAUSDT']);
+ view.unmount();
+ render(panel(signals));
+ expect(within(screen.getByTestId('fish-cabin')).getByRole('button', { name: '算法数量' })).toHaveAttribute('aria-sort', 'ascending');
 });

@@ -33,6 +33,7 @@ export interface FishMiningApi {
   configure?: (rules:FishMiningState['rules'])=>void;
   retry?: () => void; useCurrentScope?: () => void; resetConfiguration?: () => void;
   account?: string; holdKeys?: () => ReadonlySet<string>;
+  captureSelection: FishScanSelection;
 }
 export function useFishMining(o: {
   account?: string; selection: FishScanSelection; defs: readonly DeepDigFeatureDef[];
@@ -204,5 +205,5 @@ export function useFishMining(o: {
   const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{const statistics=fishStatistics(def);return {featureId:def.id,label,statistics,menuStatistics:algorithmMetricMenu(def,statistics)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
   // 算法编号修过别名后同一条鱼的键会变：再按整行内容（标的、时间、命中算法）认一次
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).flatMap(s => [fishCatchKey(s), fishVisibleCatchKey(s)])), []);
-  return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys };
+  return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys, captureSelection: o.selection };
 }

@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
+import { saveFishDownwardWick } from '@/lib/fish/downwardWick';
 import { DetectCategoryStats } from '@/components/DetectCategoryStats';
 import { MINING_START_MS, MINING_STEP_MS, newMiningState, currentDefaultRules } from '@/lib/fish/mining';
 afterEach(cleanup);
@@ -144,4 +145,35 @@ it('limits newly selectable mining metrics while keeping a saved intermediate se
  fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
  expect(configure).toHaveBeenCalledWith([rule]);
  expect(m.state.rules).toEqual([rule]);
+});
+
+it('displays frozen venues for the current round and current fishing venues for a restart', () => {
+  const mining = api({ captureSelection: { exchanges: ['binance', 'okx'], includeUsStocks: true, includeDuplicates: true } }, {
+    selection: { exchanges: ['gate'], includeDuplicates: false },
+    stepMs: MINING_STEP_MS * 2,
+  });
+  saveFishDownwardWick({ enabled: true, hours: 6, atrMultiple: 2.75 });
+  try {
+    render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#" />);
+    fireEvent.click(screen.getByRole('button', { name: '挖掘条件' }));
+    const current = screen.getByLabelText('挖掘扫描口径');
+    expect(current).toHaveTextContent('Gate · 加密永续');
+    expect(current).toHaveTextContent('合并跨所重复标的 · 本轮冻结范围');
+    expect(current).toHaveTextContent('回看 6 小时 · 5 分钟 K 线 · ATR(14) × 2.75');
+    for (const floor of ['1h ≥ 100 万 USDT', '12h ≥ 800 万 USDT', '24h ≥ 1,000 万 USDT']) {
+      expect(current).toHaveTextContent(floor);
+    }
+    expect(current).toHaveTextContent('每 24 小时一档');
+    fireEvent.keyDown(current, { key: 'Escape' });
+    act(() => { saveFishDownwardWick({ enabled: false, hours: 6, atrMultiple: 2.75 }); });
+    fireEvent.click(screen.getByRole('button', { name: '开始挖掘的其他方式' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
+    const next = within(screen.getByRole('dialog', { name: '重新开始批量挖掘' })).getByLabelText('挖掘扫描口径');
+    expect(next).toHaveTextContent('币安、OKX · 加密永续 · 美股合约（币安）');
+    expect(next).toHaveTextContent('保留跨所重复标的 · 沿用当前捕捞范围');
+    expect(next).toHaveTextContent('已关闭');
+    expect(next).toHaveTextContent('每 12 小时一档');
+  } finally {
+    localStorage.clear();
+  }
 });

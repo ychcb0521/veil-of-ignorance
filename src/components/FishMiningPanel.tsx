@@ -10,18 +10,58 @@ import { useEffect, useState } from 'react';
 import { ArrowUpRight, ChevronDown, Pause, Pickaxe, Play, Plus, RotateCcw, Settings2, X } from 'lucide-react';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseAction, qualitySplitMenuAction } from '@/components/FishQualityModule';
 import type { FishMiningApi } from '@/hooks/useFishMining';
+import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { currentDefaultRules, type FishMiningRule } from '@/lib/fish/mining';
+import { currentDefaultRules, MINING_STEP_MS, type FishMiningRule } from '@/lib/fish/mining';
+import { fishWickDuration } from '@/lib/fish/downwardWick';
+import { EXCHANGE_NAMES, US_STOCK_EXCHANGES, type FishExchange } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { parseFishSettings } from '@/lib/fishScanner';
-import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
+import { FISH_MAX_ALGORITHMS, FISH_TURNOVER_FLOORS } from '@/lib/fish/shared';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
 const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} > ${r.threshold}`;
+function MiningScanDetails({ mining, restart }: { mining: FishMiningApi; restart: boolean }) {
+  const { state, captureSelection } = mining;
+  const { downwardWick } = useFishAccountSettings();
+  const frozen = !restart && state.selection;
+  const scope = frozen || captureSelection;
+  const venues = scope?.exchanges.map(id => EXCHANGE_NAMES[id as FishExchange] ?? id).join('、');
+  const stockVenues = scope?.includeUsStocks
+    ? US_STOCK_EXCHANGES.filter(id => scope.exchanges.includes(id)).map(id => EXCHANGE_NAMES[id]).join('、')
+    : '';
+  const stepHours = (restart ? MINING_STEP_MS : state.stepMs) / 3_600_000;
+
+  return <dl aria-label="挖掘扫描口径" className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2.5 gap-y-2 rounded-md bg-muted/45 p-3 leading-relaxed">
+    <dt className="text-muted-foreground">来源市场</dt>
+    <dd>
+      <p>{venues ? `${venues} · 加密永续${stockVenues ? ` · 美股合约（${stockVenues}）` : ''}` : '未选择交易所'}</p>
+      <p className="text-muted-foreground">{scope?.includeDuplicates ? '保留' : '合并'}跨所重复标的 · {frozen ? '本轮冻结范围' : '沿用当前捕捞范围'}</p>
+    </dd>
+    <dt className="text-muted-foreground">插针回看</dt>
+    <dd>
+      <p>{downwardWick.enabled ? `已开启 · 回看 ${fishWickDuration(downwardWick.hours)} · 5 分钟 K 线 · ATR(14) × ${downwardWick.atrMultiple}` : '已关闭'}</p>
+      <p className="text-muted-foreground">每档读取捕捞设置中的插针参数</p>
+    </dd>
+    <dt className="text-muted-foreground">成交额门槛</dt>
+    <dd>
+      <p className="flex flex-wrap gap-x-3 tabular-nums">
+        {FISH_TURNOVER_FLOORS.map(({ hours, min }) => <span key={hours} className="whitespace-nowrap">{hours}h ≥ {(min / 10_000).toLocaleString('zh-CN')} 万 USDT</span>)}
+      </p>
+      <p className="text-muted-foreground">扫描截止前与信号起点前各检查一次 · 排除稳定币</p>
+    </dd>
+    <dt className="text-muted-foreground">扫描节奏</dt>
+    <dd>
+      <p>每 {stepHours} 小时一档 · 补历史时连续扫描，追上后等下一档</p>
+      <p className="text-muted-foreground">每档信号起点沿用算法的历史范围</p>
+    </dd>
+  </dl>;
+}
+
 function MiningRuleEditor({ mining, close, restart = false }: { mining: FishMiningApi; close: () => void; restart?: boolean }) {
   const [draft,setDraft]=useState(()=>structuredClone(mining.state.rules.length?mining.state.rules:currentDefaultRules())),[target,setTarget]=useState(String(mining.state.target)),[error,setError]=useState('');
   const [startTime, setStartTime] = useState(() => short(mining.state.startMs).replace(' ', 'T'));
@@ -55,8 +95,8 @@ function MiningRuleEditor({ mining, close, restart = false }: { mining: FishMini
   return <div className="flex min-h-0 flex-1 flex-col text-[11px]" data-testid="mining-rule-editor"><div className="shrink-0 space-y-3 px-4 pb-3 pt-4"><div className="flex items-center justify-between gap-2"><p className="font-medium">挖掘条件</p><FishQualityInfo label="挖掘条件说明"><p>多个算法按并集合并，任一满足即挖到。</p><p>新选指标只列出算法已有的原值、avg、avg_2。旧规则保存的其他指标继续保留，切换指标时请核对门槛。</p>{!restart && <p>修改后从当前档继续。目标为本轮累计挖掘条数，调高后可继续。</p>}</FishQualityInfo></div>{restart && <label className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
       挖掘起点（北京时间）
       <input type="datetime-local" value={startTime} max={short(Date.now()).replace(' ', 'T')} onChange={e=>setStartTime(e.target.value)} className="h-7 max-w-full rounded-md border border-border/60 bg-muted/50 px-2 font-mono"/>
-    </label>}{restart&&<label className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">挖掘结束（北京时间）<input type="datetime-local" aria-label="挖掘结束（北京时间）" value={endTime} min={startTime} max={short(Date.now()).replace(' ','T')} onChange={e=>setEndTime(e.target.value)} className="h-7 max-w-full rounded-md border border-border/60 bg-muted/50 px-2 font-mono"/></label>}{restart&&<p className="text-muted-foreground">在所选时间区间内每 12 小时扫描一档，到达结束时间或目标条数后停止。</p>}<label className="flex items-center justify-between gap-3 text-muted-foreground">目标条数<span className="inline-flex items-center gap-2"><input aria-label="挖掘目标条数" type="number" min="1" step="100" value={target} onChange={e=>setTarget(e.target.value)} className="h-7 w-24 rounded-md border border-border/60 bg-muted/50 px-2 font-mono tabular-nums outline-none focus-visible:border-ring"/>条</span></label></div>
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pb-3" data-testid="mining-rule-scroll">{draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic),menu=choice?.menuStatistics??choice?.statistics??[];return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
+    </label>}{restart&&<label className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">挖掘结束（北京时间）<input type="datetime-local" aria-label="挖掘结束（北京时间）" value={endTime} min={startTime} max={short(Date.now()).replace(' ','T')} onChange={e=>setEndTime(e.target.value)} className="h-7 max-w-full rounded-md border border-border/60 bg-muted/50 px-2 font-mono"/></label>}<label className="flex items-center justify-between gap-3 text-muted-foreground">目标条数<span className="inline-flex items-center gap-2"><input aria-label="挖掘目标条数" type="number" min="1" step="100" value={target} onChange={e=>setTarget(e.target.value)} className="h-7 w-24 rounded-md border border-border/60 bg-muted/50 px-2 font-mono tabular-nums outline-none focus-visible:border-ring"/>条</span></label></div>
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 pb-3" data-testid="mining-rule-scroll"><MiningScanDetails mining={mining} restart={restart}/>{draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic),menu=choice?.menuStatistics??choice?.statistics??[];return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
       <select aria-label={`挖掘算法 ${i+1} 特征值`} className="h-7 w-28 min-w-0 rounded bg-muted px-2" value={rule.featureId} onChange={e=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,featureId:e.target.value,statistic:choices.find(c=>c.featureId===e.target.value)?.menuStatistics?.[0]?.name??'结果',threshold:''}:r));}}>
         {!choices.some(c=>c.featureId===rule.featureId)&&<option value={rule.featureId}>{rule.featureId}（已失效）</option>}{choices.map(c=><option key={c.featureId} value={c.featureId}>{c.label}</option>)}
       </select>
@@ -96,7 +136,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
         <FishQualityInfo label="挖掘说明与进度">
           <div className="space-y-2.5">
             <div className="space-y-1"><p className="font-medium">当前进度</p><p className="font-mono tabular-nums text-muted-foreground">已挖 {s.mined} / {s.target} 条 · 已扫 {s.anchorsDone} 档{s.lastAnchorMs != null ? ` · 扫到 ${short(s.lastAnchorMs)}` : ''}</p><p className={hasError ? 'text-destructive' : 'text-muted-foreground'}>{status}</p>{hasError&&s.retryCount?<p className="text-destructive">连续失败 {s.retryCount} 次{s.lastErrorAt?` · ${short(s.lastErrorAt)}`:''}</p>:null}{s.ruleRepairs?.length?<p className="text-muted-foreground" data-testid="mining-rule-repair">{s.ruleRepairs.at(-1)}</p>:null}</div>
-            <div className="space-y-1 border-t border-border/50 pt-2.5"><p className="font-medium">当前挖掘算法 · 并集（任一满足即挖到）</p><p className="text-muted-foreground">{rules.map(ruleText).join(' · ')}</p><p className="text-muted-foreground">从 {short(s.startMs)} {s.endMs!=null?`至 ${short(s.endMs)}`:'起'}每 12 小时一档</p></div>
+            <div className="space-y-1 border-t border-border/50 pt-2.5"><p className="font-medium">当前挖掘算法 · 并集（任一满足即挖到）</p><p className="text-muted-foreground">{rules.map(ruleText).join(' · ')}</p><p className="text-muted-foreground">从 {short(s.startMs)} {s.endMs!=null?`至 ${short(s.endMs)}`:'起'}每 {s.stepMs / 3_600_000} 小时一档</p></div>
             <div className="space-y-1.5 border-t border-border/50 pt-2.5 text-muted-foreground">{!sellFixed && <p className="text-amber-700 dark:text-amber-400">还没固定卖出方案：挖到的鱼会入舱并加入列表，在卖出列的设置中固定一套方案后，才会按它比较各探测算法。</p>}<p>挖到的鱼直接进「鱼舱」（不算新鱼、不发邮件），同时加入鱼质量并自动勾选；点「开始过滤」或「开始监测」后，各自独立运行。</p><p>同一段持续的信号只记第一次能发现的那一档，按那一档的捕捞时刻买入。捕捞时挖掘自动让路，空闲后接着挖。</p><p>开始按钮右侧的 ▾ 中可选「重新开始」，设置起止时间后重新挖掘。挖掘库按 CDA、BSS、CBI-2 等算法家族分目录，目录使用组合表的形式。</p><a href={campaignHref} className="inline-flex items-center gap-0.5 text-primary hover:underline">在交易战役查看<ArrowUpRight aria-hidden className="h-3 w-3"/></a></div>
           </div>
         </FishQualityInfo>
@@ -114,7 +154,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           <DialogContent className="flex max-h-[80dvh] w-[calc(100%-2rem)] max-w-[34rem] flex-col gap-0 overflow-hidden p-0">
             <DialogHeader className="shrink-0 border-b border-border/50 px-4 pb-3 pt-4 pr-10 text-left">
               <DialogTitle className="text-sm">重新开始批量挖掘</DialogTitle>
-              <DialogDescription className="text-xs">开始后会结束当前轮次，在所选起止时间内，按当前捕捞范围每 12 小时扫一档；到达结束时间或目标条数后停止。本轮计数归零，历史结果保留在挖掘库。</DialogDescription>
+              <DialogDescription className="text-xs">开始后会结束当前轮次，新一轮计数从 0 开始。到达结束时间或目标条数后停止，历史结果保留在挖掘库。</DialogDescription>
             </DialogHeader>
             <MiningRuleEditor mining={mining} close={()=>setRestartOpen(false)} restart/>
           </DialogContent>

@@ -321,7 +321,7 @@ export function FishPanel(p: FishPanelProps) {
 </PopoverContent></Popover></div>
       </div>
       <div id="fish-catching-content" hidden={!open.catching}>
-    <header className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85" data-testid="fish-toolbar">
+    <header className="sticky top-0 z-10 bg-background" data-testid="fish-toolbar">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 px-4 pb-2.5 pt-1 text-[11px]">
 
         <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-muted/50 px-2 transition-colors focus-within:border-ring/60 focus-within:bg-background hover:bg-muted" title={p.auto?.mode==='auto'?'自动捕捞始终按当前时间；这里的时间只用于手动点「开始捕捞」':'格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间'}>

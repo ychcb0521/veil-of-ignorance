@@ -30,7 +30,7 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   /** 标题旁 ⓘ 里的说明。 */
   info?: ReactNode;
 }
-type FishSortKey = SignalSortKey | 'algorithm' | 'caughtAt';
+type FishSortKey = SignalSortKey | 'algorithm' | 'algorithmCount' | 'caughtAt';
 interface FishView { open?: boolean; algorithm?: string; query?: string; month?: string; sortKey?: FishSortKey; sortDir?: 'asc'|'desc'; scroll?: SignalScrollPosition; frozen?: {key:string;values:[string,number|null][]} }
 const viewKey=(key:string)=>`veil.fish.view.v1:${key}`;
 function readView(key?:string):FishView {
@@ -38,7 +38,7 @@ function readView(key?:string):FishView {
     const v=key?JSON.parse(sessionStorage.getItem(viewKey(key))??'{}'):{};
     if(!v||typeof v!=='object'||Array.isArray(v))return {};
     return {open:typeof v.open==='boolean'?v.open:undefined,algorithm:typeof v.algorithm==='string'?v.algorithm:'',query:typeof v.query==='string'?v.query:'',month:typeof v.month==='string'?v.month:'',
-      sortKey:['time','symbol','quality','algorithm','caughtAt'].includes(v.sortKey)?v.sortKey:undefined,sortDir:['asc','desc'].includes(v.sortDir)?v.sortDir:undefined,
+      sortKey:['time','symbol','quality','algorithm','algorithmCount','caughtAt'].includes(v.sortKey)?v.sortKey:undefined,sortDir:['asc','desc'].includes(v.sortDir)?v.sortDir:undefined,
       scroll:v.scroll&&Number.isFinite(v.scroll.top)&&v.scroll.top>=0?{top:v.scroll.top,anchorId:typeof v.scroll.anchorId==='string'?v.scroll.anchorId:undefined,index:Number.isInteger(v.scroll.index)&&v.scroll.index>=0?v.scroll.index:undefined,offset:Number.isFinite(v.scroll.offset)?v.scroll.offset:0}:undefined,
       frozen:v.frozen&&typeof v.frozen.key==='string'&&Array.isArray(v.frozen.values)?{key:v.frozen.key,values:v.frozen.values.filter((x:unknown)=>Array.isArray(x)&&typeof x[0]==='string'&&(x[1]===null||Number.isFinite(x[1])))}:undefined};
   }catch{return {};}
@@ -115,6 +115,9 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     let sorted;
     if (sortKey === 'algorithm') {
       sorted = [...basis].sort((a, b) => (fishCaughtBy(a).join(' · ').localeCompare(fishCaughtBy(b).join(' · ')) || a.timeMs - b.timeMs) * direction);
+    } else if (sortKey === 'algorithmCount') {
+      const counts = new Map(basis.map(signal => [signal.id, fishCaughtBy(signal).length]));
+      sorted = [...basis].sort((a, b) => (counts.get(a.id)! - counts.get(b.id)!) * direction || b.timeMs - a.timeMs);
     } else if (sortKey === 'caughtAt') {
       const timestamp = (time?: number) => time != null && Number.isFinite(time) && time > 0 ? time : null;
       sorted = [...basis].sort((a, b) => {
@@ -157,10 +160,11 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       <div ref={algorithmSizer} aria-hidden className="pointer-events-none invisible absolute h-0 overflow-hidden font-mono text-[10px] leading-4">
         {algorithmLabels.map(label => <span key={label} className="block w-max whitespace-nowrap">{label}</span>)}
       </div>
-      {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(834px + var(--fish-algorithm-width))` } as CSSProperties}>
+      {rows.length ? <div className="isolate min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(834px + var(--fish-algorithm-width))` } as CSSProperties}>
         <SignalLibraryHeader selection={bulk?{checked:!!rows.length&&rows.every(r=>selected.has(r.id)),toggle:()=>setSelected(s=>{const n=new Set(s),all=rows.every(r=>n.has(r.id));for(const r of rows)if(all)n.delete(r.id);else n.add(r.id);return n;})}:undefined}
-          sortKey={sortKey === 'algorithm' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess
+          sortKey={sortKey === 'algorithm' || sortKey === 'algorithmCount' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess
           algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }}
+          algorithmCountSort={{ active: sortKey === 'algorithmCount', onClick: () => toggleSort('algorithmCount') }}
           caughtAtSort={canSortCaughtAt ? { active: sortKey === 'caughtAt', onClick: () => toggleSort('caughtAt') } : undefined} />
         <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={bulk?id=>requestDelete([id]):p.onDelete} selectedIds={bulk?selected:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess confirmDelete={!bulk} />
       </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
