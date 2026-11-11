@@ -374,10 +374,12 @@ export function FishPanel(p: FishPanelProps) {
     </div>}
 </PopoverContent></Popover></div>
       </div>
-      <div id="fish-catching-content" hidden={!open.catching}>
-    <section className="sticky top-0 z-10 bg-background" aria-labelledby="fish-capture-progress-title" data-testid="fish-toolbar">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 pb-2.5 pl-[calc(2.125rem+1px)] pr-4 pt-1 text-[11px] sm:pl-[calc(2.375rem+1px)]">
-        <h3 id="fish-capture-progress-title" className={fishSubHeading}>
+      <div id="fish-catching-content" hidden={!open.catching} className="px-4 pb-4">
+    <div className={`${fishRail} space-y-3`} data-testid="fish-catching-parts">
+    <section aria-labelledby="fish-capture-progress-title" className="min-w-0 space-y-2">
+      <header className="sticky top-0 z-10 min-w-0 bg-background" data-testid="fish-toolbar">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 pb-2.5 pt-1 text-[11px]">
+        <h3 id="fish-capture-progress-title" className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap font-medium text-foreground/80">
           <Activity aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞进程
         </h3>
 
@@ -398,10 +400,9 @@ export function FishPanel(p: FishPanelProps) {
         </button>
         {p.auto?.mode === 'auto' && <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>}
       </div>
-      {x&&lookbackHours!==x.lookbackHours&&<p className="px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间改为过去 {lookbackHours} 小时，下一轮生效；{x.lookbackHours===undefined?'上一轮未设置覆盖时长。':`以下仍是过去 ${x.lookbackHours} 小时的结果。`}</p>}
-      {x?.anchorMs!=null&&Number.isFinite(x.anchorMs)&&x.lookbackHours!==undefined&&<p className="flex flex-wrap gap-x-1 px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-scan-window"><span>本轮信号起点范围（北京时间，含边界）：</span><span className="font-mono tabular-nums">{formatUTC8(x.anchorMs-x.lookbackHours*3600000)} ～ {formatUTC8(x.anchorMs)}</span><span>；只使用已收盘 K 线</span></p>}
-      {x && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2.5 text-[11px]">
-        <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="fish-status" title={[...(x.lookbackHours!==undefined?[`本轮覆盖过去 ${x.lookbackHours} 小时${x.counts.outside?`，${x.counts.outside} 个起点超出范围`:''}`]:[]),...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.wickSkipped?[`向下大插针已过滤 ${x.wickSkipped} 个`]:[]),...(x.thin?[`有 ${x.thin} 个标的出现成交额未达标`]:[])].join('；')||undefined}>
+      {x&&lookbackHours!==x.lookbackHours&&<p className="pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间改为过去 {lookbackHours} 小时，下一轮生效；{x.lookbackHours===undefined?'上一轮未设置覆盖时长。':`以下仍是过去 ${x.lookbackHours} 小时的结果。`}</p>}
+      {x?.anchorMs!=null&&Number.isFinite(x.anchorMs)&&x.lookbackHours!==undefined&&<p className="flex flex-wrap gap-x-1 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-scan-window"><span>本轮信号起点范围（北京时间，含边界）：</span><span className="font-mono tabular-nums">{formatUTC8(x.anchorMs-x.lookbackHours*3600000)} ～ {formatUTC8(x.anchorMs)}</span><span>；只使用已收盘 K 线</span></p>}
+      {x && <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pb-2.5 text-[11px]" data-testid="fish-status" title={[...(x.lookbackHours!==undefined?[`本轮覆盖过去 ${x.lookbackHours} 小时${x.counts.outside?`，${x.counts.outside} 个起点超出范围`:''}`]:[]),...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.wickSkipped?[`向下大插针已过滤 ${x.wickSkipped} 个`]:[]),...(x.thin?[`有 ${x.thin} 个标的出现成交额未达标`]:[])].join('；')||undefined}>
           <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
           <span className="text-muted-foreground/40">·</span>
           <span className="text-muted-foreground">命中 <span className="font-mono text-[12px] font-semibold tabular-nums text-primary">{x.counts.hit}</span></span>
@@ -409,11 +410,9 @@ export function FishPanel(p: FishPanelProps) {
           <span className="font-mono tabular-nums text-muted-foreground">{x.done} / {x.total}</span>
           {!!(x.wickSkipped || x.thin) && <FishWickDetails progress={x} onJump={p.onJumpQuality} jumpingSignalId={p.jumpingSignalId}/>}
           {x.cutoffMs!=null&&<><span className="text-muted-foreground/40">·</span><span className="font-mono tabular-nums text-muted-foreground" data-testid="fish-cutoff" title="本轮实际使用的截止时刻（时间留空 = 币安服务器当前时间）">截止 {formatUTC8(x.cutoffMs).slice(0,16)}</span></>}
-        </p>
-      </div>}
+      </p>}
       <div className="relative h-px bg-border/60">{scanning && x && x.total > 0 && <span role="progressbar" aria-label="捕捞进度" aria-valuemin={0} aria-valuemax={x.total} aria-valuenow={Math.min(x.done, x.total)} className="absolute bottom-0 left-0 h-[2px] rounded-r-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />}</div>
-    </section>
-    <div className="min-w-0 space-y-3 px-4 pb-4 pt-3">
+      </header>
     <section id="fish-capture-settings" aria-label="捕捞设置" hidden={!open.settings}
       className="min-w-0 max-w-3xl space-y-3 rounded-lg border border-border/60 bg-background p-3 text-[11px] sm:p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -521,9 +520,13 @@ export function FishPanel(p: FishPanelProps) {
     {x?.error && <p className="text-[11px] text-destructive">{x.error}</p>}
     {p.auto?.error && <p className="text-[11px] text-destructive/80" data-testid="fish-auto-error">{p.auto.error}</p>}
     {x?.notice && <p className="break-words text-[10.5px] text-muted-foreground" data-testid="fish-notice">{x.notice}</p>}
-    {/* 捕捞质量与捕捞进程同属捕捞；结果保留在设置卡之外。 */}
-    <div className={`${fishRail} space-y-2`} data-testid="fish-catching-parts">
     {p.reconstruction && <FishReconstructionResults state={p.reconstruction}/>}
+    <div className={fishRail}>
+      {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼舱」 */}
+      <FishLibrary key={owner+'new'} rememberViewKey={owner+'new'} level="sub" title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} info={<p>最近一次捕捞捕到的鱼。下次点「开始捕捞」时，这些会归入鱼舱。</p>} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼。'}
+        tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
+    </div>
+    </section>
     {p.onTestHitRate && <section aria-labelledby="fish-capture-quality-title" className="min-w-0 text-[11px]">
       <div className="flex min-w-0 items-center gap-2">
         <h3>
@@ -553,10 +556,6 @@ export function FishPanel(p: FishPanelProps) {
       </div>
       </div>
     </section>}
-    {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼舱」 */}
-    <FishLibrary key={owner+'new'} rememberViewKey={owner+'new'} level="sub" title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} info={<p>最近一次捕捞捕到的鱼。下次点「开始捕捞」时，这些会归入鱼舱。</p>} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼。'}
-      tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
-    </div>
     </div>
       </div>
     </section>

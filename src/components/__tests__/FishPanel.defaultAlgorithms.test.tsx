@@ -76,9 +76,14 @@ it('捕捞、鱼舱、鱼质量是三个同级模块，独立折叠', async () =
  const {newQualityStudy}=await import('@/lib/fish/quality');
  const {enableQualityComparison}=await import('@/lib/fish/qualityComparison');
  const q={study:enableQualityComparison(newQualityStudy()),ready:true,running:false,progress:null,warning:'',error:'',start:vi.fn(),cancel:vi.fn(),setRule:vi.fn(),setObserveHours:vi.fn(),selectSell:vi.fn(),setSelectedRows:vi.fn()};
- render(panel({quality:q}));
+ render(panel({quality:q,onTestHitRate:vi.fn()}));
  const host=screen.getByTestId('fish-panel');
  for(const id of ['fish-catching','fish-cabin','fish-quality'])expect(screen.getByTestId(id).parentElement).toBe(host);
+ const captureProcess = screen.getByRole('region', { name: '捕捞进程' });
+ const captureQuality = screen.getByRole('region', { name: '捕捞质量' });
+ expect(captureProcess.parentElement).toBe(captureQuality.parentElement);
+ expect(within(captureProcess).getByTestId('fish-new')).toBeVisible();
+ expect(within(captureQuality).queryByTestId('fish-new')).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'捕捞'}));
  expect(screen.getByRole('button',{name:/^鱼质量/,expanded:true})).toBeVisible();
  fireEvent.click(screen.getByRole('button',{name:/^鱼质量/,expanded:true}));
