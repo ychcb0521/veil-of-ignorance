@@ -9,8 +9,8 @@ import { buildFishScanSettings } from '@/lib/fish/scanPlan';
 import { readFishCards } from '@/lib/fish/cards';
 
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>[CBI2_DEF]}));
-const start=vi.fn(),diagnose=vi.fn(async(_o:any)=>({outcome:'skipped' as const,lines:['向下大插针，已过滤']}));
-const props={onDiagnose:diagnose,signals:[],progress:null,inputs:{time:'',threshold:'.3'},onInputsChange:()=>{},selection:{exchanges:['binance' as const],includeDuplicates:false},onSelectionChange:()=>{},onStart:start,onCancel:()=>{},onJump:()=>{},onDelete:()=>{},onRate:()=>{},jumpingSignalId:null,tradedDayIndex:new Set<string>(),campaignDayIndex:new Set<string>()};
+const start=vi.fn();
+const props={signals:[],progress:null,inputs:{time:'',threshold:'.3'},onInputsChange:()=>{},selection:{exchanges:['binance' as const],includeDuplicates:false},onSelectionChange:()=>{},onStart:start,onCancel:()=>{},onJump:()=>{},onDelete:()=>{},onRate:()=>{},jumpingSignalId:null,tradedDayIndex:new Set<string>(),campaignDayIndex:new Set<string>()};
 
 beforeEach(()=>{
   localStorage.clear();
@@ -26,13 +26,14 @@ async function openSettings() {
   fireEvent.click(screen.getByRole('button', { name: '更多' }));
   const menu = within(await screen.findByRole('dialog', { name: '更多捕捞选项' }));
   expect(menu.queryByRole('button', { name: '插针回看设置' })).not.toBeInTheDocument();
+  expect(menu.queryByRole('button', { name: '查单个币' })).not.toBeInTheDocument();
   fireEvent.click(menu.getByRole('button', { name: '设置' }));
   const settings = within(await screen.findByRole('dialog', { name: '设置' }));
   fireEvent.click(settings.getByRole('button', { name: '插针回看设置' }));
   return within(await screen.findByRole('dialog', { name: '插针回看设置' }));
 }
 
-it('saves only submitted settings and gives manual, automatic and single-coin scans the same custom rule', async () => {
+it('saves only submitted settings and gives manual and automatic scans the same custom rule', async () => {
   const view = render(<FishPanel {...props}/>);
   let settings = await openSettings();
   expect(settings.getByLabelText('过滤向下大插针')).toBeChecked();
@@ -52,13 +53,6 @@ it('saves only submitted settings and gives manual, automatic and single-coin sc
   expect(start.mock.calls[0][0].downwardWick).toEqual(expected);
   const built = buildFishScanSettings({ cards:readFishCards(), defs:[CBI2_DEF], combination:'and', selection:props.selection, time:'' });
   expect(built.settings?.downwardWick).toEqual(expected);
-
-  fireEvent.click(screen.getByRole('button', { name: '更多' }));
-  fireEvent.click(await screen.findByRole('button', { name: '查单个币' }));
-  fireEvent.change(screen.getByLabelText('查单个币的标的'), { target: { value:'COIN' } });
-  fireEvent.click(screen.getByRole('button', { name: '查' }));
-  await waitFor(() => expect(diagnose).toHaveBeenCalled());
-  expect(diagnose.mock.calls[0][0].downwardWick).toEqual(expected);
 
   view.unmount();
   render(<FishPanel {...props}/>);

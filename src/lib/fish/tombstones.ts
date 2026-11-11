@@ -10,7 +10,7 @@
  *   - 记号只压住删除时刻之前捕到的那条（caughtAt ≤ 删除时刻）；之后重新捕到同一条，照常留下。
  */
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { collapseVisibleFish, fishDedupKey, fishVisibleCatchKey, fishVisibleKey, legacyFishVisibleCatchKey, mergeFishSignals, migrateFishSignal, withoutArchivedFreshCopies } from './records';
+import { collapseVisibleFish, demoteSupersededFreshFish, fishDedupKey, fishVisibleCatchKey, fishVisibleKey, legacyFishVisibleCatchKey, mergeFishSignals, migrateFishSignal, withoutArchivedFreshCopies } from './records';
 
 /** 鱼的键 → 删除时刻（ms）。 */
 export type FishTombstones = Record<string, number>;
@@ -53,5 +53,5 @@ export function mergeFishLists(local: unknown, remote: unknown, tombstones: Fish
     const best = newer.get(fishDedupKey(s));
     return best && best !== s ? { ...s, ...best, quality: s.quality ?? best.quality, freshCatch: s.freshCatch || best.freshCatch || undefined } : s;
   });
-  return collapseVisibleFish(applyFishTombstones(merged, tombstones));
+  return collapseVisibleFish(applyFishTombstones(demoteSupersededFreshFish(merged), tombstones));
 }

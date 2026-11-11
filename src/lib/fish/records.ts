@@ -37,6 +37,34 @@ export function withoutArchivedFreshCopies(list: readonly TradeSignal[]): TradeS
   }
   return list.filter(s => s.fishArchive || !s.freshCatch || !versions.get(fishCatchKey(s))?.has(s.caughtAt ?? 0));
 }
+
+/** A later archived round supersedes an older fresh flag for the same market signal.
+ * Require both clocks to advance. A different device's capture time alone cannot prove this. */
+export function demoteSupersededFreshFish(list: TradeSignal[]): TradeSignal[] {
+  if (!list.some(signal => signal.freshCatch)) return list;
+  const roundTime = (signal: TradeSignal) => signal.fish?.lookbackAnchorMs ?? signal.fish?.cutoffMs ?? NaN;
+  const archives = new Map<string, { caughtAt: number; roundAt: number }[]>();
+  for (const signal of list) {
+    const caughtAt = signal.caughtAt ?? NaN, roundAt = roundTime(signal);
+    if (!signal.fishArchive || !Number.isFinite(caughtAt) || !Number.isFinite(roundAt)) continue;
+    const key = signalDedupKey(signal);
+    const rounds = archives.get(key) ?? [];
+    rounds.push({ caughtAt, roundAt });
+    archives.set(key, rounds);
+  }
+  let changed = false;
+  const next = list.map(signal => {
+    if (!signal.freshCatch) return signal;
+    const caughtAt = signal.caughtAt ?? NaN, roundAt = roundTime(signal);
+    const superseded = archives.get(signalDedupKey(signal))?.some(archive => archive.caughtAt > caughtAt && archive.roundAt > roundAt);
+    if (!signal.fishArchive && !superseded) return signal;
+    changed = true;
+    const { freshCatch: _fresh, ...historical } = signal;
+    return historical;
+  });
+  return changed ? next : list;
+}
+
 export function mergeFishSignals(existing: readonly TradeSignal[],incoming: readonly TradeSignal[]): TradeSignal[] {
   const map=new Map<string,TradeSignal>();
   for(const raw of withoutArchivedFreshCopies([...existing,...incoming])){

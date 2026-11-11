@@ -14,8 +14,10 @@ export const mergeFishLibraryBackups = (latest: FishLibraryBackup, previous?: Fi
   const current = new Map(latest.signals.map(s => [fishDedupKey(s), s]));
   const signals = mergeFishLists(latest.signals, previous?.signals, tombstones).map(s => {
     const now = current.get(fishDedupKey(s));
-    // Clearing the fresh flag or cancelling a rating is a real local change too.
-    return now && (now.caughtAt ?? 0) === (s.caughtAt ?? 0) ? { ...s, freshCatch: now.freshCatch, quality: now.quality } : s;
+    // Preserve explicit local edits without reviving a fresh flag rejected by archive evidence.
+    return now && (now.caughtAt ?? 0) === (s.caughtAt ?? 0)
+      ? { ...s, freshCatch: s.freshCatch && now.freshCatch, quality: now.quality }
+      : s;
   });
   return { signals, tombstones, updatedAt: latest.updatedAt ?? previous?.updatedAt };
 };

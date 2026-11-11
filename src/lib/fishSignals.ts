@@ -1,4 +1,4 @@
-import { archiveFishForNextRound, collapseVisibleFish, mergeFishSignals, fishCatchKey, fishDedupKey, fishVisibleKey } from '@/lib/fish/records';
+import { archiveFishForNextRound, collapseVisibleFish, demoteSupersededFreshFish, mergeFishSignals, fishCatchKey, fishDedupKey, fishVisibleKey } from '@/lib/fish/records';
 import { applyFishTombstones, mergeFishTombstones, normalizeFishTombstones, type FishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -35,7 +35,7 @@ export function loadFishSignals(): TradeSignal[] {
     const raw = JSON.parse(readPersistedStateRaw(FISH_STORAGE_KEY) ?? '[]');
     if(!Array.isArray(raw))return [];
     const valid=raw.filter((s):s is TradeSignal=>s&&typeof s.id==='string'&&typeof s.symbol==='string'&&Number.isFinite(s.timeMs)&&typeof s.timeLabel==='string'&&typeof s.fallbackZone==='string');
-    const migrated=collapseVisibleFish(applyFishTombstones(mergeFishSignals([],valid),loadFishTombstones())),serialized=JSON.stringify(migrated);
+    const migrated=collapseVisibleFish(applyFishTombstones(demoteSupersededFreshFish(mergeFishSignals([],valid)),loadFishTombstones())),serialized=JSON.stringify(migrated);
     // Keep malformed original rows available for recovery; only migrate a wholly valid library in place.
     // 被删除记号压住的鱼（别的设备删的、或合并时带回来的旧副本）也在这里去掉。
     if(valid.length===raw.length&&serialized!==JSON.stringify(raw))writePersistedStateRaw(FISH_STORAGE_KEY,serialized);

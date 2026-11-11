@@ -1,7 +1,8 @@
 import {expect,it,vi,beforeEach} from 'vitest';
-import {archiveFishForNextRound,mergeFishSignals,collapseVisibleFish,fishDedupKey,fishVisibleKey} from '@/lib/fish/records';
+import {archiveFishForNextRound,mergeFishSignals,collapseVisibleFish,migrateFishSignal,fishDedupKey,fishVisibleKey} from '@/lib/fish/records';
 import {mergeFishLists,applyFishTombstones} from '@/lib/fish/tombstones';
-import {loadFishSignals,saveFishSignals,recordFishDeletion} from '@/lib/fishSignals';
+import {FISH_STORAGE_KEY,loadFishSignals,saveFishSignals,recordFishDeletion} from '@/lib/fishSignals';
+import {mergeFishLibraryBackups} from '@/lib/fish/libraryStore';
 import type {TradeSignal} from '@/lib/signalLibrary';
 vi.mock('@/lib/simStateSync',()=>({queueSimStatePush:vi.fn()}));
 const fish:TradeSignal={id:'first',symbol:'AAAUSDT',timeMs:1,timeLabel:'2026-10-25 08:00:00',fallbackZone:'',freshCatch:true,caughtAt:100,quality:4,fish:{featureId:'state',featureShort:'S',statistic:'state',algorithmKey:'state|state|none|>|0.7',average:.71,cbi2:.71,startAverage:.71,previousAverage:.69,threshold:.7,cutoffMs:2}};
@@ -24,6 +25,42 @@ it('cloud union keeps the cabin and current catch, rejects the archived occurren
  expect(mergeFishLists([fish],[archive,newer])).toHaveLength(2);
  // An independent device can have an earlier clock: only the exact archived occurrence is suppressed.
  expect(mergeFishLists([archive],[{...fish,caughtAt:99}])).toHaveLength(2);
+});
+it('keeps the newer ICNTUSDT archive when an earlier round returns with a stale fresh flag', () => {
+ const signalTime = Date.parse('2026-11-06T15:45:00+08:00');
+ const stale = {
+  ...fish, symbol:'ICNTUSDT', timeMs:signalTime, timeLabel:'2026-11-06 15:45:00',
+  caughtAt:Date.parse('2026-11-06T19:01:26.140+08:00'),
+  fish:{...fish.fish!, cutoffMs:Date.parse('2026-11-06T18:55:00+08:00'), lookbackAnchorMs:Date.parse('2026-11-06T18:58:02.886+08:00'), lookbackHours:24},
+ };
+ const later = {
+  ...stale, quality:undefined, caughtAt:Date.parse('2026-11-06T21:19:14.252+08:00'),
+  fish:{...stale.fish, cutoffMs:Date.parse('2026-11-06T21:10:00+08:00'), lookbackAnchorMs:Date.parse('2026-11-06T21:10:18.752+08:00')},
+ };
+ const archive = archiveFishForNextRound([later], Date.parse('2026-11-06T22:10:41.227+08:00'))[0];
+ const expected = { fishArchive:archive.fishArchive, fish:migrateFishSignal(later).fish, caughtAt:later.caughtAt, quality:4 };
+ for (const rows of [mergeFishLists([archive],[stale]), mergeFishLists([stale],[archive])]) {
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject(expected);
+  expect(rows[0].freshCatch).toBeUndefined();
+ }
+ localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify([archive, stale]));
+ expect(loadFishSignals()).toHaveLength(1);
+ expect(loadFishSignals()[0]).toMatchObject(expected);
+ // A genuine recapture and the same symbol with a different signal time or venue stay new.
+ const recaptured = { ...stale, caughtAt:archive.fishArchive!.at + 1 };
+ const newSignal = { ...stale, timeMs:signalTime + 300_000 };
+ const otherVenue = { ...stale, exchange:'okx' as const };
+ expect(mergeFishLists([archive], [recaptured, newSignal, otherVenue]).filter(s=>s.freshCatch)).toHaveLength(3);
+});
+it('keeps distinct old algorithm snapshots in the cabin and does not revive their fresh flag on backup restore', () => {
+ const early = { ...fish, fish:{...fish.fish!, cutoffMs:2, lookbackAnchorMs:3} };
+ const later = { ...fish, caughtAt:250, fish:{...fish.fish!, cutoffMs:5, lookbackAnchorMs:6, featureId:'cba',featureShort:'CBA',statistic:'CBA'} };
+ const archive = archiveFishForNextRound([later], 300)[0];
+ const recovered = mergeFishLibraryBackups({signals:[early],tombstones:{}}, {signals:[archive],tombstones:{}}).signals;
+ expect(recovered).toHaveLength(2);
+ expect(recovered.every(s=>!s.freshCatch)).toBe(true);
+ expect(recovered.find(s=>!s.fishArchive)?.fish).toMatchObject(migrateFishSignal(early).fish);
 });
 it('deleting a cabin row removes older duplicate rounds, keeps the current fresh signal and future catches',()=>{
  const one=archiveFishForNextRound([fish],200)[0],two=archiveFishForNextRound([{...fish,caughtAt:250}],300)[0],fresh={...fish,caughtAt:301};
