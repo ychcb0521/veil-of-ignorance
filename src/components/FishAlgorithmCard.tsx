@@ -56,7 +56,7 @@ function fishAlgorithmOptions(defs: DeepDigFeatureDef[]): FishAlgorithmOption[] 
   return options;
 }
 
-export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canDelete=true,suggestion=null,computing='',queued=false,librarySize=0,footer,onRecalculate,recalculateDisabled=false,recalculating=false}:{card:FishCard;defs:DeepDigFeatureDef[];locked:boolean;index:number;onChange:(card:FishCard)=>void;onDelete:()=>void;canDelete?:boolean;suggestion?:FishSuggestion|null;computing?:string;queued?:boolean;librarySize?:number;footer?:ReactNode;onRecalculate?:()=>void;recalculateDisabled?:boolean;recalculating?:boolean}) {
+export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canDelete=true,suggestion=null,computing='',queued=false,librarySize=0,footer,onRecalculate,recalculateDisabled=false,recalculating=false,initialPreference=readFishPreference}:{card:FishCard;defs:DeepDigFeatureDef[];locked:boolean;index:number;onChange:(card:FishCard)=>void;onDelete:()=>void;canDelete?:boolean;suggestion?:FishSuggestion|null;computing?:string;queued?:boolean;librarySize?:number;footer?:ReactNode;onRecalculate?:()=>void;recalculateDisabled?:boolean;recalculating?:boolean;initialPreference?:(featureId:string)=>FishPreference}) {
  const def=defs.find(d=>d.id===card.featureId),p=card.pref,recorded=RECORDED_RANGES[card.featureId];
  const update=(patch:Partial<FishPreference>)=>onChange({...card,pref:{...p,...patch,constraints:[]}});
  // A card added before a shared suggestion finishes must also consume that cached result.
@@ -72,7 +72,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const selectAlgorithm = (value: string) => {
    const option = options.find(choice => choice.value === value);
    if (!option || option.reason) return;
-   const prior = option.statistic != null && option.def.id === card.featureId ? p : readFishPreference(option.def.id);
+   const prior = option.statistic != null && option.def.id === card.featureId ? p : initialPreference(option.def.id);
    const pref = option.statistic != null && option.statistic !== prior.statistic
      ? { ...prior, statistic: option.statistic, threshold: '', lastSuggestion: undefined }
      : prior;

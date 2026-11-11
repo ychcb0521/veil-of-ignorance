@@ -139,7 +139,7 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
             </li>
           </ul>
           <p className="pb-1 text-[11px] leading-relaxed text-muted-foreground">ATR 取触发前 14 根的平均真实波幅。任一根超线，整只标的跳过。</p>
-          <FishTurnoverThresholds />
+          <FishTurnoverThresholds floors={progress.turnoverFloors}/>
         </section>}
         {tab === 'turnover' ? <FishTurnoverDetails rows={progress.turnoverDetails} rejected={turnoverCount} /> : <>
         {incomplete>0&&<p role="note" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2.5 text-muted-foreground" data-testid="fish-wick-legacy">{incomplete} 条旧版记录仅保存了过滤数量，未保存触发时间和价格。重新捕捞后可查看完整明细。</p>}

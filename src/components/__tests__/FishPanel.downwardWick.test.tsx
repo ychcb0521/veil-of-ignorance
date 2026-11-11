@@ -6,6 +6,7 @@ import { saveFishPreference } from '@/lib/fish/preferences';
 import { readFishDownwardWick } from '@/lib/fish/downwardWick';
 import { initialFishProgress } from '@/lib/fishScanner';
 import { buildFishScanSettings } from '@/lib/fish/scanPlan';
+import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
 import { readFishCards } from '@/lib/fish/cards';
 
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>[CBI2_DEF]}));
@@ -39,7 +40,9 @@ it('saves only submitted settings and gives manual and automatic scans the same 
   expect(settings.getByLabelText('过滤向下大插针')).toBeChecked();
   expect(settings.getByLabelText('回看时长')).toHaveValue(48);
   expect(settings.getByLabelText('插针幅度（ATR 倍数）')).toHaveValue(3);
-  expect(settings.getByRole('list', { name: '成交额门槛' })).toHaveTextContent('≥ 1,000 万 USDT');
+  for (const [hours, min] of [[1, 1_000_000], [12, 8_000_000], [24, 10_000_000]]) {
+    expect(settings.getByLabelText(`${hours} 小时成交额（USDT）`)).toHaveValue(min);
+  }
   fireEvent.change(settings.getByLabelText('回看时长'), { target: { value: '1' } });
   fireEvent.change(settings.getByLabelText('插针幅度（ATR 倍数）'), { target: { value: '4.2' } });
   expect(readFishDownwardWick()).toEqual({ enabled:true, hours:48, atrMultiple:3 });
@@ -64,6 +67,20 @@ it('saves only submitted settings and gives manual and automatic scans the same 
   await waitFor(() => expect(readFishDownwardWick()).toEqual({ ...expected, enabled:false }));
 });
 
+it('passes the submitted turnover settings to manual capture', async () => {
+  render(<FishPanel {...props}/>);
+  const settings = await openSettings();
+  const first = settings.getByLabelText('1 小时成交额（USDT）');
+  fireEvent.change(first, { target: { value: '2000000' } });
+  expect(readCaptureTurnoverSettings().floors[0].min).toBe(1_000_000);
+  fireEvent.click(settings.getByRole('button', { name: '保存成交额设置' }));
+  await waitFor(() => expect(readCaptureTurnoverSettings().floors[0].min).toBe(2_000_000));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '插针回看设置' })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '开始捕捞' }));
+  await waitFor(() => expect(start).toHaveBeenCalled());
+  expect(start.mock.calls[0][0].turnoverFloors).toEqual(readCaptureTurnoverSettings().floors);
+});
+
 it('shows validation errors and preserves the previously saved rule', async () => {
   render(<FishPanel {...props}/>);
   const settings = await openSettings();
@@ -78,5 +95,6 @@ it('locks edits during scans and keeps the rejection count visible', async () =>
   const settings = await openSettings();
   expect(settings.getByLabelText('过滤向下大插针')).toBeDisabled();
   expect(settings.getByLabelText('插针幅度（ATR 倍数）')).toBeDisabled();
+  expect(settings.getByLabelText('1 小时成交额（USDT）')).toBeDisabled();
   expect(screen.getByTestId('fish-wick-skipped')).toHaveTextContent('插针过滤 3');
 });

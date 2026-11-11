@@ -1,5 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Settings2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { buildFishHitRateSettings, FISH_HIT_RATE_SETTINGS_KEY, readFishHitRateSettings, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
+import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { FishWickEvidence } from '@/components/FishWickDetails';
 import { FishTurnoverEvidence } from '@/components/FishTurnoverDetails';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
@@ -7,7 +12,7 @@ import { fishCaughtBy } from '@/lib/fish/records';
 import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { FishScanSettings } from '@/lib/fishScanner';
-import { FISH_HIT_RATE_HOURS, type FishHitRateMode, type FishHitRateOptions, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { DEFAULT_FISH_HIT_RATE_WINDOW, type FishHitRateMode, type FishHitRateOptions, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
 
 const statusText = { hit: '命中', miss: '未命中', unverified: '无法判定' };
 const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground';
@@ -36,9 +41,9 @@ const offsetText = (delta: number) => {
   return delta === 0 ? '同一时间' : `${delta < 0 ? '早' : '晚'} ${minutes} 分${rest ? ` ${rest} 秒` : ''}`;
 };
 
-function ThresholdDetails({ rows, anchorMs }: { rows: FishHitRateThresholdDetail[]; anchorMs: number }) {
+function ThresholdDetails({ rows, window }: { rows: FishHitRateThresholdDetail[]; window: FishHitRateWindow }) {
   return <>
-    <p className="text-muted-foreground">测试窗口（北京时间） {formatUTC8(anchorMs - FISH_HIT_RATE_HOURS * 3_600_000)} ～ {formatUTC8(anchorMs)} · 按已收盘 K 线取值</p>
+    <p className="text-muted-foreground">测试窗口（北京时间） {formatUTC8(window.startMs)} ～ {formatUTC8(window.anchorMs)} · 按已收盘 K 线取值</p>
     <div className="overflow-x-auto rounded-md border border-border/60">
       <table className="w-full text-xs" aria-label="未达门槛算法的窗口读数">
         <thead className="bg-muted"><tr>{['算法', '结果序列', '窗口内最大值', '最大值时间', '截止读数', '门槛'].map(label =>
@@ -56,14 +61,19 @@ function ThresholdDetails({ rows, anchorMs }: { rows: FishHitRateThresholdDetail
   </>;
 }
 
-export function FishHitRateTest({ library, buildSettings, run, disabled, onRunningChange }: {
+export function FishHitRateTest({ library, captureSettings, defs, run, disabled, onRunningChange }: {
   library: readonly TradeSignal[];
-  buildSettings: () => FishScanSettings;
+  captureSettings: () => FishHitRateSettings;
+  defs: DeepDigFeatureDef[];
   run: (options: FishHitRateOptions) => Promise<void>;
   disabled?: boolean;
   onRunningChange: (running: boolean) => void;
 }) {
   const sourceName = useId(), modeName = useId(), detailId = useId();
+  const [storedSettings, setStoredSettings] = usePersistedState<FishHitRateSettings | null>(FISH_HIT_RATE_SETTINGS_KEY, null);
+  const savedSettings = useMemo(() => readFishHitRateSettings(storedSettings), [storedSettings]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const currentWindow = savedSettings?.window ?? DEFAULT_FISH_HIT_RATE_WINDOW;
   const [source, setSource] = useState<'library' | 'paste'>('library');
   const [minRating, setMinRating] = useState(3);
   const [text, setText] = useState('');
@@ -124,7 +134,8 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
     if (controller.current || !samples.length || pasted?.errors.length) return;
     setError('');
     let settings: FishScanSettings;
-    try { settings = buildSettings(); }
+    const selectedSettings = savedSettings ?? captureSettings();
+    try { settings = buildFishHitRateSettings(selectedSettings, defs); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return; }
     const task = new AbortController();
     controller.current = task;
@@ -139,7 +150,7 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
     setProgress(undefined);
     try {
       await run({
-        samples: samples.map(sample => ({ ...sample })), mode, settings, signal: task.signal,
+        samples: samples.map(sample => ({ ...sample })), mode, settings, window: selectedSettings.window, signal: task.signal,
         onWindow: window => { if (!task.signal.aborted) setWindows(previous => [...previous, window]); },
         onProgress: value => { if (!task.signal.aborted) setProgress(value); },
       });
@@ -156,7 +167,22 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
   };
 
   return <div className="min-w-0 space-y-2 text-[11px]">
-      <p className="text-muted-foreground">每个样本前后各 2.5 小时。使用当前勾选的捕捞算法和过滤条件，信号在截止时仍须达标。</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-muted-foreground">{savedSettings ? '下次测试使用独立设置' : '当前沿用捕捞条件'} · 样本前 {currentWindow.beforeHours} 小时，后 {currentWindow.afterHours} 小时</p>
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogTrigger asChild><button type="button" disabled={running} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+            <Settings2 aria-hidden className="h-3 w-3"/>测试设置
+          </button></DialogTrigger>
+          {settingsOpen && <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto p-4 text-[11px] sm:p-5">
+            <DialogHeader className="pr-7 text-left">
+              <DialogTitle>漏报测试设置</DialogTitle>
+              <DialogDescription>这些设置用于下一次漏报测试。全市场测试按这里的交易所扫描，定向测试按样本所属市场取数。</DialogDescription>
+            </DialogHeader>
+            <FishHitRateSettingsForm initial={savedSettings ?? captureSettings()} defs={defs} copyCapture={captureSettings}
+              onSave={value => { setStoredSettings(value); setSettingsOpen(false); }} onCancel={() => setSettingsOpen(false)}/>
+          </DialogContent>}
+        </Dialog>
+      </div>
       <div className="grid gap-4 rounded-lg border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
         <fieldset disabled={running} className="min-w-0 space-y-2">
           <legend className="mb-1.5 font-medium">测试样本</legend>
@@ -178,11 +204,11 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
           <legend className="mb-1.5 font-medium">扫描范围</legend>
           <label className="flex items-center gap-2"><input type="radio" name={modeName} checked={mode === 'targets'} onChange={() => setMode('targets')}/>只扫描给定标的</label>
           <label className="flex items-center gap-2"><input type="radio" name={modeName} checked={mode === 'market'} onChange={() => setMode('market')}/>扫描本窗口内所有标的</label>
-          <p className="text-muted-foreground">{mode === 'targets' ? '按样本所属交易所和市场取数。' : '按当前捕捞市场范围扫描，列出每个窗口内的全部命中。'}</p>
+          <p className="text-muted-foreground">{mode === 'targets' ? '按样本所属交易所和市场取数。' : '按测试的全市场范围扫描，列出每个窗口内的全部命中。'}</p>
         </fieldset>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-muted-foreground">{samples.length} 条样本 · {checkedWindows} 个时间窗口</p>
+        <p className="text-muted-foreground">{samples.length} 条样本 · {checkedWindows} 个不同时间窗口</p>
         {running
           ? <button type="button" className="rounded-md border border-border px-3 py-1.5 hover:bg-muted" onClick={() => controller.current?.abort()}>停止测试</button>
           : <button type="button" className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40" disabled={disabled || !samples.length || !!pasted?.errors.length} onClick={() => void start()}>开始测试</button>}
@@ -250,7 +276,7 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
             <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setDetail(undefined)}>收起</button>
           </div>
           {activeWick && <FishWickEvidence row={activeWick}/>}
-          {activeThresholds && <ThresholdDetails rows={activeThresholds} anchorMs={detailRow.window.anchorMs}/>}
+          {activeThresholds && <ThresholdDetails rows={activeThresholds} window={detailRow.window}/>}
           {activeTurnover && <FishTurnoverEvidence rows={activeTurnover}/>}
         </section>}
         {selected && <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="本窗口全部命中">

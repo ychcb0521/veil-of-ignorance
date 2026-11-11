@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFishFeatures } from './useFishFeatures';
 import { loadFishCardsForScan, readFishCombination } from '@/lib/fish/cards';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
+import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
 import { fishAutoNextAt, readFishAuto, resetFishAuto, releaseFishAutoLease, saveFishAuto, saveFishAutoSchedule, takeFishAutoLease, type FishAutoMode, type FishAutoSchedule, type FishAutoState } from '@/lib/fish/autoScan';
 import type { FishScanSettings } from '@/lib/fishScanner';
 
@@ -54,7 +55,8 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
     const fresh = { ...s, lastRunAt: Math.max(s.lastRunAt ?? 0, saved.lastRunAt ?? 0) || null };
     if ((fishAutoNextAt(fresh) ?? Infinity) > now) { stateRef.current = fresh; setStateRaw(fresh); releaseFishAutoLease(owner.current); return; }
     const cards = loadFishCardsForScan(defsRef.current.map(d => d.id));
-    const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '', lookbackHours:readFishLookback() });
+    const turnover = readCaptureTurnoverSettings();
+    const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '', lookbackHours:readFishLookback(), turnoverFloors: turnover.enabled ? turnover.floors : [] });
     if (built.error !== undefined) { setError(`自动捕捞没开始：${built.error}`); retryAt.current = now + RETRY_MS; releaseFishAutoLease(owner.current); return; }
     setError(''); setWaiting(false); runningRef.current = true;
     setState({ ...fresh, lastRunAt: now });

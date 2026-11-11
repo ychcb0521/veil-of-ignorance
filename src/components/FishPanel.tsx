@@ -16,7 +16,8 @@ import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
 import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards,fishCombinationKey as combinationKey,readFishCombination as readCombination} from '@/lib/fish/cards';
-import {FISH_TURNOVER_FLOORS,FISH_MAX_ALGORITHMS} from '@/lib/fish/shared';
+import { FISH_MAX_ALGORITHMS, formatTurnoverWan } from '@/lib/fish/shared';
+import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
 import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
 import type {FishNotify} from '@/hooks/useFishNotify';
@@ -38,7 +39,8 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
 import { FishHitRateTest } from '@/components/FishHitRateTest';
-import { FISH_HIT_RATE_HOURS, type FishHitRateOptions } from '@/lib/fish/hitRate';
+import { DEFAULT_FISH_HIT_RATE_WINDOW, type FishHitRateOptions } from '@/lib/fish/hitRate';
+import type { FishHitRateSettings } from '@/lib/fish/hitRateSettings';
 import { FishWickDetails } from '@/components/FishWickDetails';
 import { FishWickSettings } from '@/components/FishWickSettings';
 import { FishCaptureFrequencySettings, FishCaptureOpenSettings, FishCaptureTimeSettings } from '@/components/FishCaptureSettings';
@@ -92,7 +94,7 @@ const OPEN_KEY = 'veil.fish.open';
 const catchingDefaultKey = () => `${getUserPrefix()}fish-catching-default.v1`;
 const captureSettingTitles = { settings: '设置', time: '时间设置', opening: '打开设置', frequency: '扫描频率设置', wick: '插针回看设置', notify: '邮件提醒' } as const;
 type CaptureSetting = keyof typeof captureSettingTitles;
-type FishOpen = { scope: boolean; detail: boolean; catching: boolean; cabin: boolean; algorithms: boolean; hitRate: boolean };
+type FishOpen = { scope: boolean; detail: boolean; catching: boolean; cabin: boolean; algorithms: boolean; captureQuality: boolean; hitRate: boolean };
 function readCatchingDefault() {
   try {
     const saved = localStorage.getItem(catchingDefaultKey());
@@ -103,8 +105,8 @@ function readCatchingDefault() {
 function readOpen(): FishOpen {
   const pick = (v: unknown, fallback: boolean) => typeof v === 'boolean' ? v : fallback;
   const catching = readCatchingDefault();
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: v.algorithms !== false, hitRate: v.hitRate === true }; }
-  catch { return { scope: false, detail: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: true, hitRate: false }; }
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: v.algorithms !== false, captureQuality: v.captureQuality === true, hitRate: v.hitRate === true }; }
+  catch { return { scope: false, detail: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: true, captureQuality: false, hitRate: false }; }
 }
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
 
@@ -119,7 +121,7 @@ export function FishPanel(p: FishPanelProps) {
   });
 
   const owner=getUserPrefix();
-  const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback, downwardWick, saveDownwardWick}=useFishAccountSettings();
+  const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback, downwardWick, saveDownwardWick, turnover, saveTurnover}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
   const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
   useEffect(()=>{const h=readFishLookback();setLookbackHours(h);setLookbackDraft(String(h));},[owner]);
@@ -266,22 +268,18 @@ export function FishPanel(p: FishPanelProps) {
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const plans=p.onRecombine?pool:multiple.plans;
-    for(const plan of plans){const checked=fishProgramForLookback(plan,hours,FISH_TURNOVER_FLOORS);if(checked.unavailable)throw new Error(checked.unavailable);}
-    p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+    const currentTurnover = readCaptureTurnoverSettings(owner);
+    const turnoverFloors = currentTurnover.enabled ? currentTurnover.floors : [];
+    for(const plan of plans){const checked=fishProgramForLookback(plan,hours,turnoverFloors);if(checked.unavailable)throw new Error(checked.unavailable);}
+    p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
-  const buildHitRateSettings = (): FishScanSettings => {
-    if (multiple.error) throw new Error(multiple.error);
-    if (!exchanges.length) throw new Error('请至少选择一家捕捞交易所');
-    for (const plan of multiple.plans) {
-      const checked = fishProgramForLookback(plan, FISH_HIT_RATE_HOURS, FISH_TURNOVER_FLOORS);
-      if (checked.unavailable) throw new Error(checked.unavailable);
-    }
-    return {
-      algorithms: multiple.plans.map(plan => ({ feature: plan.def, algorithm: plan.settings })),
-      combination, exchanges: [...exchanges], includeDuplicates, includeUsStocks,
-      downwardWick: readFishDownwardWick(owner), turnoverFloors: FISH_TURNOVER_FLOORS,
-    };
-  };
+  const captureHitRateSettings = (): FishHitRateSettings => ({
+    version: 1,
+    cards: [{ id: 'first', featureId: selected, enabled: firstEnabled, pref }, ...extraCards],
+    combination, selection: { exchanges: [...exchanges], includeDuplicates, includeUsStocks },
+    downwardWick: readFishDownwardWick(owner), turnover: readCaptureTurnoverSettings(owner),
+    window: { ...DEFAULT_FISH_HIT_RATE_WINDOW },
+  });
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
   const x = p.progress;
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
@@ -326,7 +324,7 @@ export function FishPanel(p: FishPanelProps) {
         <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">流程</h4>
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
-            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 1 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
+            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 1 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。排除稳定币。{turnover.enabled ? `成交额门槛 ${turnover.floors.map(floor => `${floor.hours}h ≥ ${formatTurnoverWan(floor.min)}`).join('、')} USDT，截止前与信号起点前都要满足。` : '成交额过滤已关闭。'}</li>
             <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
             <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯ → 设置」可调整时间、默认展开、扫描频率、插针回看和邮件提醒。</li>
           </ol></section>
@@ -380,7 +378,13 @@ export function FishPanel(p: FishPanelProps) {
                 setMenuOpen(false);
                 toast.success('扫描频率已保存');
               }} />}
-              {captureSetting === 'wick' && <FishWickSettings value={downwardWick} locked={running} onSave={async value => {
+              {captureSetting === 'wick' && <FishWickSettings value={downwardWick} locked={running} turnover={turnover} onSaveTurnover={async value => {
+                await saveTurnover(value);
+                if (getUserPrefix() === owner) {
+                  setMenuOpen(false);
+                  toast.success('成交额设置已保存');
+                }
+              }} onSave={async value => {
                 await saveDownwardWick(value);
                 if (getUserPrefix() === owner) {
                   setMenuOpen(false);
@@ -474,10 +478,17 @@ export function FishPanel(p: FishPanelProps) {
       </div>
     </section>
     {p.onTestHitRate && <section aria-labelledby="fish-capture-quality-title" className="min-w-0 text-[11px]">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <h3 id="fish-capture-quality-title" className="flex h-7 items-center gap-1.5 font-medium text-foreground/80">
-        <Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞质量
-      </h3>
+      <div className="flex min-w-0 items-center gap-2">
+        <h3>
+          <button id="fish-capture-quality-title" type="button" aria-expanded={open.captureQuality} aria-controls="fish-capture-quality-content"
+            onClick={() => setOpen({ captureQuality: !open.captureQuality })} className={fishSubHeading}>
+            <Gauge aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞质量
+            <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.captureQuality ? 'rotate-180' : ''}`}/>
+          </button>
+        </h3>
+        {!open.captureQuality && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
+      </div>
+      <div id="fish-capture-quality-content" hidden={!open.captureQuality} className="min-w-0 space-y-1.5">
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         <button id="fish-hit-rate-title" type="button" aria-expanded={open.hitRate} aria-controls="fish-hit-rate"
           onClick={() => setOpen({ hitRate: !open.hitRate })}
@@ -490,9 +501,9 @@ export function FishPanel(p: FishPanelProps) {
         </button>
         {!open.hitRate && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
       </div>
+      <div id="fish-hit-rate" role="region" aria-labelledby="fish-hit-rate-title" hidden={!open.hitRate} className="min-w-0">
+        <FishHitRateTest key={owner} library={library} captureSettings={captureHitRateSettings} defs={defs} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
       </div>
-      <div id="fish-hit-rate" role="region" aria-labelledby="fish-hit-rate-title" hidden={!open.hitRate} className="mt-1.5 min-w-0">
-        <FishHitRateTest key={owner} library={library} buildSettings={buildHitRateSettings} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
       </div>
     </section>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼舱」 */}

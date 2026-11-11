@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { FishScanner, type FishScanSettings } from '@/lib/fishScanner';
 import { FISH_TURNOVER_FLOORS } from '@/lib/fish/shared';
-import { runFishHitRate, type FishHitRateMode, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { runFishHitRate, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
 import { CBI2_DEF } from '@/lib/deepDig/features';
 import { readFishRound } from '@/lib/fish/roundSummary';
 import type { FishDataAdapter } from '@/lib/fish/adapters';
@@ -38,8 +38,8 @@ function setup(stopAfterFirst = false) {
   const adapter: FishDataAdapter = { exchange: 'binance', list: async () => markets, btc: () => markets[0], taker: async (_market, bars) => bars, candles };
   const scanner = new FishScanner(async () => new Response(JSON.stringify({ serverTime: anchor + HOUR })), undefined, undefined, { binance: adapter });
   const controller = new AbortController(), windows: FishHitRateWindow[] = [];
-  const run = (mode: FishHitRateMode, samples: TradeSignal[], combination: 'and' | 'or' = 'and', wick = false, options: Pick<FishScanSettings, 'algorithms' | 'turnoverFloors'> = {}) => runFishHitRate(scanner, {
-    samples, mode, signal: controller.signal, onProgress: () => {},
+  const run = (mode: FishHitRateMode, samples: TradeSignal[], combination: 'and' | 'or' = 'and', wick = false, options: Pick<FishScanSettings, 'algorithms' | 'turnoverFloors'> = {}, window?: FishHitRateOptions['window']) => runFishHitRate(scanner, {
+    samples, mode, window, signal: controller.signal, onProgress: () => {},
     settings: { exchanges: ['binance'], combination, downwardWick: { enabled: wick, hours: 4, atrMultiple: 3 }, algorithms: [{ feature, algorithm }, { feature: { ...feature, id: 'second' }, algorithm }], ...options },
     onWindow: window => { windows.push(window); if (stopAfterFirst) controller.abort(); },
   });
@@ -64,6 +64,15 @@ it('scans exactly the listed markets for the same five-hour window and keeps tes
     expect(readFishRound(hit.fish?.algorithmKey, hit.fish?.cutoffMs)).toBeNull();
     for (const member of hit.fish?.algorithms ?? []) expect(readFishRound(member.algorithmKey, member.cutoffMs)).toBeNull();
   }
+});
+
+it('uses the saved before and after durations for every sample in the same window', async () => {
+  const { run, windows } = setup();
+  await run('targets', [sample('EARLY'), sample('ENDED')], 'or', false, {}, { beforeHours: 1, afterHours: 0.5 });
+  expect(windows).toHaveLength(1);
+  expect(windows[0]).toMatchObject({ startMs: sampleTime - HOUR, anchorMs: sampleTime + 0.5 * HOUR });
+  expect(windows[0].rows.map(row => row.status)).toEqual(['hit', 'miss']);
+  expect(windows[0].hits[0].fish?.lookbackHours).toBe(1.5);
 });
 
 it('lists the other market hits without attributing them to the supplied sample', async () => {

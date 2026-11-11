@@ -1,17 +1,20 @@
 import { useId, useState, type FormEvent } from 'react';
 import { FishCheck } from './FishAlgorithmCard';
-import { FishTurnoverThresholds } from './FishTurnoverThresholds';
+import { FishCaptureTurnoverSettings } from './FishTurnoverSettings';
+import type { FishTurnoverSettings } from '@/lib/fish/turnoverSettings';
 import { fishWickWindowBars, MAX_FISH_WICK_HOURS, validateFishDownwardWick, type FishDownwardWick } from '@/lib/fish/downwardWick';
 
 interface FishWickSettingsProps {
   value: FishDownwardWick;
   locked: boolean;
   onSave: (value: FishDownwardWick) => Promise<void>;
+  turnover: FishTurnoverSettings;
+  onSaveTurnover: (value: FishTurnoverSettings) => Promise<void>;
 }
 
 const inputClass = 'h-8 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60';
 
-export function FishWickSettings({ value, locked, onSave }: FishWickSettingsProps) {
+export function FishWickSettings({ value, locked, onSave, turnover, onSaveTurnover }: FishWickSettingsProps) {
   const durationId = useId();
   const minutes = Math.round(value.hours * 60);
   const useMinutes = !Number.isInteger(value.hours) && Math.abs(value.hours * 60 - minutes) < 1e-9;
@@ -78,8 +81,7 @@ export function FishWickSettings({ value, locked, onSave }: FishWickSettingsProp
         {error && <p role="alert" className="leading-relaxed text-destructive">{error}</p>}
       </form>
       <div className="space-y-1.5 border-t border-border/60 pt-3">
-        <h3 className="font-medium text-foreground">成交额门槛</h3>
-        <FishTurnoverThresholds />
+        <FishCaptureTurnoverSettings value={turnover} locked={locked} onSave={onSaveTurnover}/>
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import type { FishCard } from '@/components/FishAlgorithmCard';
 import { isRetiredFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishExchange } from './exchanges';
 import { compileFishProgram, type FishProgram } from './algorithm';
-import { FISH_TURNOVER_FLOORS } from './shared';
+import { FISH_TURNOVER_FLOORS, type FishTurnoverFloor } from './shared';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings } from '@/lib/fishScanner';
 
 export interface FishScanSelection { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }
@@ -26,15 +26,16 @@ export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDig
 }
 
 /** 一次捕捞的完整设置；拼不出来时返回原因（与「开始捕捞」按钮的报错相同）。time 留空 = 现在。 */
-export function buildFishScanSettings(o: { cards: readonly FishCard[]; defs: readonly DeepDigFeatureDef[]; combination: 'and' | 'or'; selection: FishScanSelection; time: string; lookbackHours?:number|null }): { settings: FishScanSettings; error?: undefined } | { settings?: undefined; error: string } {
+export function buildFishScanSettings(o: { cards: readonly FishCard[]; defs: readonly DeepDigFeatureDef[]; combination: 'and' | 'or'; selection: FishScanSelection; time: string; lookbackHours?:number|null; turnoverFloors?: readonly FishTurnoverFloor[] }): { settings: FishScanSettings; error?: undefined } | { settings?: undefined; error: string } {
   try {
     const lookbackHours=o.lookbackHours===null?undefined:o.lookbackHours??readFishLookback();
+    const turnoverFloors = o.turnoverFloors ?? FISH_TURNOVER_FLOORS;
     const { plans, pool, error } = fishCardPlans(o.cards, o.defs);
     const parsed = parseFishSettings(o.time, String(plans[0]?.settings.threshold ?? 0));
     if (!o.selection.exchanges.length) throw new Error('请至少选择一家交易所');
     if (error && error !== '请启用至少一个算法') throw new Error(error);
     if (!pool.length) throw new Error('没有有效算法');
-    for(const plan of pool){const checked=fishProgramForLookback(plan,lookbackHours,FISH_TURNOVER_FLOORS);if(checked.unavailable)throw new Error(checked.unavailable);}
-    return { settings: { ...parsed, lookbackHours, feature: pool[0].def, algorithm: pool[0].settings, algorithms: pool.map(p => ({ feature: p.def, algorithm: p.settings })), retainMembers: true, displayAlgorithmKeys: plans.map(fishSelectionKey), combination: o.combination, exchanges: [...o.selection.exchanges], includeDuplicates: o.selection.includeDuplicates, includeUsStocks: o.selection.includeUsStocks ?? false, downwardWick: readFishDownwardWick(), turnoverFloors: FISH_TURNOVER_FLOORS } };
+    for(const plan of pool){const checked=fishProgramForLookback(plan,lookbackHours,turnoverFloors);if(checked.unavailable)throw new Error(checked.unavailable);}
+    return { settings: { ...parsed, lookbackHours, feature: pool[0].def, algorithm: pool[0].settings, algorithms: pool.map(p => ({ feature: p.def, algorithm: p.settings })), retainMembers: true, displayAlgorithmKeys: plans.map(fishSelectionKey), combination: o.combination, exchanges: [...o.selection.exchanges], includeDuplicates: o.selection.includeDuplicates, includeUsStocks: o.selection.includeUsStocks ?? false, downwardWick: readFishDownwardWick(), turnoverFloors } };
   } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; }
 }

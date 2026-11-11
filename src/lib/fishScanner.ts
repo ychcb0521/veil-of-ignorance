@@ -44,6 +44,7 @@ export interface FishProgress {
   /** One rejection per venue/market/instrument, even when several algorithms reject it. */
   wickDetails?: FishWickRejection[];
   turnoverDetails?: FishTurnoverDetail[];
+  turnoverFloors?: readonly FishTurnoverFloor[];
   lookbackHours?:number;
   /** 本轮跳过了某家但扫描仍在继续时的说明（如 BTC 参考取不到），淡色显示。 */
   notice?: string;
@@ -469,7 +470,7 @@ export class FishScanner {
   private async scanIntersection(options: ScanOptions): Promise<FishProgress> {
     if(this.running)throw new Error('扫描正在进行');
     this.running=true;
-    const progress={...initialFishProgress(),lookbackHours:options.lookbackHours}, states:FishProgress[]=[], results=new Map<string,Map<number,FishMemberResult>>();
+    const progress={...initialFishProgress(),lookbackHours:options.lookbackHours,turnoverFloors:options.turnoverFloors}, states:FishProgress[]=[], results=new Map<string,Map<number,FishMemberResult>>();
     const turnoverRejections = new FishTurnoverRejections();
     const emitted=new Set<string>();
     try {
@@ -587,7 +588,7 @@ export class FishScanner {
     // 捕捞过程：逐币记下截止读数与结论，扫完存成本轮摘要（只存本机）
     const memberResults=new Map<string,Map<number,FishMemberResult>>();
     const roundRows:FishRoundRow[]=[];let roundCut:number|undefined,roundAnchor=0;
-    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=rule;
+    const progress = initialFishProgress(); progress.turnoverFloors = options.turnoverFloors; progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=rule;
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
       for(const venue of Object.values(venues)) {

@@ -11,6 +11,8 @@ import {writePersistedStateRaw,notifyPersistedStateHydrated} from '@/lib/persist
 import {FISH_ACCOUNT_SETTINGS_KEY} from '@/lib/fish/accountSettings';
 import {buildFishScanSettings} from '@/lib/fish/scanPlan';
 import {readFishCards} from '@/lib/fish/cards';
+import {getUserPrefix} from '@/lib/userStoragePrefix';
+import {FISH_CAPTURE_TURNOVER_KEY,readCaptureTurnoverSettings} from '@/lib/fish/turnoverSettings';
 import {saveFishDownwardWick} from '@/lib/fish/downwardWick';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
 import {fishDelay} from '@/lib/fish/shared';
@@ -134,13 +136,18 @@ it('a coverage-only account update preserves the current manual mode and automat
  expect(view.result.current).toMatchObject({mode:'manual',hours:2});
 });
 
-it('uses independently saved wick settings on the next automatic scan', async () => {
+it('reads the latest saved wick and turnover settings on the next automatic scan', async () => {
  const {start}=hook();
  await flush();
  expect(start).toHaveBeenCalledTimes(1);
  const rule={enabled:true,hours:.2,atrMultiple:4.2};
- act(()=>{saveFishDownwardWick(rule);});
+ const turnover=readCaptureTurnoverSettings();
+ turnover.floors[0].min=2_000_000;
+ act(()=>{
+   saveFishDownwardWick(rule);
+   writePersistedStateRaw(getUserPrefix()+FISH_CAPTURE_TURNOVER_KEY,JSON.stringify(turnover));
+ });
  await flush(HOUR);
  expect(start).toHaveBeenCalledTimes(2);
- expect(start.mock.calls[1][0]).toMatchObject({downwardWick:rule,lookbackHours:1});
+ expect(start.mock.calls[1][0]).toMatchObject({downwardWick:rule,lookbackHours:1,turnoverFloors:turnover.floors});
 });

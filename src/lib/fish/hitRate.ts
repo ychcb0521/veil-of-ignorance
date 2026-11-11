@@ -5,8 +5,16 @@ import type { FishWickRejection } from './downwardWick';
 import type { FishTurnoverDetail } from './turnoverRejections';
 import { fishSourceLabel } from './records';
 
-export const FISH_HIT_RATE_HOURS = 5;
-const halfWindowMs = FISH_HIT_RATE_HOURS * 3_600_000 / 2;
+export interface FishHitRateTimeWindow { beforeHours: number; afterHours: number }
+export const DEFAULT_FISH_HIT_RATE_WINDOW: Readonly<FishHitRateTimeWindow> = { beforeHours: 2.5, afterHours: 2.5 };
+
+export function validateFishHitRateWindow({ beforeHours, afterHours }: FishHitRateTimeWindow): number {
+  const duration = beforeHours + afterHours;
+  if (!Number.isFinite(duration) || beforeHours < 0 || afterHours < 0 || duration <= 0 || duration > 8784) {
+    throw new Error('样本前后时长均须为非负数字，合计须大于 0 且不超过 8784 小时');
+  }
+  return duration;
+}
 const marketKey = (signal: Pick<TradeSignal, 'symbol' | 'exchange' | 'market'>) => `${signal.exchange ?? 'binance'}|${signal.market ?? 'crypto'}|${signal.symbol}`;
 const misses: Record<string, string> = {
   below: '截止时未达到算法门槛',
@@ -46,6 +54,7 @@ export interface FishHitRateRow {
   turnover?: FishTurnoverDetail[];
 }
 export interface FishHitRateWindow {
+  startMs: number;
   anchorMs: number;
   rows: FishHitRateRow[];
   hits: TradeSignal[];
@@ -56,6 +65,7 @@ export interface FishHitRateOptions {
   samples: readonly TradeSignal[];
   mode: FishHitRateMode;
   settings: FishScanSettings;
+  window?: FishHitRateTimeWindow;
   signal: AbortSignal;
   onWindow: (window: FishHitRateWindow) => void;
   onProgress: (progress: FishHitRateProgress) => void;
@@ -65,9 +75,12 @@ export interface FishHitRateOptions {
 export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options: FishHitRateOptions) {
   const { samples, mode, signal, onWindow, onProgress } = options;
   const settings = structuredClone(options.settings);
+  const window = options.window ?? DEFAULT_FISH_HIT_RATE_WINDOW;
+  const lookbackHours = validateFishHitRateWindow(window);
+  const afterMs = window.afterHours * 3_600_000;
   const groups = new Map<number, Map<string, TradeSignal>>();
   for (const sample of samples) {
-    const anchorMs = sample.timeMs + halfWindowMs;
+    const anchorMs = sample.timeMs + afterMs;
     const group = groups.get(anchorMs) ?? new Map<string, TradeSignal>();
     group.set(marketKey(sample), sample);
     groups.set(anchorMs, group);
@@ -93,7 +106,7 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
       let lastProgress = 0;
       try {
         scan = await scanner.scan({
-          ...settings, anchorMs, lookbackHours: FISH_HIT_RATE_HOURS, exchanges, includeUsStocks,
+          ...settings, anchorMs, lookbackHours, exchanges, includeUsStocks,
           includeDuplicates: targeted || settings.includeDuplicates,
           targetMarkets: targeted ? sampleMarkets : undefined,
           windowPeakMarkets: sampleMarkets,
@@ -151,7 +164,7 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
     const venueIssues = Object.values(scan?.venues ?? {}).flatMap(venue => [venue.error ?? venue.skippedReason].filter(Boolean));
     const notice = [...new Set([error, scan?.notice, ...venueIssues].filter(Boolean))].join(' · ');
     windowsDone++;
-    onWindow({ anchorMs, rows, hits: [...hits.values()].sort((a, b) => a.timeMs - b.timeMs), notice: notice || undefined });
+    onWindow({ startMs: anchorMs - lookbackHours * 3_600_000, anchorMs, rows, hits: [...hits.values()].sort((a, b) => a.timeMs - b.timeMs), notice: notice || undefined });
     progress(scan?.done, scan?.total);
   }
 }
