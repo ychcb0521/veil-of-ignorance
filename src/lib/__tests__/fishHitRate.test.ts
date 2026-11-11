@@ -66,6 +66,25 @@ it('scans exactly the listed markets for the same five-hour window and keeps tes
   }
 });
 
+it('keeps outside-window evidence separate from other algorithms that missed the threshold', async () => {
+  const { run, windows } = setup();
+  const algorithms = [
+    { feature, algorithm },
+    { feature: { ...feature, id: 'higher-threshold', short: 'BSS' }, algorithm: { ...algorithm, threshold: 3 } },
+  ];
+  await run('targets', [{ ...sample('STALE'), timeMs: sampleTime + 60_000 }], 'or', false, { algorithms });
+  expect(windows[0]).toMatchObject({ startMs: startTime + 60_000, anchorMs: anchor + 60_000 });
+  const row = windows[0].rows[0];
+  expect(row).toMatchObject({
+    status: 'miss',
+    rejections: [{ kind: 'outside' }, { kind: 'below' }],
+    outside: [{ algorithm: 'CBI-2', startMs: startTime - STEP, cutoffMs: anchor, cutoffReading: 2, threshold: 1, direction: '>' }],
+    thresholds: [{ algorithm: 'BSS', cutoffMs: anchor, cutoffReading: 2, threshold: 3 }],
+  });
+  expect(row.outside).toHaveLength(1);
+  expect(row.thresholds).toHaveLength(1);
+});
+
 it('uses the saved before and after durations for every sample in the same window', async () => {
   const { run, windows } = setup();
   await run('targets', [sample('EARLY'), sample('ENDED')], 'or', false, {}, { beforeHours: 1, afterHours: 0.5 });

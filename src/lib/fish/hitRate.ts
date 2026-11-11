@@ -43,6 +43,8 @@ export interface FishHitRateThresholdDetail {
   cutoffReading: number;
   maximum?: { value: number; timeMs: number };
 }
+export type FishHitRateOutsideDetail = Omit<FishHitRateThresholdDetail, 'maximum'> & { startMs: number };
+
 export interface FishHitRateRow {
   sample: TradeSignal;
   status: 'hit' | 'miss' | 'unverified';
@@ -51,6 +53,7 @@ export interface FishHitRateRow {
   rejections?: { kind: string; label: string }[];
   wick?: FishWickRejection;
   thresholds?: FishHitRateThresholdDetail[];
+  outside?: FishHitRateOutsideDetail[];
   turnover?: FishTurnoverDetail[];
 }
 export interface FishHitRateWindow {
@@ -140,22 +143,29 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
       // One confirmed rejection is enough for an intersection. A union needs every member ruled out.
       if (rejections.length && (settings.combination !== 'or' || outcomes.every(outcome => misses[outcome]))) {
         const wick = [...members.values()].find(member => member.outcome === 'wick' && member.wick)?.wick;
-        const thresholds = round.plans.flatMap((plan, index): FishHitRateThresholdDetail[] => {
+        const thresholds: FishHitRateThresholdDetail[] = [];
+        const outside: FishHitRateOutsideDetail[] = [];
+        round.plans.forEach((plan, index) => {
           const member = members.get(index);
-          if (!member?.windowPeak || member.reading === undefined) return [];
-          const { maximum, cutoffMs } = member.windowPeak;
+          if (member?.reading === undefined || (member.outcome !== 'below' && member.outcome !== 'outside')) return;
           const statistic = plan.settings.statistic ?? '结果';
-          return [{
+          const comparison = {
             algorithm: fishSourceLabel({ featureId: plan.def.id, featureShort: plan.def.short, statistic }),
             statistic, threshold: plan.settings.threshold, direction: plan.settings.direction, unit: plan.unit,
-            cutoffMs, cutoffReading: member.reading * plan.scale,
-            maximum: maximum && { ...maximum, value: maximum.value * plan.scale },
-          }];
+            cutoffReading: member.reading * plan.scale,
+          };
+          if (member.outcome === 'below' && member.windowPeak) {
+            const { maximum, cutoffMs } = member.windowPeak;
+            thresholds.push({ ...comparison, cutoffMs, maximum: maximum && { ...maximum, value: maximum.value * plan.scale } });
+          }
+          if (member.outcome === 'outside' && member.outsideStartMs !== undefined && member.snapshot) {
+            outside.push({ ...comparison, cutoffMs: member.snapshot.cutoffMs, startMs: member.outsideStartMs });
+          }
         });
         const turnover = rejections.some(({ kind }) => kind === 'thin')
           ? scan?.turnoverDetails?.filter(detail => marketKey(detail) === key)
           : undefined;
-        return { sample, status: 'miss', rejections, wick, thresholds, turnover };
+        return { sample, status: 'miss', rejections, wick, thresholds, outside, turnover };
       }
       const gaps = [...new Set(outcomes.flatMap(outcome => incomplete[outcome] ? [incomplete[outcome]] : []))];
       return { sample, status: 'unverified', reason: gaps.join('、') || '未取得完整判定' };

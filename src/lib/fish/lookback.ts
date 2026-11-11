@@ -38,16 +38,16 @@ export function fishProgramForLookback(plan:FishProgram,hours?:number,floors?:re
 export function limitFishLookback(result:FishMemberResult,anchorMs:number,hours?:number,expectedCutoff?:number):FishMemberResult {
  if(hours===undefined||result.outcome!=='hit')return result;
  const span=validateFishLookback(hours),start=result.signal?.timeMs;
- if(!Number.isFinite(anchorMs)||anchorMs<=0||!Number.isFinite(start)||start!<=0){
+ if(!Number.isFinite(anchorMs)||anchorMs<=0||start===undefined||!Number.isFinite(start)||start<=0){
   const {signal,...rest}=result;return {...rest,outcome:'readings',...(signal?.fish?{snapshot:{...signal.fish,outcome:'readings',lookbackHours:span,lookbackAnchorMs:anchorMs}}:{})};
  }
  const evidence=result.signal!.fish;
  if(expectedCutoff!==undefined&&evidence?.cutoffMs!==expectedCutoff||evidence?.lookbackAnchorMs!==undefined&&evidence.lookbackAnchorMs!==anchorMs||evidence?.lookbackHours!==undefined&&evidence.lookbackHours!==span){
   const {signal,...rest}=result;return {...rest,outcome:'readings',snapshot:{...signal.fish!,outcome:'readings',lookbackHours:span,lookbackAnchorMs:anchorMs}};
  }
- if(start!<anchorMs-span*3600000||start!>anchorMs){
+ if(start<anchorMs-span*3600000||start>anchorMs){
   const {signal,...rest}=result;
-  return {...rest,outcome:'outside',snapshot:{...signal.fish!,outcome:'outside',lookbackHours:hours,lookbackAnchorMs:anchorMs}};
+  return {...rest,outcome:'outside',outsideStartMs:start,snapshot:{...signal.fish!,outcome:'outside',lookbackHours:hours,lookbackAnchorMs:anchorMs}};
  }
  return {...result,signal:{...result.signal,fish:{...result.signal.fish!,lookbackHours:hours,lookbackAnchorMs:anchorMs}}};
 }

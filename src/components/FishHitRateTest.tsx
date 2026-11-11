@@ -12,7 +12,7 @@ import { fishCaughtBy } from '@/lib/fish/records';
 import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { FishScanSettings } from '@/lib/fishScanner';
-import { DEFAULT_FISH_HIT_RATE_WINDOW, type FishHitRateMode, type FishHitRateOptions, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { DEFAULT_FISH_HIT_RATE_WINDOW, type FishHitRateMode, type FishHitRateOptions, type FishHitRateOutsideDetail, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
 
 const statusText = { hit: '命中', miss: '未命中', unverified: '无法判定' };
 const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground';
@@ -61,6 +61,29 @@ function ThresholdDetails({ rows, window }: { rows: FishHitRateThresholdDetail[]
   </>;
 }
 
+function OutsideDetails({ rows, window }: { rows: FishHitRateOutsideDetail[]; window: FishHitRateWindow }) {
+  return <>
+    <p className="text-muted-foreground">测试窗口（北京时间） {formatUTC8(window.startMs)} ～ {formatUTC8(window.anchorMs)} · 按已收盘 K 线取值</p>
+    <div className="overflow-x-auto rounded-md border border-border/60">
+      <table className="w-full text-xs" aria-label="起点超窗算法的读数">
+        <thead className="bg-muted"><tr>{['算法', '连续达标起点', '相对窗口边界', '截止读数', '门槛'].map(label =>
+          <th key={label} scope="col" className={`${cellClass} whitespace-nowrap`}>{label}</th>)}</tr></thead>
+        <tbody>{rows.map((row, index) => {
+          const early = row.startMs < window.startMs;
+          const edgeMs = early ? window.startMs : window.anchorMs;
+          return <tr key={index} className="border-t border-border/50">
+            <td className={`${cellClass} font-medium`}>{row.algorithm}<div className="font-mono text-[10px] text-muted-foreground">{row.statistic}</div></td>
+            <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(row.startMs)}</td>
+            <td className={`${cellClass} whitespace-nowrap`}>比窗口{early ? '起点' : '截止'}{offsetText(row.startMs - edgeMs)}</td>
+            <td className={`${cellClass} whitespace-nowrap font-mono`}>{thresholdValue(row.cutoffReading, row.unit)}<div className="text-[10px] text-muted-foreground">{formatUTC8(row.cutoffMs)}</div></td>
+            <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.direction} {thresholdValue(row.threshold, row.unit)}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
+  </>;
+}
+
 export function FishHitRateTest({ library, captureSettings, defs, run, disabled, onRunningChange }: {
   library: readonly TradeSignal[];
   captureSettings: () => FishHitRateSettings;
@@ -83,7 +106,7 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
   const [filter, setFilter] = useState<'all' | FishHitRateRow['status']>('all');
   const [sort, setSort] = useState<{ key: ResultSortKey; dir: SortDirection }>({ key: 'sample', dir: 'desc' });
   const [selectedWindow, setSelectedWindow] = useState<number>();
-  const [detail, setDetail] = useState<{ sampleId: string; kind: 'wick' | 'below' | 'thin' }>();
+  const [detail, setDetail] = useState<{ sampleId: string; kind: 'wick' | 'below' | 'thin' | 'outside' }>();
   const [progress, setProgress] = useState<FishHitRateProgress>();
   const [running, setRunning] = useState(false);
   const [stopped, setStopped] = useState(false);
@@ -128,7 +151,9 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
   const activeWick = detail?.kind === 'wick' ? detailRow?.wick : undefined;
   const activeThresholds = detail?.kind === 'below' ? detailRow?.thresholds : undefined;
   const activeTurnover = detail?.kind === 'thin' ? detailRow?.turnover : undefined;
-  const detailTitle = activeWick ? '插针过滤详情' : activeThresholds?.length ? '算法门槛详情' : activeTurnover?.length ? '成交额门槛详情' : undefined;
+  const activeOutside = detail?.kind === 'outside' ? detailRow?.outside : undefined;
+  const detailTitle = activeWick ? '插针过滤详情' : activeThresholds?.length ? '算法门槛详情'
+    : activeTurnover?.length ? '成交额门槛详情' : activeOutside?.length ? '信号起点超窗详情' : undefined;
 
   const start = async () => {
     if (controller.current || !samples.length || pasted?.errors.length) return;
@@ -240,7 +265,7 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
               </th>;
             })}</tr></thead>
             <tbody>
-              {visible.map(({ sample, hit, status, reason, rejections, wick, thresholds, turnover, window, algorithmTypes }) => <tr key={sample.id} className="border-t border-border/50 hover:bg-muted/25">
+              {visible.map(({ sample, hit, status, reason, rejections, wick, thresholds, turnover, outside, window, algorithmTypes }) => <tr key={sample.id} className="border-t border-border/50 hover:bg-muted/25">
                 <td className={cellClass}><div className="font-medium">{sample.symbol}</div><div className="text-muted-foreground">{marketLabel(sample)}{sample.quality ? ` · ${sample.quality} 星` : ''}</div></td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(sample.timeMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(window.anchorMs)}</td>
@@ -254,7 +279,8 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
                   {rejections?.map(({ kind, label }) => {
                     const detailKind = kind === 'wick' && wick ? 'wick'
                       : kind === 'below' && thresholds?.length ? 'below'
-                      : kind === 'thin' && turnover?.length ? 'thin' : undefined;
+                      : kind === 'thin' && turnover?.length ? 'thin'
+                      : kind === 'outside' && outside?.length ? 'outside' : undefined;
                     if (!detailKind) return <div key={kind} className="text-muted-foreground">{label}</div>;
                     const expanded = detail?.sampleId === sample.id && detail.kind === detailKind;
                     return <div key={kind}><button type="button" aria-expanded={expanded} aria-controls={expanded ? detailId : undefined}
@@ -278,6 +304,7 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
           {activeWick && <FishWickEvidence row={activeWick}/>}
           {activeThresholds && <ThresholdDetails rows={activeThresholds} window={detailRow.window}/>}
           {activeTurnover && <FishTurnoverEvidence rows={activeTurnover}/>}
+          {activeOutside && <OutsideDetails rows={activeOutside} window={detailRow.window}/>}
         </section>}
         {selected && <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="本窗口全部命中">
           <div className="flex flex-wrap items-center justify-between gap-2">

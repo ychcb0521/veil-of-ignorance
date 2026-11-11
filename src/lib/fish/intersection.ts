@@ -11,6 +11,7 @@ import type { FishWickRejection } from './downwardWick';
 import type { FishTurnoverRejection } from './turnoverRejections';
 /** reading = 截止那根的读数；tail = 命中 / 起点不明的币可用区间的读数（阈值往严里调时据此重判，见 refilter.ts）。 */
 export interface FishMemberResult { outcome: string; signal?: TradeSignal; snapshot?: FishSnapshot; boundaryMs?: number; reading?: number; blockedBy?: number[]; tail?: FishTail; wick?: FishWickRejection; turnover?: FishTurnoverRejection;
+  outsideStartMs?: number;
   windowPeak?: { cutoffMs: number; maximum?: { value: number; timeMs: number } };
 }
 /** 多重算法怎么合：and = 交集（全部同时满足），or = 并集（满足任一即留下）。 */
