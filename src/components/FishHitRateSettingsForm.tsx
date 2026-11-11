@@ -98,7 +98,7 @@ export function FishHitRateSettingsForm({ initial, defs, copyCapture, onSave, on
       </div>
     </fieldset>
     <fieldset className="rounded-md border border-border/60 px-3 pb-3">
-      <legend className="px-1 font-medium">成交额门槛</legend>
+      <legend className="px-1 font-medium">成交额门槛 <span className="font-normal text-muted-foreground">（USDT）</span></legend>
       <FishTurnoverSettingsFields value={draft.turnover} onChange={turnover => setDraft({ ...draft, turnover })}/>
     </fieldset>
     {error && <p role="alert" className="text-destructive">{error}</p>}

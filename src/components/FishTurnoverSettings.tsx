@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { FishCheck } from './FishAlgorithmCard';
 import { validateFishTurnoverSettings, type FishTurnoverSettings } from '@/lib/fish/turnoverSettings';
 
-const inputClass = 'h-8 min-w-0 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50';
+const inputClass = 'h-8 min-w-0 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50';
 
 export function FishTurnoverSettingsFields({ value, onChange }: {
   value: FishTurnoverSettings;
@@ -13,9 +13,9 @@ export function FishTurnoverSettingsFields({ value, onChange }: {
       <FishCheck checked={value.enabled} onChange={event => onChange({ ...value, enabled: event.target.checked })}/>启用成交额过滤
     </label>
     <div className="grid gap-2 min-[450px]:grid-cols-3">
-      {value.floors.map((floor, index) => <label key={floor.hours} className="min-w-0 space-y-1">
-        <span className="block text-muted-foreground">{floor.hours} 小时成交额（USDT）</span>
-        <input type="number" inputMode="decimal" step="any" disabled={!value.enabled} value={Number.isFinite(floor.min) ? floor.min : ''}
+      {value.floors.map((floor, index) => <label key={floor.hours} className="grid min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 min-[450px]:grid-cols-1 min-[450px]:gap-1">
+        <span className="whitespace-nowrap text-muted-foreground">{floor.hours} 小时</span>
+        <input aria-label={`${floor.hours} 小时成交额（USDT）`} type="number" inputMode="decimal" step="any" disabled={!value.enabled} value={Number.isFinite(floor.min) ? floor.min : ''}
           className={inputClass} onChange={event => {
             const min = event.target.valueAsNumber;
             onChange({ ...value, floors: value.floors.map((item, at) => at === index ? { ...item, min } : item) });
@@ -45,7 +45,7 @@ export function FishCaptureTurnoverSettings({ value, locked, onSave }: {
   }
   return <form noValidate onSubmit={save} className="space-y-2">
     <fieldset disabled={locked || saving} className="space-y-2">
-      <legend className="mb-2 font-medium">成交额门槛</legend>
+      <legend className="mb-2 font-medium">成交额门槛 <span className="font-normal text-muted-foreground">（USDT）</span></legend>
       <FishTurnoverSettingsFields value={draft} onChange={setDraft}/>
     </fieldset>
     {error && <p role="alert" className="text-destructive">{error}</p>}

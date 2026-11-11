@@ -351,7 +351,7 @@ export function FishPanel(p: FishPanelProps) {
         <Popover open={menuOpen} onOpenChange={next => { if (next) setCaptureSetting(null); setMenuOpen(next); }}>
           <PopoverTrigger asChild><button type="button" aria-label="更多" title="更多捕捞选项" className={`${iconBtn} ${menuOpen||open.scope?'bg-muted text-foreground':''}`} data-testid="fish-more"><MoreHorizontal className="h-4 w-4"/></button></PopoverTrigger>
           <PopoverContent align="start" sideOffset={4}
-            className={captureSetting === 'notify' ? 'w-[36rem] p-4 text-[11px]' : captureSetting === 'settings' ? 'w-64 p-2 text-[11.5px]' : captureSetting ? 'w-96 p-4 text-[11px]' : 'w-56 p-1 text-[11.5px]'}
+            className={captureSetting === 'wick' ? 'w-96 max-w-[calc(100vw-1rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-4 text-[11px]' : captureSetting === 'notify' ? 'w-[36rem] p-4 text-[11px]' : captureSetting === 'settings' ? 'w-64 p-2 text-[11.5px]' : captureSetting ? 'w-96 p-4 text-[11px]' : 'w-56 p-1 text-[11.5px]'}
             aria-label={captureSetting ? captureSettingTitles[captureSetting] : "更多捕捞选项"} data-testid="fish-more-menu">
             {captureSetting ? <div key={captureSetting+owner} className="space-y-3">
               <div className="flex items-center gap-2">
