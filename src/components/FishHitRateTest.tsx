@@ -5,8 +5,8 @@ import { FishScreeningSamplePicker } from './FishScreeningSamplePicker';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { mergeLibraryDirectoryEdits } from '@/lib/fish/libraryDirectoryEdits';
 import { FishHitRateMissLibrary } from './FishHitRateMissLibrary';
-import { makeFishMissRound, type FishMissRound } from '@/lib/fish/hitRateMissLibrary';
-import { saveFishMissRound } from '@/lib/fish/hitRateMissLibraryStore';
+import { fishMissUpdates, makeFishMissRound, missSampleKey, type FishMissRound, type FishMissUpdate } from '@/lib/fish/hitRateMissLibrary';
+import { saveFishMissRound, saveFishMissUpdates } from '@/lib/fish/hitRateMissLibraryStore';
 import { getUserId } from '@/lib/userStoragePrefix';
 import { FishHitRateResults } from './FishHitRateResults';
 import { FishMarketHitResults } from './FishMarketHitResults';
@@ -20,6 +20,12 @@ import type { FishScanSettings } from '@/lib/fishScanner';
 import { DEFAULT_FISH_HIT_RATE_WINDOW, fishMarketHits, screeningHitRateSamples, type FishHitRateMode, type FishHitRateOptions, type FishHitRateProgress, type FishHitRateWindow } from '@/lib/fish/hitRate';
 
 const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground';
+
+interface MissLibraryWrite {
+  owner: string | null;
+  updates: FishMissUpdate[];
+  indexedRounds?: string[];
+}
 
 export function FishHitRateTest({ quality, captureSettings, defs, run, disabled, onRunningChange, onJump, canJump }: {
   quality?: FishQualityState;
@@ -41,6 +47,9 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
   const [source, setSource] = useState<'screening' | 'misses' | 'paste'>('screening');
   const [selectedRecords, setSelectedRecords] = useState<readonly string[]>([]);
   const [missSamples, setMissSamples] = useState<TradeSignal[]>([]);
+  const [activeRevision, setActiveRevision] = useState(0);
+  const [failedUpdates, setFailedUpdates] = useState<MissLibraryWrite[]>([]);
+  const pendingWrites = useRef(Promise.resolve());
   const [archiveRevision, setArchiveRevision] = useState(0);
   const [archivedCount, setArchivedCount] = useState<number>();
   const [failedArchives, setFailedArchives] = useState<{ owner: string | null; round: FishMissRound }[]>([]);
@@ -72,6 +81,7 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
     : [], [screening?.ready, screening?.library.records, selectedRecords, screeningEdits]);
   const samples = source === 'screening' ? screeningSamples : source === 'misses' ? missSamples : pasted?.signals ?? [];
   const checkedWindows = useMemo(() => new Set(samples.map(sample => sample.timeMs)).size, [samples]);
+  const runningWindowCount = useMemo(() => new Set(testedSamples.map(sample => sample.timeMs)).size, [testedSamples]);
   const marketHits = useMemo(() => resultMode === 'market' ? fishMarketHits(windows, testedSamples) : [], [resultMode, testedSamples, windows]);
   const archive = async (owner: string | null, round: FishMissRound) => {
     setSavingArchives(count => count + 1);
@@ -87,6 +97,26 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
     }
   };
 
+  const updateLibrary = (write: MissLibraryWrite) => {
+    pendingWrites.current = pendingWrites.current.then(async () => {
+      try {
+        const merged = await saveFishMissUpdates(write.owner, write.updates, write.indexedRounds);
+        setActiveRevision(value => value + 1);
+        const completedRun = write.indexedRounds?.[0];
+        setFailedUpdates(items => items.filter(item => item !== write
+          && !(completedRun && item.owner === write.owner && item.updates.every(update => update.runId === completedRun))));
+        if (getUserId() === write.owner) {
+          const resolved = new Set(write.updates.filter(update => !update.miss).map(update => update.key));
+          const confirmed = new Set(merged.updates.filter(update => !update.miss && resolved.has(update.key)).map(update => update.key));
+          if (confirmed.size) setMissSamples(items => items.filter(item => !confirmed.has(missSampleKey(item))));
+        }
+      } catch {
+        setFailedUpdates(items => items.includes(write) ? items : [...items, write]);
+      }
+    });
+    return pendingWrites.current;
+  };
+
   const start = async () => {
     if (controller.current || !samples.length || pasted?.errors.length) return;
     setError('');
@@ -96,6 +126,8 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return; }
     const task = new AbortController();
     const owner = getUserId();
+    const startedAt = Date.now();
+    const runId = crypto.randomUUID();
     const finishedWindows: FishHitRateWindow[] = [];
     const windowConfig = { ...selectedSettings.window };
     controller.current = task;
@@ -116,16 +148,22 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
           if (task.signal.aborted) return;
           finishedWindows.push(window);
           setWindows(previous => [...previous, window]);
+          const updates = fishMissUpdates(runId, startedAt, [window]);
+          if (updates.length) void updateLibrary({ owner, updates });
         },
         onProgress: value => { if (!task.signal.aborted) setProgress(value); },
       });
       if (!task.signal.aborted && finishedWindows.length === checkedWindows) {
-        const round = makeFishMissRound({ id: crypto.randomUUID(), completedAt: Date.now(), mode, window: windowConfig }, finishedWindows);
-        if (round) void archive(owner, round);
+        const round = makeFishMissRound({ id: runId, startedAt, completedAt: Date.now(), mode, window: windowConfig }, finishedWindows);
+        if (round) {
+          await updateLibrary({ owner, updates: fishMissUpdates(runId, startedAt, finishedWindows), indexedRounds: [runId] });
+          void archive(owner, round);
+        }
       }
     } catch (cause) {
       if (!task.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      await pendingWrites.current;
       if (controller.current === task) {
         controller.current = undefined;
         setRunning(false);
@@ -138,19 +176,23 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
   return <div className="min-w-0 space-y-2 text-[11px]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground">{savedSettings ? '下次测试使用独立设置' : '当前沿用捕捞条件'} · 样本前 {currentWindow.beforeHours} 小时，后 {currentWindow.afterHours} 小时</p>
-        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogTrigger asChild><button type="button" disabled={running} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
-            <Settings2 aria-hidden className="h-3 w-3"/>测试设置
-          </button></DialogTrigger>
-          {settingsOpen && <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto p-4 text-[11px] sm:p-5">
-            <DialogHeader className="pr-7 text-left">
-              <DialogTitle>漏报测试设置</DialogTitle>
-              <DialogDescription>这些设置用于下一次漏报测试。全市场测试按这里的交易所扫描，定向测试按样本所属市场取数。</DialogDescription>
-            </DialogHeader>
-            <FishHitRateSettingsForm initial={savedSettings ?? captureSettings()} defs={defs} copyCapture={captureSettings}
-              onSave={value => { setStoredSettings(value); setSettingsOpen(false); }} onCancel={() => setSettingsOpen(false)}/>
-          </DialogContent>}
-        </Dialog>
+        <div className="flex flex-wrap items-center gap-2">
+          <FishHitRateMissLibrary key={getUserId() ?? 'local'} owner={getUserId()} revision={archiveRevision} activeRevision={activeRevision} selected={missSamples} readOnly={running}
+            onSelect={samples => { setMissSamples(samples); setSource('misses'); }}/>
+          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <DialogTrigger asChild><button type="button" disabled={running} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+              <Settings2 aria-hidden className="h-3 w-3"/>测试设置
+            </button></DialogTrigger>
+            {settingsOpen && <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto p-4 text-[11px] sm:p-5">
+              <DialogHeader className="pr-7 text-left">
+                <DialogTitle>漏报测试设置</DialogTitle>
+                <DialogDescription>这些设置用于下一次漏报测试。全市场测试按这里的交易所扫描，定向测试按样本所属市场取数。</DialogDescription>
+              </DialogHeader>
+              <FishHitRateSettingsForm initial={savedSettings ?? captureSettings()} defs={defs} copyCapture={captureSettings}
+                onSave={value => { setStoredSettings(value); setSettingsOpen(false); }} onCancel={() => setSettingsOpen(false)}/>
+            </DialogContent>}
+          </Dialog>
+        </div>
       </div>
       <div className="grid gap-4 rounded-lg border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
         <fieldset disabled={running} className="min-w-0 space-y-2">
@@ -169,8 +211,7 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
             <label className="inline-flex items-center gap-2">
               <input type="radio" name={sourceName} checked={source === 'misses'} onChange={() => setSource('misses')}/>未命中库
             </label>
-            <FishHitRateMissLibrary owner={getUserId()} revision={archiveRevision} selected={missSamples} disabled={running}
-              onSelect={samples => { setMissSamples(samples); setSource('misses'); }}/>
+            {source === 'misses' && <span className="text-muted-foreground">已选 {missSamples.length} 条待复测样本</span>}
           </div>
           <label className="flex items-center gap-2"><input type="radio" name={sourceName} checked={source === 'paste'} onChange={() => setSource('paste')}/>粘贴标的和时间</label>
           {source === 'paste' && <>
@@ -188,7 +229,7 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
         </fieldset>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-muted-foreground">{samples.length} 条样本 · {checkedWindows} 个不同时间窗口</p>
+        <p className="text-muted-foreground">{running ? testedSamples.length : samples.length} 条样本 · {running ? runningWindowCount : checkedWindows} 个不同时间窗口</p>
         {running
           ? <button type="button" className="rounded-md border border-border px-3 py-1.5 hover:bg-muted" onClick={() => controller.current?.abort()}>停止测试</button>
           : <button type="button" className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40" disabled={disabled || !samples.length || !!pasted?.errors.length} onClick={() => void start()}>开始测试</button>}
@@ -198,6 +239,9 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
         {running && <> · 截止 {formatUTC8(progress.anchorMs)}{progress.marketTotal > 0 && <> · 已扫 {progress.marketDone} / {progress.marketTotal} 个标的</>}</>}
       </p>}
       {error && <p role="alert" className="text-destructive">{error}</p>}
+      {failedUpdates.length > 0 && <p role="alert" className="text-destructive">有窗口的待复测记录更新失败。
+        <button type="button" className="ml-2 underline" onClick={() => failedUpdates.forEach(write => { void updateLibrary(write); })}>重试更新</button>
+      </p>}
       {savingArchives > 0 && <p role="status" className="text-muted-foreground">正在保存未命中归档…</p>}
       {archivedCount !== undefined && <p className="text-muted-foreground">已归档 {archivedCount} 条未命中</p>}
       {failedArchives.length > 0 && <p role="alert" className="text-destructive">有 {failedArchives.length} 轮未命中结果保存失败。

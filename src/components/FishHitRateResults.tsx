@@ -80,7 +80,7 @@ function OutsideDetails({ rows, window }: { rows: FishHitRateOutsideDetail[]; wi
 export function FishHitRateResults({ windows, onShowMarketWindow, selection }: {
   windows: readonly FishHitRateWindow[];
   onShowMarketWindow?: (anchorMs: number) => void;
-  selection?: { checked: (sample: TradeSignal) => boolean; toggle: (samples: readonly TradeSignal[], checked: boolean) => void };
+  selection?: { disabled?: boolean; checked: (sample: TradeSignal) => boolean; toggle: (samples: readonly TradeSignal[], checked: boolean) => void };
 }) {
   const detailId = useId();
   const detailRef = useRef<HTMLElement>(null);
@@ -138,7 +138,7 @@ export function FishHitRateResults({ windows, onShowMarketWindow, selection }: {
     <div ref={resultScroll} className="isolate max-h-80 min-w-0 overflow-auto rounded-lg border border-border/60">
       <table className="w-full min-w-[46rem] text-[11px]" aria-label={selection ? '未命中归档结果' : '漏报测试结果'}>
         <thead className="sticky top-0 z-10 border-b border-border/60 bg-muted"><tr>{selection && <th scope="col" className={cellClass}>
-          <input type="checkbox" aria-label="全选当前未命中记录" disabled={!visible.length}
+          <input type="checkbox" aria-label="全选当前未命中记录" disabled={selection.disabled || !visible.length}
             checked={!!visible.length && visible.every(row => selection.checked(row.sample))}
             ref={node => { if (node) node.indeterminate = visible.some(row => selection.checked(row.sample)) && !visible.every(row => selection.checked(row.sample)); }}
             onChange={event => selection.toggle(visible.map(row => row.sample), event.target.checked)}/>
@@ -154,7 +154,7 @@ export function FishHitRateResults({ windows, onShowMarketWindow, selection }: {
         <tbody>
           {visible.map(({ sample, hit, status, reason, rejections, wick, thresholds, turnover, outside, window, algorithmTypes }) => <tr key={sample.id} className="border-t border-border/50 hover:bg-muted/25">
             {selection && <td className={cellClass}><input type="checkbox" aria-label={`选择 ${sample.symbol} ${formatUTC8(sample.timeMs)}`}
-              checked={selection.checked(sample)} onChange={event => selection.toggle([sample], event.target.checked)}/></td>}
+              disabled={selection.disabled} checked={selection.checked(sample)} onChange={event => selection.toggle([sample], event.target.checked)}/></td>}
             <td className={cellClass}><div className="font-medium">{sample.symbol}</div><div className="text-muted-foreground">{marketLabel(sample)}{sample.quality ? ` · ${sample.quality} 星` : ''}</div></td>
             <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(sample.timeMs)}</td>
             <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(window.anchorMs)}</td>

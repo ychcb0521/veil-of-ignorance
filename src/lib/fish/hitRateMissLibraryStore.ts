@@ -1,10 +1,11 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
-import { fishMissRoundSummary, mergeFishMissDirectories, type FishMissDirectory, type FishMissRound } from './hitRateMissLibrary';
+import { fishMissRoundSummary, fishMissUpdates, mergeFishActiveMisses, mergeFishMissDirectories, type FishActiveMisses, type FishMissDirectory, type FishMissRound, type FishMissUpdate } from './hitRateMissLibrary';
 
 const DATABASE = 'veil-fish-hit-rate-misses-v1';
 const DIRECTORY = 'directories';
 const ROUNDS = 'rounds';
 const ownerKey = (owner?: string | null) => owner ? `user:${owner}` : 'anonymous';
+const activeKey = (owner?: string | null) => [ownerKey(owner), 'active-misses'];
 const bodyKey = (owner: string | null | undefined, id: string) => [ownerKey(owner), id];
 
 function open(): Promise<IDBDatabase> {
@@ -93,4 +94,62 @@ export async function saveFishMissRound(owner: string | null | undefined, round:
     void noteAccountBlobSaved(roundBlob(round.id), owner);
     void noteAccountBlobSaved(directoryBlob, owner).then(() => syncAccountBlobOnLoad(directoryBlob, owner));
   }
+}
+
+async function mergeActive(owner: string | null | undefined, incoming: FishActiveMisses): Promise<FishActiveMisses> {
+  const db = await open();
+  try {
+    return await new Promise<FishActiveMisses>((resolve, reject) => {
+      const tx = db.transaction(DIRECTORY, 'readwrite');
+      const store = tx.objectStore(DIRECTORY), key = activeKey(owner), request = store.get(key);
+      let merged: FishActiveMisses;
+      request.onsuccess = () => {
+        try {
+          merged = mergeFishActiveMisses(request.result, incoming);
+          store.put(merged, key);
+        }
+        catch (error) { tx.abort(); reject(error); }
+      };
+      tx.oncomplete = () => resolve(merged);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('待复测样本更新失败'));
+    });
+  } finally { db.close(); }
+}
+
+const activeBlob: AccountBlobAdapter<FishActiveMisses> = {
+  name: 'fish-hit-rate-active-misses',
+  read: owner => read(DIRECTORY, activeKey(owner)),
+  async write(owner, value) {
+    if (value?.version === 1 && Array.isArray(value.updates) && Array.isArray(value.indexedRounds)) await mergeActive(owner, value);
+  },
+  async mergeRemote(owner, value) { await activeBlob.write(owner, value); },
+  weight: value => value ? value.updates.length + value.indexedRounds.length : 0,
+};
+
+export function readFishActiveMisses(owner?: string | null) {
+  return read<FishActiveMisses>(DIRECTORY, activeKey(owner));
+}
+
+export async function saveFishMissUpdates(owner: string | null | undefined, updates: FishMissUpdate[], indexedRounds: string[] = []) {
+  const merged = await mergeActive(owner, { version: 1, updates, indexedRounds });
+  if (owner) void noteAccountBlobSaved(activeBlob, owner).then(() => syncAccountBlobOnLoad(activeBlob, owner));
+  return merged;
+}
+
+export async function loadFishActiveMisses(owner: string | null | undefined, directory: FishMissDirectory, refresh = false) {
+  await syncAccountBlobOnLoad(activeBlob, owner, undefined, refresh);
+  const previous = await readFishActiveMisses(owner);
+  const indexed = new Set(previous?.indexedRounds);
+  const updates: FishMissUpdate[] = [];
+  const imported: string[] = [];
+  for (const summary of directory.rounds) {
+    if (indexed.has(summary.id)) continue;
+    try {
+      const round = await loadFishMissRound(owner, summary.id, refresh);
+      updates.push(...fishMissUpdates(round.id, round.startedAt ?? round.completedAt, round.windows));
+      imported.push(round.id);
+    } catch { /* A round with a pending body can be read again later. */ }
+  }
+  if (imported.length) await saveFishMissUpdates(owner, updates, imported);
+  return await readFishActiveMisses(owner) ?? mergeFishActiveMisses();
 }

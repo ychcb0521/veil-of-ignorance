@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { FishScanner, type FishScanSettings } from '@/lib/fishScanner';
-import { makeFishMissRound, fishMissRoundSummary, mergeFishMissDirectories } from '@/lib/fish/hitRateMissLibrary';
+import { activeMissWindows, fishMissUpdates, makeFishMissRound, fishMissRoundSummary, mergeFishActiveMisses, mergeFishMissDirectories } from '@/lib/fish/hitRateMissLibrary';
 import { FISH_TURNOVER_FLOORS } from '@/lib/fish/shared';
 import { countFishMarketHits, fishMarketHits, runFishHitRate, screeningHitRateSamples, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
 import { CBI2_DEF } from '@/lib/deepDig/features';
@@ -208,4 +208,37 @@ it('archives only misses and retains the original sample time, cutoff and diagno
   expect(summary).not.toHaveProperty('windows');
   const second = { ...summary, id: 'round-2', completedAt: summary.completedAt + 1 };
   expect(mergeFishMissDirectories({ version: 1, rounds: [summary] }, { version: 1, rounds: [summary, second] }).rounds).toEqual([second, summary]);
+});
+
+
+it('updates pending misses per window while retaining the latest decision for each original signal', () => {
+  const first: FishHitRateWindow = {
+    startMs: startTime, anchorMs: anchor, hits: [], rows: [
+      { sample: sample('EARLY'), status: 'miss', reason: 'old hit candidate' },
+      { sample: sample('ENDED'), status: 'miss', reason: 'old miss' },
+      { sample: sample('WICK'), status: 'miss', reason: 'last available evidence' },
+      { sample: { ...sample('EARLY'), timeMs: sampleTime + STEP }, status: 'miss', reason: 'another signal' },
+    ],
+  };
+  const retest: FishHitRateWindow = {
+    startMs: startTime + STEP, anchorMs: anchor + STEP, hits: [sample('EARLY')], rows: [
+      { sample: sample('EARLY'), status: 'hit', hit: sample('EARLY') },
+      { sample: sample('ENDED'), status: 'miss', reason: 'latest miss' },
+      { sample: sample('WICK'), status: 'unverified', reason: 'temporary data gap' },
+      { sample: sample('THIN'), status: 'miss', reason: 'new miss' },
+    ],
+  };
+  const legacy = { version: 1 as const, updates: fishMissUpdates('legacy', 10, [first]), indexedRounds: ['legacy'] };
+  const newer = { version: 1 as const, updates: fishMissUpdates('retest', 20, [retest]), indexedRounds: ['retest'] };
+  const merged = mergeFishActiveMisses(legacy, newer);
+  expect(mergeFishActiveMisses(newer, legacy)).toEqual(merged);
+  expect(merged.indexedRounds).toEqual(['legacy', 'retest']);
+  const pending = activeMissWindows(merged);
+  expect(pending.flatMap(window => window.rows.map(row => [row.sample.symbol, row.sample.timeMs, row.reason]))).toEqual([
+    ['EARLYUSDT', sampleTime + STEP, 'another signal'],
+    ['WICKUSDT', sampleTime, 'last available evidence'],
+    ['ENDEDUSDT', sampleTime, 'latest miss'],
+    ['THINUSDT', sampleTime, 'new miss'],
+  ]);
+  expect(pending.map(window => window.anchorMs)).toEqual([anchor, anchor + STEP]);
 });
