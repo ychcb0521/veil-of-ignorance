@@ -2,7 +2,7 @@ import {preparePreEntryTables} from './preEntryArchiveClient';
 import {newQualityStudy,qualityComparisonRows,qualityFilterReadingKey,qualityEntryIdentity,qualityMembers,qualityGroupId,type FishQualityStudy,type QualitySample} from './quality';
 import {libraryRoundRecordIds} from './libraryRounds';
 import type {QualityFilterLibrary,QualityFilterRound} from './qualityFilterLibrary';
-import {preEntrySignal,type PreEntryLibrary,type PreEntryRound} from './preEntryMonitor';
+import {preEntrySignal,type PreEntryLibrary,type PreEntryRecord,type PreEntryRound} from './preEntryMonitor';
 import {buildQualitySheets} from './qualityExport';
 import {buildXlsx} from '@/lib/xlsxWorkbook';
 import {formatUTC8} from '@/lib/timeFormat';
@@ -34,6 +34,22 @@ export function filterDirectoryStudy(library:QualityFilterLibrary,round?:Quality
   }
   out.selectedRowIds=qualityComparisonRows(out).map(r=>r.id);return out;
 }
+export function entryDirectoryGroups(library: PreEntryLibrary) {
+  const byRound = new Map<string, PreEntryRecord[]>();
+  for (const record of library.records) {
+    if (record.status !== 'matched') continue;
+    const records = byRound.get(record.roundId);
+    if (records) records.push(record);
+    else byRound.set(record.roundId, [record]);
+  }
+  return library.rounds.flatMap(round => {
+    const records = byRound.get(round.id);
+    if (!records?.length) return [];
+    const status = round.state === 'running' ? '运行中' : round.state === 'paused' ? '已暂停' : '已完成';
+    return [{ round, records, label: '入选轮次', summary: `${records.length} 条记录 · ${status}` }];
+  });
+}
+
 export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound):FishQualityStudy{
   const out:FishQualityStudy={...newQualityStudy(round.startedAt),independentFilters:true,sellPlans:[]};
   for(const record of library.records.filter(r=>r.roundId===round.id)){

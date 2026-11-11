@@ -1,10 +1,11 @@
 import { expect, it, vi } from 'vitest';
 import { FishScanner, type FishScanSettings } from '@/lib/fishScanner';
 import { FISH_TURNOVER_FLOORS } from '@/lib/fish/shared';
-import { countFishMarketHits, fishMarketHits, runFishHitRate, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { countFishMarketHits, fishMarketHits, runFishHitRate, screeningHitRateSamples, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
 import { CBI2_DEF } from '@/lib/deepDig/features';
 import { readFishRound } from '@/lib/fish/roundSummary';
 import type { FishDataAdapter } from '@/lib/fish/adapters';
+import type { PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 const HOUR = 3_600_000, STEP = 300_000;
@@ -164,4 +165,26 @@ it('classifies market hits against the full test samples and counts repeated sta
   const outside = hits.filter(row => row.group === 'outside');
   expect(outside.map(row => row.signal.symbol)).toEqual(['EDGEUSDT']);
   expect(countFishMarketHits([...outside, ...outside])).toEqual({ markets: 1, signals: 1 });
+});
+
+it('anchors selected screening records to their original signal time and deduplicates repeated admissions', async () => {
+  const source = sample('EARLY');
+  const matchedAt = sampleTime + 8 * HOUR;
+  const record: PreEntryRecord = {
+    id: 'selected', roundId: 'first-round', sample: { id: source.id, source, enteredAt: source.timeMs, basis: 'signal', importedAt: sampleTime, groups: [] },
+    status: 'matched', startTime: sampleTime, cursor: matchedAt, matchedAt, updatedAt: matchedAt, readings: [],
+  };
+  const records = [
+    record,
+    { ...record, id: 'repeat', roundId: 'repeat-round', matchedAt: matchedAt + HOUR },
+    { ...record, id: 'hidden', roundId: 'hidden-round', sample: { ...record.sample, source: sample('EDGE') } },
+    { ...record, id: 'not-matched', status: 'unmatched' as const, sample: { ...record.sample, source: sample('ENDED') } },
+    { ...record, id: 'not-selected', sample: { ...record.sample, source: sample('OTHER') } },
+  ];
+  const selected = screeningHitRateSamples(records, ['selected', 'repeat', 'hidden', 'not-matched'], { 'hidden-round': { hidden: true, at: matchedAt } });
+  expect(selected).toMatchObject([{ symbol: 'EARLYUSDT', timeMs: sampleTime }]);
+  const { run, windows } = setup();
+  await run('targets', selected);
+  expect(windows[0]).toMatchObject({ startMs: startTime, anchorMs: anchor, rows: [{ status: 'hit' }] });
+  expect(record.matchedAt).toBe(matchedAt);
 });

@@ -4,7 +4,7 @@ import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress} from './FishPreEntryProgress';
 import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
-import {entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
+import {entryDirectoryGroups,entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
 import { useMemo, useState, type ReactNode } from 'react';
@@ -71,7 +71,10 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         <td className={libraryCell}>{r.status === 'matched' && onJump && <button type="button" className="text-primary" onClick={() => { const signal = preEntrySignal(r); if (signal) onJump(signal); }}>K 线</button>}
           {!selectedOnly && (r.status === 'error' || rounds.get(r.roundId)?.state === 'paused') && <button type="button" disabled={monitor.running} className="text-primary disabled:opacity-40" onClick={() => void monitor.resume(r.roundId)}>{r.status === 'error' ? '重试本轮缺数据' : '继续本轮'}</button>}</td>
       </tr>;})}</tbody></table></div></details>;
-  const directoryItems:FishDirectoryItem[]=[...rounds.values()].filter(round=>admitted.some(r=>r.roundId===round.id)).map(round=>({id:round.id,at:round.startedAt,label:'入选轮次',summary:admitted.filter(r=>r.roundId===round.id).length+' 条记录 · '+(round.state==='running'?'运行中':round.state==='paused'?'已暂停':'已完成'),revision:monitor.library,study:()=>entryDirectoryStudy(monitor.library,round),details:close=>renderEvidence(round.id,close)}));
+  const directoryItems: FishDirectoryItem[] = entryDirectoryGroups(monitor.library).map(({ round, label, summary }) => ({
+    id: round.id, at: round.startedAt, label, summary, revision: monitor.library,
+    study: () => entryDirectoryStudy(monitor.library, round), details: close => renderEvidence(round.id, close),
+  }));
   const renderLibrary=()=> <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)} onRename={state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
     description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮`}
     dataActions={<FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}

@@ -16,9 +16,14 @@ export interface FishDirectoryItem {
 }
 export interface FishDirectoryRequest {key:number;selectedId?:string;selectedIds?:string[]}
 export const libraryDirectoryAction='inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,items,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,items,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
   loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string;info:ReactNode;dataActions?:ReactNode;items:FishDirectoryItem[];
-  edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
+  edits?:LibraryDirectoryEdits;recordCount:number;download?:()=>unknown|Promise<unknown>;
+  picker?: {
+    triggerLabel: string;
+    renderItem: (item: FishDirectoryItem) => ReactNode;
+    footer: (close: () => void) => ReactNode;
+  };
   onRename?:(id:string,name:string)=>Promise<boolean>;
   renderStudy?:(study:FishQualityStudy)=>ReactNode;
   onCopyStudy?:(study:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;
@@ -35,7 +40,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
   useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
-    if(!open){setLoaded(undefined);return;}if(!selectedId)return;
+    if(!open){setLoaded(undefined);return;}if(!selectedId||picker)return;
     const item=itemRef.current;if(!item)return;
     let active=true;setLoaded({id:item.id});
     try{
@@ -44,7 +49,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       else setLoaded({id:item.id,study:result});
     }catch(e){setLoaded({id:item.id,error:e instanceof Error?e.message:'归档读取失败，请重试'});}
     return()=>{active=false;};
-  },[open,selectedId,selected?.revision]);
+  },[open,selectedId,selected?.revision,!!picker]);
   const snapshot=loaded?.id===selectedId?loaded.study:undefined;
   const visible=[...items].filter(item=>showDeleted||!edits?.[item.id]?.hidden).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id));
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
@@ -75,10 +80,10 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   };
   const changeOpen=(value:boolean)=>{selectionEpoch.current++;setOpen(value);onOpenChange?.(value);};
   return <Dialog open={open} onOpenChange={changeOpen}>
-    <DialogTrigger asChild><button type="button" className={action} aria-label={'打开'+name}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
+    <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
-        <div className="flex flex-wrap items-center gap-1.5 pr-6"><DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo><button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!recordCount||!!busy||loading||!!loadError} onClick={()=>{try{download();setError('');}catch(e){setError(e instanceof Error?e.message:'导出失败');}}}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{recordCount}</span></button></div>
+        <div className="flex flex-wrap items-center gap-1.5 pr-6"><DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>{download&&<button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!recordCount||!!busy||loading||!!loadError} onClick={()=>{try{download();setError('');}catch(e){setError(e instanceof Error?e.message:'导出失败');}}}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{recordCount}</span></button>}</div>
         <DialogDescription className="text-[11px]">{description}</DialogDescription>
       </DialogHeader>
       <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':'时间目录'}</h3>
@@ -89,7 +94,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           <span className="text-muted-foreground">可选一个或多个目录</span>
           <button type="button" className={action+' ml-auto text-primary'} disabled={loading||!!loadError||!!busy||!checked.length} onClick={()=>void applySelection()}>{busy==='selection'?'正在载入…':`应用所选目录（${checked.length}）`}</button>
         </div>}
-        {!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
+        {!picker&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
         {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
         {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取筛选库，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{empty}</p>}
         {visible.map(item=><div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
@@ -102,8 +107,9 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <p className="w-full text-muted-foreground">留空保存可恢复默认名称；原保存时间和目录内容保留。</p>
           </form>}
           {deleteId===item.id&&<div role="alert" className="flex flex-wrap items-center gap-2 border-t px-3 py-2 text-[11px]"><span>删除这项目录？可在已删除目录中恢复。</span><button type="button" disabled={loading||!!loadError||!!busy} className={action+' text-destructive'} onClick={()=>void hide(item.id,true)}>确认删除目录</button><button type="button" className={action} onClick={()=>setDeleteId('')}>取消</button></div>}
-          {selectedId===item.id&&!snapshot&&<p role={loaded?.error?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(loaded?.error?'text-destructive':'text-muted-foreground')}>{loaded?.error??'正在读取归档…'}</p>}
-          {selectedId===item.id&&snapshot&&<div className="border-t" data-testid={prefix+'-archive-content'}>
+          {selectedId===item.id&&picker&&<div className="border-t" data-testid={prefix+'-archive-content'}>{picker.renderItem(item)}</div>}
+          {selectedId===item.id&&!picker&&!snapshot&&<p role={loaded?.error?'alert':'status'} className={'border-t px-4 py-3 text-[10.5px] '+(loaded?.error?'text-destructive':'text-muted-foreground')}>{loaded?.error??'正在读取归档…'}</p>}
+          {selectedId===item.id&&!picker&&snapshot&&<div className="border-t" data-testid={prefix+'-archive-content'}>
             {onSelectDirectory&&<div className="px-4 pt-3"><button type="button" className={action+' text-primary'} disabled={loading||!!loadError||!!busy} onClick={async()=>{setBusy(item.id);setError('');try{if(!await onSelectDirectory(item.id,snapshot))throw Error('目录未载入，当前组合表保留，请重试');changeOpen(false);}catch(e){setError(e instanceof Error?e.message:'目录选择失败');}finally{setBusy('');}}}>{busy===item.id?'正在载入…':'选择此目录'}</button></div>}
             {onCopyStudy&&<div className="flex items-center gap-1 px-4 pt-3"><button type="button" disabled={loading||!!loadError||!!busy} onClick={()=>void copy()} className={action+' text-primary'}><Copy className="h-3 w-3"/>{busy===item.id?'正在保存副本…':'复制至组合表'}</button><FishQualityInfo label="复制至组合表说明"><p>先将当前组合表完整归档，再载入这份记录的独立副本。原归档保留，不自动运行。</p></FishQualityInfo></div>}
             {item.note&&<p className="px-4 pt-3 text-[10px] text-muted-foreground">{item.note}</p>}
@@ -112,6 +118,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           </div>}
         </div>)}
       </div>
+      {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}
     </DialogContent>
   </Dialog>;
 }

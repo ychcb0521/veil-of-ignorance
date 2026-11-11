@@ -3,6 +3,9 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { AUDITED_EXCHANGES } from './exchanges';
 import type { FishWickRejection } from './downwardWick';
 import type { FishTurnoverDetail } from './turnoverRejections';
+import { formatUTC8 } from '@/lib/timeFormat';
+import type { PreEntryRecord } from './preEntryMonitor';
+import type { LibraryDirectoryEdits } from './libraryDirectoryEdits';
 import { fishSourceLabel } from './records';
 
 export interface FishHitRateTimeWindow { beforeHours: number; afterHours: number }
@@ -16,6 +19,23 @@ export function validateFishHitRateWindow({ beforeHours, afterHours }: FishHitRa
   return duration;
 }
 const marketKey = (signal: Pick<TradeSignal, 'symbol' | 'exchange' | 'market'>) => `${signal.exchange ?? 'binance'}|${signal.market ?? 'crypto'}|${signal.symbol}`;
+export function screeningHitRateSamples(records: readonly PreEntryRecord[], selectedIds: readonly string[], edits?: LibraryDirectoryEdits): TradeSignal[] {
+  if (!selectedIds.length) return [];
+  const selected = new Set(selectedIds);
+  const samples = new Map<string, TradeSignal>();
+  for (const record of records) {
+    if (!selected.has(record.id) || record.status !== 'matched' || edits?.[record.roundId]?.hidden) continue;
+    const { symbol, exchange, market, underlying, binanceSymbol, timeMs, fallbackZone, quality } = record.sample.source;
+    if (!Number.isFinite(timeMs) || timeMs <= 0) continue;
+    const identity = `${marketKey({ symbol, exchange, market })}|${timeMs}`;
+    if (!samples.has(identity)) samples.set(identity, {
+      id: `screening-sample:${record.id}`, symbol, exchange, market, underlying, binanceSymbol,
+      timeMs, timeLabel: formatUTC8(timeMs), fallbackZone, quality,
+    });
+  }
+  return [...samples.values()].sort((a, b) => b.timeMs - a.timeMs);
+}
+
 const misses: Record<string, string> = {
   below: '截止时未达到算法门槛',
   blocked: '被算法附加条件挡下',

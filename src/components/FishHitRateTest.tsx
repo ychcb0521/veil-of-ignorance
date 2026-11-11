@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { FishScreeningSamplePicker, type FishScreeningSampleSource } from './FishScreeningSamplePicker';
+import { mergeLibraryDirectoryEdits, type LibraryDirectoryEdits } from '@/lib/fish/libraryDirectoryEdits';
 import { FishMarketHitResults } from './FishMarketHitResults';
 import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -10,10 +12,10 @@ import { FishWickEvidence } from '@/components/FishWickDetails';
 import { FishTurnoverEvidence } from '@/components/FishTurnoverDetails';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { fishCaughtBy } from '@/lib/fish/records';
-import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
+import { parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { FishScanSettings } from '@/lib/fishScanner';
-import { DEFAULT_FISH_HIT_RATE_WINDOW, fishMarketHits, type FishHitRateMode, type FishHitRateOptions, type FishHitRateOutsideDetail, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { DEFAULT_FISH_HIT_RATE_WINDOW, fishMarketHits, screeningHitRateSamples, type FishHitRateMode, type FishHitRateOptions, type FishHitRateOutsideDetail, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
 
 const statusText = { hit: '命中', miss: '未命中', unverified: '无法判定' };
 const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground';
@@ -85,8 +87,9 @@ function OutsideDetails({ rows, window }: { rows: FishHitRateOutsideDetail[]; wi
   </>;
 }
 
-export function FishHitRateTest({ library, captureSettings, defs, run, disabled, onRunningChange }: {
-  library: readonly TradeSignal[];
+export function FishHitRateTest({ screening, directoryEdits, captureSettings, defs, run, disabled, onRunningChange }: {
+  screening?: FishScreeningSampleSource;
+  directoryEdits?: LibraryDirectoryEdits;
   captureSettings: () => FishHitRateSettings;
   defs: DeepDigFeatureDef[];
   run: (options: FishHitRateOptions) => Promise<void>;
@@ -98,8 +101,8 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
   const savedSettings = useMemo(() => readFishHitRateSettings(storedSettings), [storedSettings]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const currentWindow = savedSettings?.window ?? DEFAULT_FISH_HIT_RATE_WINDOW;
-  const [source, setSource] = useState<'library' | 'paste'>('library');
-  const [minRating, setMinRating] = useState(3);
+  const [source, setSource] = useState<'screening' | 'paste'>('screening');
+  const [selectedRecords, setSelectedRecords] = useState<readonly string[]>([]);
   const [text, setText] = useState('');
   const [mode, setMode] = useState<FishHitRateMode>('targets');
   const [windows, setWindows] = useState<FishHitRateWindow[]>([]);
@@ -127,9 +130,12 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
   useEffect(() => { if (detail) detailRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [detail]);
 
   const pasted = useMemo(() => source === 'paste' ? parseSignalText(text) : null, [source, text]);
-  const samples = useMemo(() => source === 'library'
-    ? library.filter(signal => (normalizeSignalQuality(signal.quality) ?? 0) >= minRating).sort((a, b) => b.timeMs - a.timeMs)
-    : pasted?.signals ?? [], [source, library, minRating, pasted]);
+  const screeningEdits = useMemo(() => mergeLibraryDirectoryEdits(directoryEdits, screening?.library.directoryEdits),
+    [directoryEdits, screening?.library.directoryEdits]);
+  const screeningSamples = useMemo(() => screening?.ready
+    ? screeningHitRateSamples(screening.library.records, selectedRecords, screeningEdits)
+    : [], [screening?.ready, screening?.library.records, selectedRecords, screeningEdits]);
+  const samples = source === 'screening' ? screeningSamples : pasted?.signals ?? [];
   const checkedWindows = useMemo(() => new Set(samples.map(sample => sample.timeMs)).size, [samples]);
   const rows = useMemo<ResultRow[]>(() => windows.flatMap(window => window.rows.map(row => ({
     ...row, window, algorithmTypes: row.hit ? fishCaughtBy(row.hit) : undefined,
@@ -216,12 +222,16 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
       <div className="grid gap-4 rounded-lg border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
         <fieldset disabled={running} className="min-w-0 space-y-2">
           <legend className="mb-1.5 font-medium">测试样本</legend>
-          <label className="flex flex-wrap items-center gap-2">
-            <input type="radio" name={sourceName} checked={source === 'library'} onChange={() => setSource('library')}/>信号库
-            {source === 'library' && <select className={inputClass} aria-label="最低评分" value={minRating} onChange={event => setMinRating(Number(event.target.value))}>
-              {[1,2,3,4,5].map(rating => <option key={rating} value={rating}>≥ {rating} 星</option>)}
-            </select>}
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-2">
+              <input type="radio" name={sourceName} checked={source === 'screening'} onChange={() => setSource('screening')}/>筛选库
+            </label>
+            {source === 'screening' && screening && <FishScreeningSamplePicker screening={screening} edits={screeningEdits}
+              selectedIds={selectedRecords} onSelect={setSelectedRecords}/>}
+          </div>
+          {source === 'screening' && <p className="text-muted-foreground">
+            {screening ? '按所选标的的信号时间建立测试窗口。' : '筛选库暂不可用。'}
+          </p>}
           <label className="flex items-center gap-2"><input type="radio" name={sourceName} checked={source === 'paste'} onChange={() => setSource('paste')}/>粘贴标的和时间</label>
           {source === 'paste' && <>
             <textarea aria-label="样本清单（北京时间）" value={text} onChange={event => setText(event.target.value)} rows={3}

@@ -502,7 +502,7 @@ export function FishPanel(p: FishPanelProps) {
         {!open.hitRate && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
       </div>
       <div id="fish-hit-rate" role="region" aria-labelledby="fish-hit-rate-title" hidden={!open.hitRate} className="min-w-0">
-        <FishHitRateTest key={owner} library={library} captureSettings={captureHitRateSettings} defs={defs} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
+        <FishHitRateTest key={owner} screening={p.quality?.preEntry} directoryEdits={p.quality?.study.monitorLibrary?.directoryEdits} captureSettings={captureHitRateSettings} defs={defs} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
       </div>
       </div>
     </section>}
