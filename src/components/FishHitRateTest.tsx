@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { FishWickEvidence } from '@/components/FishWickDetails';
 import { FishTurnoverEvidence } from '@/components/FishTurnoverDetails';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
+import { fishCaughtBy } from '@/lib/fish/records';
 import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { FishScanSettings } from '@/lib/fishScanner';
@@ -13,13 +14,15 @@ const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 
 const cellClass = 'px-2.5 py-1.5 text-left';
 const thresholdValue = (value: number, unit: string) => `${value}${unit && unit !== '原值' ? ` ${unit}` : ''}`;
 const marketLabel = (signal: TradeSignal) => `${EXCHANGE_NAMES[signal.exchange ?? 'binance']}${signal.market === 'us_stock' ? ' · 美股合约' : ''}`;
-type ResultRow = FishHitRateRow & { window: FishHitRateWindow };
+type ResultRow = FishHitRateRow & { window: FishHitRateWindow; algorithmTypes?: string[] };
 const statusRank = { hit: 0, miss: 1, unverified: 2 };
 const resultColumns = [
   { key: 'symbol', label: '标的 / 市场', initial: 'asc', value: (row: ResultRow) => `${row.sample.symbol} ${marketLabel(row.sample)}` },
   { key: 'sample', label: '样本时间', initial: 'desc', value: (row: ResultRow) => row.sample.timeMs },
   { key: 'cutoff', label: '扫描截止', initial: 'desc', value: (row: ResultRow) => row.window.anchorMs },
   { key: 'status', label: '判定', initial: 'asc', value: (row: ResultRow) => statusRank[row.status] },
+  { key: 'algorithmCount', label: '算法数量', initial: 'desc', value: (row: ResultRow) => row.algorithmTypes?.length },
+  { key: 'algorithmTypes', label: '算法类型', initial: 'asc', value: (row: ResultRow) => row.algorithmTypes?.join(' · ') },
   { key: 'hit', label: '命中起点', initial: 'desc', value: (row: ResultRow) => row.hit?.timeMs },
   { key: 'offset', label: '相对样本', initial: 'asc', value: (row: ResultRow) => row.hit ? row.hit.timeMs - row.sample.timeMs : undefined },
   { key: 'reason', label: '说明', initial: 'asc', value: (row: ResultRow) => row.reason ?? row.rejections?.map(item => item.label).join('、') },
@@ -92,7 +95,9 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
     ? library.filter(signal => (normalizeSignalQuality(signal.quality) ?? 0) >= minRating).sort((a, b) => b.timeMs - a.timeMs)
     : pasted?.signals ?? [], [source, library, minRating, pasted]);
   const checkedWindows = useMemo(() => new Set(samples.map(sample => sample.timeMs)).size, [samples]);
-  const rows = useMemo(() => windows.flatMap(window => window.rows.map(row => ({ ...row, window }))), [windows]);
+  const rows = useMemo<ResultRow[]>(() => windows.flatMap(window => window.rows.map(row => ({
+    ...row, window, algorithmTypes: row.hit ? fishCaughtBy(row.hit) : undefined,
+  }))), [windows]);
   const hitCount = rows.filter(row => row.status === 'hit').length;
   const missCount = rows.filter(row => row.status === 'miss').length;
   const verified = hitCount + missCount;
@@ -209,11 +214,13 @@ export function FishHitRateTest({ library, buildSettings, run, disabled, onRunni
               </th>;
             })}</tr></thead>
             <tbody>
-              {visible.map(({ sample, hit, status, reason, rejections, wick, thresholds, turnover, window }) => <tr key={sample.id} className="border-t border-border/50 hover:bg-muted/25">
+              {visible.map(({ sample, hit, status, reason, rejections, wick, thresholds, turnover, window, algorithmTypes }) => <tr key={sample.id} className="border-t border-border/50 hover:bg-muted/25">
                 <td className={cellClass}><div className="font-medium">{sample.symbol}</div><div className="text-muted-foreground">{marketLabel(sample)}{sample.quality ? ` · ${sample.quality} 星` : ''}</div></td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(sample.timeMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(window.anchorMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap ${status === 'hit' ? 'text-primary' : 'text-muted-foreground'}`}>{statusText[status]}</td>
+                <td className={`${cellClass} whitespace-nowrap font-mono tabular-nums text-muted-foreground`}>{algorithmTypes?.length ?? '—'}</td>
+                <td className={`${cellClass} min-w-28 break-words font-mono text-muted-foreground`}>{algorithmTypes?.join(' · ') || '—'}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{hit ? formatUTC8(hit.timeMs) : '—'}</td>
                 <td className={`${cellClass} whitespace-nowrap`}>{hit ? offsetText(hit.timeMs - sample.timeMs) : '—'}</td>
                 <td className={`${cellClass} min-w-32`}>
