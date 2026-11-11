@@ -1107,7 +1107,7 @@ describe('JournalCampaignsPage sorting', () => {
       cells: [...dl.children].map(cell => cell.getAttribute('data-testid')),
     }));
     const initial = layout()[0];
-    expect(initial.className).toBe('grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:thin]');
+    expect(initial.className).toBe('grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden');
     expect(initial.cells).toHaveLength(20);
     // 列宽模板挂在列表容器上；读数不带内联字号
     const gridStyle = () => screen.getByTestId('campaign-card-list').getAttribute('style');

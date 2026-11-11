@@ -485,7 +485,7 @@ const SORT_LONG_PRESS_MS = 450;
 // 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格，手机两列。
 // 【用户要求】「统一向左对齐，不必完全占满右边的空间，我喜欢留白；能够完整显示即可，不要有太大间隙」：
 // 每列只取这一列实际最宽的读数（列表容器上的 --cm-cols-6 / --cm-cols-9，见 cardMetricGridStyle），从左排起，右边留白
-const CARD_METRIC_STRIP = 'grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:thin]';
+const CARD_METRIC_STRIP = 'grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
