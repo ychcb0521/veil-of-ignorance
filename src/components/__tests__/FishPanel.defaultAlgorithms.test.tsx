@@ -1,5 +1,10 @@
 import * as sync from '@/lib/simStateSync';
-import { readFishAccountSettings } from '@/lib/fish/accountSettings';
+import { FISH_HIT_RATE_SETTINGS_KEY, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
+import { FISH_WICK_SETTINGS_KEY } from '@/lib/fish/downwardWick';
+import { FISH_CAPTURE_TURNOVER_KEY } from '@/lib/fish/turnoverSettings';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
+import { useState } from 'react';
+import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings } from '@/lib/fish/accountSettings';
 import {beforeEach,it,expect,vi} from 'vitest';
 import {fireEvent,render,screen,cleanup,waitFor,within} from '@testing-library/react';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
@@ -10,7 +15,7 @@ vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>defs.list}));
 const start=vi.fn();
 const panel=(extra:object={})=><FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()} {...extra}/>;
 const features=()=>[1,2,3,4,5,6].flatMap(i=>{const el=screen.queryByLabelText(i===1?'捕捞算法':`算法 ${i} 特征值`,{selector:'select'});return el?[(el as HTMLSelectElement).selectedOptions[0]?.dataset.featureId]:[];});
-beforeEach(()=>{localStorage.clear();sessionStorage.clear();start.mockClear();defs.list=fishFeatureDefinitions([CBI2_DEF,CBI_DEF,CBA_DEF,DRIFT_SPEED_Z_DEF,CDA_DEF,BSS_DEF,STATE_DEF]);});
+beforeEach(()=>{localStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));start.mockClear();defs.list=fishFeatureDefinitions([CBI2_DEF,CBI_DEF,CBA_DEF,DRIFT_SPEED_Z_DEF,CDA_DEF,BSS_DEF,STATE_DEF]);});
 it('默认四条规则全部勾选，开始捕捞使用截图的阈值、序列和交集',async()=>{
  render(panel());
  expect(FISH_DEFAULT_ALGORITHMS).toEqual(['cbi2','cba','cbi2','cba']);
@@ -84,10 +89,7 @@ it('邮件来源展示实际捕捞序列与已保存的额外来源，打开或�
  const source={key:JSON.stringify(['drift-speed-z','avg_a_2']),label:'DSP·a·avg₂'};
  const notify={config:{enabled:false,emails:[],serviceId:'',templateId:'',publicKey:'',sourceAlgorithms:[source],sourceCombination:'or' as const},status:null,sending:false,update:vi.fn(),send:vi.fn(),test:vi.fn()};
  render(panel({notify}));
- fireEvent.click(screen.getByRole('button',{name:'更多'}));
- expect(screen.queryByTestId('fish-notify-toggle')).not.toBeInTheDocument();
- fireEvent.click(screen.getByRole('button',{name:'设置'}));
- fireEvent.click(screen.getByTestId('fish-notify-toggle'));
+ fireEvent.click(screen.getByText('邮件提醒', { selector: 'summary' }));
  fireEvent.click(screen.getByText(/来源算法 ·/));
  expect(screen.getByRole('checkbox',{name:'邮件来源：DSP·a·avg₂'})).toBeChecked();
  expect(screen.getByRole('checkbox',{name:'邮件来源：CBI-2·avg₂'})).not.toBeChecked();
@@ -122,4 +124,61 @@ it('保存参数提交整套账号配置，重开时忽略本机旧卡片和未�
  expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(23);
  expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
  push.mockRestore();
+});
+
+
+it('copies saved quality settings into a cancellable capture draft and applies edited values on save', async () => {
+ localStorage.setItem('sb-test-auth-token', JSON.stringify({ user: { id: 'copy-quality' } }));
+ const prefix = getUserPrefix(), key = prefix + FISH_HIT_RATE_SETTINGS_KEY;
+ const saved: FishHitRateSettings = {
+  version: 1, cards: [{ id: 'copied', featureId: 'cbi2', enabled: true, pref: { statistic: '结果', threshold: '0.235', direction: '<', constraints: [] } }],
+  combination: 'or', window: { beforeHours: 5, afterHours: 0.1 },
+  selection: { exchanges: ['okx'], includeDuplicates: true },
+  downwardWick: { enabled: true, hours: 2.5, atrMultiple: 4.6 },
+  turnover: { enabled: false, floors: [{ hours: 1, min: 654_321 }, { hours: 12, min: 3_000_000 }, { hours: 24, min: 5_000_000 }] },
+ };
+ const auto = { mode: 'manual', hours: 4 };
+ localStorage.setItem(prefix + FISH_ACCOUNT_SETTINGS_KEY, JSON.stringify({
+  version: 1, cards: [{ ...saved.cards[0], pref: { ...saved.cards[0].pref, threshold: '0.11' } }],
+  combination: 'and', lookbackHours: 2, downwardWick: { enabled: true, hours: 48, atrMultiple: 3 },
+  selection: { exchanges: ['binance'], includeDuplicates: false }, auto,
+ }));
+ const push = vi.spyOn(sync, 'pushSimStateImmediately').mockResolvedValue(true);
+ const time = '2026-11-01 16:30:00';
+ function Fixture() {
+  const [selection, onSelectionChange] = useState({ exchanges: ['binance'], includeDuplicates: false });
+  return panel({ selection, onSelectionChange, inputs: { time, threshold: '' } });
+ }
+ try {
+  render(<Fixture/>);
+  const open = () => fireEvent.click(screen.getByRole('button', { name: '从捕捞质量复制设置' }));
+  open();
+  expect(screen.getByRole('alert')).toHaveTextContent('保存独立设置');
+  localStorage.setItem(key, JSON.stringify(saved));
+  open();
+  const dialog = screen.getByRole('dialog', { name: '从捕捞质量复制设置' });
+  const form = within(dialog);
+  expect(form.getByLabelText('扫描覆盖时间（小时）')).toHaveValue(5.1);
+  expect(form.getByLabelText('捕捞阈值')).toHaveValue(0.235);
+  expect(form.getByLabelText('OKX')).toBeChecked();
+  fireEvent.click(form.getByRole('button', { name: '取消' }));
+  expect(push).not.toHaveBeenCalled();
+  expect(readFishAccountSettings()?.lookbackHours).toBe(2);
+
+  open();
+  const draft = within(screen.getByRole('dialog', { name: '从捕捞质量复制设置' }));
+  fireEvent.change(draft.getByLabelText('扫描覆盖时间（小时）'), { target: { value: '4.5' } });
+  fireEvent.click(draft.getByRole('button', { name: '保存捕捞设置' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '从捕捞质量复制设置' })).not.toBeInTheDocument());
+  expect(push.mock.calls.map(call => call[1]).sort()).toEqual([FISH_ACCOUNT_SETTINGS_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY].sort());
+  expect(readFishAccountSettings()).toMatchObject({ lookbackHours: 4.5, combination: 'or', auto, selection: saved.selection });
+  expect(localStorage.getItem(key)).toBe(JSON.stringify(saved));
+  expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveValue(time);
+  expect(start).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '开始捕捞' }));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({
+   anchorMs: Date.parse('2026-11-01T16:30:00+08:00'), lookbackHours: 4.5, exchanges: ['okx'], combination: 'or',
+   downwardWick: saved.downwardWick, turnoverFloors: [], algorithm: expect.objectContaining({ threshold: 0.235, direction: '<' }),
+  }));
+ } finally { push.mockRestore(); }
 });

@@ -4,7 +4,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 /**
  * 「比较探测」持续挖掘的调度（见 lib/fish/mining.ts）。网站开着就在后台一档一档往前挖：
  * - 取数器空闲才挖；手动 / 定时捕捞一开始就打断这一档（之后原地重扫），挖掘永远让路；
- * - 补历史时一档接一档连着挖；追上现在后，每到下一个半天整点再挖一档；
+ * - 补历史时一档接一档连着挖；追上现在后，等下一个扫描锚点再继续；
  * - 出错原地重试（间隔 2 分钟）；多个标签页只有拿到租约的那个挖。
  * - 每次读进度都用鱼舱里已挖到的鱼校正一遍：进度被旧快照盖回去或丢了，也从最后挖到的那一档往后接。
  */
@@ -19,7 +19,7 @@ import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPl
 import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/records';
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
-import { buildConfiguredMiningScan, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
+import { buildConfiguredMiningScan, continuousMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
 import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
 
@@ -169,8 +169,10 @@ export function useFishMining(o: {
 
   const start = useCallback(() => {
     const s = load(latest.current.signalsRef.current);
-    const settings = !s.round && !s.enabled && !s.selection && !s.anchorsDone && !s.mined && !s.lastRunAt && !s.lastError ? readMiningSettings() : null;
-    if (settings) {
+    const fresh = !s.round && !s.enabled && !s.selection && !s.anchorsDone && !s.mined && !s.lastRunAt && !s.lastError;
+    const saved = fresh ? readMiningSettings() : null;
+    if (saved) {
+      const settings = continuousMiningSettings(saved);
       setState({ ...s, ...structuredClone(settings), enabled: true, round: { id: crypto.randomUUID(), startedAt: Date.now() } });
       setTimeout(() => void tickRef.current(), 0);
       return;
@@ -183,13 +185,14 @@ export function useFishMining(o: {
     if(!Number.isFinite(startMs)||startMs<=0||startMs>Date.now()||endMs!=null&&(!Number.isFinite(endMs)||endMs<=startMs||endMs>Date.now()))return;
     const previous = readMiningState();
     const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
+    const configured = settings && continuousMiningSettings(settings);
     cancelScan();
-    if (previous.enabled && (!previous.round || (settings && !previous.scan))) saveMiningState({ ...previous, enabled: false });
-    if (settings) saveMiningSettings(settings);
+    if (previous.enabled && (!previous.round || (configured && !previous.scan))) saveMiningState({ ...previous, enabled: false });
+    if (configured) saveMiningSettings(configured);
     setState({
       ...newMiningState(), enabled: true, startMs, ...(endMs!=null?{endMs}:{}), cursorMs: startMs, target,
       rules: structuredClone(rules), selection: structuredClone(latest.current.selection),
-      ...(settings ? structuredClone(settings) : {}),
+      ...(configured ? structuredClone(configured) : {}),
       round: { id: crypto.randomUUID(), startedAt },
     });
     setWaiting('');

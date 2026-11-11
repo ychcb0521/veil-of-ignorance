@@ -37,6 +37,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
   it('算法设置与每次打开恢复自动1h一起生效，临时间隔不影响保存的阈值',()=>{
     saveFishAuto({mode:'manual',hours:64,lastRunAt:Date.now()});render(control());
     const toggle=screen.getByRole('button',{name:/^渔/});fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button',{name:'捕捞设置'}));
     expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
     expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('1');
     fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'0.123'}});
@@ -214,9 +215,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     // 【用户要求】2026-10-19 交易所勾选收在淡色图标后
     expect(screen.queryByRole('checkbox',{name:'币安'})).not.toBeInTheDocument();
-    // 【用户要求】2026-10-21 捕捞范围 / 查单个币 / 邮件提醒 / 复原收进「⋯」：顶栏不再直接显示
+    // 【用户要求】2026-10-21 市场、邮件提醒和复原收进捕捞设置，顶栏不直接显示
     for(const name of ['捕捞范围','查单个币','邮件提醒','复原'])expect(screen.queryByRole('button',{name})).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
+    fireEvent.click(screen.getByRole('button',{name:'捕捞设置'}));
     expect(screen.getByRole('checkbox',{name:'币安'})).toBeChecked();
     for(const name of ['OKX','Bitget','Gate']){expect(screen.getByRole('checkbox',{name})).not.toBeChecked();fireEvent.click(screen.getByRole('checkbox',{name}));}
     for(const name of ['Bybit','KuCoin 合约','MEXC 合约'])expect(screen.queryByRole('checkbox',{name})).not.toBeInTheDocument();
@@ -261,7 +262,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
 });
 
 it('默认只币安、不选美股；其他交易所与美股仅明确勾选后传入扫描',async()=>{
- render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
+ render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'捕捞设置'}));
  expect(screen.getByRole('checkbox',{name:'币安'})).toBeChecked();
  for(const name of ['OKX','Bitget','Gate','美股'])expect(screen.getByRole('checkbox',{name})).not.toBeChecked();
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(mocks.scan).toHaveBeenCalledTimes(1));
@@ -280,6 +281,7 @@ it('自动模式下打开时间框是「现在」（不恢复以前输过的）�
  sessionStorage.setItem('veil.fish.time','2025-04-23 01:26:00');
  saveFishAuto({mode:'auto',hours:1,lastRunAt:Date.now()});
  render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+ fireEvent.click(screen.getByRole('button',{name:'捕捞设置'}));
  const time=()=>screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement;
  expect(time().value).toBe('');expect(time()).toHaveAttribute('autocomplete','off');
  fireEvent.change(time(),{target:{value:'2026-10-18 12:34:56'}});expect(time().value).toBe('2026-10-18 12:34:56');
@@ -290,6 +292,7 @@ it('即使上次手动模式也恢复自动和现在',()=>{
  sessionStorage.setItem('veil.fish.time','2025-04-23 01:26:00');
  render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
  expect((screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement).value).toBe('');
+ fireEvent.click(screen.getByRole('button',{name:'捕捞设置'}));
  expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
 });
 

@@ -7,7 +7,7 @@ import { getUserPrefix } from '@/lib/userStoragePrefix';
 
 vi.mock('@/hooks/useFishFeatures', () => ({ useFishFeatures: () => [{ ...CBI2_DEF, formula: 'C', scale: 1 }] }));
 // 公式被模拟成只有「C」（没有 avg 行）：跳过默认卡换 avg 的一次性迁移，这里只测 50 条上限
-beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem(`${getUserPrefix()}fish-default-avg.v1`, '1'); });
+beforeEach(() => { localStorage.clear(); sessionStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true })); localStorage.setItem(`${getUserPrefix()}fish-default-avg.v1`, '1'); });
 
 it('adds the 50th rule, blocks the 51st, restores all settings and sends all 50 to capture', async () => {
   const cards = Array.from({ length: 49 }, (_, i) => ({

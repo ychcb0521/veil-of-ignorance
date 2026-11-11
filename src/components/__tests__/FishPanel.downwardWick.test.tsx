@@ -23,15 +23,9 @@ beforeEach(()=>{
 async function openSettings() {
   const capture = screen.getByRole('button', { name: '捕捞' });
   if (capture.getAttribute('aria-expanded') === 'false') fireEvent.click(capture);
-  expect(screen.queryByRole('button', { name: '插针回看设置' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '更多' }));
-  const menu = within(await screen.findByRole('dialog', { name: '更多捕捞选项' }));
-  expect(menu.queryByRole('button', { name: '插针回看设置' })).not.toBeInTheDocument();
-  expect(menu.queryByRole('button', { name: '查单个币' })).not.toBeInTheDocument();
-  fireEvent.click(menu.getByRole('button', { name: '设置' }));
-  const settings = within(await screen.findByRole('dialog', { name: '设置' }));
-  fireEvent.click(settings.getByRole('button', { name: '插针回看设置' }));
-  return within(await screen.findByRole('dialog', { name: '插针回看设置' }));
+  const toggle = screen.getByRole('button', { name: '捕捞设置' });
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
+  return within(await screen.findByRole('region', { name: '捕捞设置' }));
 }
 
 it('saves only submitted settings and gives manual and automatic scans the same custom rule', async () => {
@@ -47,7 +41,7 @@ it('saves only submitted settings and gives manual and automatic scans the same 
   fireEvent.change(settings.getByLabelText('插针幅度（ATR 倍数）'), { target: { value: '4.2' } });
   expect(readFishDownwardWick()).toEqual({ enabled:true, hours:48, atrMultiple:3 });
   fireEvent.click(settings.getByRole('button', { name: '保存插针设置' }));
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: '插针回看设置' })).not.toBeInTheDocument());
+  await waitFor(() => expect(settings.getByRole('button', { name: '保存插针设置' })).toBeEnabled());
   const expected = { enabled:true, hours:1, atrMultiple:4.2 };
   expect(readFishDownwardWick()).toEqual(expected);
 
@@ -75,7 +69,7 @@ it('passes the submitted turnover settings to manual capture', async () => {
   expect(readCaptureTurnoverSettings().floors[0].min).toBe(1_000_000);
   fireEvent.click(settings.getByRole('button', { name: '保存成交额设置' }));
   await waitFor(() => expect(readCaptureTurnoverSettings().floors[0].min).toBe(2_000_000));
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: '插针回看设置' })).not.toBeInTheDocument());
+  await waitFor(() => expect(settings.getByRole('button', { name: '保存成交额设置' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '开始捕捞' }));
   await waitFor(() => expect(start).toHaveBeenCalled());
   expect(start.mock.calls[0][0].turnoverFloors).toEqual(readCaptureTurnoverSettings().floors);

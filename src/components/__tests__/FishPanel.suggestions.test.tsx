@@ -19,7 +19,7 @@ function Harness({onSuggest=suggest}:{onSuggest?:FishPanelProps['onSuggest']}){
  return <><button onClick={()=>setLibrary([...signals,{...signals[0],id:'extra',timeMs:signals[0].timeMs+300000}])}>增加信号</button><FishPanel librarySignals={library} onSuggest={onSuggest} signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/></>;
 }
 function select(){fireEvent.change(screen.getByLabelText('捕捞算法'),{target:{value:def.id}});expect(screen.queryByLabelText('捕捞平均时长')).toBeNull();}
-beforeEach(()=>{localStorage.clear();sessionStorage.clear();localStorage.setItem(getUserPrefix()+FEATURES_KEY,JSON.stringify([def]));suggest.mockClear();load.mockClear();start.mockClear();});
+beforeEach(()=>{localStorage.clear();sessionStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));localStorage.setItem(getUserPrefix()+FEATURES_KEY,JSON.stringify([def]));suggest.mockClear();load.mockClear();start.mockClear();});
 const help=(index=1)=>{const b=screen.getByRole('button',{name:`算法 ${index} 说明`});if(b.getAttribute('aria-expanded')!=='true')fireEvent.click(b);};
 const closeHelp=(index=1)=>{const b=screen.getByRole('button',{name:`算法 ${index} 说明`});if(b.getAttribute('aria-expanded')==='true')fireEvent.click(b);};
 const rule=()=>{const b=screen.getByRole('button',{name:'组合说明'});if(b.getAttribute('aria-expanded')!=='true')fireEvent.click(b);return screen.getByTestId('fish-rule');};

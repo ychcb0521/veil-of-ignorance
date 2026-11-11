@@ -8,16 +8,17 @@ import { readFishCards, readFishCombination } from './cards';
 import { readFishDownwardWick, validateFishDownwardWick } from './downwardWick';
 import { AUDITED_EXCHANGES } from './exchanges';
 import { validateFishHitRateWindow } from './hitRate';
-import { FISH_HIT_RATE_SETTINGS_KEY, readFishHitRateSettings } from './hitRateSettings';
-import { readFishLookback, validateFishLookback } from './lookback';
+import { readSavedFishHitRateSettings } from './hitRateSettings';
+import { FISH_DEFAULT_LOOKBACK_HOURS, readFishLookback, validateFishLookback } from './lookback';
 import { currentDefaultRules, miningCards } from './mining';
 import { MINING_COMBINATION } from './defaultRules';
-import type { FishMiningScanConfig, FishMiningState } from './miningState';
+import { MINING_STEP_MS, type FishMiningScanConfig, type FishMiningState } from './miningState';
 import { buildFishScanSettings, type FishScanSelection } from './scanPlan';
 import { FISH_MAX_ALGORITHMS, FISH_TURNOVER_FLOORS } from './shared';
 import { readCaptureTurnoverSettings, validateFishTurnoverSettings } from './turnoverSettings';
 
-const HOUR_MS = 3_600_000;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 const MINING_SETTINGS_KEY = 'fish-mining-settings.v1';
 export type FishMiningSettings = Pick<FishMiningState, 'rules' | 'target' | 'stepMs'> & {
   selection: FishScanSelection;
@@ -26,7 +27,7 @@ export type FishMiningSettings = Pick<FishMiningState, 'rules' | 'target' | 'ste
 
 const schema = z.object({
   target: z.number().int().positive(),
-  stepMs: z.number().int().min(300_000).max(8784 * HOUR_MS),
+  stepMs: z.number().int().min(MINUTE_MS).max(8784 * HOUR_MS),
   rules: z.array(z.object({
     id: z.string(), featureId: z.string(), statistic: z.string(), threshold: z.string(),
     direction: z.enum(['>', '<']).optional(), enabled: z.boolean().optional(),
@@ -40,6 +41,7 @@ const schema = z.object({
     downwardWick: z.object({ enabled: z.boolean(), hours: z.number(), atrMultiple: z.number() }),
     turnover: z.object({ enabled: z.boolean(), floors: z.array(z.object({ hours: z.number(), min: z.number() })) }),
     lookbackHours: z.number().positive().max(8784).nullable(),
+    continuous: z.literal(true).optional(),
   }),
 });
 
@@ -92,23 +94,25 @@ export function copyCaptureToMining(settings: FishMiningSettings, selection: Fis
 }
 
 export function copyHitRateToMining(settings: FishMiningSettings): FishMiningSettings {
-  let value: unknown;
-  try {
-    value = JSON.parse(readPersistedStateRaw(getUserPrefix() + FISH_HIT_RATE_SETTINGS_KEY) ?? 'null');
-  } catch { /* Unreadable settings are treated as unavailable. */ }
-  const saved = readFishHitRateSettings(value);
-  if (!saved) throw new Error('请先在「捕捞质量 → 漏报测试 → 测试设置」保存独立设置');
-  const { cards, combination, selection, downwardWick, turnover, window } = saved;
+  const { cards, combination, selection, downwardWick, turnover, window } = readSavedFishHitRateSettings();
   return {
     ...settings, rules: miningRulesFromCards(cards), selection,
     scan: { combination, downwardWick, turnover, lookbackHours: validateFishHitRateWindow(window) },
   };
 }
 
+export function continuousMiningSettings(settings: FishMiningSettings): FishMiningSettings {
+  const hours = validateFishLookback(settings.scan.lookbackHours ?? FISH_DEFAULT_LOOKBACK_HOURS);
+  // User-selected anchors are minute-aligned, as are all supported candle close times.
+  const minutes = Math.max(1, Math.floor(hours * 60 + 1e-9));
+  return { ...settings, stepMs: Math.min(minutes * MINUTE_MS, MINING_STEP_MS),
+    scan: { ...settings.scan, continuous: true } };
+}
+
 export function buildConfiguredMiningScan(settings: FishMiningSettings, defs: readonly DeepDigFeatureDef[]) {
   if (!Number.isSafeInteger(settings.target) || settings.target <= 0) throw new Error('目标条数必须是正整数');
-  if (!Number.isSafeInteger(settings.stepMs) || settings.stepMs < 300_000 || settings.stepMs > 8784 * HOUR_MS) {
-    throw new Error('扫描间隔须在 5 分钟到 8784 小时之间');
+  if (!Number.isSafeInteger(settings.stepMs) || settings.stepMs < MINUTE_MS || settings.stepMs > 8784 * HOUR_MS) {
+    throw new Error('挖掘推进设置无效，请重新开始一轮');
   }
   if (settings.scan.lookbackHours !== null) validateFishLookback(settings.scan.lookbackHours);
   const downwardWick = validateFishDownwardWick(settings.scan.downwardWick);

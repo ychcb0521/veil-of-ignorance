@@ -1,5 +1,5 @@
 import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
-import type { FishAccountSettings } from '@/lib/fish/accountSettings';
+import { readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
 import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
@@ -11,7 +11,7 @@ import {readPersistedStateRaw,writePersistedStateRaw} from '@/lib/persistedState
 import { FishReconstructionResults } from './FishReconstruction';
 import type { FishReconstructionState } from '@/hooks/useFishReconstruction';
 import {FishAlgorithmCard,FishCheck,RECORDED_RANGES,type FishCard} from './FishAlgorithmCard';
-import {getUserPrefix} from '@/lib/userStoragePrefix';
+import {getUserId,getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
@@ -29,21 +29,24 @@ import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type Fish
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Gauge, History, ListChecks, Mail, MoreHorizontal, PanelTop, Play, Plus, ScanSearch, Settings, ShieldAlert, SlidersHorizontal, Square, Timer } from 'lucide-react';
+import { Activity, ChevronDown, CircleHelp, Clock3, Copy, Gauge, History, ListChecks, Play, Plus, ScanSearch, Settings, ShieldAlert, Square } from 'lucide-react';
 import { fishInfoTrigger, fishRail, fishSectionHeading, fishSubHeading } from './FishSection';
 import { FishQualityInfo } from './FishQualityModule';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { signalChartSymbol, type TradeSignal } from '@/lib/signalLibrary';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishProgress } from '@/lib/fishScanner';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
 import { FishHitRateTest } from '@/components/FishHitRateTest';
-import { DEFAULT_FISH_HIT_RATE_WINDOW, type FishHitRateOptions } from '@/lib/fish/hitRate';
-import type { FishHitRateSettings } from '@/lib/fish/hitRateSettings';
+import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
+import { DEFAULT_FISH_HIT_RATE_WINDOW, validateFishHitRateWindow, type FishHitRateOptions } from '@/lib/fish/hitRate';
+import { readSavedFishHitRateSettings, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
+import { buildFishScanSettings } from '@/lib/fish/scanPlan';
 import { FishWickDetails } from '@/components/FishWickDetails';
 import { FishWickSettings } from '@/components/FishWickSettings';
-import { FishCaptureFrequencySettings, FishCaptureOpenSettings, FishCaptureTimeSettings } from '@/components/FishCaptureSettings';
+import { FishCaptureOpenSettings } from '@/components/FishCaptureSettings';
 import { FishQuality } from '@/components/FishQuality';
 import { ModuleErrorBoundary } from '@/components/ModuleErrorBoundary';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -92,9 +95,7 @@ export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
 const catchingDefaultKey = () => `${getUserPrefix()}fish-catching-default.v1`;
-const captureSettingTitles = { settings: '设置', time: '时间设置', opening: '打开设置', frequency: '扫描频率设置', wick: '插针回看设置', notify: '邮件提醒' } as const;
-type CaptureSetting = keyof typeof captureSettingTitles;
-type FishOpen = { scope: boolean; detail: boolean; catching: boolean; cabin: boolean; algorithms: boolean; captureQuality: boolean; hitRate: boolean };
+type FishOpen = { settings: boolean; catching: boolean; cabin: boolean; algorithms: boolean; captureQuality: boolean; hitRate: boolean };
 function readCatchingDefault() {
   try {
     const saved = localStorage.getItem(catchingDefaultKey());
@@ -105,8 +106,8 @@ function readCatchingDefault() {
 function readOpen(): FishOpen {
   const pick = (v: unknown, fallback: boolean) => typeof v === 'boolean' ? v : fallback;
   const catching = readCatchingDefault();
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: v.algorithms !== false, captureQuality: v.captureQuality === true, hitRate: v.hitRate === true }; }
-  catch { return { scope: false, detail: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: true, captureQuality: false, hitRate: false }; }
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { settings: v.settings === true, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: v.algorithms !== false, captureQuality: v.captureQuality === true, hitRate: v.hitRate === true }; }
+  catch { return { settings: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: true, captureQuality: false, hitRate: false }; }
 }
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
 
@@ -284,39 +285,74 @@ export function FishPanel(p: FishPanelProps) {
     window: { ...DEFAULT_FISH_HIT_RATE_WINDOW },
   });
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
-  const x = p.progress;
+  const x = p.progress, auto = p.auto;
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
-  const [menuOpen,setMenuOpen]=useState(false);
-  const [captureSetting, setCaptureSetting] = useState<CaptureSetting | null>(null);
-  const saveCaptureTime = async (time: string, duration: string) => {
-    parseFishSettings(time, '0');
-    const hours = validateFishLookback(duration);
-    await saveLookback(hours);
-    if (getUserPrefix() !== owner) return;
-    setLookbackHours(hours);
-    setLookbackDraft(String(hours));
-    p.onInputsChange({ ...inputsRef.current, time });
+  const [captureCopyRevision, setCaptureCopyRevision] = useState(0);
+  const [captureCopy, setCaptureCopy] = useState<{ owner: string; settings: FishHitRateSettings } | null>(null);
+  const [copyError, setCopyError] = useState('');
+  const openCaptureCopy = () => {
+    try {
+      setCaptureCopy({ owner, settings: readSavedFishHitRateSettings() });
+      setCopyError('');
+    } catch (cause) {
+      setCopyError(cause instanceof Error ? cause.message : '捕捞质量设置读取失败');
+    }
+  };
+  const saveCaptureCopy = async ({ cards, combination, selection, downwardWick, turnover, window }: FishHitRateSettings) => {
+    if (running || hitRateRunning || getUserPrefix() !== owner) throw new Error('当前任务结束后可以保存设置');
+    if (!getUserId()) throw new Error('请先登录后保存账号参数');
+    const lookbackHours = validateFishHitRateWindow(window);
+    const fixedCards = cards.map(card => ({ ...card, pref: { ...cleanPreference(card.pref), lastSuggestion: undefined } }));
+    const built = buildFishScanSettings({ cards: fixedCards, defs, combination, selection, time: '', lookbackHours,
+      downwardWick, turnoverFloors: turnover.enabled ? turnover.floors : [] });
+    if (!built.settings) throw new Error(built.error);
+    const auto = readFishAccountSettings()?.auto;
+    const profile: FishAccountSettings = { version: 1, cards: fixedCards, combination, selection, lookbackHours,
+      downwardWick: readLegacyFishDownwardWick(owner), ...(auto && { auto }) };
+    setSavingParameters(true);
     setError('');
-    setMenuOpen(false);
+    try {
+      const writes = [saveDownwardWick(downwardWick), saveTurnover(turnover), saveAccountSettings(profile)];
+      // The save hooks stage each validated setting locally before awaiting its account acknowledgement.
+      const [first, ...rest] = fixedCards;
+      setSelected(first.featureId);
+      setFirstEnabled(first.enabled);
+      setPref(first.pref);
+      setExtraCards(rest);
+      setCombinationState(combination);
+      setLookbackHours(lookbackHours);
+      setLookbackDraft(String(lookbackHours));
+      p.onSelectionChange(selection);
+      setCaptureCopyRevision(value => value + 1);
+      const results = await Promise.allSettled(writes);
+      if (getUserPrefix() !== owner) return;
+      const failed = results.find(result => result.status === 'rejected');
+      if (failed) throw failed.reason;
+      setCaptureCopy(null);
+      toast.success('捕捞设置已保存到账号');
+    } finally {
+      setSavingParameters(false);
+    }
   };
   const saveCaptureOpening = (expanded: boolean) => {
     localStorage.setItem(catchingDefaultKey(), String(expanded));
-    setMenuOpen(false);
-    setOpen({ catching: expanded });
+    setOpen({ catching: expanded, settings: false });
   };
-  const captureOptions = [
-    { key:'time', icon:Clock3, hint:`过去 ${lookbackHours} 小时`, show:true },
-    { key:'opening', icon:PanelTop, hint:readCatchingDefault() ? '默认展开' : '默认折叠', show:true },
-    { key:'frequency', icon:Timer, hint:p.auto?.mode === 'auto' ? `自动 · 每 ${p.auto.hours}h` : '手动', show:!!p.auto },
-    { key:'wick', icon:SlidersHorizontal, hint:downwardWick.enabled ? `${fishWickDuration(downwardWick.hours)} · ${downwardWick.atrMultiple}×` : '已关闭', show:true },
-    { key:'notify', icon:Mail, hint:p.notify?.config.enabled ? `已开启 · ${p.notify.config.emails.length} 个邮箱` : '未开启', show:!!p.notify },
-  ] as const;
-  const iconBtn = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
   // 【用户要求】2026-10-19「渔界面内的内容可以上下滑动，要切换自如」：面板自己限高、内部滚动；顶栏（时间 / 捕捞 / 状态）滚动时贴顶。
   // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
   // 顶栏一行操作（时间 · 主按钮 · 淡色工具），下面一行状态，底边一根细线兼作进度条；算法是一张对齐的表，合并方式用分段按钮。
   return <section className={`mt-2 ${p.fillHeight?'min-h-0 flex-1':'max-h-[65dvh]'} min-w-0 overflow-y-auto overscroll-y-contain rounded-xl border border-border/60 bg-background`} aria-label="渔" data-testid="fish-panel">
+    {captureCopy?.owner === owner && <Dialog open onOpenChange={next => { if (!next && !savingParameters) setCaptureCopy(null); }}>
+      <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-3xl overflow-y-auto p-4 text-[11px] sm:p-5">
+        <DialogHeader className="pr-7 text-left">
+          <DialogTitle>从捕捞质量复制设置</DialogTitle>
+          <DialogDescription>已载入保存的漏报测试设置。扫描覆盖时间取样本前后时长之和，保存后用于下一轮捕捞。</DialogDescription>
+        </DialogHeader>
+        <FishHitRateSettingsForm initial={captureCopy.settings} defs={defs} capture locked={running || hitRateRunning}
+          onSave={saveCaptureCopy} onCancel={() => setCaptureCopy(null)}/>
+      </DialogContent>
+    </Dialog>}
     <section aria-labelledby="fish-catching-title" data-testid="fish-catching">
       <div className="flex items-center px-4 pb-1 pt-3">
         <div className="flex items-center gap-0.5 pr-1.5"><button id="fish-catching-title" type="button" aria-expanded={open.catching} aria-controls="fish-catching-content" onClick={()=>setOpen({catching:!open.catching})} className={fishSectionHeading}><Play aria-hidden className="h-3 w-3 text-muted-foreground"/><span>捕捞</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.catching?'rotate-180':''}`}/></button><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" title="捕捞说明" className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[min(75dvh,var(--radix-popover-content-available-height))] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2.5 p-3.5 text-[11px] leading-relaxed" aria-label="捕捞说明">
@@ -329,7 +365,7 @@ export function FishPanel(p: FishPanelProps) {
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
             <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 1 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。排除稳定币。{turnover.enabled ? `成交额门槛 ${turnover.floors.map(floor => `${floor.hours}h ≥ ${formatTurnoverWan(floor.min)}`).join('、')} USDT，截止前与信号起点前都要满足。` : '成交额过滤已关闭。'}</li>
             <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
-            <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯ → 设置」可调整时间、默认展开、扫描频率、插针回看和邮件提醒。</li>
+            <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「捕捞设置」可调整算法、市场、时间、频率、过滤和提醒。</li>
           </ol></section>
         {(x?.anchorMs||x?.cutoffMs)&&<p className="border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground/80">{x?.anchorMs?`本轮节点 ${formatUTC8(x.anchorMs)}`:''}{x?.anchorMs&&x?.cutoffMs?' · ':''}{x?.cutoffMs?`本轮阈值 ${plan?.settings.direction??'>'} ${x.threshold??.3}`:''}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
@@ -339,8 +375,11 @@ export function FishPanel(p: FishPanelProps) {
 </PopoverContent></Popover></div>
       </div>
       <div id="fish-catching-content" hidden={!open.catching}>
-    <header className="sticky top-0 z-10 bg-background" data-testid="fish-toolbar">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 px-4 pb-2.5 pt-1 text-[11px]">
+    <section className="sticky top-0 z-10 bg-background" aria-labelledby="fish-capture-progress-title" data-testid="fish-toolbar">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 pb-2.5 pl-[calc(2.125rem+1px)] pr-4 pt-1 text-[11px] sm:pl-[calc(2.375rem+1px)]">
+        <h3 id="fish-capture-progress-title" className={fishSubHeading}>
+          <Activity aria-hidden className="h-3 w-3 text-muted-foreground"/>捕捞进程
+        </h3>
 
         <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-muted/50 px-2 transition-colors focus-within:border-ring/60 focus-within:bg-background hover:bg-muted" title={p.auto?.mode==='auto'?'自动捕捞始终按当前时间；这里的时间只用于手动点「开始捕捞」':'格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间'}>
           <Clock3 aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60"/>
@@ -351,76 +390,13 @@ export function FishPanel(p: FishPanelProps) {
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||hitRateRunning||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
-        <Popover open={menuOpen} onOpenChange={next => { if (next) setCaptureSetting(null); setMenuOpen(next); }}>
-          <PopoverTrigger asChild><button type="button" aria-label="更多" title="更多捕捞选项" className={`${iconBtn} ${menuOpen||open.scope?'bg-muted text-foreground':''}`} data-testid="fish-more"><MoreHorizontal className="h-4 w-4"/></button></PopoverTrigger>
-          <PopoverContent align="start" sideOffset={4}
-            className={captureSetting === 'wick' ? 'w-96 max-w-[calc(100vw-1rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-4 text-[11px]' : captureSetting === 'notify' ? 'w-[36rem] p-4 text-[11px]' : captureSetting === 'settings' ? 'w-64 p-2 text-[11.5px]' : captureSetting ? 'w-96 p-4 text-[11px]' : 'w-56 p-1 text-[11.5px]'}
-            aria-label={captureSetting ? captureSettingTitles[captureSetting] : "更多捕捞选项"} data-testid="fish-more-menu">
-            {captureSetting ? <div key={captureSetting+owner} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <button type="button" autoFocus onClick={() => setCaptureSetting(captureSetting === 'settings' ? null : 'settings')}
-                  aria-label={captureSetting === 'settings' ? '返回更多菜单' : '返回设置'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                  <ChevronLeft aria-hidden className="h-3.5 w-3.5" />
-                </button>
-                <h3 className="text-xs font-medium">{captureSettingTitles[captureSetting]}</h3>
-              </div>
-              {captureSetting === 'settings' && <div className="space-y-0.5">
-                {captureOptions.filter(option => option.show).map(({key, icon: Icon, hint}) => <button key={key} type="button" onClick={() => setCaptureSetting(key)}
-                  aria-label={captureSettingTitles[key]} data-testid={key === 'notify' ? 'fish-notify-toggle' : undefined}
-                  className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-foreground/85 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                  <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="shrink-0">{captureSettingTitles[key]}</span>
-                  <span className="ml-auto truncate text-[10.5px] text-muted-foreground">{hint}</span>
-                  <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-                </button>)}
-              </div>}
-              {captureSetting === 'time' && <FishCaptureTimeSettings value={p.inputs.time} duration={lookbackDraft} locked={running} onSave={saveCaptureTime} />}
-              {captureSetting === 'opening' && <FishCaptureOpenSettings value={readCatchingDefault()} onSave={saveCaptureOpening} />}
-              {captureSetting === 'frequency' && p.auto && <FishCaptureFrequencySettings value={p.auto} onSave={schedule => {
-                p.auto!.setSchedule(schedule);
-                setMenuOpen(false);
-                toast.success('扫描频率已保存');
-              }} />}
-              {captureSetting === 'wick' && <FishWickSettings value={downwardWick} locked={running} turnover={turnover} onSaveTurnover={async value => {
-                await saveTurnover(value);
-                if (getUserPrefix() === owner) {
-                  setMenuOpen(false);
-                  toast.success('成交额设置已保存');
-                }
-              }} onSave={async value => {
-                await saveDownwardWick(value);
-                if (getUserPrefix() === owner) {
-                  setMenuOpen(false);
-                  toast.success('插针回看设置已保存');
-                }
-              }}/>}
-              {captureSetting === 'notify' && p.notify && <FishNotifySettings notify={p.notify} algorithms={[
-                ...pool.map(plan => fishEmailAlgorithm({ featureId: plan.def.id, featureShort: plan.def.short, statistic: plan.settings.statistic, definitionKey: definitionKey(plan.def) })),
-                ...p.signals.flatMap(signal => qualityMembers(signal).map(fishEmailAlgorithm)),
-              ].filter((a): a is NonNullable<typeof a> => Boolean(a))}/>}
-            </div> : ([
-              {key:'scope',icon:SlidersHorizontal,label:'捕捞范围',hint:exchanges.map(e=>EXCHANGE_NAMES[e]).join('、')||'未选交易所',active:open.scope,onClick:()=>setOpen({scope:!open.scope}),show:true},
-              {key:'settings',icon:Settings,label:captureSettingTitles.settings,hint:'',active:false,onClick:()=>setCaptureSetting('settings'),show:true,subview:true},
-              {key:'recon',icon:History,label:'复原',hint:'',active:false,onClick:async()=>{const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}await p.reconstruction!.start();},show:!!p.reconstruction,disabled:running||hitRateRunning||!p.reconstruction?.available,title:p.reconstruction?.settingsError||'复原：用信号发生前的数据评估各算法，仅保存在本机'},
-            ] as const).filter(i=>i.show).map(i=>{const Icon=i.icon;return <button key={i.key} type="button" aria-label={i.label} aria-expanded={i.key==='recon'||'subview' in i?undefined:i.active} title={'title' in i?i.title:undefined} disabled={'disabled' in i?i.disabled:false} data-testid={'testId' in i?i.testId:undefined}
-              onClick={()=>{if(!('subview' in i))setMenuOpen(false);void i.onClick();}}
-              className={`flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40 ${i.active?'bg-muted/70 text-foreground':'text-foreground/85'}`}>
-              <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground"/><span className="shrink-0">{i.label}</span>
-              {i.key === 'settings' && <ChevronRight aria-hidden className="ml-auto h-3 w-3 shrink-0 text-muted-foreground/60" />}
-              {i.hint&&<span className="ml-auto min-w-0 truncate pl-2 text-[10.5px] text-muted-foreground/70">{i.hint}</span>}
-            </button>;})}
-          </PopoverContent>
-        </Popover>
-        {p.auto&&<>
-          {/* 【用户要求】2026-10-21「渔这里增设一个定时自动（& 手动）捕捉的功能」：手动 = 与原来一样；自动 = 每隔所选时长自动捕一次（时间 = 现在） */}
-          <div role="radiogroup" aria-label="捕捞模式" className="inline-flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[11px]">
-            {(['manual','auto'] as const).map(m=><button key={m} type="button" role="radio" aria-checked={p.auto!.mode===m} title={m==='manual'?'手动：点「开始捕捞」才捕':'自动：网站开着就每隔所选时长自动捕一次（按当前时间）'} onClick={()=>p.auto!.setMode(m)} className={`h-6 rounded px-2.5 transition-colors ${p.auto!.mode===m?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{m==='manual'?'手动':'自动'}</button>)}
-          </div>
-          {p.auto.mode==='auto'&&<>
-            <span className="relative shrink-0"><select aria-label="自动捕捞间隔" value={p.auto.hours} onChange={e=>p.auto!.setHours(Number(e.target.value))} className="h-7 appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 text-[11px] tabular-nums text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60">{FISH_AUTO_INTERVALS.map(h=><option key={h} value={h}>每 {h}h</option>)}</select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/></span>
-            <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>
-          </>}
-        </>}
+        <button type="button" aria-expanded={open.settings} aria-controls="fish-capture-settings"
+          onClick={() => { setCopyError(''); setOpen({ settings: !open.settings }); }}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+          <Settings aria-hidden className="h-3.5 w-3.5"/>捕捞设置
+          <ChevronDown aria-hidden className={`h-3 w-3 transition-transform ${open.settings ? 'rotate-180' : ''}`}/>
+        </button>
+        {p.auto?.mode === 'auto' && <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>}
       </div>
       {x&&lookbackHours!==x.lookbackHours&&<p className="px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间改为过去 {lookbackHours} 小时，下一轮生效；{x.lookbackHours===undefined?'上一轮未设置覆盖时长。':`以下仍是过去 ${x.lookbackHours} 小时的结果。`}</p>}
       {x?.anchorMs!=null&&Number.isFinite(x.anchorMs)&&x.lookbackHours!==undefined&&<p className="flex flex-wrap gap-x-1 px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-scan-window"><span>本轮信号起点范围（北京时间，含边界）：</span><span className="font-mono tabular-nums">{formatUTC8(x.anchorMs-x.lookbackHours*3600000)} ～ {formatUTC8(x.anchorMs)}</span><span>；只使用已收盘 K 线</span></p>}
@@ -435,51 +411,119 @@ export function FishPanel(p: FishPanelProps) {
           {x.cutoffMs!=null&&<><span className="text-muted-foreground/40">·</span><span className="font-mono tabular-nums text-muted-foreground" data-testid="fish-cutoff" title="本轮实际使用的截止时刻（时间留空 = 币安服务器当前时间）">截止 {formatUTC8(x.cutoffMs).slice(0,16)}</span></>}
         </p>
       </div>}
-      <div className="relative h-px bg-border/60" aria-hidden>{scanning && x && x.total > 0 && <span className="absolute bottom-0 left-0 h-[2px] rounded-r-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />}</div>
-    </header>
+      <div className="relative h-px bg-border/60">{scanning && x && x.total > 0 && <span role="progressbar" aria-label="捕捞进度" aria-valuemin={0} aria-valuemax={x.total} aria-valuenow={Math.min(x.done, x.total)} className="absolute bottom-0 left-0 h-[2px] rounded-r-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />}</div>
+    </section>
     <div className="min-w-0 space-y-3 px-4 pb-4 pt-3">
-    {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
-      {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
-        <FishCheck disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
-        {EXCHANGE_NAMES[exchange]}
-      </label>)}
-      <label className="flex items-center gap-1.5"><FishCheck checked={includeUsStocks} disabled={running} onChange={e=>p.onSelectionChange({...p.selection,includeUsStocks:e.target.checked})}/>美股</label>
-      <label className="ml-1 flex items-center gap-1.5 border-l border-border/60 pl-4"><FishCheck disabled={running} checked={includeDuplicates} onChange={e => p.onSelectionChange({ ...p.selection, includeDuplicates: e.target.checked })} />含重复币</label>
-    </div>}
-    {(error||multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
-    {x?.error && <p className="text-[11px] text-destructive">{x.error}</p>}
-    {p.auto?.error && <p className="text-[11px] text-destructive/80" data-testid="fish-auto-error">{p.auto.error}</p>}
-    {x?.notice && <p className="break-words text-[10.5px] text-muted-foreground" data-testid="fish-notice">{x.notice}</p>}
-    {/* 【用户要求】2026-10-28「三个模块各自领域内的隶属关系要清晰显示」：算法与新鱼是捕捞的组成部分，收在左侧竖线里、标题小一级（与鱼质量的挖掘 / 过滤 / 监测同一种样式） */}
-    <div className={`${fishRail} space-y-2`} data-testid="fish-catching-parts">
-    <section className="space-y-1.5" data-testid="fish-algorithm-section">
+    <section id="fish-capture-settings" aria-label="捕捞设置" hidden={!open.settings}
+      className="min-w-0 max-w-3xl space-y-3 rounded-lg border border-border/60 bg-background p-3 text-[11px] sm:p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" disabled={running || hitRateRunning} onClick={openCaptureCopy}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+          <Copy aria-hidden className="h-3 w-3"/>从捕捞质量复制设置
+        </button>
+        {p.reconstruction && <button type="button" disabled={running || hitRateRunning || !p.reconstruction.available}
+          title={p.reconstruction.settingsError || '用信号发生前的数据评估各算法'}
+          onClick={async () => {
+            const pending = suggestionRun.current;
+            if (pending) { suggestionController.current?.abort(); await pending.done; }
+            setOpen({ settings: false });
+            await p.reconstruction!.start();
+          }}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+          <History aria-hidden className="h-3 w-3"/>复原
+        </button>}
+      </div>
+      {copyError && <p role="alert" className="text-destructive">{copyError}</p>}
+      <div className={`grid gap-3 ${auto ? 'sm:grid-cols-2' : ''}`}>
+        <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">
+          <legend className="px-1 font-medium">来源市场</legend>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
+            {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
+              <FishCheck disabled={running} checked={exchanges.includes(exchange)} onChange={event => p.onSelectionChange({
+                ...p.selection, exchanges: AUDITED_EXCHANGES.filter(id => id === exchange ? event.target.checked : exchanges.includes(id)),
+              })}/>
+              {EXCHANGE_NAMES[exchange]}
+            </label>)}
+            <label className="flex items-center gap-1.5">
+              <FishCheck disabled={running} checked={includeUsStocks} onChange={event => p.onSelectionChange({ ...p.selection, includeUsStocks: event.target.checked })}/>美股
+            </label>
+            <label className="flex items-center gap-1.5">
+              <FishCheck disabled={running} checked={includeDuplicates} onChange={event => p.onSelectionChange({ ...p.selection, includeDuplicates: event.target.checked })}/>含重复币
+            </label>
+          </div>
+        </fieldset>
+        {auto && <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">
+          <legend className="px-1 font-medium">模式与频率</legend>
+          <div className="flex flex-wrap items-center gap-2">
+            <div role="radiogroup" aria-label="捕捞模式" className="inline-flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5">
+              {(['manual', 'auto'] as const).map(mode => <button key={mode} type="button" role="radio" aria-checked={auto.mode === mode}
+                onClick={() => auto.setMode(mode)}
+                className={`h-6 rounded px-2.5 transition-colors ${auto.mode === mode ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                {mode === 'manual' ? '手动' : '自动'}
+              </button>)}
+            </div>
+            {auto.mode === 'auto' && <span className="relative shrink-0">
+              <select aria-label="自动捕捞间隔" value={auto.hours} onChange={event => auto.setHours(Number(event.target.value))}
+                className="h-7 appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 tabular-nums outline-none hover:bg-muted focus-visible:border-ring/60">
+                {FISH_AUTO_INTERVALS.map(hours => <option key={hours} value={hours}>每 {hours}h</option>)}
+              </select>
+              <ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/>
+            </span>}
+          </div>
+        </fieldset>}
+      </div>
+      <section className="space-y-1.5" data-testid="fish-algorithm-section">
       <div className="flex min-w-0 items-center gap-2"><button type="button" aria-expanded={open.algorithms} aria-controls="fish-algorithms-content" onClick={()=>setOpen({algorithms:!open.algorithms})} className={fishSubHeading}><ListChecks aria-hidden className="h-3 w-3 text-muted-foreground"/><span>算法</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.algorithms?'rotate-180':''}`}/></button>
-        {!open.algorithms&&<span className="min-w-0 truncate text-[10.5px] text-muted-foreground" title={ruleText}>{enabledCardNumbers.length} 个启用{enabledCardNumbers.length>1?` · ${combination==='or'?'并集':'交集'}`:''}</span>}</div>
+      {!open.algorithms&&<span className="min-w-0 truncate text-[10.5px] text-muted-foreground" title={ruleText}>{enabledCardNumbers.length} 个启用{enabledCardNumbers.length>1?` · ${combination==='or'?'并集':'交集'}`:''}</span>}</div>
       <div id="fish-algorithms-content" hidden={!open.algorithms} className="space-y-1.5">
-    <div className="w-fit min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60" data-testid="fish-algorithms">
+      <div className="min-w-0 overflow-hidden rounded-lg border border-border/60" data-testid="fish-algorithms">
       <div className="divide-y divide-border/50">
       <FishAlgorithmCard card={{id:'first',featureId:selected,enabled:firstEnabled,pref}} defs={defs} index={1} locked={running} canDelete={extraCards.length>0} onRecalculate={()=>void calculateSuggestion('manual')} recalculateDisabled={running||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target==='first'} footer={<>
       {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {suggestionStale?suggestion.samples.attempted:library.length} 条）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
       {!suggestion&&suggestionProgress?.status==='running'&&suggestionRun.current?.target==='first'&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
       </>}
-        onChange={next=>{setFirstEnabled(next.enabled);if(next.featureId===selected&&next.pref.direction!==pref.direction){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setPref(cleanPreference(next.pref));saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
-        onDelete={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}/>
+      onChange={next=>{setFirstEnabled(next.enabled);if(next.featureId===selected&&next.pref.direction!==pref.direction){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setPref(cleanPreference(next.pref));saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
+      onDelete={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}/>
       {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onRecalculate={()=>{const target=extraSuggest[i];if(target)void calculateSuggestion('manual',{id:target.id,plan:target.plan});}} recalculateDisabled={running||!p.onSuggest||!extraSuggest[i]} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/50 bg-muted/20 px-2 py-1.5">
-        <button type="button" disabled={running||savingParameters} onClick={()=>void saveParameters()} className="inline-flex h-6 items-center rounded border border-primary/40 px-2 text-[11px] text-primary disabled:opacity-40">{savingParameters?'保存中…':'保存参数'}</button>
-        <span className="text-[10px] text-muted-foreground">保存后跟随账号，直到下次手动修改并保存</span>
-        <button type="button" aria-label="+ 算法" title={`添加一个算法（最多 ${FISH_MAX_ALGORITHMS} 个）`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={running||extraCards.length>=FISH_MAX_ALGORITHMS-1} onClick={()=>setExtraCards(cs=>cs.length>=FISH_MAX_ALGORITHMS-1?cs:[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}><Plus aria-hidden className="h-3 w-3"/>算法</button>
-        {extraCards.length>0&&<div role="radiogroup" aria-label="多重算法合并方式" className="inline-flex h-6 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[10.5px]">
-          {([['and','交集','每个算法都命中才留下'],['or','并集','任一算法命中即留下']] as const).map(([value,text,hint])=><button key={value} type="button" role="radio" aria-checked={combination===value} title={hint} disabled={running&&!(scanning&&p.onLiveCombination)} onClick={()=>{if(value===combination)return;setCombination(value);if(scanning)p.onLiveCombination?.(value);}} className={`h-5 rounded px-2 transition-colors disabled:opacity-50 ${combination===value?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{text}</button>)}
-        </div>}
-        <Popover><PopoverTrigger asChild><button type="button" aria-label="组合说明" title="组合说明" className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] space-y-2 p-3 text-[11px] leading-relaxed" aria-label="组合说明"><p className="font-medium">{combination==='or'?'并集：任一算法命中即留下':'交集：每个算法都命中才留下'}</p><p className="break-words text-muted-foreground" data-testid="fish-rule">{ruleText}</p></PopoverContent></Popover>
+      <button type="button" disabled={running||savingParameters} onClick={()=>void saveParameters()} className="inline-flex h-6 items-center rounded border border-primary/40 px-2 text-[11px] text-primary disabled:opacity-40">{savingParameters?'保存中…':'保存参数'}</button>
+      <span className="text-[10px] text-muted-foreground">保存后跟随账号，直到下次手动修改并保存</span>
+      <button type="button" aria-label="+ 算法" title={`添加一个算法（最多 ${FISH_MAX_ALGORITHMS} 个）`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={running||extraCards.length>=FISH_MAX_ALGORITHMS-1} onClick={()=>setExtraCards(cs=>cs.length>=FISH_MAX_ALGORITHMS-1?cs:[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}><Plus aria-hidden className="h-3 w-3"/>算法</button>
+      {extraCards.length>0&&<div role="radiogroup" aria-label="多重算法合并方式" className="inline-flex h-6 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[10.5px]">
+      {([['and','交集','每个算法都命中才留下'],['or','并集','任一算法命中即留下']] as const).map(([value,text,hint])=><button key={value} type="button" role="radio" aria-checked={combination===value} title={hint} disabled={running&&!(scanning&&p.onLiveCombination)} onClick={()=>{if(value===combination)return;setCombination(value);if(scanning)p.onLiveCombination?.(value);}} className={`h-5 rounded px-2 transition-colors disabled:opacity-50 ${combination===value?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{text}</button>)}
+      </div>}
+      <Popover><PopoverTrigger asChild><button type="button" aria-label="组合说明" title="组合说明" className={fishInfoTrigger}><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] space-y-2 p-3 text-[11px] leading-relaxed" aria-label="组合说明"><p className="font-medium">{combination==='or'?'并集：任一算法命中即留下':'交集：每个算法都命中才留下'}</p><p className="break-words text-muted-foreground" data-testid="fish-rule">{ruleText}</p></PopoverContent></Popover>
       </div>
-    </div>
-    {staleRound&&!running&&<p className="text-[10.5px] text-muted-foreground" data-testid="fish-stale-round">{staleText}</p>}
-    {p.reconstruction&&<FishReconstructionResults state={p.reconstruction}/>}
       </div>
+      {staleRound&&!running&&<p className="text-[10.5px] text-muted-foreground" data-testid="fish-stale-round">{staleText}</p>}
+      </div>
+      </section>
+      <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">
+        <legend className="px-1 font-medium">插针与成交额</legend>
+        <FishWickSettings key={`${owner}:${captureCopyRevision}`} value={downwardWick} locked={running} turnover={turnover}
+          onSaveTurnover={async value => { await saveTurnover(value); toast.success('成交额设置已保存'); }}
+          onSave={async value => { await saveDownwardWick(value); toast.success('插针回看设置已保存'); }}/>
+      </fieldset>
+      <details className="rounded-md border border-border/60 p-3">
+        <summary className="cursor-pointer font-medium">默认展开</summary>
+        <div className="pt-2"><FishCaptureOpenSettings value={readCatchingDefault()} onSave={saveCaptureOpening}/></div>
+      </details>
+      {p.notify && <details className="rounded-md border border-border/60 p-3">
+        <summary className="cursor-pointer font-medium">邮件提醒</summary>
+        <div className="pt-2"><FishNotifySettings notify={p.notify} algorithms={[
+          ...pool.map(plan => fishEmailAlgorithm({ featureId: plan.def.id, featureShort: plan.def.short, statistic: plan.settings.statistic, definitionKey: definitionKey(plan.def) })),
+          ...p.signals.flatMap(signal => qualityMembers(signal).map(fishEmailAlgorithm)),
+        ].filter((a): a is NonNullable<typeof a> => Boolean(a))}/></div>
+      </details>}
     </section>
+    {(error||multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
+    {x?.error && <p className="text-[11px] text-destructive">{x.error}</p>}
+    {p.auto?.error && <p className="text-[11px] text-destructive/80" data-testid="fish-auto-error">{p.auto.error}</p>}
+    {x?.notice && <p className="break-words text-[10.5px] text-muted-foreground" data-testid="fish-notice">{x.notice}</p>}
+    {/* 捕捞质量与捕捞进程同属捕捞；结果保留在设置卡之外。 */}
+    <div className={`${fishRail} space-y-2`} data-testid="fish-catching-parts">
+    {p.reconstruction && <FishReconstructionResults state={p.reconstruction}/>}
     {p.onTestHitRate && <section aria-labelledby="fish-capture-quality-title" className="min-w-0 text-[11px]">
       <div className="flex min-w-0 items-center gap-2">
         <h3>

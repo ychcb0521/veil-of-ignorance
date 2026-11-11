@@ -14,6 +14,7 @@ export interface FishMiningScanConfig {
   downwardWick: FishDownwardWick;
   turnover: FishTurnoverSettings;
   lookbackHours: number | null;
+  continuous?: true;
 }
 export interface FishMiningState {
   version: 1; enabled: boolean; startMs: number; stepMs: number;
@@ -93,6 +94,13 @@ export function mergeMiningStates(localRaw: unknown, remoteRaw: unknown): FishMi
     lastRunAt: Math.max(a.lastRunAt ?? 0, b.lastRunAt ?? 0) || null, lastError: failure.lastError, retryAt: failure.retryAt, retryCount: failure.retryCount, lastErrorAt: failure.lastErrorAt, errorKind: failure.errorKind,
     rules: settings.rules.length ? settings.rules : far.rules, selection: settings.selection ?? far.selection,
     minedKeys, mined: Math.max(a.mined, b.mined, minedKeys.length), savedAt: Math.max(a.savedAt ?? 0, b.savedAt ?? 0) || undefined };
+}
+
+export function nextMiningAnchor(state: FishMiningState, anchorMs: number): number {
+  const next = anchorMs + state.stepMs;
+  return state.scan?.continuous && state.endMs != null && anchorMs < state.endMs
+    ? Math.min(next, state.endMs)
+    : next;
 }
 
 export const MINING_RETRY_MS = 2 * 60_000;

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import { isSellerFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishScanSettings } from '@/lib/fishScanner';
+import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { compileFishProgram } from './algorithm';
 import { validateFishDownwardWick } from './downwardWick';
 import { AUDITED_EXCHANGES, type FishExchange } from './exchanges';
@@ -41,6 +43,16 @@ export type FishHitRateSettings = z.infer<typeof settingsSchema>;
 export function readFishHitRateSettings(value: unknown): FishHitRateSettings | null {
   const parsed = settingsSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+export function readSavedFishHitRateSettings(): FishHitRateSettings {
+  let value: unknown;
+  try {
+    value = JSON.parse(readPersistedStateRaw(getUserPrefix() + FISH_HIT_RATE_SETTINGS_KEY) ?? 'null');
+  } catch { /* Unreadable settings are treated as unavailable. */ }
+  const saved = readFishHitRateSettings(value);
+  if (!saved) throw new Error('请先在「捕捞质量 → 漏报测试 → 测试设置」保存独立设置');
+  return saved;
 }
 
 export function newHitRatePreference(featureId: string): FishCard['pref'] {

@@ -93,7 +93,7 @@ function FishMiningRecords({ onJump, canJump, onSelectInTable,librarySource,onCl
   };
   return <FishLibraryDialog embedded name="挖掘库" roundLabel="档位" rounds={options} placeholder="搜索标的、挖掘时间、指标或门槛…" onOpenChange={next => { if(!next)onClose(); setTableError(''); if (!next) setSelected(new Set()); }}
     description={`${items.length} 条信号 · ${library.anchors.length} 档${errors ? ` · ${errors} 档出错` : ''}`}
-    info={<><p>批量挖掘按各轮设置的间隔逐档记录：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起，每 {latestRun.stepMs / 3_600_000} 小时一档</p>}</>}
+    info={<><p>批量挖掘逐档记录：扫到几条、新增几条、出错原因；挖到的每条信号保存当时的读数快照。命中算法逐条显示具体序列、方向、门槛、周期与历史公式版本，可展开核对公式和参数。</p><p>挖掘库、鱼舱和信号库独立并行，均可进入过滤库与监测库。删除一个来源不影响另两个库；同标的、同信号和入场时刻的下游结果合并显示，仍有其他来源时保留。「挖掘时间」是实际挖到信号的北京时间。每轮结果单独保留，同一轮内相同档位与算法条件的重复记录合并显示。可搜索旧门槛，再勾选要删除的记录。随账号保存。</p>{latestRun && <p className="text-muted-foreground">挖掘方案：{runText(latestRun)}；从 {short(latestRun.startMs)} 起，{latestRun.scan?.continuous ? '连续挖掘' : `每 ${latestRun.stepMs / 3_600_000} 小时一档`}</p>}</>}
     headers={['标的', '信号时间', '挖掘档位', '命中算法', '读数', '挖掘时间']}
     sortColumn={{ label: '挖掘时间', direction, toggle: () => setDirection(current => current === 'descending' ? 'ascending' : 'descending') }}
     items={items} match={match} detail={tableError && <p role="alert" className="text-xs text-destructive">{tableError}</p>}

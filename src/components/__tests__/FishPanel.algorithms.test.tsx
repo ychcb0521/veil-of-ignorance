@@ -10,7 +10,7 @@ const start=vi.fn(),custom:DeepDigFeatureDef={...CBI2_DEF,id:'custom-fish',short
 function Harness(){const [inputs,onInputsChange]=useState({time:'',threshold:'.3'}),[selection,onSelectionChange]=useState<FishPanelProps['selection']>({exchanges:['binance'],includeDuplicates:false});return <FishPanel signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;}
 const save=(defs:DeepDigFeatureDef[])=>{const key=getUserPrefix()+FEATURES_KEY;localStorage.setItem(key,JSON.stringify(defs));act(()=>notifyPersistedStateHydrated(key));};
 // 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已给 CBI-2 填过 0.3 测其余流程
-beforeEach(()=>{localStorage.clear();start.mockReset();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
+beforeEach(()=>{localStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));start.mockReset();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
 describe('渔的通用算法设置',()=>{
  it('共享目录：新增项出现，removed消失，错误公式和超12000根置灰并显示原因；默认CBI2缺失选第一项',()=>{
   render(<Harness/>);expect(screen.getByLabelText('捕捞算法')).toHaveValue('cbi2');save([custom,{...custom,id:'bad',name:'错误公式',formula:'missing_name'},{...custom,id:'huge',name:'过长历史',formula:'avg(C,10000)'}]);expect(screen.getByRole('option',{name:/Z · 新增特征/})).toBeEnabled();expect(screen.getByRole('option',{name:/错误公式/})).toBeDisabled();for(const option of screen.getAllByRole('option',{name:/过长历史/})){expect(option).toBeDisabled();expect(option).toHaveTextContent('12000');}save([{...CBI2_DEF,removed:true},{...custom,removed:true}]);expect(screen.queryByRole('option',{name:/新增特征/})).not.toBeInTheDocument();expect(screen.getByLabelText('捕捞算法')).toHaveValue('drift-speed');
@@ -28,4 +28,4 @@ describe('渔的通用算法设置',()=>{
  });
 });
 
-it('美股范围默认不勾选，用户可开启并传入冻结的本轮设置',()=>{render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));expect(screen.getByRole('checkbox',{name:'美股'})).not.toBeChecked();fireEvent.click(screen.getByRole('checkbox',{name:'美股'}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(start).toHaveBeenCalledWith(expect.objectContaining({includeUsStocks:true}));});
+it('美股范围默认不勾选，用户可开启并传入冻结的本轮设置',()=>{render(<Harness/>);expect(screen.getByRole('checkbox',{name:'美股'})).not.toBeChecked();fireEvent.click(screen.getByRole('checkbox',{name:'美股'}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(start).toHaveBeenCalledWith(expect.objectContaining({includeUsStocks:true}));});

@@ -18,7 +18,7 @@ import { queueSimStatePush } from '@/lib/simStateSync';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { FISH_DEFAULT_RULES } from './defaultRules';
 import { fishCatchKey } from './records';
-import { MINING_CONFIGURED_ROUND_KEY, MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, normalizeMiningState, newMiningState, type FishMiningRule, type FishMiningState } from './miningState';
+import { MINING_CONFIGURED_ROUND_KEY, MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, normalizeMiningState, newMiningState, nextMiningAnchor, type FishMiningRule, type FishMiningState } from './miningState';
 export * from './miningState';
 
 export const miningKey = (logicalKey = MINING_LOGICAL_KEY) => `${getUserPrefix()}${logicalKey}`;
@@ -53,11 +53,15 @@ export function reconcileMiningWithFish(state: FishMiningState, signals: readonl
   if (!mined.length) return state;
   const lastAnchor = Math.max(...mined.map(s => s.mined!.anchorMs));
   const seen = new Set(state.minedKeys), fresh = mined.map(fishCatchKey).filter(k => !seen.has(k) && (seen.add(k), true));
-  if (lastAnchor + state.stepMs <= state.cursorMs && !fresh.length) return state;
-  const cursorMs = Math.max(state.cursorMs, lastAnchor + state.stepMs);
+  const next = nextMiningAnchor(state, lastAnchor);
+  if (next <= state.cursorMs && !fresh.length) return state;
+  const cursorMs = Math.max(state.cursorMs, next);
+  const recoveredAnchors = state.scan?.continuous
+    ? Math.ceil((lastAnchor - state.startMs) / state.stepMs) + 1
+    : Math.round((cursorMs - state.startMs) / state.stepMs);
   const minedKeys = [...state.minedKeys, ...fresh];
   return { ...state, cursorMs, minedKeys, mined: Math.max(state.mined, minedKeys.length),
-    anchorsDone: Math.max(state.anchorsDone, Math.round((cursorMs - state.startMs) / state.stepMs)),
+    anchorsDone: Math.max(state.anchorsDone, recoveredAnchors),
     lastAnchorMs: Math.max(state.lastAnchorMs ?? -Infinity, lastAnchor) };
 }
 /** 现在该扫的锚点：开着、没到目标、锚点已经过去；否则 null。 */
@@ -83,7 +87,8 @@ export function acceptMinedAnchor(state: FishMiningState, found: readonly TradeS
     const mined = state.round ? { anchorMs, roundId: state.round.id } : { anchorMs };
     added.push({ ...signal, id: `${raw.id}|mine:${occurrence}`, fishArchive: { id: `mine-${occurrence}`, at: now }, caughtAt: now, mined });
   }
-  return { added, state: { ...state, ...(state.endMs!=null&&anchorMs+state.stepMs>state.endMs?{enabled:false}:{}), cursorMs: anchorMs + state.stepMs, mined: state.mined + added.length, anchorsDone: state.anchorsDone + 1,
+  const cursorMs = nextMiningAnchor(state, anchorMs);
+  return { added, state: { ...state, ...(state.endMs != null && cursorMs > state.endMs ? { enabled: false } : {}), cursorMs, mined: state.mined + added.length, anchorsDone: state.anchorsDone + 1,
     minedKeys: [...state.minedKeys, ...added.map(fishCatchKey)], lastAnchorMs: anchorMs, lastRunAt: now, lastError: '', retryAt:null,retryCount:0,lastErrorAt:null,errorKind:undefined } };
 }
 /** 同一台电脑开着多个标签页时只让一个去挖。 */

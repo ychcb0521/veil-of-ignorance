@@ -8,7 +8,7 @@ import {initialFishProgress} from '@/lib/fishScanner';
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>[CBI2_DEF]}));
 const start=vi.fn();
 const panel=()=><FishPanel signals={[]} progress={null} inputs={{time:'',threshold:'.3'}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;
-beforeEach(()=>{localStorage.clear();sessionStorage.clear();start.mockClear();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
+beforeEach(()=>{localStorage.clear();sessionStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));start.mockClear();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
 const rule=()=>{const b=screen.getByRole('button',{name:'组合说明'});if(b.getAttribute('aria-expanded')!=='true')fireEvent.click(b);return screen.getByTestId('fish-rule');};
 it('两个及以上算法时可选交集 / 并集：默认交集；选并集后规则写「或」、开始捕捞沿用并集；跟账号记住',async()=>{
  render(panel());expect(screen.queryByLabelText('多重算法合并方式')).toBeNull();

@@ -22,6 +22,19 @@ it('scans both interval boundaries, stops permanently after its last anchor and 
  expect(readMiningState()).toMatchObject({endMs,anchorsDone:2});expect(localStorage.getItem(miningKey(MINING_RANGE_LOGICAL_KEY))).not.toBeNull();
  await flush(10*MINING_STEP_MS);expect(mine).toHaveBeenCalledTimes(2);
 });
+it('scans a partial final window without changing the preceding cadence or running beyond the end', async () => {
+  const { h, mine } = setup();
+  const startMs = MINING_START_MS, hour = 3_600_000, endMs = startMs + 2.5 * hour;
+  const rules = currentDefaultRulesForRange();
+  const defaults = initialMiningSettings(newMiningState(), selection);
+  const settings = { ...defaults, rules, target: 100, scan: { ...defaults.scan, lookbackHours: 1 } };
+  act(() => h.result.current.restart({ startMs, endMs, target: 100, rules, settings }));
+  await flush(20);
+  expect(mine.mock.calls.map(([scan]) => scan.anchorMs)).toEqual([startMs, startMs + hour, startMs + 2 * hour, endMs]);
+  expect(readMiningState()).toMatchObject({ stepMs: hour, endMs, enabled: false, anchorsDone: 4 });
+  await flush(hour);
+  expect(mine).toHaveBeenCalledTimes(4);
+});
 const currentDefaultRulesForRange=()=>newMiningState().rules.length?newMiningState().rules:[{id:'bounded',featureId:'cbi2',statistic:'结果',threshold:'0.04'}];
 it('rejects a reversed time range before stopping or replacing the current round',async()=>{
  const {h,mine,stop}=setup();const before=readMiningState();act(()=>h.result.current.restart({startMs:MINING_START_MS,endMs:MINING_START_MS-1,target:100,rules:currentDefaultRulesForRange()}));await flush();
@@ -34,12 +47,13 @@ function setup(o: { mine?: (s: any) => Promise<TradeSignal[]>; busy?: () => bool
   return { h, mine, commit, list, onMined, stop };
 }
 
-it('freezes independently saved conditions, applies the configured cadence, and resumes with the frozen conditions', async () => {
+it('freezes independently saved conditions, automatically advances by the lookback, and resumes with the frozen conditions', async () => {
   const { h, mine } = setup();
   const settings = initialMiningSettings(newMiningState(), selection);
   settings.rules = [{ ...currentDefaultRulesForRange()[0], direction: '<' }];
   settings.selection = { exchanges: ['okx'], includeDuplicates: true };
-  settings.stepMs = MINING_STEP_MS / 2;
+  settings.stepMs = MINING_STEP_MS / 2; // Legacy profile cadence is ignored for a new round.
+  const stepMs = 3 * 3_600_000;
   settings.target = 2;
   settings.scan = { ...settings.scan, combination: 'and', lookbackHours: 3,
     downwardWick: { enabled: false, hours: 9, atrMultiple: 2 },
@@ -49,17 +63,17 @@ it('freezes independently saved conditions, applies the configured cadence, and 
   expect(mine).not.toHaveBeenCalled();
   act(() => h.result.current.start());
   await flush(20);
-  expect(mine.mock.calls.map(call => call[0].anchorMs)).toEqual([MINING_START_MS, MINING_START_MS + settings.stepMs]);
+  expect(mine.mock.calls.map(call => call[0].anchorMs)).toEqual([MINING_START_MS, MINING_START_MS + stepMs]);
   expect(mine.mock.calls[0][0]).toMatchObject({ exchanges: ['okx'], includeDuplicates: true, lookbackHours: 3,
     combination: 'and', turnoverFloors: [], downwardWick: settings.scan.downwardWick, algorithm: { direction: '<' } });
-  expect(readMiningState()).toMatchObject({ scan: settings.scan, anchorsDone: 2 });
+  expect(readMiningState()).toMatchObject({ scan: { ...settings.scan, continuous: true }, stepMs, anchorsDone: 2 });
   expect(localStorage.getItem(miningKey(MINING_CONFIGURED_ROUND_KEY))).not.toBeNull();
   act(() => h.result.current.pause());
   saveMiningSettings({ ...settings, stepMs: MINING_STEP_MS, selection, scan: { ...settings.scan, lookbackHours: 7 } });
   act(() => h.result.current.setTarget(3));
   act(() => h.result.current.start());
   await flush(20);
-  expect(mine.mock.calls[2][0]).toMatchObject({ anchorMs: MINING_START_MS + 2 * settings.stepMs, exchanges: ['okx'], lookbackHours: 3 });
+  expect(mine.mock.calls[2][0]).toMatchObject({ anchorMs: MINING_START_MS + 2 * stepMs, exchanges: ['okx'], lookbackHours: 3 });
 });
 
 it('does nothing until started, then backfills anchor after anchor with the four default algorithms (union: any one hit is mined)', async () => {
