@@ -1,7 +1,7 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_K_TOUCH_VERSION} from '@/lib/fish/qualityAddition';
 import {DBL5_GUARD_DEFAULTS} from '@/lib/dbl5m';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { defaultBreakevenFloor, defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
 import {useSettingsImageCapture} from './SettingsImageExport';
@@ -153,11 +153,26 @@ function Part({title,role,info,children,testId}:{title:string;role:string;info:R
  </section>;
 }
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
-export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number}) {
+export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean}) {
  const imageCapture=useSettingsImageCapture();
  const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(defs),[defs]);
  const features=[...new Map(choices.map(c=>[c.featureId,c.group])).entries()];
  const [selectedRound,setSelectedRound]=useState(0),count=Math.min(100,Math.max(1,Math.floor(Number(all.maxRounds)||1))),index=imageRound??Math.min(selectedRound,count-1);
+ const roundIndices = Array.from({length:count}, (_, round) => round);
+ const showRoundTabs = !stickyRounds || count <= 8;
+ function navigateRoundTabs(event: KeyboardEvent<HTMLButtonElement>, round: number) {
+  let next: number;
+  switch (event.key) {
+   case 'ArrowLeft': next = (round + count - 1) % count; break;
+   case 'ArrowRight': next = (round + 1) % count; break;
+   case 'Home': next = 0; break;
+   case 'End': next = count - 1; break;
+   default: return;
+  }
+  event.preventDefault();
+  setSelectedRound(next);
+  event.currentTarget.parentElement?.querySelectorAll('button')[next]?.focus({preventScroll:true});
+ }
  const current=index?all.otherRounds[index-1]??all:all,d={...all,...current};
  const patch=(p:Partial<AdditionDraft>)=>{if('enabled' in p){setDraft({...all,...p});return;}if(!index){setDraft({...all,...p});return;}const others=Array.from({length:Math.max(count-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));others[index-1]={...current,...p};setDraft({...all,otherRounds:others});};
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
@@ -213,8 +228,23 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </FishQualityInfo></div><label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"><input aria-label="启用条件加仓" type="checkbox" checked={d.enabled} onChange={e=>patch({enabled:e.target.checked})} className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"/>启用</label></div>
   <label className="flex flex-wrap items-center gap-2 text-[11px]">加仓执行口径<select aria-label="加仓执行口径" className={field} value={all.positionVersion??'legacy-mirror'} onChange={e=>setDraft({...all,positionVersion:e.target.value==='legacy-mirror'?undefined:HOLDING_LEDGER_ADDITION_VERSION})}><option value={HOLDING_LEDGER_ADDITION_VERSION}>通用持仓账 · 镜像可选</option><option value="legacy-mirror">历史口径 · 镜像成交后</option></select></label>
   <p className="text-[10.5px] leading-relaxed text-muted-foreground">{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'镜像不是加仓前提。未发生卖出时，按全部实际持仓、落袋盈亏 0 计算；发生镜像或减仓后，按当时余仓、剩余成本及已实现净盈亏计算。预算不足或已清仓时不加仓。':'此方案保留历史镜像前置规则。需要无镜像加仓时，选择通用持仓账并保存新方案或副本；旧模板和历史轮次不变。'}</p>
-  <div className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-2 text-[11px] text-muted-foreground">最多加仓<input aria-label="最多加仓次数" type="number" min="1" max="100" step="1" disabled={!d.enabled} value={all.maxRounds} onChange={e=>setLimit(e.target.value)} className={field+' w-16'}/>次</label>
-   <div role="tablist" aria-label="选择加仓轮次" className="flex flex-wrap gap-1">{Array.from({length:count},(_,i)=><button key={i} type="button" role="tab" aria-selected={index===i} className={`rounded px-2 py-1 text-[11px] ${index===i?'bg-primary/15 text-primary':'bg-muted/40 text-muted-foreground hover:bg-muted'}`} onClick={()=>setSelectedRound(i)}>第 {i+1} 次</button>)}</div></div>
+  <div className={`flex flex-wrap items-center gap-2 ${stickyRounds ? 'addition-round-picker' : ''}`}>
+   <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+    最多加仓<input aria-label="最多加仓次数" type="number" min="1" max="100" step="1" disabled={!d.enabled} value={all.maxRounds} onChange={e=>setLimit(e.target.value)} className={field+' w-16'}/>次
+   </label>
+   {showRoundTabs && <div role="tablist" aria-label="选择加仓轮次" className="addition-round-tabs flex flex-wrap gap-1">
+    {roundIndices.map(round => <button key={round} type="button" role="tab" aria-selected={index===round}
+     className={`rounded px-2 py-1 text-[11px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring ${index===round?'bg-primary/15 text-primary':'bg-muted/40 text-muted-foreground hover:bg-muted'}`}
+     tabIndex={index===round ? 0 : -1} onKeyDown={event=>navigateRoundTabs(event,round)}
+     onClick={()=>setSelectedRound(round)}>第 {round+1} 次</button>)}
+   </div>}
+   {/* The selected tab already supplies the round label to the image export when both controls exist. */}
+   {stickyRounds && <select aria-label="选择加仓轮次" value={index} onChange={e=>setSelectedRound(Number(e.target.value))}
+    className={field+' addition-round-select'} data-compact-only={showRoundTabs ? '' : undefined}
+    data-settings-image-skip={showRoundTabs ? '' : undefined}>
+    {roundIndices.map(round => <option key={round} value={round}>第 {round+1} 次</option>)}
+   </select>}
+  </div>
 
   <Part title="方向" role="必要不充分 · 位置那一刻须全部满足" testId="addition-prerequisites" info={<p>方向条件本身不会触发加仓：只有在「位置」达到的那一刻，下列指标和涨幅门槛全部满足，这次加仓才成立；不满足就等下一个位置。指标只读当时最后一根已收盘 K 线。涨幅门槛＝那一刻收盘价相对最新成本线 S 的涨幅（首轮 S 为首次买入价，之后为上一次加仓的 K）。探测算法：这条信号的原探测算法（或只选其中一个）在那一刻的读数，须沿原探测方向达到原门槛再提高 x%（调整量＝原门槛绝对值 × x%，原门槛为 0 时按 1 个单位）；信号没有所选的探测算法就不加仓。</p>}>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
@@ -328,6 +358,6 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </Part>
   {!!all.laterSellStages?.length&&<p className="text-[10px] text-muted-foreground">另有 {all.laterSellStages.length} 个卖出切换设在第 {all.laterSellStages.map(s=>s.afterAdditions).join('、')} 次加仓后，超过最多加仓次数，暂不生效（已保留）。</p>}
   {!!vetoStages?.stages.some(s=>Number(s.afterAdditions)>count)&&<p className="text-[10px] text-muted-foreground">另有否决条件设在第 {vetoStages.stages.filter(s=>Number(s.afterAdditions)>count).map(s=>s.afterAdditions).join('、')} 次加仓后，超过最多加仓次数，暂不生效（已保留）。</p>}
-  {imageCapture&&imageRound==null&&<div hidden data-settings-image-include="">{Array.from({length:count},(_,i)=>i===index?null:<div key={i}><h4>第 {i+1} 次加仓 · 完整条件</h4><FishQualityAdditionEditor draft={all} setDraft={()=>{}} vetoStages={vetoStages} setVetoStages={()=>{}} imageRound={i}/></div>)}</div>}
+  {imageCapture&&imageRound==null&&<div hidden data-settings-image-include="">{roundIndices.map(i=>i===index?null:<div key={i}><h4>第 {i+1} 次加仓 · 完整条件</h4><FishQualityAdditionEditor draft={all} setDraft={()=>{}} vetoStages={vetoStages} setVetoStages={()=>{}} imageRound={i}/></div>)}</div>}
  </section>;
 }
