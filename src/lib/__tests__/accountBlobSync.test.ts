@@ -289,3 +289,16 @@ it.each([false,true])('restores a 55-part archive under the server response limi
  put('idb:test-blob',{v:1,rev,parts:55,savedAt:Date.now(),enc:'json',bytes:json.length});parts.forEach((data,i)=>put('idb:test-blob#'+i,{rev:mixed&&i===30?'interrupted-revision':rev,data}));cloud.state.maxReadKeys=4;
  const a=await device();expect(await a.mod.syncAccountBlobOnLoad(a.adapter,'u1',6000)).toBe(mixed?'failed':'adopted');expect(a.local.value).toEqual(mixed?undefined:value);expect(cloud.state.upserts).toHaveLength(0);
 });
+
+it('can explicitly retry a settled lookup when an archive body arrives after its directory', async () => {
+  const reader = await device();
+  expect(await reader.mod.syncAccountBlobOnLoad(reader.adapter, 'u1')).toBe('unchanged');
+  const writer = await device({ items: [42] });
+  await writer.reopen();
+  expect(await reader.mod.syncAccountBlobOnLoad(reader.adapter, 'u1')).toBe('unchanged');
+  expect(reader.local.value).toBeUndefined();
+  expect(await reader.mod.syncAccountBlobOnLoad(reader.adapter, 'u1', undefined, true)).toBe('adopted');
+  expect(reader.local.value).toEqual({ items: [42] });
+  reader.mod.__resetAccountBlobSyncForTests();
+  writer.mod.__resetAccountBlobSyncForTests();
+});

@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { FishScanner, type FishScanSettings } from '@/lib/fishScanner';
+import { makeFishMissRound, fishMissRoundSummary, mergeFishMissDirectories } from '@/lib/fish/hitRateMissLibrary';
 import { FISH_TURNOVER_FLOORS } from '@/lib/fish/shared';
 import { countFishMarketHits, fishMarketHits, runFishHitRate, screeningHitRateSamples, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
 import { CBI2_DEF } from '@/lib/deepDig/features';
@@ -187,4 +188,24 @@ it('anchors selected screening records to their original signal time and dedupli
   await run('targets', selected);
   expect(windows[0]).toMatchObject({ startMs: startTime, anchorMs: anchor, rows: [{ status: 'hit' }] });
   expect(record.matchedAt).toBe(matchedAt);
+});
+
+it('archives only misses and retains the original sample time, cutoff and diagnostic evidence', async () => {
+  const { run, windows } = setup();
+  await run('targets', [sample('EARLY'), sample('ENDED'), sample('BROKEN'), sample('WICK'), sample('THIN')], 'or', true,
+    { turnoverFloors: FISH_TURNOVER_FLOORS });
+  const meta = { id: 'round-1', completedAt: anchor + HOUR, mode: 'targets' as const, window: { beforeHours: 2.5, afterHours: 2.5 } };
+  const archive = makeFishMissRound(meta, windows)!;
+  expect(archive.count).toBe(3);
+  expect(archive.windows[0]).toMatchObject({ startMs: startTime, anchorMs: anchor, hits: [], rows: [
+    { status: 'miss', sample: { symbol: 'ENDEDUSDT', timeMs: sampleTime }, thresholds: expect.any(Array) },
+    { status: 'miss', sample: { symbol: 'WICKUSDT', timeMs: sampleTime }, wick: { candles: expect.any(Array) } },
+    { status: 'miss', sample: { symbol: 'THINUSDT', timeMs: sampleTime }, turnover: expect.any(Array) },
+  ] });
+  expect(makeFishMissRound(meta, [{ ...windows[0], rows: windows[0].rows.filter(row => row.status !== 'miss') }])).toBeNull();
+  expect(windows[0].rows).toHaveLength(5);
+  const summary = fishMissRoundSummary(archive);
+  expect(summary).not.toHaveProperty('windows');
+  const second = { ...summary, id: 'round-2', completedAt: summary.completedAt + 1 };
+  expect(mergeFishMissDirectories({ version: 1, rounds: [summary] }, { version: 1, rounds: [summary, second] }).rounds).toEqual([second, summary]);
 });

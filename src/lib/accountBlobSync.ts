@@ -402,25 +402,29 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
   return 'adopted';
 }
 
-const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { state: 'open' | 'adopting' | 'closed' } }>();
+const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { state: 'open' | 'adopting' | 'closed' }; settled: boolean }>();
 /**
  * 本机存储读取前调用：每页每个账号对一次账，最多等 6 秒；
  * 超时就先用本机那份（之后的对账不再改本机数据，下次打开再来）。
  */
-export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: string | null | undefined, timeoutMs = LOAD_TIMEOUT_MS): Promise<AccountBlobSyncStatus> {
+export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: string | null | undefined, timeoutMs = LOAD_TIMEOUT_MS, refresh = false): Promise<AccountBlobSyncStatus> {
   if (!owner) return Promise.resolve('skipped');
   adapters.set(adapter.name, adapter);
   const id = idOf(adapter.name, owner);
   let entry = loads.get(id);
+  if (refresh && entry?.settled) { loads.delete(id); entry = undefined; }
   if (!entry) {
     const gate: { state: 'open' | 'adopting' | 'closed' } = { state: 'open' };
     const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; return true; }))
       .catch((error): AccountBlobSyncStatus => { console.warn('[账号研究] 恢复未完成', adapter.name, error instanceof Error ? error.message : '读取失败'); return 'failed'; });
-    const created = { task, gate };
+    const created = { task, gate, settled: false };
     loads.set(id, created);
     entry = created;
     // 失败或没赶上：下次打开再对账。
-    void task.then(status => { if ((status === 'failed' || status === 'skipped') && loads.get(id) === created) loads.delete(id); });
+    void task.then(status => {
+      created.settled = true;
+      if ((status === 'failed' || status === 'skipped') && loads.get(id) === created) loads.delete(id);
+    });
   }
   const { task, gate } = entry;
   // 正在把云端那份写进本机时不能放行（否则页面读到旧的、之后又拿旧的盖回去）；其余情况超时即先用本机。
