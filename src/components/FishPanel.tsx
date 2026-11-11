@@ -121,6 +121,9 @@ export function FishPanel(p: FishPanelProps) {
   });
 
   const owner=getUserPrefix();
+  const jumpQuality = (source: TradeSignal) => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id);
+  const canJumpQuality = (source: TradeSignal) => !p.jumpingSignalId && !!signalChartSymbol(source)
+    && (!!p.onJumpQuality || p.signals.some(signal => signal.id === source.id));
   const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback, downwardWick, saveDownwardWick, turnover, saveTurnover}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
   const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
@@ -502,7 +505,7 @@ export function FishPanel(p: FishPanelProps) {
         {!open.hitRate && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
       </div>
       <div id="fish-hit-rate" role="region" aria-labelledby="fish-hit-rate-title" hidden={!open.hitRate} className="min-w-0">
-        <FishHitRateTest key={owner} screening={p.quality?.preEntry} directoryEdits={p.quality?.study.monitorLibrary?.directoryEdits} captureSettings={captureHitRateSettings} defs={defs} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
+        <FishHitRateTest key={owner} quality={p.quality} onJump={jumpQuality} canJump={canJumpQuality} captureSettings={captureHitRateSettings} defs={defs} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
       </div>
       </div>
     </section>}
@@ -517,6 +520,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} info={<><p><a href="/guide#fish-cabin" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">阅读完整说明 · 3.3.3 鱼舱</a></p><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onRate={p.onRateQuality} onJump={source => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id)} canJump={source => !p.jumpingSignalId && !!signalChartSymbol(source) && (!!p.onJumpQuality || p.signals.some(s => s.id === source.id))}/></ModuleErrorBoundary>}
+    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality}/></ModuleErrorBoundary>}
   </section>;
 }

@@ -963,8 +963,26 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */
-function ArchivedQualityBoard({study,onJump,canJump}:{study:FishQualityStudy;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean}){
- const [selection,setSelection]=useState(study.selectedRowIds??[]);
- const state=useMemo(()=>{const noop=()=>{},asyncNoop=async()=>{};return {study:{...study,selectedRowIds:selection},ready:true,running:false,progress:null,filterRunning:false,filterProgress:null,filterError:'',warning:'',error:'',start:asyncNoop,restart:asyncNoop,cancel:noop,startFilter:asyncNoop,cancelFilter:noop,clearFilterResults:noop,clearMonitorResults:noop,setRule:noop,setCombo:noop,setObserveHours:noop,selectSell:noop,setSelectedRows:(ids:readonly string[])=>setSelection([...ids]),setPriority:noop,setScope:noop,setFilters:noop,setHoldingVetoes:noop,setSellPlans:noop} satisfies FishQualityState;},[study,selection]);
- return <FishQuality archiveView state={state} onJump={onJump} canJump={canJump}/>;
+export function ArchivedQualityBoard({ study, onJump, canJump, selection }: {
+  study: FishQualityStudy;
+  onJump?: (source: TradeSignal) => void;
+  canJump?: (source: TradeSignal) => boolean;
+  selection?: { rowIds: string[]; onChange: (ids: readonly string[]) => void };
+}) {
+  const [localSelection, setLocalSelection] = useState(study.selectedRowIds ?? []);
+  const selectedRowIds = selection?.rowIds ?? localSelection;
+  const onSelectionChange = selection?.onChange;
+  const state = useMemo(() => {
+    const noop = () => {};
+    const asyncNoop = async () => {};
+    return {
+      study: { ...study, selectedRowIds }, ready: true, running: false, progress: null,
+      filterRunning: false, filterProgress: null, filterError: '', warning: '', error: '',
+      start: asyncNoop, restart: asyncNoop, cancel: noop, startFilter: asyncNoop, cancelFilter: noop,
+      clearFilterResults: noop, clearMonitorResults: noop, setRule: noop, setCombo: noop, setObserveHours: noop, selectSell: noop,
+      setSelectedRows: (ids: readonly string[]) => { if (onSelectionChange) onSelectionChange(ids); else setLocalSelection([...ids]); },
+      setPriority: noop, setScope: noop, setFilters: noop, setHoldingVetoes: noop, setSellPlans: noop,
+    } satisfies FishQualityState;
+  }, [study, selectedRowIds, onSelectionChange]);
+  return <FishQuality archiveView state={state} onJump={onJump} canJump={canJump}/>;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FishScreeningSamplePicker, type FishScreeningSampleSource } from './FishScreeningSamplePicker';
-import { mergeLibraryDirectoryEdits, type LibraryDirectoryEdits } from '@/lib/fish/libraryDirectoryEdits';
+import { FishScreeningSamplePicker } from './FishScreeningSamplePicker';
+import type { FishQualityState } from '@/hooks/useFishQuality';
+import { mergeLibraryDirectoryEdits } from '@/lib/fish/libraryDirectoryEdits';
 import { FishMarketHitResults } from './FishMarketHitResults';
 import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -87,15 +88,18 @@ function OutsideDetails({ rows, window }: { rows: FishHitRateOutsideDetail[]; wi
   </>;
 }
 
-export function FishHitRateTest({ screening, directoryEdits, captureSettings, defs, run, disabled, onRunningChange }: {
-  screening?: FishScreeningSampleSource;
-  directoryEdits?: LibraryDirectoryEdits;
+export function FishHitRateTest({ quality, captureSettings, defs, run, disabled, onRunningChange, onJump, canJump }: {
+  quality?: FishQualityState;
+  onJump?: (signal: TradeSignal) => void;
+  canJump?: (signal: TradeSignal) => boolean;
   captureSettings: () => FishHitRateSettings;
   defs: DeepDigFeatureDef[];
   run: (options: FishHitRateOptions) => Promise<void>;
   disabled?: boolean;
   onRunningChange: (running: boolean) => void;
 }) {
+  const screening = quality?.preEntry;
+  const directoryEdits = quality?.study.monitorLibrary?.directoryEdits;
   const sourceName = useId(), modeName = useId(), detailId = useId();
   const [storedSettings, setStoredSettings] = usePersistedState<FishHitRateSettings | null>(FISH_HIT_RATE_SETTINGS_KEY, null);
   const savedSettings = useMemo(() => readFishHitRateSettings(storedSettings), [storedSettings]);
@@ -226,8 +230,8 @@ export function FishHitRateTest({ screening, directoryEdits, captureSettings, de
             <label className="inline-flex items-center gap-2">
               <input type="radio" name={sourceName} checked={source === 'screening'} onChange={() => setSource('screening')}/>筛选库
             </label>
-            {source === 'screening' && screening && <FishScreeningSamplePicker screening={screening} edits={screeningEdits}
-              selectedIds={selectedRecords} onSelect={setSelectedRecords}/>}
+            {source === 'screening' && quality && screening && <FishScreeningSamplePicker state={quality} edits={screeningEdits}
+              selectedIds={selectedRecords} onSelect={setSelectedRecords} onJump={onJump} canJump={canJump}/>}
           </div>
           {source === 'screening' && <p className="text-muted-foreground">
             {screening ? '按所选标的的信号时间建立测试窗口。' : '筛选库暂不可用。'}

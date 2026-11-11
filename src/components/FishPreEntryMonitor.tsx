@@ -7,7 +7,7 @@ import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
 import {entryDirectoryGroups,entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { ChevronDown, Filter, Pause, RotateCcw, Settings2 } from 'lucide-react';
 import { libraryCell } from './FishLibraryDialog';
 import { qualitySettingsAction, qualitySplitPrimaryAction, qualitySplitPauseAction, qualitySplitMenuAction } from './FishQualityModule';
@@ -27,35 +27,47 @@ const engineLabel = (round?: PreEntryRound) => round?.engine===PRE_ENTRY_RETRY_V
 const stageStatus={pass:'通过',blocked:'排除',pending:'等待'} as const;
 const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';
-export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory }: {
-  state: FishQualityState; selectedCount: number; filtersOn: boolean; onSelected: () => void; onJump?: (signal: TradeSignal) => void;
-  openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;
-  onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;
-  renderStudy?:(study:FishQualityStudy)=>ReactNode;onCopyStudy?:(study:FishQualityStudy)=>Promise<boolean>;
-  renderConditions?: (close: () => void) => ReactNode;
-}) {
+interface FishPreEntryLibraryProps {
+  state: FishQualityState;
+  onSelected?: () => void;
+  onJump?: (signal: TradeSignal) => void;
+  openRequest?: FishDirectoryRequest;
+  onSelectDirectory?: (id: string, study: FishQualityStudy, ids?: string[]) => Promise<boolean>;
+  onSetHidden?: (id: string, hidden: boolean) => Promise<boolean>;
+  renderStudy?: (study: FishQualityStudy) => ReactNode;
+  onCopyStudy?: (study: FishQualityStudy) => Promise<boolean>;
+}
+interface ScreeningSamplePicker {
+  selected: string[];
+  setSelected: Dispatch<SetStateAction<string[]>>;
+  footer: (close: () => void) => ReactNode;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, onSelectDirectory,
+  onSetHidden, renderStudy, onCopyStudy, samplePicker }: FishPreEntryLibraryProps & { samplePicker?: ScreeningSamplePicker }) {
   const monitor = state.preEntry;
-  const [selected, setSelected] = useState<string[]>([]), [message, setMessage] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [resultsOpen,setResultsOpen]=useState(false);
-  const rounds = useMemo(() => new Map(monitor?.library.rounds.map(r => [r.id, r]) ?? []), [monitor?.library.rounds]);
+  const [localSelection, setLocalSelection] = useState<string[]>([]);
+  const [message, setMessage] = useState('');
+  const selected = samplePicker?.selected ?? localSelection;
+  const setSelected = samplePicker?.setSelected ?? setLocalSelection;
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const rounds = useMemo(() => new Map(monitor?.library.rounds.map(round => [round.id, round])), [monitor?.library.rounds]);
+  const records = useMemo(() => [...(monitor?.library.records ?? [])].sort((a, b) => b.updatedAt - a.updatedAt), [monitor?.library.records]);
   if (!monitor) return null;
-  const latestRound = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt).at(-1);
-  const resumable = latestRound?.state === 'paused' && latestRound.hours>0 ? latestRound : undefined;
-  const records = [...monitor.library.records].sort((a, b) => b.updatedAt - a.updatedAt);
-  const latestRecords = records.filter(r => r.roundId === latestRound?.id);
-  const missingCount = latestRecords.filter(r => r.status === 'error').length;
-  const hours = newPreEntryHours(monitor.library.settings?.hours);
   const stagesFor=(r:typeof records[number])=>rounds.get(r.roundId)?.plans?.find(p=>p.id===r.planId)?.preEntryThreeStage;
   const filtersFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId), plan=round?.plans?.find(p=>p.id===r.planId);return plan?.preEntryThreeStage?plan.preEntryThreeStage.required:plan?preEntryPlanFilters(plan):round?.filters??[]; };
   const exclusionsFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId);return round?.engine===PRE_ENTRY_CONDITIONS_VERSION?round.plans?.find(p=>p.id===r.planId)?.preEntryConditions:undefined; };
   const readingLabel = (r:typeof records[number],key:string,index:number) => (rounds.get(r.roundId)?.engine?filtersFor(r).find(f=>f.id===key):filtersFor(r)[index])?.label ?? stagesFor(r)?.sellRules.flatMap(s=>expressionConditions(s.expression)).find(c=>c.id===key)?.label ?? stagesFor(r)?.hardVetoes.find(v=>'hard:'+v.id===key)?.label ?? r.threeStage?.readings.find(reading=>reading.id===key)?.label ?? preEntryVetoes(exclusionsFor(r)).find(v=>v.id===key)?.label ?? key;
-  const canStart = monitor.ready && state.ready && selectedCount > 0 && filtersOn;
   const admitted = records.filter(r => r.status === 'matched');
   const selectedOnly=true;
   const renderEvidence=(roundId:string,close:()=>void)=><details className="m-4 text-[11px]"><summary className="cursor-pointer text-muted-foreground">入选判定详情</summary>
-    <div className="my-2 flex items-center gap-2"><label><input type="checkbox" aria-label="全选当前筛选的筛选库记录" checked={admitted.filter(r=>r.roundId===roundId).every(r=>selectedSet.has(r.id))} onChange={e=>setSelected(e.target.checked?admitted.filter(r=>r.roundId===roundId).map(r=>r.id):[])}/> 全选本轮</label>
-    <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected();close();}}>在组合表中勾选</button></div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
+    <div className="my-2 flex items-center gap-2"><label><input type="checkbox" aria-label="全选当前筛选的筛选库记录" checked={admitted.filter(r=>r.roundId===roundId).every(r=>selectedSet.has(r.id))} onChange={e=>{
+      const roundIds = new Set(admitted.filter(r=>r.roundId===roundId).map(r=>r.id));
+      if (!samplePicker) { setSelected(e.target.checked ? [...roundIds] : []); return; }
+      setSelected(e.target.checked ? ids => [...new Set([...ids, ...roundIds])] : ids => ids.filter(id=>!roundIds.has(id)));
+    }}/> 全选本轮</label>
+    {!samplePicker && <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected?.();close();}}>在组合表中勾选</button>}</div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
     <div className="overflow-auto"><table className="w-full text-[11px]"><thead><tr>{['选择','标的','原信号 / 监测起点','监测条件','状态与原因','扫描到','首次满足时间','命中读数','操作'].map(h=><th key={h} className={libraryCell}>{h}</th>)}</tr></thead><tbody>{admitted.filter(r=>r.roundId===roundId).map(r=>{const onCheck=(checked:boolean,_shift?:boolean)=>setSelected(ids=>checked?[...new Set([...ids,r.id])]:ids.filter(id=>id!==r.id));return <tr key={r.id} data-testid={selectedOnly ? "pre-entry-library-row" : "pre-entry-scan-row"} className="border-t border-border/40">
         {selectedOnly && <td className={libraryCell}><input type="checkbox" aria-label={`选择入选记录 ${r.sample.source.symbol} ${r.id}`} checked={selectedSet.has(r.id)} onChange={e => onCheck?.(e.target.checked, (e.nativeEvent as MouseEvent).shiftKey)}/></td>}
         <td className={`${libraryCell} font-mono`}>{r.sample.source.symbol}</td>
@@ -75,12 +87,27 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
     id: round.id, at: round.startedAt, label, summary, revision: monitor.library,
     study: () => entryDirectoryStudy(monitor.library, round), details: close => renderEvidence(round.id, close),
   }));
-  const renderLibrary=()=> <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)} onRename={state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
-    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮`}
-    dataActions={<FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}
+  return <FishLibraryTimeDirectory picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
+    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
+    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
+    dataActions={!samplePicker && <FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}
     download={()=>downloadDirectoryTables('筛选库',directoryItems.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
     info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。仅收录已满足记录，原信号、冻结条件、首次满足时间和判定证据保留；未入选的扫描记录仍保存在原库。</p><p>新副本 v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开后可复制至组合表。复制前完整归档当前组合表，载入后不自动运行；完整下载与导入保留各版本历史，不改当前方案。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
+}
+
+export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory }: {
+  selectedCount: number; filtersOn: boolean;
+  renderConditions?: (close: () => void) => ReactNode;
+} & FishPreEntryLibraryProps) {
+  const monitor = state.preEntry;
+  const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [resultsOpen,setResultsOpen]=useState(false);
+  if (!monitor) return null;
+  const latestRound = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt).at(-1);
+  const resumable = latestRound?.state === 'paused' && latestRound.hours>0 ? latestRound : undefined;
+  const missingCount = monitor.library.records.filter(r => r.roundId === latestRound?.id && r.status === 'error').length;
+  const hours = newPreEntryHours(monitor.library.settings?.hours);
+  const canStart = monitor.ready && state.ready && selectedCount > 0 && filtersOn;
   return <div className="contents" data-testid="pre-entry-controls">
     <div role="group" aria-label="筛选运行" className="inline-flex h-6 shrink-0 items-stretch">
       {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={monitor.pause}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
@@ -103,7 +130,8 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
       </PopoverContent>
     </Popover>
-    {renderLibrary()}
+    <FishPreEntryLibrary state={state} onSelected={onSelected} onJump={onJump} openRequest={openRequest}
+      onSelectDirectory={onSelectDirectory} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy}/>
     <FishPreEntryProgress monitor={monitor} open={resultsOpen} onOpenChange={setResultsOpen}/>
   </div>;
 }
