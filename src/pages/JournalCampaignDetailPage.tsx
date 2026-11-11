@@ -2687,7 +2687,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     if (!campaign || !isOwner || restoringFromBin) return;
     setRestoringFromBin(true);
     try {
-      await restoreCampaign(campaign.id);
+      await restoreCampaign(campaign.id, campaign.user_id);
       setCampaign(current => (current && current.id === campaign.id ? { ...current, deleted_at: null } : current));
       toast.success('战役已恢复，回到正常列表可以看到');
     } catch (error) {

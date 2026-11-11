@@ -631,12 +631,32 @@ describe('【用户要求】排序后的分组统计', () => {
     expect(unrealizedLoss?.levels[1]).toEqual({ kind: 'none' });
   });
 
-  it('第一级是字母 / 操作时间：只给一组「全部」', () => {
+  it('第一级是字母：只给一组「全部」', () => {
     const chain: CampaignSortChain = [{ mode: 'alpha', direction: 'asc' }, { mode: 'captureRate', direction: 'desc' }];
     const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toEqual({ kind: 'all' });
     expect(groups[0].count).toBe(ROWS.length);
+  });
+
+  it('多级操作时间按北京时间午夜分组，同日按明确选中的下一级排序', () => {
+    const rows = [
+      makeSortRow({ id: 'late', time: '2026-11-10T15:59:59.999Z', pcr: 1 }),
+      makeSortRow({ id: 'midnight', time: '2026-11-10T16:00:00.000Z', pcr: 0.5 }),
+      makeSortRow({ id: 'early', time: '2026-11-10T02:03:00.000Z', pcr: 3 }),
+    ];
+    const chain = parseCampaignSortChain('?sort=time&direction=desc&then=captureRate.desc');
+    const sorted = sortCampaignRows(rows, chain);
+    expect(ids(sorted)).toEqual(['midnight', 'early', 'late']);
+    expect(summarizeSortGroups(sorted, chain).map(group => [group.key, group.count])).toEqual([
+      [{ kind: 'day', day: '2026-11-11' }, 1],
+      [{ kind: 'day', day: '2026-11-10' }, 2],
+    ]);
+    expect(describeSortLevelEffects(sorted, chain)[1]?.sorted).toBe(2);
+    const single = parseCampaignSortChain('?sort=time&direction=desc');
+    const following = parseCampaignSortChain('?sort=time&direction=desc&then=captureRate.follow');
+    expect(ids(sortCampaignRows(rows, single))).toEqual(['midnight', 'late', 'early']);
+    expect(ids(sortCampaignRows(rows, following))).toEqual(['midnight', 'late', 'early']);
   });
 });
 

@@ -551,7 +551,7 @@ describe('战役列表：多级排序', () => {
     expect(rules).toHaveTextContent('以 0 为界，负的一侧与正的一侧各按场数对半分');
     expect(rules).toHaveTextContent('预期回撤按四分位分');
     expect(rules).toHaveTextContent('档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）');
-    expect(rules).toHaveTextContent('镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档');
+    expect(rules).toHaveTextContent('多级排序中的操作时间按北京时间的自然日比较');
     expect(rules).toHaveTextContent('第二级起每一级标出本级排了几场');
     expect(rules).toHaveTextContent('「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项');
     // 【复核】档界与各级的作用不只放在悬停提示里：ⓘ 末尾的「当前」段逐级写出来（手机、键盘也读得到）

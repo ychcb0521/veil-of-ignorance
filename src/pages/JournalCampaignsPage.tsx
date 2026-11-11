@@ -1517,6 +1517,7 @@ function describeSortLevelEffect(level: number, label: string, effect: SortLevel
 /** 分组统计表的组名：分档写档界（与「分档」提示同一写法），镜像止盈写档位名，自评写分值与量表文字，杠杆写倍数。 */
 function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, thresholds: readonly number[] | null): string {
   if (key.kind === 'all') return '全部';
+  if (key.kind === 'day') return key.day ?? '未记录日期';
   if (key.kind === 'quartile') return formatQuartileRange(mode, key.quartile, thresholds);
   if (mode === 'mirrorTp') return formatMirrorTpMetric(key.value);
   if (mode === 'importance') return `${key.value} ${selfRatingLabel(Number(key.value)) ?? '未评'}`;
@@ -2002,7 +2003,7 @@ const CampaignCard = memo(function CampaignCard({
           >
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsExpanded ? 'rotate-180' : ''}`} />
           </button>
-          {isOwnCampaign && (
+          {isOwnCampaign && !campaign.comparison && (
             <div
               role="radiogroup"
               aria-label="自评"
@@ -2373,7 +2374,8 @@ export default function JournalCampaignsPage() {
   const section = campaignSection(location.search), comparing = section !== 'personal';
   const [comparisonStatsOpen, setComparisonStatsOpen] = useState(false);
   useEffect(() => setComparisonStatsOpen(false), [section]);
-  const binView = useMemo(() => parseCampaignBinParam(location.search) && campaignSection(location.search) === 'personal', [location.search]);
+  const binView = parseCampaignBinParam(location.search);
+  const binTitle = comparing ? '持仓监测回收站' : '亲自交易回收站';
   const { user, profile } = useAuth();
   // 只认 id：auth 每次刷新 token 都会换一个 user 对象，不能让它牵动取数与回调。
   const userId = user?.id;
@@ -2391,7 +2393,7 @@ export default function JournalCampaignsPage() {
     [balance, positionsMap, priceMap],
   );
   const personalList = useCampaignList(comparing ? undefined : userId, { tradeHistory, ordersMap, filledOrders, positionsMap }, binView ? 'deleted' : 'active');
-  const comparisonList = useQualityCampaignList(userId, section);
+  const comparisonList = useQualityCampaignList(userId, section, binView);
   const {
     rows: sourceRows, setRows, complete: campaignRowsComplete, refreshing, loaded, total, cached: campaignRowsCached,
     error: campaignLoadError, failedCount, retry: retryCampaignLoad, beginMutation,
@@ -2451,9 +2453,12 @@ export default function JournalCampaignsPage() {
   const [actionsOpen, setActionsOpen] = useState(false);
   const metricChartPanelRef = useRef<HTMLDivElement | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
-  const [deletedLoading, setDeletedLoading] = useState(false);
-  const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
+  const [personalDeletedLoading, setDeletedLoading] = useState(false);
+  const [personalDeletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
+  const deletedCampaigns = comparing ? (comparisonList.deletedCampaigns ?? []) : personalDeletedCampaigns.filter(campaign => campaign.user_id === userId);
+  const deletedLoading = comparing ? !campaignRowsComplete && !campaignLoadError : personalDeletedLoading;
   const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
+  useEffect(() => setDeletedOpen(false), [section, userId]);
   const [expandedCampaignIds, setExpandedCampaignIds] = useState<Set<string>>(() => new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   // 每个账号、板块和回收站独立选择。未手动选择时始终全选，异步加载的新行也自动纳入。
@@ -2983,11 +2988,12 @@ export default function JournalCampaignsPage() {
   /**
    * 【用户要求】「分级分区之后，在众多战役之间开一个分区模块——现在看不出分级和模块化的界限」：
    * 多级排序时卡片列表按第一级的档切成几段（与分组统计同一套组、同一个顺序；组在排好的列表里本来就是连续的），
-   * 每段前一条分区标题：哪一档、几场、胜率、平均 b；可以单独收起。字母 / 操作时间作第一级时不分组，没有分区。
+   * 每段有独立标题；操作时间作第一级时用北京时间的自然日作为分区。
    * 各组场数加起来必须正好是列表长度，否则（理论上不会）退回不分区的列表，不冒险切错。
    */
   const cardSections = useMemo(() => {
-    if (sortGroupStats.length < 2 || sortGroupStats[0].key.kind === 'all') return null;
+    const firstGroup = sortGroupStats[0];
+    if (!firstGroup || firstGroup.key.kind === 'all' || (sortGroupStats.length < 2 && firstGroup.key.kind !== 'day')) return null;
     if (sortGroupStats.reduce((sum, group) => sum + group.count, 0) !== sortedRows.length) return null;
     let offset = 0;
     return sortGroupStats.map((group, index) => {
@@ -3031,7 +3037,7 @@ export default function JournalCampaignsPage() {
       hiddenMetrics={hiddenMinorMetrics}
       expanded={expandedCampaignIds.has(row.campaign.id)}
       busy={busyCampaignId === row.campaign.id}
-      isOwnCampaign={row.campaign.user_id === userId && !row.campaign.comparison}
+      isOwnCampaign={row.campaign.user_id === userId}
       campaignAccountName={campaignAccountName}
       selectionMode={selectionMode}
       selected={selectedCampaignIds.has(row.campaign.id)}
@@ -3775,14 +3781,14 @@ export default function JournalCampaignsPage() {
   ) => {
     event.stopPropagation();
     if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
-    const confirmed = window.confirm(`删除战役「${campaign.title}」？\n\n战役会移到“已删除”，之后仍可恢复；已生成的交易记录不会被删除。`);
+    const confirmed = window.confirm(`将战役「${campaign.title}」移入${binTitle}？\n\n之后可在该回收站恢复。`);
     if (!confirmed) return;
 
     // 记下拿掉的那一行与它的位置：失败时只把它放回原处，不整表回滚
     let removed: { row: CampaignCardData; index: number } | null = null;
     const finishMutation = beginMutation();
     setBusyCampaignId(campaign.id);
-    setRows(prev => {
+    if (!comparing) setRows(prev => {
       const index = prev.findIndex(row => row.campaign.id === campaign.id);
       if (index < 0) return prev;
       removed = { row: prev[index], index };
@@ -3790,13 +3796,13 @@ export default function JournalCampaignsPage() {
     });
     try {
       // 先等后台正在跑的那一场自愈落地再删（最多等 2 s）
-      await waitForCampaignListHeal();
-      await deleteCampaign(campaign.id);
-      setDeletedCampaigns(current => [
+      if (!comparing) await waitForCampaignListHeal();
+      await deleteCampaign(campaign.id, campaign.user_id);
+      if (!comparing) setDeletedCampaigns(current => [
         { ...campaign, deleted_at: new Date().toISOString() },
         ...current.filter(item => item.id !== campaign.id),
       ]);
-      toast.success('战役已移到已删除，可随时恢复');
+      toast.success(`战役已移入${binTitle}`);
     } catch (error) {
       const restore = removed as { row: CampaignCardData; index: number } | null;
       if (restore) {
@@ -3812,11 +3818,11 @@ export default function JournalCampaignsPage() {
       setBusyCampaignId(null);
       finishMutation();
     }
-  }, [userId, beginMutation, setRows, setBusyCampaignId]);
+  }, [userId, beginMutation, setRows, setBusyCampaignId, comparing, binTitle]);
 
   const handleDeletedOpenChange = async (open: boolean) => {
     setDeletedOpen(open);
-    if (!open || !user) return;
+    if (!open || !user || comparing) return;
     setDeletedLoading(true);
     try {
       setDeletedCampaigns(await listDeletedCampaigns(user.id));
@@ -3881,21 +3887,21 @@ export default function JournalCampaignsPage() {
     if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
     const finishMutation = beginMutation();
     setBusyCampaignId(campaign.id);
-    const putBack = removeRowOptimistically(campaign.id);
+    const putBack = comparing ? null : removeRowOptimistically(campaign.id);
     try {
       // 先等后台正在跑的那一场自愈落地再写（最多等 2 s）；乐观更新已经画上了
-      await waitForCampaignListHeal();
-      await restoreCampaign(campaign.id);
-      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      if (!comparing) await waitForCampaignListHeal();
+      await restoreCampaign(campaign.id, campaign.user_id);
+      if (!comparing) setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       toast.success('战役已恢复，回到正常列表可以看到');
     } catch (error) {
-      putBack();
+      putBack?.();
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyCampaignId(null);
       finishMutation();
     }
-  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId]);
+  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId, comparing]);
 
   /** 回收站卡片上的「彻底删除」：二次确认的措辞与已删除战役弹窗里的一致。 */
   const handleBinPurgeCampaign = useCallback(async (
@@ -3905,25 +3911,27 @@ export default function JournalCampaignsPage() {
     event.stopPropagation();
     if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
     const confirmed = window.confirm(
-      `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
+      comparing
+        ? `永久移除持仓监测战役「${campaign.title}」？\n\n这场战役将无法恢复，监测库中的原始结果仍保留。`
+        : `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
     );
     if (!confirmed) return;
     const finishMutation = beginMutation();
     setBusyCampaignId(campaign.id);
-    const putBack = removeRowOptimistically(campaign.id);
+    const putBack = comparing ? null : removeRowOptimistically(campaign.id);
     try {
-      await waitForCampaignListHeal();
-      await permanentlyDeleteCampaign(campaign.id);
-      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      if (!comparing) await waitForCampaignListHeal();
+      await permanentlyDeleteCampaign(campaign.id, campaign.user_id);
+      if (!comparing) setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       toast.success('战役已永久删除');
     } catch (error) {
-      putBack();
+      putBack?.();
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyCampaignId(null);
       finishMutation();
     }
-  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId]);
+  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId, comparing]);
 
   const handleCampaignDetailsToggle = useCallback((
     event: MouseEvent<HTMLButtonElement>,
@@ -3939,16 +3947,16 @@ export default function JournalCampaignsPage() {
   }, []);
 
   const handleRestoreCampaign = async (campaign: TradeCampaign) => {
-    if (!user || deletedBusyId) return;
+    if (!user || campaign.user_id !== user.id || deletedBusyId) return;
     const finishMutation = beginMutation();
     setDeletedBusyId(campaign.id);
     // 回收站视图里这一行就在列表上：恢复后它从回收站消失，不把恢复的行插进当前（回收站的）列表
-    const putBack = binView ? removeRowOptimistically(campaign.id) : null;
+    const putBack = binView && !comparing ? removeRowOptimistically(campaign.id) : null;
     try {
-      await waitForCampaignListHeal();
-      await restoreCampaign(campaign.id);
-      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
-      if (!binView) {
+      if (!comparing) await waitForCampaignListHeal();
+      await restoreCampaign(campaign.id, campaign.user_id);
+      if (!comparing) setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      if (!binView && !comparing) {
         const details = await getCampaignFullData(campaign.id);
         const exitPriceCorrections = await fetchLegExitPriceCorrections(
           details.campaign.symbol,
@@ -3969,19 +3977,21 @@ export default function JournalCampaignsPage() {
   };
 
   const handlePermanentDeleteCampaign = async (campaign: TradeCampaign) => {
-    if (deletedBusyId) return;
+    if (!user || campaign.user_id !== user.id || deletedBusyId) return;
     const confirmed = window.confirm(
-      `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
+      comparing
+        ? `永久移除持仓监测战役「${campaign.title}」？\n\n这场战役将无法恢复，监测库中的原始结果仍保留。`
+        : `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
     );
     if (!confirmed) return;
     setDeletedBusyId(campaign.id);
     // 回收站视图里这一行就在列表上：先拿掉，写入结束后以远端为准核对一次
     const finishMutation = binView ? beginMutation() : null;
-    const putBack = binView ? removeRowOptimistically(campaign.id) : null;
+    const putBack = binView && !comparing ? removeRowOptimistically(campaign.id) : null;
     try {
-      await waitForCampaignListHeal();
-      await permanentlyDeleteCampaign(campaign.id);
-      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      if (!comparing) await waitForCampaignListHeal();
+      await permanentlyDeleteCampaign(campaign.id, campaign.user_id);
+      if (!comparing) setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       toast.success('战役已永久删除');
     } catch (error) {
       putBack?.();
@@ -4256,6 +4266,16 @@ export default function JournalCampaignsPage() {
                   分档
                 </button>
               )}
+              {!following && level.mode === 'time' && (
+                <button
+                  type="button"
+                  title="按北京时间自然日分组"
+                  onClick={event => openFormulaPopover(event, 'sortChain')}
+                  className={`${SORT_CHAIN_NOTE} ${SORT_CHAIN_NOTE_BINNED} hover:bg-[#F0B90B]/10`}
+                >
+                  按天
+                </button>
+              )}
               {!first && effect && (
                 <button
                   type="button"
@@ -4314,7 +4334,8 @@ export default function JournalCampaignsPage() {
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
-            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（神奇的 b、首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
+            <div>多级排序中的操作时间按北京时间的自然日比较。同一天内再看下一级。只有操作时间一级时，按具体时间排序。</div>
+            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（神奇的 b、首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母不分数值档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
             <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
             <div>点第一级的名称或箭头切换方向；第二级起点击依次切换「双向 → 降序 → 升序」。新加一级默认“双向”：在上一级同一档内继续严格按上一级原始读数及其升降序排列，不用本级指标打乱；选降序或升序才按本级指标重排。× 移除这一级；「清除」只保留第一级。</div>
@@ -4487,15 +4508,15 @@ export default function JournalCampaignsPage() {
                   className="inline-flex h-[18px] items-center gap-1 rounded border border-[#F0B90B]/50 bg-[#F0B90B]/10 px-1.5 text-[10px] font-medium text-[#8F6B00] dark:text-[#F0B90B]"
                 >
                   <ArchiveRestore aria-hidden="true" className="h-3 w-3" />
-                  回收站
+                  {binTitle}
                 </span>
               )}
             </h1>
-            <p className="text-[11px] text-muted-foreground">{binView ? '只显示回收站里的战役' : comparing ? '持仓监测结果' : '复盘的高层单位'}</p>
+            <p className="text-[11px] text-muted-foreground">{binView ? '可恢复或彻底移除' : comparing ? '持仓监测结果' : '复盘的高层单位'}</p>
           </div>
           <div className="flex-1" />
           {/* 回收站视图下没有「归类历史交易」（新战役不会归类进回收站），换成「返回战役」 */}
-          {!comparing && (binView ? (
+          {binView ? (
             <button
               type="button"
               onClick={leaveBin}
@@ -4505,7 +4526,7 @@ export default function JournalCampaignsPage() {
               <Undo2 className="h-3.5 w-3.5" />
               返回战役
             </button>
-          ) : (
+          ) : !comparing && (
             <button
               type="button"
               onClick={() => nav('/journal/campaigns/classify')}
@@ -4515,14 +4536,13 @@ export default function JournalCampaignsPage() {
               <FolderPlus className="w-3.5 h-3.5" />
               归类历史交易
             </button>
-          ))}
+          )}
           {/* 回收站图标照旧打开「已删除战役」弹窗；回收站视图下点亮（琥珀）表示当前就在回收站 */}
-          {!comparing && (
           <button
             type="button"
             onClick={() => void handleDeletedOpenChange(true)}
-            title={binView ? '已删除战役（当前在回收站视图）' : '已删除战役'}
-            aria-label={`已删除战役，共 ${deletedCampaigns.length} 场`}
+            title={binTitle}
+            aria-label={`${binTitle}，共 ${deletedCampaigns.length} 场`}
             aria-pressed={binView}
             data-testid="deleted-campaigns-entry"
             className={`inline-flex h-8 items-center gap-1 rounded border px-1.5 text-[10px] transition-colors ${
@@ -4534,7 +4554,6 @@ export default function JournalCampaignsPage() {
             <ArchiveRestore className="h-3.5 w-3.5" />
             {deletedCampaigns.length > 0 && <span>{deletedCampaigns.length}</span>}
           </button>
-          )}
         </div>
       </header>
 
@@ -4544,7 +4563,7 @@ export default function JournalCampaignsPage() {
           section={section}
           onSectionChange={next => {
             const params = new URLSearchParams(location.search);
-            params.delete('sell'); params.delete('detector'); params.delete('category'); params.delete('bin');
+            params.delete('sell'); params.delete('detector'); params.delete('category');
             if (next === 'personal') params.delete('section'); else params.set('section', next);
             nav({ pathname: '/journal/campaigns', search: params.toString() });
           }}
@@ -6149,7 +6168,7 @@ export default function JournalCampaignsPage() {
           <DialogHeader className="border-b border-border px-5 py-4 pr-12">
             <DialogTitle className="flex items-center gap-2 text-[14px] font-medium">
               <ArchiveRestore className="h-4 w-4 text-muted-foreground" />
-              已删除战役
+              {binTitle}
             </DialogTitle>
             <DialogDescription className="text-[11px]">
               删除的战役不会进入列表与统计；恢复后会回到原来的战役记录。
@@ -6180,6 +6199,11 @@ export default function JournalCampaignsPage() {
           <div className="max-h-[60vh] overflow-y-auto px-5 py-2">
             {deletedLoading ? (
               <div className="py-12 text-center text-[12px] text-muted-foreground">{comparing ? '正在恢复账号中的持仓监测记录…' : '加载中…'}</div>
+            ) : comparing && campaignLoadError && deletedCampaigns.length === 0 ? (
+              <div role="alert" className="py-8 text-center text-[12px] text-muted-foreground">
+                <p>{campaignLoadError}</p>
+                <button type="button" onClick={retryCampaignLoad} className="mt-2 text-primary underline">重试</button>
+              </div>
             ) : deletedCampaigns.length === 0 ? (
               <div className="py-12 text-center">
                 <ArchiveRestore className="mx-auto h-5 w-5 text-muted-foreground/45" />

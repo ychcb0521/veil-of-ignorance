@@ -11,4 +11,6 @@ export function campaignSection(search: string): CampaignSection {
 /** 战役编号仍按来源区分（固定卖出方案做探测的那场为 detect，其余为 sell），两种都能打开同一场。 */
 export function qualityCampaignId(key: string, section: 'sell' | 'detect' = 'sell') { return `fish-${section}-${key}`; }
 export const isQualityCampaignId = (id?: string) => /^fish-(sell|detect)-[\w-]+$/.test(id ?? '');
+/** Old detection and sell URLs can resolve to the same frozen run. */
+export const qualityCampaignTrashKey = (id: string) => id.replace(/^fish-detect-/, 'fish-sell-');
 export function qualityCampaignPath(key: string, section: 'sell' | 'detect' = 'sell') { return `/journal/campaigns/${qualityCampaignId(key, section)}?section=quality`; }

@@ -5,14 +5,17 @@ import { summarizeCampaignPerformance, type CampaignPerformanceSample } from '@/
 import { summarizeAsymmetricRiskMetrics } from '@/lib/asymmetricRiskMetrics';
 import type { FishQualityStudy } from './quality';
 import { iterateQualityCampaignData } from './qualityCampaignProjection';
+import { qualityCampaignTrashKey } from '@/lib/campaignSections';
 
 /** Same frozen fills, risk denominator and statistical formulas as campaign details.
  * Comparison fills bypass market-price correction in campaignLegExecution.
  * Only the scalar samples remain alive between campaigns; no plans/legs cross to the UI.
  */
-export function qualityCampaignPerformanceFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect' | 'quality', sellKey: string) {
+export function qualityCampaignPerformanceFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect' | 'quality', sellKey: string, excluded: readonly string[] = []) {
   const samples: CampaignPerformanceSample[] = [];
+  const excludedKeys = new Set(excluded);
   for (const details of iterateQualityCampaignData(owner, study, section, sellKey)) {
+    if (excludedKeys.has(qualityCampaignTrashKey(details.campaign.id))) continue;
     try {
       const settlement = computeCampaignRealizedPnl(details.campaign, details.legs, details.tradeRecords, {});
       const campaign = reconcileCampaignWithSettlement(details.campaign, details.legs, settlement);

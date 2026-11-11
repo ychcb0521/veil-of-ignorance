@@ -6,6 +6,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { isQualityCampaignId } from '@/lib/campaignSections';
 import { loadQualityCampaignData } from '@/lib/fish/qualityCampaigns';
+import { updateQualityCampaignTrash } from '@/lib/fish/qualityCampaignTrash';
 import type { KlineData } from '@/hooks/useBinanceData';
 import {
   buildActualSimulationParams,
@@ -1214,10 +1215,11 @@ function mergeCounterfactuals(remote: CampaignCounterfactual[], local: CampaignC
   return sortCounterfactuals([...merged.values()]);
 }
 
-async function getAuthenticatedUserId(label: string): Promise<string> {
+async function getAuthenticatedUserId(label: string, expectedOwner?: string): Promise<string> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user?.id;
   if (!userId) throw new Error(`${label}失败：用户未登录`);
+  if (expectedOwner && expectedOwner !== userId) throw new Error(`${label}失败：当前账号已切换`);
   return userId;
 }
 
@@ -2182,8 +2184,9 @@ async function campaignForDeletionFallback(userId: string, id: string): Promise<
   return data ? toCampaign(data) : local;
 }
 
-export async function deleteCampaign(id: string): Promise<void> {
-  const userId = await getAuthenticatedUserId('删除战役');
+export async function deleteCampaign(id: string, expectedOwner?: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('删除战役', expectedOwner);
+  if (isQualityCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'deleted');
   const fallbackCampaign = await campaignForDeletionFallback(userId, id);
   const deletedAt = new Date().toISOString();
   const { error } = await supabase
@@ -2210,8 +2213,9 @@ export async function deleteCampaign(id: string): Promise<void> {
   }
 }
 
-export async function restoreCampaign(id: string): Promise<void> {
-  const userId = await getAuthenticatedUserId('恢复战役');
+export async function restoreCampaign(id: string, expectedOwner?: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('恢复战役', expectedOwner);
+  if (isQualityCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'active');
   const local = findLocalCampaign(userId, id);
   const restoredAt = new Date().toISOString();
   const { error } = await supabase
@@ -2231,8 +2235,9 @@ export async function restoreCampaign(id: string): Promise<void> {
   }
 }
 
-export async function permanentlyDeleteCampaign(id: string): Promise<void> {
-  const userId = await getAuthenticatedUserId('永久删除战役');
+export async function permanentlyDeleteCampaign(id: string, expectedOwner?: string): Promise<void> {
+  const userId = await getAuthenticatedUserId('永久删除战役', expectedOwner);
+  if (isQualityCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'purged');
   const { error } = await supabase
     .from('trade_campaigns' as never)
     .delete()

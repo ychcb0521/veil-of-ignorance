@@ -1,12 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { buildCampaignCardData, type CampaignCardData } from '@/lib/campaignListCache';
 import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
-import type { CampaignSection } from '@/lib/campaignSections';
+import { qualityCampaignTrashKey, type CampaignSection } from '@/lib/campaignSections';
+import { loadQualityCampaignTrash, readQualityCampaignTrash, subscribeQualityCampaignTrash, type QualityCampaignTrash } from '@/lib/fish/qualityCampaignTrash';
 
-export function useQualityCampaignList(owner: string | undefined, section: CampaignSection) {
+export function useQualityCampaignList(owner: string | undefined, section: CampaignSection, binView = false) {
   const [snapshot, setSnapshot] = useState({ owner, section, rows: [] as CampaignCardData[], complete: false, error: null as string | null, selectedSellKey: undefined as string | undefined, buyFilterLabel: '' });
+  const [trash, setTrash] = useState<{ owner?: string; marks?: QualityCampaignTrash; error?: string }>({});
   const [revision, setRevision] = useState(0);
   const retry = useCallback(() => setRevision(v => v + 1), []);
+  useEffect(() => {
+    if (!owner || section === 'personal') return;
+    let active = true;
+    let revision = 0;
+    const refresh = (synchronize = false) => {
+      const current = ++revision;
+      const read = synchronize ? loadQualityCampaignTrash : readQualityCampaignTrash;
+      void read(owner).then(
+        marks => { if (active && current === revision) setTrash({ owner, marks }); },
+        error => {
+          if (active && current === revision) {
+            setTrash(previous => ({
+              owner,
+              marks: previous.owner === owner ? previous.marks : undefined,
+              error: error instanceof Error ? error.message : String(error),
+            }));
+          }
+        },
+      );
+    };
+    const onChange = () => refresh();
+    const unsubscribe = subscribeQualityCampaignTrash(owner, onChange);
+    refresh(true);
+    window.addEventListener('focus', onChange);
+    return () => { active = false; unsubscribe(); window.removeEventListener('focus', onChange); };
+  }, [owner, section, revision]);
   useEffect(() => {
     if (!owner || section === 'personal') return;
     let active = true, generation = 0, inFlight = false, queued = false;
@@ -41,8 +69,22 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
     return () => { active = false;controller.abort();window.removeEventListener('fish-quality-saved', saved); window.removeEventListener('focus', load); };
   }, [owner, section, revision]);
   const visible = snapshot.owner === owner && snapshot.section === section;
-  const rows = useMemo(() => visible ? snapshot.rows : [], [visible, snapshot.rows]);
+  const marks = trash.owner === owner ? trash.marks : undefined;
+  const trashError = trash.owner === owner ? trash.error : undefined;
+  const partition = useMemo(() => {
+    const active: CampaignCardData[] = [], deleted: CampaignCardData[] = [];
+    if (visible && marks) for (const row of snapshot.rows) {
+      const mark = marks[qualityCampaignTrashKey(row.campaign.id)];
+      if (mark?.state === 'purged') continue;
+      if (mark?.state === 'deleted') {
+        deleted.push({ ...row, campaign: { ...row.campaign, deleted_at: new Date(mark.at).toISOString() } });
+      } else active.push(row);
+    }
+    deleted.sort((a, b) => b.campaign.deleted_at!.localeCompare(a.campaign.deleted_at!));
+    return { active, deleted, deletedCampaigns: deleted.map(row => row.campaign) };
+  }, [visible, snapshot.rows, marks]);
+  const rows = binView ? partition.deleted : partition.active;
   const setRows = useCallback((next: CampaignCardData[] | ((prev: CampaignCardData[]) => CampaignCardData[])) => setSnapshot(s => ({ ...s, rows: typeof next === 'function' ? next(s.rows) : next })), []);
-  return { rows, setRows, complete: visible && snapshot.complete, refreshing: false, loaded: rows.length, total: rows.length,
-    cached: false, error: visible ? snapshot.error : null, failedCount: 0, retry, beginMutation: () => () => undefined, selectedSellKey: visible ? snapshot.selectedSellKey : undefined, buyFilterLabel: visible ? snapshot.buyFilterLabel : '' };
+  return { rows, setRows, deletedCampaigns: partition.deletedCampaigns, complete: visible && snapshot.complete && !!marks, refreshing: false, loaded: rows.length, total: rows.length,
+    cached: false, error: trashError ?? (visible ? snapshot.error : null), failedCount: 0, retry, beginMutation: () => () => undefined, selectedSellKey: visible ? snapshot.selectedSellKey : undefined, buyFilterLabel: visible ? snapshot.buyFilterLabel : '' };
 }

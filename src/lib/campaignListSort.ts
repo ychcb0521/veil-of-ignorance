@@ -9,6 +9,7 @@ import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmpl
 import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import { resolveUnifiedMagicB } from '@/lib/campaignB';
+import { beijingDayKey } from '@/lib/campaignOperationRange';
 
 /**
  * 交易战役列表的排序：每个排序项是一个独立的比较器，排序链按次序依次比较。
@@ -396,6 +397,8 @@ export type CampaignSortKey<T extends CampaignSortRow = CampaignSortRow> = {
   tieBreak: RowCompare<T>;
   /** 连续数值指标的读数（分档用）；算不出时 null。分档指标（镜像止盈 / 重要性 / 杠杆 / 字母 / 操作时间）没有。 */
   value?: (row: T) => number | null;
+  /** 操作时间在多级排序中的北京时间自然日。 */
+  day?: (row: T) => string | null;
 };
 
 function finite(value: number | null | undefined): value is number {
@@ -432,6 +435,10 @@ function memoizeByRow<T extends object, V>(read: (row: T) => V): (row: T) => V {
  */
 export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<CampaignSortMode, CampaignSortKey<T>> {
   const operationTime = memoizeByRow<T, number | null>(row => campaignOperationTime(row.legs, row.tradeRecords));
+  const operationDay = memoizeByRow<T, string | null>(row => {
+    const time = operationTime(row);
+    return time == null ? null : beijingDayKey(time);
+  });
   // 第一级沿用原口径：没有客观操作时间的战役记作 0（最早）
   const sortTime = (row: T) => operationTime(row) ?? 0;
   const importance = memoizeByRow<T, number>(row => importanceValue(row.campaign));
@@ -482,6 +489,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       missing: row => operationTime(row) == null,
       compare: (a, b, direction) => compareNumber(sortTime(a), sortTime(b), direction),
       tieBreak: (a, b) => importanceDesc(a, b) || pnlDesc(a, b) || alphaAsc(a, b),
+      day: operationDay,
     },
     captureRate: metric(
       row => row.profitCaptureRatio,
@@ -866,6 +874,29 @@ function binnedCompare<T extends CampaignSortRow>(
   return (a, b) => compareNumber(bin(a), bin(b), direction);
 }
 
+function compareByDay<T extends CampaignSortRow>(key: CampaignSortKey<T>): CampaignSortKey<T> {
+  const day = key.day;
+  if (!day) return key;
+  return {
+    ...key,
+    compare: (a, b, direction) => {
+      const left = day(a) ?? '', right = day(b) ?? '';
+      if (left === right) return 0;
+      return (left < right ? -1 : 1) * (direction === 'asc' ? 1 : -1);
+    },
+  };
+}
+
+function laterSortKeys<T extends CampaignSortRow>(levels: CampaignSortChain, keys: Record<CampaignSortMode, CampaignSortKey<T>>) {
+  return levels.slice(1).map((level, index) => {
+    if (level.follow) {
+      const previous = levels[index];
+      return { key: keys[previous.mode], direction: previous.direction };
+    }
+    return { key: compareByDay(keys[level.mode]), direction: level.direction };
+  });
+}
+
 /**
  * 按排序链排：第一级决定进不进列表；之后各级依次比较（算不出的排到本档末尾）；全部打平再用第一级原有的并列裁决。
  * 链为空时按默认（操作时间从新到旧）。
@@ -875,17 +906,15 @@ function binnedCompare<T extends CampaignSortRow>(
 export function sortCampaignRows<T extends CampaignSortRow>(rows: readonly T[], chain: CampaignSortChain): T[] {
   const levels = chain.length > 0 ? chain : DEFAULT_CAMPAIGN_SORT_CHAIN;
   const keys = buildCampaignSortKeys<T>();
-  const [first, ...rest] = levels;
+  const [first] = levels;
   const firstKey = keys[first.mode];
-  const thenKeys = rest.map((level, index) => {
-    const source = level.follow ? levels[index] : level;
-    return { key: keys[source.mode], direction: source.direction };
-  });
+  const thenKeys = laterSortKeys(levels, keys);
+  const primaryKey = levels.length > 1 ? compareByDay(firstKey) : firstKey;
   const included = rows.filter(row => firstKey.include(row));
   const binning = resolveSortBinning(included, levels, keys);
   const primaryCompare: RowCompare<T> = binning
     ? binnedCompare(firstKey, binning, first.direction)
-    : (a, b, direction) => firstKey.compare(a, b, direction);
+    : primaryKey.compare;
   return included.sort((a, b) => {
     // 第一级：原来的比较（缺值已被过滤；操作时间缺值按原口径记 0）；分档时先比档
     const primary = primaryCompare(a, b, first.direction);
@@ -901,7 +930,7 @@ export function sortCampaignRows<T extends CampaignSortRow>(rows: readonly T[], 
       if (result) return result;
     }
     // 分档时各级都打平：再按第一级本身的数值（保持原有并列裁决在最后）
-    if (binning) {
+    if (binning || primaryKey !== firstKey) {
       const own = firstKey.compare(a, b, first.direction);
       if (own) return own;
     }
@@ -941,16 +970,13 @@ export function describeSortLevelEffects<T extends CampaignSortRow>(
   const levels = chain.length > 0 ? chain : DEFAULT_CAMPAIGN_SORT_CHAIN;
   if (levels.length <= 1) return levels.map(() => null);
   const keys = buildCampaignSortKeys<T>();
-  const [first, ...rest] = levels;
+  const [first] = levels;
   const firstKey = keys[first.mode];
   const binning = resolveSortBinning(sortedRows, levels, keys);
   const primaryCompare: RowCompare<T> = binning
     ? binnedCompare(firstKey, binning, first.direction)
-    : (a, b, direction) => firstKey.compare(a, b, direction);
-  const thenKeys = rest.map((level, index) => {
-    const source = level.follow ? levels[index] : level;
-    return { key: keys[source.mode], direction: source.direction };
-  });
+    : compareByDay(firstKey).compare;
+  const thenKeys = laterSortKeys(levels, keys);
   /** 第 level 级（0 = 第一级）上两行是否打平。 */
   const tiedAt = (a: T, b: T, level: number): boolean => {
     if (level === 0) return primaryCompare(a, b, first.direction) === 0;
@@ -1006,12 +1032,13 @@ export function describeSortLevelEffects<T extends CampaignSortRow>(
  * 以及后面各级在这一组里的读数概况——看得出「第一级的每一档里，第二级大致是什么水平」。
  *   · 第一级分档时（连续指标）：一档一组（Q4…Q1，按列表顺序）；
  *   · 第一级是镜像止盈 / 重要性 / 杠杆：一个读数一组；
- *   · 第一级是字母 / 操作时间：几乎一场一组，分组没有意义，只给一行「全部」。
+ *   · 第一级是操作时间：多级排序按北京时间自然日分组；字母只给一行「全部」。
  * 组的先后与列表相同（按排好的行第一次出现的顺序）。胜率与统计概览同一口径：b > 0 记赢，只数算得出 b 的战役。
  */
 export type SortGroupKey =
   | { kind: 'quartile'; quartile: SortQuartile; lower: number | null }
   | { kind: 'value'; value: number }
+  | { kind: 'day'; day: string | null }
   | { kind: 'all' };
 
 export type SortGroupLevelStat =
@@ -1082,6 +1109,10 @@ function groupSortedRows<T extends CampaignSortRow>(
       const q = quartile(row);
       return { kind: 'quartile', quartile: q, lower: q === 1 ? null : binning.thresholds[q - 2] };
     };
+  } else if (levels.length > 1 && firstKey.day) {
+    const day = firstKey.day;
+    groupOf = row => day(row) ?? 'undated';
+    keyOf = row => ({ kind: 'day', day: day(row) });
   } else if (DISCRETE_GROUP_MODES.has(first.mode)) {
     const read = discreteReader<T>(first.mode);
     groupOf = row => `v${read(row)}`;
@@ -1142,7 +1173,7 @@ export function summarizeSortGroups<T extends CampaignSortRow>(
  * 列的分档对整张列表统一算，每一行才读得出「这一档里第二级偏高还是偏低」：
  *   · 连续指标：按列表里算得出这一项的全部战役算四分位（与第一级分档同一口径：封面精度取整、档界是那一档最小的读数）；
  *   · 镜像止盈 / 重要性 / 杠杆：一个读数一列；
- *   · 字母 / 操作时间：没法分档，返回 null。
+ *   · 操作时间按北京时间自然日分列；字母返回 null。
  * 列的先后按这一级的方向（从大到小就是 Q4 在左）；算不出这一项的战役另起一列「算不出」，没有就不出这一列。
  * 整张表一场都没有的列不画（读数成团时四分位档界会重合）。
  */
@@ -1189,6 +1220,11 @@ export function summarizeSortCrossTab<T extends CampaignSortRow>(
       column: { kind: 'quartile', quartile, lower: quartile === 1 ? null : bounds[quartile - 2] },
       order: quartile,
     }));
+  } else if (key.day) {
+    const day = key.day;
+    columnOf = row => day(row) ?? 'missing';
+    const dates = [...new Set(sortedRows.map(day).filter((value): value is string => value != null))].sort();
+    candidates = dates.map((date, order) => ({ id: date, column: { kind: 'day', day: date }, order }));
   } else if (DISCRETE_GROUP_MODES.has(level.mode)) {
     const read = discreteReader<T>(level.mode);
     columnOf = row => (key.missing(row) ? 'missing' : `v${read(row)}`);

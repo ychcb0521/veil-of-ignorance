@@ -32,6 +32,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
 import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID } from '@/components/SignalLibraryHeader';
+import { formatBeijingTime } from '@/lib/timeFormat';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { turingCupTicker } from '@/lib/turingCupSymbol';
 import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
@@ -205,6 +206,7 @@ interface RowProps {
   id: string;
   symbol: string;
   timeLabel: string;
+  caughtAt?: number;
   fallbackZone: string;
   turingReplaySample?: true;
   /** 已归一化的评分；undefined = 未评分。 */
@@ -233,7 +235,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
+  id, symbol, timeLabel, caughtAt, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
@@ -256,7 +258,7 @@ function SignalLibraryRowImpl({
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
-        className="col-span-4 grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+        className={`${algorithmTypes ? 'col-span-5' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
         title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -285,6 +287,9 @@ function SignalLibraryRowImpl({
             />
           )}
         </span>
+        {algorithmTypes && <span className="whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-caught-at">
+          {caughtAt != null && caughtAt > 0 ? formatBeijingTime(new Date(caughtAt).getTime()) : '—'}
+        </span>}
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
         {algorithmTypes
           ? <span className="whitespace-nowrap font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
@@ -595,6 +600,7 @@ function SignalLibraryListImpl({
         market={sig.market}
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
+        caughtAt={rowAlgorithmTypes ? sig.caughtAt : undefined}
         fallbackZone={sig.fallbackZone}
         turingReplaySample={sig.turingReplaySample}
         quality={normalizeSignalQuality(sig.quality)}

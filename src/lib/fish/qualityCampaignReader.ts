@@ -8,7 +8,7 @@ import { qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformanc
 export type QualityCampaignReadRequest = { owner: string; warning?: string } & (
   | { kind: 'list'; section: 'sell' | 'detect' | 'quality'; definitions: readonly DeepDigFeatureDef[] }
   | { kind: 'detail'; id: string }
-  | { kind: 'performance'; section: 'sell' | 'detect' | 'quality'; sellKey: string }
+  | { kind: 'performance'; section: 'sell' | 'detect' | 'quality'; sellKey: string; excluded?: readonly string[] }
 );
 export type QualityCampaignReadResult =
   | { kind: 'list'; data: ReturnType<typeof listQualityCampaignDataFromStudy> }
@@ -19,7 +19,7 @@ export type QualityCampaignReadResult =
 /** Only derived campaign data crosses the worker boundary. Frozen tables stay on disk. */
 export function projectQualityCampaignStudy(study: FishQualityStudy, request: QualityCampaignReadRequest): QualityCampaignReadResult {
   const clean = cleanQualityCampaignStudy(study);
-  if (request.kind === 'performance') return { kind: 'performance', data: qualityCampaignPerformanceFromStudy(request.owner, clean, request.section, request.sellKey) };
+  if (request.kind === 'performance') return { kind: 'performance', data: qualityCampaignPerformanceFromStudy(request.owner, clean, request.section, request.sellKey, request.excluded) };
   return request.kind === 'list'
     ? { kind: 'list', data: listQualityCampaignDataFromStudy(request.owner, clean, request.section, request.definitions) }
     : { kind: 'detail', data: qualityCampaignDetailFromStudy(request.owner, clean, request.id) };

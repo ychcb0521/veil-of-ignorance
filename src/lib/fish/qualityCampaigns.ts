@@ -5,6 +5,8 @@ import type { QualityCampaignReadRequest, QualityCampaignReadResult } from './qu
 import { qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
 import { serializeArchiveWork } from '../serializeArchiveWork';
 import {QualityCampaignPacketDecoder,type QualityCampaignReply} from './qualityCampaignTransfer';
+import { qualityCampaignTrashKey } from '@/lib/campaignSections';
+import { loadQualityCampaignTrash, readQualityCampaignTrash } from './qualityCampaignTrash';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -53,24 +55,40 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
   return { ...listQualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning };
 }
 export async function loadQualityCampaignData(owner: string, id: string): Promise<QualityCampaignData> {
+  const initialMarks = await loadQualityCampaignTrash(owner);
+  if (initialMarks[qualityCampaignTrashKey(id)]?.state === 'purged') {
+    throw new Error('这场持仓监测战役已永久移除');
+  }
+  const applyTrash = async (data: QualityCampaignData) => {
+    const marks = await readQualityCampaignTrash(owner);
+    const mark = marks[qualityCampaignTrashKey(data.campaign.id)];
+    if (mark?.state === 'purged' || marks[qualityCampaignTrashKey(id)]?.state === 'purged') {
+      throw new Error('这场持仓监测战役已永久移除');
+    }
+    return mark?.state === 'deleted'
+      ? { ...data, campaign: { ...data.campaign, deleted_at: new Date(mark.at).toISOString() } }
+      : data;
+  };
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
       const result = await projectInWorker({ owner, kind: 'detail', id, warning: prepared.warning });
       if (result.kind !== 'detail') throw new Error('持仓监测读取结果不匹配');
-      return result.data;
+      return applyTrash(result.data);
     }
   }
-  return qualityCampaignDetailFromStudy(owner, (await loadQualityStudy(owner)).study, id);
+  return applyTrash(qualityCampaignDetailFromStudy(owner, (await loadQualityStudy(owner)).study, id));
 }
 export async function loadQualityCampaignPerformance(owner: string, section: 'sell' | 'detect' | 'quality', sellKey: string) {
+  const trash = await loadQualityCampaignTrash(owner);
+  const excluded = Object.keys(trash).filter(key => trash[key].state !== 'active');
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
-      const result = await projectInWorker({ owner, kind: 'performance', section, sellKey, warning: prepared.warning });
+      const result = await projectInWorker({ owner, kind: 'performance', section, sellKey, warning: prepared.warning, ...(excluded.length ? { excluded } : {}) });
       if (result.kind !== 'performance') throw new Error('持仓监测统计结果不匹配');
       return result.data;
     }
   }
-  return qualityCampaignPerformanceFromStudy(owner, (await loadQualityStudy(owner)).study, section, sellKey);
+  return qualityCampaignPerformanceFromStudy(owner, (await loadQualityStudy(owner)).study, section, sellKey, excluded);
 }

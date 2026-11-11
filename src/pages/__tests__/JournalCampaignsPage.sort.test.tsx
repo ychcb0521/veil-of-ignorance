@@ -2780,7 +2780,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('删除于 2026-07-17 11:00')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('restore-campaign-deleted-campaign'));
-    await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign'));
+    await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign', 'user-1'));
     await waitFor(() => expect(screen.queryByTestId('deleted-campaign-row')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(5));
   });
@@ -3018,7 +3018,7 @@ describe('【用户要求】回收站平行世界', () => {
     );
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
     fireEvent.click(screen.getByTestId('campaign-bin-restore'));
-    await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign'));
+    await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign', 'user-1'));
     await waitFor(() => expect(screen.queryAllByTestId('campaign-card')).toHaveLength(0));
     expect(await screen.findByTestId('campaign-bin-empty')).toHaveTextContent('回收站是空的');
     fireEvent.click(screen.getByTestId('campaign-bin-leave'));
@@ -3039,7 +3039,7 @@ describe('【用户要求】回收站平行世界', () => {
     expect(mockPermanentlyDeleteCampaign).not.toHaveBeenCalled();
     expect(screen.getAllByTestId('campaign-card')).toHaveLength(1);
     fireEvent.click(screen.getByTestId('campaign-bin-purge'));
-    await waitFor(() => expect(mockPermanentlyDeleteCampaign).toHaveBeenCalledWith('deleted-campaign'));
+    await waitFor(() => expect(mockPermanentlyDeleteCampaign).toHaveBeenCalledWith('deleted-campaign', 'user-1'));
     await waitFor(() => expect(screen.queryAllByTestId('campaign-card')).toHaveLength(0));
     confirm.mockRestore();
   }, 15_000);
