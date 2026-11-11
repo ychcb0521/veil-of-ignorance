@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { FishCard } from '@/components/FishAlgorithmCard';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { queueSimStatePush } from '@/lib/simStateSync';
@@ -6,6 +7,8 @@ import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { readFishCards, readFishCombination } from './cards';
 import { readFishDownwardWick, validateFishDownwardWick } from './downwardWick';
 import { AUDITED_EXCHANGES } from './exchanges';
+import { validateFishHitRateWindow } from './hitRate';
+import { FISH_HIT_RATE_SETTINGS_KEY, readFishHitRateSettings } from './hitRateSettings';
 import { readFishLookback, validateFishLookback } from './lookback';
 import { currentDefaultRules, miningCards } from './mining';
 import { MINING_COMBINATION } from './defaultRules';
@@ -71,16 +74,34 @@ export function initialMiningSettings(state: FishMiningState, capture: FishScanS
   });
 }
 
-export function copyCaptureToMining(settings: FishMiningSettings, selection: FishScanSelection): FishMiningSettings {
-  const rules = readFishCards().map(({ id, featureId, pref, enabled }) => ({
+function miningRulesFromCards(cards: readonly FishCard[]): FishMiningSettings['rules'] {
+  return cards.map(({ id, featureId, pref, enabled }) => ({
     id, featureId, statistic: pref.statistic ?? '结果', threshold: pref.threshold, direction: pref.direction, enabled,
   }));
+}
+
+export function copyCaptureToMining(settings: FishMiningSettings, selection: FishScanSelection): FishMiningSettings {
+  const rules = miningRulesFromCards(readFishCards());
   return {
     ...settings, selection: structuredClone(selection), rules: rules.length ? rules : settings.rules,
     scan: {
       combination: readFishCombination(), downwardWick: readFishDownwardWick(),
       turnover: readCaptureTurnoverSettings(), lookbackHours: readFishLookback(),
     },
+  };
+}
+
+export function copyHitRateToMining(settings: FishMiningSettings): FishMiningSettings {
+  let value: unknown;
+  try {
+    value = JSON.parse(readPersistedStateRaw(getUserPrefix() + FISH_HIT_RATE_SETTINGS_KEY) ?? 'null');
+  } catch { /* Unreadable settings are treated as unavailable. */ }
+  const saved = readFishHitRateSettings(value);
+  if (!saved) throw new Error('请先在「捕捞质量 → 漏报测试 → 测试设置」保存独立设置');
+  const { cards, combination, selection, downwardWick, turnover, window } = saved;
+  return {
+    ...settings, rules: miningRulesFromCards(cards), selection,
+    scan: { combination, downwardWick, turnover, lookbackHours: validateFishHitRateWindow(window) },
   };
 }
 

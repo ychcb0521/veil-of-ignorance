@@ -13,7 +13,7 @@ import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishCheck } from './FishAlgorithmCard';
 import { FishNumberField, FishScanScopeFields, FishScanWickFields } from './FishScanSettingsFields';
 import { FishTurnoverSettingsFields } from './FishTurnoverSettings';
-import { buildConfiguredMiningScan, copyCaptureToMining, initialMiningSettings, readMiningSettings, saveMiningSettings } from '@/lib/fish/miningSettings';
+import { buildConfiguredMiningScan, copyCaptureToMining, copyHitRateToMining, initialMiningSettings, readMiningSettings, saveMiningSettings } from '@/lib/fish/miningSettings';
 import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -80,9 +80,23 @@ function MiningRuleEditor({ mining, close, mode = 'current' }: {
   const [draft, setDraft] = useState(settings.rules);
   const [target, setTarget] = useState(String(settings.target));
   const [error, setError] = useState('');
+  const [copiedFrom, setCopiedFrom] = useState<'捕捞' | '捕捞质量'>();
   const [startTime, setStartTime] = useState(() => short(mining.state.startMs).replace(' ', 'T'));
   const [endTime,setEndTime]=useState(()=>short(mining.state.endMs??Date.now()).replace(' ','T'));
   const locked = mining.running && !independent;
+  const copySettings = (source: '捕捞' | '捕捞质量') => {
+    const current = { ...settings, rules: draft };
+    try {
+      const copied = source === '捕捞' ? copyCaptureToMining(current, capture) : copyHitRateToMining(current);
+      setSettings(copied);
+      setDraft(copied.rules);
+      setCopiedFrom(source);
+      setError('');
+    } catch (cause) {
+      setCopiedFrom(undefined);
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
   const editRules = independent || !mining.state.scan;
   const choices=(mining.ruleChoices??[]).filter(c=>c.statistics.length>0);
   const save=()=>{
@@ -128,9 +142,16 @@ function MiningRuleEditor({ mining, close, mode = 'current' }: {
             <option value="and">交集</option><option value="or">并集</option>
           </select>
         </label>
-        <button type="button" className="rounded-md border border-border/70 px-2 py-1 hover:bg-muted"
-          onClick={() => { const copied = copyCaptureToMining({ ...settings, rules: draft }, capture); setSettings(copied); setDraft(copied.rules); setError(''); }}>复制已保存的捕捞条件</button>
+        <div role="group" aria-label="复制设置" className="flex flex-wrap items-center gap-1.5">
+          <button type="button" className="rounded-md border border-border/70 px-2 py-1 hover:bg-muted"
+            onClick={() => copySettings('捕捞')}>复制已保存的捕捞条件</button>
+          <button type="button" className="rounded-md border border-border/70 px-2 py-1 hover:bg-muted"
+            onClick={() => copySettings('捕捞质量')}>复制捕捞质量设置</button>
+        </div>
       </div>
+      {copiedFrom && <p role="status" className="text-muted-foreground">
+        已从{copiedFrom}填入草稿。{copiedFrom === '捕捞质量' && '每档回看使用样本前后时长之和。'}
+      </p>}
     </> : <MiningScanDetails mining={mining}/>}
     {editRules && draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic),menu=choice?.menuStatistics??choice?.statistics??[];return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
       {independent && <FishCheck aria-label={`启用挖掘算法 ${i+1}`} checked={rule.enabled!==false}

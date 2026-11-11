@@ -3,6 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
+import { FISH_HIT_RATE_SETTINGS_KEY, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readMiningSettings } from '@/lib/fish/miningSettings';
 import { saveFishDownwardWick } from '@/lib/fish/downwardWick';
 import { DetectCategoryStats } from '@/components/DetectCategoryStats';
@@ -207,4 +209,67 @@ it('saves independently edited values and leaves the current round paused', () =
     expect(mining.start).not.toHaveBeenCalled();
     expect(mining.setTarget).not.toHaveBeenCalled();
   } finally { localStorage.clear(); }
+});
+
+
+it('copies saved capture-quality settings into an editable mining draft for future rounds', () => {
+  localStorage.clear();
+  const key = getUserPrefix() + FISH_HIT_RATE_SETTINGS_KEY;
+  const source: FishHitRateSettings = {
+    version: 1,
+    cards: [
+      { id: 'quality-cbi2', featureId: 'cbi2', enabled: true, pref: { statistic: 'CBI2', threshold: '0.032', direction: '<', constraints: [] } },
+      { id: 'quality-cba', featureId: 'cba', enabled: false, pref: { threshold: '2.2', direction: '>', constraints: [] } },
+    ],
+    combination: 'and',
+    selection: { exchanges: ['okx', 'gate'], includeDuplicates: true, includeUsStocks: true },
+    downwardWick: { enabled: false, hours: 8, atrMultiple: 3.5 },
+    turnover: { enabled: false, floors: [{ hours: 1, min: 650_000 }, { hours: 12, min: 3_000_000 }, { hours: 24, min: 4_000_000 }] },
+    window: { beforeHours: 5, afterHours: 0.1 },
+  };
+  const snapshot = JSON.stringify(source);
+  const mining = api({ ruleChoices: [
+    { featureId: 'cbi2', label: 'CBI-2', statistics: [{ name: 'CBI2', label: '原值' }] },
+    { featureId: 'cba', label: 'CBA', statistics: [{ name: '结果', label: '结果' }] },
+  ] }, { target: 50, stepMs: 24 * 3_600_000 });
+  try {
+    render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#" />);
+    const open = () => fireEvent.click(screen.getByRole('button', { name: '挖掘设置' }));
+    const form = () => within(screen.getByRole('dialog', { name: '批量挖掘设置' }));
+    const copy = () => fireEvent.click(form().getByRole('button', { name: '复制捕捞质量设置' }));
+    open();
+    fireEvent.change(form().getByLabelText('挖掘目标条数'), { target: { value: '99' } });
+    fireEvent.change(form().getByLabelText('扫描间隔（小时）'), { target: { value: '6' } });
+    copy();
+    expect(form().getByRole('alert')).toHaveTextContent('保存独立设置');
+    localStorage.setItem(key, snapshot);
+    copy();
+    expect(form().getByLabelText('挖掘算法 1 方向')).toHaveValue('<');
+    expect(form().getByLabelText('挖掘算法 1 门槛')).toHaveValue(0.032);
+    expect(form().getByLabelText('启用挖掘算法 2')).not.toBeChecked();
+    expect(form().getByLabelText('每档回看（小时）')).toHaveValue(5.1);
+    expect(form().getByLabelText('扫描间隔（小时）')).toHaveValue(6);
+    expect(form().getByLabelText('挖掘目标条数')).toHaveValue(99);
+    expect(readMiningSettings()).toBeNull();
+    fireEvent.click(form().getByRole('button', { name: '取消' }));
+    open();
+    expect(form().getByLabelText('挖掘目标条数')).toHaveValue(50);
+    copy();
+    fireEvent.change(form().getByLabelText('挖掘算法 1 门槛'), { target: { value: '0.04' } });
+    fireEvent.click(form().getByRole('button', { name: '保存设置' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(readMiningSettings()).toMatchObject({
+      target: 50, stepMs: 24 * 3_600_000, selection: source.selection,
+      scan: { combination: source.combination, downwardWick: source.downwardWick, turnover: source.turnover, lookbackHours: 5.1 },
+      rules: [
+        { featureId: 'cbi2', statistic: 'CBI2', direction: '<', threshold: '0.04', enabled: true },
+        { featureId: 'cba', statistic: '结果', direction: '>', threshold: '2.2', enabled: false },
+      ],
+    });
+    expect(localStorage.getItem(key)).toBe(snapshot);
+    expect(mining.start).not.toHaveBeenCalled();
+    expect(mining.pause).not.toHaveBeenCalled();
+  } finally {
+    localStorage.clear();
+  }
 });
