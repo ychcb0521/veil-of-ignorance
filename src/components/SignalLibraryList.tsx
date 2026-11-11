@@ -196,6 +196,7 @@ interface RowProps {
   algorithmTypes?: string[];
   /** 「渔」的鱼：这一列先放「捕捞过程」入口（点开看凭什么击中、为什么避开噪音）。 */
   processSignal?: TradeSignal;
+  processCaptures?: readonly TradeSignal[];
   match?: SignalReconstructionMatch;
   showMatch?: boolean;
   market?: 'us_stock';
@@ -237,7 +238,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, caughtAt, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes, confirmDelete = false, selected, onSelect,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   // 【用户要求】2026-10-21「鱼那里的数据…不能轻易删除」：× 紧挨着跳转箭头，容易点错——鱼要再点一次「确认删除」
@@ -308,7 +309,7 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
-      {showMatch ? <SignalMatchCell match={match}/> : processSignal ? <FishProcessButton signal={processSignal}/> : <span aria-hidden/>}
+      {showMatch ? <SignalMatchCell match={match}/> : processSignal ? <FishProcessButton signal={processSignal} captures={processCaptures}/> : <span aria-hidden/>}
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
           它说的就是「这个箭头点不动」，挨着它才读得出因果；
@@ -365,6 +366,7 @@ interface Props {
   showProcess?: boolean;
   /** 「渔」的鱼：兜底区这一列换成「算法类型」。 */
   rowAlgorithmTypes?: (signal: TradeSignal) => string[];
+  rowProcessSignals?: (signal: TradeSignal) => readonly TradeSignal[] | undefined;
   /** 删除要点两下确认（「鱼」用）。 */
   confirmDelete?: boolean;
   /** 已排好序、筛好的行。 */
@@ -400,7 +402,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect,
-  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, confirmDelete = false,
+  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef(rows); rowsRef.current = rows;
@@ -593,6 +595,7 @@ function SignalLibraryListImpl({
         showMatch={matches !== undefined}
         match={matches?.get(sig.id)}
         processSignal={showProcess ? sig : undefined}
+        processCaptures={showProcess ? rowProcessSignals?.(sig) : undefined}
         algorithmTypes={rowAlgorithmTypes?.(sig)}
         extraTitle={rowTitle?.(sig)}
         algorithm={rowAlgorithm?.(sig)}

@@ -1,4 +1,4 @@
-// 【用户要求】2026-10-27「挖掘库中命中算法这里只显示探测算法（也就是被哪个算法捕捉到的）」
+// 【用户要求】2026-10-27「捕捞库中命中算法这里只显示探测算法（也就是被哪个算法捕捉到的）」
 import { fireEvent, render, screen, within,waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
@@ -11,8 +11,8 @@ const store = vi.hoisted(() => ({ library: null as unknown }));
 vi.mock('@/lib/fish/miningLibraryStore', () => ({ MINING_LIBRARY_EVENT: 'x',updateMiningLibrary:vi.fn(), loadMiningLibrary: async () => store.library }));
 
 async function openFamily(family='CBI-2'){
- await waitFor(()=>expect(screen.getByLabelText('打开挖掘归档 mining-family-'+family)).toBeInTheDocument());
- fireEvent.click(screen.getByLabelText('打开挖掘归档 mining-family-'+family));fireEvent.click(screen.getByText('挖掘记录详情'));
+ await waitFor(()=>expect(screen.getByLabelText('打开捕捞归档 mining-family-'+family)).toBeInTheDocument());
+ fireEvent.click(screen.getByLabelText('打开捕捞归档 mining-family-'+family));fireEvent.click(screen.getByText('挖掘记录详情'));
 }
 const A = Date.UTC(2026, 4, 16, 4);
 const snap = (featureShort: string, statistic: string, algorithmKey: string) => ({ average: 0.05, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: A, threshold: 0.04, featureShort, statistic, algorithmKey });
@@ -30,7 +30,7 @@ it('shows only the detectors that actually caught each signal, merges identical 
   // 鱼舱里 AKE 只有修过别名后的那条（键与旧记录不同），DOGE 已删除
   const hold = new Set([fishCatchKey(ake), fishVisibleCatchKey(ake)]);
   render(<FishMiningLibrary account="u" holdKeys={() => hold}/>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
+  fireEvent.click(screen.getByRole('button', { name: '打开捕捞库' }));await openFamily();
   const rows=await screen.findAllByTestId('mining-library-row');expect(rows).toHaveLength(1);
   const cells=within(rows[0]).getAllByRole('cell').map(c=>c.textContent);
   expect(cells[0]).toBe('AKEUSDT');expect(cells[3]).toContain('CBI-2');expect(cells[3]).toContain('avg_CBA_2');expect(cells[3]).not.toContain('avg_state_2');
@@ -45,9 +45,9 @@ it('shows only the detectors that actually caught each signal, merges identical 
 it('keeps different historical thresholds visible even when their old shorthand labels and signal times are identical',async()=>{
  const a=signal('AAAUSDT',[1]),b=structuredClone(a);a.fish!.algorithms![0]={...a.fish!.algorithms![0],direction:'>',threshold:.04};b.fish!.algorithms![0]={...b.fish!.algorithms![0],direction:'>',threshold:.05};
  store.library={...emptyMiningLibrary(),records:[record(a,'a','a',1),record(b,'b','b',2)]};
- render(<FishMiningLibrary/>);fireEvent.click(screen.getByRole('button',{name:'打开挖掘库'}));await openFamily();
+ render(<FishMiningLibrary/>);fireEvent.click(screen.getByRole('button',{name:'打开捕捞库'}));await openFamily();
  const rows=await screen.findAllByTestId('mining-library-row');expect(rows).toHaveLength(2);expect(rows.map(r=>r.textContent).join(' ')).toContain('avg_CBI2_2 > 0.04');expect(rows.map(r=>r.textContent).join(' ')).toContain('avg_CBI2_2 > 0.05');
- fireEvent.change(screen.getByLabelText('搜索挖掘库'),{target:{value:'avg_CBI2_2 > 0.05'}});expect(screen.getAllByTestId('mining-library-row')).toHaveLength(1);
+ fireEvent.change(screen.getByLabelText('搜索捕捞库'),{target:{value:'avg_CBI2_2 > 0.05'}});expect(screen.getAllByTestId('mining-library-row')).toHaveLength(1);
 });
 
 it('shows exact Beijing mining times, sorts repeated captures separately, and selects only the matching threshold for deletion', async () => {
@@ -69,7 +69,7 @@ it('shows exact Beijing mining times, sorts repeated captures separately, and se
   ] };
   const remove = vi.fn();
   render(<FishBulkDeleteContext.Provider value={remove}><FishMiningLibrary/></FishBulkDeleteContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
+  fireEvent.click(screen.getByRole('button', { name: '打开捕捞库' }));await openFamily();
   await screen.findAllByTestId('mining-library-mined-at');
   const dates = () => screen.getAllByTestId('mining-library-mined-at').map(cell => cell.textContent);
   const sort = screen.getByRole('button', { name: '按捕捞时间排序' });
@@ -79,7 +79,7 @@ it('shows exact Beijing mining times, sorts repeated captures separately, and se
   expect(dates()).toEqual(['2026-05-16 12:00:11', '2026-05-16 12:00:23', '2026-05-16 12:00:35', '—']);
 
   fireEvent.click(screen.getByRole('checkbox', { name: '选择挖掘记录 AAAUSDT new' }));
-  const search = screen.getByLabelText('搜索挖掘库');
+  const search = screen.getByLabelText('搜索捕捞库');
   fireEvent.change(search, { target: { value: '2026-05-16 12:00:11' } });
   expect(dates()).toEqual(['2026-05-16 12:00:11']);
   fireEvent.change(search, { target: { value: 'avg_CBI2_2 > 0.04' } });
@@ -99,14 +99,14 @@ it('bulk selects a sorted, filtered range across the scroll window and supports 
   store.library = { ...emptyMiningLibrary(), records: [...captures, record(excluded, 'excluded', 'excluded', excluded.caughtAt)] };
   const remove = vi.fn();
   render(<FishBulkDeleteContext.Provider value={remove}><FishMiningLibrary/></FishBulkDeleteContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily();
+  fireEvent.click(screen.getByRole('button', { name: '打开捕捞库' }));await openFamily();
   await screen.findAllByTestId('mining-library-row');
 
-  fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: 'KEEP' } });
+  fireEvent.change(screen.getByLabelText('搜索捕捞库'), { target: { value: 'KEEP' } });
   fireEvent.click(screen.getByRole('button', { name: '按捕捞时间排序' }));
   const first = screen.getByRole('checkbox', { name: '选择挖掘记录 KEEP19USDT 19' });
   const last = screen.getByRole('checkbox', { name: '选择挖掘记录 KEEP00USDT 0' });
-  const header = screen.getByRole('checkbox', { name: '全选当前筛选的挖掘库记录' });
+  const header = screen.getByRole('checkbox', { name: '全选当前筛选的捕捞库记录' });
   expect(screen.queryByRole('checkbox', { name: '选择挖掘记录 KEEP03USDT 3' })).not.toBeInTheDocument();
 
   fireEvent.click(first);
@@ -130,11 +130,11 @@ it('hands the selected actual mining date to the combination table with each ori
   store.library = { ...emptyMiningLibrary(), records: [record(old, 'old', 'old', A), record(selected, 'new', 'new', A)] };
   const useInTable = vi.fn(() => true);
   render(<FishMiningLibrary onSelectInTable={useInTable}/>);
-  fireEvent.click(screen.getByRole('button', { name: '打开挖掘库' }));await openFamily('S');
+  fireEvent.click(screen.getByRole('button', { name: '打开捕捞库' }));await openFamily('S');
   await screen.findAllByTestId('mining-library-row');
-  fireEvent.change(screen.getByLabelText('搜索挖掘库'), { target: { value: '2026-11-06' } });
-  fireEvent.click(screen.getByRole('checkbox', { name: '全选当前筛选的挖掘库记录' }));
+  fireEvent.change(screen.getByLabelText('搜索捕捞库'), { target: { value: '2026-11-06' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: '全选当前筛选的捕捞库记录' }));
   fireEvent.click(screen.getByRole('button', { name: '在组合表中勾选' }));
   expect(useInTable).toHaveBeenCalledWith([{ ...selected, mined: { anchorMs: A } }]);
-  expect(screen.queryByRole('dialog', { name: '挖掘库' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: '捕捞库' })).not.toBeInTheDocument();
 });

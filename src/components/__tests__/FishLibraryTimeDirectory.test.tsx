@@ -18,16 +18,16 @@ it('edits a directory without loading its snapshot, retains failed drafts, and p
 const snapshot=newQualityStudy(1),items:FishDirectoryItem[]=[{id:'one',at:1,label:'本轮',summary:'1 条记录',study:()=>snapshot}];
 it('allows multiple directories or a single directory, applies only on confirmation, and restores checked choices on reopen',async()=>{
  const selected=vi.fn(async(_id:string,_study:FishQualityStudy,_ids?:string[])=>true),entries=[items[0],{...items[0],id:'two',at:2,label:'另一轮',study:()=>newQualityStudy(2)}];
- const props={name:'挖掘库',prefix:'mining',description:'测试',info:null,items:entries,recordCount:2,download:vi.fn(),empty:'空',onSelectDirectory:selected};
+ const props={name:'捕捞库',prefix:'mining',description:'测试',info:null,items:entries,recordCount:2,download:vi.fn(),empty:'空',onSelectDirectory:selected};
  const h=render(<FishLibraryTimeDirectory {...props} openRequest={{key:1,selectedIds:['one']}}/>);
- expect(screen.getByLabelText('选择挖掘库目录 本轮 one')).toBeChecked();
- fireEvent.click(screen.getByLabelText('选择挖掘库目录 另一轮 two'));expect(selected).not.toHaveBeenCalled();
+ expect(screen.getByLabelText('选择捕捞库目录 本轮 one')).toBeChecked();
+ fireEvent.click(screen.getByLabelText('选择捕捞库目录 另一轮 two'));expect(selected).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole('button',{name:'应用所选目录（2）'}));await waitFor(()=>expect(selected).toHaveBeenCalledOnce());
  expect(selected.mock.calls[0][2]).toEqual(['two','one']);expect(screen.queryByRole('dialog')).toBeNull();
  h.rerender(<FishLibraryTimeDirectory {...props} openRequest={{key:2,selectedIds:['one','two']}}/>);
- expect(screen.getByLabelText('选择挖掘库目录 本轮 one')).toBeChecked();expect(screen.getByLabelText('选择挖掘库目录 另一轮 two')).toBeChecked();
+ expect(screen.getByLabelText('选择捕捞库目录 本轮 one')).toBeChecked();expect(screen.getByLabelText('选择捕捞库目录 另一轮 two')).toBeChecked();
  fireEvent.click(screen.getByRole('button',{name:'清空选择'}));expect(screen.getByRole('button',{name:'应用所选目录（0）'})).toBeDisabled();
- fireEvent.click(screen.getByLabelText('选择挖掘库目录 本轮 one'));fireEvent.click(screen.getByRole('button',{name:'应用所选目录（1）'}));
+ fireEvent.click(screen.getByLabelText('选择捕捞库目录 本轮 one'));fireEvent.click(screen.getByRole('button',{name:'应用所选目录（1）'}));
  await waitFor(()=>expect(selected).toHaveBeenCalledTimes(2));expect(selected.mock.calls[1][2]).toEqual(['one']);expect(snapshot).toEqual(newQualityStudy(1));
 });
 

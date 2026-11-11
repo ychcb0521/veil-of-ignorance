@@ -11,7 +11,7 @@ import {librarySignalIdentity} from './libraryRounds';
 import {miningLibraryConditions} from './libraryConditions';
 import {adoptQualityMonitorHistory} from './qualityMonitorLibrary';
 export type LibraryScope='all'|'mining'|'filter'|'monitor';
-export const LIBRARY_NAMES={all:'三个库',mining:'挖掘库',filter:'过滤库',monitor:'监测库'} as const;
+export const LIBRARY_NAMES={all:'三个库',mining:'捕捞库',filter:'过滤库',monitor:'监测库'} as const;
 export interface LibraryPayload {resolvedLegacySources?:LegacySourceResolutions;deletedReadings?:SourceDeletions;deletedSources?:SourceDeletions;mining?:FishMiningLibrary;filter?:QualityFilterLibrary;monitor?:QualityMonitorLibrary;observations?:Pick<FishQualityStudy,'entryReadings'|'postExitReadings'>}
 export interface LibraryPackage {format:'veil-fish-quality-libraries';version:1;id:string;exportedAt:number;scope:LibraryScope;source:{account:string;label:string};libraries:LibraryPayload}
 export interface LibraryCollection {version:1;packages:LibraryPackage[]}
@@ -35,7 +35,7 @@ function rounds(values:any[],records:Set<string>){
 export function validateLibraryPayload(input:unknown):asserts input is LibraryPayload {
  if(!object(input))fail('缺少库内容');const v=input as LibraryPayload;if(!v.mining&&!v.filter&&!v.monitor)fail('没有三个库中的任何一个');
  if(v.resolvedLegacySources){if(!object(v.resolvedLegacySources))fail('旧来源兼容记录无效');for(const origins of Object.values(v.resolvedLegacySources))if(!Array.isArray(origins)||origins.some(o=>!Object.prototype.hasOwnProperty.call(QUALITY_SOURCE_NAMES,o)))fail('旧来源兼容记录无效');}
- if(v.mining){const l=v.mining;if(l.version!==1)fail('挖掘库版本不支持');const runs=list(l.runs,'挖掘方案'),anchors=list(l.anchors,'挖掘档位'),records=list(l.records,'挖掘记录');const runIds=ids(runs,'挖掘方案'),recordIds=ids(records,'挖掘记录');ids(anchors,'挖掘档位');
+ if(v.mining){const l=v.mining;if(l.version!==1)fail('捕捞库版本不支持');const runs=list(l.runs,'挖掘方案'),anchors=list(l.anchors,'挖掘档位'),records=list(l.records,'挖掘记录');const runIds=ids(runs,'挖掘方案'),recordIds=ids(records,'挖掘记录');ids(anchors,'挖掘档位');
   for(const r of runs)if(typeof r.signature!=='string'||!Array.isArray(r.rules))fail('挖掘方案缺少参数');
   for(const r of records){if(!runIds.has(r.runId)||!finite(r.anchorMs)||!finite(r.updatedAt))fail('挖掘记录引用或时间无效');source(r.signal);}
   for(const a of anchors){if(!runIds.has(a.runId)||!finite(a.anchorMs))fail('挖掘档位引用无效');for(const id of list(a.recordIds,'档位记录'))if(!recordIds.has(id))fail('档位缺少关联记录');}

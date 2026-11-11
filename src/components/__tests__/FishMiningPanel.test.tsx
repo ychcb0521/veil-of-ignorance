@@ -38,7 +38,7 @@ it('explains the plan, starts mining and keeps the library next to settings', ()
   expect(screen.queryByText('0 / 1000')).toBeNull();
   expect(screen.queryByRole('status')).toBeNull();
   const controls=screen.getByTestId('fish-mining-panel');
-  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始批量捕捞','开始批量捕捞的其他方式','本轮条件','批量捕捞设置','打开挖掘库','重新开始'].includes(name!))).toEqual(['开始批量捕捞','开始批量捕捞的其他方式','批量捕捞设置','打开挖掘库']);
+  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始批量捕捞','开始批量捕捞的其他方式','本轮条件','批量捕捞设置','打开捕捞库','重新开始'].includes(name!))).toEqual(['开始批量捕捞','开始批量捕捞的其他方式','批量捕捞设置','打开捕捞库']);
   fireEvent.click(screen.getByRole('button', { name: '开始批量捕捞' })); expect(m.start).toHaveBeenCalled();
   expect(screen.queryByLabelText('批量捕捞目标条数')).toBeNull();
   expect(screen.queryByRole('button', { name: '本轮条件' })).toBeNull();

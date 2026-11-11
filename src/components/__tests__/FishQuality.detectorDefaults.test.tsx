@@ -26,7 +26,7 @@ it('keeps every saved capture after async hydration while the header offers only
   const view = render(<FishQuality state={state(true)}/>), s = state();
   view.rerender(<FishQuality state={s}/>);
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(6);
-  expect(s.setScope).toHaveBeenLastCalledWith(expect.arrayContaining(qualityDisplayRows(s.study).map(row => row.id)));
+  expect(vi.mocked(s.setScope!).mock.calls.at(-1)![0]).toEqual(expect.arrayContaining(qualityDisplayRows(s.study).map(row => row.id)));
   expect(vi.mocked(s.setScope!).mock.calls.at(-1)![0]).toHaveLength(6);
   const picker = open(); expect(within(picker).queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
   // 【用户要求】2026-10-28 下拉只列默认算法与数值，非默认的（CBI-2·avg > 0.06、S·avg₂ > 0.6）不再出现
@@ -57,4 +57,4 @@ it('keeps the unclassified signal library accessible without a manual detector r
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(6);
 });
 
-function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
+function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'捕捞库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}

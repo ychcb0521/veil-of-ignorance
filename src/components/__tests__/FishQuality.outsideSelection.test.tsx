@@ -38,7 +38,7 @@ it('只清挡住勾选的标的搜索，不动别的筛选', () => {
   expect(screen.getByLabelText('鱼质量的来源')).toHaveTextContent('全部来源');
 });
 
-function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
+function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'捕捞库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
 
 it('隐藏未选行只改变当前视图，仍可清除显示行的勾选并保留筛选外的勾选', () => {
   const s = state();

@@ -27,14 +27,14 @@ export function screeningResultIndex(results:readonly QualityScreeningResult[]){
 }
 export function screeningRowResults(row:QualityTableRow,index:ReturnType<typeof screeningResultIndex>,roundId?:string,workingRoundId?:string):QualityScreeningResult[]{
  const entries=new Map<string,QualityScreeningResult>();
- for(const member of qualityTableMembers(row)){const matches=index.get(qualityEntryIdentity(member.source,member.enteredAt))??[];
+ for(const member of qualityTableMembers(row)){const entry=qualityEntryIdentity(member.source,member.enteredAt),matches=index.get(entry)??[];
  const scope=workingRoundId&&matches.some(r=>r.round.id===workingRoundId)?workingRoundId:roundId??member.source.preEntryMonitor?.roundId;
  for(const result of matches){
   if(scope&&result.round.id!==scope)continue;
-  const plan=result.round.plans?.find(p=>p.id===result.record.planId),key=JSON.stringify(plan??result.round.filters),old=entries.get(key);
+  const plan=result.round.plans?.find(p=>p.id===result.record.planId),key=JSON.stringify([entry,plan??result.round.filters]),old=entries.get(key);
   if(!old||result.record.updatedAt>old.record.updatedAt||result.record.updatedAt===old.record.updatedAt&&result.round.startedAt>old.round.startedAt)entries.set(key,result);
  }}
- return [...entries.values()];
+ return [...new Map([...entries.values()].map(result => [result.record.id, result])).values()];
 }
 export interface QualityScreeningScope { roundId?: string; workingRoundId?: string }
 /** Use the same row/round association as the first-match column, including original signal rows. */

@@ -198,6 +198,15 @@ it('shows each buy of a signal as its own row with exact results, merging only s
  expect(screen.getByTestId('quality-fish-table')).not.toHaveTextContent('～');
  for(const r of screen.getAllByTestId('quality-fish-row'))expect(r).not.toHaveTextContent('信号库');
  for(const label of ['+10.00%','-5.00%'])expect(screen.getAllByTitle(new RegExp('收益率 '+label.replace(/[+.]/g,m=>'\\'+m))).length).toBeGreaterThan(0);
+ chooseSource('fish');
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+ expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号');
+ const merged = screen.getByTestId('quality-fish-row');
+ expect(within(merged).getByTitle(/收益率 -5\.00%～\+10\.00%/)).toBeInTheDocument();
+ fireEvent.click(within(merged).getByRole('checkbox'));
+ expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
+ fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
 });
 it('keeps source filters working without source badges in detector comparison rows', () => {
   const s=state();
@@ -213,7 +222,7 @@ it('keeps source filters working without source badges in detector comparison ro
     expect(within(row).queryByText('信号库')).toBeNull();
   }
   const source = screen.getByLabelText('鱼质量的来源');
-  fireEvent.click(source);for (const label of ['全部来源 3','鱼舱 1','信号库 1','挖掘库 1'])expect(screen.getByRole('option',{name:label})).toBeInTheDocument();fireEvent.click(source);
+  fireEvent.click(source);for (const label of ['全部来源 3','鱼舱 1','信号库 1','捕捞库 1'])expect(screen.getByRole('option',{name:label})).toBeInTheDocument();fireEvent.click(source);
   chooseSource('mined');
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   for(const row of screen.getAllByTestId('quality-fish-row')) { expect(row).toHaveTextContent('AAAUSDT'); expect(within(row).queryByText('默认值挖掘')).toBeNull(); }
@@ -743,10 +752,10 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   expect(screen.getByRole('region', { name: '持仓监测模块' })).toBeVisible();
   const modules = screen.getByTestId('quality-modules');
   expect(Array.from(modules.children).map(el => el.getAttribute('aria-label'))).toEqual(['批量捕捞模块', '买前过滤模块', '持仓监测模块']);
-  fireEvent.click(within(screen.getByRole('region', { name: '批量捕捞模块' })).getByRole('button', { name: '批量捕捞', exact: true }));
+  fireEvent.click(within(screen.getByRole('region', { name: '批量捕捞模块' })).getByRole('button', { name: '批量捕捞' }));
   expect(screen.getByRole('region', { name: '批量捕捞模块' })).toBeVisible();
   expect(screen.queryByRole('button', { name: '开始批量捕捞' })).toBeNull();
-  fireEvent.click(within(screen.getByRole('region', { name: '批量捕捞模块' })).getByRole('button', { name: '批量捕捞', exact: true }));
+  fireEvent.click(within(screen.getByRole('region', { name: '批量捕捞模块' })).getByRole('button', { name: '批量捕捞' }));
   expect(screen.getByRole('button', { name: '开始批量捕捞' })).toBeInTheDocument();
   expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
 });
@@ -1263,7 +1272,7 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  expect(s.savePlanTemplate).toHaveBeenCalledWith(copied.id,'副本新组合');expect(s.study.planTemplates).toHaveLength(2);expect(s.study.planTemplates![1].plan!.router!.threshold).toBe(.8);expect(planVersionChanges(s.study.planTemplates![1].plan!)).toEqual([]);
 },60000);
 
-function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'挖掘库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
+function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'捕捞库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
 
 it('restores both table axes, measured row height and populated results on campaign return',async()=>{
  const {saveQualityReturn,armQualityReturn,finishQualityReturn}=await import('@/lib/fish/qualityReturn');

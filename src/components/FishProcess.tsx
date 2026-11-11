@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishRoundIdentity, readFishRound, type FishRoundSummary } from '@/lib/fish/roundSummary';
-import { fishSourceLabel, fishMetricLabel } from '@/lib/fish/records';
+import { fishCaughtBy, fishSourceLabel, fishMetricLabel } from '@/lib/fish/records';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { fishCaptureTime } from '@/lib/fish/qualitySources';
 import { intervalMs } from '@/lib/deepRsa/marketData';
 
 /** 快照记录的周期（缺省 5 分钟）对应的毫秒数。 */
@@ -125,8 +126,10 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
  * 列表里的「捕捞过程」入口：点开是屏幕正中的对话框（不贴着按钮弹出），点开才读本轮记录。
  * 【用户要求】2026-10-20「捕捞过程点开之后的卡片，位置有问题、不美观、不和谐。要保证美观、居中对齐」。
  */
-export function FishProcessButton({ signal }: { signal: TradeSignal }) {
+export function FishProcessButton({ signal, captures }: { signal: TradeSignal; captures?: readonly TradeSignal[] }) {
   const [open, setOpen] = useState(false);
+  const [captureId, setCaptureId] = useState<string>();
+  const capture = captures?.find(item => item.id === captureId) ?? captures?.[0] ?? signal;
   return <>
     {/* 【用户要求】2026-10-28 精简：列头已写「捕捞过程」，每行只放一个淡色图标，不再逐行重复文字 */}
     <button type="button" aria-label="捕捞过程" title={`查看 ${signal.symbol} 的捕捞过程`} className="-my-1 -ml-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" data-testid="fish-process-open" onClick={() => setOpen(true)}><ScrollText aria-hidden className="h-3.5 w-3.5"/></button>
@@ -136,7 +139,18 @@ export function FishProcessButton({ signal }: { signal: TradeSignal }) {
           <DialogTitle className="font-mono text-sm">{signal.symbol}<span className="ml-2 font-sans text-xs font-normal text-muted-foreground">捕捞过程</span></DialogTitle>
           <DialogDescription className="text-[11px]">信号时间 {formatUTC8(signal.timeMs)}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 overflow-y-auto px-5 pb-5">{open && <FishProcessDetail signal={signal} hideTitle />}</div>
+        <div className="min-h-0 overflow-y-auto px-5 pb-5">{open && <>
+          {captures && captures.length > 1 && <label className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            捕捞记录
+            <select aria-label="捕捞记录" value={capture.id} onChange={event => setCaptureId(event.target.value)} className="min-w-0 max-w-full rounded-md border bg-background px-2 py-1">
+              {captures.map((item, index) => {
+                const at = fishCaptureTime(item);
+                return <option value={item.id} key={item.id}>{index + 1} · {at ? formatUTC8(at) : '时间未记录'} · {fishCaughtBy(item).join(' / ')}</option>;
+              })}
+            </select>
+          </label>}
+          <FishProcessDetail signal={capture} hideTitle />
+        </>}</div>
       </DialogContent>
     </Dialog>
   </>;

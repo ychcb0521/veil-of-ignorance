@@ -40,3 +40,14 @@ it('excludes fresh fish, sorts like the default list, leaves missing ratings bla
  expect(s[0].rows[1][3]).toBe('美股');expect(s[0].rows[1][4]).toBeNull();expect(JSON.stringify(input)).toBe(before);
  const xml=new TextDecoder().decode(buildXlsxBytes(s));expect(xml).toContain('avg_state_2');expect(xml).not.toContain('<f>');
 });
+
+it('exports one row per market and signal time with the algorithms and thresholds from each capture', () => {
+  const first = signal('same',[base],[1]);
+  const later = {...signal('same',[avg],[1]),id:'again',caughtAt:cut+60000};
+  const other = {...later,id:'other',exchange:'okx' as const};
+  const rows = buildFishCabinSheets([first,later,other])[0].rows;
+  expect(rows).toHaveLength(2);
+  expect(rows[0][2]).toBe('S·avg₂ · S 原值');
+  expect(rows[0][6]).toBe('S·avg₂：> 0.6；S 原值：> 0.7');
+  expect(rows[1][0]).toBe('sameUSDT（OKX）');
+});

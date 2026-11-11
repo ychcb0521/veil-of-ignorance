@@ -59,3 +59,19 @@ it('exports the actual capture time column only when it appears on the table',as
  expect(screen.getByTestId('quality-mined-at-column')).toHaveTextContent('捕捞时间');fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));const sheet=capture.download.mock.calls[0][0] as XlsxSheet,at=sheet.columns.findIndex(c=>c.header==='捕捞时间');expect(at).toBeGreaterThan(0);expect(sheet.rows.map(row=>row[at])).toEqual(expect.arrayContaining(['2026-11-10 08:00:00','2026-11-10 08:01:00']));
  cleanup();render(<FishQuality state={state(3)}/>);expect(screen.queryByTestId('quality-mined-at-column')).toBeNull();
 });
+
+it('exports one cabin row across different entries and sorts it by the latest actual capture time',async()=>{
+ const s=state(3),first=s.study.samples[0];
+ s.study.samples=s.study.samples.map((row,i)=>({...row,origin:'fish',origins:['fish'],source:{...row.source,caughtAt:T+60000*(i+1)}}));
+ s.study.samples.push({...s.study.samples[0],id:'recapture',enteredAt:first.enteredAt!+60_000,source:{...first.source,id:'recapture',caughtAt:T+240000}});
+ s.study.selectedRowIds=qualityDisplayRows(s.study).map(row=>row.id);render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:/^鱼舱/}));
+ const order=()=>screen.getAllByTestId('quality-fish-row').map(row=>row.textContent!.match(/COIN\d{3}USDT/)![0]);
+ const sort=screen.getByRole('button',{name:'按捕捞时间排序'});
+ fireEvent.click(sort);expect(order()).toEqual(['COIN000USDT','COIN002USDT','COIN001USDT']);
+ fireEvent.click(sort);expect(order()).toEqual(['COIN001USDT','COIN002USDT','COIN000USDT']);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));
+ await waitFor(()=>expect(capture.download).toHaveBeenCalledOnce());
+ const sheet=capture.download.mock.calls[0][0] as XlsxSheet,at=sheet.columns.findIndex(c=>c.header==='捕捞时间');
+ expect(sheet.rows.map(row=>row[1])).toEqual(order());expect(sheet.rows[2][at]).toBe('2026-11-10 08:04:00');
+});

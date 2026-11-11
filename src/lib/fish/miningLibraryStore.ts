@@ -1,5 +1,5 @@
 /**
- * 挖掘库的本机存储（IndexedDB，按账号一份）+ 账号云端存档（accountBlobSync，键 idb:fish-mining-library）。
+ * 捕捞库的本机存储（IndexedDB，按账号一份）+ 账号云端存档（accountBlobSync，键 idb:fish-mining-library）。
  * 写入按账号串行：读 → 合并 → 写在同一个事务里，另一个标签页的写入不会被覆盖。
  */
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
@@ -15,10 +15,10 @@ function open(): Promise<IDBDatabase> {
     if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB unavailable')); return; }
     const request = indexedDB.open(DATABASE, 1);
     let expired = false;
-    const timer = setTimeout(() => { expired = true; reject(new Error('挖掘库存储超时')); }, 8_000);
+    const timer = setTimeout(() => { expired = true; reject(new Error('捕捞库存储超时')); }, 8_000);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
     request.onsuccess = () => { clearTimeout(timer); if (expired) request.result.close(); else resolve(request.result); };
-    request.onerror = request.onblocked = () => { clearTimeout(timer); reject(new Error('挖掘库存储不可用')); };
+    request.onerror = request.onblocked = () => { clearTimeout(timer); reject(new Error('捕捞库存储不可用')); };
   });
 }
 async function readRaw(key: string): Promise<FishMiningLibrary | undefined> {
@@ -61,7 +61,7 @@ const announce = (owner: string | null | undefined) => {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(MINING_LIBRARY_EVENT, { detail: { owner: owner ?? null } }));
 };
 
-/** 读挖掘库（先与账号云端对一次账）。读不到返回空库。 */
+/** 读捕捞库（先与账号云端对一次账）。读不到返回空库。 */
 export async function loadMiningLibrary(owner: string | null | undefined): Promise<FishMiningLibrary> {
   if (typeof indexedDB === 'undefined') return emptyMiningLibrary();
   await syncAccountBlobOnLoad(miningLibraryAccountBlob, owner ?? undefined);
@@ -73,7 +73,7 @@ export async function loadMiningLibrary(owner: string | null | undefined): Promi
 export async function loadMiningLibraryForTransfer(owner?:string):Promise<FishMiningLibrary>{
  await syncAccountBlobOnLoad(miningLibraryAccountBlob,owner);await queues.get(keyOf(owner));return await readRaw(keyOf(owner))??emptyMiningLibrary();
 }
-/** 改挖掘库：排队、在事务里合并写入；成功后通知界面并安排上传。失败不抛（挖掘本身不受影响）。 */
+/** 改捕捞库：排队、在事务里合并写入；成功后通知界面并安排上传。失败不抛（挖掘本身不受影响）。 */
 export function updateMiningLibrary(owner: string | null | undefined, apply: (library: FishMiningLibrary) => FishMiningLibrary): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(false);
   const key = keyOf(owner);

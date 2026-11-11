@@ -1,7 +1,8 @@
 /** Export the cabin as the same simple table the user sees, using saved capture settings. */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from './algorithm';
-import { fishCaughtBy, fishMetricLabel, fishSourceLabel } from './records';
+import { fishMetricLabel, fishSourceLabel } from './records';
+import { groupFishCabin } from './cabinRows';
 import { EXCHANGE_NAMES } from './exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { buildXlsx, type XlsxSheet } from '@/lib/xlsxWorkbook';
@@ -27,12 +28,12 @@ function captureThreshold(m: Partial<FishSnapshot>): string {
 }
 
 export function buildFishCabinSheets(input: readonly TradeSignal[]): XlsxSheet[] {
-  const rows = input.filter(s => !s.freshCatch).slice().sort((a, b) => b.timeMs - a.timeMs).map(s => {
-    const members = caughtMembers(s);
+  const rows = groupFishCabin(input.filter(s => !s.freshCatch)).sort((a, b) => b.signal.timeMs - a.signal.timeMs).map(({ signal: s, captures, algorithms }) => {
+    const members = captures.flatMap(caughtMembers);
     const details = (label: (m: Partial<FishSnapshot>) => string) => [...new Set(members.map(m =>
       members.length > 1 ? `${fishSourceLabel(m)}：${label(m)}` : label(m)))].join('；') || '未记录';
     const venue = s.exchange && s.exchange !== 'binance' ? `（${EXCHANGE_NAMES[s.exchange]}）` : '';
-    return [s.symbol + venue, formatUTC8(s.timeMs), fishCaughtBy(s).join(' · ') || '—',
+    return [s.symbol + venue, formatUTC8(s.timeMs), algorithms.join(' · ') || '—',
       s.market === 'us_stock' ? '美股' : '',
       typeof s.quality === 'number' && Number.isFinite(s.quality) ? s.quality : null,
       details(fishMetricLabel), details(captureThreshold)];

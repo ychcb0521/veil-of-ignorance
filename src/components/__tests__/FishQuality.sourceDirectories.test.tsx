@@ -24,7 +24,7 @@ it('defaults to the newest screening directory without replacing saved data, and
  expect(screen.getByTestId('quality-active-directory')).toHaveTextContent('2026-11-08 08:01:00');expect(state.restoreMonitorStudy).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));
  const options=within(screen.getByRole('listbox',{name:'选择组合表来源'})).getAllByRole('option');
- expect(options.map(o=>o.textContent!.replace(/\d/g,'').trim())).toEqual(['全部来源','信号库','图灵杯','过滤库','筛选库','挖掘库','鱼舱']);
+ expect(options.map(o=>o.textContent!.replace(/\d/g,'').trim())).toEqual(['全部来源','信号库','图灵杯','过滤库','筛选库','捕捞库','鱼舱']);
  fireEvent.click(screen.getByRole('option',{name:/^筛选库/}));
  const dialog=screen.getByRole('dialog');expect(within(dialog).getByLabelText('打开筛选归档 latest')).toHaveAttribute('aria-expanded','true');
  expect(state.study).toEqual(before);expect(state.restoreMonitorStudy).not.toHaveBeenCalled();

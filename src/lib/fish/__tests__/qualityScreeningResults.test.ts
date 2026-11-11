@@ -58,3 +58,14 @@ it('retains a recorded exclusion process when a newer status-only library save h
  const merged=mergePreEntryLibraries(l,incoming);
  expect(merged.records[0].exclusionProcess).toEqual(l.records[0].exclusionProcess);expect(merged.records[0].updatedAt).toBe(incoming.records[0].updatedAt);
 });
+
+it('keeps distinct screening outcomes in a merged cabin row and shows shared evidence only once', () => {
+  const l = library(), first = l.records[0];
+  const alias = {...first.sample, id:'match-entry', enteredAt:first.matchedAt!};
+  const later = {...first.sample, id:'later', enteredAt:T+120000};
+  l.records.push({...first, id:'later-record', sample:later, status:'unmatched', matchedAt:undefined, updatedAt:T+180000});
+  const row = {...first.sample, members:[first.sample,alias,later]};
+  const results = screeningRowResults(row, screeningResultIndex(qualityScreeningResults({},l)));
+  expect(results.map(({record})=>record.id)).toEqual(['record','later-record']);
+  expect(screeningCell(results)).toMatchObject({status:'已入选 / 未入选',at:'2026-11-08 08:01:00'});
+});

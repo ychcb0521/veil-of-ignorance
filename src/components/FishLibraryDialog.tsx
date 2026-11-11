@@ -1,5 +1,5 @@
 /**
- * 挖掘库 / 过滤库共用的弹窗外壳：搜索、轮次与连续滚动表格。
+ * 捕捞库 / 过滤库共用的弹窗外壳：搜索、轮次与连续滚动表格。
  * 内容（记录、轮次、表头、行）由各库自己给。
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
@@ -18,7 +18,7 @@ export interface FishLibraryRoundOption { id: string; label: string; error?: str
 export function FishLibraryDialog<T extends {id:string}>({ name, info, description, placeholder, rounds, roundLabel, headers, items, match, row, empty, detail, onOpenChange, selection, sortColumn,embedded=false }: {
   embedded?:boolean;
   selection?: { selected: ReadonlySet<string>; select: (ids: string[]) => void; remove?: () => void; action?: () => boolean };
-  /** 按钮与标题，如「挖掘库」。 */
+  /** 按钮与标题，如「捕捞库」。 */
   name: string; info: ReactNode; description: string; placeholder: string;
   rounds: FishLibraryRoundOption[]; roundLabel: string;
   headers: string[];
@@ -46,7 +46,7 @@ export function FishLibraryDialog<T extends {id:string}>({ name, info, descripti
   const round = rounds.find(r => r.id === roundId);
   const change = (next: boolean) => { setOpen(next); onOpenChange?.(next); };
   const content=<>{!embedded&&<>      <DialogHeader className="shrink-0 space-y-1 text-left">
-        <div className="flex flex-wrap items-center gap-1.5"><DialogTitle className="text-sm">{name}</DialogTitle><FishQualityInfo label={`${name}说明`}>{info}</FishQualityInfo>{(name==='挖掘库'||name==='过滤库')&&<FishLibraryDataActions scope={name==='挖掘库'?'mining':'filter'}/>}</div>
+        <div className="flex flex-wrap items-center gap-1.5"><DialogTitle className="text-sm">{name}</DialogTitle><FishQualityInfo label={`${name}说明`}>{info}</FishQualityInfo>{(name==='捕捞库'||name==='过滤库')&&<FishLibraryDataActions scope={name==='捕捞库'?'mining':'filter'}/>}</div>
         <DialogDescription className="text-[11px]">{description}</DialogDescription>
       </DialogHeader></>}
 

@@ -2,7 +2,7 @@ import { signalDedupKey } from '@/lib/signalLibrary';
 import type { QualitySample } from './quality';
 import { fishCaptureTime, qualityOrigins } from './qualitySources';
 
-/** Display-only grouping by signal and buy time. Preserve every entry, source and detector ID for execution and selection. */
+/** Display-only grouping. Preserve every entry, source and detector ID for execution and selection. */
 export interface QualityTableRow extends QualitySample { members?: QualitySample[] }
 export const qualityTableMembers = (row: QualityTableRow): QualitySample[] => row.members ?? [row];
 export function qualityTableCaptureTime(row: QualityTableRow): number | null {
@@ -14,11 +14,13 @@ export function qualityTableCaptureTime(row: QualityTableRow): number | null {
   return latest;
 }
 export const qualityTableSignalKey = (row: QualitySample) => signalDedupKey(row.source);
-export function collapseQualityTableRows(rows: readonly QualitySample[]): QualityTableRow[] {
+export function collapseQualityTableRows(rows: readonly QualitySample[], groupBy: 'entry' | 'signal' = 'entry'): QualityTableRow[] {
   const grouped = new Map<string, QualityTableRow>();
   for (const row of rows) {
-    // 【用户要求】2026-11-02 不显示区间：同一信号不同时间的买入各占一行（结果各不相同）；同一次买入的多个探测行仍合成一行（共用同一份监测结果）
-    const key = `${qualityTableSignalKey(row)}|${row.enteredAt ?? ''}`, previous = grouped.get(key);
+    // The cabin groups repeated captures by signal. Other sources keep their separate buy times.
+    const signalKey = qualityTableSignalKey(row);
+    const key = groupBy === 'signal' ? signalKey : `${signalKey}|${row.enteredAt ?? ''}`;
+    const previous = grouped.get(key);
     if (previous) {
       previous.members!.push(row);
       previous.groups = [...new Set([...previous.groups, ...row.groups])];
