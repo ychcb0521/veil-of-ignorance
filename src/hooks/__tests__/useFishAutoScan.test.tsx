@@ -44,6 +44,24 @@ it('重新打开渔恢复每小时，实际扫描沿用临时间隔直到重新�
  act(()=>view.result.current.resetDefaults());expect(view.result.current.hours).toBe(1);
  await flush(HOUR);expect(start).toHaveBeenCalledTimes(3);
 });
+it('菜单保存的频率在重新打开后继续生效，手动模式保持暂停调度', async () => {
+ const { view, start } = hook();
+ await flush();
+ act(() => view.result.current.setSchedule({ mode: 'manual', hours: 4 }));
+ view.unmount();
+ const reopened = hook();
+ await flush(5 * HOUR);
+ expect(start).toHaveBeenCalledTimes(1);
+ expect(reopened.start).not.toHaveBeenCalled();
+ expect(reopened.view.result.current).toMatchObject({ mode: 'manual', hours: 4 });
+ act(() => reopened.view.result.current.setSchedule({ mode: 'auto', hours: 2 }));
+ await flush();
+ expect(reopened.start).toHaveBeenCalledTimes(1);
+ await flush(HOUR);
+ expect(reopened.start).toHaveBeenCalledTimes(1);
+ await flush(HOUR);
+ expect(reopened.start).toHaveBeenCalledTimes(2);
+});
 it('切到自动立刻捕第一次（时间 = 现在，四条默认规则），之后每隔所选时长一次，没到点不捕',async()=>{
  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
  const {start,view}=hook();await flush();start.mockClear();

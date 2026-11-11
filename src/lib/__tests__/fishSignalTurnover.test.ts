@@ -27,6 +27,11 @@ it('截止前达标、信号起点前不达标的币成不了鱼；两处都达�
  expect(r.hits[0].timeMs).toBe(cut-4*STEP);
  expect(r.p.thin).toBe(1);expect(r.p.done).toBe(r.p.total);
  expect(r.res.get('binance|crypto|LATEUSDT').outcome).toBe('thin');
+ expect(r.p.turnoverDetails).toMatchObject([{symbol:'LATEUSDT',stage:'signal-start',at:cut-4*STEP,checks:[
+   {hours:1,value:12_000,min:1_000_000,ok:false},
+   {hours:12,value:144_000,min:8_000_000,ok:false},
+   {hours:24,value:288_000,min:10_000_000,ok:false},
+ ]}]);
 });
 it('交集、并集同样不出这条',async()=>{
  const b={...a,threshold:100.5};
@@ -45,4 +50,12 @@ it('阈值调严后起点挪到放量之后：重判时按新起点再查，达�
 it('查单个币写明是信号前成交额不够',async()=>{
  const d=await new FishScanner(fetcher,undefined,undefined,{binance:adapter()}).diagnose({symbol:'LATE',feature:def,algorithm:a,anchorMs:cut,turnoverFloors:FISH_TURNOVER_FLOORS,signal:new AbortController().signal});
  expect(d.outcome).toBe('skipped');expect(d.lines.at(-1)).toContain('信号前1h 成交额');expect(d.lines.at(-1)).toContain('起点之后才放量');
+});
+
+it('keeps a second algorithm’s liquidity check visible when a union signal passes on the first algorithm',async()=>{
+ const strict={...a,threshold:101.5};
+ const r=await scan({algorithms:[{feature:def,algorithm:strict},{feature:def,algorithm:a}],combination:'or'});
+ expect(r.hits.map(h=>h.symbol)).toContain('LATEUSDT');
+ expect(r.p.thin).toBe(1);
+ expect(r.p.turnoverDetails).toMatchObject([{symbol:'LATEUSDT',stage:'signal-start',at:cut-4*STEP,algorithms:[expect.stringContaining('100')]}]);
 });

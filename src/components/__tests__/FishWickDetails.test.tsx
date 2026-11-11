@@ -53,3 +53,30 @@ it('non-Binance snapshots identify their source; no mapped symbol never opens a 
  expect(screen.getByRole('img',{name:/OKX 原始/})).toBeInTheDocument();expect(screen.queryByRole('button',{name:/打开.*盘面/})).not.toBeInTheDocument();
  expect(screen.getByText(/此标的暂无可用的币安盘面/)).toBeInTheDocument();
 });
+
+it('switches to actual turnover readings, searches by symbol and marks every failed window',()=>{
+ const details=[{
+   symbol:'LOWUSDT',exchange:'binance' as const,stage:'signal-start' as const,at:cut,
+   checks:[{hours:1,min:1e6,value:600_000,ok:false},{hours:12,min:8e6,value:9e6,ok:true},{hours:24,min:1e7,value:9.5e6,ok:false}],
+   algorithms:['CBI-2·avg > 0.07'],
+ }];
+ render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:1,wickDetails:[evidence],thin:1,turnoverDetails:details}} jumpingSignalId={null}/>);
+ fireEvent.click(screen.getByRole('button',{name:'查看插针过滤详情（1 个）'}));
+ const tabs=within(screen.getByRole('group',{name:'过滤类型'}));
+ fireEvent.click(tabs.getByRole('button',{name:/成交额过滤/}));
+ const table=within(screen.getByRole('table',{name:'成交额过滤'}));
+ expect(table.getByText('LOWUSDT')).toBeInTheDocument();
+ expect(table.getByText('信号起点')).toBeInTheDocument();
+ expect(table.getByText('600,000')).toHaveAttribute('title','实际 600000 USDT · 门槛 ≥ 1000000 USDT');
+ expect(table.getByText('1h、24h')).toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText('搜索成交额过滤标的或交易所'),{target:{value:'no-match'}});
+ expect(table.queryByText('LOWUSDT')).toBeNull();
+ expect(screen.getByText('没有匹配的记录')).toBeInTheDocument();
+});
+it('opens a count-only turnover round directly without filling in missing amounts',()=>{
+ render(<FishWickDetails progress={{...initialFishProgress(),thin:3}} jumpingSignalId={null}/>);
+ expect(screen.queryByTestId('fish-wick-skipped')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'查看成交额过滤详情（3 个）'}));
+ expect(screen.getByRole('note')).toHaveTextContent('3 个标的仅保存了过滤数量');
+ expect(screen.queryByRole('table',{name:'成交额过滤'})).toBeNull();
+});

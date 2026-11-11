@@ -12,7 +12,8 @@ import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, FISH_STATE_HOLD_TEXT, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars, fishTurnoverCheck, describeTurnoverMiss, FISH_MAX_ALGORITHMS, type FishTurnoverFloor } from '@/lib/fish/shared';
-import { fishSignalTurnoverOk, fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
+import { FishTurnoverRejections, type FishTurnoverDetail } from '@/lib/fish/turnoverRejections';
+import { fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
 import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
@@ -42,13 +43,14 @@ export type FishOutcome = 'hit' | 'below' | 'unknown' | 'gap' | 'readings' | 'fa
 export interface FishProgress {
   /** One rejection per venue/market/instrument, even when several algorithms reject it. */
   wickDetails?: FishWickRejection[];
+  turnoverDetails?: FishTurnoverDetail[];
   lookbackHours?:number;
   /** 本轮跳过了某家但扫描仍在继续时的说明（如 BTC 参考取不到），淡色显示。 */
   notice?: string;
   algorithmHits?: number[];
   markets?: Partial<Record<'crypto'|'us_stock', FishProgress>>;
   venues?: Partial<Record<FishExchange, FishProgress>>; cutoffMs: number | null; anchorMs?: number | null; threshold?: number; total: number; done: number; current: string;
-  counts: Record<Exclude<FishOutcome,'outside'>, number> & {outside?:number}; status: 'running' | 'complete' | 'cancelled' | 'aborted' | 'skipped'; error?: string; history?: number; /** 截止前 24 小时成交额低于下限、跳过不判定的币数。 */ thin?: number; wickSkipped?: number; skippedReason?: string; failures?: {failed: {symbol:string;reason:string}[];readings: {symbol:string;reason:string}[]}; blocked?: number; constraintBlocked?: number[]; rule?: string; bars?: number; constraintTexts?: string[];
+  counts: Record<Exclude<FishOutcome,'outside'>, number> & {outside?:number}; status: 'running' | 'complete' | 'cancelled' | 'aborted' | 'skipped'; error?: string; history?: number; /** 未通过成交额检查的标的数，同一交易所和市场内去重。 */ thin?: number; wickSkipped?: number; skippedReason?: string; failures?: {failed: {symbol:string;reason:string}[];readings: {symbol:string;reason:string}[]}; blocked?: number; constraintBlocked?: number[]; rule?: string; bars?: number; constraintTexts?: string[];
 
 }
 export const initialFishProgress = (): FishProgress => ({ cutoffMs: null, anchorMs: null, threshold: FISH_THRESHOLD, total: 0, done: 0, current: '', counts: { hit: 0, below: 0, unknown: 0, gap: 0, readings: 0, failed: 0, outside: 0 }, status: 'running' });
@@ -465,10 +467,12 @@ export class FishScanner {
     if(this.running)throw new Error('扫描正在进行');
     this.running=true;
     const progress={...initialFishProgress(),lookbackHours:options.lookbackHours}, states:FishProgress[]=[], results=new Map<string,Map<number,FishMemberResult>>();
+    const turnoverRejections = new FishTurnoverRejections();
     const emitted=new Set<string>();
     try {
       if(options.algorithms!.length>FISH_MAX_ALGORITHMS)throw new Error(`最多 ${FISH_MAX_ALGORITHMS} 个算法`);
       const plans=options.algorithms!.map(a=>fishProgramForLookback(compileFishProgram(a.feature,a.algorithm),options.lookbackHours,options.turnoverFloors));
+      const algorithmRules = plans.map(plan => fishRuleText(plan.def, plan.settings.direction, plan.settings.threshold, plan.texts.length, plan.settings.statistic));
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime<=0)throw new Error('服务器时间无效');
       const anchorMs=options.anchorMs??clock.serverTime;
@@ -497,6 +501,8 @@ export class FishScanner {
         progress.done=Math.min(...plans.map((_,i)=>{const st=states[i];return !st?0:st.status==='running'?st.done:total;}));
         progress.notice=[...new Set(states.flatMap(p=>p?.notice?p.notice.split('；'):[]))].join('；')||undefined;
         progress.total=total;
+        progress.thin = turnoverRejections.count;
+        progress.turnoverDetails = turnoverRejections.details;
         progress.wickSkipped=[...results.values()].filter(m=>[...m.values()].some(r=>r.outcome==='wick')).length;
         progress.wickDetails=[...results.values()].flatMap(m=>{
           const evidence=[...m.values()].find(r=>r.outcome==='wick'&&r.wick)?.wick;
@@ -522,6 +528,7 @@ export class FishScanner {
         const scanner=new FishScanner(async()=>new Response(JSON.stringify(clock)),undefined,this.calculate,adapters);
         states[i]=await scanner.scan({...options,...a,algorithms:undefined,anchorMs,skipReasons:options.retainMembers||mode==='or'?undefined:skips,onRound:undefined,onSignal:()=>{},onProgress:p=>{states[i]=p;publish();},onResult:(key,r)=>{
           const members=results.get(key)??new Map<number,FishMemberResult>();members.set(i,r);results.set(key,members);
+          if (r.outcome === 'thin') turnoverRejections.record(key, r.turnover, algorithmRules[i]);
           if(members.size===plans.length&&!decided.has(key)&&!options.signal.aborted){settle(key,members);publish();}
         }});
       }));
@@ -562,9 +569,12 @@ export class FishScanner {
     try {plan=fishProgramForLookback(compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]}),options.lookbackHours,options.turnoverFloors);if(plan.unavailable)throw new Error(plan.unavailable);}
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
     const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N,...((plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{})};
+    const turnoverRejections = new FishTurnoverRejections();
+    const rule = fishRuleText(plan.def, plan.settings.direction, threshold, plan.texts.length, plan.settings.statistic);
     let completed = new Map<string, FishMemberResult>();
     const reportResult = (key: string, member: FishMemberResult) => {
       if (options.checkpoint && ['hit', 'below', 'unknown', 'blocked', 'wick', 'thin', 'history', 'outside'].includes(member.outcome)) completed.set(key, member);
+      if (member.outcome === 'thin') turnoverRejections.record(key, member.turnover, rule);
       options.onResult?.(key, member);
     };
     const requested = [...(options.exchanges ?? ['binance'])];
@@ -574,7 +584,7 @@ export class FishScanner {
     // 捕捞过程：逐币记下截止读数与结论，扫完存成本轮摘要（只存本机）
     const memberResults=new Map<string,Map<number,FishMemberResult>>();
     const roundRows:FishRoundRow[]=[];let roundCut:number|undefined,roundAnchor=0;
-    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.direction,threshold,plan.texts.length,plan.settings.statistic);
+    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=rule;
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
       for(const venue of Object.values(venues)) {
@@ -587,6 +597,7 @@ export class FishScanner {
         }
       }
       const all = Object.values(venues);
+      progress.turnoverDetails = turnoverRejections.details;
       progress.wickDetails=[...memberResults.values()].flatMap(m=>m.get(0)?.wick?[m.get(0)!.wick!]:[]);
       if(all.length) {
         progress.history=all.reduce((n,p)=>n+(p.history??0),0);
@@ -704,7 +715,9 @@ export class FishScanner {
                   if(checks.some(c=>!c.ok)){
                     if(local.signal.aborted)return;
                     p.thin=(p.thin??0)+1;roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:'thin'});
-                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,member:FishMemberResult={outcome:'thin'};memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
+                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;
+                    const member: FishMemberResult = { outcome:'thin', turnover:{symbol:market.symbol,exchange,market:market.market,stage:'cutoff',at:cut,checks} };
+                    memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
                     p.done++;publish();await fishDelay(0,local.signal);continue;
                   }
                 }
@@ -715,14 +728,15 @@ export class FishScanner {
                 const result=limitFishLookback(classifyFishProgram(market.symbol,bars,readings,cut,plan),node,options.lookbackHours,cut);
                 if(local.signal.aborted)return;
                 // 命中的币再查「信号前」成交额（截止前达标、起点前没达标 = 起点之后才放量，成不了鱼）；读数仍留着，调严阈值时起点后移可能达标
-                if(result.outcome==='hit'){
-                  const ok=fishSignalTurnoverOk(bars,result.signal!.timeMs,plan.step,options.turnoverFloors);
-                  if(ok===null)throw new FishError('K 线不够覆盖信号前 24 小时，无法判断成交额门槛','readings');
-                  if(!ok){
+                if(result.outcome==='hit' && options.turnoverFloors?.length){
+                  const at = result.signal!.timeMs;
+                  const checks = fishTurnoverCheck(bars, at, plan.step, options.turnoverFloors);
+                  if(checks===null)throw new FishError('K 线不够覆盖信号前 24 小时，无法判断成交额门槛','readings');
+                  if(checks.some(check => !check.ok)){
                     const reading=readings.average[bars.length-1];
                     p.thin=(p.thin??0)+1;roundRows.push({symbol:market.symbol,exchange,market:market.market,reading,outcome:'thin'});
                     const place:FishPlace={symbol:market.symbol,exchange,...(market.market==='us_stock'?{market:'us_stock',underlying:market.underlying??market.base}:{}),...(exchange!=='binance'&&market.market!=='us_stock'?{binanceSymbol:binanceByBase.get(fishBase(market.base))??null}:{})};
-                    const member:FishMemberResult={outcome:'thin',reading},tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;
+                    const member:FishMemberResult={outcome:'thin',reading,turnover:{symbol:market.symbol,exchange,market:market.market,stage:'signal-start',at,checks}},tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;
                     const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
                     p.done++;publish();await fishDelay(0,local.signal);continue;
                   }

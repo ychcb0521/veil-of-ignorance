@@ -22,7 +22,13 @@ beforeEach(()=>{
 async function openSettings() {
   const capture = screen.getByRole('button', { name: '捕捞' });
   if (capture.getAttribute('aria-expanded') === 'false') fireEvent.click(capture);
-  fireEvent.click(screen.getByRole('button', { name: '插针回看设置' }));
+  expect(screen.queryByRole('button', { name: '插针回看设置' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '更多' }));
+  const menu = within(await screen.findByRole('dialog', { name: '更多捕捞选项' }));
+  expect(menu.queryByRole('button', { name: '插针回看设置' })).not.toBeInTheDocument();
+  fireEvent.click(menu.getByRole('button', { name: '设置' }));
+  const settings = within(await screen.findByRole('dialog', { name: '设置' }));
+  fireEvent.click(settings.getByRole('button', { name: '插针回看设置' }));
   return within(await screen.findByRole('dialog', { name: '插针回看设置' }));
 }
 

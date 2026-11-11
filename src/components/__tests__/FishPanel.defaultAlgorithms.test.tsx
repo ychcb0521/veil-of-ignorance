@@ -85,6 +85,8 @@ it('邮件来源展示实际捕捞序列与已保存的额外来源，打开或�
  const notify={config:{enabled:false,emails:[],serviceId:'',templateId:'',publicKey:'',sourceAlgorithms:[source],sourceCombination:'or' as const},status:null,sending:false,update:vi.fn(),send:vi.fn(),test:vi.fn()};
  render(panel({notify}));
  fireEvent.click(screen.getByRole('button',{name:'更多'}));
+ expect(screen.queryByTestId('fish-notify-toggle')).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'设置'}));
  fireEvent.click(screen.getByTestId('fish-notify-toggle'));
  fireEvent.click(screen.getByText(/来源算法 ·/));
  expect(screen.getByRole('checkbox',{name:'邮件来源：DSP·a·avg₂'})).toBeChecked();

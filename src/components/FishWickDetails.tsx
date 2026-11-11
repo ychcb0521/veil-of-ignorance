@@ -1,12 +1,13 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowUpRight, CandlestickChart, ChevronDown, Search } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { fishWickDuration, type FishWickRejection } from '@/lib/fish/downwardWick';
 import { FISH_STEP, type FishProgress } from '@/lib/fishScanner';
 import { signalChartSymbol, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishTurnoverThresholds } from './FishTurnoverThresholds';
+import { FishTurnoverDetails } from './FishTurnoverDetails';
 
 const identity = (r: FishWickRejection) => `${r.exchange}|${r.market ?? 'crypto'}|${r.symbol}|${r.cutoffMs}|${r.openTime}`;
 const price = (n: number) => Number.isFinite(n) ? Number(n.toPrecision(9)).toString() : '—';
@@ -48,17 +49,38 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
   const pages=Math.max(1,Math.ceil(filtered.length/50)),at=Math.min(page,pages-1),shown=filtered.slice(at*50,(at+1)*50);
   const active=rows.find(r=>identity(r)===selected), source=active?sourceOf(active):null;
   const [thresholdsOpen, setThresholdsOpen] = useState(false);
+  const [tab, setTab] = useState<'wick' | 'turnover'>('wick');
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const turnoverCount = progress.thin ?? 0;
+  const wickCount = progress.wickSkipped ?? 0;
+  const sections = [
+    { key:'wick', label:'插针过滤', count:wickCount },
+    { key:'turnover', label:'成交额过滤', count:turnoverCount },
+  ] as const;
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [tab]);
   const thresholdsId = useId();
   const rule = active?.rule ?? rows[0]?.rule;
   const incomplete=Math.max(0,(progress.wickSkipped??0)-rows.length);
   const cutoff=rows[0]?.cutoffMs??progress.cutoffMs;
   useEffect(()=>{if(selected&&open)document.getElementById('fish-wick-chart')?.scrollIntoView?.({behavior:'smooth',block:'nearest'});},[selected,open]);
   return <Dialog open={open} onOpenChange={next => { setOpen(next); if (!next) setThresholdsOpen(false); }}>
-    <DialogTrigger asChild><button type="button" data-testid="fish-wick-skipped" aria-label={`查看插针过滤详情（${progress.wickSkipped??0} 个）`} className="rounded-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">插针过滤 {progress.wickSkipped??0}</button></DialogTrigger>
-    <DialogContent className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+    {sections.filter(section => section.count > 0).map(section => <span key={section.key} className="inline-flex items-center gap-2">
+      <span aria-hidden className="text-muted-foreground/40">·</span>
+      <button type="button" aria-haspopup="dialog" data-testid={section.key === 'wick' ? 'fish-wick-skipped' : 'fish-turnover-skipped'}
+        aria-label={`查看${section.label}详情（${section.count} 个）`}
+        onClick={event => { triggerRef.current = event.currentTarget; setTab(section.key); setOpen(true); }}
+        className="rounded-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        {section.label} {section.count}
+      </button>
+    </span>)}
+    <DialogContent
+      className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0"
+      onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus(); } }}
+    >
       <DialogHeader className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5 text-left">
         <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
-          <DialogTitle className="text-sm">插针过滤 · 详情</DialogTitle>
+          <DialogTitle className="text-sm">{tab === "wick" ? "插针过滤" : "成交额过滤"} · 详情</DialogTitle>
           <button
             type="button"
             aria-expanded={thresholdsOpen}
@@ -71,11 +93,17 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
           </button>
         </div>
         <DialogDescription className="text-xs leading-relaxed">
-          本轮已过滤 {progress.wickSkipped??0} 个标的{progress.status==='running'?' · 扫描中，明细持续更新':''}
-          {cutoff!=null?` · 截止 ${formatUTC8(cutoff)}（UTC+8）`:''}。每个交易所、标的记首根触发的已收盘 5m K 线，多算法不重复计数。
+          {tab === 'wick' ? <>本轮已过滤 {wickCount} 个标的{cutoff != null ? ` · 截止 ${formatUTC8(cutoff)}（UTC+8）` : ''}。每个标的记首根触发的已收盘 5 分钟 K 线。</> : <>本轮 {turnoverCount} 个标的出现成交额未达标。相同检查合并显示，检查时点不同会分行列出。并集里，其他算法达标仍可入库。</>}
+          {progress.status === 'running' && ' 扫描中，明细持续更新。'}
         </DialogDescription>
+        <div role="group" aria-label="过滤类型" className="mt-2 inline-flex w-fit flex-wrap gap-1 rounded-md bg-muted/60 p-0.5">
+          {sections.map(section => <button key={section.key} type="button" aria-pressed={tab === section.key} onClick={() => setTab(section.key)}
+            className={`inline-flex h-6 items-center gap-1.5 rounded px-2 text-[11px] transition-colors ${tab === section.key ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+            {section.label}<span className="tabular-nums text-muted-foreground">{section.count}</span>
+          </button>)}
+        </div>
       </DialogHeader>
-      <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4 text-xs">
+      <div ref={bodyRef} className="min-h-0 space-y-4 overflow-y-auto px-5 py-4 text-xs">
         {thresholdsOpen && <section id={thresholdsId} aria-label="过滤门槛" className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 px-3.5 py-2.5">
           <ul aria-label="插针门槛" className="divide-y divide-border/50 text-[11px]">
             <li className="flex flex-wrap justify-between gap-x-3 py-1.5">
@@ -90,7 +118,9 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
           <p className="pb-1 text-[11px] leading-relaxed text-muted-foreground">ATR 取触发前 14 根的平均真实波幅。任一根超线，整只标的跳过。</p>
           <FishTurnoverThresholds />
         </section>}
+        {tab === 'turnover' ? <FishTurnoverDetails rows={progress.turnoverDetails} rejected={turnoverCount} /> : <>
         {incomplete>0&&<p role="note" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2.5 text-muted-foreground" data-testid="fish-wick-legacy">{incomplete} 条旧版记录仅保存了过滤数量，未保存触发时间和价格。重新捕捞后可查看完整明细。</p>}
+        {wickCount === 0 && rows.length === 0 && <p className="py-8 text-center text-muted-foreground">本轮暂无插针过滤记录。</p>}
         {rows.length>0&&<>
           <label className="flex h-8 items-center gap-2 rounded-md bg-muted/50 px-2.5 text-muted-foreground"><Search aria-hidden className="h-3.5 w-3.5"/><input aria-label="搜索插针过滤标的或交易所" placeholder="搜索标的或交易所…" value={query} onChange={e=>{setQuery(e.target.value);setPage(0);}} className="min-w-0 flex-1 bg-transparent text-foreground outline-none"/></label>
           <div className="overflow-x-auto rounded-lg border border-border/60">
@@ -118,6 +148,7 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
           <p className="mt-2 leading-relaxed text-muted-foreground" data-testid="fish-wick-reason">当轮回看 {active.rule.hours}h；开盘至最低价跌幅 {price(active.drop)}（{percent(active)}），严格大于此前 ATR(14) {price(active.atr)} × {active.rule.atrMultiple} = {price(active.atr*active.rule.atrMultiple)}，因此过滤。ATR 不包含触发线。</p>
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">快照仅含本轮截止前已收盘线。历史盘面定位到触发线收盘时刻，保留主盘面当前周期。{active.exchange!=='binance'?' 原始快照来自该交易所；币安参考盘面价格可能不同。':''}{!signalChartSymbol(source)?' 此标的暂无可用的币安盘面，可查看上方原始快照。':''}</p>
         </section>}
+        </>}
       </div>
     </DialogContent>
   </Dialog>;

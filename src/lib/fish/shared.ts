@@ -125,8 +125,9 @@ export function fishTurnoverWithin(bars: readonly ResearchBar[], cutoffMs: numbe
   }
   return sum;
 }
+export interface FishTurnoverCheck extends FishTurnoverFloor { value: number; ok: boolean }
 /** 逐条检查成交额门槛；读数不全或 K 线不够覆盖返回 null，否则返回各条的读数与是否达标。 */
-export function fishTurnoverCheck(bars: readonly ResearchBar[], cutoffMs: number, step: number, floors: readonly FishTurnoverFloor[]): { hours: number; min: number; value: number; ok: boolean }[] | null {
+export function fishTurnoverCheck(bars: readonly ResearchBar[], cutoffMs: number, step: number, floors: readonly FishTurnoverFloor[]): FishTurnoverCheck[] | null {
   const out = [];
   for (const f of floors) { const value = fishTurnoverWithin(bars, cutoffMs, f.hours, step); if (value === null) return null; out.push({ ...f, value, ok: value >= f.min }); }
   return out;

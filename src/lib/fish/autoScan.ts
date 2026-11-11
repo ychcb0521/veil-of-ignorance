@@ -11,8 +11,10 @@ import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedSt
 export const FISH_AUTO_INTERVALS = [0.5, 1, 2, 4, 8, 16, 32, 64] as const;
 export type FishAutoMode = 'manual' | 'auto';
 export interface FishAutoState { mode: FishAutoMode; hours: number; lastRunAt: number | null }
+export type FishAutoSchedule = Pick<FishAutoState, 'mode' | 'hours'>;
 const HOUR = 3_600_000;
 export const fishAutoKey = () => `${getUserPrefix()}fish-auto.v1`;
+const scheduleKey = () => `${getUserPrefix()}fish-auto-schedule.v1`;
 const leaseKey = () => `${getUserPrefix()}fish-auto-lease.v1`;
 export const DEFAULT_FISH_AUTO: FishAutoState = { mode: 'auto', hours: 1, lastRunAt: null };
 
@@ -27,9 +29,30 @@ export function readFishAuto(): FishAutoState {
 export function saveFishAuto(state: FishAutoState): void {
   try { writePersistedStateRaw(fishAutoKey(), JSON.stringify({ ...state, defaultsVersion: 1 })); } catch { /* 记不住只是下次要重新设 */ }
 }
-/** Reopen restores explicitly saved account preferences; unsaved legacy sessions retain hourly defaults. */
+function scheduleSignature(schedule?: FishAutoSchedule): string {
+  return schedule ? `${schedule.mode}:${schedule.hours}` : '';
+}
+
+export function saveFishAutoSchedule(schedule: FishAutoSchedule): void {
+  const account = scheduleSignature(readFishAccountSettings()?.auto);
+  writePersistedStateRaw(scheduleKey(), JSON.stringify({ ...schedule, account }));
+}
+
+function readFishAutoSchedule(account?: FishAutoSchedule): FishAutoSchedule | undefined {
+  try {
+    const value = JSON.parse(readPersistedStateRaw(scheduleKey()) ?? 'null');
+    if (value?.account === scheduleSignature(account)
+      && (value.mode === 'manual' || value.mode === 'auto')
+      && (FISH_AUTO_INTERVALS as readonly number[]).includes(value.hours)) {
+      return { mode: value.mode, hours: value.hours };
+    }
+  } catch { /* Fall back to the saved account schedule. */ }
+  return account;
+}
+
+/** Restore an explicit local schedule or the latest account schedule when reopening. */
 export function resetFishAuto(): FishAutoState {
-  const state = { ...DEFAULT_FISH_AUTO, ...readFishAccountSettings()?.auto, lastRunAt: readFishAuto().lastRunAt };
+  const state = { ...DEFAULT_FISH_AUTO, ...readFishAutoSchedule(readFishAccountSettings()?.auto), lastRunAt: readFishAuto().lastRunAt };
   saveFishAuto(state);
   return state;
 }

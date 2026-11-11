@@ -31,11 +31,17 @@ it('任一条不够就跳过、不判定、成不了鱼；两条都够才判定�
  expect((await scan({})).hits).toEqual(['LOW12HUSDT','LOW1HUSDT','LOW24HUSDT','OKUSDT']);
  const gated=await scan({turnoverFloors:FISH_TURNOVER_FLOORS});
  expect(gated.hits).toEqual(['OKUSDT']);expect(gated.p.thin).toBe(3);expect(gated.p.done).toBe(gated.p.total);
- expect(gated.res.get('binance|crypto|LOW1HUSDT')).toEqual({outcome:'thin'});expect(gated.res.get('binance|crypto|LOW12HUSDT')).toEqual({outcome:'thin'});expect(gated.res.get('binance|crypto|LOW24HUSDT')).toEqual({outcome:'thin'});
+ expect(gated.p.turnoverDetails).toHaveLength(3);
+ for(const [symbol,hours,value] of [['LOW1HUSDT',1,600_000],['LOW12HUSDT',12,6_700_044],['LOW24HUSDT',24,9_180_000]] as const){
+   const detail=gated.p.turnoverDetails!.find(row=>row.symbol===symbol);
+   expect(detail).toMatchObject({exchange:'binance',stage:'cutoff',at:cut});
+   expect(detail?.checks.filter(check=>!check.ok)).toMatchObject([{hours,value}]);
+   expect(gated.res.get('binance|crypto|'+symbol)).toMatchObject({outcome:'thin',turnover:{symbol,stage:'cutoff',at:cut}});
+ }
 });
 it('交集 / 并集都不出不达标的币；查单个币写明哪一条没达标',async()=>{
  const b={...a,threshold:100.5};
- for(const combination of ['and','or'] as const){const r=await scan({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination,turnoverFloors:FISH_TURNOVER_FLOORS});expect(r.hits).toEqual(['OKUSDT']);}
+ for(const combination of ['and','or'] as const){const r=await scan({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination,turnoverFloors:FISH_TURNOVER_FLOORS});expect(r.hits).toEqual(['OKUSDT']);expect(r.p.thin).toBe(3);expect(r.p.turnoverDetails).toHaveLength(3);expect(r.p.turnoverDetails!.every(row=>row.algorithms.length===2)).toBe(true);}
  const d=await new FishScanner(fetcher,undefined,undefined,{binance:adapter()}).diagnose({symbol:'LOW12H',feature:def,algorithm:a,anchorMs:cut,turnoverFloors:FISH_TURNOVER_FLOORS,signal:new AbortController().signal});
  const d24=await new FishScanner(fetcher,undefined,undefined,{binance:adapter()}).diagnose({symbol:'LOW24H',feature:def,algorithm:a,anchorMs:cut,turnoverFloors:FISH_TURNOVER_FLOORS,signal:new AbortController().signal});
  expect(d24.lines.at(-1)).toContain('24h 成交额 918 万 < 1000 万');expect(d24.lines.at(-1)).not.toContain('12h');

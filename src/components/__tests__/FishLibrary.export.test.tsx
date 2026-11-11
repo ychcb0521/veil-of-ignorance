@@ -26,3 +26,21 @@ it('one export entry belongs to the cabin, exports all stored fish despite filte
  view.rerender(panel([fresh]));
  expect(within(cabin).getByRole('button',{name:'导出鱼舱数据'})).toBeDisabled();
 });
+
+it('鱼舱按实际捕捞时间双向排序，旧记录始终排在末尾', () => {
+ const signals = [{ ...a, timeMs: 40, caughtAt: 200 }, { ...b, timeMs: 50, caughtAt: 100 }, { ...fresh, freshCatch: false, timeMs: 60 }];
+ const view = render(panel(signals));
+ const cabin = within(screen.getByTestId('fish-cabin'));
+ const header = cabin.getByRole('button', { name: '捕捞时间' });
+ const symbols = () => cabin.getAllByText(/^(AAA|BBB|NEW)USDT$/).map(node => node.textContent);
+ expect(symbols()).toEqual(['NEWUSDT', 'BBBUSDT', 'AAAUSDT']);
+ fireEvent.click(header);
+ expect(header).toHaveAttribute('aria-sort', 'descending');
+ expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'NEWUSDT']);
+ fireEvent.click(header);
+ expect(header).toHaveAttribute('aria-sort', 'ascending');
+ expect(symbols()).toEqual(['BBBUSDT', 'AAAUSDT', 'NEWUSDT']);
+ view.unmount();
+ render(panel(signals));
+ expect(within(screen.getByTestId('fish-cabin')).getByRole('button', { name: '捕捞时间' })).toHaveAttribute('aria-sort', 'ascending');
+});
