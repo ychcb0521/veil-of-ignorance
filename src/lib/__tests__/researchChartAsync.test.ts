@@ -7,6 +7,13 @@ beforeEach(()=>{vi.resetModules();vi.useFakeTimers();fake.messages=[];fake.frame
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals()});
 const reply=(job:any,first:number,last:number,values:number[])=>fake.worker.onmessage({data:{id:job.id,first,last,vars:{state:Float64Array.from(values),avg_state:Float64Array.from(values),avg_state_2:Float64Array.from(values)},packet:job.packet}});
 async function setup(){const c=await import('../chartComputeClient'),r=await import('../researchIndicators');return{...c,...r,spec:r.CUSTOM_RESEARCH_INDICATORS.find(x=>x.id==='STATE')!}}
+it('reuses chart output names until the exact definition changes', async () => {
+ const chart = await setup();
+ const old = chart.researchSeriesNames(chart.spec, 'state = C');
+ expect(chart.researchSeriesNames(chart.spec, 'state = C')).toBe(old);
+ expect(chart.researchSeriesNames(chart.spec, 'renamed = C')).toEqual({core:'renamed',avg:'avg_renamed',avg2:'avg_renamed_2'});
+ expect(chart.researchSeriesNames(chart.spec, 'state = C')).toBe(old);
+});
 it('keeps hidden warmup aligned and pads an uncomputed new candle with a gap',async()=>{
  const c=await setup(),data=bars([900000,1200000]);c.enableChartComputation(data);
  expect(c.researchChartSeries(data,c.spec,24).core).toEqual([null,null]);reply(fake.messages[0],0,1200000,[.1,.2,.3,.4,.5]);

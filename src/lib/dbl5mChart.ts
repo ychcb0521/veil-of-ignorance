@@ -16,22 +16,42 @@ export function dbl5VisibleGuardRegime(result:readonly Record<string,number>[],f
  }
  return null;
 }
+const chartRows = new WeakMap<ReturnType<typeof researchChartSeries>, Record<string, number>[]>();
+
 export function registerDbl5Indicator(item:ResearchIndicator){
  const price=!!item.priceOverlay;
  registerIndicator<Record<string,number>>({name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:price?12:2,
   figures:(price?['value','DBL5_upper','_DBL5_guard']:['value']).map(key=>({key,title:(key==='value'?item.short:key==='_DBL5_guard'?'防守线':'固定上轨')+': ',type:'line' as const})),
-  calc:(bars,indicator)=>{const out=researchChartSeries(bars,item,indicator.calcParams[0]);return out.core.map((value,i)=>({...((value!==null&&Number.isFinite(value))?{value}:{}),...Object.fromEntries(Object.entries(out.components??{}).map(([k,a])=>[k,a[i]??undefined])),_pending:out.pending?1:0}));},
+  calc:(bars,indicator)=>{
+    const out=researchChartSeries(bars,item,indicator.calcParams[0]);
+    const cached=chartRows.get(out);
+    if(cached)return cached;
+    const components=Object.entries(out.components??{}),pending=out.pending?1:0;
+    const rows=out.core.map((value,i)=>{
+      const row:Record<string,number>={_pending:pending};
+      if(value!==null&&Number.isFinite(value))row.value=value;
+      for(const [key,values] of components){const point=values[i];if(point!=null)row[key]=point;}
+      return row;
+    });
+    chartRows.set(out,rows);
+    return rows;
+  },
   draw:({ctx,indicator,visibleRange,xAxis,yAxis,bounding,defaultStyles}:IndicatorDrawParams<Record<string,number>>)=>{
     ctx.save();ctx.setLineDash([]);
     for(const field of price?['value','DBL5_upper']:['value']){
       let previous:{x:number;y:number;identity:number}|undefined;
+      let drew=false;
+      ctx.beginPath();
+      ctx.lineWidth=1;ctx.globalAlpha=field==='value'?.55:.4;ctx.strokeStyle=field==='DBL5_upper'?'#8a96a5':'#0b9f78';
       for(let i=Math.max(0,visibleRange.from-2);i<Math.min(indicator.result.length,visibleRange.to+1);i++){
         const row=indicator.result[i],value=row?.[field],identity=row?.[field==='DBL5_upper'?'_DBL5_box':'_DBL5_episode'];
         if(!Number.isFinite(value)||!Number.isFinite(identity)){previous=undefined;continue;}
         // Source candle timestamps are opens. Publish at its close, never at its opening centre.
-        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);ctx.beginPath();ctx.lineWidth=1;ctx.globalAlpha=field==='value'?.55:.4;ctx.strokeStyle=field==='DBL5_upper'?'#8a96a5':'#0b9f78';
-        if(previous?.identity===identity){ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}ctx.stroke();previous={x,y,identity};
+        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);
+        if(previous?.identity===identity){ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}
+        drew=true;previous={x,y,identity};
       }
+      if(drew)ctx.stroke();
     }
     // 【用户要求】2026-11-02「颜色太多分不清」：防守线是唯一的主线（蓝色加粗），上涨期实线、震荡期虚线；箱底、箱顶退为淡色细线；
     // 只保留防守线收盘确认跌破的红叉，箱底被影线刺穿的小叉不再画

@@ -5,7 +5,7 @@ export const SIGNAL_LIBRARY_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128
 export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128px)_minmax(0,160px)_36px_74px_minmax(200px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Fish tables size the algorithm column from every row, including virtualized rows. */
-export const SIGNAL_LIBRARY_FISH_GRID = 'grid grid-cols-[148px_128px_128px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
+export const SIGNAL_LIBRARY_FISH_GRID = 'grid grid-cols-[148px_128px_128px_52px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Shared column widths and sort controls for the main library and 鱼. */
 export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, algorithmSort, caughtAtSort, selection }: {
@@ -28,6 +28,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
     {algorithmSort && (caughtAtSort
       ? <SortHeader label="捕捞时间" active={caughtAtSort.active} dir={sortDir} onClick={caughtAtSort.onClick} />
       : <span title="实际捕获这条鱼的时间（北京时间）">捕捞时间</span>)}
+    {algorithmSort && <span title="实际命中的不同算法类型数量">算法数量</span>}
     {algorithmSort ? <SortHeader label="算法类型" active={algorithmSort.active} dir={sortDir} onClick={algorithmSort.onClick} /> : <span>兜底区</span>}
     <span>市场</span>
     <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => onSort('quality')} />

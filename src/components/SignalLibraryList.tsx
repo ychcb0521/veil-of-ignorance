@@ -258,7 +258,7 @@ function SignalLibraryRowImpl({
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
-        className={`${algorithmTypes ? 'col-span-5' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
+        className={`${algorithmTypes ? 'col-span-6' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
         title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -290,6 +290,7 @@ function SignalLibraryRowImpl({
         {algorithmTypes && <span className="whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-caught-at">
           {caughtAt != null && caughtAt > 0 ? formatBeijingTime(new Date(caughtAt).getTime()) : '—'}
         </span>}
+        {algorithmTypes && <span className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-algorithm-count">{algorithmTypes.length}</span>}
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
         {algorithmTypes
           ? <span className="whitespace-nowrap font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>

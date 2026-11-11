@@ -69,3 +69,17 @@ it('background MBI and CTBA retain the same forming-bar masks as synchronous cha
   reply(job,1000,2000,[1,NaN]);
  }
 });
+
+it('classifies the formula once for an entire history packet', async () => {
+ const rules = await import('../deepDig/features');
+ const classify = vi.spyOn(rules, 'featureUsesMbiFamily');
+ try {
+  const c = await import('../chartComputeClient');
+  const bars = Array.from({length:1000}, (_, i) => ({...data()[0], timestamp:i*300000, cba2Closed:i<999}));
+  c.requestChartComputation('ordinary', request(bars, 'warmup'));
+  expect(classify).toHaveBeenCalledTimes(1);
+  const packet = new Float64Array(fake.messages[0].packet);
+  expect(packet[9990+4]).toBe(1); // Ordinary price formulas can read forming bars.
+  expect(packet[9990+9]).toBe(0);
+ } finally { classify.mockRestore(); }
+});

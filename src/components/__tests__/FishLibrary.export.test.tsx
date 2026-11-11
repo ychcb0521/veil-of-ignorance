@@ -44,3 +44,20 @@ it('鱼舱按实际捕捞时间双向排序，旧记录始终排在末尾', () =
  render(panel(signals));
  expect(within(screen.getByTestId('fish-cabin')).getByRole('button', { name: '捕捞时间' })).toHaveAttribute('aria-sort', 'ascending');
 });
+
+it('新鱼和鱼舱在算法类型左侧显示实际列出的命中类型数量', () => {
+ const base = { featureShort:'CBA', average:2, cbi2:2, startAverage:2, previousAverage:1, threshold:1, cutoffMs:2 };
+ const result: TradeSignal = {...fresh,fish:{...base,combination:'or',hitAlgorithms:[1,3,4],algorithms:[
+  base, {...base,featureShort:'未命中'}, {...base,featureShort:'BSS'}, {...base},
+ ]}};
+ render(panel([result,a]));
+ const newList = within(screen.getByTestId('fish-new'));
+ const cabin = within(screen.getByTestId('fish-cabin'));
+ for (const list of [newList,cabin]) {
+  const head = within(list.getByTestId('signal-library-header'));
+  expect(head.getByText('算法数量').nextElementSibling).toBe(head.getByRole('button',{name:'算法类型'}));
+ }
+ expect(newList.getByTestId('fish-algorithm-count')).toHaveTextContent(/^2$/);
+ expect(newList.getByTestId('fish-algorithm-type')).toHaveTextContent('CBA · BSS');
+ expect(cabin.getByTestId('fish-algorithm-count')).toHaveTextContent(/^1$/);
+});

@@ -95,13 +95,25 @@ async function pump() {
   const size = (n - from) * 10;
   if (!packet || packet.byteLength < size * 8) packet = new ArrayBuffer(Math.max(8, 2 ** Math.ceil(Math.log2(Math.max(1, size)))) * 8);
   const values = new Float64Array(packet, 0, size);
+  const template = featureTemplateId(r.def) ?? '';
+  const usesEvidenceVolume = ['ati6h', 'prs6h', 'sbs_5m', 'darvas_5m_lower'].includes(template);
+  const hideFormingAmounts = !!r.def.retentionSourceId || template === 'ctba' || usesEvidenceVolume;
+  const hideFormingClose = hideFormingAmounts || featureUsesMbiFamily(r.def);
+  const step = intervalMs(r.params.interval ?? '5m'), now = Date.now();
+  const number = (value: unknown) => typeof value === 'number' ? value : NaN;
   for (let i = from; i < n; i++) {
     const b = r.data[i], at = (i - from) * 10;
-    const number = (v: unknown) => typeof v === 'number' ? v : NaN;
-    values[at] = number(b.timestamp); values[at+1] = number(b.open); values[at+2] = number(b.high); values[at+3] = number(b.low); values[at+4] = number(b.close);
-    values[at+9]=b.cba2Closed===false||b.timestamp+intervalMs(r.params.interval??'5m')>Date.now()?0:1;
-    values[at+5] = number(b.volume); values[at+6] = number(['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??'')?(b.ATI6H_quoteVolume??b.turnover):b.turnover); values[at+7] = number(['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??'')?(b.ATI6H_takerBuyQuoteVolume??b.takerBuyTurnover):b.takerBuyTurnover); values[at+8] = number(r.refs?.[i]);
-    if((r.def.retentionSourceId||featureUsesMbiFamily(r.def)||['ctba','ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??''))&&(b.cba2Closed===false||b.timestamp+intervalMs(r.params.interval??'5m')>Date.now())){values[at+4]=NaN;if(r.def.retentionSourceId||['ctba','ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(featureTemplateId(r.def)??''))values[at+5]=values[at+6]=values[at+7]=NaN;}
+    const forming = b.cba2Closed === false || b.timestamp + step > now;
+    values[at] = number(b.timestamp);
+    values[at+1] = number(b.open);
+    values[at+2] = number(b.high);
+    values[at+3] = number(b.low);
+    values[at+4] = forming && hideFormingClose ? NaN : number(b.close);
+    values[at+5] = forming && hideFormingAmounts ? NaN : number(b.volume);
+    values[at+6] = forming && hideFormingAmounts ? NaN : number(usesEvidenceVolume ? b.ATI6H_quoteVolume ?? b.turnover : b.turnover);
+    values[at+7] = forming && hideFormingAmounts ? NaN : number(usesEvidenceVolume ? b.ATI6H_takerBuyQuoteVolume ?? b.takerBuyTurnover : b.takerBuyTurnover);
+    values[at+8] = number(r.refs?.[i]);
+    values[at+9] = forming ? 0 : 1;
   }
   try {
     startWorker(); active = channel; activeTimes = r.data.map(bar => bar.timestamp);

@@ -130,8 +130,13 @@ export function researchIndicatorForKc(name: string): ResearchIndicator | undefi
   return accountResearchIndicators().find(item => [0, 1, 2].some(level => researchKcName(item.id, level) === name));
 }
 
+const seriesNamesCache = new Map<string, Readonly<{ core: string; avg: string; avg2: string }>>();
+
 /** Some saved Z definitions call their output a, rather than the built-in az. */
 export function researchSeriesNames(item: ResearchIndicator, formula: string) {
+  const key = `${item.id}\0${item.core}\0${formula}`;
+  const cached = seriesNamesCache.get(key);
+  if (cached) return cached;
   let core: string = item.core;
   try {
     const program = compileFeatureFormula(namedChartFormula(formula)).program;
@@ -143,7 +148,10 @@ export function researchSeriesNames(item: ResearchIndicator, formula: string) {
       if (!names.has('az') && names.has('a')) core = 'a';
     } catch { /* Invalid definitions leave chart series blank, including tooltips. */ }
   }
-  return { core, avg: `avg_${core}`, avg2: `avg_${core}_2` };
+  const names = { core, avg: `avg_${core}`, avg2: `avg_${core}_2` };
+  if (seriesNamesCache.size >= 128) seriesNamesCache.delete(seriesNamesCache.keys().next().value!);
+  seriesNamesCache.set(key, names);
+  return names;
 }
 
 const chartDataGenerations = new WeakMap<KLineData[], number>();
@@ -379,18 +387,35 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const mbiStep = (item.marketEvidence || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
-  const scaled = (name: string, multiply = true) => Array.from({ length: visibleLength }, (_, i) => {
-    // Live MBI never publishes a candle that has not closed yet.
-    if ((item.marketEvidence || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
-    const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * (multiply ? def.scale : 1);
-  });
+  const closedOnly = item.marketEvidence || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba';
+  const step = closedOnly ? chartInterval(data) : 0;
+  const now = Date.now();
+  const unclosed = (index: number) => data[index].cba2Closed === false || data[index].timestamp + step > now;
+  const scaled = (name: string, multiply = true) => {
+    const values = out?.vars.get(name);
+    const scale = multiply ? def.scale : 1;
+    return Array.from({ length: visibleLength }, (_, i) => {
+      const index = visibleOffset + i;
+      // The formula's closed-bar rule is constant throughout this draw.
+      if (closedOnly && unclosed(index)) return null;
+      const value = values?.[index];
+      return value == null ? null : value * scale;
+    });
+  };
   const components=item.components?{components:Object.fromEntries(item.components.map(name=>[name,scaled(name,false)]))}:{};
   // Do not use out.core: the last account expression may itself be the weighted average.
   if (options.averageHours != null) {
     if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });
     const core = out?.vars.get(names.core) ?? data.map(() => null);
-    const average = (kind: 'avg' | 'avg2') => { const values = displayAverage(core, options.averageHours!*(item.marketEvidence?300000/chartInterval(data):1), kind); return Array.from({ length: visibleLength }, (_, i) => { if(item.marketEvidence&&(data[visibleOffset+i].cba2Closed===false||data[visibleOffset+i].timestamp+mbiStep>Date.now()))return null;const v = values[visibleOffset + i]; return Number.isFinite(v) ? v * def.scale : null; }); };
+    const average = (kind: 'avg' | 'avg2') => {
+      const values = displayAverage(core, options.averageHours! * (item.marketEvidence ? 300000 / step : 1), kind);
+      return Array.from({ length: visibleLength }, (_, i) => {
+        const index = visibleOffset + i;
+        if (item.marketEvidence && unclosed(index)) return null;
+        const value = values[index];
+        return Number.isFinite(value) ? value * def.scale : null;
+      });
+    };
     return save({ core: scaled(names.core), avg: average('avg'), avg2: average('avg2'),...components });
   }
   return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });

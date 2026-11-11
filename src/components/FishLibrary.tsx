@@ -157,7 +157,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       <div ref={algorithmSizer} aria-hidden className="pointer-events-none invisible absolute h-0 overflow-hidden font-mono text-[10px] leading-4">
         {algorithmLabels.map(label => <span key={label} className="block w-max whitespace-nowrap">{label}</span>)}
       </div>
-      {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(774px + var(--fish-algorithm-width))` } as CSSProperties}>
+      {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(834px + var(--fish-algorithm-width))` } as CSSProperties}>
         <SignalLibraryHeader selection={bulk?{checked:!!rows.length&&rows.every(r=>selected.has(r.id)),toggle:()=>setSelected(s=>{const n=new Set(s),all=rows.every(r=>n.has(r.id));for(const r of rows)if(all)n.delete(r.id);else n.add(r.id);return n;})}:undefined}
           sortKey={sortKey === 'algorithm' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess
           algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }}
