@@ -8,6 +8,27 @@ const PAGE_SIZE = 50;
 const amount = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 });
 const EMPTY_ROWS: readonly FishTurnoverDetail[] = [];
 
+export function FishTurnoverEvidence({ rows }: { rows: readonly FishTurnoverDetail[] }) {
+  return <div className="space-y-3">
+    {rows.map(row => <section key={fishTurnoverDetailKey(row)} className="space-y-1.5">
+      <p className="font-medium">{row.stage === 'cutoff' ? '扫描截止前检查' : '信号起点前检查'} <span className="font-mono font-normal text-muted-foreground">{formatUTC8(row.at)}（北京时间）</span></p>
+      <div className="overflow-x-auto rounded-md border border-border/60">
+        <table className="w-full whitespace-nowrap text-left" aria-label="当次成交额读数">
+          <thead className="bg-muted"><tr>{['回看时长', '实际成交额（USDT）', '门槛（USDT）', '判定'].map(label =>
+            <th key={label} scope="col" className="px-3 py-2">{label}</th>)}</tr></thead>
+          <tbody>{row.checks.map(check => <tr key={check.hours} className="border-t border-border/50">
+            <td className="px-3 py-2">{check.hours} 小时</td>
+            <td className={`px-3 py-2 font-mono tabular-nums ${check.ok ? '' : 'font-medium text-destructive'}`}>{amount.format(check.value)}</td>
+            <td className="px-3 py-2 font-mono tabular-nums">≥ {amount.format(check.min)}</td>
+            <td className={`px-3 py-2 ${check.ok ? 'text-muted-foreground' : 'font-medium text-destructive'}`}>{check.ok ? '达标' : '未达标'}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      {row.algorithms.length > 0 && <p className="text-muted-foreground">涉及规则 {row.algorithms.join('、')}</p>}
+    </section>)}
+  </div>;
+}
+
 export function FishTurnoverDetails({ rows = EMPTY_ROWS, rejected }: { rows?: readonly FishTurnoverDetail[]; rejected: number }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);

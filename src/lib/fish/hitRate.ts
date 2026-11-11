@@ -2,10 +2,12 @@ import type { FishCombinationRound, FishProgress, FishScanner, FishScanSettings 
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { AUDITED_EXCHANGES } from './exchanges';
 import type { FishWickRejection } from './downwardWick';
+import type { FishTurnoverDetail } from './turnoverRejections';
+import { fishSourceLabel } from './records';
 
 export const FISH_HIT_RATE_HOURS = 5;
 const halfWindowMs = FISH_HIT_RATE_HOURS * 3_600_000 / 2;
-const marketKey = (signal: TradeSignal) => `${signal.exchange ?? 'binance'}|${signal.market ?? 'crypto'}|${signal.symbol}`;
+const marketKey = (signal: Pick<TradeSignal, 'symbol' | 'exchange' | 'market'>) => `${signal.exchange ?? 'binance'}|${signal.market ?? 'crypto'}|${signal.symbol}`;
 const misses: Record<string, string> = {
   below: '截止时未达到算法门槛',
   blocked: '被算法附加条件挡下',
@@ -23,12 +25,25 @@ const incomplete: Record<string, string> = {
 };
 
 export type FishHitRateMode = 'targets' | 'market';
+export interface FishHitRateThresholdDetail {
+  algorithm: string;
+  statistic: string;
+  threshold: number;
+  direction: '>' | '<';
+  unit: string;
+  cutoffMs: number;
+  cutoffReading: number;
+  maximum?: { value: number; timeMs: number };
+}
 export interface FishHitRateRow {
   sample: TradeSignal;
   status: 'hit' | 'miss' | 'unverified';
   hit?: TradeSignal;
   reason?: string;
+  rejections?: { kind: string; label: string }[];
   wick?: FishWickRejection;
+  thresholds?: FishHitRateThresholdDetail[];
+  turnover?: FishTurnoverDetail[];
 }
 export interface FishHitRateWindow {
   anchorMs: number;
@@ -68,6 +83,7 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
     let scan: FishProgress | undefined;
     let error: string | undefined;
     const targeted = mode === 'targets';
+    const sampleMarkets = new Set(group.keys());
     const exchanges = targeted
       ? [...new Set([...group.values()].map(sample => sample.exchange ?? 'binance'))].filter(exchange => AUDITED_EXCHANGES.includes(exchange))
       : settings.exchanges ?? ['binance'];
@@ -79,7 +95,8 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
         scan = await scanner.scan({
           ...settings, anchorMs, lookbackHours: FISH_HIT_RATE_HOURS, exchanges, includeUsStocks,
           includeDuplicates: targeted || settings.includeDuplicates,
-          targetMarkets: targeted ? new Set(group.keys()) : undefined,
+          targetMarkets: targeted ? sampleMarkets : undefined,
+          windowPeakMarkets: sampleMarkets,
           retainMembers: true, saveSummary: false, signal,
           onSignal: hit => { hits.set(marketKey(hit), hit); },
           onRound: value => { round = value; },
@@ -106,11 +123,26 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
         return { sample, status: 'unverified', reason: error ?? venue?.error ?? venue?.skippedReason ?? '当前市场范围或可交易标的未覆盖该样本' };
       }
       const outcomes = round.plans.map((_, index) => members.get(index)?.outcome ?? 'missing');
-      const reasons = [...new Set(outcomes.flatMap(outcome => misses[outcome] ? [misses[outcome]] : []))];
+      const rejections = [...new Set(outcomes)].flatMap(kind => misses[kind] ? [{ kind, label: misses[kind] }] : []);
       // One confirmed rejection is enough for an intersection. A union needs every member ruled out.
-      if (reasons.length && (settings.combination !== 'or' || outcomes.every(outcome => misses[outcome]))) {
+      if (rejections.length && (settings.combination !== 'or' || outcomes.every(outcome => misses[outcome]))) {
         const wick = [...members.values()].find(member => member.outcome === 'wick' && member.wick)?.wick;
-        return { sample, status: 'miss', reason: reasons.join('、'), wick };
+        const thresholds = round.plans.flatMap((plan, index): FishHitRateThresholdDetail[] => {
+          const member = members.get(index);
+          if (!member?.windowPeak || member.reading === undefined) return [];
+          const { maximum, cutoffMs } = member.windowPeak;
+          const statistic = plan.settings.statistic ?? '结果';
+          return [{
+            algorithm: fishSourceLabel({ featureId: plan.def.id, featureShort: plan.def.short, statistic }),
+            statistic, threshold: plan.settings.threshold, direction: plan.settings.direction, unit: plan.unit,
+            cutoffMs, cutoffReading: member.reading * plan.scale,
+            maximum: maximum && { ...maximum, value: maximum.value * plan.scale },
+          }];
+        });
+        const turnover = rejections.some(({ kind }) => kind === 'thin')
+          ? scan?.turnoverDetails?.filter(detail => marketKey(detail) === key)
+          : undefined;
+        return { sample, status: 'miss', rejections, wick, thresholds, turnover };
       }
       const gaps = [...new Set(outcomes.flatMap(outcome => incomplete[outcome] ? [incomplete[outcome]] : []))];
       return { sample, status: 'unverified', reason: gaps.join('、') || '未取得完整判定' };

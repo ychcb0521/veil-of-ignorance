@@ -1,31 +1,66 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ScanSearch } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { FishWickEvidence } from '@/components/FishWickDetails';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { FishTurnoverEvidence } from '@/components/FishTurnoverDetails';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { FishScanSettings } from '@/lib/fishScanner';
-import type { FishHitRateMode, FishHitRateOptions, FishHitRateProgress, FishHitRateRow, FishHitRateWindow } from '@/lib/fish/hitRate';
+import { FISH_HIT_RATE_HOURS, type FishHitRateMode, type FishHitRateOptions, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
 
 const statusText = { hit: '命中', miss: '未命中', unverified: '无法判定' };
 const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground';
-const cellClass = 'px-3 py-2 text-left';
+const cellClass = 'px-2.5 py-1.5 text-left';
+const thresholdValue = (value: number, unit: string) => `${value}${unit && unit !== '原值' ? ` ${unit}` : ''}`;
 const marketLabel = (signal: TradeSignal) => `${EXCHANGE_NAMES[signal.exchange ?? 'binance']}${signal.market === 'us_stock' ? ' · 美股合约' : ''}`;
+type ResultRow = FishHitRateRow & { window: FishHitRateWindow };
+const statusRank = { hit: 0, miss: 1, unverified: 2 };
+const resultColumns = [
+  { key: 'symbol', label: '标的 / 市场', initial: 'asc', value: (row: ResultRow) => `${row.sample.symbol} ${marketLabel(row.sample)}` },
+  { key: 'sample', label: '样本时间', initial: 'desc', value: (row: ResultRow) => row.sample.timeMs },
+  { key: 'cutoff', label: '扫描截止', initial: 'desc', value: (row: ResultRow) => row.window.anchorMs },
+  { key: 'status', label: '判定', initial: 'asc', value: (row: ResultRow) => statusRank[row.status] },
+  { key: 'hit', label: '命中起点', initial: 'desc', value: (row: ResultRow) => row.hit?.timeMs },
+  { key: 'offset', label: '相对样本', initial: 'asc', value: (row: ResultRow) => row.hit ? row.hit.timeMs - row.sample.timeMs : undefined },
+  { key: 'reason', label: '说明', initial: 'asc', value: (row: ResultRow) => row.reason ?? row.rejections?.map(item => item.label).join('、') },
+] as const;
+type ResultSortKey = (typeof resultColumns)[number]['key'];
+type SortDirection = 'asc' | 'desc';
+
 const offsetText = (delta: number) => {
   const seconds = Math.abs(delta) / 1000;
   const minutes = Math.floor(seconds / 60), rest = seconds % 60;
   return delta === 0 ? '同一时间' : `${delta < 0 ? '早' : '晚'} ${minutes} 分${rest ? ` ${rest} 秒` : ''}`;
 };
 
-export function FishHitRateTest({ library, buildSettings, run, disabled }: {
+function ThresholdDetails({ rows, anchorMs }: { rows: FishHitRateThresholdDetail[]; anchorMs: number }) {
+  return <>
+    <p className="text-muted-foreground">测试窗口（北京时间） {formatUTC8(anchorMs - FISH_HIT_RATE_HOURS * 3_600_000)} ～ {formatUTC8(anchorMs)} · 按已收盘 K 线取值</p>
+    <div className="overflow-x-auto rounded-md border border-border/60">
+      <table className="w-full text-xs" aria-label="未达门槛算法的窗口读数">
+        <thead className="bg-muted"><tr>{['算法', '结果序列', '窗口内最大值', '最大值时间', '截止读数', '门槛'].map(label =>
+          <th key={label} scope="col" className={`${cellClass} whitespace-nowrap`}>{label}</th>)}</tr></thead>
+        <tbody>{rows.map((row, index) => <tr key={index} className="border-t border-border/50">
+          <td className={`${cellClass} font-medium`}>{row.algorithm}</td>
+          <td className={`${cellClass} font-mono`}>{row.statistic}</td>
+          <td className={`${cellClass} whitespace-nowrap font-mono font-medium`}>{row.maximum ? thresholdValue(row.maximum.value, row.unit) : '窗内无可用读数'}</td>
+          <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.maximum ? formatUTC8(row.maximum.timeMs) : '—'}</td>
+          <td className={`${cellClass} whitespace-nowrap font-mono`}>{thresholdValue(row.cutoffReading, row.unit)}<div className="text-[10px] text-muted-foreground">{formatUTC8(row.cutoffMs)}</div></td>
+          <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.direction} {thresholdValue(row.threshold, row.unit)}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </>;
+}
+
+export function FishHitRateTest({ library, buildSettings, run, disabled, onRunningChange }: {
   library: readonly TradeSignal[];
   buildSettings: () => FishScanSettings;
   run: (options: FishHitRateOptions) => Promise<void>;
   disabled?: boolean;
+  onRunningChange: (running: boolean) => void;
 }) {
-  const sourceName = useId(), modeName = useId(), wickDetailId = useId();
-  const [open, setOpen] = useState(false);
+  const sourceName = useId(), modeName = useId(), detailId = useId();
   const [source, setSource] = useState<'library' | 'paste'>('library');
   const [minRating, setMinRating] = useState(3);
   const [text, setText] = useState('');
@@ -33,29 +68,52 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
   const [windows, setWindows] = useState<FishHitRateWindow[]>([]);
   const [resultMode, setResultMode] = useState<FishHitRateMode>('targets');
   const [filter, setFilter] = useState<'all' | FishHitRateRow['status']>('all');
+  const [sort, setSort] = useState<{ key: ResultSortKey; dir: SortDirection }>({ key: 'sample', dir: 'desc' });
   const [selectedWindow, setSelectedWindow] = useState<number>();
-  const [wickRowId, setWickRowId] = useState<string>();
+  const [detail, setDetail] = useState<{ sampleId: string; kind: 'wick' | 'below' | 'thin' }>();
   const [progress, setProgress] = useState<FishHitRateProgress>();
   const [running, setRunning] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [error, setError] = useState('');
   const controller = useRef<AbortController>();
-  const wickDetail = useRef<HTMLElement>(null);
-  useEffect(() => () => controller.current?.abort(), []);
-  useEffect(() => { if (wickRowId) wickDetail.current?.scrollIntoView?.({ block: 'nearest' }); }, [wickRowId]);
+  const detailRef = useRef<HTMLElement>(null);
+  const resultScroll = useRef<HTMLDivElement>(null);
+  useEffect(() => () => {
+    if (!controller.current) return;
+    controller.current.abort();
+    controller.current = undefined;
+    onRunningChange(false);
+  }, [onRunningChange]);
+  useEffect(() => { if (resultScroll.current) resultScroll.current.scrollTop = 0; }, [filter, sort]);
+  useEffect(() => { if (detail) detailRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [detail]);
 
   const pasted = useMemo(() => source === 'paste' ? parseSignalText(text) : null, [source, text]);
   const samples = useMemo(() => source === 'library'
     ? library.filter(signal => (normalizeSignalQuality(signal.quality) ?? 0) >= minRating).sort((a, b) => b.timeMs - a.timeMs)
     : pasted?.signals ?? [], [source, library, minRating, pasted]);
   const checkedWindows = useMemo(() => new Set(samples.map(sample => sample.timeMs)).size, [samples]);
-  const rows = windows.flatMap(window => window.rows.map(row => ({ ...row, window })));
+  const rows = useMemo(() => windows.flatMap(window => window.rows.map(row => ({ ...row, window }))), [windows]);
   const hitCount = rows.filter(row => row.status === 'hit').length;
   const missCount = rows.filter(row => row.status === 'miss').length;
   const verified = hitCount + missCount;
-  const visible = filter === 'all' ? rows : rows.filter(row => row.status === filter);
+  const visible = useMemo(() => {
+    const value = resultColumns.find(column => column.key === sort.key)!.value;
+    const direction = sort.dir === 'asc' ? 1 : -1;
+    return rows.filter(row => filter === 'all' || row.status === filter).map(row => ({ row, value: value(row) }))
+      .sort((a, b) => {
+        const tie = b.row.sample.timeMs - a.row.sample.timeMs;
+        if (a.value === undefined || b.value === undefined) return Number(a.value === undefined) - Number(b.value === undefined) || tie;
+        const comparison = typeof a.value === 'number' && typeof b.value === 'number'
+          ? a.value - b.value : String(a.value).localeCompare(String(b.value), 'zh-CN', { numeric: true });
+        return comparison * direction || tie;
+      }).map(item => item.row);
+  }, [rows, filter, sort]);
   const selected = windows.find(window => window.anchorMs === selectedWindow);
-  const activeWick = visible.find(row => row.sample.id === wickRowId)?.wick;
+  const detailRow = visible.find(row => row.sample.id === detail?.sampleId);
+  const activeWick = detail?.kind === 'wick' ? detailRow?.wick : undefined;
+  const activeThresholds = detail?.kind === 'below' ? detailRow?.thresholds : undefined;
+  const activeTurnover = detail?.kind === 'thin' ? detailRow?.turnover : undefined;
+  const detailTitle = activeWick ? '插针过滤详情' : activeThresholds?.length ? '算法门槛详情' : activeTurnover?.length ? '成交额门槛详情' : undefined;
 
   const start = async () => {
     if (controller.current || !samples.length || pasted?.errors.length) return;
@@ -66,11 +124,12 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
     const task = new AbortController();
     controller.current = task;
     setRunning(true);
+    onRunningChange(true);
     setStopped(false);
     setWindows([]);
     setResultMode(mode);
     setSelectedWindow(undefined);
-    setWickRowId(undefined);
+    setDetail(undefined);
     setFilter('all');
     setProgress(undefined);
     try {
@@ -85,22 +144,14 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
       if (controller.current === task) {
         controller.current = undefined;
         setRunning(false);
+        onRunningChange(false);
         setStopped(task.signal.aborted);
       }
     }
   };
 
-  return <Dialog open={open} onOpenChange={next => { if (next || !running) setOpen(next); }}>
-    <DialogTrigger asChild>
-      <button type="button" className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-        <ScanSearch aria-hidden className="h-3.5 w-3.5"/>漏报测试
-      </button>
-    </DialogTrigger>
-    <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-4xl overflow-y-auto p-4 text-xs sm:p-5">
-      <DialogHeader className="pr-7 text-left">
-        <DialogTitle>捕捞漏报测试</DialogTitle>
-        <DialogDescription>每个样本时间后延 2.5 小时作为扫描截止，向前扫描 5 小时。使用当前勾选的捕捞算法和过滤条件，信号在截止时仍须达标。</DialogDescription>
-      </DialogHeader>
+  return <div className="min-w-0 space-y-2 text-[11px]">
+      <p className="text-muted-foreground">每个样本前后各 2.5 小时。使用当前勾选的捕捞算法和过滤条件，信号在截止时仍须达标。</p>
       <div className="grid gap-4 rounded-lg border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
         <fieldset disabled={running} className="min-w-0 space-y-2">
           <legend className="mb-1.5 font-medium">测试样本</legend>
@@ -142,39 +193,58 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
             <strong>{verified ? `命中率 ${(100 * hitCount / verified).toFixed(1)}%` : '暂无可判定样本'}</strong>
             <span className="ml-2 text-muted-foreground">{hitCount} 命中 · {missCount} 未命中 · {rows.length - verified} 无法判定</span>
           </p>
-          <select className={inputClass} aria-label="筛选测试结果" value={filter} onChange={event => setFilter(event.target.value as typeof filter)}>
+          <select className={inputClass} aria-label="筛选测试结果" value={filter} onChange={event => { setDetail(undefined); setFilter(event.target.value as typeof filter); }}>
             <option value="all">全部结果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="unverified">无法判定</option>
           </select>
         </div>
-        <div className="max-h-80 overflow-auto rounded-md border border-border/60">
-          <table className="w-full min-w-[46rem] text-xs">
-            <thead className="sticky top-0 bg-muted"><tr>{['标的 / 市场','样本时间','扫描截止','判定','命中起点','相对样本','说明'].map(label => <th scope="col" className={cellClass} key={label}>{label}</th>)}</tr></thead>
+        <div ref={resultScroll} className="isolate max-h-80 min-w-0 overflow-auto rounded-lg border border-border/60">
+          <table className="w-full min-w-[46rem] text-[11px]" aria-label="漏报测试结果">
+            <thead className="sticky top-0 z-10 border-b border-border/60 bg-muted"><tr>{resultColumns.map(({ key, label, initial }) => {
+              const active = sort.key === key;
+              return <th scope="col" className={cellClass} key={key} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+                <button type="button" title={`按${label}排序`} className={`flex items-center gap-0.5 whitespace-nowrap font-medium hover:text-foreground ${active ? 'text-foreground' : 'text-muted-foreground'}`}
+                  onClick={() => setSort(current => ({ key, dir: current.key === key ? (current.dir === 'asc' ? 'desc' : 'asc') : initial }))}>
+                  {label}<span aria-hidden className="w-2">{active ? (sort.dir === 'asc' ? '↑' : '↓') : ''}</span>
+                </button>
+              </th>;
+            })}</tr></thead>
             <tbody>
-              {visible.map(({ sample, hit, status, reason, wick, window }) => <tr key={sample.id} className="border-t border-border/50">
+              {visible.map(({ sample, hit, status, reason, rejections, wick, thresholds, turnover, window }) => <tr key={sample.id} className="border-t border-border/50 hover:bg-muted/25">
                 <td className={cellClass}><div className="font-medium">{sample.symbol}</div><div className="text-muted-foreground">{marketLabel(sample)}{sample.quality ? ` · ${sample.quality} 星` : ''}</div></td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(sample.timeMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(window.anchorMs)}</td>
                 <td className={`${cellClass} whitespace-nowrap ${status === 'hit' ? 'text-primary' : 'text-muted-foreground'}`}>{statusText[status]}</td>
                 <td className={`${cellClass} whitespace-nowrap font-mono`}>{hit ? formatUTC8(hit.timeMs) : '—'}</td>
                 <td className={`${cellClass} whitespace-nowrap`}>{hit ? offsetText(hit.timeMs - sample.timeMs) : '—'}</td>
-                <td className={cellClass}>{wick
-                  ? <button type="button" aria-expanded={wickRowId === sample.id} aria-controls={wickDetailId}
-                    className="inline-flex min-w-32 items-center gap-1 text-left text-primary underline-offset-2 hover:underline"
-                    onClick={() => { setSelectedWindow(undefined); setWickRowId(current => current === sample.id ? undefined : sample.id); }}>
-                    {reason}<ChevronDown aria-hidden className={`h-3 w-3 shrink-0 ${wickRowId === sample.id ? 'rotate-180' : ''}`}/>
-                  </button>
-                  : reason && <div className="min-w-32 text-muted-foreground">{reason}</div>}{resultMode === 'market' && <button type="button" className="whitespace-nowrap text-primary hover:underline" onClick={() => { setWickRowId(undefined); setSelectedWindow(window.anchorMs); }}>本窗命中 {window.hits.length} 条</button>}</td>
+                <td className={`${cellClass} min-w-32`}>
+                  {reason && <div className="text-muted-foreground">{reason}</div>}
+                  {rejections?.map(({ kind, label }) => {
+                    const detailKind = kind === 'wick' && wick ? 'wick'
+                      : kind === 'below' && thresholds?.length ? 'below'
+                      : kind === 'thin' && turnover?.length ? 'thin' : undefined;
+                    if (!detailKind) return <div key={kind} className="text-muted-foreground">{label}</div>;
+                    const expanded = detail?.sampleId === sample.id && detail.kind === detailKind;
+                    return <div key={kind}><button type="button" aria-expanded={expanded} aria-controls={expanded ? detailId : undefined}
+                      className="inline-flex items-center gap-1 text-left text-primary underline-offset-2 hover:underline"
+                      onClick={() => { setSelectedWindow(undefined); setDetail(expanded ? undefined : { sampleId: sample.id, kind: detailKind }); }}>
+                      {label}<ChevronDown aria-hidden className={`h-3 w-3 shrink-0 ${expanded ? 'rotate-180' : ''}`}/>
+                    </button></div>;
+                  })}
+                  {resultMode === 'market' && <button type="button" className="whitespace-nowrap text-primary hover:underline" onClick={() => { setDetail(undefined); setSelectedWindow(window.anchorMs); }}>本窗命中 {window.hits.length} 条</button>}
+                </td>
               </tr>)}
             </tbody>
           </table>
           {!visible.length && <p className="p-3 text-muted-foreground">没有符合筛选的结果。</p>}
         </div>
-        {activeWick && <section ref={wickDetail} id={wickDetailId} className="space-y-2 rounded-md border border-border/60 p-3" aria-label="插针过滤详情">
+        {detailRow && detailTitle && <section ref={detailRef} id={detailId} className="space-y-2 rounded-md border border-border/60 p-3" aria-label={detailTitle}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-medium">{activeWick.symbol} · {EXCHANGE_NAMES[activeWick.exchange]} · 5 分钟 K 线</h3>
-            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setWickRowId(undefined)}>收起</button>
+            <h3 className="font-medium">{detailRow.sample.symbol} · {marketLabel(detailRow.sample)} · {activeWick ? '5 分钟 K 线' : detailTitle}</h3>
+            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setDetail(undefined)}>收起</button>
           </div>
-          <FishWickEvidence row={activeWick}/>
+          {activeWick && <FishWickEvidence row={activeWick}/>}
+          {activeThresholds && <ThresholdDetails rows={activeThresholds} anchorMs={detailRow.window.anchorMs}/>}
+          {activeTurnover && <FishTurnoverEvidence rows={activeTurnover}/>}
         </section>}
         {selected && <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="本窗口全部命中">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -187,6 +257,5 @@ export function FishHitRateTest({ library, buildSettings, run, disabled }: {
           </ul>}
         </section>}
       </section>}
-    </DialogContent>
-  </Dialog>;
+  </div>;
 }

@@ -191,6 +191,7 @@ export type FishScanCheckpoint = Map<string, Map<string, FishMemberResult>>;
 type ScanOptions = FishScanSettings & {
   checkpoint?: FishScanCheckpoint;
   targetMarkets?: ReadonlySet<string>;
+  windowPeakMarkets?: ReadonlySet<string>;
   saveSummary?: boolean;
   /** 捕捞中可改的交集 / 并集（2026-10-21「捕捞运行的过程中，我也可以灵活切换到并集」）：每判完一个币读一次当前值。 */
   combinationRef?: { current: FishCombination };
@@ -754,6 +755,18 @@ export class FishScanner {
                 const member:FishMemberResult={...result,reading:readings.average[bars.length-1]};
                 if(result.outcome==='hit'||result.outcome==='unknown'||result.outcome==='outside'){const tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;}
                 const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;
+                if (result.outcome === 'below' && options.windowPeakMarkets?.has(memberKey) && options.lookbackHours !== undefined) {
+                  const from = node - options.lookbackHours * 3_600_000;
+                  let maximum: { value: number; timeMs: number } | undefined;
+                  for (let i = bars.length - 1; i >= plan.warm - 1; i--) {
+                    const timeMs = bars[i].openTime + plan.step;
+                    if (timeMs < from) break;
+                    const value = readings.average[i];
+                    // Readings belong to the bar's close. Keep the first occurrence when the maximum ties.
+                    if (timeMs <= cut && Number.isFinite(value) && (!maximum || value >= maximum.value)) maximum = { value, timeMs };
+                  }
+                  member.windowPeak = { cutoffMs: cut, maximum };
+                }
                 memberResults.set(memberKey,new Map([[0,member]]));
                 reportResult(memberKey,member);
               }catch(error){
