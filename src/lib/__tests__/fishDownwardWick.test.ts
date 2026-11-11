@@ -155,3 +155,15 @@ it('malformed settings fall back to the 48h / 3 ATR default',()=>{
  localStorage.setItem(getUserPrefix()+'fish-downward-wick.v2','malformed');
  expect(readFishDownwardWick()).toEqual({enabled:true,hours:48,atrMultiple:3});
 });
+
+it('accepts a custom ATR multiple and checks only complete 5-minute candles in a fractional window', () => {
+  const custom = {enabled:true,hours:.2,atrMultiple:4.1};
+  const sample = bars();
+  sample[sample.length-3] = wick(sample.at(-3)!);
+  expect(fishWickCount(custom)).toBe(17);
+  expect(findFishDownwardWick(sample,cut,custom)).toBeNull();
+  sample[sample.length-3] = bars().at(-3)!;
+  sample[sample.length-2] = wick(sample.at(-2)!);
+  expect(findFishDownwardWick(sample,cut,custom)).toBeNull();
+  expect(findFishDownwardWick(sample,cut,{...custom,atrMultiple:3.9})).toMatchObject({openTime:cut-2*STEP,drop:8,atr:2});
+});

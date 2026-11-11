@@ -11,6 +11,7 @@ import {writePersistedStateRaw,notifyPersistedStateHydrated} from '@/lib/persist
 import {FISH_ACCOUNT_SETTINGS_KEY} from '@/lib/fish/accountSettings';
 import {buildFishScanSettings} from '@/lib/fish/scanPlan';
 import {readFishCards} from '@/lib/fish/cards';
+import {saveFishDownwardWick} from '@/lib/fish/downwardWick';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
 import {fishDelay} from '@/lib/fish/shared';
 const HOUR=3_600_000,selection={exchanges:['binance' as const],includeDuplicates:false};
@@ -113,4 +114,15 @@ it('a coverage-only account update preserves the current manual mode and automat
  act(()=>{writePersistedStateRaw(key,JSON.stringify({...saved,lookbackHours:1}));notifyPersistedStateHydrated(key);});
  await flush();
  expect(view.result.current).toMatchObject({mode:'manual',hours:2});
+});
+
+it('uses independently saved wick settings on the next automatic scan', async () => {
+ const {start}=hook();
+ await flush();
+ expect(start).toHaveBeenCalledTimes(1);
+ const rule={enabled:true,hours:.2,atrMultiple:4.2};
+ act(()=>{saveFishDownwardWick(rule);});
+ await flush(HOUR);
+ expect(start).toHaveBeenCalledTimes(2);
+ expect(start.mock.calls[1][0]).toMatchObject({downwardWick:rule,lookbackHours:1});
 });

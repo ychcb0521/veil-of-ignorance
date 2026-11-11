@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, CandlestickChart, Search } from 'lucide-react';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { ArrowUpRight, CandlestickChart, ChevronDown, Search } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
-import type { FishWickRejection } from '@/lib/fish/downwardWick';
+import { fishWickDuration, type FishWickRejection } from '@/lib/fish/downwardWick';
 import { FISH_STEP, type FishProgress } from '@/lib/fishScanner';
 import { signalChartSymbol, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { FishTurnoverThresholds } from './FishTurnoverThresholds';
 
 const identity = (r: FishWickRejection) => `${r.exchange}|${r.market ?? 'crypto'}|${r.symbol}|${r.cutoffMs}|${r.openTime}`;
 const price = (n: number) => Number.isFinite(n) ? Number(n.toPrecision(9)).toString() : '—';
@@ -46,20 +47,49 @@ export function FishWickDetails({ progress, onJump, jumpingSignalId }: {
   const filtered=useMemo(()=>{const q=query.trim().toLowerCase();return rows.filter(r=>`${r.symbol} ${EXCHANGE_NAMES[r.exchange]}`.toLowerCase().includes(q));},[rows,query]);
   const pages=Math.max(1,Math.ceil(filtered.length/50)),at=Math.min(page,pages-1),shown=filtered.slice(at*50,(at+1)*50);
   const active=rows.find(r=>identity(r)===selected), source=active?sourceOf(active):null;
+  const [thresholdsOpen, setThresholdsOpen] = useState(false);
+  const thresholdsId = useId();
+  const rule = active?.rule ?? rows[0]?.rule;
   const incomplete=Math.max(0,(progress.wickSkipped??0)-rows.length);
   const cutoff=rows[0]?.cutoffMs??progress.cutoffMs;
   useEffect(()=>{if(selected&&open)document.getElementById('fish-wick-chart')?.scrollIntoView?.({behavior:'smooth',block:'nearest'});},[selected,open]);
-  return <Dialog open={open} onOpenChange={setOpen}>
+  return <Dialog open={open} onOpenChange={next => { setOpen(next); if (!next) setThresholdsOpen(false); }}>
     <DialogTrigger asChild><button type="button" data-testid="fish-wick-skipped" aria-label={`查看插针过滤详情（${progress.wickSkipped??0} 个）`} className="rounded-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">插针过滤 {progress.wickSkipped??0}</button></DialogTrigger>
     <DialogContent className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0">
       <DialogHeader className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5 text-left">
-        <DialogTitle className="text-sm">插针过滤 · 详情</DialogTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
+          <DialogTitle className="text-sm">插针过滤 · 详情</DialogTitle>
+          <button
+            type="button"
+            aria-expanded={thresholdsOpen}
+            aria-controls={thresholdsId}
+            onClick={() => setThresholdsOpen(current => !current)}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border/70 px-2 text-[11px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            过滤门槛
+            <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground transition-transform ${thresholdsOpen ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
         <DialogDescription className="text-xs leading-relaxed">
           本轮已过滤 {progress.wickSkipped??0} 个标的{progress.status==='running'?' · 扫描中，明细持续更新':''}
           {cutoff!=null?` · 截止 ${formatUTC8(cutoff)}（UTC+8）`:''}。每个交易所、标的记首根触发的已收盘 5m K 线，多算法不重复计数。
         </DialogDescription>
       </DialogHeader>
       <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4 text-xs">
+        {thresholdsOpen && <section id={thresholdsId} aria-label="过滤门槛" className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 px-3.5 py-2.5">
+          <ul aria-label="插针门槛" className="divide-y divide-border/50 text-[11px]">
+            <li className="flex flex-wrap justify-between gap-x-3 py-1.5">
+              <span className="text-muted-foreground">插针回看</span>
+              <span className="font-medium">{rule ? `本轮回看 ${fishWickDuration(rule.hours)}，只看已收盘 5 分钟 K 线` : '使用已收盘 5 分钟 K 线，本轮时长未保存'}</span>
+            </li>
+            <li className="flex flex-wrap justify-between gap-x-3 py-1.5">
+              <span className="text-muted-foreground">插针幅度</span>
+              <span className="font-medium">开盘价 − 最低价 &gt; ATR(14) × {rule?.atrMultiple ?? '所设倍数'}</span>
+            </li>
+          </ul>
+          <p className="pb-1 text-[11px] leading-relaxed text-muted-foreground">ATR 取触发前 14 根的平均真实波幅。任一根超线，整只标的跳过。</p>
+          <FishTurnoverThresholds />
+        </section>}
         {incomplete>0&&<p role="note" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2.5 text-muted-foreground" data-testid="fish-wick-legacy">{incomplete} 条旧版记录仅保存了过滤数量，未保存触发时间和价格。重新捕捞后可查看完整明细。</p>}
         {rows.length>0&&<>
           <label className="flex h-8 items-center gap-2 rounded-md bg-muted/50 px-2.5 text-muted-foreground"><Search aria-hidden className="h-3.5 w-3.5"/><input aria-label="搜索插针过滤标的或交易所" placeholder="搜索标的或交易所…" value={query} onChange={e=>{setQuery(e.target.value);setPage(0);}} className="min-w-0 flex-1 bg-transparent text-foreground outline-none"/></label>

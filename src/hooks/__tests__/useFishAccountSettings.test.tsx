@@ -18,7 +18,7 @@ import { FISH_ACCOUNT_SETTINGS_KEY, type FishAccountSettings } from '@/lib/fish/
 import { readFishCards, readFishCombination } from '@/lib/fish/cards';
 import { readFishLookback } from '@/lib/fish/lookback';
 import { resetFishAuto } from '@/lib/fish/autoScan';
-import { readFishDownwardWick } from '@/lib/fish/downwardWick';
+import { FISH_WICK_SETTINGS_KEY, readFishDownwardWick } from '@/lib/fish/downwardWick';
 const login=(id:string)=>localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id}}));
 const value:FishAccountSettings={version:1,cards:[{id:'first',featureId:'cbi2',enabled:true,pref:{statistic:'avg_CBI2_2',direction:'<',threshold:'0.987',constraints:[]}}],combination:'or',lookbackHours:24,downwardWick:{enabled:false,hours:12,atrMultiple:2},selection:{exchanges:['binance'],includeDuplicates:true},auto:{mode:'manual',hours:8}};
 beforeEach(()=>{localStorage.clear();__resetSimStateSyncForTests();cloud.rows.clear();cloud.fail=false;cloud.writes=0;login('A');});
@@ -99,4 +99,30 @@ it('persists coverage for an account without a fixed algorithm snapshot', async 
  await act(async()=>{await expect(second.result.current.saveLookback(0)).rejects.toThrow('扫描覆盖时间');});
  expect(readFishLookback()).toBe(2);
  second.unmount();
+});
+
+it('saves custom wick settings separately and adopts them on another device without replacing the existing account settings', async () => {
+  const first = renderHook(() => useFishAccountSettings());
+  await act(() => first.result.current.save(value));
+  const original = first.result.current.settings;
+  const wick = { enabled:true, hours:1, atrMultiple:4.25 };
+  await act(() => first.result.current.saveDownwardWick(wick));
+  expect(first.result.current.settings).toBe(original);
+  expect(first.result.current.downwardWick).toEqual(wick);
+  expect(cloud.rows.get('A'+FISH_ACCOUNT_SETTINGS_KEY)?.value).toEqual(value);
+  expect(cloud.rows.get('A'+FISH_WICK_SETTINGS_KEY)?.value).toEqual(wick);
+  await act(() => first.result.current.saveLookback(2));
+  expect(readFishDownwardWick()).toEqual(wick);
+
+  first.unmount();localStorage.clear();__resetSimStateSyncForTests();login('A');
+  await hydrateSimState('A');
+  const second=renderHook(()=>useFishAccountSettings(true));
+  expect(second.result.current.downwardWick).toEqual(wick);
+  expect(second.result.current.settings).toEqual({...value,lookbackHours:2});
+  const remote = {...wick,hours:24,atrMultiple:3.75};
+  cloud.rows.set('A'+FISH_WICK_SETTINGS_KEY,{key:FISH_WICK_SETTINGS_KEY,value:remote,updated_at:'2000-01-01T00:00:00.000Z'});
+  await act(()=>hydrateSimState('A',[FISH_WICK_SETTINGS_KEY]));
+  expect(second.result.current.downwardWick).toEqual(remote);
+  login('B');second.rerender();
+  expect(second.result.current.downwardWick).toEqual({enabled:true,hours:48,atrMultiple:3});
 });

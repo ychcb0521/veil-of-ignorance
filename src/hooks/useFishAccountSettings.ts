@@ -4,24 +4,42 @@ import { notifyPersistedStateHydrated, subscribePersistedStateHydration, writePe
 import { hydrateSimState, pushSimStateImmediately } from '@/lib/simStateSync';
 import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FISH_LOOKBACK_KEY, saveFishLookback } from '@/lib/fish/lookback';
+import { FISH_WICK_SETTINGS_KEY, readFishDownwardWick, saveFishDownwardWick, validateFishDownwardWick, type FishDownwardWick } from '@/lib/fish/downwardWick';
 
 export function useFishAccountSettings(refreshOnFocus = false) {
-  const userId = getUserId(), fullKey = getUserPrefix() + FISH_ACCOUNT_SETTINGS_KEY;
+  const userId = getUserId(), prefix = getUserPrefix();
+  const fullKey = prefix + FISH_ACCOUNT_SETTINGS_KEY, wickKey = prefix + FISH_WICK_SETTINGS_KEY;
   const [snapshot, setSnapshot] = useState(() => ({ fullKey, value: readFishAccountSettings(fullKey) }));
+  const [wickSnapshot, setWickSnapshot] = useState(() => ({ prefix, value: readFishDownwardWick(prefix) }));
   const settings = snapshot.fullKey === fullKey ? snapshot.value : readFishAccountSettings(fullKey);
+  const downwardWick = wickSnapshot.prefix === prefix ? wickSnapshot.value : readFishDownwardWick(prefix);
   useEffect(() => {
-    const refresh = () => setSnapshot({fullKey, value: readFishAccountSettings(fullKey)});
-    const unsubscribe = subscribePersistedStateHydration(fullKey, refresh);
-    refresh();
-    return unsubscribe;
-  }, [fullKey]);
+    const refreshWick = () => setWickSnapshot({ prefix, value: readFishDownwardWick(prefix) });
+    const refreshSettings = () => {
+      setSnapshot({ fullKey, value: readFishAccountSettings(fullKey) });
+      refreshWick();
+    };
+    const unsubscribeSettings = subscribePersistedStateHydration(fullKey, refreshSettings);
+    const unsubscribeWick = subscribePersistedStateHydration(wickKey, refreshWick);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === fullKey) refreshSettings();
+      else if (event.key === wickKey) refreshWick();
+    };
+    window.addEventListener('storage', onStorage);
+    refreshSettings();
+    return () => {
+      unsubscribeSettings();
+      unsubscribeWick();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [prefix, fullKey, wickKey]);
   useEffect(() => {
     if (!userId || !refreshOnFocus) return;
     let pending = false;
     const refresh = async () => {
       if (pending || document.hidden) return;
       pending = true;
-      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY]); }
+      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY, FISH_WICK_SETTINGS_KEY]); }
       finally { pending = false; }
     };
     void refresh();
@@ -59,5 +77,9 @@ export function useFishAccountSettings(refreshOnFocus = false) {
     else await persist(FISH_LOOKBACK_KEY, hours);
     return hours;
   }, [userId, fullKey, persist, save]);
-  return { settings, save, saveLookback };
+  const saveDownwardWick = useCallback(async (value: FishDownwardWick) => {
+    if (userId) await persist(FISH_WICK_SETTINGS_KEY, validateFishDownwardWick(value));
+    else if (!saveFishDownwardWick(value, prefix)) throw new Error('浏览器暂时无法保存插针设置，请重试');
+  }, [userId, prefix, persist]);
+  return { settings, downwardWick, save, saveLookback, saveDownwardWick };
 }

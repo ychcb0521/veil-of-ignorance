@@ -22,6 +22,8 @@ import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIME
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
 import { mergeMiningStates, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
+import { FISH_ACCOUNT_SETTINGS_KEY } from '@/lib/fish/accountSettings';
+import { FISH_WICK_SETTINGS_KEY } from '@/lib/fish/downwardWick';
 import {
   clearPersistedStateMemoryForTests,
   getUnpersistedStateMetadata,
@@ -382,8 +384,9 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
   // A different device may have edited the server since our last acknowledgement.
   for (const key of acknowledged.keys()) if (key.startsWith(`${userId}\u0000`)) acknowledged.delete(key);
   // Saved account preferences use the server row as authority, independent of device clock skew.
-  const preferenceKey = 'fish-account-settings.v1';
-  const preferenceGeneration = generation.get(genKey(userId, preferenceKey)) ?? 0;
+  const preferenceGenerations = new Map(
+    [FISH_ACCOUNT_SETTINGS_KEY, FISH_WICK_SETTINGS_KEY].map(key => [key, generation.get(genKey(userId, key)) ?? 0]),
+  );
   try {
     const query = supabase
       .from('user_sim_state' as never)
@@ -460,14 +463,15 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
       // 历史登记表已在上方并集合并，不会以远端整键覆盖这些本地新节点。
       if (!recoverSignalLibrary && (memoryMetadata?.source === 'local' || unsyncedGeneration.has(genKey(userId, row.key)))) continue;
       const remoteRaw = JSON.stringify(row.value);
-      if (row.key === preferenceKey) {
+      const preferenceGeneration = preferenceGenerations.get(row.key);
+      if (preferenceGeneration !== undefined) {
         // A response started before a local Save cannot undo that Save after its acknowledgement.
-        if ((generation.get(genKey(userId, preferenceKey)) ?? 0) !== preferenceGeneration) continue;
+        if ((generation.get(genKey(userId, row.key)) ?? 0) !== preferenceGeneration) continue;
         if (hasLocal && sameJsonContent(localRaw, remoteRaw)) continue;
       }
       // 修复旧版本留下的「影子戳已追平云端，数据写入却失败」：等戳还须内容一致。
       // 真正更晚的本地写入仍然保留，正在推送的同毫秒本地写入已由上方保护。
-      if (!recoverSignalLibrary && row.key !== preferenceKey && hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
+      if (!recoverSignalLibrary && preferenceGeneration === undefined && hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
       try {
         writePersistedStateRaw(fullKey, remoteRaw, { source: 'remote', updatedAt: remoteTs });
         writePersistedValueShadowTs(fullKey, remoteRaw, remoteTs);

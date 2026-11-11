@@ -6,7 +6,7 @@ import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramFo
 import {fishSignalInRoundWindow} from '@/lib/fish/roundWindow';
 import { downloadFishCabin } from '@/lib/fish/export';
 import { toast } from 'sonner';
-import { readFishDownwardWick, saveFishDownwardWick, FISH_WICK_HOURS, FISH_WICK_ATR_MULTIPLES, type FishDownwardWick } from '@/lib/fish/downwardWick';
+import { readFishDownwardWick, readLegacyFishDownwardWick, type FishDownwardWick } from '@/lib/fish/downwardWick';
 import {readPersistedStateRaw,writePersistedStateRaw} from '@/lib/persistedStateStorage';
 import { FishReconstructionResults } from './FishReconstruction';
 import type { FishReconstructionState } from '@/hooks/useFishReconstruction';
@@ -39,6 +39,7 @@ import type { FishAlgorithmSettings } from '@/lib/fish/algorithm';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
 import { FishWickDetails } from '@/components/FishWickDetails';
+import { FishWickSettings } from '@/components/FishWickSettings';
 import { FishQuality } from '@/components/FishQuality';
 import { ModuleErrorBoundary } from '@/components/ModuleErrorBoundary';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -106,7 +107,7 @@ export function FishPanel(p: FishPanelProps) {
   });
 
   const owner=getUserPrefix();
-  const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback}=useFishAccountSettings();
+  const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback, downwardWick, saveDownwardWick}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
   const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
   useEffect(()=>{const h=readFishLookback();setLookbackHours(h);setLookbackDraft(String(h));},[owner]);
@@ -120,12 +121,6 @@ export function FishPanel(p: FishPanelProps) {
       if(getUserPrefix()===editingOwner)setError(e instanceof Error?e.message:'覆盖时间无效');
     }
   };
-  const [downwardWick,setDownwardWick]=useState(readFishDownwardWick);
-  const [wickChanged,setWickChanged]=useState(false);
-  useEffect(()=>{setDownwardWick(readFishDownwardWick());setWickChanged(false);},[owner]);
-  const updateWick=(patch:Partial<FishDownwardWick>)=>{const next={...downwardWick,...patch};setDownwardWick(next);saveFishDownwardWick(next);setWickChanged(true);};
-
-
   const loadCards=()=>{const cards=p.defaultAlgorithms?defaultCards(p.defaultAlgorithms,defs.map(d=>d.id)):[];return cards.length?cards:readCards();};
   const [initialCards]=useState(loadCards);
   const [extraCards,setExtraCards]=useState<FishCard[]>(()=>initialCards.slice(1));
@@ -146,14 +141,11 @@ export function FishPanel(p: FishPanelProps) {
   // Saving the coverage alone must preserve edits in the algorithm cards and other controls.
   const accountAlgorithmKey=JSON.stringify([savedAccountSettings?.cards,savedAccountSettings?.combination]);
   const accountLookbackHours=savedAccountSettings?.lookbackHours;
-  const accountWickKey=JSON.stringify(savedAccountSettings?.downwardWick);
   const accountSelectionKey=JSON.stringify(savedAccountSettings?.selection);
   useEffect(()=>()=>{suggestionController.current?.abort();suggestionController.current=null;},[owner]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);},[owner,accountAlgorithmKey]);
   useEffect(()=>{if(accountLookbackHours===undefined)return;setLookbackHours(accountLookbackHours);setLookbackDraft(String(accountLookbackHours));},[owner,accountLookbackHours]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(()=>{if(savedAccountSettings)setDownwardWick({...savedAccountSettings.downwardWick});},[owner,accountWickKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{if(savedAccountSettings)p.onSelectionChange(savedAccountSettings.selection);},[owner,accountSelectionKey]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
@@ -192,7 +184,7 @@ export function FishPanel(p: FishPanelProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[selectionSignature,p.roundPlans]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
-  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:validateFishLookback(lookbackDraft),downwardWick,selection:p.selection,...(p.auto?{auto:{mode:p.auto.mode,hours:p.auto.hours}}:{})});
+  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:validateFishLookback(lookbackDraft),downwardWick:readLegacyFishDownwardWick(owner),selection:p.selection,...(p.auto?{auto:{mode:p.auto.mode,hours:p.auto.hours}}:{})});
   const saveParameters=async()=>{setSavingParameters(true);setError('');try{if(multiple.error)throw new Error(multiple.error);if(!p.selection.exchanges.length)throw new Error('请至少选择一家交易所');await saveAccountSettings(parameterDraft());toast.success('捕捞参数已保存到账号');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setSavingParameters(false);}};
 
   const runProbe=async()=>{
@@ -201,7 +193,7 @@ export function FishPanel(p: FishPanelProps) {
     try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;validateFishLookback(lookbackDraft);}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
     if(multiple.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[multiple.error||'算法设置有误']}}));return;}
     setProbe(v=>({...v,busy:true,result:null}));
-    try{const result=await p.onDiagnose({lookbackHours:validateFishLookback(lookbackDraft),downwardWick,turnoverFloors:FISH_TURNOVER_FLOORS,symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
+    try{const result=await p.onDiagnose({lookbackHours:validateFishLookback(lookbackDraft),downwardWick:readFishDownwardWick(owner),turnoverFloors:FISH_TURNOVER_FLOORS,symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
     catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
   };
   const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
@@ -274,8 +266,7 @@ export function FishPanel(p: FishPanelProps) {
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const plans=p.onRecombine?pool:multiple.plans;
     for(const plan of plans){const checked=fishProgramForLookback(plan,hours,FISH_TURNOVER_FLOORS);if(checked.unavailable)throw new Error(checked.unavailable);}
-    setWickChanged(false);
-    p.onStart({...settings,lookbackHours:hours,downwardWick,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+    p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
   const x = p.progress;
@@ -339,6 +330,10 @@ export function FishPanel(p: FishPanelProps) {
             </button>;})}
           </PopoverContent>
         </Popover>
+        <FishWickSettings key={owner} value={downwardWick} locked={running || probe.busy} onSave={async value => {
+          await saveDownwardWick(value);
+          if (getUserPrefix() === owner) toast.success('插针回看设置已保存');
+        }}/>
         {p.auto&&<>
           {/* 【用户要求】2026-10-21「渔这里增设一个定时自动（& 手动）捕捉的功能」：手动 = 与原来一样；自动 = 每隔所选时长自动捕一次（时间 = 现在） */}
           <div role="radiogroup" aria-label="捕捞模式" className="inline-flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[11px]">
@@ -377,15 +372,6 @@ export function FishPanel(p: FishPanelProps) {
       </label>)}
       <label className="flex items-center gap-1.5"><FishCheck checked={includeUsStocks} disabled={running} onChange={e=>p.onSelectionChange({...p.selection,includeUsStocks:e.target.checked})}/>美股</label>
       <label className="ml-1 flex items-center gap-1.5 border-l border-border/60 pl-4"><FishCheck disabled={running} checked={includeDuplicates} onChange={e => p.onSelectionChange({ ...p.selection, includeDuplicates: e.target.checked })} />含重复币</label>
-    </div>}
-    {open.scope&&<div className="space-y-1.5 rounded-lg bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground" data-testid="fish-wick-settings">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <label className="flex items-center gap-1.5"><FishCheck aria-label="过滤向下大插针" checked={downwardWick.enabled} disabled={running||probe.busy} onChange={e=>updateWick({enabled:e.target.checked})}/>过滤向下大插针</label>
-        <label className="flex items-center gap-1.5">回看<select aria-label="插针回看时长" className="h-6 rounded border border-border/60 bg-background px-1.5 text-foreground disabled:opacity-40" value={downwardWick.hours} disabled={running||probe.busy||!downwardWick.enabled} onChange={e=>updateWick({hours:Number(e.target.value)})}>{FISH_WICK_HOURS.map(h=><option key={h} value={h}>{h}h</option>)}</select></label>
-        <label className="flex items-center gap-1.5">开盘至最低价跌幅 &gt; ATR(14) ×<select aria-label="插针 ATR 倍数" className="h-6 rounded border border-border/60 bg-background px-1.5 text-foreground disabled:opacity-40" value={downwardWick.atrMultiple} disabled={running||probe.busy||!downwardWick.enabled} onChange={e=>updateWick({atrMultiple:Number(e.target.value)})}>{FISH_WICK_ATR_MULTIPLES.map(n=><option key={n} value={n}>{n}</option>)}</select></label>
-        <FishQualityInfo label="插针过滤说明"><p className="text-muted-foreground">只看已收盘 5m K 线，以开盘价减最低价计跌幅，包含大阴线和下影线；严格大于所选 ATR 倍数即过滤，不限制实体或下影占比。ATR(14) 取该根之前 14 根真实波幅的均值，不含该根和之后的数据。手动、自动及单币查询共用。</p></FishQualityInfo>
-      </div>
-      {wickChanged&&<p className="text-[10px] text-primary">过滤设置将在下次捕捞生效，下面仍是已保存的结果。</p>}
     </div>}
     {open.probe&&p.onDiagnose&&<div className="space-y-1.5 rounded-lg bg-muted/30 px-3 py-2 text-[11px]" data-testid="fish-probe">
       <div className="flex flex-wrap items-center gap-2 text-muted-foreground">

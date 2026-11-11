@@ -29,6 +29,17 @@ it('reflects new live records, searches and uses frozen thresholds after setting
  expect(screen.getByRole('table')).not.toHaveTextContent('WICKUSDT');
  fireEvent.click(screen.getByRole('button',{name:'查看 OTHERUSDT 币安 的触发 K 线'}));
  expect(screen.getByTestId('fish-wick-reason')).toHaveTextContent('2 × 1.5 = 3');
+ const toggle=screen.getByRole('button',{name:'过滤门槛'});
+ expect(toggle).toHaveAttribute('aria-expanded','false');
+ fireEvent.click(toggle);
+ const gates=within(screen.getByRole('region',{name:'过滤门槛'}));
+ expect(gates.getByRole('list',{name:'插针门槛'})).toHaveTextContent('本轮回看 48 小时');
+ expect(gates.getByRole('list',{name:'插针门槛'})).toHaveTextContent('ATR(14) × 1.5');
+ expect(within(gates.getByRole('list',{name:'成交额门槛'})).getAllByRole('listitem').map(row=>row.textContent)).toEqual([
+   '1 小时成交额≥ 100 万 USDT','12 小时成交额≥ 800 万 USDT','24 小时成交额≥ 1,000 万 USDT',
+ ]);
+ fireEvent.click(toggle);
+ expect(screen.queryByRole('region',{name:'过滤门槛'})).toBeNull();
 });
 it('legacy counts never invent symbols or candle times',()=>{
  render(<FishWickDetails progress={{...initialFishProgress(),wickSkipped:20}} jumpingSignalId={null}/>);
