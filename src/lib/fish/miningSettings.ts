@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
-import { queueSimStatePush } from '@/lib/simStateSync';
+import { hydrateSimState, queueSimStatePush } from '@/lib/simStateSync';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { readFishCards, readFishCombination } from './cards';
 import { readFishDownwardWick, validateFishDownwardWick } from './downwardWick';
@@ -10,9 +10,9 @@ import { AUDITED_EXCHANGES } from './exchanges';
 import { validateFishHitRateWindow } from './hitRate';
 import { readSavedFishHitRateSettings } from './hitRateSettings';
 import { FISH_DEFAULT_LOOKBACK_HOURS, readFishLookback, validateFishLookback } from './lookback';
-import { currentDefaultRules, miningCards } from './mining';
+import { currentDefaultRules, miningCards, readMiningState } from './mining';
 import { MINING_COMBINATION } from './defaultRules';
-import { MINING_STEP_MS, type FishMiningScanConfig, type FishMiningState } from './miningState';
+import { MINING_STEP_MS, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY, type FishMiningScanConfig, type FishMiningState } from './miningState';
 import { buildFishScanSettings, type FishScanSelection } from './scanPlan';
 import { FISH_MAX_ALGORITHMS, FISH_TURNOVER_FLOORS } from './shared';
 import { readCaptureTurnoverSettings, validateFishTurnoverSettings } from './turnoverSettings';
@@ -40,25 +40,40 @@ const schema = z.object({
     combination: z.enum(['and', 'or']),
     downwardWick: z.object({ enabled: z.boolean(), hours: z.number(), atrMultiple: z.number() }),
     turnover: z.object({ enabled: z.boolean(), floors: z.array(z.object({ hours: z.number(), min: z.number() })) }),
-    lookbackHours: z.number().positive().max(8784).nullable(),
+    lookbackHours: z.number().positive().max(8784).nullable().optional(),
     continuous: z.literal(true).optional(),
   }),
 });
 
-export function readMiningSettings(): FishMiningSettings | null {
+export function readMiningSettings(userId = getUserId(), strict = false): FishMiningSettings | null {
+  const raw = readPersistedStateRaw(getUserPrefix(userId) + MINING_SETTINGS_KEY);
+  if (raw == null) return null;
   try {
-    const result = schema.safeParse(JSON.parse(readPersistedStateRaw(getUserPrefix() + MINING_SETTINGS_KEY) ?? 'null'));
-    if (result.success) {
-      validateFishDownwardWick(result.data.scan.downwardWick);
-      validateFishTurnoverSettings(result.data.scan.turnover);
-      return { ...result.data, scan: { ...result.data.scan, lookbackHours: result.data.scan.lookbackHours ?? null } };
-    }
-  } catch { /* Keep the established mining behavior if stored settings are unreadable. */ }
-  return null;
+    const result = schema.parse(JSON.parse(raw));
+    validateFishDownwardWick(result.scan.downwardWick);
+    validateFishTurnoverSettings(result.scan.turnover);
+    return { ...result, scan: { ...result.scan, lookbackHours: result.scan.lookbackHours ?? null } };
+  } catch {
+    if (strict) throw new Error('已保存的批量捕捞设置无法读取');
+    return null;
+  }
 }
 
-export function saveMiningSettings(settings: FishMiningSettings) {
-  const userId = getUserId();
+export async function loadMiningSettings(userId: string, capture: FishScanSelection, signal: AbortSignal) {
+  const hydrate = async (keys: readonly string[]) => {
+    const result = await hydrateSimState(userId, keys, signal);
+    if (signal.aborted) throw signal.reason ?? new Error('读取批量捕捞设置已取消');
+    if (result.status !== 'hydrated' && result.status !== 'empty') throw new Error('无法读取账号的批量捕捞设置');
+  };
+
+  await hydrate([MINING_SETTINGS_KEY]);
+  const saved = readMiningSettings(userId, true);
+  if (saved) return saved;
+  await hydrate([MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]);
+  return readMiningSettings(userId, true) ?? initialMiningSettings(readMiningState({ userId, persistPresetUpgrade: false }), capture);
+}
+
+export function saveMiningSettings(settings: FishMiningSettings, userId = getUserId()) {
   writePersistedStateRaw(getUserPrefix(userId) + MINING_SETTINGS_KEY, JSON.stringify(settings));
   if (userId) queueSimStatePush(userId, MINING_SETTINGS_KEY, settings);
 }

@@ -171,12 +171,9 @@ it('defaults to one row per symbol/time, toggles detector details from the heade
  expect(toggle).toHaveAttribute('aria-expanded','false');expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
  const checkbox=()=>within(screen.getAllByTestId('quality-fish-row')[0]).getByRole('checkbox') as HTMLInputElement;
  expect(checkbox().indeterminate).toBe(true);expect(checkbox()).not.toBeChecked();
- fireEvent.click(screen.getByRole('button',{name:'隐藏未选行'}));
- expect(checkbox().indeterminate).toBe(true);
- fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
- expect(screen.getByTestId('quality-row-count')).toHaveTextContent('已隐藏 2 行');
+ expect(within(screen.getByTestId('quality-combination-toolbar')).queryByRole('button',{name:/隐藏未选行|隐藏未运行/})).toBeNull();
+ fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
  fireEvent.click(toggle);expect(checkbox().indeterminate).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'显示未选行'}));
  expect(s.setSelectedRows).not.toHaveBeenCalled();
  fireEvent.click(checkbox());expect(s.setSelectedRows).toHaveBeenLastCalledWith(expect.arrayContaining(ids));
  s.study={...s.study,selectedRowIds:vi.mocked(s.setSelectedRows).mock.calls.at(-1)![0]};view.rerender(<FishQuality state={s}/>);
@@ -1308,7 +1305,9 @@ it('locks only checked rows in the current scope and keeps new signals outside u
 
   const incoming = importQualityLibrary(selected, [c], T + 2);
   view.rerender(<FishQuality state={{ ...base, study: { ...incoming, selectedRowIds: [] }, lockedBatch, setLockedBatch }}/>);
-  expect(screen.getByTestId('quality-locked-batch')).toHaveTextContent('1 条信号');
+  const toolbar = within(screen.getByTestId('quality-combination-toolbar'));
+  expect(toolbar.getByTestId('quality-locked-batch')).toHaveTextContent('已锁定 1 条信号');
+  expect(toolbar.getByRole('button', { name: '解除锁定' })).toBeEnabled();
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   expect(screen.queryByText('BBBUSDT')).toBeNull();
   expect(screen.queryByText('CCCUSDT')).toBeNull();

@@ -61,13 +61,13 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(loadFishSignals().some(s=>s.symbol==='WICKUSDT')).toBe(false);
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toEqual([]);
   });
-  it('按钮紧邻信号库并互斥，评分/删除独立，无加入信号库入口，不显示快照悬停框', async () => {
+  it('入口与信号库互斥，评分/删除独立，无加入信号库入口，不显示快照悬停框', async () => {
     render(control());
     const fishButton = screen.getByRole('button',{name:/^渔/});
-    expect(fishButton.previousElementSibling).toHaveTextContent('信号库');
-    expect(fishButton).toHaveTextContent('1');
+    expect(fishButton.previousElementSibling).toHaveTextContent('图灵杯');
+    expect(fishButton).toHaveTextContent(/^渔$/);
     fireEvent.click(fishButton);
-    const panel = screen.getByTestId('fish-panel');
+    const panel = screen.getByTestId('fish-old');
     expect(within(panel).getByText('AAAUSDT').closest('.group')).not.toHaveAttribute('title');
     expect(within(panel).getByText('AAAUSDT').closest('button')).not.toHaveAttribute('title',expect.stringContaining('0.35000000'));
     fireEvent.click(within(panel).getByRole('radio',{name:'4 星'}));
@@ -82,11 +82,13 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     // 【用户要求】2026-10-21「不能轻易删除」：点 × 先变成「确认删除」，再点一次才删
     fireEvent.click(within(screen.getByTestId('fish-panel')).getByTitle('删除该信号'));
     expect(loadFishSignals()).toHaveLength(1);
-    fireEvent.click(within(screen.getByTestId('fish-panel')).getByRole('button',{name:/^确认删除/}));
-    expect(loadFishSignals()).toHaveLength(0);
+    const confirmation = within(screen.getByRole('dialog', {name:'批量删除鱼舱数据'})).getByRole('button',{name:'确认删除及关联结果'});
+    await waitFor(() => expect(confirmation).toBeEnabled());
+    fireEvent.click(confirmation);
+    await waitFor(() => expect(loadFishSignals()).toHaveLength(0));
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
-  it('沿用信号跳转，成功后收起渔；云端延迟恢复可刷新徽标和列表', async () => {
+  it('沿用信号跳转，成功后收起渔；云端延迟恢复后可查看新信号', async () => {
     const jump = vi.fn(async () => ({ ok: true as const })); render(control(jump));
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     fireEvent.click(within(screen.getByTestId('fish-panel')).getByText('AAAUSDT'));
@@ -94,7 +96,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.queryByTestId('fish-panel')).not.toBeInTheDocument();
     localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([SIGNAL,{...SIGNAL,id:'fish-BBB',symbol:'BBBUSDT',timeMs:456}]));
     act(() => notifyPersistedStateHydrated(FISH_STORAGE_KEY));
-    expect(screen.getByRole('button',{name:/^渔/})).toHaveTextContent('2');
+    const fishButton = screen.getByRole('button',{name:'渔'});
+    fireEvent.click(fishButton);
+    expect(within(screen.getByTestId('fish-old')).getByText('BBBUSDT')).toBeVisible();
   });
   it('扫描只在点击后开始，重复命中去重，可取消', async () => {
     render(control()); expect(mocks.scan).not.toHaveBeenCalled();
@@ -326,7 +330,7 @@ it('鱼舱把截图中的三轮相同行合成一条，徽标/月计数一致，
  expect(within(cabin).getAllByText('AAAUSDT')).toHaveLength(1);
  expect(within(cabin).getByRole('button',{name:/^鱼舱/})).toHaveTextContent('1');
  expect(within(cabin).getByLabelText('鱼舱的月份')).toHaveDisplayValue('全部月份（1）');
- expect(screen.getByRole('button',{name:/^渔/})).toHaveTextContent('1');
+ expect(screen.getByRole('button',{name:'渔'})).toBeInTheDocument();
  fireEvent.click(within(cabin).getByRole('radio',{name:'5 星'}));
  expect(loadFishSignals()).toHaveLength(1);expect(loadFishSignals()[0].quality).toBe(5);
  view.unmount();render(control());
@@ -335,8 +339,10 @@ it('鱼舱把截图中的三轮相同行合成一条，徽标/月计数一致，
  expect(within(restored).getAllByText('AAAUSDT')).toHaveLength(1);
  expect(within(restored).getByRole('radio',{name:'5 星'})).toBeChecked();
  fireEvent.click(within(restored).getByTitle('删除该信号'));
- fireEvent.click(within(restored).getByRole('button',{name:/^确认删除/}));
- expect(loadFishSignals()).toHaveLength(0);
+ const confirmation = within(screen.getByRole('dialog', {name:'批量删除鱼舱数据'})).getByRole('button',{name:'确认删除及关联结果'});
+ await waitFor(() => expect(confirmation).toBeEnabled());
+ fireEvent.click(confirmation);
+ await waitFor(() => expect(loadFishSignals()).toHaveLength(0));
 },30000);
 
 it.each([true, false])('鱼质量的信号库标的可点击定位盘面；跳转成功=%s 时按结果收起渔并阻止重复跳转', async success => {

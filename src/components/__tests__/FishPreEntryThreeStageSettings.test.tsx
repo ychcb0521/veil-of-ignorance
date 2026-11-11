@@ -225,3 +225,36 @@ it('keeps each event toggle, settings, help and removal inside its own independe
  expect(within(guard).getByLabelText('启用原生防守线准入')).toBeChecked();expect(within(indicators[1]).getByLabelText('准入算法 2 启用')).toBeChecked();expect(within(indicators[0]).getByLabelText('准入算法 1 门槛')).toHaveValue(.8);
  fireEvent.click(within(indicators[1]).getByRole('button',{name:'准入算法 2 删除'}));expect(screen.getAllByTestId('admission-indicator-module')).toHaveLength(1);expect(screen.getByLabelText('准入算法 1 启用')).not.toBeChecked();fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));expect(f.configure.mock.calls[0][0][0].preEntryThreeStage.admission).toMatchObject({guardEnabled:true,algorithms:[{enabled:false,threshold:.8}]});expect(f.state.preEntry!.library).toEqual(before);
 });
+
+it('uses loaded templates while screening history is being read and retains the draft through retry', () => {
+  const f = singleFixture();
+  const retry = vi.fn();
+  const monitor = f.state.preEntry!;
+  const entry = { id: 'available-entry', name: '已读筛选模板', savedAt: 1, updatedAt: 1, entryHours: 24, plan: f.current };
+  const study = { ...f.state.study, planTemplates: [entry] };
+  const batchState = { ...f.state, study, lockedBatch: { rowIds: ['locked-row'], groupBySignal: false } };
+  const empty = { ...monitor.library, settings: undefined };
+  const editor = (preEntry: typeof monitor) => <TooltipProvider>
+    <FishPreEntrySettings state={{ ...batchState, preEntry }} selectedCount={89} done={vi.fn()}/>
+  </TooltipProvider>;
+
+  const view = render(editor({ ...monitor, ready: false, library: empty, retry }));
+  expect(screen.getByText('正在读取筛选库，完成后可保存方案或开始筛选。')).toBeVisible();
+  expect(screen.getByRole('button', { name: '保存三阶方案' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /模板库/ }));
+  fireEvent.click(screen.getByRole('button', { name: '用模板 已读筛选模板 新建方案' }));
+  expect(screen.getByLabelText('三阶方案名称')).toHaveValue('已读筛选模板');
+  expect(screen.getByRole('button', { name: '保存并开始三阶筛选' })).toBeDisabled();
+
+  view.rerender(editor({ ...monitor, ready: false, error: '筛选库读取超时', library: empty, retry }));
+  expect(screen.getByRole('alert')).toHaveTextContent('筛选库读取超时');
+  fireEvent.click(screen.getByRole('button', { name: '重试读取筛选库' }));
+  expect(retry).toHaveBeenCalledOnce();
+  view.rerender(editor({ ...monitor, error: '', retry }));
+  expect(screen.getByLabelText('三阶方案名称')).toHaveValue('已读筛选模板');
+  expect(screen.getByLabelText('单标的筛选时限（小时）')).toHaveValue(24);
+  expect(f.configure).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保存并开始三阶筛选' }));
+  expect(f.configure).toHaveBeenCalledWith([expect.objectContaining({ label: entry.name, preEntryThreeStage: entry.plan.preEntryThreeStage })], 24);
+  expect(monitor.restart).toHaveBeenCalledWith(24);
+});

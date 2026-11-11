@@ -13,7 +13,7 @@ import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishCheck } from './FishAlgorithmCard';
 import { FishNumberField, FishScanScopeFields, FishScanWickFields } from './FishScanSettingsFields';
 import { FishTurnoverSettingsFields } from './FishTurnoverSettings';
-import { buildConfiguredMiningScan, continuousMiningSettings, copyCaptureToMining, copyHitRateToMining, initialMiningSettings, readMiningSettings, saveMiningSettings } from '@/lib/fish/miningSettings';
+import { buildConfiguredMiningScan, continuousMiningSettings, copyCaptureToMining, copyHitRateToMining, initialMiningSettings, loadMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
@@ -26,11 +26,57 @@ import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
 const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} ${r.direction ?? '>'} ${r.threshold}`;
-function MiningRuleEditor({ mining, close, restart = false }: {
-  mining: FishMiningApi; close: () => void; restart?: boolean;
-}) {
+type MiningEditorProps = { mining: FishMiningApi; close: () => void; restart?: boolean };
+
+function MiningSettingsContent({ mining, ...editor }: MiningEditorProps) {
+  const account = mining.account;
+  const [load, setLoad] = useState<
+    { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; settings: FishMiningSettings }
+  >({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const [capture] = useState(mining.captureSelection);
+
+  useEffect(() => {
+    if (!account) return;
+    const request = new AbortController();
+    const timeout = setTimeout(() => request.abort(new Error('读取批量捕捞设置超时')), 15_000);
+    let disposed = false;
+    void loadMiningSettings(account, capture, request.signal).then(
+      settings => { if (!disposed) setLoad({ status: 'ready', settings }); },
+      error => { if (!disposed) setLoad({ status: 'error', message: error instanceof Error ? error.message : '读取批量捕捞设置失败' }); },
+    ).finally(() => clearTimeout(timeout));
+    return () => {
+      disposed = true;
+      request.abort();
+      clearTimeout(timeout);
+    };
+  }, [account, attempt, capture]);
+
+  if (!account || load.status === 'ready') {
+    return <MiningRuleEditor {...editor} mining={mining} loaded={load.status === 'ready' ? load.settings : undefined}/>;
+  }
+
+  if (load.status === 'loading') {
+    return <p role="status" className="px-4 py-5 text-xs text-muted-foreground">正在读取上次保存的批量捕捞设置…</p>;
+  }
+
+  const local = readMiningSettings(account);
+  return <div className="space-y-3 px-4 py-5 text-xs">
+    <p role="alert" className="text-destructive">{load.message}</p>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className={qualityPrimaryAction} onClick={() => {
+        setLoad({ status: 'loading' });
+        setAttempt(value => value + 1);
+      }}>重试读取</button>
+      {local && <button type="button" className={qualityPauseAction}
+        onClick={() => setLoad({ status: 'ready', settings: local })}>使用本机已保存设置</button>}
+    </div>
+  </div>;
+}
+
+function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEditorProps & { loaded?: FishMiningSettings }) {
   const capture = mining.captureSelection;
-  const [settings, setSettings] = useState(() => readMiningSettings() ?? initialMiningSettings(mining.state, capture));
+  const [settings, setSettings] = useState(() => loaded ?? readMiningSettings() ?? initialMiningSettings(mining.state, capture));
   const [draft, setDraft] = useState(settings.rules);
   const [target, setTarget] = useState(String(settings.target));
   const [error, setError] = useState('');
@@ -73,7 +119,7 @@ function MiningRuleEditor({ mining, close, restart = false }: {
       try{endMs=parseFishSettings(endTime,'0').anchorMs;}catch{/* Keep the draft visible. */}
       if(endMs===undefined||endMs<=startMs||endMs>Date.now()){setError('请选择晚于扫描起点且不晚于现在的扫描结束时间（北京时间）');return;}
       mining.restart({ startMs, endMs, target: count, rules: draft, settings: configured });
-    } else saveMiningSettings(configured);
+    } else saveMiningSettings(configured, mining.account);
     close();
   };
   return <div className="flex min-h-0 flex-1 flex-col text-[11px]" data-testid="mining-rule-editor"><div className="shrink-0 space-y-3 px-4 pb-3 pt-4"><div className="flex items-center justify-between gap-2"><p className="font-medium">目标与时间</p><FishQualityInfo label="批量捕捞条件说明"><p>交集须所有启用的算法达标，并集满足任一算法即可。</p><p>新选指标只列出算法已有的原值、avg、avg_2。旧规则保存的其他指标继续保留，切换指标时请核对门槛。</p></FishQualityInfo></div>{restart && <label className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
@@ -184,7 +230,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
               <DialogTitle className="text-sm">批量捕捞设置</DialogTitle>
               <DialogDescription className="text-xs">保存后用于开始新一轮。继续捕捞会从上次进度接着扫描。</DialogDescription>
             </DialogHeader>
-            <MiningRuleEditor mining={mining} close={()=>setProfileOpen(false)}/>
+            <MiningSettingsContent key={mining.account} mining={mining} close={()=>setProfileOpen(false)}/>
           </DialogContent>
         </Dialog>
         <Dialog open={restartOpen} onOpenChange={setRestartOpen}>
@@ -193,7 +239,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
               <DialogTitle className="text-sm">重新开始批量捕捞</DialogTitle>
               <DialogDescription className="text-xs">开始后会结束当前轮次，新一轮计数从 0 开始。到达结束时间或目标条数后停止，历史结果保留在捕捞库。</DialogDescription>
             </DialogHeader>
-            <MiningRuleEditor mining={mining} close={()=>setRestartOpen(false)} restart/>
+            <MiningSettingsContent key={mining.account} mining={mining} close={()=>setRestartOpen(false)} restart/>
           </DialogContent>
         </Dialog>
         <FishMiningLibrary openRequest={openRequest} onSelectDirectory={onSelectDirectory} directoryEdits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump} onSelectInTable={onSelectInTable}/>

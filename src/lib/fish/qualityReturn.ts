@@ -16,7 +16,6 @@ export interface QualityReturnUi {
   /** 旧版本的分页（已合并为一个视图）。 */
   phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;
-  hideUnselected?: boolean;
   postExitExpanded?: string[];
   entryExpanded?: string[];
   labelExpanded?: string[];

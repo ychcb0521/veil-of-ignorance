@@ -1,16 +1,59 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import { FISH_HIT_RATE_SETTINGS_KEY, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { readMiningSettings } from '@/lib/fish/miningSettings';
+import { initialMiningSettings, readMiningSettings } from '@/lib/fish/miningSettings';
 import { DetectCategoryStats } from '@/components/DetectCategoryStats';
 import { MINING_START_MS, MINING_STEP_MS, newMiningState, currentDefaultRules } from '@/lib/fish/mining';
-beforeEach(() => localStorage.clear());
+const hydrate = vi.hoisted(() => vi.fn<typeof import('@/lib/simStateSync').hydrateSimState>());
+vi.mock('@/lib/simStateSync', async original => ({
+  ...await original<typeof import('@/lib/simStateSync')>(),
+  hydrateSimState: hydrate,
+}));
+beforeEach(() => { localStorage.clear(); hydrate.mockReset(); });
 afterEach(cleanup);
 const api = (patch: object = {}, state: object = {}) => ({ state: { ...newMiningState(), ...state }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn(), defs: fishFeatureDefinitions(BUILTIN_FEATURES), captureSelection: { exchanges: ['binance'], includeDuplicates: false }, ...patch });
+
+it('opens with the last saved profile after hydration and preserves a draft through mining progress', async () => {
+  const account = 'mining-settings-owner';
+  const m = api({ account });
+  const saved = initialMiningSettings({ ...m.state, target: 50 }, { exchanges: ['binance'], includeDuplicates: false });
+  saved.scan.lookbackHours = 1;
+  saved.rules[0].threshold = '0.05';
+  let finish!: () => void;
+  hydrate.mockImplementationOnce(() => new Promise(resolve => {
+    finish = () => {
+      localStorage.setItem(getUserPrefix(account) + 'fish-mining-settings.v1', JSON.stringify(saved));
+      resolve({ status: 'hydrated', applied: 1 });
+    };
+  }));
+  const view = render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
+  fireEvent.click(screen.getByRole('button', { name: '批量捕捞设置' }));
+  const form = within(screen.getByRole('dialog'));
+  expect(form.getByRole('status')).toHaveTextContent('正在读取上次保存的批量捕捞设置');
+  expect(form.queryByLabelText('批量捕捞目标条数')).toBeNull();
+  expect(hydrate).toHaveBeenCalledWith(account, ['fish-mining-settings.v1'], expect.any(AbortSignal));
+  await act(async () => finish());
+  expect(form.getByLabelText('批量捕捞目标条数')).toHaveValue(50);
+  expect(form.getByLabelText('每档回看（小时）')).toHaveValue(1);
+  expect(form.getByLabelText('批量捕捞算法 1 门槛')).toHaveValue(0.05);
+
+  fireEvent.change(form.getByLabelText('批量捕捞目标条数'), { target: { value: '65' } });
+  view.rerender(<FishMiningPanel mining={{ ...m, state: { ...m.state, target: 50, mined: 3 } } as never} sellFixed campaignHref="#"/>);
+  expect(form.getByLabelText('批量捕捞目标条数')).toHaveValue(65);
+  expect(readMiningSettings(account)?.target).toBe(50);
+  fireEvent.click(form.getByRole('button', { name: '取消' }));
+
+  hydrate.mockResolvedValueOnce({ status: 'error', applied: 0 });
+  fireEvent.click(screen.getByRole('button', { name: '批量捕捞设置' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('无法读取账号的批量捕捞设置');
+  expect(screen.queryByLabelText('批量捕捞目标条数')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '使用本机已保存设置' }));
+  expect(screen.getByLabelText('批量捕捞目标条数')).toHaveValue(50);
+});
 
 it('adds restored DSP·a as a selectable mining algorithm without replacing existing rules',()=>{
  const base={id:'base',featureId:'cbi2',statistic:'avg_CBI2_2',threshold:'0.04'};

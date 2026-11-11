@@ -151,7 +151,6 @@ export function TimeControl({
     ) : EMPTY_TURING_SIGNALS;
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
-  const fishCount = useMemo(() => new Set(fish.signals.map(signal => signal.freshCatch ? `fresh:${signal.id}` : signalDedupKey(signal))).size, [fish.signals]);
   const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs);
   const { deletedSources, resolvedLegacySources } = fishQuality.study;
   const turingSignals = useMemo(() => {
@@ -631,7 +630,6 @@ export function TimeControl({
         <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); setFishOpen(o => !o); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
           <Fish className="w-3 h-3" />渔
-          <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{fishCount}</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${fishOpen ? 'rotate-180' : ''}`} />
         </button>
 

@@ -25,14 +25,14 @@ export const miningKey = (logicalKey = MINING_LOGICAL_KEY) => `${getUserPrefix()
 const leaseKey = () => `${getUserPrefix()}${MINING_LEASE_LOGICAL_KEY}`;
 export const currentDefaultRules = (): FishMiningRule[] => FISH_DEFAULT_RULES.map(r => ({ ...r }));
 
-export function readMiningState(): FishMiningState {
+export function readMiningState({ userId = getUserId(), persistPresetUpgrade = true } = {}): FishMiningState {
   for (const logicalKey of [MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]) {
     try {
-      const raw = JSON.parse(readPersistedStateRaw(miningKey(logicalKey)) ?? 'null');
+      const raw = JSON.parse(readPersistedStateRaw(getUserPrefix(userId) + logicalKey) ?? 'null');
       const state = normalizeMiningState(raw);
       if (!state || (logicalKey !== MINING_LOGICAL_KEY && !state.round) || (logicalKey === MINING_CONFIGURED_ROUND_KEY && !state.scan)) continue;
       // Persist and sync the one-time replacement; otherwise old saved configuration errors return on refresh.
-      if (raw.presetRevision !== state.presetRevision) saveMiningState(state);
+      if (persistPresetUpgrade && raw.presetRevision !== state.presetRevision) saveMiningState(state);
       return state;
     } catch { /* Try the next slot. */ }
   }

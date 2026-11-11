@@ -379,8 +379,8 @@ export interface HydrateResult {
  * 仅当远端行比本地影子时间戳更新（或本地没有该键）时才覆盖——
  * 新浏览器拿到全量，旧浏览器更新的本地值不被回滚。
  */
-export async function hydrateSimState(userId: string, keys?: readonly string[]): Promise<HydrateResult> {
-  if (!userId) return { status: 'error', applied: 0 };
+export async function hydrateSimState(userId: string, keys?: readonly string[], signal?: AbortSignal): Promise<HydrateResult> {
+  if (!userId || signal?.aborted) return { status: 'error', applied: 0 };
   // 水化发生在交易组件树挂载之前，是认定会话归属最早、也最可靠的时机。
   setActiveSyncUser(userId);
   // A different device may have edited the server since our last acknowledgement.
@@ -396,8 +396,9 @@ export async function hydrateSimState(userId: string, keys?: readonly string[]):
       // 大块本机数据（鱼质量、扫描结果……）由 accountBlobSync 单独对账：不下载、不写进 localStorage。
       .not('key', 'like', `${ACCOUNT_BLOB_PREFIX}%`)
       .eq('user_id', userId);
-    const { data, error } = await (keys ? query.in('key', [...keys]) : query);
-    if (activeUserId !== userId) return { status: 'error', applied: 0 };
+    const scoped = keys ? query.in('key', [...keys]) : query;
+    const { data, error } = await (signal ? scoped.abortSignal(signal) : scoped);
+    if (activeUserId !== userId || signal?.aborted) return { status: 'error', applied: 0 };
     if (error) {
       if (isMissingSimStateTableError(error)) {
         tableMissing = true;

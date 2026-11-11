@@ -34,7 +34,7 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
   c.hardVetoes.push(...(p.preEntryConditions?.hardVetoes??[]).map(v=>({...structuredClone(v),id:id()})));
   return {id:id(),label:p.label+' · 三阶副本',metric:p.metric,snapshot:structuredClone(p.snapshot),execution:'intrabar-1m',initialization:p.initialization,preEntryThreeStage:c};
 }
-export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state:FishQualityState;selectedCount:number;done:()=>void}){
+export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTemplate}:{state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
   const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=retryPreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
@@ -109,8 +109,8 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
   };
   return <div className="screening-settings" data-testid="pre-entry-three-stage-settings">
     <div className="screening-header"><div><h3 className="screening-title">动态筛选条件</h3><p className="screening-subtitle">三阶准入 · 按首次满足时间入选</p></div><div className="screening-template-actions">
-      {active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate?'模板尚未恢复':!monitor.library.settings?.plans.some(p=>p.id===active.id&&JSON.stringify(p)===JSON.stringify(active))||Object.keys(vetoDrafts).length>0||Object.keys(hardDrafts).length>0||Number(hours)!==monitor.library.settings?.hours?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
-      <TemplatePicker purpose="entry" plans={plans} disabled={!state.ready||!monitor.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study).filter(t=>!!t.plan.preEntryThreeStage),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate?template=>{if(!template.plan?.preEntryThreeStage)throw Error('请选择三阶筛选模板');state.restorePlanTemplate!(template);}:undefined}} onUse={template=>{const next=qualityPlanFromTemplate(template,id());setPlans([next]);setActiveId(next.id);if(template.entryHours!=null)setHours(String(template.entryHours));setVetoDrafts({});setHardDrafts({});}}/>
+      {active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate||!state.ready?'模板尚未恢复':!monitor.ready?'筛选库尚未读取完成':!monitor.library.settings?.plans.some(p=>p.id===active.id&&JSON.stringify(p)===JSON.stringify(active))||Object.keys(vetoDrafts).length>0||Object.keys(hardDrafts).length>0||Number(hours)!==monitor.library.settings?.hours?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
+      <TemplatePicker purpose="entry" plans={plans} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study).filter(t=>!!t.plan.preEntryThreeStage),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate?template=>{if(!template.plan?.preEntryThreeStage)throw Error('请选择三阶筛选模板');state.restorePlanTemplate!(template);}:undefined}} onUse={template=>{const next=qualityPlanFromTemplate(template,id());onUseTemplate?.();setPlans([next]);setActiveId(next.id);if(template.entryHours!=null)setHours(String(template.entryHours));setVetoDrafts({});setHardDrafts({});}}/>
     </div></div>
     {!active&&!!monitor.library.settings?.plans.length&&<label className="block text-[11px]">选择唯一保留的筛选方案<select aria-label="选择唯一保留的筛选方案" className={field+' mt-1 w-full'} value="" onChange={e=>{const saved=monitor.library.settings!.plans.find(p=>p.id===e.target.value);if(saved){const plan=copyAsThreeStage(saved);setPlans([plan]);setActiveId(plan.id);}}}><option value="">请选择要保留的已保存方案</option>{monitor.library.settings.plans.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
     {active&&c&&<>
@@ -184,6 +184,12 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done}:{state
     {!active&&<label className="screening-form-label mt-4">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>}
     <p className="mt-4 text-muted-foreground">首次满足即停止；到达时限仍未满足则结束。修改时限后，从头重新筛选生效。</p>
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
+    {!monitor.ready && <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      <p role={monitor.error ? 'alert' : 'status'} className={monitor.error ? 'text-destructive' : 'text-muted-foreground'}>
+        {monitor.error || '正在读取筛选库，完成后可保存方案或开始筛选。'}
+      </p>
+      {monitor.error && <button type="button" className={button} onClick={monitor.retry}>重试读取筛选库</button>}
+    </div>}
     <div className="screening-footer"><span className="screening-footer-meta">已选择 {selectedCount} 个标的</span><div className="screening-footer-actions"><SettingsImageButton/><button type="button" disabled={!state.ready||!monitor.ready} className={button} onClick={()=>save(false)}>保存三阶方案</button><button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' screening-save-primary'} onClick={()=>save(true)}>保存并开始三阶筛选</button></div></div>
   </div>;
 }

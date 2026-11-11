@@ -46,7 +46,7 @@ import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVet
 import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
 import { qualityCampaignPath } from '@/lib/campaignSections';
 import { hasQualityCampaign } from '@/lib/fish/qualityCampaignArchive';
-import { Activity, ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Eraser, Eye, EyeOff, Filter, Gauge, Lock, LockOpen, Pause, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
+import { Activity, ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Eraser, Eye, EyeOff, Filter, Gauge, Lock, Pause, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
@@ -503,7 +503,6 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
   },[archiveView,ready,state.preEntry?.ready,state.account,latestEntryId]);
   // 【用户要求】2026-10-26「比较卖出和比较探测没必要分开，合并到一起，统一叫做卖出与探测（控制变量法）」：只有一个视图
   const phase = 'sell' as const;
-  const [hideUnselected, setHideUnselected] = useState(ui?.hideUnselected === true);
   const [detectorExpanded, setDetectorExpanded] = useState(ui?.detectorExpanded ?? false);
   const [labelExpanded,setLabelExpanded]=useState<string[]>(ui?.labelExpanded??[]);
   const toggleLabel=(id:string)=>setLabelExpanded(ids=>ids.includes(id)?ids.filter(v=>v!==id):[...ids,id]);
@@ -522,9 +521,9 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
   const lastPause = lastRound?.state === 'paused' && lastRound.error ? { reason: lastRound.error, at: lastRound.finishedAt ?? lastRound.updatedAt } : null;
   /** 点进交易战役前记下界面状态与滚动位置，返回时原样恢复。 */
   const rememberReturn = () => {
-    const top=tableRef.current?.scrollTop??scrollTop,index=Math.max(0,Math.min(displayedRows.length-1,Math.floor(top/rowPx))),anchorRow=displayedRows[index];
+    const top=tableRef.current?.scrollTop??scrollTop,index=Math.max(0,Math.min(rows.length-1,Math.floor(top/rowPx))),anchorRow=rows[index];
     saveQualityReturn({owner:state.account,
-      ui:{open,query,month,algorithms:algorithmChoice,origin,directory:directoryChoice,hideUnselected,detectorExpanded,labelExpanded,postExitExpanded,entryExpanded,sort,ascending,screeningRunId,rowPx,tableLeft:tableRef.current?.scrollLeft??0,tableTop:top,...(anchorRow?{anchor:{id:anchorRow.id,fraction:(top%rowPx)/rowPx}}:{})},
+      ui:{open,query,month,algorithms:algorithmChoice,origin,directory:directoryChoice,detectorExpanded,labelExpanded,postExitExpanded,entryExpanded,sort,ascending,screeningRunId,rowPx,tableLeft:tableRef.current?.scrollLeft??0,tableTop:top,...(anchorRow?{anchor:{id:anchorRow.id,fraction:(top%rowPx)/rowPx}}:{})},
       scroll:ancestorScrolls(rootRef.current),
     });
   };
@@ -661,10 +660,6 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
   const togglePostExit=(id:string)=>{const opening=!postExitOpen.has(id);setPostExitExpanded(ids=>opening?[...ids,id]:ids.filter(v=>v!==id));if(opening)requestPostExit?.([id],sortedRows.map(r=>r.signalId??r.id),true);};
   const selectedIds = useMemo(() => new Set(lockedBatch?.rowIds ?? study.selectedRowIds ?? []), [lockedBatch, study.selectedRowIds]);
   const selectedRows = useMemo(() => rows.filter(row => qualityTableMembers(row).some(member => selectedIds.has(member.id))), [rows, selectedIds]);
-  // The display can narrow to selected rows while the existing run scope still uses sortedRows.
-  const displayedRows = hideUnselected ? selectedRows : rows;
-  const hiddenRowCount = rows.length - displayedRows.length;
-  const originalRowIndices = useMemo(() => hideUnselected ? new Map(rows.map((row, index) => [row.id, index])) : undefined, [rows, hideUnselected]);
   // 【用户要求】2026-10-27 买前过滤、持仓监测只处理「当前筛选下可见、且已勾选」的行；筛选外勾着的不动
   const selectedBatch = batch.filter(r => selectedIds.has(r.id)), scopedSelected = sortedRows.filter(r => selectedIds.has(r.id));
   const selectedCount = countSignals(scopedSelected), selectedTotal = countSignals(selectedBatch);
@@ -711,18 +706,18 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
   const rowSelected = (row: QualityTableRow) => qualityTableMembers(row).every(member => selectedIds.has(member.id));
   // 【用户要求】2026-11-02 像 Excel 那样：每行左侧有行号（选中的行号高亮），底部显示已选行数
   const selectedRowCount = rows.filter(rowSelected).length;
-  const allSelected = displayedRows.length > 0 && selectedRowCount === displayedRows.length;
+  const allSelected = rows.length > 0 && selectedRowCount === rows.length;
   // Shift 连选的起点：最后一次单击（或连选）的那一行
   const selectAnchor = useRef<string | null>(null);
   const toggleRow = (id: string, checked: boolean, shift: boolean) => {
-    const affected = new Set(rangeSelect(displayedRows.map(r => r.id), new Set<string>(), selectAnchor.current, id, true, shift));
+    const affected = new Set(rangeSelect(rows.map(r => r.id), new Set<string>(), selectAnchor.current, id, true, shift));
     const ids = new Set(selectedIds);
-    displayedRows.filter(row => affected.has(row.id)).flatMap(qualityTableMembers).forEach(member => { if (checked) ids.add(member.id); else ids.delete(member.id); });
+    rows.filter(row => affected.has(row.id)).flatMap(qualityTableMembers).forEach(member => { if (checked) ids.add(member.id); else ids.delete(member.id); });
     state.setSelectedRows([...ids]);
     selectAnchor.current = id;
   };
   const selectVisible = (checked: boolean) => {
-    const ids = new Set(selectedIds); displayedRows.flatMap(qualityTableMembers).forEach(row => { if (checked) ids.add(row.id); else ids.delete(row.id); });
+    const ids = new Set(selectedIds); rows.flatMap(qualityTableMembers).forEach(row => { if (checked) ids.add(row.id); else ids.delete(row.id); });
     state.setSelectedRows([...ids]);
   };
   // Capture time is display metadata. It does not affect entry or execution.
@@ -731,11 +726,6 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
   const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ui?.rowPx ?? ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
-  const toggleUnselected = () => {
-    selectAnchor.current = null;
-    setHideUnselected(hidden => !hidden);
-    resetScroll();
-  };
   const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
   const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy,ids?:string[])=>{
     if(!state.restoreMonitorStudy)return false;
@@ -753,7 +743,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
   const expandDetectors = (expanded: boolean) => { setDetectorExpanded(expanded); selectAnchor.current = null; resetScroll(); };
   // 返回时把表格与外面各层滚回原处：数据是陆续载入的，逐帧重试到位置稳住（最多 8 秒）；用户一动滚轮 / 触屏 / 按键就停手
   const readyRef = useRef(ready); readyRef.current = ready;
-  const restoreRows=useRef(displayedRows),restoreRowPx=useRef(rowPx);restoreRows.current=displayedRows;restoreRowPx.current=rowPx;
+  const restoreRows=useRef(rows),restoreRowPx=useRef(rowPx);restoreRows.current=rows;restoreRowPx.current=rowPx;
   useLayoutEffect(() => {
     if (!back) return;
     let frame = 0, stable = 0, stopped = false;
@@ -793,19 +783,19 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
       pendingTableScroll.current={top:nextTop,left};setRowPx(measured);setScrollTop(nextTop);
     }else if(changed){el.scrollTop=top;el.scrollLeft=left;}
     if(el.clientHeight>0&&el.clientHeight!==viewPx)setViewPx(el.clientHeight);
-  },[open,displayedRows,rowPx,viewPx,Math.floor(scrollTop/rowPx),rowLayoutKey,study.results,study.entryReadings]);
-  const first = Math.max(0, Math.min(displayedRows.length - 1, Math.floor(scrollTop / rowPx) - OVERSCAN));
-  const last = Math.min(displayedRows.length, Math.max(first + 1, Math.ceil((scrollTop + viewPx) / rowPx) + OVERSCAN));
+  },[open,rows,rowPx,viewPx,Math.floor(scrollTop/rowPx),rowLayoutKey,study.results,study.entryReadings]);
+  const first = Math.max(0, Math.min(rows.length - 1, Math.floor(scrollTop / rowPx) - OVERSCAN));
+  const last = Math.min(rows.length, Math.max(first + 1, Math.ceil((scrollTop + viewPx) / rowPx) + OVERSCAN));
   // Keep the live table virtualized. Export only frozen selected rows in small
   // offscreen batches, using exactly the same cell renderer as the live table.
   const EXPORT_BATCH=40,exportTableRef=useRef<HTMLTableElement>(null);
   type TableExport={nodes:ReactNode[];header:HTMLTableSectionElement;offset:number;sheet:ReturnType<typeof readQualityTableSheet>;owner?:string};
   const [tableExport,setTableExport]=useState<TableExport|null>(null);
-  const visible=displayedRows.slice(first,last),padTop=first*rowPx,padBottom=(displayedRows.length-last)*rowPx;
+  const visible=rows.slice(first,last),padTop=first*rowPx,padBottom=(rows.length-last)*rowPx;
 
   // 评估先算屏幕上看得见的行，再按表格顺序往下
   const { setPriority } = state;
-  useEffect(() => { setPriority?.([...visible.flatMap(qualityTableMembers), ...rows.flatMap(qualityTableMembers)].map(r => r.signalId ?? r.id)); }, [setPriority, rows, displayedRows, first, last]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPriority?.([...visible.flatMap(qualityTableMembers), ...rows.flatMap(qualityTableMembers)].map(r => r.signalId ?? r.id)); }, [setPriority, rows, first, last]); // eslint-disable-line react-hooks/exhaustive-deps
   const changeSort = (key: SortKey) => { if (sort === key) setAscending(!ascending); else { setSort(key); setAscending(TEXT_KEYS.has(key)); } resetScroll(); };
   const arrow = (key: SortKey) => sort === key ? ascending ? ' ↑' : ' ↓' : '';
   const ariaSort = (key: SortKey) => sort === key ? ascending ? 'ascending' as const : 'descending' as const : 'none' as const;
@@ -920,14 +910,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
           <FishMonitorLibrary onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onCopyStudy={!lockedBatch&&state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={snapshot=><ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>}/>
         </FishQualityModule>
       </div>}
-      {lockedBatch ? <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-[11px]" data-testid="quality-locked-batch">
-        <Lock aria-hidden className="h-3 w-3 shrink-0 text-primary"/>
-        <span className="font-medium text-foreground">锁定批次</span>
-        <span className="tabular-nums text-muted-foreground">{selectedCount} 条信号{batch.length < lockedBatch.rowIds.length ? ` · ${lockedBatch.rowIds.length - batch.length} 行已不可用` : ''}</span>
-        <button type="button" className={button + ' ml-auto'} disabled={!!state.archiving} onClick={unlockSelection}>
-          <LockOpen aria-hidden className="h-3 w-3"/>解除锁定
-        </button>
-      </div> : <div className="flex flex-wrap items-center gap-1.5">
+      {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">
         <FishQualitySourcePicker value={origin} onSelect={selectSource} options={[
           {value:'',label:'全部来源',count:countSignals(batch)},
           {value:'library',label:'信号库',count:countSignals(batch.filter(r=>hasSource(r,'library')))},
@@ -948,25 +931,22 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
       {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
       {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}
       {/* 表格到达上下边界后，滚轮自然交给「渔」面板，避免只能移到表格外才能继续滚动。 */}
-      <div className="flex flex-wrap items-center justify-between gap-2" data-testid="quality-combination-toolbar"><div className="inline-flex items-center gap-0.5"><h4 className="text-xs font-medium text-foreground" data-testid="quality-combination-title">组合表</h4><FishCombinationHelp/></div>
+      <div className="flex flex-wrap items-center justify-between gap-2" data-testid="quality-combination-toolbar"><div className="inline-flex items-center gap-0.5"><h4 className="text-xs font-medium text-foreground" data-testid="quality-combination-title">组合表</h4><FishCombinationHelp/>
+          {lockedBatch && <span className="ml-1.5 text-[11px] tabular-nums text-muted-foreground" data-testid="quality-locked-batch">
+            已锁定 {selectedCount} 条信号{batch.length < lockedBatch.rowIds.length ? ` · ${lockedBatch.rowIds.length - batch.length} 行已不可用` : ''}
+          </span>}
+        </div>
         <div className="flex items-center gap-1">
+          {lockedBatch && <button type="button" className="px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-40" disabled={!!state.archiving} onClick={unlockSelection}>解除锁定</button>}
           {!archiveView && !lockedBatch && state.setLockedBatch && <button type="button" className={button} disabled={!ready || !selectedCount || !!state.archiving}
             title="固定当前筛选内已勾选的记录，单独查看和处理这一批" onClick={lockSelection}>
             <Lock aria-hidden className="h-3 w-3"/>锁定所选
-          </button>}
-          {!lockedBatch && <button
-            type="button"
-            className={`${button} ${hideUnselected ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary' : ''}`}
-            onClick={toggleUnselected}
-          >
-            {hideUnselected ? <Eye aria-hidden className="h-3 w-3"/> : <EyeOff aria-hidden className="h-3 w-3"/>}
-            {hideUnselected ? '显示未选行' : '隐藏未选行'}
           </button>}
           <button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.nodes.length:'导出数据'}</button>
         </div>
       </div>
       {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.nodes.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH)}</tbody></table></div>}
-      {displayedRows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className="max-h-[28rem] overflow-auto overscroll-x-contain overscroll-y-auto rounded-lg border border-border/60 [overflow-anchor:none]" aria-label="组合表" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0),minWidth:'100%'}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
+      {rows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className="max-h-[28rem] overflow-auto overscroll-x-contain overscroll-y-auto rounded-lg border border-border/60 [overflow-anchor:none]" aria-label="组合表" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0),minWidth:'100%'}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground">
           <tr className="bg-muted/35" data-testid="quality-algorithm-categories">
             {/* 【用户要求】2026-11-02 探测值、探测算法、捕捞过程、过滤读数和入场读数都归「买前过滤」；「卖出算法」改名「持仓监测」 */}
@@ -987,7 +967,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
             <th aria-hidden="true"/>
           </tr>
           <tr className="bg-muted/40">
-          <th className={`${cell} sticky left-0 z-30 min-w-[184px] bg-muted font-medium`} aria-sort={ariaSort('symbol')}><span className="flex items-center gap-2"><span aria-hidden className="w-6 shrink-0"/><input type="checkbox" aria-label={hideUnselected ? "全选显示的行" : "全选当前筛选信号"} title={hideUnselected ? "只作用于当前显示的行" : "全选当前筛选下的所有行；按住 Shift 点两行可连续选择"} checked={allSelected} ref={el => { if (el) el.indeterminate = selectedRows.length > 0 && !allSelected; }} disabled={!ready || !!lockedBatch} onChange={e => selectVisible(e.target.checked)} className="h-3 w-3 accent-[hsl(var(--primary))]"/>{sortButton('symbol', '标的')}</span></th>
+          <th className={`${cell} sticky left-0 z-30 min-w-[184px] bg-muted font-medium`} aria-sort={ariaSort('symbol')}><span className="flex items-center gap-2"><span aria-hidden className="w-6 shrink-0"/><input type="checkbox" aria-label="全选当前筛选信号" title="全选当前筛选下的所有行；按住 Shift 点两行可连续选择" checked={allSelected} ref={el => { if (el) el.indeterminate = selectedRows.length > 0 && !allSelected; }} disabled={!ready || !!lockedBatch} onChange={e => selectVisible(e.target.checked)} className="h-3 w-3 accent-[hsl(var(--primary))]"/>{sortButton('symbol', '标的')}</span></th>
           <th className={`${cell} min-w-[140px] font-medium`} aria-sort={ariaSort('time')}>{sortButton('time', '信号时间')}</th>
           {showCaptureTime && <th className={`${cell} min-w-[140px] font-medium`} data-testid="quality-mined-at-column" aria-sort={ariaSort('mined-at')} title="实际捕捞到该信号的时间（北京时间）。同一入场有多次捕捞时显示最近一次。">{sortButton('mined-at', '捕捞时间')}</th>}
           <th className={`${cell} font-medium`} aria-sort={ariaSort('market')}>{sortButton('market', '市场')}</th>
@@ -999,8 +979,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,archiveView=
           {showScreening&&<ScreeningHeaders cell={cell} sort={sort} ascending={ascending} onSort={changeSort}/>}
           {shownPlans.map(p => <Fragment key={p.id}><th className={`${cell} relative min-w-[180px] border-l border-border/40 pr-12 font-medium`} data-testid="quality-sell-column" aria-sort={sort === `sell:${p.id}` ? ascending ? 'ascending' : 'descending' : 'none'}>{/* 【用户要求】2026-11-01 三栏名称与「静态最大回撤」等同一行：方案名在上方变量行已有，规则改到右上角设置图标 */}<QualityStatisticsButton label={`卖出水平 ${p.label} ${ruleText(p)}`} onClick={() => setStatistics({category:'sell',variableId:p.combo ? `combo:${p.id}` : qualityVariableKey(p.snapshot,p.metric),levelId:p.id})}/><Popover><PopoverTrigger asChild><button type="button" className="absolute right-6 top-0.5 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/40 outline-none hover:bg-background/80 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40" disabled={archiveView} aria-label={`设置${p.label}卖出算法`} title={`卖出算法：${ruleText(p)}${study.selectedSellId === p.id ? '（已固定，用于比较探测算法）' : ''}`}>{study.selectedSellId === p.id ? <Check aria-hidden className="h-3 w-3 text-primary"/> : <Settings2 aria-hidden className="h-3 w-3"/>}</button></PopoverTrigger><PopoverContent align="start" className="w-80">{p.combo ? <ComboSellEditor key={`${p.id}:${JSON.stringify([p.rule, p.combo])}`} plan={p} state={state}/> : <SellEditor key={`${p.id}:${JSON.stringify(p.rule)}`} plan={p} state={state}/>}</PopoverContent></Popover><span className={`${SELL_PARTS} font-medium`} data-testid="quality-sell-parts"><button type="button" className="text-left hover:text-foreground" aria-label={`按${p.label}加仓次数排序`} onClick={()=>changeSort(`addition:${p.id}`)}>加仓次数{arrow(`addition:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：几何仓位 M＝(1 − αf) × ∏(1 + αₖ)，αf 为首次加仓前已卖出的首仓比例（半仓镜像），αₖ＝第 k 次加仓币数 ÷ 加仓前持币数；没有加仓时已卖出的计入镜像，仍持有的记 1。" aria-label={`按${p.label}几何仓位排序`} onClick={()=>changeSort(`geometric:${p.id}`)}>几何仓位{arrow(`geometric:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：G＝(F − Kₘ) ÷ (E − K初)，F 最终卖出价、Kₘ 最后一次加仓的止损线、E 首次买入价、K初 由硬性终止的静态回撤得出；只算有加仓且已卖出的持仓。" aria-label={`按${p.label}相对涨幅排序`} onClick={()=>changeSort(`relative:${p.id}`)}>相对涨幅{arrow(`relative:${p.id}`)}</button><button type="button" className="text-left hover:text-foreground" title="与交易战役同口径：盈亏比＝已实现净盈亏 ÷ 初始最大预期亏损 L₀，单位 R；L₀＝初始仓位 × 硬性终止的静态回撤%；只算已卖出的持仓。" aria-label={`按${p.label}盈亏比排序`} onClick={()=>changeSort(`payoff:${p.id}`)}>盈亏比{arrow(`payoff:${p.id}`)}</button></span></th>{phase === 'sell' && <><th className={`${cell} min-w-[110px] font-medium`} aria-sort={ariaSort(`static:${p.id}`)} title="相对买入价到持仓最低价的最大跌幅，至少为 0%。"><button type="button" className="hover:text-foreground" aria-label={`按${p.label}静态最大回撤排序`} onClick={()=>changeSort(`static:${p.id}`)}>静态最大回撤{arrow(`static:${p.id}`)}</button></th><th className={`${cell} min-w-[110px] font-medium`} aria-sort={ariaSort(`peak:${p.id}`)} title="与交易战役同口径：持仓期间相对买入价的最大有利价格涨幅，读取该轮冻结结果；不等于组合收益。"><button type="button" className="hover:text-foreground" aria-label={`按${p.label}峰值涨幅排序`} onClick={()=>changeSort(`peak:${p.id}`)}>峰值涨幅{arrow(`peak:${p.id}`)}</button></th><th className={`${cell} min-w-[120px] font-medium`} data-testid="quality-price-change-header" aria-sort={ariaSort(`price-change:${p.id}`)} title="与交易战役「首仓涨跌幅」同口径：（最终卖出价 ÷ 首次买入价 − 1）×100%，首仓从买入到实际完成卖出的涨跌幅。"><button type="button" className="hover:text-foreground" aria-label={`按${p.label}首仓涨幅排序`} onClick={()=>changeSort(`price-change:${p.id}`)}>首仓涨幅{arrow(`price-change:${p.id}`)}</button></th><th className={`${cell} min-w-[135px] font-medium`} aria-sort={ariaSort(`mirror:${p.id}`)} title="开仓至镜像止盈成交时的实际涨幅 =（镜像成交价 ÷ 开仓价 − 1）× 100%；不乘卖出比例，不含余仓后续涨跌。未触发不记作零涨幅。"><button type="button" className="hover:text-foreground" aria-label={`按${p.label}半仓镜像实际涨幅排序`} onClick={()=>changeSort(`mirror:${p.id}`)}>半仓镜像{arrow(`mirror:${p.id}`)}</button></th></>}{/* 【用户要求】2026-11-02 持仓监测里的「探测标签」删除（买前过滤已有） */}{phase === 'sell' && <th className={`${cell} min-w-[84px] font-medium`} aria-sort={ariaSort(`held:${p.id}`)} title="买入到卖出的时长；还在持有的算到最近一次估值。"><button type="button" className="hover:text-foreground" aria-label={`按${p.label}持仓时间排序`} onClick={() => changeSort(`held:${p.id}`)}>持仓时间{arrow(`held:${p.id}`)}</button></th>}<PostExitHeaders plan={p} expanded={postExitOpen.has(p.id)} toggle={()=>togglePostExit(p.id)} sort={sort} ascending={ascending} onSort={changeSort}/></Fragment>)}
           <th className={`${cell} font-medium`} aria-label="跳转"/>
-        </tr></thead><tbody>{padTop > 0 && <tr aria-hidden style={{ height: padTop }}/>}{visible.map((row,vi)=>renderRow(row,originalRowIndices?.get(row.id)??first+vi))}{padBottom > 0 && <tr aria-hidden style={{ height: padBottom }}/>}</tbody></table></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{lockedBatch ? '本批记录已不可用。解除锁定后可重新选择。' : hideUnselected && rows.length ? '当前筛选内没有已选行。点击「显示未选行」可继续勾选。' : allRows.length ? <>没有匹配的标的。{emptyByDetector && <span className="ml-1" data-testid="quality-empty-detector-filter">表头「探测算法」筛选{chosenChoices.length ? `（${chosenChoices.map(choiceText).join('、')}）` : ''}把它们全滤掉了{isSignalLibraryOrigin(origin) ? '：' + QUALITY_SOURCE_NAMES[origin] + '自己的信号没有探测算法' : ''}。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => setAlgorithms([])}>清除探测算法筛选</button></span>}</> : '暂无可评估的信号。捕捞到的鱼、信号库和图灵杯的信号会自动加入。'}</div>}
-      {rows.length > 0 && <p className="text-right text-[10px] tabular-nums text-muted-foreground" data-testid="quality-row-count">{selectedRowCount > 0 && <span className="font-medium text-primary" data-testid="quality-selected-row-count">已选 {selectedRowCount} 行 · </span>}{(!hideUnselected || !allSelected) && <>{hideUnselected ? "显示" : "共"} {displayedRows.length} 行 · </>}{countSignals(displayedRows)} 条信号{hiddenRowCount > 0 ? ` · 已隐藏 ${hiddenRowCount} 行` : ''}{mergeCabinSignals ? ' · 同一信号已合并' : !detectorExpanded ? ' · 已合并探测明细' : ''}{sortedRows.length < batch.length ? `（筛选自 ${countSignals(batch)} 条信号）` : ''}</p>}
+        </tr></thead><tbody>{padTop > 0 && <tr aria-hidden style={{ height: padTop }}/>}{visible.map((row,vi)=>renderRow(row,first+vi))}{padBottom > 0 && <tr aria-hidden style={{ height: padBottom }}/>}</tbody></table></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{lockedBatch ? '本批记录已不可用。解除锁定后可重新选择。' : allRows.length ? <>没有匹配的标的。{emptyByDetector && <span className="ml-1" data-testid="quality-empty-detector-filter">表头「探测算法」筛选{chosenChoices.length ? `（${chosenChoices.map(choiceText).join('、')}）` : ''}把它们全滤掉了{isSignalLibraryOrigin(origin) ? '：' + QUALITY_SOURCE_NAMES[origin] + '自己的信号没有探测算法' : ''}。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => setAlgorithms([])}>清除探测算法筛选</button></span>}</> : '暂无可评估的信号。捕捞到的鱼、信号库和图灵杯的信号会自动加入。'}</div>}
+      {rows.length > 0 && <p className="text-right text-[10px] tabular-nums text-muted-foreground" data-testid="quality-row-count">{selectedRowCount > 0 && <span className="font-medium text-primary" data-testid="quality-selected-row-count">已选 {selectedRowCount} 行 · </span>}共 {rows.length} 行 · {countSignals(rows)} 条信号{mergeCabinSignals ? ' · 同一信号已合并' : !detectorExpanded ? ' · 已合并探测明细' : ''}{sortedRows.length < batch.length ? `（筛选自 ${countSignals(batch)} 条信号）` : ''}</p>}
     </div>}
     {statistics && <FishQualityStatistics key={`${statistics.category}:${statistics.variableId ?? ''}:${statistics.levelId ?? ''}`} study={study} rows={sortedRows} request={statistics} onClose={() => setStatistics(null)}/>}
     {screeningStatistics&&<ScreeningStatistics results={[...new Map(sortedRows.flatMap(row=>screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)).map(result=>[result.record.id,result])).values()]} onClose={()=>setScreeningStatistics(false)}/>}
