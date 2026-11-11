@@ -18,6 +18,7 @@ export interface FishMiningRun {
   id: string; signature: string; rules: FishMiningRule[]; selection?: FishMiningState['selection'];
   /** 旧记录未填写时仍按原来的并集解释。 */
   combination?: 'and' | 'or';
+  scan?: FishMiningState['scan'];
   startMs: number; endMs?: number; stepMs: number; firstAt: number; updatedAt: number;
 }
 export interface FishMiningAnchor {
@@ -47,19 +48,23 @@ export function compactMinedSignal(s: TradeSignal): TradeSignal {
   return { ...rest, fish: { ...fish, ...(fish.algorithms ? { algorithms: fish.algorithms.map(({ trace: _t, ...a }) => a) } : {}) } };
 }
 const runSignature = (s: Pick<FishMiningState, 'rules' | 'selection' | 'startMs' | 'stepMs'>) => JSON.stringify([
-  [...s.rules].map(r => [r.featureId, r.statistic, r.threshold]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+  [...s.rules].map(r => [r.featureId, r.statistic, r.threshold, ...(r.direction === '<' ? ['<'] : []), ...(r.enabled === false ? ['disabled'] : [])]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
   s.selection ? [[...s.selection.exchanges].sort(), !!s.selection.includeDuplicates, !!s.selection.includeUsStocks] : null, s.startMs, s.stepMs,
 ]);
 function withRun(library: FishMiningLibrary, state: FishMiningState, at: number, combination: 'and'|'or' = 'and'): { library: FishMiningLibrary; run: FishMiningRun } {
   // Keep legacy signatures stable and preserve each explicit restart, even with identical settings.
-  const signature = runSignature(state) + (combination === 'and' ? '|and' : '') + (state.endMs!=null?`|end:${state.endMs}`:'') + (state.round ? `|round:${state.round.id}` : '');
+  const scan = state.scan;
+  const scanKey = scan ? JSON.stringify([scan.combination, scan.lookbackHours, scan.downwardWick.enabled,
+    scan.downwardWick.hours, scan.downwardWick.atrMultiple, scan.turnover.enabled,
+    scan.turnover.floors.map(floor => [floor.hours, floor.min])]) : '';
+  const signature = runSignature(state) + (combination === 'and' ? '|and' : '') + (state.endMs!=null?`|end:${state.endMs}`:'') + (state.round ? `|round:${state.round.id}` : '') + (scanKey ? `|scan:${scanKey}` : '');
   const existing = library.runs.find(r => r.signature === signature);
   if (existing) {
     const run = { ...existing, updatedAt: Math.max(existing.updatedAt, at) };
     return { run, library: { ...library, runs: library.runs.map(r => r.id === run.id ? run : r) } };
   }
   const run: FishMiningRun = { id: `mine-run-${shortFishHash(signature)}`, signature, combination, rules: structuredClone(state.rules), ...(state.selection ? { selection: structuredClone(state.selection) } : {}),
-    startMs: state.startMs, ...(state.endMs!=null?{endMs:state.endMs}:{}), stepMs: state.stepMs, firstAt: at, updatedAt: at };
+    ...(state.scan ? { scan: structuredClone(state.scan) } : {}), startMs: state.startMs, ...(state.endMs!=null?{endMs:state.endMs}:{}), stepMs: state.stepMs, firstAt: at, updatedAt: at };
   return { run, library: { ...library, runs: [...library.runs, run] } };
 }
 const recordId = (runId: string, catchKey: string) => `${runId}|${catchKey}`;

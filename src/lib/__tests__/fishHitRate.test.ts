@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { FishScanner, type FishScanSettings } from '@/lib/fishScanner';
 import { FISH_TURNOVER_FLOORS } from '@/lib/fish/shared';
-import { runFishHitRate, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { countFishMarketHits, fishMarketHits, runFishHitRate, type FishHitRateMode, type FishHitRateOptions, type FishHitRateWindow } from '@/lib/fish/hitRate';
 import { CBI2_DEF } from '@/lib/deepDig/features';
 import { readFishRound } from '@/lib/fish/roundSummary';
 import type { FishDataAdapter } from '@/lib/fish/adapters';
@@ -152,4 +152,16 @@ it('retains measured turnover at the actual failed check, keeping both cutoff an
     { status: 'miss', rejections: [{ kind: 'thin', label: '成交额未达门槛' }], turnover: [{ symbol: 'THINUSDT', stage: 'cutoff', at: anchor, checks }] },
     { status: 'miss', rejections: [{ kind: 'thin', label: '成交额未达门槛' }], turnover: [{ symbol: 'EDGEUSDT', stage: 'signal-start', at: startTime, checks }] },
   ]);
+});
+
+it('classifies market hits against the full test samples and counts repeated starts only once', async () => {
+  const { run, windows } = setup();
+  const samples = [sample('EARLY'), { ...sample('OTHER'), timeMs: sampleTime + 0.5 * HOUR }];
+  await run('market', samples, 'or');
+  const hits = fishMarketHits(windows, samples);
+  expect(hits.filter(row => row.signal.symbol === 'OTHERUSDT').map(row => row.group)).toEqual(['other-window', 'sample']);
+  expect(hits.filter(row => row.signal.symbol === 'EARLYUSDT').map(row => row.group)).toEqual(['sample', 'other-window']);
+  const outside = hits.filter(row => row.group === 'outside');
+  expect(outside.map(row => row.signal.symbol)).toEqual(['EDGEUSDT']);
+  expect(countFishMarketHits([...outside, ...outside])).toEqual({ markets: 1, signals: 1 });
 });

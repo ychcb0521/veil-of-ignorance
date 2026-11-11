@@ -63,6 +63,33 @@ export interface FishHitRateWindow {
   hits: TradeSignal[];
   notice?: string;
 }
+export type FishMarketHitGroup = 'outside' | 'other-window' | 'sample';
+export interface FishMarketHit {
+  signal: TradeSignal;
+  anchorMs: number;
+  marketKey: string;
+  group: FishMarketHitGroup;
+}
+
+export function fishMarketHits(windows: readonly FishHitRateWindow[], samples: readonly TradeSignal[]): FishMarketHit[] {
+  const sampleKeys = new Set(samples.map(marketKey));
+  return windows.flatMap(window => {
+    const windowKeys = new Set(window.rows.map(row => marketKey(row.sample)));
+    return window.hits.map(signal => {
+      const key = marketKey(signal);
+      const group = windowKeys.has(key) ? 'sample' : sampleKeys.has(key) ? 'other-window' : 'outside';
+      return { signal, anchorMs: window.anchorMs, marketKey: key, group };
+    });
+  });
+}
+
+export function countFishMarketHits(rows: readonly FishMarketHit[]) {
+  return {
+    markets: new Set(rows.map(row => row.marketKey)).size,
+    signals: new Set(rows.map(row => `${row.marketKey}|${row.signal.timeMs}`)).size,
+  };
+}
+
 export interface FishHitRateProgress { windowsDone: number; windowsTotal: number; marketDone: number; marketTotal: number; anchorMs: number }
 export interface FishHitRateOptions {
   samples: readonly TradeSignal[];

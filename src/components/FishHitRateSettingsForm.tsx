@@ -1,23 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Plus } from 'lucide-react';
-import { FishAlgorithmCard, FishCheck } from './FishAlgorithmCard';
+import { FishAlgorithmCard } from './FishAlgorithmCard';
 import { FishTurnoverSettingsFields } from './FishTurnoverSettings';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { AUDITED_EXCHANGES, EXCHANGE_NAMES } from '@/lib/fish/exchanges';
+import { FishNumberField, FishScanScopeFields, FishScanWickFields } from './FishScanSettingsFields';
 import { buildFishHitRateSettings, newHitRatePreference, readFishHitRateSettings, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
 import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
-
-const fieldClass = 'h-8 min-w-0 w-full rounded-md border border-border/70 bg-background px-2.5 font-mono tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50';
-
-function NumberField({ label, value, onChange, disabled }: {
-  label: string; value: number; onChange: (value: number) => void; disabled?: boolean;
-}) {
-  return <label className="min-w-0 space-y-1">
-    <span className="block text-muted-foreground">{label}</span>
-    <input className={fieldClass} type="number" step="any" inputMode="decimal" disabled={disabled}
-      value={Number.isFinite(value) ? value : ''} onChange={event => onChange(event.target.valueAsNumber)}/>
-  </label>;
-}
 
 export function FishHitRateSettingsForm({ initial, defs, copyCapture, onSave, onCancel }: {
   initial: FishHitRateSettings;
@@ -65,37 +53,20 @@ export function FishHitRateSettingsForm({ initial, defs, copyCapture, onSave, on
       <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">
         <legend className="px-1 font-medium">测试窗口</legend>
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="样本前（小时）" value={draft.window.beforeHours}
+          <FishNumberField label="样本前（小时）" value={draft.window.beforeHours}
             onChange={beforeHours => setDraft({ ...draft, window: { ...draft.window, beforeHours } })}/>
-          <NumberField label="样本后（小时）" value={draft.window.afterHours}
+          <FishNumberField label="样本后（小时）" value={draft.window.afterHours}
             onChange={afterHours => setDraft({ ...draft, window: { ...draft.window, afterHours } })}/>
         </div>
       </fieldset>
       <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">
         <legend className="px-1 font-medium">全市场测试范围</legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-          {AUDITED_EXCHANGES.map(exchange => <label className="inline-flex items-center gap-1.5" key={exchange}>
-            <FishCheck checked={draft.selection.exchanges.includes(exchange)}
-              onChange={event => setDraft({ ...draft, selection: { ...draft.selection, exchanges: AUDITED_EXCHANGES.filter(item =>
-                item === exchange ? event.target.checked : draft.selection.exchanges.includes(item)) } })}/>{EXCHANGE_NAMES[exchange]}
-          </label>)}
-          <label className="inline-flex items-center gap-1.5"><FishCheck checked={!!draft.selection.includeUsStocks}
-            onChange={event => setDraft({ ...draft, selection: { ...draft.selection, includeUsStocks: event.target.checked } })}/>美股合约</label>
-          <label className="inline-flex items-center gap-1.5"><FishCheck checked={draft.selection.includeDuplicates}
-            onChange={event => setDraft({ ...draft, selection: { ...draft.selection, includeDuplicates: event.target.checked } })}/>含跨所重复标的</label>
-        </div>
+        <FishScanScopeFields value={draft.selection} onChange={selection => setDraft({ ...draft, selection })}/>
       </fieldset>
     </div>
     <fieldset className="space-y-2 rounded-md border border-border/60 px-3 pb-3">
       <legend className="px-1 font-medium">插针过滤</legend>
-      <label className="flex items-center gap-2"><FishCheck checked={draft.downwardWick.enabled}
-        onChange={event => setDraft({ ...draft, downwardWick: { ...draft.downwardWick, enabled: event.target.checked } })}/>过滤向下大插针</label>
-      <div className="grid grid-cols-2 gap-2">
-        <NumberField label="插针回看（小时）" value={draft.downwardWick.hours} disabled={!draft.downwardWick.enabled}
-          onChange={hours => setDraft({ ...draft, downwardWick: { ...draft.downwardWick, hours } })}/>
-        <NumberField label="插针幅度（ATR 倍数）" value={draft.downwardWick.atrMultiple} disabled={!draft.downwardWick.enabled}
-          onChange={atrMultiple => setDraft({ ...draft, downwardWick: { ...draft.downwardWick, atrMultiple } })}/>
-      </div>
+      <FishScanWickFields value={draft.downwardWick} onChange={downwardWick => setDraft({ ...draft, downwardWick })}/>
     </fieldset>
     <fieldset className="rounded-md border border-border/60 px-3 pb-3">
       <legend className="px-1 font-medium">成交额门槛 <span className="font-normal text-muted-foreground">（USDT）</span></legend>

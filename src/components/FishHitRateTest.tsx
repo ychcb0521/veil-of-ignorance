@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { FishMarketHitResults } from './FishMarketHitResults';
 import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { buildFishHitRateSettings, FISH_HIT_RATE_SETTINGS_KEY, readFishHitRateSettings, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
@@ -12,7 +13,7 @@ import { fishCaughtBy } from '@/lib/fish/records';
 import { normalizeSignalQuality, parseSignalText, type TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { FishScanSettings } from '@/lib/fishScanner';
-import { DEFAULT_FISH_HIT_RATE_WINDOW, type FishHitRateMode, type FishHitRateOptions, type FishHitRateOutsideDetail, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
+import { DEFAULT_FISH_HIT_RATE_WINDOW, fishMarketHits, type FishHitRateMode, type FishHitRateOptions, type FishHitRateOutsideDetail, type FishHitRateProgress, type FishHitRateRow, type FishHitRateThresholdDetail, type FishHitRateWindow } from '@/lib/fish/hitRate';
 
 const statusText = { hit: '命中', miss: '未命中', unverified: '无法判定' };
 const inputClass = 'min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground';
@@ -102,10 +103,12 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
   const [text, setText] = useState('');
   const [mode, setMode] = useState<FishHitRateMode>('targets');
   const [windows, setWindows] = useState<FishHitRateWindow[]>([]);
+  const [testedSamples, setTestedSamples] = useState<TradeSignal[]>([]);
   const [resultMode, setResultMode] = useState<FishHitRateMode>('targets');
   const [filter, setFilter] = useState<'all' | FishHitRateRow['status']>('all');
   const [sort, setSort] = useState<{ key: ResultSortKey; dir: SortDirection }>({ key: 'sample', dir: 'desc' });
   const [selectedWindow, setSelectedWindow] = useState<number>();
+  const marketResults = useRef<HTMLElement>(null);
   const [detail, setDetail] = useState<{ sampleId: string; kind: 'wick' | 'below' | 'thin' | 'outside' }>();
   const [progress, setProgress] = useState<FishHitRateProgress>();
   const [running, setRunning] = useState(false);
@@ -146,7 +149,7 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
         return comparison * direction || tie;
       }).map(item => item.row);
   }, [rows, filter, sort]);
-  const selected = windows.find(window => window.anchorMs === selectedWindow);
+  const marketHits = useMemo(() => resultMode === 'market' ? fishMarketHits(windows, testedSamples) : [], [resultMode, testedSamples, windows]);
   const detailRow = visible.find(row => row.sample.id === detail?.sampleId);
   const activeWick = detail?.kind === 'wick' ? detailRow?.wick : undefined;
   const activeThresholds = detail?.kind === 'below' ? detailRow?.thresholds : undefined;
@@ -169,13 +172,15 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
     setStopped(false);
     setWindows([]);
     setResultMode(mode);
+    const samplesForRun = samples.map(sample => ({ ...sample }));
+    setTestedSamples(samplesForRun);
     setSelectedWindow(undefined);
     setDetail(undefined);
     setFilter('all');
     setProgress(undefined);
     try {
       await run({
-        samples: samples.map(sample => ({ ...sample })), mode, settings, window: selectedSettings.window, signal: task.signal,
+        samples: samplesForRun, mode, settings, window: selectedSettings.window, signal: task.signal,
         onWindow: window => { if (!task.signal.aborted) setWindows(previous => [...previous, window]); },
         onProgress: value => { if (!task.signal.aborted) setProgress(value); },
       });
@@ -229,7 +234,7 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
           <legend className="mb-1.5 font-medium">扫描范围</legend>
           <label className="flex items-center gap-2"><input type="radio" name={modeName} checked={mode === 'targets'} onChange={() => setMode('targets')}/>只扫描给定标的</label>
           <label className="flex items-center gap-2"><input type="radio" name={modeName} checked={mode === 'market'} onChange={() => setMode('market')}/>扫描本窗口内所有标的</label>
-          <p className="text-muted-foreground">{mode === 'targets' ? '按样本所属交易所和市场取数。' : '按测试的全市场范围扫描，列出每个窗口内的全部命中。'}</p>
+          <p className="text-muted-foreground">{mode === 'targets' ? '按样本所属交易所和市场取数。' : '按测试设置的市场范围扫描，统计样本外命中与算法来源。'}</p>
         </fieldset>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -243,7 +248,12 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
         {running && <> · 截止 {formatUTC8(progress.anchorMs)}{progress.marketTotal > 0 && <> · 已扫 {progress.marketDone} / {progress.marketTotal} 个标的</>}</>}
       </p>}
       {error && <p role="alert" className="text-destructive">{error}</p>}
+      {resultMode === 'market' && windows.length > 0 && <section ref={marketResults} aria-label="全市场命中" className="scroll-mt-20">
+        <FishMarketHitResults key={selectedWindow ?? 'all-windows'} rows={marketHits} anchorMs={selectedWindow}
+          windows={windows} clearWindow={() => setSelectedWindow(undefined)}/>
+      </section>}
       {rows.length > 0 && <section className="min-w-0 space-y-2 border-t border-border/60 pt-3" aria-label="测试结果">
+        {resultMode === 'market' && <h3 className="font-medium">样本判定</h3>}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="tabular-nums">
             <strong>{verified ? `命中率 ${(100 * hitCount / verified).toFixed(1)}%` : '暂无可判定样本'}</strong>
@@ -285,11 +295,11 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
                     const expanded = detail?.sampleId === sample.id && detail.kind === detailKind;
                     return <div key={kind}><button type="button" aria-expanded={expanded} aria-controls={expanded ? detailId : undefined}
                       className="inline-flex items-center gap-1 text-left text-primary underline-offset-2 hover:underline"
-                      onClick={() => { setSelectedWindow(undefined); setDetail(expanded ? undefined : { sampleId: sample.id, kind: detailKind }); }}>
+                      onClick={() => { setDetail(expanded ? undefined : { sampleId: sample.id, kind: detailKind }); }}>
                       {label}<ChevronDown aria-hidden className={`h-3 w-3 shrink-0 ${expanded ? 'rotate-180' : ''}`}/>
                     </button></div>;
                   })}
-                  {resultMode === 'market' && <button type="button" className="whitespace-nowrap text-primary hover:underline" onClick={() => { setDetail(undefined); setSelectedWindow(window.anchorMs); }}>本窗命中 {window.hits.length} 条</button>}
+                  {resultMode === 'market' && <button type="button" className="whitespace-nowrap text-primary hover:underline" onClick={() => { setSelectedWindow(window.anchorMs); marketResults.current?.scrollIntoView?.({ block: 'nearest' }); }}>本窗命中 {window.hits.length} 条</button>}
                 </td>
               </tr>)}
             </tbody>
@@ -305,16 +315,6 @@ export function FishHitRateTest({ library, captureSettings, defs, run, disabled,
           {activeThresholds && <ThresholdDetails rows={activeThresholds} window={detailRow.window}/>}
           {activeTurnover && <FishTurnoverEvidence rows={activeTurnover}/>}
           {activeOutside && <OutsideDetails rows={activeOutside} window={detailRow.window}/>}
-        </section>}
-        {selected && <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label="本窗口全部命中">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-medium">窗口截止 {formatUTC8(selected.anchorMs)} · 命中 {selected.hits.length} 条</h3>
-            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setSelectedWindow(undefined)}>收起</button>
-          </div>
-          {selected.notice && <p className="text-muted-foreground">{selected.notice}</p>}
-          {!!selected.hits.length && <ul className="max-h-48 divide-y divide-border/50 overflow-y-auto">
-            {selected.hits.map(hit => <li key={hit.id} className="flex flex-wrap items-center gap-x-3 py-1.5"><strong>{hit.symbol}</strong><span className="text-muted-foreground">{marketLabel(hit)}</span><time className="font-mono">起点 {formatUTC8(hit.timeMs)}</time></li>)}
-          </ul>}
         </section>}
       </section>}
   </div>;

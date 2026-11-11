@@ -1,18 +1,21 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
+import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
+import { fishFeatureDefinitions } from '@/lib/fish/features';
+import { readMiningSettings } from '@/lib/fish/miningSettings';
 import { saveFishDownwardWick } from '@/lib/fish/downwardWick';
 import { DetectCategoryStats } from '@/components/DetectCategoryStats';
 import { MINING_START_MS, MINING_STEP_MS, newMiningState, currentDefaultRules } from '@/lib/fish/mining';
 afterEach(cleanup);
-const api = (patch: object = {}, state: object = {}) => ({ state: { ...newMiningState(), ...state }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn(), ...patch });
+const api = (patch: object = {}, state: object = {}) => ({ state: { ...newMiningState(), ...state }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn(), defs: fishFeatureDefinitions(BUILTIN_FEATURES), captureSelection: { exchanges: ['binance'], includeDuplicates: false }, ...patch });
 
 it('adds restored DSP·a as a selectable mining algorithm without replacing existing rules',()=>{
  const configure=vi.fn(),base={id:'base',featureId:'cbi2',statistic:'avg_CBI2_2',threshold:'0.04'};
  const m=api({configure,ruleChoices:[{featureId:'cbi2',label:'CBI-2',statistics:[{name:'结果',label:'结果'},{name:'avg_CBI2_2',label:'avg₂'}]},
   {featureId:'drift-speed',label:'DSP·a',statistics:['结果','a','avg_a','avg_a_2'].map(name=>({name,label:name}))}]},{rules:[base],mined:220,anchorsDone:93});
  render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
- fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));fireEvent.click(screen.getByRole('button',{name:'新增挖掘算法'}));
+ fireEvent.click(screen.getByRole('button',{name:'本轮条件'}));fireEvent.click(screen.getByRole('button',{name:'新增挖掘算法'}));
  fireEvent.change(screen.getByLabelText('挖掘算法 2 特征值'),{target:{value:'drift-speed'}});
  expect(screen.getByLabelText('挖掘算法 2 统计量')).toHaveValue('结果');
  for(const name of ['a','avg_a','avg_a_2'])expect(within(screen.getByLabelText('挖掘算法 2 统计量')).getByRole('option',{name})).toBeInTheDocument();
@@ -30,9 +33,9 @@ it('explains the plan, starts mining and edits the target', () => {
   expect(screen.queryByText('0 / 1000')).toBeNull();
   expect(screen.queryByRole('status')).toBeNull();
   const controls=screen.getByTestId('fish-mining-panel');
-  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始挖掘','开始挖掘的其他方式','挖掘条件','打开挖掘库','重新开始'].includes(name!))).toEqual(['开始挖掘','开始挖掘的其他方式','挖掘条件','打开挖掘库']);
+  expect(within(controls).getAllByRole('button').map(b=>b.getAttribute('aria-label')??b.textContent).filter(name=>['开始挖掘','开始挖掘的其他方式','本轮条件','挖掘设置','打开挖掘库','重新开始'].includes(name!))).toEqual(['开始挖掘','开始挖掘的其他方式','挖掘设置','本轮条件','打开挖掘库']);
   fireEvent.click(screen.getByRole('button', { name: '开始挖掘' })); expect(m.start).toHaveBeenCalled();
-  expect(screen.queryByLabelText('挖掘目标条数')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
+  expect(screen.queryByLabelText('挖掘目标条数')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'本轮条件'}));
   fireEvent.change(screen.getByLabelText('挖掘目标条数'), { target: { value: '2000' } });fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
   expect(m.setTarget).toHaveBeenCalledWith(2000);
   fireEvent.click(screen.getByRole('button', { name: '挖掘说明与进度' }));
@@ -89,7 +92,7 @@ it('shows the cause, retry time and actions directly, and exposes configuration 
 
 it('lets an invalid saved statistic be repaired locally and explicitly resumed without clearing progress',()=>{
  const configure=vi.fn(),m=api({configure,ruleChoices:[{featureId:'drift-speed-z',label:'az',statistics:[{name:'结果',label:'结果 · avg_a_2'},{name:'avg_a',label:'avg_a'}]}]},{mined:220,anchorsDone:93,rules:[{id:'az',featureId:'drift-speed-z',statistic:'avg_az',threshold:'0.15'}],lastError:'统计量已不存在',errorKind:'configuration'});
- render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
+ render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'本轮条件'}));
  expect((screen.getByLabelText('挖掘算法 1 统计量') as HTMLSelectElement).selectedOptions[0]).toHaveTextContent('avg_az（已失效）');
  fireEvent.change(screen.getByLabelText('挖掘算法 1 统计量'),{target:{value:'avg_a'}});fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
  expect(configure).toHaveBeenCalledWith([{id:'az',featureId:'drift-speed-z',statistic:'avg_a',threshold:'0.15'}]);expect(m.state.mined).toBe(220);
@@ -131,6 +134,7 @@ it('edits a new round while a scan is running and waits for explicit confirmatio
   expect(restart).toHaveBeenCalledWith({
     startMs: Date.parse('2026-01-15T07:30:00+08:00'), endMs:Date.parse('2026-01-16T07:30:00+08:00'), target: 80,
     rules: [{ ...rules[0], featureId: 'cba', statistic: '结果', threshold: '9' }],
+    settings: expect.objectContaining({ target: 80 }),
   });
 });
 
@@ -138,7 +142,7 @@ it('limits newly selectable mining metrics while keeping a saved intermediate se
  const configure=vi.fn(),rule={id:'legacy',featureId:'custom',statistic:'helper',threshold:'0.15'};
  const menuStatistics=[{name:'core',label:'原值'},{name:'avg_core',label:'avg'},{name:'avg_core_2',label:'avg_2'}];
  const m=api({configure,ruleChoices:[{featureId:'custom',label:'测试',statistics:[{name:'helper',label:'内部变量'},...menuStatistics],menuStatistics}]},{rules:[rule]});
- render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
+ render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'本轮条件'}));
  const select=screen.getByLabelText('挖掘算法 1 统计量') as HTMLSelectElement;
  expect(Array.from(select.options).filter(o=>!o.hidden).map(o=>o.textContent)).toEqual(['原值','avg','avg_2']);
  expect(select.value).toBe('helper');
@@ -147,7 +151,7 @@ it('limits newly selectable mining metrics while keeping a saved intermediate se
  expect(m.state.rules).toEqual([rule]);
 });
 
-it('displays frozen venues for the current round and current fishing venues for a restart', () => {
+it('shows the current scope and edits an independent draft for a new round', () => {
   const mining = api({ captureSelection: { exchanges: ['binance', 'okx'], includeUsStocks: true, includeDuplicates: true } }, {
     selection: { exchanges: ['gate'], includeDuplicates: false },
     stepMs: MINING_STEP_MS * 2,
@@ -155,7 +159,7 @@ it('displays frozen venues for the current round and current fishing venues for 
   saveFishDownwardWick({ enabled: true, hours: 6, atrMultiple: 2.75 });
   try {
     render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#" />);
-    fireEvent.click(screen.getByRole('button', { name: '挖掘条件' }));
+    fireEvent.click(screen.getByRole('button', { name: '本轮条件' }));
     const current = screen.getByLabelText('挖掘扫描口径');
     expect(current).toHaveTextContent('Gate · 加密永续');
     expect(current).toHaveTextContent('合并跨所重复标的 · 本轮冻结范围');
@@ -168,12 +172,39 @@ it('displays frozen venues for the current round and current fishing venues for 
     act(() => { saveFishDownwardWick({ enabled: false, hours: 6, atrMultiple: 2.75 }); });
     fireEvent.click(screen.getByRole('button', { name: '开始挖掘的其他方式' }));
     fireEvent.click(screen.getByRole('button', { name: '重新开始' }));
-    const next = within(screen.getByRole('dialog', { name: '重新开始批量挖掘' })).getByLabelText('挖掘扫描口径');
-    expect(next).toHaveTextContent('币安、OKX · 加密永续 · 美股合约（币安）');
-    expect(next).toHaveTextContent('保留跨所重复标的 · 沿用当前捕捞范围');
-    expect(next).toHaveTextContent('已关闭');
-    expect(next).toHaveTextContent('每 12 小时一档');
+    const next = within(screen.getByRole('dialog', { name: '重新开始批量挖掘' }));
+    expect(next.getByLabelText('Gate')).toBeChecked();
+    expect(next.getByLabelText('扫描间隔（小时）')).toHaveValue(24);
+    fireEvent.click(next.getByRole('button', { name: '复制已保存的捕捞条件' }));
+    expect(next.getByLabelText('币安')).toBeChecked();
+    expect(next.getByLabelText('OKX')).toBeChecked();
+    expect(next.getByLabelText('美股合约')).toBeChecked();
+    expect(next.getByLabelText('含跨所重复标的')).toBeChecked();
+    expect(next.getByLabelText('过滤向下大插针')).not.toBeChecked();
+    expect(next.getByLabelText('扫描间隔（小时）')).toHaveValue(24);
   } finally {
     localStorage.clear();
   }
+});
+
+it('saves independently edited values and leaves the current round paused', () => {
+  localStorage.clear();
+  const rule = { ...currentDefaultRules()[0], statistic: '结果' };
+  const mining = api({ ruleChoices: [{ featureId: 'cbi2', label: 'CBI-2', statistics: [{ name: '结果', label: '结果' }] }] }, { rules: [rule], mined: 20 });
+  try {
+    render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#"/>);
+    fireEvent.click(screen.getByRole('button', { name: '挖掘设置' }));
+    const dialog = within(screen.getByRole('dialog', { name: '批量挖掘设置' }));
+    fireEvent.change(dialog.getByLabelText('扫描间隔（小时）'), { target: { value: '4' } });
+    fireEvent.change(dialog.getByLabelText('每档回看（小时）'), { target: { value: '2.5' } });
+    fireEvent.change(dialog.getByLabelText('算法组合'), { target: { value: 'and' } });
+    fireEvent.click(dialog.getByLabelText('OKX'));
+    fireEvent.change(dialog.getByLabelText('1 小时成交额（USDT）'), { target: { value: '600000' } });
+    expect(readMiningSettings()).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: '保存设置' }));
+    expect(readMiningSettings()).toMatchObject({ stepMs: 4 * 3_600_000, selection: { exchanges: ['binance', 'okx'] },
+      scan: { lookbackHours: 2.5, combination: 'and', turnover: { floors: [{ hours: 1, min: 600_000 }, { hours: 12, min: 8_000_000 }, { hours: 24, min: 10_000_000 }] } } });
+    expect(mining.start).not.toHaveBeenCalled();
+    expect(mining.setTarget).not.toHaveBeenCalled();
+  } finally { localStorage.clear(); }
 });

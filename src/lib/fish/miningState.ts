@@ -2,11 +2,19 @@
  * 持续挖掘的状态类型、默认值与合并规则。单独成文件、不引任何重模块：
  * 云端同步层（simStateSync）水化时要用 mergeMiningStates，不能因此把捕捞 / 特征计算整串拉进启动路径。
  */
+import type { FishDownwardWick } from './downwardWick';
+import type { FishTurnoverSettings } from './turnoverSettings';
 import { FISH_DEFAULT_RULES, MINING_PRESET_REVISION } from './defaultRules';
 export const MINING_START_MS = Date.parse('2026-04-01T00:00:00+08:00');
 export const MINING_STEP_MS = 12 * 3_600_000;
 export const MINING_DEFAULT_TARGET = 1000;
-export interface FishMiningRule { id: string; featureId: string; statistic: string; threshold: string }
+export interface FishMiningRule { id: string; featureId: string; statistic: string; threshold: string; direction?: '>' | '<'; enabled?: boolean }
+export interface FishMiningScanConfig {
+  combination: 'and' | 'or';
+  downwardWick: FishDownwardWick;
+  turnover: FishTurnoverSettings;
+  lookbackHours: number | null;
+}
 export interface FishMiningState {
   version: 1; enabled: boolean; startMs: number; stepMs: number;
   /** Inclusive last scan anchor, only set by explicit bounded restarts. */
@@ -22,6 +30,7 @@ export interface FishMiningState {
   rules: FishMiningRule[];
   /** 开始时冻结的捕捞范围（交易所等）；没冻结过就用当前的。 */
   selection?: { exchanges: string[]; includeDuplicates: boolean; includeUsStocks?: boolean };
+  scan?: FishMiningScanConfig;
   lastAnchorMs: number | null; lastRunAt: number | null; lastError: string;
   /** 最后一次保存的时刻：合并两份时，开关、目标等设置取较新的那份。 */
   savedAt?: number;
@@ -38,6 +47,8 @@ export const MINING_LOGICAL_KEY = 'fish-mining.v1';
 export const MINING_ROUND_LOGICAL_KEY = 'fish-mining.v2';
 // Older tabs cannot enforce an end time, so bounded rounds use their own slot.
 export const MINING_RANGE_LOGICAL_KEY = 'fish-mining.v3';
+// Independently configured rounds are readable only by clients that apply their settings.
+export const MINING_CONFIGURED_ROUND_KEY = 'fish-mining.v4';
 export const MINING_LEASE_LOGICAL_KEY = 'fish-mining-lease.v1';
 export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
   target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], presetRevision: MINING_PRESET_REVISION, lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });

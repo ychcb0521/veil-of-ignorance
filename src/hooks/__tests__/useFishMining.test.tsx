@@ -2,8 +2,9 @@ import { noteBinanceRateLimit } from '@/lib/binanceRateLimit';
 // 持续挖掘的调度：一档接一档补历史；取数器忙时等待；被捕捞打断原地重扫；出错重试；到目标就停
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { initialMiningSettings, saveMiningSettings } from '@/lib/fish/miningSettings';
 import { useFishMining } from '@/hooks/useFishMining';
-import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_RANGE_LOGICAL_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
+import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -32,6 +33,34 @@ function setup(o: { mine?: (s: any) => Promise<TradeSignal[]>; busy?: () => bool
   const h = renderHook(() => useFishMining({ account: 'a', selection, defs:o.definitions??defs, mine, busy: o.busy ?? (() => false), stop, signalsRef: list, commit, onMined }));
   return { h, mine, commit, list, onMined, stop };
 }
+
+it('freezes independently saved conditions, applies the configured cadence, and resumes with the frozen conditions', async () => {
+  const { h, mine } = setup();
+  const settings = initialMiningSettings(newMiningState(), selection);
+  settings.rules = [{ ...currentDefaultRulesForRange()[0], direction: '<' }];
+  settings.selection = { exchanges: ['okx'], includeDuplicates: true };
+  settings.stepMs = MINING_STEP_MS / 2;
+  settings.target = 2;
+  settings.scan = { ...settings.scan, combination: 'and', lookbackHours: 3,
+    downwardWick: { enabled: false, hours: 9, atrMultiple: 2 },
+    turnover: { ...settings.scan.turnover, enabled: false } };
+  saveMiningSettings(settings);
+  await flush();
+  expect(mine).not.toHaveBeenCalled();
+  act(() => h.result.current.start());
+  await flush(20);
+  expect(mine.mock.calls.map(call => call[0].anchorMs)).toEqual([MINING_START_MS, MINING_START_MS + settings.stepMs]);
+  expect(mine.mock.calls[0][0]).toMatchObject({ exchanges: ['okx'], includeDuplicates: true, lookbackHours: 3,
+    combination: 'and', turnoverFloors: [], downwardWick: settings.scan.downwardWick, algorithm: { direction: '<' } });
+  expect(readMiningState()).toMatchObject({ scan: settings.scan, anchorsDone: 2 });
+  expect(localStorage.getItem(miningKey(MINING_CONFIGURED_ROUND_KEY))).not.toBeNull();
+  act(() => h.result.current.pause());
+  saveMiningSettings({ ...settings, stepMs: MINING_STEP_MS, selection, scan: { ...settings.scan, lookbackHours: 7 } });
+  act(() => h.result.current.setTarget(3));
+  act(() => h.result.current.start());
+  await flush(20);
+  expect(mine.mock.calls[2][0]).toMatchObject({ anchorMs: MINING_START_MS + 2 * settings.stepMs, exchanges: ['okx'], lookbackHours: 3 });
+});
 
 it('does nothing until started, then backfills anchor after anchor with the four default algorithms (union: any one hit is mined)', async () => {
   const { h, mine, list, onMined } = setup();

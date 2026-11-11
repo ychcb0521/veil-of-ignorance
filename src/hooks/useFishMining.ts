@@ -19,11 +19,12 @@ import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPl
 import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/records';
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
+import { buildConfiguredMiningScan, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
-type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'>;
+type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'> & { settings?: FishMiningSettings };
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
   start: () => void; pause: () => void; setTarget: (target: number) => void;
@@ -34,6 +35,7 @@ export interface FishMiningApi {
   retry?: () => void; useCurrentScope?: () => void; resetConfiguration?: () => void;
   account?: string; holdKeys?: () => ReadonlySet<string>;
   captureSelection: FishScanSelection;
+  defs: readonly DeepDigFeatureDef[];
 }
 export function useFishMining(o: {
   account?: string; selection: FishScanSelection; defs: readonly DeepDigFeatureDef[];
@@ -89,11 +91,15 @@ export function useFishMining(o: {
     if (!takeMiningLease(owner.current, now)) { setWaiting('另一个标签页正在挖掘'); return; }
     const scope=(s.selection as FishScanSelection|undefined)??latest.current.selection;
     const unsupported=scope.exchanges.find(exchange=>!AUDITED_EXCHANGES.includes(exchange));
-    const missing=s.rules.find(rule=>!latest.current.defs.some(def=>def.id===rule.featureId));
-    const built:ReturnType<typeof buildFishScanSettings> = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
+    const missing=s.rules.find(rule=>rule.enabled!==false&&!latest.current.defs.some(def=>def.id===rule.featureId));
+    const combination = s.scan?.combination ?? MINING_COMBINATION;
+    let built: ReturnType<typeof buildFishScanSettings>;
+    try {
+      built = s.scan ? { settings: buildConfiguredMiningScan({ ...s, selection: scope, scan: s.scan }, latest.current.defs) } : unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
+    } catch (cause) { built = { error: cause instanceof Error ? cause.message : String(cause) }; }
     if (built.error !== undefined) {
       const failed=miningFailureState(s,built.error,now,'configuration');setState(failed);setWaiting('配置需修正，修正后点「重新检查」');
-      void updateMiningLibrary(account.current,library=>recordMiningError(library,failed,anchor,built.error,now,MINING_COMBINATION));
+      void updateMiningLibrary(account.current,library=>recordMiningError(library,failed,anchor,built.error,now,combination));
       releaseMiningLease(owner.current);return;
     }
     runningRef.current = true; runningStop.current=latest.current.stop; setRunning(true); setAnchorMs(anchor); setProgress(null); setWaiting('');
@@ -120,7 +126,7 @@ export function useFishMining(o: {
       setState(next); advanced = true;
       // 挖掘库：记下这一档扫到几条、新增哪些（独立于鱼舱，删了鱼也还在）
       const scanned = found.length, at = Date.now();
-      void updateMiningLibrary(who, library => recordMinedAnchor(library, next, anchor, scanned, added, at, MINING_COMBINATION));
+      void updateMiningLibrary(who, library => recordMinedAnchor(library, next, anchor, scanned, added, at, combination));
       if (added.length) latest.current.onMined?.(added);
     } catch (e) {
       if(!active())return;
@@ -131,7 +137,7 @@ export function useFishMining(o: {
       const at=Date.now(),cooldown=readBinanceCooldown(at),failure=miningFailureState(fresh,e instanceof Error?e.message:String(e),at,'transient');
       const failed=cooldown?{...failure,retryAt:cooldown.until}:failure;
       setState(failed);
-      void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at, MINING_COMBINATION));
+      void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at, combination));
     } finally {
       clearInterval(renew);if(watchdog)clearInterval(watchdog);if(cancelTask.current===cancelThis)cancelTask.current=null;
       if(active()){
@@ -146,7 +152,7 @@ export function useFishMining(o: {
     const run = () => { void tickRef.current(); };
     const timer = setInterval(run, TICK_MS);
     const onStorage = (event: StorageEvent) => {
-      if ([MINING_ROUND_LOGICAL_KEY,MINING_RANGE_LOGICAL_KEY].some(key=>event.key===miningKey(key)) && readMiningState().round?.id !== stateRef.current.round?.id) run();
+      if ([MINING_ROUND_LOGICAL_KEY,MINING_RANGE_LOGICAL_KEY,MINING_CONFIGURED_ROUND_KEY].some(key=>event.key===miningKey(key)) && readMiningState().round?.id !== stateRef.current.round?.id) run();
     };
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
@@ -163,19 +169,27 @@ export function useFishMining(o: {
 
   const start = useCallback(() => {
     const s = load(latest.current.signalsRef.current);
+    const settings = !s.round && !s.enabled && !s.selection && !s.anchorsDone && !s.mined && !s.lastRunAt && !s.lastError ? readMiningSettings() : null;
+    if (settings) {
+      setState({ ...s, ...structuredClone(settings), enabled: true, round: { id: crypto.randomUUID(), startedAt: Date.now() } });
+      setTimeout(() => void tickRef.current(), 0);
+      return;
+    }
     // 第一次开始时冻结当前默认算法与阈值
     setState({ ...s, enabled: true, rules: s.rules.length ? s.rules : currentDefaultRules(), selection: s.selection ?? { ...latest.current.selection, exchanges: [...latest.current.selection.exchanges] }, retryAt:null,errorKind:undefined }); setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
   const pause = useCallback(() => { setState({ ...readMiningState(), enabled: false }); cancelScan(); }, [cancelScan, setState]);
-  const restart = useCallback(({ startMs, endMs, target, rules }: MiningRestart) => {
+  const restart = useCallback(({ startMs, endMs, target, rules, settings }: MiningRestart) => {
     if(!Number.isFinite(startMs)||startMs<=0||startMs>Date.now()||endMs!=null&&(!Number.isFinite(endMs)||endMs<=startMs||endMs>Date.now()))return;
     const previous = readMiningState();
     const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
     cancelScan();
-    if (!previous.round && previous.enabled) saveMiningState({ ...previous, enabled: false });
+    if (previous.enabled && (!previous.round || (settings && !previous.scan))) saveMiningState({ ...previous, enabled: false });
+    if (settings) saveMiningSettings(settings);
     setState({
       ...newMiningState(), enabled: true, startMs, ...(endMs!=null?{endMs}:{}), cursorMs: startMs, target,
       rules: structuredClone(rules), selection: structuredClone(latest.current.selection),
+      ...(settings ? structuredClone(settings) : {}),
       round: { id: crypto.randomUUID(), startedAt },
     });
     setWaiting('');
@@ -188,22 +202,25 @@ export function useFishMining(o: {
   const retry=useCallback(()=>{if(runningRef.current)return;start();},[start]);
   const useCurrentScope=useCallback(()=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
+    if (s.scan) return;
     setState({...s,selection:structuredClone(latest.current.selection),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
   const resetConfiguration=useCallback(()=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
+    if (s.scan) return;
     const rules=currentDefaultRules();
     setState({...s,rules,selection:structuredClone(latest.current.selection),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
   const configure=useCallback((rules:FishMiningState['rules'])=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
+    if (s.scan) return;
     setState({...s,rules:structuredClone(rules),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
   const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{const statistics=fishStatistics(def);return {featureId:def.id,label,statistics,menuStatistics:algorithmMetricMenu(def,statistics)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
   // 算法编号修过别名后同一条鱼的键会变：再按整行内容（标的、时间、命中算法）认一次
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).flatMap(s => [fishCatchKey(s), fishVisibleCatchKey(s)])), []);
-  return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys, captureSelection: o.selection };
+  return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys, captureSelection: o.selection, defs: o.defs };
 }

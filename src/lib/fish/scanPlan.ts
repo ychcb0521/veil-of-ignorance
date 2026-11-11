@@ -1,5 +1,5 @@
 import { readFishLookback, fishProgramForLookback } from './lookback';
-import { readFishDownwardWick } from './downwardWick';
+import { readFishDownwardWick, type FishDownwardWick } from './downwardWick';
 /**
  * 由卡片、合并方式、交易所范围拼出一次捕捞的设置。「开始捕捞」按钮与定时自动捕捞用同一个函数，两边拿到的设置逐项一致。
  */
@@ -26,7 +26,7 @@ export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDig
 }
 
 /** 一次捕捞的完整设置；拼不出来时返回原因（与「开始捕捞」按钮的报错相同）。time 留空 = 现在。 */
-export function buildFishScanSettings(o: { cards: readonly FishCard[]; defs: readonly DeepDigFeatureDef[]; combination: 'and' | 'or'; selection: FishScanSelection; time: string; lookbackHours?:number|null; turnoverFloors?: readonly FishTurnoverFloor[] }): { settings: FishScanSettings; error?: undefined } | { settings?: undefined; error: string } {
+export function buildFishScanSettings(o: { cards: readonly FishCard[]; defs: readonly DeepDigFeatureDef[]; combination: 'and' | 'or'; selection: FishScanSelection; time: string; lookbackHours?:number|null; turnoverFloors?: readonly FishTurnoverFloor[]; downwardWick?: FishDownwardWick }): { settings: FishScanSettings; error?: undefined } | { settings?: undefined; error: string } {
   try {
     const lookbackHours=o.lookbackHours===null?undefined:o.lookbackHours??readFishLookback();
     const turnoverFloors = o.turnoverFloors ?? FISH_TURNOVER_FLOORS;
@@ -36,6 +36,6 @@ export function buildFishScanSettings(o: { cards: readonly FishCard[]; defs: rea
     if (error && error !== '请启用至少一个算法') throw new Error(error);
     if (!pool.length) throw new Error('没有有效算法');
     for(const plan of pool){const checked=fishProgramForLookback(plan,lookbackHours,turnoverFloors);if(checked.unavailable)throw new Error(checked.unavailable);}
-    return { settings: { ...parsed, lookbackHours, feature: pool[0].def, algorithm: pool[0].settings, algorithms: pool.map(p => ({ feature: p.def, algorithm: p.settings })), retainMembers: true, displayAlgorithmKeys: plans.map(fishSelectionKey), combination: o.combination, exchanges: [...o.selection.exchanges], includeDuplicates: o.selection.includeDuplicates, includeUsStocks: o.selection.includeUsStocks ?? false, downwardWick: readFishDownwardWick(), turnoverFloors } };
+    return { settings: { ...parsed, lookbackHours, feature: pool[0].def, algorithm: pool[0].settings, algorithms: pool.map(p => ({ feature: p.def, algorithm: p.settings })), retainMembers: true, displayAlgorithmKeys: plans.map(fishSelectionKey), combination: o.combination, exchanges: [...o.selection.exchanges], includeDuplicates: o.selection.includeDuplicates, includeUsStocks: o.selection.includeUsStocks ?? false, downwardWick: o.downwardWick ?? readFishDownwardWick(), turnoverFloors } };
   } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; }
 }
