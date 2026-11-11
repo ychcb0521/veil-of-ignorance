@@ -9,11 +9,19 @@ const time=(at?:number)=>at&&Number.isFinite(at)?formatUTC8(at):'—';
 const kinds={observation:'门槛观察','guard-rejected':'新防守线事件被否决',matched:'首次满足 · 入选',unmatched:'未入选 · 本轮结束',warming:'历史不足',error:'数据或运行异常',paused:'暂停',restart:'重建起点 · 继续筛选'} as const;
 export function FishScreeningProcessButton({results}:{results:readonly QualityScreeningResult[]}){
   const [open,setOpen]=useState(false);
-  if(!results.length)return <span className="text-muted-foreground">—</span>;
+  if(!results.length||results.some(({record})=>record.status!=='unmatched'))return <span className="text-muted-foreground">—</span>;
   return <><button type="button" aria-label="排除过程" title="查看动态筛选的排除过程" className="-my-1 -ml-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" data-testid="screening-process-open" onClick={()=>setOpen(true)}><ScrollText aria-hidden className="h-3.5 w-3.5"/></button>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl flex-col gap-3 overflow-hidden p-0" data-testid="screening-process-dialog"><DialogHeader className="border-b border-border/60 px-5 pb-3 pt-5 text-left"><DialogTitle className="font-mono text-sm">{results[0].record.sample.source.symbol}<span className="ml-2 font-sans text-xs font-normal text-muted-foreground">排除过程</span></DialogTitle><DialogDescription className="text-[11px]">仅显示最新一轮筛选的最后一次排除原因与判定读数，重点标出触发的否决条件。</DialogDescription></DialogHeader>
       <div className="min-h-0 space-y-5 overflow-y-auto px-5 pb-5 text-[11px] leading-relaxed">{open&&latestScreeningProcessResults(results).map(({record:r,round})=><section key={r.id} className="space-y-3"><p className="font-medium">{round.plans?.find(p=>p.id===r.planId)?.label??'历史筛选方案'}</p><p className="text-muted-foreground">筛选起点 {time(r.startTime)} · 首次满足 {time(r.matchedAt)}</p><p className="text-muted-foreground">本轮时限 {round.hours>0?`${round.hours} 小时`:"当时未设固定时限"} · 扫描到 {time(r.cursor)}</p>
-        {!r.exclusionProcess?<div className="space-y-1 text-muted-foreground"><p>这条历史记录未保存完整排除过程，以下仅列最后一次已保存摘要。</p>{(()=>{const last=[...(r.lastVeto?[{at:r.lastVeto.at,reason:r.lastVeto.reason}]:[]),...(r.missedGuard?[{at:r.missedGuard.event.at,reason:r.missedGuard.reason}]:[])].reduce<{at:number;reason:string}|undefined>((a,e)=>!a||e.at>=a.at?e:a,undefined);return last?<p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 font-semibold text-destructive">{time(last.at)} · 最后排除：{last.reason}</p>:<p>{r.detail??'暂无排除摘要'}</p>;})()}</div>:<>
+        {r.signalGate&&<article className="space-y-1 rounded-md border border-border/60 p-3" data-testid="screening-signal-gate">
+          <p className={r.signalGate.status==='blocked'?'font-semibold text-destructive':'font-medium'}>⓪ 信号时点必要条件 · {r.signalGate.status==='pass'?'已满足':r.signalGate.status==='blocked'?'未满足':'未判定'}</p>
+          <p className="font-mono text-muted-foreground">原信号 {time(r.signalGate.signalAt)}{r.signalGate.at!==r.signalGate.signalAt&&<> · 读数截至 {time(r.signalGate.at)}</>}</p>
+          {r.signalGate.reason&&<p>{r.signalGate.reason}</p>}
+          {r.signalGate.readings.map(reading=><p key={reading.id} className={reading.met===false?'text-destructive':'text-muted-foreground'}>
+            {reading.label??reading.id} = {reading.value??'—'}（{reading.direction} {reading.threshold}） · {reading.pending??(reading.met?'满足':'未满足')}
+          </p>)}
+        </article>}
+        {r.signalGate?.status!=='blocked'&&(!r.exclusionProcess?<div className="space-y-1 text-muted-foreground"><p>这条历史记录未保存完整排除过程，以下仅列最后一次已保存摘要。</p>{(()=>{const last=[...(r.lastVeto?[{at:r.lastVeto.at,reason:r.lastVeto.reason}]:[]),...(r.missedGuard?[{at:r.missedGuard.event.at,reason:r.missedGuard.reason}]:[])].reduce<{at:number;reason:string}|undefined>((a,e)=>!a||e.at>=a.at?e:a,undefined);return last?<p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 font-semibold text-destructive">{time(last.at)} · 最后排除：{last.reason}</p>:<p>{r.detail??'暂无排除摘要'}</p>;})()}</div>:<>
           {!latestScreeningExclusion(r.exclusionProcess).length&&<p className="text-muted-foreground">尚未记录排除原因。</p>}
           {latestScreeningExclusion(r.exclusionProcess).map((e,i)=>{
             const negative=e.status==='blocked'||e.kind==='guard-rejected'||e.kind==='unmatched';
@@ -34,7 +42,7 @@ export function FishScreeningProcessButton({results}:{results:readonly QualitySc
               })}</div>)}</details>}
             </article>;
           })}
-        </>}
+        </>)}
       </section>)}</div></DialogContent></Dialog>
   </>;
 }

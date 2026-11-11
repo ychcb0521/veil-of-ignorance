@@ -84,7 +84,7 @@ export interface FishPanelProps {
   onJumpQuality?: (source: TradeSignal) => void;
   onRateQuality?: (source:TradeSignal,value:number)=>void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
-  jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
+  jumpingSignalId: string | null; qualityJumpPending?: boolean; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
 }
 /**
  * 【用户要求】2026-10-19「渔这里，界面要简单一点，只用显示命中以及加载进度，其他的都折叠收起来，用非常隐形的符号做入口」：
@@ -124,7 +124,7 @@ export function FishPanel(p: FishPanelProps) {
 
   const owner=getUserPrefix();
   const jumpQuality = (source: TradeSignal) => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id);
-  const canJumpQuality = (source: TradeSignal) => !p.jumpingSignalId && !!signalChartSymbol(source)
+  const canJumpQuality = (source: TradeSignal) => (!p.jumpingSignalId || p.qualityJumpPending && p.jumpingSignalId !== source.id) && !!signalChartSymbol(source)
     && (!!p.onJumpQuality || p.signals.some(signal => signal.id === source.id));
   const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback, downwardWick, saveDownwardWick, turnover, saveTurnover}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
@@ -575,6 +575,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} info={<><p><a href="/guide#fish-cabin" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">阅读完整说明 · 3.3.3 鱼舱</a></p><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${groupFishCabin(old.filter(signal => !signal.freshCatch)).length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality}/></ModuleErrorBoundary>}
+    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality} jumpingSignalId={p.qualityJumpPending ? p.jumpingSignalId : null}/></ModuleErrorBoundary>}
   </section>;
 }

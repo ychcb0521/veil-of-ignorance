@@ -1909,8 +1909,10 @@ const Index = () => {
 
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
   // 从「信号库」下拉点开某标的时调用，越过手动输入标的/时间，直接定位盘面。
+  const signalJumpSequence = useRef(0);
   const handleJumpToSignal = useCallback(
     async (symbol: string, timeMs: number, options?: SignalJumpOptions): Promise<SignalJumpResult> => {
+      const request = ++signalJumpSequence.current;
       const offline = isTuringCupSymbol(symbol);
       const normalized = offline ? symbol : symbol.toUpperCase().replace(/[\s/]+/g, "");
       const fromFirstCandle = offline && options?.fromFirstCandle;
@@ -1932,16 +1934,19 @@ const Index = () => {
       const superseded: SignalJumpResult = { ok: false, reason: "已被后一次操作取代" };
       let data = await initLoad(normalized, jumpInterval, timeMs, loadOptions);
       if (data === SUPERSEDED_INIT_LOAD) return superseded;
+      if (request !== signalJumpSequence.current) return superseded;
       let coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, jumpIntervalMs);
 
       if (!coversSignalTime) {
         const diagnostic = await diagnoseSignalJump(normalized, timeMs, jumpInterval, jumpIntervalMs);
+        if (request !== signalJumpSequence.current) return superseded;
 
         // 首次取数可能刚好碰上短暂请求抖动；诊断确认行情存在时只重试一次，
         // 不把可恢复问题错误写成信号库的永久标记。
         if (diagnostic.status === "available") {
           data = await initLoad(normalized, jumpInterval, timeMs, loadOptions);
           if (data === SUPERSEDED_INIT_LOAD) return superseded;
+          if (request !== signalJumpSequence.current) return superseded;
           coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, jumpIntervalMs);
         }
 

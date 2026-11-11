@@ -10,6 +10,7 @@ import { activeAdditionVetoes, evaluateAdditionVetoes, fastDropHit, type Additio
 import { advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, type QualityHoldingPath } from './qualityVeto';
 import { createBoxStopReader, isBoxBreak } from './qualityBoxStop';
 import { preEntryConditionText, preEntryVetoes, type PreEntryConditions } from './preEntryConditions';
+import { formatUTC8 } from '../timeFormat';
 
 const M = 60000, FIVE = 5 * M;
 const pricePlan = (interval: '1m' | '5m') => compileFishProgram({id:'pre-entry-price',name:'筛选价格',short:'价格',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval}, {statistic:'结果',direction:'>',threshold:0,constraints:[]});
@@ -20,7 +21,7 @@ export const preEntryGuardWarmBars = (conditions?: PreEntryConditions) => {
 
 /** Price-path state is rebuilt causally from the original scan start on resume.
  * No position, quantity, fill, profit or account data is invented. */
-export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal }) {
+export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal; latchHardStops?: boolean }) {
   let entry = Math.ceil(o.start / M) * M;
   const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes).filter(v=>v.historyHours==null);
   const history=createVetoHistoryReader({rules:o.conditions.entryVetoes,entry:o.start,row:o.row,load:o.load,signal:o.signal});
@@ -35,6 +36,14 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
   let path: QualityHoldingPath | undefined, atrState: ChartAtrState | undefined;
   let fastHit: AdditionVetoHit | undefined, lockPeak: number | undefined;
   let boxHit: string | undefined, slowHit: AdditionVetoHit | undefined;
+  let historicalHardStop: { at: number; reason: string } | undefined;
+  const priceHit = (at: number) => {
+    for (const veto of priceVetoes) {
+      const n = minuteDropWindow(veto.kind);
+      const reading = n ? minuteDropReading(minutes,n,entry,at)?.reading : path ? holdingVetoReading(path,veto.kind as 'static-drawdown'|'dynamic-drawdown') : undefined;
+      if (reading != null && reading >= veto.threshold-1e-10) return `${veto.label.replace(/持仓/g,'筛选')}：${+reading.toFixed(6)}% ≥ ${veto.threshold}%`;
+    }
+  };
   const consume = async (bar: ResearchBar) => {
     if (bar.openTime !== cursor) throw Error('筛选观察区间缺少连续分钟行情，不能跳过');
     if (![bar.open,bar.high,bar.low,bar.close].every(p=>Number.isFinite(p)&&p>0)) throw Error('筛选价格无效');
@@ -51,6 +60,10 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
     const stop = await boxReader.read(bar, { observeNativeClose: true });
     boxHit = stop?.cause?.label ? preEntryConditionText(stop.cause.label) : undefined;
     cursor += M;
+    if (o.latchHardStops && !historicalHardStop) {
+      const reason = boxHit ?? priceHit(cursor);
+      if (reason) historicalHardStop = { at: cursor, reason };
+    }
   };
   const read=async (at: number, minute?: ResearchBar): Promise<{blocked?:string;pending?:string}> => {
     if (o.signal.aborted) throw new DOMException('已暂停','AbortError');
@@ -65,11 +78,8 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
     }
     const historical=await history(at);
     let blocked = boxHit??(historical.hit?`${historical.hit.label}：${historical.hit.reading}`:undefined);
-    for (const veto of priceVetoes) {
-      const n=minuteDropWindow(veto.kind);
-      const reading=n?minuteDropReading(minutes,n,entry,at)?.reading:path?holdingVetoReading(path,veto.kind as 'static-drawdown'|'dynamic-drawdown'):undefined;
-      if (reading!=null && reading >= veto.threshold-1e-10) blocked??=`${veto.label.replace(/持仓/g,'筛选')}：${+reading.toFixed(6)}% ≥ ${veto.threshold}%`;
-    }
+    if (historicalHardStop) blocked ??= historicalHardStop.at === at ? historicalHardStop.reason : `${historicalHardStop.reason} · 历史触发于 ${formatUTC8(historicalHardStop.at)}`;
+    blocked ??= priceHit(at);
     if (fastHit) blocked??=`${fastHit.label}：${fastHit.reading}`;
     if ((priceVetoes.length||guards.length||boxes.length) && !path) return {blocked,pending:'等待筛选起点后的首根完整分钟行情'};
     if (slowGuards.length) {
@@ -110,7 +120,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
   // history for every rejection. All attempt-dependent paths and locks reset.
   return Object.assign(read,{restart(at:number){
     if(at!==cursor||at%M!==0)throw Error('重筛起点须位于已观察分钟的下一起点');
-    entry=at;path=undefined;minutes.length=0;fastHit=undefined;lockPeak=undefined;slowHit=undefined;boxHit=undefined;
+    entry=at;path=undefined;minutes.length=0;fastHit=undefined;lockPeak=undefined;slowHit=undefined;boxHit=undefined;historicalHardStop=undefined;
     boxReader.restartObservation(at);
   }});
 }

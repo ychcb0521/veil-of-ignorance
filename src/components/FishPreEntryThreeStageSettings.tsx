@@ -9,7 +9,7 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, PRE_ENTRY_SIGNAL_GATE_VERSION, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
 import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
@@ -37,17 +37,29 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
 export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTemplate}:{state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
-  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=retryPreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
+  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=signalGatePreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(monitor.library.settings?.hours))),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
-  const retry=c?.version===PRE_ENTRY_RETRY_VERSION;
+  const retry=c?.observationBasis==='retry-origin-v2';
+  const signalGate=c?.version===PRE_ENTRY_SIGNAL_GATE_VERSION;
   const sources=state.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
   const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
+  const createSignalGateCopy=()=>guardAction(()=>{
+    if(!active||!c||!retry||signalGate)return;
+    const {frozenVersions:_old,...base}=active;
+    const config={
+      ...c,
+      additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,
+      hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):c.hardVetoes,
+    };
+    const copy={...structuredClone(base),id:id(),label:active.label+' · 信号时点副本',preEntryThreeStage:signalGatePreEntryThreeStage(config)};
+    setPlans([copy]);setActiveId(copy.id);setVetoDrafts({});setHardDrafts({});
+  });
   const createFiveMinuteStallCopy=()=>guardAction(()=>{
     if(!active||!c?.stallTurn)return;
     const {frozenVersions:_old,...base}=active,previous=c.stallTurn;
@@ -126,8 +138,9 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         </div><p className="mt-2 text-muted-foreground">仅复制所选轮次的市场条件；原探测算法按每条原信号的冻结公式和门槛判断。实际成本、分段持仓及动态退出确认不能直接转换。来源配置和旧模板保持原样。</p>
       </details>
       <section className="screening-stage space-y-3" data-testid="three-stage-zero">
-        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">⓪ 必要条件</h4><FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才继续检查①和②；关闭的条件不参与判断。这里不包含否决条件。</p><p>例如设置状态 S &gt; 0.6，则任何一路新事件准入，都须同时满足该门槛。未设置必要条件时，直接检查后两阶段。</p><p>指标按所选的逐分钟复原或已收盘原周期判断，原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">全部满足</span></div>
-        <p className="text-muted-foreground">所有已启用的条件须同时满足。</p>
+        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">⓪ 必要条件</h4><FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才具备入选资格。未设置必要条件时，直接检查后两阶段。</p><p>{signalGate?'只在原信号时点判断一次。逐分钟复原使用截至信号时刻已结束的分钟，收盘模式读取当时已收盘的原周期。重筛沿用本次判定。':'此版本逐分钟判断，必要条件须在准入时点同时满足。'}</p><p>原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">{signalGate?'仅信号时点':'全部满足'}</span></div>
+        <p className="text-muted-foreground">{signalGate?'所有已启用的条件须在原信号时点满足。':'所有已启用的条件须在准入时点同时满足。'}</p>
+        {retry&&!signalGate&&<button type="button" className={button+' text-primary'} onClick={createSignalGateCopy}>改用信号时点判断（另存副本）</button>}
         {c.required.map((f,i)=><div key={f.id}>{conditionEditor(f,value=>patch({required:c.required.map((old,j)=>j===i?value:old)}),()=>patch({required:c.required.filter((_,j)=>j!==i)}),'必要条件 '+(i+1)+' ')}</div>)}
         {!c.required.length&&<p className="text-[11px] text-muted-foreground">{retry?'未设置额外必要条件；满足任一启用的准入标准后，继续检查排除门槛。':'未设置额外指标门槛；仍须通过防守线事件与排除门槛。'}</p>}
         <button type="button" className={button} disabled={!choices.length} onClick={()=>patch({required:[...c.required,newCondition()]})}>添加必要条件</button>
@@ -136,8 +149,8 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         {c.additionSource&&<p className="text-[10px] text-muted-foreground">复制来源：{c.additionSource.label} · 第 {c.additionSource.round} 次加仓主分支；必要条件只读已收盘原周期。</p>}
       </section>
       <section className="screening-stage space-y-3" data-testid="three-stage-first">
-        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">① 新事件准入</h4><FishQualityInfo label="新事件准入使用说明"><p>防守线新事件、状态 S 和其他指标准入属于同一层级，彼此是“或”的关系；任意一个已勾选项满足，就通过①。</p><p>例如同时勾选防守线和状态 S &gt; 0.8：出现防守线新事件，或状态 S 超过 0.8，满足其一即可。只勾选状态 S 时，就只按状态 S 判断。</p><p>新副本默认勾选全部准入项；每一项都可单独关闭、修改指标、方向、阈值和确认时点。至少保留一个启用项。</p><p>防守线首次产生、断裂后重建、上移或下移、实虚切换均算新事件；同价同型延续和仅换箱体编号不算。防守线只读已收盘 5 分钟结构，其他指标按所选时点读取。</p><p>完整入选要求：⓪全部满足、①任一勾选项满足、②未触发排除，三者在同一时点成立。</p>{!retry&&<p>当前保存的旧方案仅使用防守线新事件。选择状态 S、添加其他标准或点击配置按钮，会创建独立的新副本；原方案、条件参数及模板保留。</p>}</FishQualityInfo><span className="screening-stage-note">任一满足</span></div>
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-muted-foreground">各模块互为“或”：满足任一已勾选事件即可。</p>{retry?<div className="flex gap-2"><button type="button" className={button} aria-label="全选准入标准" onClick={()=>patch({admission:{...c.admission!,guardEnabled:true,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:true}))}})}>全选</button><button type="button" className={button} onClick={()=>patch({admission:{...c.admission!,guardEnabled:false,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:false}))}})}>取消全选</button></div>:<button type="button" className={button+' text-primary'} onClick={()=>createEventAdmissionCopy()}>配置新事件准入（另存副本）</button>}</div>
+        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">① 新事件准入</h4><FishQualityInfo label="新事件准入使用说明"><p>防守线新事件、状态 S 和其他指标准入属于同一层级，彼此是“或”的关系；任意一个已勾选项满足，就通过①。</p><p>例如同时勾选防守线和状态 S &gt; 0.8：出现防守线新事件，或状态 S 超过 0.8，满足其一即可。只勾选状态 S 时，就只按状态 S 判断。</p><p>新副本默认勾选全部准入项；每一项都可单独关闭、修改指标、方向、阈值和确认时点。至少保留一个启用项。</p><p>防守线首次产生、断裂后重建、上移或下移、实虚切换均算新事件；同价同型延续和仅换箱体编号不算。防守线只读已收盘 5 分钟结构，其他指标按所选时点读取。</p><p>{signalGate?'①找到任一新事件后，以该时点为候选。②从候选时点向前检查，若触发排除则继续找下一个新事件。':'完整入选要求：⓪全部满足、①任一勾选项满足、②未触发排除，三者在同一时点成立。'}</p>{!retry&&<p>当前保存的旧方案仅使用防守线新事件。选择状态 S、添加其他标准或点击配置按钮，会创建独立的新副本；原方案、条件参数及模板保留。</p>}</FishQualityInfo><span className="screening-stage-note">任一满足</span></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-muted-foreground">{signalGate?'任一已勾选事件出现即可。指标准入持续达标时只记一次，重新达标才算新事件。':'各模块互为“或”：满足任一已勾选事件即可。'}</p>{retry?<div className="flex gap-2"><button type="button" className={button} aria-label="全选准入标准" onClick={()=>patch({admission:{...c.admission!,guardEnabled:true,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:true}))}})}>全选</button><button type="button" className={button} onClick={()=>patch({admission:{...c.admission!,guardEnabled:false,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:false}))}})}>取消全选</button></div>:<button type="button" className={button+' text-primary'} onClick={()=>createEventAdmissionCopy()}>配置新事件准入（另存副本）</button>}</div>
         {!retry&&<p className="text-[10px] text-muted-foreground">原方案保留。启用新事件时创建独立副本，新副本默认全选。</p>}
         <div className="space-y-3" data-testid="admission-event-modules">
           <section aria-label="防守线新事件准入模块" data-testid="admission-guard-module" className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3">
@@ -156,7 +169,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         <button type="button" className={button} disabled={!choices.length} onClick={()=>retry?patch({admission:{...c.admission!,algorithms:[...c.admission!.algorithms,defaultAdmission()]}}):createEventAdmissionCopy(true,newCondition())}>添加新事件</button>
       </section>
       <section className="screening-stage space-y-3" data-testid="three-stage-second">
-        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">② 排除门槛</h4><FishQualityInfo label="排除门槛使用说明"><p>加仓共用否决、任一完整普通卖出规则、任一硬性终止，三类中任一启用条件成立，即排除当前时点；①中的任何准入项都不能绕过②。</p><p>普通卖出规则按所填的组合关系、连续次数和确认周期判断；硬性终止一旦成立立即排除，不等待普通卖出确认。</p><p>{retry?'被否决后从下一分钟重建观察起点，按原条件继续筛选；总截止时间仍从原筛选起点计算，不延长。':'旧方案按原筛选起点和原有锁定规则执行，不因打开或保存面板而改变。'}</p><p>观察阶段没有实际仓位；依赖实际成本、落袋利润、持仓数量或第 N 次实际加仓的条件不能直接用于入选前筛选。</p></FishQualityInfo><span className="screening-stage-note">任一排除</span></div>
+        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">② 排除门槛</h4><FishQualityInfo label="排除门槛使用说明"><p>加仓共用否决、任一完整普通卖出规则、任一硬性终止，三类中任一启用条件成立，即排除当前时点；①中的任何准入项都不能绕过②。</p><p>普通卖出规则按所填的组合关系、连续次数和确认周期判断；硬性终止一旦成立立即排除，不等待普通卖出确认。</p><p>{signalGate?'只在找到候选时机后检查。按各条件的范围向前回看；若否决，从下一分钟继续寻找新事件，原总截止时间不变。':retry?'被否决后从下一分钟重建观察起点，按原条件继续筛选；总截止时间仍从原筛选起点计算，不延长。':'旧方案按原筛选起点和原有锁定规则执行，不因打开或保存面板而改变。'}</p><p>观察阶段没有实际仓位；依赖实际成本、落袋利润、持仓数量或第 N 次实际加仓的条件不能直接用于入选前筛选。</p></FishQualityInfo><span className="screening-stage-note">任一排除</span></div>
         {retry&&<div className="space-y-2 rounded border border-border/60 p-2 text-[11px]"><label className="flex items-center gap-2"><input type="checkbox" aria-label="启用长周期回撤否决" checked={!!c.longDrawdown?.enabled} onChange={e=>patch({longDrawdown:e.target.checked?{enabled:true,hours:24,pct:NaN,mode:'current'}:undefined})}/>可选：长周期回撤否决</label>
           {c.longDrawdown?.enabled&&<div className="flex flex-wrap items-center gap-2"><label>回看时长<input aria-label="长周期回撤回看时长（小时）" className={field+' ml-1 w-20'} type="number" min="0.016666666666666666" max="8784" step="any" value={Number.isFinite(c.longDrawdown.hours)?c.longDrawdown.hours:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,hours:e.target.value.trim()?Number(e.target.value):NaN}})}/>小时</label><select aria-label="长周期回撤口径" className={field} value={c.longDrawdown.mode} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,mode:e.target.value as 'current'|'maximum'}})}><option value="current">当前距窗口高点的回撤</option><option value="maximum">窗口内最大回撤</option></select><label>达到<input aria-label="长周期回撤阈值（%）" className={field+' mx-1 w-20'} type="number" min="0" max="100" step="any" placeholder="填写阈值" value={Number.isFinite(c.longDrawdown.pct)?c.longDrawdown.pct:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,pct:e.target.value.trim()?Number(e.target.value):NaN}})}/>% 即否决</label></div>}
           <p className="text-muted-foreground">默认关闭。检查截至筛选时点的历史窗口，包含本次观察起点之前的行情，不随重筛清空。当前回撤＝（窗口最高价－当前收盘价）÷窗口最高价；最大回撤按窗口内先高后低计算。历史不足时等待，不补造数据。</p>

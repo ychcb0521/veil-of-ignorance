@@ -18,7 +18,11 @@ export const PRE_ENTRY_THREE_STAGE_VERSION = 'pre-entry-three-stage-v6' as const
  * observation under identical conditions and the ORIGINAL overall deadline.
  * v5/v6 retain fixed-origin locks, fingerprints and executable implementations. */
 export const PRE_ENTRY_RETRY_VERSION = 'pre-entry-three-stage-v7' as const;
-export type PreEntryThreeStageVersion = typeof PRE_ENTRY_THREE_STAGE_V5 | typeof PRE_ENTRY_THREE_STAGE_VERSION | typeof PRE_ENTRY_RETRY_VERSION;
+export const PRE_ENTRY_SIGNAL_GATE_VERSION = 'pre-entry-three-stage-v8' as const;
+const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION] as const;
+export type PreEntryThreeStageVersion = typeof THREE_STAGE_VERSIONS[number];
+export const isPreEntryThreeStageVersion = (version: unknown): version is PreEntryThreeStageVersion =>
+  THREE_STAGE_VERSIONS.some(candidate => candidate === version);
 export const PRE_ENTRY_GUARD_EVENT_VERSION = 'pre-entry-guard-event-v1' as const;
 export interface EntryMarketCondition {
   id: string; label: string; metric: string; snapshot: FishSnapshot;
@@ -62,20 +66,25 @@ export function retryPreEntryThreeStage(c:PreEntryThreeStage,algorithms:EntryMar
  validatePreEntryThreeStage(c);
  return {...structuredClone(c),version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:c.admission?structuredClone(c.admission):{guardEnabled:true,algorithms:structuredClone(algorithms)}};
 }
+export function signalGatePreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
+  return { ...retryPreEntryThreeStage(config, algorithms), version: PRE_ENTRY_SIGNAL_GATE_VERSION };
+}
 export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondition[] => 'condition' in e ? [e.condition] : e.children.flatMap(expressionConditions);
 export function validateEntryCondition(c: EntryMarketCondition) {
   if (!c.id || !c.metric || !c.snapshot?.definitionKey || !c.label.trim() || !Number.isFinite(c.threshold) || !['<','>','<=','>='].includes(c.direction) || !['intrabar','closed'].includes(c.timing)) throw Error('市场条件须选择指标、方向、有限门槛及确认方式');
 }
-/** Old v5/v6 configurations retain their original basis; only v7 permits retries and OR routes. */
+/** Old v5/v6 configurations retain their original basis. */
 export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is PreEntryThreeStage {
-  if (!c || !([PRE_ENTRY_THREE_STAGE_VERSION,PRE_ENTRY_THREE_STAGE_V5,PRE_ENTRY_RETRY_VERSION] as string[]).includes(c.version) || c.observationBasis !== (c.version===PRE_ENTRY_RETRY_VERSION?'retry-origin-v2':'scan-origin-v1') || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
+  if (!c || !isPreEntryThreeStageVersion(c.version) || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
+  const retry = c.version === PRE_ENTRY_RETRY_VERSION || c.version === PRE_ENTRY_SIGNAL_GATE_VERSION;
+  if (c.observationBasis !== (retry ? 'retry-origin-v2' : 'scan-origin-v1')) throw Error('三阶筛选版本不可用，请保留原方案');
   const ids = new Set<string>();
   const unique = (id: string) => { if (!id || ids.has(id)) throw Error('三阶条件编号重复'); ids.add(id); };
   if(c.stallTurn){
     if(c.version===PRE_ENTRY_THREE_STAGE_V5)throw Error('旧 v5 保持原样，滞涨转弱须在新方案中启用');
     validateEntryStallTurnRule(c.stallTurn);unique(c.stallTurn.version);
   }
-  if(c.version===PRE_ENTRY_RETRY_VERSION){
+  if(retry){
     if(!c.admission||typeof c.admission.guardEnabled!=='boolean'||!Array.isArray(c.admission.algorithms)||!c.admission.guardEnabled&&!c.admission.algorithms.some(f=>f.enabled))throw Error('至少启用一条并列准入算法');
     c.admission.algorithms.forEach(f=>{unique(f.id);validateEntryCondition(f);});
     if(c.longDrawdown?.enabled){unique('long-drawdown-v1');const d=c.longDrawdown;if(!Number.isFinite(d.hours)||d.hours<1/60||d.hours>8784||!Number.isFinite(d.pct)||d.pct<=0||d.pct>=100||!['current','maximum'].includes(d.mode))throw Error('长周期回撤须填写至少 1 分钟的有效回看时长和 0～100% 之间的回撤阈值');}

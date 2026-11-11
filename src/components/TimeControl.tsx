@@ -237,7 +237,8 @@ export function TimeControl({
     setMonthFilter(month);
     if (month) { setSortKey('time'); setSortDir('asc'); }
   };
-  const [jumpingSignalId, setJumpingSignalId] = useState<string | null>(null);
+  const [pendingJump, setPendingJump] = useState<{ id: string; fromQuality: boolean } | null>(null);
+  const jumpingSignalId = pendingJump?.id ?? null;
   const [signalAuditProgress, setSignalAuditProgress] = useState<{
     checked: number;
     total: number;
@@ -252,7 +253,7 @@ export function TimeControl({
    */
   const signalsRef = useRef(signals);
   signalsRef.current = signals;
-  const jumpingSignalIdRef = useRef<string | null>(null);
+  const pendingJumpRef = useRef<typeof pendingJump>(null);
   const jumpPropsRef = useRef({ onJumpToSignal, onSymbolChange });
   jumpPropsRef.current = { onJumpToSignal, onSymbolChange };
 
@@ -506,9 +507,10 @@ export function TimeControl({
       setSignalLibOpen(false);
       return;
     }
-    if (jumpingSignalIdRef.current) return;
-    jumpingSignalIdRef.current = sig.id;
-    setJumpingSignalId(sig.id);
+    if (pendingJumpRef.current) return;
+    const request = { id: sig.id, fromQuality: false };
+    pendingJumpRef.current = request;
+    setPendingJump(request);
     try {
       const chartSymbol = signalChartSymbol(sig)!;
       const result = await (sig.turingReplaySample
@@ -529,8 +531,8 @@ export function TimeControl({
           item.id === sig.id ? { ...item, jumpIssue: issue } : item));
       }
     } finally {
-      jumpingSignalIdRef.current = null;
-      setJumpingSignalId(null);
+      pendingJumpRef.current = null;
+      setPendingJump(null);
     }
   }, [setSignals]);
 
@@ -539,21 +541,26 @@ export function TimeControl({
   const handleRateFish = useCallback((id:string,quality:number)=>{const source=fishSourcesRef.current.find(signal=>signal.id===id);if(source)handleRateQualitySource(source,quality);},[fishSourcesRef,handleRateQualitySource]);
   const handleJumpFish = useCallback(async (id: string, qualitySource?: TradeSignal) => {
     const fishSignal = fish.signalsRef.current.find(s => s.id === id);
-    const sig = fishSignal ?? qualitySource;
-    if (!sig || !signalChartSymbol(sig) || jumpingSignalIdRef.current) return;
+    const sig = qualitySource ?? fishSignal;
+    const chartSymbol = sig && signalChartSymbol(sig);
+    if (!sig || !chartSymbol) return;
+    const pending = pendingJumpRef.current;
+    if (pending && (!qualitySource || !pending.fromQuality || pending.id === id)) return;
     rememberFishPosition();
     const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
-    if (!jumpTo) { changeSymbol?.(signalChartSymbol(sig)!); setFishOpen(false); return; }
-    jumpingSignalIdRef.current = id; setJumpingSignalId(id);
+    if (!jumpTo) { changeSymbol?.(chartSymbol); setFishOpen(false); return; }
+    const request = { id, fromQuality: !!qualitySource };
+    pendingJumpRef.current = request;
+    setPendingJump(request);
     const updateIssue = (issue: TradeSignal['jumpIssue']) => {
       if (fishSignal) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
       else (isTuringCupSymbol(sig.symbol) ? setTuringSignals : setOnlineSignals)(previous => previous.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
     };
     try {
-      const chartSymbol = signalChartSymbol(sig)!;
       const result = await (sig.turingReplaySample
         ? jumpTo(chartSymbol, sig.timeMs, { fromFirstCandle: true })
         : jumpTo(chartSymbol, sig.timeMs));
+      if (pendingJumpRef.current !== request) return;
       if (result.ok) {
         if (sig.turingReplaySample) setDateInput(formatUTC8(sig.timeMs));
         if (sig.jumpIssue) updateIssue(undefined);
@@ -562,7 +569,12 @@ export function TimeControl({
         const issue = 'fatalIssue' in result ? result.fatalIssue : undefined;
         if (issue) updateIssue(issue);
       }
-    } finally { jumpingSignalIdRef.current = null; setJumpingSignalId(null); }
+    } finally {
+      if (pendingJumpRef.current === request) {
+        pendingJumpRef.current = null;
+        setPendingJump(null);
+      }
+    }
   }, [fish.commit, fish.signalsRef, rememberFishPosition, setOnlineSignals, setTuringSignals]);
 
   const handleStart = () => {
@@ -694,7 +706,7 @@ export function TimeControl({
       </div>
 
       <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={onlineReconstruction} librarySignals={onlineSignals} onSuggest={fish.suggest} onTestHitRate={fish.testHitRate} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
-        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onRateQuality={handleRateQualitySource} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
+        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onRateQuality={handleRateQualitySource} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} qualityJumpPending={pendingJump?.fromQuality} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (

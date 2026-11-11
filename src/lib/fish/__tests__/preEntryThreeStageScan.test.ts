@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
 import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -28,14 +28,75 @@ function loader(closes:number[]=Array(30).fill(100),zeroAt?:number):FishReconstr
 async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:PreEntryRecord;aborter?:AbortController;onRecord?:(r:PreEntryRecord)=>void;end?:number;hours?:number;start?:number}={}){
   let record:PreEntryRecord=options.old??{id:'r',roundId:'round',planId:p.id,sample,status:'queued',startTime:T,cursor:T,readings:[],updatedAt:T};
   const aborter=options.aborter??new AbortController();
-  const retry=p.preEntryThreeStage?.version===PRE_ENTRY_RETRY_VERSION;
-  try{await collectPreEntryMonitor({round:{id:'round',engine:retry?PRE_ENTRY_RETRY_VERSION:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
+  const retry=p.preEntryThreeStage?.observationBasis==='retry-origin-v2';
+  try{await collectPreEntryMonitor({round:{id:'round',engine:retry?p.preEntryThreeStage!.version:PRE_ENTRY_THREE_STAGE_VERSION,plans:[freezeQualityPlan(p)],filters:[],hours:options.hours??(retry?1:0),state:'running',startedAt:T,updatedAt:T},records:[record],onRecord:r=>{record=r;options.onRecord?.(r);}},options.load??loader(),options.end??T+12*M,aborter.signal,vi.fn(),options.start==null?undefined:{start:async()=>options.start});}
   catch(error){if(!aborter.signal.aborted)throw error;}
   return record;
 }
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it('retains a passing signal-time gate across later price changes, a veto and resumption',async()=>{
+ const original=stateOnlyPlan();
+ original.preEntryThreeStage!.required=[condition('必要条件',95)];
+ original.preEntryThreeStage!.longDrawdown={enabled:true,mode:'current',hours:1/60,pct:6};
+ const frozen=freezeQualityPlan(original);
+ const next={...original,preEntryThreeStage:signalGatePreEntryThreeStage(original.preEntryThreeStage!)};
+ const load=loader([90,90,75,90]);
+ let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock+=200);
+ const aborter=new AbortController();
+ const paused=await run(next,{load,aborter,onRecord:r=>{if(r.status==='scanning'&&r.cursor===T+M)aborter.abort();}});
+ expect(paused.status).toBe('paused');
+ expect(paused.signalGate).toMatchObject({signalAt:T,at:T,status:'pass',readings:[{value:100,met:true}]});
+ const resumed=await run(next,{load,old:paused});
+ expect(resumed).toMatchObject({status:'matched',matchedAt:T+4*M,signalGate:paused.signalGate});
+ expect(resumed.exclusionProcess!.entries.some(e=>e.kind==='restart')).toBe(true);
+ expect((await run(frozen,{load})).status).toBe('unmatched');
+ expect(planVersionChanges(frozen)).toEqual([]);
+});
+it('does not run the historical window or restart until a new event produces a candidate',async()=>{
+ const p=stateOnlyPlan();
+ p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);
+ p.preEntryThreeStage.admission!.algorithms=[condition('准入',120)];
+ p.preEntryThreeStage.longDrawdown={enabled:true,mode:'maximum',hours:1,pct:3};
+ const load=vi.fn(loader([90,70,80]));
+ const result=await run(p,{load});
+ expect(result).toMatchObject({status:'unmatched',retry:{attempt:1}});
+ expect(result.lastVeto).toBeUndefined();
+ expect(load.mock.calls.some(([, , , program])=>program.def.id==='pre-entry-long-drawdown')).toBe(false);
+});
+it.each(['indicator','drop-1m'] as const)('checks a historical %s trigger at the candidate, then finds a later fresh event',async kind=>{
+ const p=stateOnlyPlan();
+ p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);
+ p.preEntryThreeStage.admission!.algorithms=[condition('准入',100)];
+ p.preEntryThreeStage.hardVetoes=[kind==='indicator'
+   ?{id:'hard',label:'历史硬伤',enabled:true,kind,metric:'raw',snapshot:snapshot(),direction:'<',threshold:90}
+   :{id:'hard',label:'历史硬伤',enabled:true,kind,direction:'>=',threshold:12}];
+ const result=await run(p,{load:loader([85,105,105,95,105])});
+ expect(result).toMatchObject({status:'matched',matchedAt:T+5*M,lastVeto:{at:T+2*M,reason:expect.stringMatching(/历史硬伤.*历史触发于/)}});
+ expect(result.exclusionProcess!.entries.filter(e=>e.kind==='restart')).toHaveLength(1);
+});
+it('rejects at the original signal time without borrowing stronger readings from the later screening start',async()=>{
+ const p=stateOnlyPlan();
+ p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);
+ p.preEntryThreeStage.required=[condition('必要条件',105)];
+ const old:PreEntryRecord={id:'r',roundId:'round',planId:p.id,sample:{...sample,source:{...sample.source,timeMs:T+19_000}},status:'queued',startTime:T+M,cursor:T+M,readings:[],updatedAt:T};
+ const load=vi.fn(loader([120,120]));
+ const result=await run(p,{load,old});
+ expect(result).toMatchObject({status:'unmatched',signalGate:{signalAt:T+19_000,at:T,status:'blocked',readings:[{value:100,met:false}]}});
+ expect(load.mock.calls.every(([, , cutoff])=>cutoff<=T)).toBe(true);
+});
+it('keeps selected candle timing at the signal, including the partial 5m candle built from closed minutes',async()=>{
+ const p=stateOnlyPlan();
+ p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);
+ p.preEntryThreeStage.required=['intrabar','closed'].map((timing,i)=>({
+   ...condition(timing,i===0?105:95),snapshot:snapshot('raw=C','5m'),timing:timing as EntryMarketCondition['timing'],
+ }));
+ const old:PreEntryRecord={id:'r',roundId:'round',planId:p.id,sample:{...sample,source:{...sample.source,timeMs:T+2*M}},status:'queued',startTime:T+2*M,cursor:T+2*M,readings:[],updatedAt:T};
+ const result=await run(p,{old,load:loader([110,120,90])});
+ expect(result.signalGate).toMatchObject({status:'pass',readings:[{id:'intrabar',value:120},{id:'closed',value:100}]});
+ expect(result.status).toBe('matched');
+});
 it('uses only closed 5m bars through v7 retries and resume, admitting on the exact recovery close',async()=>{
  const p=stateOnlyPlan();p.preEntryThreeStage!.additionVetoes=[{...ADDITION_VETO_DEFAULTS['stall-turn'],enabled:true}];
  const closes=[101,102,103,104,105,106,107,108,109,110,111,112,112,112,112,111,110],price=(i:number)=>i < -17?100:i<0?closes[i+17]:i===0?111:112;

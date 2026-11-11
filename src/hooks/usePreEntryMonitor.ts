@@ -10,7 +10,8 @@ import { loadPreEntryLibraryV5 } from '@/lib/fish/preEntryMonitorV5Store';
 import { loadPreEntryLibraryV6, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
 import { withPreEntryTableClears } from '@/lib/fish/preEntryTableClears';
 import {projectPreEntryBatch} from '@/lib/fish/preEntryArchiveClient';
-import { PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
@@ -160,8 +161,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = `pre-entry-${crypto.randomUUID()}`;
     const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)) };
-    const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => ({ id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
-      status: 'queued' as const, startTime: sample.enteredAt ?? sample.source.timeMs, cursor: sample.enteredAt ?? sample.source.timeMs, readings: [], updatedAt: at })));
+    const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => {
+      const startTime = round.engine === PRE_ENTRY_SIGNAL_GATE_VERSION ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
+      return { id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
+        status: 'queued' as const, startTime, cursor: startTime, readings: [], updatedAt: at };
+    }));
     const base=current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
     commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
     // The screening engine reads its frozen round and records, never the research history.

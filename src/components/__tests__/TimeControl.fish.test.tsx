@@ -374,3 +374,34 @@ it('从组合表进入盘面再打开时恢复筛选、展开状态和内外层�
  const names=screen.getAllByTestId('quality-fish-row').map(row=>row.textContent);fireEvent.click(within(screen.getAllByTestId('quality-fish-row')[0]).getByRole('button',{name:/^查看 RET.*盘面$/}));await waitFor(()=>expect(screen.queryByTestId('fish-panel')).toBeNull());expect(jump).toHaveBeenCalledOnce();fireEvent.click(toggle);
  await waitFor(()=>{expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('RET');expect(screen.getByTestId('quality-fish-table').scrollTop).toBe(660);expect(screen.getByTestId('quality-fish-table').scrollLeft).toBe(1100);});expect(screen.getByTestId('fish-panel').scrollTop).toBe(320);expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');expect(screen.getAllByTestId('quality-fish-row').map(row=>row.textContent)).toEqual(names);
 },30000);
+
+it('allows another locked row to take over a pending chart jump and keeps the batch on return',async()=>{
+  const library = ['AAAUSDT','BBBUSDT','CCCUSDT'].map((symbol,i)=>({id:'locked-'+i,symbol,timeMs:123+i,timeLabel:'',fallbackZone:''}));
+  localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY,JSON.stringify(library));
+  const pending: Array<(value:{ok:true})=>void> = [];
+  const jump=vi.fn(() => new Promise<{ok:true}>(resolve=>pending.push(resolve)));
+  render(control(jump as any));
+  const toggle=screen.getByRole('button',{name:/^渔/});
+  fireEvent.click(toggle);
+  for(const symbol of ['AAAUSDT','BBBUSDT']){
+    const checkbox=await screen.findByRole('checkbox',{name:new RegExp('选择 '+symbol)});
+    await waitFor(()=>expect(checkbox).toBeEnabled());
+    fireEvent.click(checkbox);
+  }
+  fireEvent.click(screen.getByRole('button',{name:'锁定所选'}));
+  const first=screen.getByRole('button',{name:'查看 AAAUSDT 盘面'});
+  const second=screen.getByRole('button',{name:'查看 BBBUSDT 盘面'});
+  fireEvent.click(first);
+  expect(first).toBeDisabled();
+  expect(second).toBeEnabled();
+  fireEvent.click(second);
+  expect(jump.mock.calls).toEqual([['AAAUSDT',123],['BBBUSDT',124]]);
+  await act(async()=>pending[0]({ok:true}));
+  expect(second).toBeDisabled();
+  expect(screen.getByTestId('quality-locked-batch')).toHaveTextContent('已锁定 2 条信号');
+  await act(async()=>pending[1]({ok:true}));
+  expect(screen.queryByTestId('fish-panel')).toBeNull();
+  fireEvent.click(toggle);
+  expect(await screen.findByTestId('quality-locked-batch')).toHaveTextContent('已锁定 2 条信号');
+  expect(screen.queryByRole('button',{name:'查看 CCCUSDT 盘面'})).toBeNull();
+},30000);

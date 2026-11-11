@@ -20,10 +20,10 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { PRE_ENTRY_CONDITIONS_VERSION, preEntryConditionText, preEntryVetoes } from '@/lib/fish/preEntryConditions';
 import { activeAdditionVetoes, additionVetoLabel } from '@/lib/fish/qualityAdditionVeto';
 import { holdingVetoLabel } from '@/lib/fish/qualityVeto';
-import { PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_THREE_STAGE_V5, expressionConditions, preEntryPlanFilters, type EntryMarketExpression } from '@/lib/fish/preEntryThreeStage';
+import { PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_THREE_STAGE_V5, expressionConditions, preEntryPlanFilters, type EntryMarketExpression } from '@/lib/fish/preEntryThreeStage';
 
 const STATUS: Record<PreEntryStatus, string> = { queued: '待监测', scanning: '监测中', paused: '已暂停', matched: '已满足', unmatched: '未满足', warming: '历史不足·待预热', error: '缺数据' };
-const engineLabel = (round?: PreEntryRound) => round?.engine===PRE_ENTRY_RETRY_VERSION?'分钟筛选 v7 · 并列准入与否决重筛':round?.engine === PRE_ENTRY_THREE_STAGE_VERSION ? '分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）' : round?.engine === PRE_ENTRY_THREE_STAGE_V5 ? '分钟筛选 v5 · 三阶准入' : round?.engine === PRE_ENTRY_CONDITIONS_VERSION ? '分钟筛选 v4 · 入选与否决' : round?.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? '分钟筛选 v3 · 图灵杯零成交等待' : round?.engine ? '分钟筛选 v2' : '收盘筛选 v1';
+const engineLabel = (round?: PreEntryRound) => round?.engine===PRE_ENTRY_SIGNAL_GATE_VERSION?'分钟筛选 v8 · 信号时点必要条件':round?.engine===PRE_ENTRY_RETRY_VERSION?'分钟筛选 v7 · 并列准入与否决重筛':round?.engine === PRE_ENTRY_THREE_STAGE_VERSION ? '分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）' : round?.engine === PRE_ENTRY_THREE_STAGE_V5 ? '分钟筛选 v5 · 三阶准入' : round?.engine === PRE_ENTRY_CONDITIONS_VERSION ? '分钟筛选 v4 · 入选与否决' : round?.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? '分钟筛选 v3 · 图灵杯零成交等待' : round?.engine ? '分钟筛选 v2' : '收盘筛选 v1';
 const stageStatus={pass:'通过',blocked:'排除',pending:'等待'} as const;
 const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';
@@ -92,7 +92,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
     description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
     dataActions={!samplePicker && <FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}
     download={()=>downloadDirectoryTables('筛选库',directoryItems.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
-    info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。仅收录已满足记录，原信号、冻结条件、首次满足时间和判定证据保留；未入选的扫描记录仍保存在原库。</p><p>新副本 v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开后可复制至组合表。复制前完整归档当前组合表，载入后不自动运行；完整下载与导入保留各版本历史，不改当前方案。</p></>}
+    info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。仅收录已满足记录，原信号、冻结条件、首次满足时间和判定证据保留；未入选的扫描记录仍保存在原库。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开后可复制至组合表。复制前完整归档当前组合表，载入后不自动运行；完整下载与导入保留各版本历史，不改当前方案。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
 }
 

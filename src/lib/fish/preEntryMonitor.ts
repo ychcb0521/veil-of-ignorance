@@ -8,6 +8,7 @@ import { qualityMetricPlan, type QualityBuyFilter, type QualityFilterReading, ty
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
 import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
+import { isPreEntryThreeStageVersion } from './preEntryThreeStage';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
@@ -17,6 +18,7 @@ export interface PreEntryRecord {
   /** Clear only the working table display, retaining the complete scan history. */
   tableClearedAt?:number;
   threeStage?: import('./preEntryThreeStageScan').EntryStageEvidence;
+  signalGate?: import('./preEntryThreeStageScan').EntrySignalGateEvidence;
   missedGuard?: { count:number; event:import('./preEntryGuardEvent').EntryGuardEvent; reason:string };
   lastVeto?: { at: number; reason: string; count: number };
   retry?:{version:'retry-origin-v2';attempt:number;startedAt:number};
@@ -83,7 +85,7 @@ export async function collectPreEntryMonitor(
   onProgress: (progress: QualityProgress) => void,
   bounds?: { start?: (symbol: string) => Promise<number | undefined>; end?: (symbol: string) => Promise<number> },
 ): Promise<void> {
-  if (task.round.engine === 'pre-entry-three-stage-v5' || task.round.engine === 'pre-entry-three-stage-v6' || task.round.engine === 'pre-entry-three-stage-v7') {
+  if (isPreEntryThreeStageVersion(task.round.engine)) {
     const { collectPreEntryThreeStage } = await import('./preEntryThreeStageScan');
     return collectPreEntryThreeStage(task, load, now, signal, onProgress, bounds);
   }

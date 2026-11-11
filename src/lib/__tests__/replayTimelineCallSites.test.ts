@@ -44,7 +44,7 @@ describe('回放时间线的分叉 / 结束调用点', () => {
 
   it('信号跳转：行情覆盖检查全部通过之后才分叉（失败的跳转不留痕迹），且在改钟之前', () => {
     const body = handlerBody(index, 'handleJumpToSignal');
-    const forkAt = body.indexOf('forkReplayTimeline(normalized, "jump", startTs, timeDirection)');
+    const forkAt = body.indexOf('forkReplayTimeline(normalized, "jump", startTs, direction)');
     expect(forkAt).toBeGreaterThan(body.lastIndexOf('return { ok: false'));
     expect(forkAt).toBeLessThan(body.indexOf('setCoinTimelines('));
     expect(forkAt).toBeLessThan(body.indexOf('sim.startSimulation('));
@@ -224,9 +224,10 @@ describe('时序校验的调用点：每条撮合路径都问 canExecuteReplayOr
     expect(start.indexOf('if (data === SUPERSEDED_INIT_LOAD) return;')).toBeGreaterThan(-1);
     expect(start.indexOf('if (data === SUPERSEDED_INIT_LOAD) return;')).toBeLessThan(start.indexOf('toast.error("数据获取失败"'));
     const jump = handlerBody(index, 'handleJumpToSignal');
-    expect(jump).toContain('accept: (candles: KlineData[]) => hasKlineCoveringSignalTime(candles, timeMs, iMs),');
+    expect(jump).toContain('accept: (candles: KlineData[]) => hasKlineCoveringSignalTime(candles, timeMs, jumpIntervalMs),');
     expect(jump.match(/if \(data === SUPERSEDED_INIT_LOAD\) return superseded;/g)).toHaveLength(2);
     expect(jump.indexOf('if (data === SUPERSEDED_INIT_LOAD) return superseded;')).toBeLessThan(jump.indexOf('diagnoseSignalJump('));
+    expect(jump).toMatch(/await diagnoseSignalJump\([^\n]+\);\s*if \(request !== signalJumpSequence.current\) return superseded;/);
     expect(index).toContain('if (datasetRehomeRef.current.attempts >= DATASET_REHOME_MAX_ATTEMPTS) return;');
     expect(index).toContain('const DATASET_REHOME_MAX_ATTEMPTS = 2;');
     const hook = read('hooks/useBinanceData.ts');
