@@ -3,6 +3,7 @@ import { archiveFishForNextRound, collapseVisibleFish, mergeFishSignals, fishCat
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, deriveFishRound, saveFishMemberRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import type { FishProgram } from '@/lib/fish/algorithm';
+import { runFishHitRate, type FishHitRateOptions } from '@/lib/fish/hitRate';
 import { fishRuleText } from '@/lib/fishRule';
 import type { FishCombination } from '@/lib/fish/intersection';
 import { backupFishSignals, restoreFishSignals, loadFishSignals, loadFishTombstones, saveFishSignals, recordFishDeletion, FISH_STORAGE_KEY, FISH_DELETED_KEY } from '@/lib/fishSignals';
@@ -108,10 +109,11 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     return () => { cancelled = true; ++generation.current; controller.current?.abort(); controller.current = null; mineController.current?.abort(); scanner.current = null; unsubscribe(); unsubscribeDeleted(); window.removeEventListener('storage', storage); };
   }, [userId,reconcile]);
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
+  const hitRateBusy = useRef(false);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
-    if (controller.current) return;
+    if (controller.current || hitRateBusy.current) return;
     // 持续挖掘让路：先打断这一档，等取数器空出来（这一档之后原地重扫）
-    if (mineController.current) { mineController.current.abort(); await minePromise.current?.catch(() => undefined); if (controller.current) return; }
+    if (mineController.current) { mineController.current.abort(); await minePromise.current?.catch(() => undefined); if (controller.current || hitRateBusy.current) return; }
     // Move the previous round immediately. Background persistence must never gate market scanning.
     const at = Date.now();
     recoveryArchiveBefore.current ??= at;
@@ -168,7 +170,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   },[]);
   const cancel = useCallback(() => controller.current?.abort(), []);
   /** 是否有捕捞 / 建议 / 复原等在用取数器（定时自动捕捞据此等待）。持续挖掘不算：捕捞一开始就会打断它。 */
-  const busy = useCallback(() => !!controller.current || (!mineController.current && !!(scanner.current ?? pageScanner)?.isBusy()), []);
+  const busy = useCallback(() => hitRateBusy.current || !!controller.current || (!mineController.current && !!(scanner.current ?? pageScanner)?.isBusy()), []);
   /**
    * 持续挖掘扫一档：不动「新鱼」、不发邮件、不留本轮摘要，只把命中的鱼交回去（由挖掘决定怎么入舱）。
    * 取数器正被别的任务占着时抛错；被捕捞打断时抛 AbortError。
@@ -177,7 +179,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   const miningCheckpoint = pageMiningCheckpoint;
   const mine = useCallback(async (settings: FishScanSettings, onProgress?: (p: FishProgress) => void, roundId?: string): Promise<TradeSignal[]> => {
     const sc = (scanner.current ??= pageScanner ??= new FishScanner());
-    if (controller.current || mineController.current || sc.isBusy()) throw new Error('取数器正忙');
+    if (controller.current || mineController.current || hitRateBusy.current || sc.isBusy()) throw new Error('取数器正忙');
     const mine = new AbortController(); mineController.current = mine;
     const checkpointKey = JSON.stringify([ownerRef.current, roundId, settings]);
     if (miningCheckpoint.current?.key !== checkpointKey) miningCheckpoint.current = { key: checkpointKey, results: new Map() };
@@ -189,6 +191,13 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     finally { if (mineController.current === mine) { mineController.current = null; minePromise.current = null; } }
   }, []);
   const stopMining = useCallback(() => mineController.current?.abort(), []);
+  const testHitRate = useCallback(async (options: FishHitRateOptions) => {
+    const sc = scanner.current ??= pageScanner ??= new FishScanner();
+    if (controller.current || mineController.current || hitRateBusy.current || sc.isBusy()) throw new Error('取数器正忙，请在当前任务结束后开始测试');
+    hitRateBusy.current = true;
+    try { await runFishHitRate(sc, options); }
+    finally { hitRateBusy.current = false; }
+  }, []);
   /**
    * 任选本轮算法子集与交集 / 并集：用保存的逐币结论直接重新合并，「新鱼」换成另一种结果，不用重扫。
    * 先撤掉这一轮写进列表的改动（新加的删掉、被改成新鱼的恢复原样），再按新方式写入。
@@ -264,5 +273,5 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     commit(signalsRef.current.filter(s => s.id !== id));
   }, [commit]);
   const removeMany=useCallback((ids:readonly string[])=>{const selected=new Set(ids),gone=signalsRef.current.filter(s=>selected.has(s.id));if(!gone.length)return;recordFishDeletion(gone,ownerRef.current??null);commit(signalsRef.current.filter(s=>!selected.has(s.id)));},[commit]);
-  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, mine, stopMining, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
+  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
 }

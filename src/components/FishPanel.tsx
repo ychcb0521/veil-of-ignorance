@@ -37,6 +37,8 @@ import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishPr
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
+import { FishHitRateTest } from '@/components/FishHitRateTest';
+import { FISH_HIT_RATE_HOURS, type FishHitRateOptions } from '@/lib/fish/hitRate';
 import { FishWickDetails } from '@/components/FishWickDetails';
 import { FishWickSettings } from '@/components/FishWickSettings';
 import { FishCaptureFrequencySettings, FishCaptureOpenSettings, FishCaptureTimeSettings } from '@/components/FishCaptureSettings';
@@ -68,6 +70,7 @@ export interface FishPanelProps {
   defaultAlgorithms?: readonly string[];
   librarySignals?: TradeSignal[];
   onSuggest?: (options:FishSuggestionOptions)=>Promise<FishSuggestion>;
+  onTestHitRate?: (options: FishHitRateOptions) => Promise<void>;
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
@@ -265,6 +268,19 @@ export function FishPanel(p: FishPanelProps) {
     for(const plan of plans){const checked=fishProgramForLookback(plan,hours,FISH_TURNOVER_FLOORS);if(checked.unavailable)throw new Error(checked.unavailable);}
     p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
+  const buildHitRateSettings = (): FishScanSettings => {
+    if (multiple.error) throw new Error(multiple.error);
+    if (!exchanges.length) throw new Error('请至少选择一家捕捞交易所');
+    for (const plan of multiple.plans) {
+      const checked = fishProgramForLookback(plan, FISH_HIT_RATE_HOURS, FISH_TURNOVER_FLOORS);
+      if (checked.unavailable) throw new Error(checked.unavailable);
+    }
+    return {
+      algorithms: multiple.plans.map(plan => ({ feature: plan.def, algorithm: plan.settings })),
+      combination, exchanges: [...exchanges], includeDuplicates, includeUsStocks,
+      downwardWick: readFishDownwardWick(owner), turnoverFloors: FISH_TURNOVER_FLOORS,
+    };
+  };
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
   const x = p.progress;
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
@@ -333,6 +349,7 @@ export function FishPanel(p: FishPanelProps) {
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
+        {p.onTestHitRate && <FishHitRateTest key={owner} library={library} buildSettings={buildHitRateSettings} run={p.onTestHitRate} disabled={running}/>}
         <Popover open={menuOpen} onOpenChange={next => { if (next) setCaptureSetting(null); setMenuOpen(next); }}>
           <PopoverTrigger asChild><button type="button" aria-label="更多" title="更多捕捞选项" className={`${iconBtn} ${menuOpen||open.scope?'bg-muted text-foreground':''}`} data-testid="fish-more"><MoreHorizontal className="h-4 w-4"/></button></PopoverTrigger>
           <PopoverContent align="start" sideOffset={4}
