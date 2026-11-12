@@ -2,7 +2,8 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { DBL5_DEFAULTS, DBL5_GUARD_DEFAULTS, type Dbl5Config } from '@/lib/dbl5m';
 import { SBS5M_DEFAULTS, SBS5M_PARAMETER_SPECS } from '@/lib/sbs5m';
 import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
-import { freezeStructureVersions, structureVersionLabel } from '@/lib/fish/boxAlgorithmVersions';
+import { CURRENT_GUARD_VERSION, freezeStructureVersions, selectStructureGuardVersion, structureVersionLabel, structureVersions } from '@/lib/fish/boxAlgorithmVersions';
+import { Dbl5GuardVersionSelect } from '@/components/Dbl5GuardVersionSelect';
 import { isBoxBreak, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
 const field='h-7 rounded bg-muted/50 px-2 text-[11px] min-w-0';
 export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definitions,entry=false,admission=false}:{rule:BoxStopRule;onChange:(rule:BoxStopRule)=>void;disabled:boolean;prefix:string;definitions:readonly DeepDigFeatureDef[];entry?:boolean;admission?:boolean}) {
@@ -19,6 +20,9 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
       <label>{entry?'排除方式':'卖出方式'} <select aria-label={prefix+'确认方式'} className={field} value={rule.confirmation} onChange={e=>put({confirmation:e.target.value as BoxStopRule['confirmation']})}><option value="touch">{entry?'触碰 K 当分钟不入选':'触碰 K 立即全仓止损'}</option><option value="close-1m">1 分钟收盘确认</option><option value="close-5m">5 分钟收盘确认</option></select></label>
       {rule.confirmation!=='touch'&&number('连续确认根数',rule.closes,n=>put({closes:n}),1,100,'1')}
     </div>}
+    {s.algorithm==='dbl5'&&s.kSource==='guard'&&<Dbl5GuardVersionSelect label={prefix+'防守线版本'}
+      value={structureVersions(s).guard??CURRENT_GUARD_VERSION}
+      onChange={version=>put({structure:selectStructureGuardVersion(s,version)})}/>}
     <details><summary className="cursor-pointer text-[11px] text-primary">箱体算法细节设置</summary><div className="mt-2 flex flex-wrap gap-3">
       {s.algorithm==='dbl5'?<>
         {number('箱体确认 n',def.DBL5_config?.n??DBL5_DEFAULTS.n,n=>dbl('n',n),1,1007,'1')}

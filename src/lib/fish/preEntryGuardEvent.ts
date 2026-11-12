@@ -1,6 +1,6 @@
 import { compileFishProgram, shortFishHash } from './algorithm';
 import { evaluateOnBars, featureWindowMs } from '../deepDig/features';
-import type { Dbl5Checkpoint, Dbl5Row } from '../dbl5m';
+import { dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '../dbl5m';
 import type { TradeSignal } from '../signalLibrary';
 import type { FishReconstructionLoader } from './reconstruction';
 import { qualityHistoryFrom } from './qualityInitialization';
@@ -24,7 +24,7 @@ export function nativeGuardEvent(previous:Dbl5Row|undefined, row:Dbl5Row, scanSt
   if (!rebuilt && before===price && oldRegime===regime) return;
   const kind:EntryGuardEvent['kind']=rebuilt?'rebuild':before==null?(row.darvas_5m_guard_segment!>0?'rebuild':'first'):oldRegime!==regime?'type-change':price>before?'raise':'lower';
   const evidence={at:row.at,kind,price,regime,previousPrice:before,previousRegime:oldRegime,boxId:row.box_id,segment:row.darvas_5m_guard_segment??0,broken:!!row.darvas_5m_guard_broken,
-    tickSize:row.tick_size,algorithmVersion:row.algorithm_version,guardVersion:'dbl5-guard-v1',parameters:row.effective_parameters,
+    tickSize:row.tick_size,algorithmVersion:row.algorithm_version,guardVersion:dbl5GuardVersion(row.effective_parameters),parameters:row.effective_parameters,
     initializationStart:row.initialization_start!,initializationId:row.initialization_id,dataChecksum:row.data_checksum};
   return {id:'entry-guard-'+shortFishHash(stableEntryJson(evidence)),...evidence};
 }

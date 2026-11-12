@@ -8,7 +8,7 @@
  *  3. src/lib/__tests__/boxAlgorithmVersions.test.ts 用固定 K 线锁住每个版本的输出；那里的期望值不能改，只能为新版本另加。
  */
 import type { StructureAdditionRule } from './qualityAdditionStructure';
-import { DBL5_GUARD_DEFAULTS } from '@/lib/dbl5m';
+import { DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
 
 export type BoxAlgorithm = StructureAdditionRule['algorithm'];
 export interface BoxAlgorithmVersion {
@@ -34,6 +34,13 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
       `震荡期：线＝震荡区最低箱底 − b×ATR，区间内小箱体不抬线（b 默认 ${DBL5_GUARD_DEFAULTS.guard_range_atr}）`,
       `跌破：上涨期 ${DBL5_GUARD_DEFAULTS.guard_trend_closes} 根、震荡期连续 ${DBL5_GUARD_DEFAULTS.guard_range_closes} 根 5 分钟收盘在线下；确认后清空，等下一个箱体重建`,
       `ATR 为 5 分钟 ATR(${DBL5_GUARD_DEFAULTS.atr_period})；首个箱体按震荡期`] },
+  { id: DBL5_RETEST_GUARD_VERSION, algorithm: 'dbl5', layer: 'guard', label: '防守线-20261112', since: '2026-11-12',
+    summary: '最终箱底首次出现在局部新高后的第一根 5 分钟线上时，等待独立回踩确认后启用防守线。',
+    rules: [
+      '只在箱体完整确认后开始观察；已有防守线按自身规则继续有效。',
+      `用箱体确认时的 ATR 冻结观察区：箱底至箱底＋${DBL5_GUARD_RETEST.nearAtr} ATR。先有一根最低价在观察区之上、收盘至少离箱底 ${DBL5_GUARD_RETEST.departureAtr} ATR 的 5 分钟线。`,
+      '随后一根回到观察区，最低价未跌穿箱底且收盘回到观察区上方，才按当时的防守线公式生效。箱体破坏、到期、换箱或数据不连续会结束这次等待。',
+    ] },
 ]);
 export const CURRENT_BOX_VERSION: Readonly<Record<BoxAlgorithm, string>> = Object.freeze({ dbl5: 'dbl-5-v2', sbs5m: 'sbs-5m-v1' });
 export const CURRENT_GUARD_VERSION = 'dbl5-guard-v1';
@@ -44,13 +51,20 @@ export interface StructureVersions { box: string; guard?: string }
 export function structureVersions(rule: Pick<StructureAdditionRule, 'algorithm' | 'kSource' | 'definition'> & { versions?: StructureVersions }): StructureVersions {
   const fromFormula = /^#\s*([a-z0-9-]+)/i.exec(String(rule.definition?.formula ?? ''))?.[1];
   const box = rule.versions?.box ?? fromFormula ?? CURRENT_BOX_VERSION[rule.algorithm];
-  const guard = rule.kSource === 'guard' ? rule.versions?.guard ?? CURRENT_GUARD_VERSION : undefined;
+  const guard = rule.kSource === 'guard' ? rule.versions?.guard ?? dbl5GuardVersion(rule.definition?.DBL5_config) : undefined;
   return guard ? { box, guard } : { box };
 }
 /** 「DBL-5 v2」或「DBL-5 v2 · 防守线 v1」。 */
 export function structureVersionLabel(rule: Parameters<typeof structureVersions>[0]): string {
   const v = structureVersions(rule);
   return [boxAlgorithmVersion(v.box)?.label ?? v.box, ...(v.guard ? [boxAlgorithmVersion(v.guard)?.label ?? v.guard] : [])].join(' · ');
+}
+export function selectStructureGuardVersion(rule: StructureAdditionRule, version: Dbl5GuardVersion): StructureAdditionRule {
+  return {
+    ...rule,
+    versions: { ...structureVersions(rule), guard: version },
+    definition: { ...rule.definition, DBL5_config: withDbl5GuardVersion(rule.definition.DBL5_config, version) },
+  };
 }
 /**
  * 保存方案 / 模板时调用：写下所用版本；用防守线时把当时生效的防守线参数也写成明确的值，
@@ -69,7 +83,8 @@ export function freezeStructureVersions<R extends StructureAdditionRule & { vers
 export function assertStructureVersionsAvailable(rule: Parameters<typeof structureVersions>[0]) {
   const v = structureVersions(rule), box = boxAlgorithmVersion(v.box);
   if (!box || box.algorithm !== rule.algorithm || box.layer !== 'box' || v.box !== CURRENT_BOX_VERSION[rule.algorithm]) throw Error(`方案冻结的箱体算法版本 ${v.box} 当前没有可运行的实现，请勿改用其它版本代替`);
-  if (v.guard && v.guard !== CURRENT_GUARD_VERSION) throw Error(`方案冻结的防守线版本 ${v.guard} 当前没有可运行的实现，请勿改用其它版本代替`);
+  if (v.guard && v.guard !== CURRENT_GUARD_VERSION && v.guard !== DBL5_RETEST_GUARD_VERSION) throw Error(`方案冻结的防守线版本 ${v.guard} 当前没有可运行的实现，请勿改用其它版本代替`);
+  if (v.guard && v.guard !== dbl5GuardVersion(rule.definition.DBL5_config)) throw Error('方案冻结的防守线版本与实际参数不一致');
 }
 
 /** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */

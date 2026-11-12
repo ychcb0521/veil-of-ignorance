@@ -1,8 +1,8 @@
 import { qualityHistoryFrom } from './qualityInitialization';
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
-import {assertStructureVersionsAvailable,structureVersionLabel,type StructureVersions} from './boxAlgorithmVersions';
-import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,DBL5_GUARD_VERSION,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
+import {assertStructureVersionsAvailable,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
+import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import {sbsParameters,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {compileFishProgram} from './algorithm';
@@ -59,7 +59,7 @@ export function withPreviousBox(rule:Pick<StructureAdditionRule,'kBasis'>,e:Stru
 /** K 基准取 DBL-5 防守线（已含分行情冗余）；防守线不存在（刚跌破、尚未重建）时不加仓。 */
 export function withGuard(e:StructureAdditionEvidence,row:Dbl5Row):StructureAdditionEvidence|undefined {
  const guard=row.darvas_5m_guard,regime=row.darvas_5m_guard_regime,closes=row.darvas_5m_guard_closes;
- if(guard==null||!(guard>0)||!Number.isFinite(guard)||!regime||!closes)return;
+ if(row.darvas_5m_guard_waiting||guard==null||!(guard>0)||!Number.isFinite(guard)||!regime||!closes)return;
  return {...e,basePrice:guard,guardPrice:guard,guardRegime:regime,guardCloses:closes};
 }
 export function defaultStructureAddition(algorithm:StructureAdditionRule['algorithm']='dbl5',definitions:readonly DeepDigFeatureDef[]=[]):StructureAdditionRule {
@@ -84,7 +84,7 @@ export function validateStructureAddition(rule?:StructureAdditionRule):asserts r
 export const guardTrendOnly=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendOnly'>)=>r.kSource==='guard'&&r.guardTrendOnly===true;
 /** K 基准的简称（标签、版本清单、导出共用）。 */
 export const structureKSourceLabel=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendOnly'>)=>r.kSource==='current'?'新C':r.kSource==='guard'?(guardTrendOnly(r)?'防守线（只用实线）':'防守线'):'旧C';
-export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${DBL5_GUARD_VERSION}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(guardTrendOnly(r)?['guard-trend-only-v1']:[]),...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[])];
+export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${structureVersions(r).guard}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(guardTrendOnly(r)?['guard-trend-only-v1']:[]),...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[])];
 export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
 export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureVersionLabel(r)} · ${structureTriggerLabel(r)} · K＝${structureKSourceLabel(r)}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}${r.minDistancePct!=null?`（离现价 ≥ ${r.minDistancePct}%）`:''}`;
@@ -94,8 +94,10 @@ export function structureAdditionSignal(rule:StructureAdditionRule,row:Dbl5Row|S
  if(rule.algorithm==='dbl5'){
   const r=row as Dbl5Row,a=r.active;if(!r.darvas_5m_available||!a)return;
   const allowed=rule.trigger==='raise'?['UP_STEP','NESTED_HIGHER_FLOOR']:['BASELINE','UP_STEP','NESTED_HIGHER_FLOOR','SAME_FLOOR'];
-  const event=r.events.find(e=>allowed.includes(e.type)&&e.box_id===a.box_id&&e.at===r.at);if(!event)return;
-  return {algorithm:rule.algorithm,trigger:rule.trigger,event:event.type,eventId:event.id,boxId:a.box_id,episodeId:a.episode_id,at:r.at,confirmedAt:a.confirmed_at,supportPrice:a.D,upperPrice:a.U,nativeInvalidation:null,tickSize:a.tick_size,algorithmVersion:r.algorithm_version,definitionKey:definitionKey(rule.definition),parameters:r.effective_parameters,initializationStart,dataChecksum:r.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,basePrice:a.D,bufferUnit:rule.bufferUnit,buffer:rule.buffer};
+  const retest=rule.kSource==='guard'?r.darvas_5m_guard_retest:undefined;
+  const events=retest?[retest]:r.events;
+  const event=events.find(e=>allowed.includes(e.type)&&e.box_id===a.box_id&&e.at===r.at);if(!event)return;
+  return {algorithm:rule.algorithm,trigger:rule.trigger,event:retest?'GUARD_RETEST':event.type,eventId:event.id,boxId:a.box_id,episodeId:a.episode_id,at:r.at,confirmedAt:retest?retest.at:a.confirmed_at,supportPrice:a.D,upperPrice:a.U,nativeInvalidation:null,tickSize:a.tick_size,algorithmVersion:r.algorithm_version,definitionKey:definitionKey(rule.definition),parameters:r.effective_parameters,initializationStart,dataChecksum:r.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,basePrice:a.D,bufferUnit:rule.bufferUnit,buffer:rule.buffer};
  }
  const r=row as SbsRow,a=r.active;if(r.support_status!=='ACTIVE'||!a||r.at==null||a.confirmed_at==null)return;
  const allowed=rule.trigger==='raise'?['STEP_CONFIRMED']:rule.trigger==='confirm'?['BASELINE_CONFIRMED','STEP_CONFIRMED']:['RETEST_SUCCEEDED'];
@@ -128,7 +130,7 @@ interface ReaderOptions {row:TradeSignal;entry:number;end:number;load:FishRecons
 /** 每根已收盘 5 分钟线上的支撑（箱体下轨 / 防守线），供「支撑线下移减仓」判断。 */
 export interface StructureSupportPoint {at:number;boxId:string|null;support:number|null;guard:number|null;close:number}
 /** 箱体事件没能成为加仓时机的原因：涨幅门槛未达、没有旧 C、防守线断开、只用实线时防守线是虚线。 */
-export type StructureSkip={at:number;support:number;reason:'gain'|'no-old-c'|'no-guard'|'guard-range';close?:number;referencePrice?:number;thresholdPct?:number};
+export type StructureSkip={at:number;support:number;reason:'gain'|'no-old-c'|'no-guard'|'guard-range'|'guard-retest';close?:number;referencePrice?:number;thresholdPct?:number};
 export type StructureSkipReporter=(skip:StructureSkip)=>void;
 export function createStructureAdditionReader(o:ReaderOptions){
  const readers=new Map<string,{supports:(until:number)=>Promise<readonly StructureSupportPoint[]>;read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'},onSkip?:StructureSkipReporter)=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
@@ -141,7 +143,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
    let cursor=from,dbl:Dbl5Checkpoint|undefined,sbs:SbsCheckpoint|undefined,lastBox:StructureActiveBox|undefined;
    const decisions:{e:StructureAdditionEvidence;close:number}[]=[],invalid:number[]=[],supportPoints:StructureSupportPoint[]=[];
    /** 【用户要求】2026-11-03 未加仓理由：支撑上移了、但没有旧 C / 防守线，因此不能作为加仓位置的事件。 */
-   const dropped:{at:number;support:number;key:string;reason:'no-old-c'|'no-guard'|'guard-range'}[]=[];
+   const dropped:(Omit<StructureSkip,'reason'>&{key:string;reason:Exclude<StructureSkip['reason'],'gain'>})[]=[];
    const advance=async(cut:number,stop?:()=>boolean)=>{
     while(cursor<cut){
      if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
@@ -150,7 +152,27 @@ export function createStructureAdditionReader(o:ReaderOptions){
      dbl=result.DBL5_checkpoint;sbs=result.SBS5M_checkpoint;
      const rows=rule.algorithm==='dbl5'?result.DBL5_details!:result.SBS5M_details!;
      const closes=new Map(bars.map(b=>[b.openTime+STEP,b.close])),sources=new Map(bars.map(b=>[b.openTime+STEP,b.PRS6H_data_source??'binance-usdm']));
-     for(const row of rows){if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}const raw=structureAdditionSignal(rule,row,from),guarded=raw&&rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):undefined,rangeGuard=!!guarded&&guardTrendOnly(rule)&&guarded.guardRegime!=='trend',e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?(rangeGuard?undefined:guarded):withPreviousBox(rule,raw,lastBox));lastBox=structureActiveBox(rule,row);if(row.at!=null&&row.at>o.entry){const box=structureActiveBox(rule,row),g=rule.algorithm==='dbl5'?(row as Dbl5Row).darvas_5m_guard??null:null;supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard:g,close:closes.get(row.at)!});}if(raw&&!e&&raw.at>o.entry)dropped.push({at:raw.at,support:raw.supportPrice,key:`${raw.algorithm}:${raw.boxId}`,reason:rangeGuard?'guard-range':rule.kSource==='guard'?'no-guard':'no-old-c'});if(e&&e.at>o.entry){e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);decisions.push({e,close:closes.get(e.at)!});}}
+     for(const row of rows){
+      if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}
+      const raw=structureAdditionSignal(rule,row,from);
+      const guarded=raw&&rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):undefined;
+      const rangeGuard=!!guarded&&guardTrendOnly(rule)&&guarded.guardRegime!=='trend';
+      const e=raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?(rangeGuard?undefined:guarded):withPreviousBox(rule,raw,lastBox));
+      const box=structureActiveBox(rule,row);
+      lastBox=box;
+      if(row.at!=null&&row.at>o.entry){
+       const guard=rule.algorithm==='dbl5'?(row as Dbl5Row).darvas_5m_guard??null:null;
+       supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard,close:closes.get(row.at)!});
+      }
+      if(raw&&!e&&raw.at>o.entry){
+       const reason=rule.kSource!=='guard'?'no-old-c':rangeGuard?'guard-range':(row as Dbl5Row).darvas_5m_guard_waiting?'guard-retest':'no-guard';
+       dropped.push({at:raw.at,support:raw.supportPrice,key:`${raw.algorithm}:${raw.boxId}`,reason});
+      }
+      if(e&&e.at>o.entry){
+       e.tickSize=dbl5TickRule(dbl5TickAt(o.row.symbol,e.at-STEP,e.tickSize,sources.get(e.at))!);
+       decisions.push({e,close:closes.get(e.at)!});
+      }
+     }
      cursor=to;await fishDelay(0,o.signal);
      if(stop?.())break;
     }

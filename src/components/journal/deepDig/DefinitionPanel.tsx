@@ -1,7 +1,8 @@
 import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
 import {Dbl5GuardDefinition} from './Dbl5GuardDefinition';
 import {ATI6H_DEFAULTS} from '@/lib/ati6h';
-import {DBL5_ID,DBL5_DEFAULTS,dbl5Parameters} from '@/lib/dbl5m';
+import {DBL5_ID,DBL5_DEFAULTS,dbl5GuardVersion,dbl5Parameters,withDbl5GuardVersion} from '@/lib/dbl5m';
+import {Dbl5GuardVersionSelect} from '@/components/Dbl5GuardVersionSelect';
 import {SBS5M_DEFAULTS,SBS5M_PARAMETER_SPECS,sbsParameters} from '@/lib/sbs5m';
 import {prsParameters,PRS6H_DEFAULTS} from '@/lib/prs6h';
 import { mbi2HoursOf, mbi2NOf, mbi2BandOf, mbi2ConfirmOf, type Mbi2Params } from '@/lib/mbi2';
@@ -151,7 +152,14 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           {help && <FormulaHelp />}
         </div>
       </div>
-      {featureTemplateId(draft)===DBL5_ID&&<Dbl5GuardDefinition config={draft.DBL5_config}/>}
+      {featureTemplateId(draft)===DBL5_ID&&<>
+        <Dbl5GuardVersionSelect value={dbl5GuardVersion(draft.DBL5_config)} disabled={!!dblError} onChange={version=>{
+          const config=withDbl5GuardVersion(draft.DBL5_config,version);
+          set('DBL5_config',config);
+          setDblText(JSON.stringify(config,null,2));
+        }}/>
+        <Dbl5GuardDefinition config={draft.DBL5_config}/>
+      </>}
       <div className="flex gap-2">
         <span className={label}>参数</span>
         {draft.chartTemplate===DBL5_ID&&<details className="min-w-0 flex-1 text-xs" open><summary className="cursor-pointer">DBL-5 参数 · 研究初值</summary><textarea aria-label="DBL5 参数配置" value={dblText} rows={5} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setDblText(e.target.value);try{const p=JSON.parse(e.target.value);dbl5Parameters(p);set('DBL5_config',p);setDblError('');}catch(error){setDblError(error instanceof Error?error.message:'参数JSON无效');}}}/>{dblError&&<p role="alert" className={RED}>{dblError}</p>}<p className="mt-2 text-muted-foreground">timeframe 固定5m。n为回看及确认根数；window_minutes 为几何证据年龄，20–10080分钟且为5的倍数。须满足2n+1&lt;W；默认360分钟时n为1–35。到期从origin_time计算，触底不续期。</p></details>}
