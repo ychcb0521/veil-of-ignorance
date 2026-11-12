@@ -22,6 +22,7 @@ vi.mock('@/lib/authBootRecovery', async (original) => ({
 }));
 
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { AuthRetryableFetchError } from '@supabase/supabase-js';
 import { AUTH_BOOT_TIMEOUT_MS } from '@/lib/authBootRecovery';
 import { AUTH_ACTION_TIMEOUT_MS } from '@/lib/authTransport';
 import { AuthBootRecoveryScreen } from '@/components/AuthBootRecoveryScreen';
@@ -49,6 +50,26 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
 
 describe('登录态恢复不再无限转圈', () => {
+  it('keeps the existing session during a 522 and enters the app after token refresh', async () => {
+    const tokenKey = 'sb-test-auth-token';
+    const storedSession = JSON.stringify(session);
+    localStorage.setItem(tokenKey, storedSession);
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: new AuthRetryableFetchError('HTTP 522', 522) });
+    const view = mount();
+    const callback = auth.onAuthStateChange.mock.calls[0][0];
+    act(() => callback('INITIAL_SESSION', null));
+    await flush();
+
+    expect(latest.bootIssue?.kind).toBe('service-unavailable');
+    expect(view.queryByRole('button', { name: '重新登录' })).toBeNull();
+    expect(localStorage.getItem(tokenKey)).toBe(storedSession);
+    expect(reloadPage).not.toHaveBeenCalled();
+
+    act(() => callback('TOKEN_REFRESHED', session));
+    await flush();
+    expect(view.getByTestId('state').textContent).toBe('signed-in');
+    expect(latest.bootIssue).toBeNull();
+  });
   it('a successful auth event wins over a late stale startup session response',async()=>{
     let finish!:(value:unknown)=>void;auth.getSession.mockReturnValue(new Promise(resolve=>{finish=resolve;}));
     mount();await flush();

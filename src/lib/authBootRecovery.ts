@@ -18,7 +18,7 @@ export const AUTH_BOOT_TIMEOUT_MS = 12_000;
 export const AUTH_BOOT_AUTO_RELOAD_WINDOW_MS = 60_000;
 const AUTO_RELOAD_KEY = 'veil.authBoot.autoReloadAt';
 
-export type AuthBootIssueKind = 'lock-stolen' | 'storage-full' | 'timeout' | 'error';
+export type AuthBootIssueKind = 'lock-stolen' | 'storage-full' | 'timeout' | 'service-unavailable' | 'error';
 export interface AuthBootDiagnostic { label: string; value: string }
 export interface AuthBootIssue {
   kind: AuthBootIssueKind;
@@ -59,6 +59,7 @@ export function authBootReason(kind: AuthBootIssueKind, headroom?: StorageHeadro
       : '浏览器给本站的本地存储写满了，新的登录令牌存不进去。可重建的缓存已经清掉腾出了位置，重试即可。';
   }
   if (kind === 'timeout') return `向登录服务刷新令牌已经等了 ${AUTH_BOOT_TIMEOUT_MS / 1000} 秒没有回应，多半是这个浏览器到登录服务的连接卡住了。页面还在等，回应一到会自动进入。`;
+  if (kind === 'service-unavailable') return '登录服务暂时无法验证当前会话。浏览器会保留登录令牌，服务恢复后可重试。';
   return '恢复登录态时出错。';
 }
 

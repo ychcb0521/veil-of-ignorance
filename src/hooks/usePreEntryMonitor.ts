@@ -66,9 +66,13 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       persistence.seed(drafts ? mergePreEntryLibraries(newLibrary,drafts) : newLibrary);
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
+      const recordedRounds = new Set<string>(), pendingRounds = new Set<string>();
+      for (const record of value.records) {
+        recordedRounds.add(record.roundId);
+        if (preEntryRecordPending(record)) pendingRounds.add(record.roundId);
+      }
       const recovered = { ...value, rounds: value.rounds.map(r => {
-        const records = value.records.filter(record => record.roundId === r.id);
-        if (r.state !== 'complete' && records.length && !records.some(preEntryRecordPending)) {
+        if (r.state !== 'complete' && recordedRounds.has(r.id) && !pendingRounds.has(r.id)) {
           return { ...r, state: 'complete' as const, updatedAt: at };
         }
         return r.state === 'running' ? { ...r, state: 'paused' as const, updatedAt: at } : r;

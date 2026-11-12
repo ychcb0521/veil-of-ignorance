@@ -5,7 +5,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { User, Session } from '@supabase/supabase-js';
+import { isAuthRetryableFetchError, type User, type Session } from '@supabase/supabase-js';
 import { setActiveSyncUser } from '@/lib/simStateSync';
 import { boundedAuthAction, AuthActionTimeout } from '@/lib/authTransport';
 import { authErrorText } from '@/lib/authErrorText';
@@ -76,6 +76,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if(!active)return;
+        // The SDK also emits INITIAL_SESSION with null when token refresh fails.
+        // getSession distinguishes a temporary backend error from a signed-out session.
+        if (event === 'INITIAL_SESSION' && !session) return;
         authRevision++;settled=true;clearTimeout(watchdog);
         currentUser.current=session?.user?.id??null;
         setLoading(false);setBootIssue(null);
@@ -97,17 +100,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
      * 刷新令牌的请求卡住时它一直不返回。三种都不能表现为无限的「加载中...」。
      */
     const report = async (kind: AuthBootIssueKind, error?: unknown, knownHeadroom?: StorageHeadroom) => {
+      const revision = authRevision;
       const { diagnostics, headroom } = await collectAuthBootDiagnostics(error, Date.now(), knownHeadroom);
       // 读现场要等一拍：这期间登录态可能已经恢复，迟到的超时提示不能再盖上去。
-      if (!active || (kind === 'timeout' && settled)) return;
+      if (!active || revision !== authRevision || (kind === 'timeout' && settled)) return;
       setBootIssue({ kind, reason: authBootReason(kind, headroom), diagnostics });
     };
 
     // Then get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
       if(!active||authRevision>0)return;
       settled = true;
       clearTimeout(watchdog);
+      if (isAuthRetryableFetchError(error)) {
+        void report('service-unavailable', error);
+        return;
+      }
       setBootIssue(null);
       setSession(session);
       currentUser.current=session?.user?.id??null;
