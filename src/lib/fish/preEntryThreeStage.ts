@@ -20,7 +20,9 @@ export const PRE_ENTRY_THREE_STAGE_VERSION = 'pre-entry-three-stage-v6' as const
 export const PRE_ENTRY_RETRY_VERSION = 'pre-entry-three-stage-v7' as const;
 export const PRE_ENTRY_SIGNAL_GATE_VERSION = 'pre-entry-three-stage-v8' as const;
 export const PRE_ENTRY_TRACKED_GATE_VERSION = 'pre-entry-three-stage-v9' as const;
-const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION] as const;
+/** 三个步骤可独立跳过。指标准入从首次具备资格的观察时点开始计数。 */
+export const PRE_ENTRY_OPTIONAL_STAGES_VERSION = 'pre-entry-three-stage-v10' as const;
+const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION, PRE_ENTRY_OPTIONAL_STAGES_VERSION] as const;
 export type PreEntryThreeStageVersion = typeof THREE_STAGE_VERSIONS[number];
 export const isPreEntryThreeStageVersion = (version: unknown): version is PreEntryThreeStageVersion =>
   THREE_STAGE_VERSIONS.some(candidate => candidate === version);
@@ -37,6 +39,8 @@ export interface EntrySellRule {
   confirmation: { samples: number; minutes: number };
   source?: { planId: string; label: string; versions: QualityGroup['frozenVersions'] };
 }
+export interface PreEntryStageSwitches { required: boolean; admission: boolean; exclusion: boolean }
+
 export interface PreEntryThreeStage {
   version: PreEntryThreeStageVersion;
   observationBasis: 'scan-origin-v1'|'retry-origin-v2';
@@ -46,6 +50,7 @@ export interface PreEntryThreeStage {
   stallTurn?: EntryStallTurnRule;
   required: EntryMarketCondition[];
   requiredPaths?: { static: boolean; tracking: boolean };
+  steps?: PreEntryStageSwitches;
   detectors?: {id:string;featureId?:string;stricterPct:number;match:'all'|'any'}[];
   additionSource?: {planId:string;label:string;round:number;versions:QualityGroup['frozenVersions']};
   additionVetoes: QualityAdditionEntryVeto[];
@@ -66,7 +71,7 @@ export const emptyPreEntryThreeStage = (): PreEntryThreeStage => ({
 /** Only an explicit new plan/copy opts into different observation semantics. */
 export function retryPreEntryThreeStage(c:PreEntryThreeStage,algorithms:EntryMarketCondition[]=[]):PreEntryThreeStage {
  validatePreEntryThreeStage(c);
- const {requiredPaths,...copy}=structuredClone(c);
+ const {requiredPaths,steps,...copy}=structuredClone(c);
  return {...copy,version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:c.admission?structuredClone(c.admission):{guardEnabled:true,algorithms:structuredClone(algorithms)}};
 }
 export function signalGatePreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
@@ -75,7 +80,17 @@ export function signalGatePreEntryThreeStage(config: PreEntryThreeStage, algorit
 export function trackedGatePreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
   return {...signalGatePreEntryThreeStage(config,algorithms),version:PRE_ENTRY_TRACKED_GATE_VERSION,requiredPaths:{static:true,tracking:false}};
 }
-export const usesSignalTimeGate = (version: unknown): boolean => version === PRE_ENTRY_SIGNAL_GATE_VERSION || version === PRE_ENTRY_TRACKED_GATE_VERSION;
+export function optionalStagesPreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
+  return {
+    ...trackedGatePreEntryThreeStage(config, algorithms),
+    version: PRE_ENTRY_OPTIONAL_STAGES_VERSION,
+    requiredPaths: config.requiredPaths ? {...config.requiredPaths} : {static:true,tracking:false},
+    steps: config.steps ? {...config.steps} : {required:true,admission:true,exclusion:true},
+  };
+}
+export const usesTrackedGate = (version: unknown): boolean =>
+  version === PRE_ENTRY_TRACKED_GATE_VERSION || version === PRE_ENTRY_OPTIONAL_STAGES_VERSION;
+export const usesSignalTimeGate = (version: unknown): boolean => version === PRE_ENTRY_SIGNAL_GATE_VERSION || usesTrackedGate(version);
 export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondition[] => 'condition' in e ? [e.condition] : e.children.flatMap(expressionConditions);
 export function validateEntryCondition(c: EntryMarketCondition) {
   if (!c.id || !c.metric || !c.snapshot?.definitionKey || !c.label.trim() || !Number.isFinite(c.threshold) || !['<','>','<=','>='].includes(c.direction) || !['intrabar','closed'].includes(c.timing)) throw Error('市场条件须选择指标、方向、有限门槛及确认方式');
@@ -84,9 +99,14 @@ export function validateEntryCondition(c: EntryMarketCondition) {
 export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is PreEntryThreeStage {
   if (!c || !isPreEntryThreeStageVersion(c.version) || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
   const retry = c.version === PRE_ENTRY_RETRY_VERSION || usesSignalTimeGate(c.version);
-  if (c.version === PRE_ENTRY_TRACKED_GATE_VERSION) {
+  if (c.version === PRE_ENTRY_OPTIONAL_STAGES_VERSION) {
+    if (!c.steps || [c.steps.required,c.steps.admission,c.steps.exclusion].some(enabled=>typeof enabled !== 'boolean')) {
+      throw Error('三步筛选开关不完整');
+    }
+  } else if (c.steps !== undefined) throw Error('三步独立开关须另存为新方案');
+  if (usesTrackedGate(c.version)) {
     const paths = c.requiredPaths;
-    if (!paths || typeof paths.static !== 'boolean' || typeof paths.tracking !== 'boolean' || !paths.static && !paths.tracking) throw Error('请至少选择一种必要条件路径');
+    if (!paths || typeof paths.static !== 'boolean' || typeof paths.tracking !== 'boolean' || c.steps?.required !== false && !paths.static && !paths.tracking) throw Error('请至少选择一种必要条件路径');
   } else if (c.requiredPaths) throw Error('动态门槛须另存为新方案');
   if (c.observationBasis !== (retry ? 'retry-origin-v2' : 'scan-origin-v1')) throw Error('三阶筛选版本不可用，请保留原方案');
   const ids = new Set<string>();
@@ -96,7 +116,7 @@ export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is
     validateEntryStallTurnRule(c.stallTurn);unique(c.stallTurn.version);
   }
   if(retry){
-    if(!c.admission||typeof c.admission.guardEnabled!=='boolean'||!Array.isArray(c.admission.algorithms)||!c.admission.guardEnabled&&!c.admission.algorithms.some(f=>f.enabled))throw Error('至少启用一条并列准入算法');
+    if(!c.admission||typeof c.admission.guardEnabled!=='boolean'||!Array.isArray(c.admission.algorithms)||c.steps?.admission!==false&&!c.admission.guardEnabled&&!c.admission.algorithms.some(f=>f.enabled))throw Error('至少启用一条并列准入算法');
     c.admission.algorithms.forEach(f=>{unique(f.id);validateEntryCondition(f);});
     if(c.longDrawdown?.enabled){unique('long-drawdown-v1');const d=c.longDrawdown;if(!Number.isFinite(d.hours)||d.hours<1/60||d.hours>8784||!Number.isFinite(d.pct)||d.pct<=0||d.pct>=100||!['current','maximum'].includes(d.mode))throw Error('长周期回撤须填写至少 1 分钟的有效回看时长和 0～100% 之间的回撤阈值');}
   }else if(c.admission!==undefined||c.longDrawdown!==undefined)throw Error('新准入与回撤条件须另存为 v7 新方案');

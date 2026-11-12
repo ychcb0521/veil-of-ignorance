@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, trackedGatePreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, trackedGatePreEntryThreeStage, optionalStagesPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
 import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -428,4 +428,54 @@ it('retains the first passing minute on resume and respects the original cutoff'
   expect(first).toMatchObject({status:'queued',trackedGate:{at:T+2*M,status:'pass'}});
   expect(await run(p,{load,automatic:true,end:T+5*M,hours:5/60,old:first})).toMatchObject({status:'matched',matchedAt:T+4*M,trackedGate:first.trackedGate});
   expect(await run(p,{load,automatic:true,end:T+5*M,hours:1/60})).toMatchObject({status:'unmatched',cursor:T+M,detail:'截止前必要条件未全部满足'});
+});
+
+it.each([
+  [true, true, true, 2], [true, true, false, 2],
+  [true, false, true, 2], [true, false, false, 2],
+  [false, true, true, 4], [false, true, false, 1],
+  [false, false, true, 2], [false, false, false, 1],
+] as const)('executes only enabled stages (necessary=%s admission=%s exclusion=%s)', async (required,admission,exclusion,minute) => {
+  const p=stateOnlyPlan();
+  p.preEntryThreeStage=optionalStagesPreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.steps={required,admission,exclusion};
+  p.preEntryThreeStage.requiredPaths={static:true,tracking:true};
+  p.preEntryThreeStage.required=[condition('必要资格',103)];
+  p.preEntryThreeStage.longDrawdown={enabled:true,mode:'current',hours:1/60,pct:6};
+  const load=vi.fn(loader([85,105,75,110]));
+  const result=await run(p,{load,end:T+4*M});
+  expect(result).toMatchObject({status:'matched',matchedAt:T+minute*M});
+  if(required)expect(result.trackedGate?.at).toBe(T+2*M);
+  else expect(result.signalGate).toBeUndefined();
+  if(admission)expect(result.threeStage?.admission?.met).toEqual(['状态 S']);
+  else expect(result.threeStage?.admission).toMatchObject({skipped:true,met:[]});
+  expect(result.threeStage?.readings.some(reading=>reading.id==='long-drawdown-v1')).toBe(exclusion);
+  if(!required&&exclusion) {
+    expect(result.lastVeto?.at).toBe(T+M);
+    if(!admission)expect(result.exclusionProcess?.entries.find(e=>e.stage==='exclusion')?.admission)
+      .toMatchObject({at:T+M,labels:['已跳过事件准入']});
+  }
+});
+
+it('admits a previously qualifying indicator at the tracked gate, including after an automatic resume',async()=>{
+  const p=stateOnlyPlan();
+  p.preEntryThreeStage=optionalStagesPreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.requiredPaths={static:true,tracking:true};
+  p.preEntryThreeStage.required=[condition('门槛',115)];
+  const load=loader([110,120,121]);
+  const first=await run(p,{load,automatic:true,end:T+M});
+  expect(first).toMatchObject({status:'queued',cursor:T+M});
+  const resumed=await run(p,{load,automatic:true,end:T+3*M,old:first});
+  const fresh=await run(p,{load,automatic:true,end:T+3*M});
+  expect(resumed).toMatchObject({status:'matched',matchedAt:T+2*M,trackedGate:{at:T+2*M}});
+  expect(resumed.threeStage).toEqual(fresh.threeStage);
+});
+
+it('does not admit through an enabled exclusion at the original deadline',async()=>{
+  const p=stateOnlyPlan();
+  p.preEntryThreeStage=optionalStagesPreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.steps={required:false,admission:false,exclusion:true};
+  p.preEntryThreeStage.hardVetoes=[{id:'never',label:'全程排除',enabled:true,kind:'indicator',metric:'raw',snapshot:snapshot(),direction:'>',threshold:0}];
+  expect(await run(p,{load:loader([110,115,120]),hours:2/60,end:T+4*M}))
+    .toMatchObject({status:'unmatched',cursor:T+2*M,endTime:T+2*M,lastVeto:{at:T+2*M,count:2}});
 });

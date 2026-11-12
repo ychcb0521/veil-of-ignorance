@@ -26,7 +26,8 @@ export function recordEntryEvidence(process:EntryExclusionProcess,e:EntryStageEv
   // All stages describe this same immutable minute. Share its readings instead
   // of making three identical copies in every saved observation.
   const readings=e.readings.map(r=>({...r}));
-  const admission = e.admission?.met.length ? {at:e.at,labels:e.admission.met,indicatorIds} : undefined;
+  const admission = e.admission?.skipped ? {at:e.at,labels:['已跳过事件准入'],indicatorIds}
+    : e.admission?.met.length ? {at:e.at,labels:e.admission.met,indicatorIds} : undefined;
   for(const [stage,state]of observed){
     let index=-1;for(let i=entries.length-1;i>=0;i--)if(entries[i].kind==='observation'&&entries[i].stage===stage){index=i;break;}
     const previous=entries[index],consecutive=previous?.through===e.at-60000&&!previous.endedAt,reason=state.reason??'条件尚未通过';
