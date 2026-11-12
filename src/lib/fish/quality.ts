@@ -164,6 +164,8 @@ export interface FishQualityStudy {
   filterLibrary?: QualityFilterLibrary;
   campaignRepair?: QualityRepairBatch;
   buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
+  workspaceUpdatedAt?: number;
+  workspaceMonitorDraft?: import('./qualityMonitorLibrary').QualityMonitorLibrary;
   signalMetrics?: import('./qualitySignalReadings').QualitySignalMetric[];
   signalMetricsUpdatedAt?: number;
   signalReadings?: QualityFilterReading[];

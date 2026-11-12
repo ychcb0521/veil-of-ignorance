@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, trackedGatePreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
 import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -387,4 +387,40 @@ it('yields during already-saved resume history so a queued pause can interrupt b
  const abort=setTimeout(()=>aborter.abort(),0);
  try{const result=await run(p,{old,aborter,end:T+500*M,hours:10});expect(aborter.signal.aborted).toBe(true);expect(result.status).toBe('paused');expect(result.cursor).toBe(old.cursor);}
  finally{clearTimeout(abort);timing.mockRestore();}
+});
+
+it('defaults to a one-time signal gate and fingerprints the tracking path separately', async () => {
+  const p = stateOnlyPlan();
+  p.preEntryThreeStage = trackedGatePreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.required = [condition('门槛',105)];
+  expect(p.preEntryThreeStage.requiredPaths).toEqual({static:true,tracking:false});
+  const saved = freezeQualityPlan(p);
+  const tracked = {...p,preEntryThreeStage:{...p.preEntryThreeStage,requiredPaths:{static:true,tracking:true}}};
+  expect(planVersionChanges({...saved,preEntryThreeStage:tracked.preEntryThreeStage}).length).toBeGreaterThan(0);
+  expect(await run(saved,{load:loader([110,120])})).toMatchObject({status:'unmatched',signalGate:{status:'blocked'}});
+  expect((await run(tracked,{load:loader([70,110,120])})).trackedGate?.at).toBe(T+2*M);
+});
+
+it.each([true,false])('tracks until the first simultaneous gate pass and ignores a stale event (static selected=%s)', async (staticPath) => {
+  const p = stateOnlyPlan();
+  p.preEntryThreeStage = trackedGatePreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.requiredPaths={static:staticPath,tracking:true};
+  p.preEntryThreeStage.required = [condition('先达到120',115),condition('保持在130以内',130,'<')];
+  p.preEntryThreeStage.admission!.algorithms = [condition('新事件',105)];
+  const data=loader([110,120,119,99,110]);
+  const result=await run(p,{load:data});
+  expect(result).toMatchObject({status:'matched',matchedAt:T+5*M,signalGate:{status:'blocked'},trackedGate:{at:T+2*M,status:'pass',readings:[{value:120,met:true},{value:120,met:true}]}});
+});
+
+it('retains the first passing minute on resume and respects the original cutoff', async () => {
+  const p=stateOnlyPlan();
+  p.preEntryThreeStage=trackedGatePreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.requiredPaths={static:true,tracking:true};
+  p.preEntryThreeStage.required=[condition('门槛',115)];
+  p.preEntryThreeStage.admission!.algorithms=[condition('新事件',125)];
+  const load=loader([100,120,121,126]);
+  const first=await run(p,{load,automatic:true,end:T+3*M,hours:5/60});
+  expect(first).toMatchObject({status:'queued',trackedGate:{at:T+2*M,status:'pass'}});
+  expect(await run(p,{load,automatic:true,end:T+5*M,hours:5/60,old:first})).toMatchObject({status:'matched',matchedAt:T+4*M,trackedGate:first.trackedGate});
+  expect(await run(p,{load,automatic:true,end:T+5*M,hours:1/60})).toMatchObject({status:'unmatched',cursor:T+M,detail:'截止前必要条件未全部满足'});
 });

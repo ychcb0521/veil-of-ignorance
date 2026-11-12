@@ -8,13 +8,14 @@ import { loadFishActiveMisses, loadFishMissDirectory, loadFishMissRound, readFis
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 
-export function FishHitRateMissLibrary({ owner, revision, activeRevision, selected, onSelect, readOnly }: {
+export function FishHitRateMissLibrary({ owner, revision, activeRevision, selected, onSelect, readOnly, workspace = false }: {
   owner?: string | null;
   revision: number;
   activeRevision: number;
   selected: readonly TradeSignal[];
   onSelect: (samples: TradeSignal[]) => void;
   readOnly?: boolean;
+  workspace?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'pending' | 'history'>('pending');
@@ -103,13 +104,13 @@ export function FishHitRateMissLibrary({ owner, revision, activeRevision, select
   return <Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild>
       <button type="button" className={libraryDirectoryAction}>
-        <Database aria-hidden className="h-3 w-3"/>从未命中库选择标的
+        <Database aria-hidden className="h-3 w-3"/>{workspace?'未命中库':'从未命中库选择标的'}
       </button>
     </DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] flex-col gap-3 overflow-y-auto p-4 sm:p-5">
       <DialogHeader className="pr-6 text-left">
         <DialogTitle className="text-sm">未命中库</DialogTitle>
-        <DialogDescription className="text-[11px]">每个测试窗口判定后更新待复测记录。勾选标的后按原信号时间复测。</DialogDescription>
+        <DialogDescription className="text-[11px]">{workspace?'勾选待复测或历史轮次的标的，可按原信号时间导入组合表。':'每个测试窗口判定后更新待复测记录。勾选标的后按原信号时间复测。'}</DialogDescription>
       </DialogHeader>
       <div role="group" aria-label="未命中库视图" className="flex w-fit gap-1 rounded-md bg-muted/60 p-0.5 text-[11px]">
         <button type="button" aria-pressed={view === 'pending'} onClick={() => setView('pending')}
@@ -163,7 +164,7 @@ export function FishHitRateMissLibrary({ owner, revision, activeRevision, select
           <button type="button" onClick={() => changeOpen(false)} className="rounded-md border border-border/60 px-3 py-1.5 hover:bg-muted">取消</button>
           <button type="button" disabled={readOnly || (!draft.size && !selected.length)} onClick={() => { onSelect([...draft.values()]); changeOpen(false); }}
             className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40">
-            {draft.size || !selected.length ? '使用所选样本' : '清空测试样本'}
+            {workspace ? '导入组合表' : draft.size || !selected.length ? '使用所选样本' : '清空测试样本'}
           </button>
         </div>
       </div>

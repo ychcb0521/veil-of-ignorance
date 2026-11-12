@@ -7,48 +7,60 @@ import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
 import { loadPreEntryLibraryV4 } from '@/lib/fish/preEntryMonitorV4Store';
 import { loadPreEntryLibraryV5 } from '@/lib/fish/preEntryMonitorV5Store';
-import { loadPreEntryLibraryV6, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
+import { loadPreEntryLibraryV6, loadPreEntryWorkspaceDraft, savePreEntryWorkspaceDraft, discardPublishedWorkspaceDraft, savePreEntryLibraryV6 as savePreEntryLibrary, savePreEntryTableClears } from '@/lib/fish/preEntryMonitorV6Store';
 import { withPreEntryTableClears } from '@/lib/fish/preEntryTableClears';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import {projectPreEntryBatch} from '@/lib/fish/preEntryArchiveClient';
-import { PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { usesSignalTimeGate, PRE_ENTRY_THREE_STAGE_VERSION, validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
 import { freezeQualityPlan, freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
-export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>) {
+export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>, workspaceMode = false) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
   const [ready, setReady] = useState(false), [running, setRunning] = useState(false);
   const [automaticRunning, setAutomaticRunning] = useState(false);
   const [error, setError] = useState(''), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [reload, setReload] = useState(0);
-  const persistence = useMemo(() => createPreEntryCheckpoint(value => savePreEntryLibrary(owner, value), true), [owner]);
   const current = useRef(library), runner = useRef(run), controller = useRef<AbortController | null>(null);
   const epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout>>();
+  const persistence = useMemo(() => createPreEntryCheckpoint(async value => {
+    if (!workspaceMode) return savePreEntryLibrary(owner,value);
+    const draftIds = new Set(current.current.rounds.filter(round => round.workspaceDraft).map(round => round.id));
+    const drafts = {version:1 as const,rounds:value.rounds.filter(round => draftIds.has(round.id)),records:value.records.filter(record => draftIds.has(record.roundId))};
+    if (drafts.rounds.length || drafts.records.length) await savePreEntryWorkspaceDraft(owner,drafts);
+    const saved = {...value,rounds:value.rounds.filter(round => !draftIds.has(round.id)),records:value.records.filter(record => !draftIds.has(record.roundId))};
+    if (saved.rounds.length || saved.records.length || saved.settings || saved.settingsHistory || saved.directoryEdits || saved.tableClears) await savePreEntryLibrary(owner,saved);
+  },true), [owner,workspaceMode]);
   const execution = useRef<Promise<void> | null>(null);
+  const savingDraft = useRef(false);
+  const [savingWorkspaceDraft,setSavingWorkspaceDraft] = useState(false);
   const tableClearLock=useRef(false);
   const readyRef = useRef(false); runner.current = run;
   const commit = useCallback((value: PreEntryLibrary) => { current.current = value; setLibrary(value); }, []);
   useEffect(() => {
     const generation = ++epoch.current;
     readyRef.current = false; setReady(false); setRunning(false); setAutomaticRunning(false); setProgress(null); setError('');
-    tableClearLock.current=false;commit(emptyPreEntryLibrary());
+    tableClearLock.current=false;savingDraft.current=false;setSavingWorkspaceDraft(false);commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
-    void Promise.all([loadPreEntryLibraryV6(owner,preview=>{if(epoch.current===generation)commit(preview);},reload>0), loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined)]).then(async([newLibrary, v5, v4, v3, v2, legacy]) => {
+    void Promise.all([loadPreEntryLibraryV6(owner,preview=>{if(epoch.current===generation)commit(preview);},reload>0), loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined),workspaceMode ? loadPreEntryWorkspaceDraft(owner) : undefined]).then(async([newLibrary, v5, v4, v3, v2, legacy, draft]) => {
       const old = mergePreEntryLibraries(mergePreEntryLibraries(mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary()), v3 ?? emptyPreEntryLibrary()), v4);
       if(v4.settings) old.settings=v4.settings;
       const oldV5=mergePreEntryLibraries(old,v5);if(v5.settings)oldV5.settings=v5.settings;
-      const value = mergePreEntryLibraries(oldV5, newLibrary);
+      const saved = mergePreEntryLibraries(oldV5,newLibrary);
+      const published = new Set(saved.rounds.map(round => round.id));
+      const drafts = draft && {...draft,rounds:draft.rounds.filter(round => !published.has(round.id)),records:draft.records.filter(record => !published.has(record.roundId))};
+      const value = drafts ? mergePreEntryLibraries(saved,drafts) : saved;
       const cold=value.records.filter(r=>!r.processRef&&(r.exclusionProcess?.entries.length??0)>16);
       if(cold.length){const projected=await projectPreEntryBatch(owner,cold),byId=new Map(projected.map(r=>[r.id,r]));value.records=value.records.map(r=>byId.get(r.id)??r);}
       // Once v6 has its own settings, a still-open older page cannot replace
       // them merely by saving its older schema with a later timestamp.
       if (newLibrary.settings) value.settings = newLibrary.settings;
       if (epoch.current !== generation) return;
-      persistence.seed(newLibrary);
+      persistence.seed(drafts ? mergePreEntryLibraries(newLibrary,drafts) : newLibrary);
       // An interrupted page has no live task. Keep its frozen conditions and cursor for explicit resume.
       const at = Date.now();
       const recovered = { ...value, rounds: value.rounds.map(r => {
@@ -68,10 +80,10 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (timer.current) { clearTimeout(timer.current); timer.current = undefined; }
       window.removeEventListener('pagehide', flush);
     };
-  }, [owner, enabled, reload, commit, persistence]);
+  }, [owner, enabled, reload, commit, persistence, workspaceMode]);
 
   const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy) => {
-    if (!readyRef.current || controller.current||tableClearLock.current) return;
+    if (!readyRef.current || controller.current||tableClearLock.current||savingDraft.current) return;
     const generation = epoch.current, aborter = new AbortController(); controller.current = aborter;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; }); execution.current = finished;
@@ -147,7 +159,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     }
   }, [commit, persistence, owner]);
   const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false) => {
-    if (!readyRef.current || controller.current||tableClearLock.current) return;
+    if (!readyRef.current || controller.current||tableClearLock.current||savingDraft.current) return;
     if (automaticId) {
       if (owner && recover) {
         const generation = epoch.current;
@@ -178,9 +190,9 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     if (!plans.length || !threeStage&&!filters.length || !samples.length) { setError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = automaticId ?? `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? { automatic: true } : {}) };
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => {
-      const startTime = round.engine === PRE_ENTRY_SIGNAL_GATE_VERSION ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
+      const startTime = usesSignalTimeGate(round.engine) ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
       return { id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
         status: 'queued' as const, startTime, cursor: startTime, readings: [], updatedAt: at };
     }));
@@ -189,7 +201,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     // The screening engine reads its frozen round and records, never the research history.
     // Do not duplicate hundreds of MB of unrelated results when starting a task.
     await execute(round, newQualityStudy(study.startedAt));
-  }, [execute, commit, owner]);
+  }, [execute, commit, owner, workspaceMode]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
     const round = current.current.rounds.find(r => r.id === roundId);
     if (round) await execute(round, newQualityStudy(study.startedAt));
@@ -240,7 +252,33 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const next={...mergePreEntryLibraries(current.current,historical),settings:current.current.settings};
     try{await persistence.save(next);if(epoch.current!==generation)return false;commit({...mergePreEntryLibraries(current.current,next),settings:current.current.settings});return true;}catch{return false;}
   },[commit,persistence]);
-  return { library, ready, running, automaticRunning, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
+  const savedLibrary = useMemo(() => {
+    const draftIds = new Set(library.rounds.filter(round => round.workspaceDraft).map(round => round.id));
+    return !draftIds.size ? library : {...library,rounds:library.rounds.filter(round => !draftIds.has(round.id)),records:library.records.filter(record => !draftIds.has(record.roundId))};
+  },[library]);
+  const saveWorkspaceScreening = useCallback(async () => {
+    if (!readyRef.current || savingDraft.current) return false;
+    const completed = current.current.rounds.filter(round => round.workspaceDraft && round.state === 'complete');
+    if (!completed.length) return false;
+    const generation = epoch.current;
+    const rounds = completed.map(({workspaceDraft,...round}) => ({...round,workspaceSaved:true as const,updatedAt:Math.max(Date.now(),round.updatedAt+1)}));
+    const ids = new Set(rounds.map(round => round.id));
+    const records = current.current.records.filter(record => ids.has(record.roundId));
+    savingDraft.current = true;setSavingWorkspaceDraft(true);setError('');
+    try {
+      await savePreEntryLibrary(owner,{version:1,rounds,records});
+      if (generation !== epoch.current) return false;
+      commit({...current.current,rounds:current.current.rounds.map(round => rounds.find(saved => saved.id === round.id) ?? round)});
+      void discardPublishedWorkspaceDraft(owner,ids,records.map(record=>record.id)).catch(()=>undefined);
+      return true;
+    } catch (cause) {
+      if (generation === epoch.current) setError(cause instanceof Error ? cause.message : '保存筛选结果失败');
+      return false;
+    } finally {
+      if (generation === epoch.current) {savingDraft.current=false;setSavingWorkspaceDraft(false);}
+    }
+  },[commit,owner]);
+  return { library, savedLibrary, saveWorkspaceScreening, savingWorkspaceDraft, ready, running, automaticRunning, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
     startAutomatic: (id: string, study: FishQualityStudy, recover: boolean) => start(study, newPreEntryHours(current.current.settings?.hours), id, recover),
     pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
 }

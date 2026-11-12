@@ -9,7 +9,7 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, PRE_ENTRY_SIGNAL_GATE_VERSION, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, trackedGatePreEntryThreeStage, PRE_ENTRY_TRACKED_GATE_VERSION, usesSignalTimeGate, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
 import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
@@ -37,27 +37,27 @@ function copyAsThreeStage(p:QualityGroup):QualityGroup {
 export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTemplate}:{state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void}){
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
-  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=signalGatePreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
+  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=trackedGatePreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(monitor.library.settings?.hours))),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
   const retry=c?.observationBasis==='retry-origin-v2';
-  const signalGate=c?.version===PRE_ENTRY_SIGNAL_GATE_VERSION;
+  const signalGate=usesSignalTimeGate(c?.version), trackedGate=c?.version===PRE_ENTRY_TRACKED_GATE_VERSION;
   const sources=state.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
   const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
   const createSignalGateCopy=()=>guardAction(()=>{
-    if(!active||!c||!retry||signalGate)return;
+    if(!active||!c||trackedGate)return;
     const {frozenVersions:_old,...base}=active;
     const config={
       ...c,
       additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,
       hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):c.hardVetoes,
     };
-    const copy={...structuredClone(base),id:id(),label:active.label+' · 信号时点副本',preEntryThreeStage:signalGatePreEntryThreeStage(config)};
+    const copy={...structuredClone(base),id:id(),label:active.label+' · 门槛路径副本',preEntryThreeStage:trackedGatePreEntryThreeStage(config,c.admission?[]:[defaultAdmission()])};
     setPlans([copy]);setActiveId(copy.id);setVetoDrafts({});setHardDrafts({});
   });
   const createFiveMinuteStallCopy=()=>guardAction(()=>{
@@ -138,9 +138,15 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         </div><p className="mt-2 text-muted-foreground">仅复制所选轮次的市场条件；原探测算法按每条原信号的冻结公式和门槛判断。实际成本、分段持仓及动态退出确认不能直接转换。来源配置和旧模板保持原样。</p>
       </details>
       <section className="screening-stage space-y-3" data-testid="three-stage-zero">
-        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">⓪ 必要条件</h4><FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才具备入选资格。未设置必要条件时，直接检查后两阶段。</p><p>{signalGate?'只在原信号时点判断一次。逐分钟复原使用截至信号时刻已结束的分钟，收盘模式读取当时已收盘的原周期。重筛沿用本次判定。':'此版本逐分钟判断，必要条件须在准入时点同时满足。'}</p><p>原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">{signalGate?'仅信号时点':'全部满足'}</span></div>
-        <p className="text-muted-foreground">{signalGate?'所有已启用的条件须在原信号时点满足。':'所有已启用的条件须在准入时点同时满足。'}</p>
-        {retry&&!signalGate&&<button type="button" className={button+' text-primary'} onClick={createSignalGateCopy}>改用信号时点判断（另存副本）</button>}
+        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">⓪ 必要条件</h4><FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才具备入选资格。未设置必要条件时，直接检查后两阶段。</p><p>{trackedGate?'静态门槛在原信号时点判断一次。追踪捕捉在原截止时间内逐步检查，首次全部满足后观察新事件。两项都启用时，任一路径通过即可。':signalGate?'只在原信号时点判断一次。逐分钟复原使用截至信号时刻已结束的分钟，收盘模式读取当时已收盘的原周期。重筛沿用本次判定。':'此版本逐分钟判断，必要条件须在准入时点同时满足。'}</p><p>原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">{trackedGate?'至少一条路径':signalGate?'仅信号时点':'全部满足'}</span></div>
+        {trackedGate && c.requiredPaths ? <fieldset className="flex flex-wrap gap-4 text-[11px]">
+          <legend className="mb-1 text-muted-foreground">必要条件路径</legend>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={c.requiredPaths.static} onChange={event=>patch({requiredPaths:{...c.requiredPaths!,static:event.target.checked}})}/>静态门槛</label>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={c.requiredPaths.tracking} onChange={event=>patch({requiredPaths:{...c.requiredPaths!,tracking:event.target.checked}})}/>追踪捕捉</label>
+        </fieldset> : <>
+          <p className="text-muted-foreground">{signalGate?'所有已启用的条件须在原信号时点满足。':'所有已启用的条件须在准入时点同时满足。'}</p>
+          <button type="button" className={button+' text-primary'} onClick={createSignalGateCopy}>使用静态门槛 / 追踪捕捉（另存副本）</button>
+        </>}
         {c.required.map((f,i)=><div key={f.id}>{conditionEditor(f,value=>patch({required:c.required.map((old,j)=>j===i?value:old)}),()=>patch({required:c.required.filter((_,j)=>j!==i)}),'必要条件 '+(i+1)+' ')}</div>)}
         {!c.required.length&&<p className="text-[11px] text-muted-foreground">{retry?'未设置额外必要条件；满足任一启用的准入标准后，继续检查排除门槛。':'未设置额外指标门槛；仍须通过防守线事件与排除门槛。'}</p>}
         <button type="button" className={button} disabled={!choices.length} onClick={()=>patch({required:[...c.required,newCondition()]})}>添加必要条件</button>

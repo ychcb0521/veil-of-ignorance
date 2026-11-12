@@ -130,24 +130,26 @@ function taskFor(study: FishQualityStudy, sample: QualitySample, plan: QualityGr
 }
 function recordFor(task: MonitorTask, readings: Map<string, QualityFilterReading>, result: QualityResult | undefined, at: number, prior?: QualityMonitorRecord): QualityMonitorRecord {
   const { id, setting, sample, plan } = task;
-  const { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol } = sample.source;
+  const { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, preEntryMonitor } = sample.source;
   const frozenStudy = { buyFilters: plan.buyFilters, sellPlans: [setting.plan] } as FishQualityStudy;
   const picked = (setting.plan.buyFilters ?? []).flatMap(f => { const reading = readings.get(qualityFilterReadingKey(sample, f)); return reading ? [structuredClone(reading)] : []; });
-  return { id, settingId: setting.id, source: { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol }, enteredAt: sample.enteredAt, basis: sample.basis,origin:sample.origin,origins:sample.origins,
+  return { id, settingId: setting.id, source: { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, ...(preEntryMonitor?{preEntryMonitor}: {}) }, enteredAt: sample.enteredAt, basis: sample.basis,origin:sample.origin,origins:sample.origins,
     filterStatus: qualityFilterStatus(frozenStudy, sample, setting.plan, readings), readings: picked,
     result: result ? structuredClone(result) : prior?.result, firstSavedAt: prior?.firstSavedAt ?? at, updatedAt: at };
 }
 let sequence = 0;
-export function beginQualityMonitorRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number, restart = false): { study: FishQualityStudy; capture: QualityMonitorCapture } {
+export function beginQualityMonitorRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number, restart = false, isolatedRound = false): { study: FishQualityStudy; capture: QualityMonitorCapture } {
   const library = study.monitorLibrary ?? empty(), catalog = new Map(library.settings.map(s => [s.signature, s]));
+  const roundId = `monitor-${at}-${++sequence}-${Math.random().toString(36).slice(2, 10)}`;
   const tasks = new Map<string, MonitorTask>(), readings = new Map((frozen.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Map((restart ? [] : frozen.results).map(r => [r.key, r]));
   const records = new Map(library.records.map(r => [r.id, r]));
   for (const sample of qualityRunSamples(frozen).map(qualityMonitoringSample)) for (const plan of qualityRunGroups(frozen).filter(g => frozen.sellPlans || sample.groups.includes(g.id))) {
-    const task = taskFor(frozen, sample, plan, catalog); tasks.set(task.resultKey, task);
+    const task = taskFor(frozen, sample, plan, catalog);
+    if (isolatedRound) task.id = roundId + ':' + task.id;
+    tasks.set(task.resultKey, task);
     records.set(task.id, recordFor(task, readings, results.get(task.resultKey), at, records.get(task.id)));
   }
-  const roundId = `monitor-${at}-${++sequence}-${Math.random().toString(36).slice(2, 10)}`;
   const round: QualityMonitorRound = { id: roundId, startedAt: at, updatedAt: at, state: 'running', ...encodeRound(library, [...new Set([...tasks.values()].map(t => t.id))]) };
   return { study: { ...study, monitorLibrary: { ...library, settings: [...catalog.values()], records: [...records.values()], rounds: [...library.rounds, round] } }, capture: { roundId, tasks, readings, results } };
 }

@@ -9,7 +9,7 @@ import { stricterAdditionThreshold } from './qualityAddition';
 import { planVersionChanges } from './qualityPlanVersions';
 import { withTuringInitialization } from './qualityInitialization';
 import { createPreEntryMarketReader, expressionResult, type EntryConditionReading } from './preEntryMarketReader';
-import { expressionConditions, validatePreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION, type EntryMarketCondition } from './preEntryThreeStage';
+import { expressionConditions, validatePreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION, usesSignalTimeGate, type EntryMarketCondition } from './preEntryThreeStage';
 import { createPreEntryGuardReader, type EntryGuardEvent } from './preEntryGuardEvent';
 import { createPreEntryGate, preEntryGuardWarmBars } from './preEntryGate';
 import { emptyPreEntryConditions } from './preEntryConditions';
@@ -152,8 +152,9 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const config=selected.preEntryThreeStage;validatePreEntryThreeStage(config);
       // 已存 v5 方案继续按 v5 顺序产出证据；新方案走 v6（⓪ 必要条件 → ① 防守线 → ② 排除段）。
       const retry=config.observationBasis==='retry-origin-v2';
-      const signalGate=config.version===PRE_ENTRY_SIGNAL_GATE_VERSION;
-      if((retry || task.round.engine===PRE_ENTRY_SIGNAL_GATE_VERSION || task.round.engine==='pre-entry-three-stage-v7') && config.version!==task.round.engine)throw Error('重筛轮次与冻结方案版本不符，不能混用');
+      const signalGate=usesSignalTimeGate(config.version);
+      const trackedPath=config.version===PRE_ENTRY_TRACKED_GATE_VERSION && config.requiredPaths?.tracking;
+      if((retry || usesSignalTimeGate(task.round.engine) || task.round.engine==='pre-entry-three-stage-v7') && config.version!==task.round.engine)throw Error('重筛轮次与冻结方案版本不符，不能混用');
       if(retry&&task.round.hours<=0)throw Error('否决重筛须设置有限总时限');
       const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION||retry;
       const row={...record.sample.source,timeMs:now},start=await bounds?.start?.(row.symbol),availableEnd=await bounds?.end?.(row.symbol)??now;
@@ -168,21 +169,29 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         const direction=f.direction??'>';
         return {id:d.id+':'+i,label:(f.featureShort??f.featureName??'原探测算法')+' 探测值',metric:'capture',snapshot:f,enabled:true,direction,threshold:d.stricterPct===0?f.threshold:stricterAdditionThreshold(f.threshold,direction,d.stricterPct),timing:'closed',originalDetector:{constraints:f.constraints??[]}};
       })}));
+      const necessaryConditions = [...required,...detectorGroups.flatMap(group => group.conditions)];
+      const signalAt = qualitySignalTime(record.sample.source);
+      let tracking = false;
       if (signalGate && (required.length || detectorGroups.length)) {
-        const gate = record.signalGate ?? await readSignalGate(row, qualitySignalTime(record.sample.source), required, detectorGroups, initializedLoad, signal, start, Math.min(now, availableEnd));
+        const gate = record.signalGate ?? await readSignalGate(row,signalAt,required,detectorGroups,initializedLoad,signal,start,Math.min(now,availableEnd))
+          .catch(error => {
+            if (!trackedPath || signal.aborted || !(error instanceof FishError) || error.kind !== 'gap') throw error;
+            return {signalAt,at:Math.floor(signalAt/M)*M,status:'pending' as const,reason:'信号时点行情有缺口',readings:[]};
+          });
         record = { ...record, signalGate: gate };
-        if (gate.status !== 'pass') {
+        tracking = !!trackedPath && gate.status !== 'pass';
+        if (gate.status !== 'pass' && !tracking) {
           publish({ status: gate.status === 'blocked' ? 'unmatched' : 'warming', endTime: end,
             detail: '⓪ 信号时点必要条件：' + (gate.reason ?? '读数不可用') });
           continue;
         }
       }
       const admissionAlgorithms=retry?config.admission!.algorithms.filter(c=>c.enabled):[],admissionIds=new Set(admissionAlgorithms.map(c=>c.id));
-      const conditions=[...(signalGate?[]:[...required,...detectorGroups.flatMap(g=>g.conditions)]),...sellers.flatMap(r=>expressionConditions(r.expression).filter(c=>c.enabled)),...hardIndicators,...admissionAlgorithms];
+      const conditions=[...(signalGate&&!tracking?[]:necessaryConditions),...sellers.flatMap(r=>expressionConditions(r.expression).filter(c=>c.enabled)),...hardIndicators,...admissionAlgorithms];
       const warmPlans=conditions.map(c=>({c,...qualityMetricPlan(c.snapshot,c.metric)}));
       const firstConfig={...emptyPreEntryConditions(),entryVetoes:config.additionVetoes};
       const secondConfig={...emptyPreEntryConditions(),hardVetoes:config.hardVetoes.filter(v=>v.kind!=='indicator')};
-      const readyAt=start==null||selected.initialization?record.startTime:Math.max(record.startTime,
+      const readyAt=tracking||start==null||selected.initialization?record.startTime:Math.max(record.startTime,
         ...warmPlans.filter(({c})=>!retry||!admissionIds.has(c.id)).map(({plan})=>Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step),
         ...(preEntryGuardWarmBars(firstConfig)?[Math.ceil(start/300000)*300000+preEntryGuardWarmBars(firstConfig)*300000]:[]));
       publish({status:'scanning',endTime:end});
@@ -193,7 +202,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       if(readyAt>end){publish({status:'warming',detail:'行情不足以完成三阶条件预热，未判定入选'});continue;}
       const readers=await Promise.all(conditions.map(async condition=>{
         const plan=warmPlans.find(p=>p.c===condition)!.plan;
-        const available=retry&&admissionIds.has(condition.id)&&start!=null&&!selected.initialization?Math.max(readyAt,Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step):readyAt;
+        const available=retry&&(tracking||admissionIds.has(condition.id))&&start!=null&&!selected.initialization?Math.max(readyAt,Math.ceil(start/plan.step)*plan.step+plan.warm*plan.step):readyAt;
         if(available<=readyAt)return {...await createPreEntryMarketReader({condition,row,since:readyAt,origin:record.startTime,load,signal}),prepare:undefined};
         // One slow OR branch must not postpone a ready guard/other algorithm.
         // Construct its reader only when the required history is in the past.
@@ -210,10 +219,11 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       // Independent history and recovery lock survive observation retries.
       const stallTurn=config.stallTurn?.enabled?createVersionedEntryStallTurnReader({condition:config.stallTurn,row,load,signal,availableStart:start}):undefined;
       let attempt=1,observationStart=record.startTime;
+      const necessaryById = new Map(necessaryConditions.map(condition => [condition.id,condition]));
       const resumeAt=original.cursor;
       let lastPaint=0,matched=false;
       const transport=entryMinuteTransport(readers.map(r=>r.plan));
-      const replayStart=Math.max(load.turingInitialization?.startMs??0,Math.min(Math.floor(readyAt/M)*M-M,...readers.map(r=>r.start)));
+      const replayStart=Math.max(load.turingInitialization?.startMs??0,tracking ? start??0 : 0,Math.min(Math.floor(readyAt/M)*M-M,...readers.map(r=>r.start)));
       for(let cursor=replayStart;cursor<end&&!matched;){
         let requestedCut=Math.min(end,cursor+500*M);
         let chunk:Awaited<ReturnType<typeof loadQualityScanChunk>>;
@@ -238,7 +248,20 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           const readings = readers.map(r=>({...r.read(at,minute),label:r.condition.label}));
           const map = new Map(readings.map(r=>[r.id,r]));
           const zeroTrade = isTuringCupSymbol(row.symbol)&&completeZeroTradeBar(minute);
-          const metAdmission = retry && (!signalGate || !zeroTrade) ? [
+          let qualification: EntryStageResult = {status:'pass'};
+          if (tracking && (!record.trackedGate || at<record.trackedGate.at)) {
+            const gate = decideNecessary(required,detectorGroups,map);
+            if (!record.trackedGate && gate.status==='pass' && !zeroTrade) {
+              const readings = [...necessaryById].flatMap(([id,condition]) => {
+                const reading = map.get(id);
+                return reading ? [{...reading,threshold:condition.threshold,direction:condition.direction}] : [];
+              });
+              record = {...record,trackedGate:{signalAt,at,status:'pass',readings}};
+            } else {
+              qualification = {status:'pending',reason:gate.reason ? '必要条件继续追踪 · '+gate.reason : '等待必要条件读数'};
+            }
+          }
+          const admissionEvents = retry && (!signalGate || !zeroTrade) ? [
             ...(guard.event ? ['原生防守线新事件'] : []),
             ...admissionAlgorithms.filter(condition => {
               const met = map.get(condition.id)?.met;
@@ -249,6 +272,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
               return true;
             }).map(condition => condition.label),
           ] : [];
+          const metAdmission = qualification.status === 'pass' ? admissionEvents : [];
           const candidate = !signalGate || metAdmission.length > 0;
           // v8 checks historical rules only at a candidate time. The readers
           // rebuild the intervening history through that minute's close.
@@ -257,7 +281,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           const longResult = candidate ? await longDrawdown?.(at,minute) : undefined;
           const stallResult = candidate ? await stallTurn?.(at,minute) : undefined;
           const observations=[...readings,...(longResult?.reading?[longResult.reading]:[]),...(stallResult?.readings??[])];
-          const necessary:EntryStageResult=signalGate?{status:'pass'}:decideNecessary(required,detectorGroups,map);
+          const necessary:EntryStageResult=signalGate?qualification:decideNecessary(required,detectorGroups,map);
           const first:EntryStageResult=firstGateResult.blocked?{status:'blocked',reason:firstGateResult.blocked}:necessary.status==='blocked'?necessary:firstGateResult.pending?{status:'pending',reason:firstGateResult.pending}:necessary;
           // v6 的 ⓪ 只留指标与探测门槛：加仓共用否决已挪进 ② 排除段，不能在这里提前判 block。
           const zero:EntryStageResult=v6?necessary:first;
@@ -311,7 +335,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         cursor=chunk.cut;readers.forEach(r=>r.trim());const pause=timeSlice();if(pause)await pause;
       }
       if (!matched && liveWindow?.waiting) publish({status:'queued',cursor:end,detail:'等待后续已收盘行情'});
-      else if(!matched)publish({status:'unmatched',cursor:end,detail:record.threeStage?entryStageText(record.threeStage)+(signalGate?'；本轮无通过排除检查的新事件':'；本轮未出现三阶同刻通过'):'本轮无可判断时点'});
+      else if(!matched)publish({status:'unmatched',cursor:end,detail:tracking&&!record.trackedGate?'截止前必要条件未全部满足':record.threeStage?entryStageText(record.threeStage)+(signalGate?'；本轮无通过排除检查的新事件':'；本轮未出现三阶同刻通过'):'本轮无可判断时点'});
     }catch(error){
       if(signal.aborted){publish({status:'paused',detail:'已暂停，继续时恢复本轮三阶条件和历史状态'});throw error;}
       publish({status:'error',detail:error instanceof Error?error.message:'三阶筛选失败'});

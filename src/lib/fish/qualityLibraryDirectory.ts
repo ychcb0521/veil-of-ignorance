@@ -43,22 +43,27 @@ export function entryDirectoryGroups(library: PreEntryLibrary) {
     else byRound.set(record.roundId, [record]);
   }
   return library.rounds.flatMap(round => {
-    const records = byRound.get(round.id);
-    if (!records?.length) return [];
+    const records = byRound.get(round.id) ?? [];
+    if (!records.length && !round.workspaceSaved) return [];
     const status = round.state === 'running' ? '运行中' : round.state === 'paused' ? '已暂停' : '已完成';
-    return [{ round, records, label: '入选轮次', summary: `${records.length} 条记录 · ${status}` }];
+    return [{ round, records, label: round.workspaceSaved ? '筛选轮次' : '入选轮次', summary: `${records.length} 条记录 · ${status}` }];
   });
 }
 
 export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound):FishQualityStudy{
   const out:FishQualityStudy={...newQualityStudy(round.startedAt),independentFilters:true,sellPlans:[]};
-  for(const record of library.records.filter(r=>r.roundId===round.id)){
-    const signal=preEntrySignal(record);if(!signal)continue;
+  const records = library.records.filter(record=>record.roundId===round.id);
+  for(const record of records){
+    const signal=preEntrySignal(record);
+    if (!signal) {
+      if (round.workspaceSaved) out.samples.push({...structuredClone(record.sample),groups:[],readings:undefined});
+      continue;
+    }
     // Keep the first-match entry semantics used by the main combination table.
     out.samples.push({id:signal.id,source:{...signal,quality:record.sample.source.quality},enteredAt:signal.timeMs,basis:'signal',importedAt:record.updatedAt,groups:[],origin:'pre-entry',origins:['pre-entry']});
   }
   out.screeningRounds=[structuredClone(round)];
-  out.screeningResults=structuredClone(library.records.filter(r=>r.roundId===round.id&&r.status==='matched').map(({tableClearedAt:_clear,...record})=>record));
+  out.screeningResults=structuredClone(records.filter(r=>round.workspaceSaved||r.status==='matched').map(({tableClearedAt:_clear,...record})=>record));
   out.selectedRowIds=qualityComparisonRows(out).map(r=>r.id);return out;
 }
 export function downloadDirectoryTables(name:string,tables:readonly {id:string;study:FishQualityStudy}[],at=Date.now()){

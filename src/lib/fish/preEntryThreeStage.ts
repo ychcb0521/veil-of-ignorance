@@ -19,7 +19,8 @@ export const PRE_ENTRY_THREE_STAGE_VERSION = 'pre-entry-three-stage-v6' as const
  * v5/v6 retain fixed-origin locks, fingerprints and executable implementations. */
 export const PRE_ENTRY_RETRY_VERSION = 'pre-entry-three-stage-v7' as const;
 export const PRE_ENTRY_SIGNAL_GATE_VERSION = 'pre-entry-three-stage-v8' as const;
-const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION] as const;
+export const PRE_ENTRY_TRACKED_GATE_VERSION = 'pre-entry-three-stage-v9' as const;
+const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION] as const;
 export type PreEntryThreeStageVersion = typeof THREE_STAGE_VERSIONS[number];
 export const isPreEntryThreeStageVersion = (version: unknown): version is PreEntryThreeStageVersion =>
   THREE_STAGE_VERSIONS.some(candidate => candidate === version);
@@ -44,6 +45,7 @@ export interface PreEntryThreeStage {
   longDrawdown?:import('./preEntryLongDrawdown').EntryLongDrawdown;
   stallTurn?: EntryStallTurnRule;
   required: EntryMarketCondition[];
+  requiredPaths?: { static: boolean; tracking: boolean };
   detectors?: {id:string;featureId?:string;stricterPct:number;match:'all'|'any'}[];
   additionSource?: {planId:string;label:string;round:number;versions:QualityGroup['frozenVersions']};
   additionVetoes: QualityAdditionEntryVeto[];
@@ -64,11 +66,16 @@ export const emptyPreEntryThreeStage = (): PreEntryThreeStage => ({
 /** Only an explicit new plan/copy opts into different observation semantics. */
 export function retryPreEntryThreeStage(c:PreEntryThreeStage,algorithms:EntryMarketCondition[]=[]):PreEntryThreeStage {
  validatePreEntryThreeStage(c);
- return {...structuredClone(c),version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:c.admission?structuredClone(c.admission):{guardEnabled:true,algorithms:structuredClone(algorithms)}};
+ const {requiredPaths,...copy}=structuredClone(c);
+ return {...copy,version:PRE_ENTRY_RETRY_VERSION,observationBasis:'retry-origin-v2',admission:c.admission?structuredClone(c.admission):{guardEnabled:true,algorithms:structuredClone(algorithms)}};
 }
 export function signalGatePreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
   return { ...retryPreEntryThreeStage(config, algorithms), version: PRE_ENTRY_SIGNAL_GATE_VERSION };
 }
+export function trackedGatePreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
+  return {...signalGatePreEntryThreeStage(config,algorithms),version:PRE_ENTRY_TRACKED_GATE_VERSION,requiredPaths:{static:true,tracking:false}};
+}
+export const usesSignalTimeGate = (version: unknown): boolean => version === PRE_ENTRY_SIGNAL_GATE_VERSION || version === PRE_ENTRY_TRACKED_GATE_VERSION;
 export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondition[] => 'condition' in e ? [e.condition] : e.children.flatMap(expressionConditions);
 export function validateEntryCondition(c: EntryMarketCondition) {
   if (!c.id || !c.metric || !c.snapshot?.definitionKey || !c.label.trim() || !Number.isFinite(c.threshold) || !['<','>','<=','>='].includes(c.direction) || !['intrabar','closed'].includes(c.timing)) throw Error('市场条件须选择指标、方向、有限门槛及确认方式');
@@ -76,7 +83,11 @@ export function validateEntryCondition(c: EntryMarketCondition) {
 /** Old v5/v6 configurations retain their original basis. */
 export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is PreEntryThreeStage {
   if (!c || !isPreEntryThreeStageVersion(c.version) || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
-  const retry = c.version === PRE_ENTRY_RETRY_VERSION || c.version === PRE_ENTRY_SIGNAL_GATE_VERSION;
+  const retry = c.version === PRE_ENTRY_RETRY_VERSION || usesSignalTimeGate(c.version);
+  if (c.version === PRE_ENTRY_TRACKED_GATE_VERSION) {
+    const paths = c.requiredPaths;
+    if (!paths || typeof paths.static !== 'boolean' || typeof paths.tracking !== 'boolean' || !paths.static && !paths.tracking) throw Error('请至少选择一种必要条件路径');
+  } else if (c.requiredPaths) throw Error('追踪捕捉须另存为新方案');
   if (c.observationBasis !== (retry ? 'retry-origin-v2' : 'scan-origin-v1')) throw Error('三阶筛选版本不可用，请保留原方案');
   const ids = new Set<string>();
   const unique = (id: string) => { if (!id || ids.has(id)) throw Error('三阶条件编号重复'); ids.add(id); };

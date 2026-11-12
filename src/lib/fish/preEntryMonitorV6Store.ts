@@ -1,7 +1,7 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
-import { validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears } from './preEntryPersistence';
+import { validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears, removePublishedPreEntryDrafts } from './preEntryPersistence';
 import {readProjectedPreEntry as read,decodeProjectedPreEntry} from './preEntryArchiveClient';
 import { validPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 import { persistPreEntrySnapshot } from './preEntryPersistenceClient';
@@ -56,4 +56,19 @@ export async function loadPreEntryLibraryV6(owner?: string,preview?:(library:Pre
 export async function savePreEntryLibraryV6(owner: string | undefined, library: PreEntryLibrary): Promise<void> {
   await write(owner, library);
   void noteAccountBlobSaved(preEntryV6AccountBlob, owner);
+}
+
+// Manual drafts use a separate local namespace; old pages and cloud library exports only see committed runs.
+const workspaceDraftOwner = (owner?: string) => `quality-workspace-draft:${owner ?? 'anonymous'}`;
+export async function loadPreEntryWorkspaceDraft(owner?: string): Promise<PreEntryLibrary> {
+  const draftOwner = workspaceDraftOwner(owner);
+  await queues.get(keyOf(draftOwner));
+  return await read(draftOwner) ?? emptyPreEntryLibrary();
+}
+export const savePreEntryWorkspaceDraft = (owner: string | undefined, delta: PreEntryLibrary) => write(workspaceDraftOwner(owner),delta);
+
+export async function discardPublishedWorkspaceDraft(owner:string|undefined,rounds:ReadonlySet<string>,records:readonly string[]):Promise<void> {
+  const draftOwner = workspaceDraftOwner(owner);
+  await queues.get(keyOf(draftOwner));
+  await removePublishedPreEntryDrafts(draftOwner,rounds,records);
 }

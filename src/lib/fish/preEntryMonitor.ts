@@ -19,6 +19,7 @@ export interface PreEntryRecord {
   tableClearedAt?:number;
   threeStage?: import('./preEntryThreeStageScan').EntryStageEvidence;
   signalGate?: import('./preEntryThreeStageScan').EntrySignalGateEvidence;
+  trackedGate?: import('./preEntryThreeStageScan').EntrySignalGateEvidence;
   missedGuard?: { count:number; event:import('./preEntryGuardEvent').EntryGuardEvent; reason:string };
   lastVeto?: { at: number; reason: string; count: number };
   retry?:{version:'retry-origin-v2';attempt:number;startedAt:number};
@@ -39,6 +40,8 @@ export interface PreEntryRound {
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
   automatic?: boolean;
+  workspaceDraft?: true;
+  workspaceSaved?: true;
 }
 /** A live catch can still have unopened minutes inside its frozen screening window. */
 export function automaticPreEntryWindow(round: PreEntryRound, record: PreEntryRecord, now: number, availableEnd: number) {

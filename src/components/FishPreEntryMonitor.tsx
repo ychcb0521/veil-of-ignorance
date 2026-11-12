@@ -20,10 +20,10 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { PRE_ENTRY_CONDITIONS_VERSION, preEntryConditionText, preEntryVetoes } from '@/lib/fish/preEntryConditions';
 import { activeAdditionVetoes, additionVetoLabel } from '@/lib/fish/qualityAdditionVeto';
 import { holdingVetoLabel } from '@/lib/fish/qualityVeto';
-import { PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_THREE_STAGE_V5, expressionConditions, preEntryPlanFilters, type EntryMarketExpression } from '@/lib/fish/preEntryThreeStage';
+import { PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_THREE_STAGE_V5, expressionConditions, preEntryPlanFilters, type EntryMarketExpression } from '@/lib/fish/preEntryThreeStage';
 
 const STATUS: Record<PreEntryStatus, string> = { queued: '待监测', scanning: '监测中', paused: '已暂停', matched: '已满足', unmatched: '未满足', warming: '历史不足·待预热', error: '缺数据' };
-const engineLabel = (round?: PreEntryRound) => round?.engine===PRE_ENTRY_SIGNAL_GATE_VERSION?'分钟筛选 v8 · 信号时点必要条件':round?.engine===PRE_ENTRY_RETRY_VERSION?'分钟筛选 v7 · 并列准入与否决重筛':round?.engine === PRE_ENTRY_THREE_STAGE_VERSION ? '分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）' : round?.engine === PRE_ENTRY_THREE_STAGE_V5 ? '分钟筛选 v5 · 三阶准入' : round?.engine === PRE_ENTRY_CONDITIONS_VERSION ? '分钟筛选 v4 · 入选与否决' : round?.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? '分钟筛选 v3 · 图灵杯零成交等待' : round?.engine ? '分钟筛选 v2' : '收盘筛选 v1';
+const engineLabel = (round?: PreEntryRound) => round?.engine===PRE_ENTRY_TRACKED_GATE_VERSION?'分钟筛选 v9 · 必要条件双路径':round?.engine===PRE_ENTRY_SIGNAL_GATE_VERSION?'分钟筛选 v8 · 信号时点必要条件':round?.engine===PRE_ENTRY_RETRY_VERSION?'分钟筛选 v7 · 并列准入与否决重筛':round?.engine === PRE_ENTRY_THREE_STAGE_VERSION ? '分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）' : round?.engine === PRE_ENTRY_THREE_STAGE_V5 ? '分钟筛选 v5 · 三阶准入' : round?.engine === PRE_ENTRY_CONDITIONS_VERSION ? '分钟筛选 v4 · 入选与否决' : round?.engine === PRE_ENTRY_ZERO_TRADE_VERSION ? '分钟筛选 v3 · 图灵杯零成交等待' : round?.engine ? '分钟筛选 v2' : '收盘筛选 v1';
 const stageStatus={pass:'通过',blocked:'排除',pending:'等待'} as const;
 const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';
@@ -34,7 +34,7 @@ interface FishPreEntryLibraryProps {
   openRequest?: FishDirectoryRequest;
   onSelectDirectory?: (id: string, study: FishQualityStudy, ids?: string[]) => Promise<boolean>;
   onSetHidden?: (id: string, hidden: boolean) => Promise<boolean>;
-  renderStudy?: (study: FishQualityStudy) => ReactNode;
+  renderStudy?: (study: FishQualityStudy, close?: () => void) => ReactNode;
   onCopyStudy?: (study: FishQualityStudy) => Promise<boolean>;
 }
 interface ScreeningSamplePicker {
@@ -47,14 +47,15 @@ interface ScreeningSamplePicker {
 export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, onSelectDirectory,
   onSetHidden, renderStudy, onCopyStudy, samplePicker }: FishPreEntryLibraryProps & { samplePicker?: ScreeningSamplePicker }) {
   const monitor = state.preEntry;
+  const archived = monitor?.savedLibrary ?? monitor?.library;
   const [localSelection, setLocalSelection] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const selected = samplePicker?.selected ?? localSelection;
   const setSelected = samplePicker?.setSelected ?? setLocalSelection;
   const selectedSet = useMemo(() => new Set(selected), [selected]);
-  const rounds = useMemo(() => new Map(monitor?.library.rounds.map(round => [round.id, round])), [monitor?.library.rounds]);
-  const records = useMemo(() => [...(monitor?.library.records ?? [])].sort((a, b) => b.updatedAt - a.updatedAt), [monitor?.library.records]);
-  if (!monitor) return null;
+  const rounds = useMemo(() => new Map(archived?.rounds.map(round => [round.id, round])), [archived?.rounds]);
+  const records = useMemo(() => [...(archived?.records ?? [])].sort((a, b) => b.updatedAt - a.updatedAt), [archived?.records]);
+  if (!monitor || !archived) return null;
   const stagesFor=(r:typeof records[number])=>rounds.get(r.roundId)?.plans?.find(p=>p.id===r.planId)?.preEntryThreeStage;
   const filtersFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId), plan=round?.plans?.find(p=>p.id===r.planId);return plan?.preEntryThreeStage?plan.preEntryThreeStage.required:plan?preEntryPlanFilters(plan):round?.filters??[]; };
   const exclusionsFor = (r: typeof records[number]) => { const round=rounds.get(r.roundId);return round?.engine===PRE_ENTRY_CONDITIONS_VERSION?round.plans?.find(p=>p.id===r.planId)?.preEntryConditions:undefined; };
@@ -67,7 +68,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       if (!samplePicker) { setSelected(e.target.checked ? [...roundIds] : []); return; }
       setSelected(e.target.checked ? ids => [...new Set([...ids, ...roundIds])] : ids => ids.filter(id=>!roundIds.has(id)));
     }}/> 全选本轮</label>
-    {!samplePicker && !state.lockedBatch && <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected?.();close();}}>在组合表中勾选</button>}</div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
+    {!samplePicker && !state.workspace && !state.lockedBatch && <button type="button" className="text-primary" onClick={()=>{const count=state.selectPreEntryRecords?.(selected)??0;if(!count){setMessage('请至少选择一条“已满足”的记录');return;}setMessage('');onSelected?.();close();}}>在组合表中勾选</button>}</div>{message&&<p role="alert" className="text-xs text-destructive">{message}</p>}
     <div className="overflow-auto"><table className="w-full text-[11px]"><thead><tr>{['选择','标的','原信号 / 监测起点','监测条件','状态与原因','扫描到','首次满足时间','命中读数','操作'].map(h=><th key={h} className={libraryCell}>{h}</th>)}</tr></thead><tbody>{admitted.filter(r=>r.roundId===roundId).map(r=>{const onCheck=(checked:boolean,_shift?:boolean)=>setSelected(ids=>checked?[...new Set([...ids,r.id])]:ids.filter(id=>id!==r.id));return <tr key={r.id} data-testid={selectedOnly ? "pre-entry-library-row" : "pre-entry-scan-row"} className="border-t border-border/40">
         {selectedOnly && <td className={libraryCell}><input type="checkbox" aria-label={`选择入选记录 ${r.sample.source.symbol} ${r.id}`} checked={selectedSet.has(r.id)} onChange={e => onCheck?.(e.target.checked, (e.nativeEvent as MouseEvent).shiftKey)}/></td>}
         <td className={`${libraryCell} font-mono`}>{r.sample.source.symbol}</td>
@@ -83,16 +84,16 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
         <td className={libraryCell}>{r.status === 'matched' && onJump && <button type="button" className="text-primary" onClick={() => { const signal = preEntrySignal(r); if (signal) onJump(signal); }}>K 线</button>}
           {!selectedOnly && (r.status === 'error' || rounds.get(r.roundId)?.state === 'paused') && <button type="button" disabled={monitor.running} className="text-primary disabled:opacity-40" onClick={() => void monitor.resume(r.roundId)}>{r.status === 'error' ? '重试本轮缺数据' : '继续本轮'}</button>}</td>
       </tr>;})}</tbody></table></div></details>;
-  const directoryItems: FishDirectoryItem[] = entryDirectoryGroups(monitor.library).map(({ round, label, summary }) => ({
-    id: round.id, at: round.startedAt, label, summary, revision: monitor.library,
-    study: () => entryDirectoryStudy(monitor.library, round), details: close => renderEvidence(round.id, close),
+  const directoryItems: FishDirectoryItem[] = entryDirectoryGroups(archived).map(({ round, label, summary }) => ({
+    id: round.id, at: round.startedAt, label, summary, revision: archived,
+    study: () => entryDirectoryStudy(archived, round), details: close => renderEvidence(round.id, close),
   }));
   return <FishLibraryTimeDirectory picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
-    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
-    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`仅收录满足全部条件的标的 · ${admitted.length} 条入选记录 · ${directoryItems.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
-    dataActions={!samplePicker && <FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...monitor.library,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,monitor.library.directoryEdits)}} onImport={monitor.importLibrary}/>}
+    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={directoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admitted.length}
+    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):`${admitted.length} 条入选记录 · ${directoryItems.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
+    dataActions={!samplePicker && <FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)}} onImport={monitor.importLibrary}/>}
     download={()=>downloadDirectoryTables('筛选库',directoryItems.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
-    info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。仅收录已满足记录，原信号、冻结条件、首次满足时间和判定证据保留；未入选的扫描记录仍保存在原库。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开后可复制至组合表。复制前完整归档当前组合表，载入后不自动运行；完整下载与导入保留各版本历史，不改当前方案。</p></>}
+    info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。手动保存的轮次包含各标的的判定结果，自动筛选照常记录入选。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开目录后，可选择记录导入组合表。下载和导入保留各版本历史。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
 }
 

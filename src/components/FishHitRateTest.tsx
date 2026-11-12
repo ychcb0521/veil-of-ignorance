@@ -78,8 +78,8 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
   const screeningEdits = useMemo(() => mergeLibraryDirectoryEdits(directoryEdits, screening?.library.directoryEdits),
     [directoryEdits, screening?.library.directoryEdits]);
   const screeningSamples = useMemo(() => screening?.ready
-    ? screeningHitRateSamples(screening.library.records, selectedRecords, screeningEdits)
-    : [], [screening?.ready, screening?.library.records, selectedRecords, screeningEdits]);
+    ? screeningHitRateSamples((screening.savedLibrary??screening.library).records, selectedRecords, screeningEdits)
+    : [], [screening?.ready, screening?.library.records, screening?.savedLibrary?.records, selectedRecords, screeningEdits]);
   const samples = { screening: screeningSamples, monitor: monitorSamples, misses: missSamples, paste: pasted?.signals ?? [] }[source];
   const checkedWindows = useMemo(() => new Set(samples.map(sample => sample.timeMs)).size, [samples]);
   const runningWindowCount = useMemo(() => new Set(testedSamples.map(sample => sample.timeMs)).size, [testedSamples]);

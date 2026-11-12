@@ -26,7 +26,7 @@ const runText = (run: FishMiningRun) => run.rules.filter(rule => rule.enabled !=
 type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null };
 
 
-type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;account?:string;holdKeys?:()=>ReadonlySet<string>;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onSelectInTable?:(signals:readonly TradeSignal[])=>boolean;renderStudy?:(s:FishQualityStudy)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>};
+type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;account?:string;holdKeys?:()=>ReadonlySet<string>;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onSelectInTable?:(signals:readonly TradeSignal[])=>boolean;renderStudy?:(s:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>};
 export function FishMiningLibrary(props:MiningDirectoryProps){
  const {account,renderStudy,onCopyStudy,directoryEdits,onSetHidden,openRequest,onSelectDirectory}=props;
  const [library,setLibrary]=useState<FishMiningLibrary>(emptyMiningLibrary),[open,setOpen]=useState(false),[loadError,setLoadError]=useState('');

@@ -189,3 +189,23 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
     await cachePreEntryReadModel(owner,{...delta,records:delta.records.map(record=>views.get(record.id)??record)},completeIndex,true,{generation,meta:checkpointMeta});
   }catch{/* The canonical checkpoint remains saved and the read index incomplete. */}
 }
+
+/** Delete only published draft records after the public library write has committed. */
+export async function removePublishedPreEntryDrafts(owner: string, rounds: ReadonlySet<string>, records: readonly string[]): Promise<void> {
+  const db = await open();
+  try {
+    await new Promise<void>((resolve,reject) => {
+      const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),meta=store.get(metaKey(owner));
+      meta.onsuccess=()=>{
+        if (validPreEntryLibrary(meta.result)) {
+          const next = {...meta.result,rounds:meta.result.rounds.filter((round:PreEntryLibrary['rounds'][number])=>!rounds.has(round.id))};
+          store.put(next,metaKey(owner));
+        }
+        for (const id of records) store.delete(rowPrefix(owner)+id);
+        store.delete(viewKey(owner));
+      };
+      tx.oncomplete=()=>resolve();
+      tx.onerror=tx.onabort=()=>reject(tx.error??Error('清理已保存的筛选草稿失败'));
+    });
+  } finally {db.close();}
+}

@@ -17,7 +17,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const [requested, setRequested] = useState(false);
   const [mined,setMined]=useState<readonly TradeSignal[]>(EMPTY);
   useEffect(()=>{if (!requested) return;let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(miningRecordSignal));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner,requested]);
-  const state = useFishQuality(owner, input.fish, run, input.library,mined, requested, input.turing);
+  const state = useFishQuality(owner, input.fish, run, input.library,mined, requested, input.turing, true);
   const notify = useFishNotify(owner, undefined, undefined, true);
   const automaticScreening = useFishScreeningAutomation(owner, state.ready, state.preEntry, notify);
   const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0;
