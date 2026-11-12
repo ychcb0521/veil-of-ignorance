@@ -1,5 +1,14 @@
 import {registerIndicator,type IndicatorDrawParams} from 'klinecharts';
 import {researchChartSeries,researchKcName,type ResearchIndicator} from './researchIndicators';
+import {DBL5_GUARD_VERSION,DBL5_RETEST_GUARD_VERSION,type Dbl5GuardVersion} from './dbl5m';
+import {boxAlgorithmVersion} from './fish/boxAlgorithmVersions';
+
+// Keep the first three native chart parameters unchanged. An absent fourth
+// parameter follows the account's research definition, including old layouts.
+export const dbl5ChartGuardParam=(version:Dbl5GuardVersion):number=>version===DBL5_RETEST_GUARD_VERSION?2:1;
+const chartGuardVersion=(params?:readonly number[]):Dbl5GuardVersion|undefined=>
+  params?.[3]===1?DBL5_GUARD_VERSION:params?.[3]===2?DBL5_RETEST_GUARD_VERSION:undefined;
+const chartGuardLabel=(params?:readonly number[])=>boxAlgorithmVersion(chartGuardVersion(params))?.label??'防守线';
 export function dbl5StepPath(points:readonly {x:number;y:number|null;episode:string|number|null}[]):string {
  let d='',previous:typeof points[number]|undefined;
  for(const p of points){if(p.y===null||!Number.isFinite(p.y)||p.episode===null){previous=undefined;continue;}d+=previous&&previous.episode===p.episode?` H${p.x} V${p.y}`:` M${p.x},${p.y}`;previous=p;}
@@ -23,7 +32,7 @@ export function registerDbl5Indicator(item:ResearchIndicator){
  registerIndicator<Record<string,number>>({name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:price?12:2,
   figures:(price?['value','DBL5_upper','_DBL5_guard']:['value']).map(key=>({key,title:(key==='value'?item.short:key==='_DBL5_guard'?'防守线':'固定上轨')+': ',type:'line' as const})),
   calc:(bars,indicator)=>{
-    const out=researchChartSeries(bars,item,indicator.calcParams[0]);
+    const out=researchChartSeries(bars,item,indicator.calcParams[0],{guardVersion:chartGuardVersion(indicator.calcParams)});
     const cached=chartRows.get(out);
     if(cached)return cached;
     const components=Object.entries(out.components??{}),pending=out.pending?1:0;
@@ -93,7 +102,7 @@ export function registerDbl5Indicator(item:ResearchIndicator){
         if(regime){
           ctx.save();ctx.font='10.5px sans-serif';ctx.textAlign='right';ctx.globalAlpha=.78;
           ctx.fillStyle=defaultStyles?.tooltip?.text?.color??'#64748b';
-          const text='防守线 · '+regime,right=bounding.width-8,y=bounding.height-10;
+          const text=chartGuardLabel(indicator.calcParams)+' · '+regime,right=bounding.width-8,y=bounding.height-10;
           ctx.fillText(text,right,y);
           const lineRight=right-ctx.measureText(text).width-6;
           ctx.strokeStyle='#2563eb';ctx.lineWidth=1.4;ctx.setLineDash(regime==='趋势'?[]:[5,3]);ctx.beginPath();ctx.moveTo(lineRight-18,y-3);ctx.lineTo(lineRight,y-3);ctx.stroke();ctx.restore();
@@ -108,7 +117,7 @@ export function registerDbl5Indicator(item:ResearchIndicator){
     // Crosshair candle at open t can only read a completed result <= t.
     const index=crosshair?.dataIndex,previous=index===undefined?indicator.result.length-1:index-1,row=indicator.result[previous],n=(v:number)=>Number.isFinite(v)?Number(v.toPrecision(12)).toString():'—';
     const type=row?row._pending?'正在准备5m历史行情':row._DBL5_invalid===1?'行情或历史价格精度不可验证':row._DBL5_warmup===1?'连续行情预热中':row._DBL5_nested===1?'内部箱底抬高':row._DBL5_up_step===1?'完整上移':row._DBL5_same_floor===1?'同底新箱':row._DBL5_baseline===1?'基准箱':'无有效箱体':'尚无已确认结果';
-    return {name:item.short,calcParamsText:'5m已收盘 · '+type,icons:defaultStyles.tooltip.icons,values:[{title:price?'下轨: ':item.short+': ',value:n(row?.value)},...(price?[{title:'固定上轨: ',value:n(row?.DBL5_upper)},{title:`防守线${Number.isFinite(row?._DBL5_guard)?row._DBL5_guard_trend===1?'（实线·上涨期）':'（虚线·震荡期）':''}: `,value:n(row?._DBL5_guard)}]:[])]};
+    return {name:item.short,calcParamsText:'5m已收盘 · '+type,icons:defaultStyles.tooltip.icons,values:[{title:price?'下轨: ':item.short+': ',value:n(row?.value)},...(price?[{title:'固定上轨: ',value:n(row?.DBL5_upper)},{title:`${chartGuardLabel(indicator.calcParams)}${Number.isFinite(row?._DBL5_guard)?row._DBL5_guard_trend===1?'（实线·上涨期）':'（虚线·震荡期）':''}: `,value:n(row?._DBL5_guard)}]:[])]};
   }
  });
 }

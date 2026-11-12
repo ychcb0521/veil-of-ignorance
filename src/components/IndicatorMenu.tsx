@@ -1,6 +1,8 @@
 import { chartFeaturePeriod } from '@/lib/featureSource';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { accountResearchIndicators } from '@/lib/researchIndicators';
+import { accountResearchIndicators, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
+import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION, type Dbl5GuardVersion } from '@/lib/dbl5m';
+import { boxAlgorithmVersion } from '@/lib/fish/boxAlgorithmVersions';
 import { CTBA_DEFAULTS, CTBA_DESCRIPTION } from '@/lib/ctba';
 import { CUSTOM_INDICATOR_GROUPS } from '@/lib/customIndicatorGroups';
 import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
@@ -45,6 +47,7 @@ export interface IndicatorCatalogItem {
   /** 【用户要求】副图均线 avg(·, N)：有这一项就多一个均线时长框（小时），默认值在这里。 */
   rawOnly?:boolean;
   fixedPeriod?:boolean;
+  guardVersionSelect?:boolean;
   avgDefault?: number;
   avgHint?: string;
   /** 【用户要求】有「Z」开关（Z 分数版）：开关的说明。 */
@@ -58,6 +61,8 @@ function isSupported(id: string): boolean {
 
 /** 二选一的菜单项：动态谢林点「主图线 + 副图」与「只要副图」。 */
 const EXCLUSIVE_PAIRS: Record<string, string> = { DSP: 'DSP_VA', DSP_VA: 'DSP' };
+const GUARD_VERSION_CHOICES = ([DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION] as const)
+  .map(id=>({id,label:boxAlgorithmVersion(id)!.label}));
 
 function shortCustomNames(items: IndicatorCatalogItem[]): IndicatorCatalogItem[] {
   return items.map(item => item.category === 'custom' ? {
@@ -346,15 +351,17 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
   const availableCatalog = useMemo(() => [
     ...INDICATOR_CATALOG.map(item => {
       const spec = researchItems.find(spec => spec.id === item.id);
+      const entry = supportsDbl5GuardVersion(spec) ? { ...item, guardVersionSelect:true } : item;
       const legacyId = item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : undefined;
       const def = definitions.find(def => def.id === (spec?.featureId ?? legacyId));
       const builtin = def && BUILTIN_FEATURES.find(d => d.id === def.id);
-      return def ? { ...item, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: def.definition, detail: def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : item;
+      return def ? { ...entry, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: def.definition, detail: def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : entry;
     }),
     ...researchItems.filter(item => item.id.startsWith('FEATURE_')).map(item => ({
       id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay:item.priceOverlay??false, fixedPeriod:item.rawOnly&&(item.featureId.startsWith('sbs_5m')||item.templateId?.startsWith('DBL5')), defaultPeriod: researchDefaultPeriod(item),
       rawOnly:item.rawOnly,avgDefault:item.rawOnly?undefined:item.marketEvidence?24:undefined,avgHint:item.marketEvidence?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined,color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit:item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h'),
       description: definitions.find(def => def.id === item.featureId)?.definition,
+      guardVersionSelect:supportsDbl5GuardVersion(item),
     })),
   ], [definitions, researchItems]);
   const filtered = useMemo(() => {
@@ -365,13 +372,14 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(
-        item => (item.fullName?.toLowerCase().includes(q) ?? false) || item.nameZh.toLowerCase().includes(q) || item.nameEn.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
+        item => (item.fullName?.toLowerCase().includes(q) ?? false) || item.nameZh.toLowerCase().includes(q) || item.nameEn.toLowerCase().includes(q) || item.id.toLowerCase().includes(q) ||
+          (item.guardVersionSelect && GUARD_VERSION_CHOICES.some(choice=>choice.label.toLowerCase().includes(q)))
       );
     }
     return items;
   }, [search, categoryFilter, availableCatalog]);
 
-  const toggleIndicator = (item: IndicatorCatalogItem) => {
+  const toggleIndicator = (item: IndicatorCatalogItem, guardVersion?: Dbl5GuardVersion) => {
     const existing = indicators.find(i => i.type === item.id);
     if (existing) {
       onIndicatorsChange(indicators.filter(i => i.type !== item.id));
@@ -388,7 +396,21 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     const mbi2Feature=item.id==='MBI2'?'mbi2':item.id==='MBI2_BEAR'?'mbi2-bear':null;
     const mbi2Auto=!!mbi2Feature&&definitions.find(d=>d.id===mbi2Feature)?.MBI2_T_HOURS==null;
     const defaultPeriod = mbi2Auto?25*mbi2ChartMinutes/60:research ? researchDefaultPeriod(research) : legacyDef ? chartFeaturePeriod(legacyDef, item.defaultPeriod) : item.defaultPeriod;
-    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(['MBI2','MBI2_BEAR'].includes(item.id)?{mbi2AutoHours:mbi2Auto}:{}), ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
+    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(['MBI2','MBI2_BEAR'].includes(item.id)?{mbi2AutoHours:mbi2Auto}:{}), ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), ...(guardVersion ? {guardVersion} : {}), color: item.color, enabled: true }]);
+  };
+
+  const updateGuardVersion = (item: IndicatorCatalogItem, guardVersion?: Dbl5GuardVersion) => {
+    if (!indicators.some(i => i.type === item.id)) {
+      toggleIndicator(item,guardVersion);
+      return;
+    }
+    onIndicatorsChange(indicators.map(i=>{
+      if(i.type!==item.id)return i;
+      const next={...i,enabled:true};
+      if(guardVersion)next.guardVersion=guardVersion;
+      else delete next.guardVersion;
+      return next;
+    }));
   };
 
   const updatePeriod = (id: string, period: number) => {
@@ -493,7 +515,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
               主图叠加 · Overlays ({overlays.length})
             </div>
             {overlays.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} onUpdateGuardVersion={updateGuardVersion} />
             ))}
           </>
         )}
@@ -504,7 +526,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
               <div className="text-[11px] font-semibold text-foreground">{group.title} <span className="text-muted-foreground">({group.items.length})</span></div>
               <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground" title={'detail' in group ? group.detail : group.note}>{group.note}</p>
             </div>
-            {group.items.map(item => <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} />)}
+            {group.items.map(item => <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} onUpdateGuardVersion={updateGuardVersion} />)}
           </section>
         ))}
         {!customGroups && INDICATOR_CATALOG?.length > 0 && oscillators.length > 0 && (
@@ -513,7 +535,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
               副图指标 · Sub-pane ({oscillators.length})
             </div>
             {oscillators.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} onUpdateGuardVersion={updateGuardVersion} />
             ))}
           </>
         )}
@@ -543,7 +565,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   onUpdateAvgHours: (id: string, avgHours: number) => void;
   onToggleZ: (id: string) => void;
   onTogglePane: (id: string, visibility: CustomPaneVisibility) => void;
-}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ, onTogglePane }, ref) {
+  onUpdateGuardVersion: (item: IndicatorCatalogItem, version?: Dbl5GuardVersion) => void;
+}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ, onTogglePane, onUpdateGuardVersion }, ref) {
   const active = indicators.find(i => i.type === item.id);
   const supported = isSupported(item.id);
   const custom = item.category === 'custom';
@@ -585,6 +608,17 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
       </div>
 
       <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-full">
+        {item.guardVersionSelect&&<select
+          aria-label={`${item.nameZh} 防守线版本`}
+          title="盘面防守线版本"
+          className="max-w-full rounded border border-border bg-secondary px-1 py-0.5 text-[11px] text-foreground"
+          value={active?.guardVersion??''}
+          onClick={e=>e.stopPropagation()}
+          onChange={e=>onUpdateGuardVersion(item,GUARD_VERSION_CHOICES.find(choice=>choice.id===e.target.value)?.id)}
+        >
+          <option value="">防守线 · 跟随研究定义</option>
+          {GUARD_VERSION_CHOICES.map(choice=><option key={choice.id} value={choice.id}>{choice.label}</option>)}
+        </select>}
         {active ? (
           <>
             {item.fixedPeriod?<span className="text-[10px] text-muted-foreground" title="在 Deep Dig 的定义参数中设置">5m · 定义参数</span>:<ParamInput

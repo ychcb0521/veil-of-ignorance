@@ -1,4 +1,4 @@
-import {DBL5_ID} from '@/lib/dbl5m';
+import {DBL5_ID,withDbl5GuardVersion,type Dbl5GuardVersion} from '@/lib/dbl5m';
 import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import {sbsHistoryBars} from '@/lib/sbs5m';
 import {saveSbsCheckpoint} from '@/lib/sbs5mPersistence';
@@ -219,7 +219,7 @@ const seriesCache = new WeakMap<KLineData[], Map<string, { key: string; result: 
  * 在图上的 K 线上算账号里那份定义：refClose 由调用方给（用到 CB 时）；T 用真实开盘时间，其余窗口按 5 分钟图计。
  * 同一批 K 线、同一参数只算一次（DSP 的 a / avg_a / A 三个副图共用）。
  */
-export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string; variables?: string[]; delta?: { revision:number; changes:readonly [number,number][]; referenceVersion:number } } = {}): ChartFeatureSeries | null {
+export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string; variables?: string[]; guardVersion?: Dbl5GuardVersion; delta?: { revision:number; changes:readonly [number,number][]; referenceVersion:number } } = {}): ChartFeatureSeries | null {
   const def = chartFeatureDef(featureId);
   if (!def) return null;
   const usesMbi = featureUsesMbi(def), usesMbi2=featureUsesMbi2(def), templateId = featureTemplateId(def);
@@ -251,7 +251,11 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   if(usesMbi2)Object.assign(params,{id:def.id,formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===mbi2Minutes*60000)??def.interval??'5m',
     MBI2_T_HOURS:has?p:mbi2HoursOf(def,mbi2Minutes),MBI2_Z0:def.MBI2_Z0,MBI2_BAND:mbi2BandOf(def),MBI2_CONFIRM:mbi2ConfirmOf(def)});
   if(templateId===DBL5_ID&&!dataList.some(b=>typeof b.researchSymbol==='string'))return null;
-  if(templateId===DBL5_ID){const metadata=dataList.find(b=>typeof b.researchSymbol==='string'),symbol=metadata?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:DBL5_ID,formula:def.formula,interval:'5m',DBL5_config:def.DBL5_config,DBL5_dimension:def.DBL5_dimension,DBL5_symbol:symbol,DBL5_tick_size:dataList.find(b=>b.PRS6H_tick_size!=null)?.PRS6H_tick_size??(symbol?peekAti6hTickSize(symbol):null),DBL5_initialization_start:def.DBL5_initialization_start??dataList.find(b=>b.DBL5_initialization_start!==undefined)?.DBL5_initialization_start,DBL5_data_version:dataList.find(b=>b.DBL5_data_version!==undefined)?.DBL5_data_version??'ohlc-v1'});}
+  if(templateId===DBL5_ID){
+    const metadata=dataList.find(b=>typeof b.researchSymbol==='string'),symbol=metadata?.researchSymbol as string|undefined;
+    const config=options.guardVersion?withDbl5GuardVersion(def.DBL5_config,options.guardVersion):def.DBL5_config;
+    Object.assign(params,{id:def.id,chartTemplate:DBL5_ID,formula:def.formula,interval:'5m',DBL5_config:config,DBL5_dimension:def.DBL5_dimension,DBL5_symbol:symbol,DBL5_tick_size:dataList.find(b=>b.PRS6H_tick_size!=null)?.PRS6H_tick_size??(symbol?peekAti6hTickSize(symbol):null),DBL5_initialization_start:def.DBL5_initialization_start??dataList.find(b=>b.DBL5_initialization_start!==undefined)?.DBL5_initialization_start,DBL5_data_version:dataList.find(b=>b.DBL5_data_version!==undefined)?.DBL5_data_version??'ohlc-v1'});
+  }
   if(templateId==='sbs_5m'){const symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'sbs_5m',formula:def.formula,interval:'5m',SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_symbol:symbol,SBS5M_tick_size:typeof dataList[0]?.PRS6H_tick_size==='number'?dataList[0].PRS6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
   if(templateId==='prs6h'){const minutes=inferResearchMinutes(dataList),symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'prs6h',formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m',PRS6H_config:{...def.PRS6H_config,...(has?{evidenceHalfLifeMinutes:p*60}:{})},PRS6H_symbol:symbol,PRS6H_tick_size:typeof dataList[0]?.PRS6H_tick_size==='number'?dataList[0].PRS6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}
   if(templateId==='ati6h'){const minutes=inferResearchMinutes(dataList),symbol=dataList.find(b=>typeof b.researchSymbol==='string')?.researchSymbol as string|undefined;Object.assign(params,{id:def.id,chartTemplate:'ati6h',formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===minutes*60000)??def.interval??'5m',ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:ati6hDependencyOf(def),ATI6H_tick_size:typeof dataList[0]?.ATI6H_tick_size==='number'?dataList[0].ATI6H_tick_size:symbol?peekAti6hTickSize(symbol):null});}

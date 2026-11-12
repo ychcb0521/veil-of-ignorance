@@ -30,6 +30,7 @@ import type { PendingOrder } from "@/types/trading";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { IndicatorMenu } from "./IndicatorMenu";
+import type { Dbl5GuardVersion } from '@/lib/dbl5m';
 import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
@@ -174,6 +175,7 @@ export interface IndicatorConfig {
   featureDefinitionVersion?: number;
   /** Last saved definition period; a seller-response-only formula upgrade preserves chart window overrides. */
   featureWindowPeriod?: number;
+  guardVersion?: Dbl5GuardVersion;
   /** 【用户要求】副图均线 avg(·, N) 的时长 N（小时）：BSS、DSP 的 a 副图用；没写 = 24。 */
   avgHours?: number;
   /** 自制区副图独立可见性：原值与 avg2 默认显示，普通 avg 默认隐藏。 */

@@ -1,6 +1,6 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
-import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS} from '@/lib/dbl5m';
+import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5GuardVersion} from '@/lib/dbl5m';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
 import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
@@ -61,6 +61,8 @@ export interface ResearchIndicator {
   neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
   priceOverlay?:boolean; rawOnly?:boolean; marketEvidence?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
+export const supportsDbl5GuardVersion = (item?: ResearchIndicator) =>
+  !!item?.priceOverlay && (item.id === 'DBL5' || item.templateId?.startsWith('DBL5') === true);
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
   const builtin = BUILTIN_FEATURES.find(d => d.id === def.id);
@@ -287,19 +289,20 @@ function continueDisplay(data: KLineData[], key: string, result: DisplaySeries):
   }
   return result;
 }
-type ChartSeriesOptions = { fetchReference?: boolean; averageHours?: number };
+type ChartSeriesOptions = { fetchReference?: boolean; averageHours?: number; guardVersion?: Dbl5GuardVersion };
 const liveSeriesCache = new WeakMap<KLineData[], Map<string, { generation: number; result: ReturnType<typeof calculateChartSeries> }>>();
 export function researchChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}) {
   const generation = chartDataGenerations.get(data);
   const def = accountFeatureDef(item.featureId);
-  const continuityKey = `${item.id}|${period}|${options.averageHours ?? 24}|${researchDefinitionVersion(item)}`;
+  const guardKey = options.guardVersion ? `|${options.guardVersion}` : '';
+  const continuityKey = `${item.id}|${period}|${options.averageHours ?? 24}|${researchDefinitionVersion(item)}${guardKey}`;
   const continuous = isChartComputationEnabled(data);
   const finish = (result: DisplaySeries) => continuous ? continueDisplay(data, continuityKey, result) : result;
   // Establish lineage even while the first worker request is still pending.
   if (continuous) displayHistory(data);
   if (generation == null) return finish(calculateChartSeries(data, item, period, options));
   const mbiKey = def && featureUsesMbi(def) ? `|${def?.MBI_N}|${def?.MBI_Z0}` : def&&featureUsesMbi2(def)?`|${def.MBI2_T_HOURS}|${def.MBI2_BAND}|${def.MBI2_CONFIRM}` : '';
-  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}|${item.marketEvidence?researchDefinitionVersion(item):''}${mbiKey}`;
+  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}|${item.marketEvidence?researchDefinitionVersion(item):''}${mbiKey}${guardKey}`;
   let cache = liveSeriesCache.get(data);
   // Raw and 24h companion panes read the same immutable display result during
   // one native update. Background completion must also invalidate this result.
@@ -377,6 +380,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const names = researchSeriesNames(item, formula);
   const generation = chartDataGenerations.get(data);
   const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, variables: [names.core, names.avg, names.avg2,...(item.components??[])], revision: `${dataRevision(data)}:${researchHistoryVersion()}:${usesBtc ? btcReferenceVersion() : 0}`,
+    guardVersion: options.guardVersion,
     delta: generation == null ? undefined : { revision:generation, changes:chartDataChanges.get(data) ?? [], referenceVersion:usesBtc ? btcReferenceVersion() : 0 } });
   const displayKey = `${visibleLength}|${options.averageHours ?? 24}|${def.scale}|${names.core}`;
   let displays = out ? displaySeriesCache.get(out) : undefined;

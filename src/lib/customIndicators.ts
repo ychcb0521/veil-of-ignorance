@@ -1,5 +1,7 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
-import {registerDbl5Indicator} from '@/lib/dbl5mChart';
+import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
+import type {Dbl5GuardVersion} from '@/lib/dbl5m';
+import {supportsDbl5GuardVersion} from '@/lib/researchIndicators';
 import {registerSbsPriceIndicator} from '@/lib/sbs5mChart';
 import {PRS6H_STATES} from '@/lib/prs6h';
 import {ATI6H_COMPONENTS,ATI6H_LABELS} from '@/lib/ati6h';
@@ -400,7 +402,7 @@ export function visibleIndicatorCompanions(ind: { type: string; showRaw?: boolea
  * 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长；
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
  */
-export function indicatorCalcParams(kcName: string, ind: { type?: string; period: number; avgHours?: number; zscore?: boolean }): number[] {
+export function indicatorCalcParams(kcName: string, ind: { type?: string; period: number; avgHours?: number; zscore?: boolean; guardVersion?: Dbl5GuardVersion }): number[] {
   const averaged = calibratedAverageForName(kcName);
   if (averaged) return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(averaged.item), avgCalibrationVersion()];
   const base = DSP_Z_BASE_NAMES[kcName];
@@ -413,7 +415,8 @@ export function indicatorCalcParams(kcName: string, ind: { type?: string; period
   if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if(research?.marketEvidence&&kcName!==researchKcName(research.id))return [ind.period,validHours(ind.avgHours,AVG_DEFAULT_HOURS),btcReferenceVersion()+researchHistoryVersion(),researchDefinitionVersion(research)];
-  if (research) return [ind.period, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(research)];
+  if (research) return [ind.period, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(research),
+    ...(ind.guardVersion&&supportsDbl5GuardVersion(research)?[dbl5ChartGuardParam(ind.guardVersion)]:[])];
   const legacyId = kcName === 'CBI_CUSTOM' ? 'cbi' : kcName === 'CBA2_CUSTOM' ? 'cba-2' : undefined;
   if (legacyId) return [ind.period, researchDefinitionVersion({ featureId: legacyId } as ResearchIndicator)];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
