@@ -7,6 +7,10 @@ import { emptyPreEntryThreeStage, freezePreEntryThreeStage, retryPreEntryThreeSt
 import { assertStructureVersionsAvailable, freezeStructureVersions, selectStructureGuardVersion } from '../fish/boxAlgorithmVersions';
 import { createStructureAdditionReader, defaultStructureAddition, structureAdditionIdentity, structureAdditionSignal, withGuard } from '../fish/qualityAdditionStructure';
 import { withTuringInitialization } from '../fish/qualityInitialization';
+import { createBoxStopReader, defaultBoxBreak } from '../fish/qualityBoxStop';
+import { createPreEntryGate } from '../fish/preEntryGate';
+import { emptyPreEntryConditions } from '../fish/preEntryConditions';
+import type { QualityHoldingVeto } from '../fish/qualityVeto';
 import type { TradeSignal } from '../signalLibrary';
 
 const start=Date.UTC(2026,10,12), step=DBL5_STEP;
@@ -118,5 +122,44 @@ describe('防守线-20261112',()=>{
     expect(await add(rule,entry,candidateAt+step,[],undefined,x=>{if(x.reason==='guard-retest')blocked.push(x.at);})).toBeUndefined();
     expect(blocked).toEqual([candidateAt]);
     expect(await add(rule,entry,end,[])).toMatchObject({at:retestAt,structureEvidence:{event:'GUARD_RETEST',confirmedAt:retestAt}});
+  });
+
+  it('executes a saved 20261112 red-cross rule in holding and screening only after its native line breaks', async () => {
+    const old = defaultBoxBreak();
+    const next = defaultBoxBreak([], DBL5_RETEST_GUARD_VERSION);
+    expect(next.structure.versions?.guard).toBe(DBL5_RETEST_GUARD_VERSION);
+    const oldBefore = structuredClone(old);
+    const beforeRetest = [...source.slice(0, 21), bar(21, [112,90,93]), bar(22, [112,90,93])];
+    const afterRetest = [...source, bar(24, [112,90,93]), bar(25, [112,90,93])];
+    const legacyAt = start + 23 * step;
+    const latestAt = start + 26 * step;
+    expect(computeDbl5(beforeRetest, {symbol:params.symbol,tickSize:1}).rows.at(-1)?.darvas_5m_guard_broken).toBe(true);
+    expect(computeDbl5(beforeRetest, params).rows.some(row => row.darvas_5m_guard_broken)).toBe(false);
+    expect(computeDbl5(afterRetest, params).rows.at(-1)?.darvas_5m_guard_broken).toBe(true);
+    const row = {id:'break', symbol:'TURING:TURING 1', timeMs:start, timeLabel:'', fallbackZone:''};
+    const signal = new AbortController().signal;
+    const entry = start + 17 * step, minute = 60_000;
+    const minuteBar = (openTime:number) => ({openTime,open:93,high:94,low:90,close:93,volume:1,takerBuyVolume:0.5});
+    const loadFor = (bars: readonly Dbl5Bar[]) => withTuringInitialization(async (_row, from, to, plan) =>
+      plan.step === step ? bars.filter(bar => bar.openTime >= from && bar.openTime < to) :
+        Array.from({length:(to-from)/minute}, (_, i) => minuteBar(from+i*minute)), row.symbol, start);
+    const veto = (boxStop:typeof next): QualityHoldingVeto =>
+      ({id:'red-cross',label:'支撑断裂',kind:'box-stop',enabled:true,direction:'<=',threshold:0,boxStop});
+    const hold = (bars:readonly Dbl5Bar[], rule:typeof next) => createBoxStopReader({
+      vetoes:[veto(rule)],row,entry,since:entry,load:loadFor(bars),signal,
+    });
+    const screen = (bars:readonly Dbl5Bar[], rule:typeof next) => createPreEntryGate({
+      conditions:{...emptyPreEntryConditions(),hardVetoes:[veto(rule)]},start:entry,row,load:loadFor(bars),signal,
+    });
+    expect(await hold(beforeRetest, old).read(minuteBar(legacyAt))).toMatchObject({fillPrice:93,cause:{boxBreakEvidence:{confirmedAt:legacyAt}}});
+    expect(await hold(beforeRetest, next).read(minuteBar(legacyAt))).toBeUndefined();
+    expect((await screen(beforeRetest, next)(legacyAt)).blocked).toBeUndefined();
+    const held = hold(afterRetest, next);
+    expect(await held.read(minuteBar(latestAt-minute))).toBeUndefined();
+    expect(await held.read(minuteBar(latestAt))).toMatchObject({fillPrice:93,cause:{boxBreakEvidence:{confirmedAt:latestAt}}});
+    const screened = screen(afterRetest, next);
+    expect((await screened(latestAt-minute)).blocked).toBeUndefined();
+    expect((await screened(latestAt)).blocked).toContain('红叉确认');
+    expect(old).toEqual(oldBefore);
   });
 });

@@ -375,10 +375,20 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const aborter = new AbortController(); filterController.current = aborter;
     aborter.signal.addEventListener('abort', () => finishRound('paused'), { once: true });
     const active = () => epoch === generation.current && revision === filterRevision.current && filterController.current === aborter && !aborter.signal.aborted;
-    setFilterRunning(true); setFilterProgress(previous => paused && previous ? previous : { done: 0, total, current: '' });
+    setFilterRunning(true); setFilterProgress(previous => paused && previous ? previous : { done: 0, total, current: '', ...(frozen.independentFilters ? {matched:0} : {}) });
     try {
       await latestRun.current({ study: frozen, signal: aborter.signal, task: 'filter', mode: 'filter-only', priority: () => priorityRef.current,
-        onProgress: p => { if (active()) setFilterProgress(previous => paused && previous && p.done < previous.done ? { ...p, done: previous.done } : p); },
+        onProgress: p => {
+          if (!active()) return;
+          setFilterProgress(previous => {
+            const matched = paused ? previous?.matched : undefined;
+            return {
+              ...p,
+              done: paused ? Math.max(p.done, previous?.done ?? 0) : p.done,
+              ...(matched != null ? {matched:Math.max(p.matched ?? 0, matched)} : {}),
+            };
+          });
+        },
         onFilterReading: reading => {
           if (!active() || !readingKeys.has(reading.key)) return;
           // 有效读数覆盖；缺数据只在这一轮还没有读数时记下（不拿失败盖掉成功）
@@ -496,10 +506,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!qualityRunSamples(snapshot).length || (!metrics.length && !filtersOn)) return;
     if (force) {
       stopFilter();
-      setFilterProgress(null);
-      setFilterError('');
       setSignalValues(null);
     }
+    setFilterProgress(null);
+    setFilterError('');
     const ownerEpoch = generation.current;
     const readings = generateSignalValues(metrics, rowIds, force);
     const revision = filterRevision.current;

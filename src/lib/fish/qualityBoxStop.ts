@@ -1,11 +1,11 @@
 import { evaluateOnBars, featureWindowMs, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { advanceChartAtr, type ChartAtrState } from '@/lib/atr';
 import { compileFishProgram } from './algorithm';
-import { freezeStructureVersions } from './boxAlgorithmVersions';
+import { freezeStructureVersions, selectStructureGuardVersion } from './boxAlgorithmVersions';
 import { defaultStructureAddition, structureActiveBox, structureAdditionIdentity, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { validateFishBars } from './shared';
-import { dbl5Parameters, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
+import { dbl5Parameters, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
 import { sbsParameters, type SbsCheckpoint } from '@/lib/sbs5m';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -32,7 +32,16 @@ export function freezeBoxStop(rule:BoxStopRule):BoxStopRule {
 export const defaultBoxStop = (defs: readonly DeepDigFeatureDef[] = []): BoxStopRule => freezeBoxStop({version: BOX_STOP_VERSION, structure: {...defaultStructureAddition('dbl5', defs), kSource:'current'}, update:'raise-only', confirmation:'touch', closes:1});
 /** Opt-in event exit: the exact DBL-5 flag used to draw a red cross. */
 export const isBoxBreak = (rule:BoxStopRule) => rule.version === BOX_BREAK_VERSION;
-export const defaultBoxBreak = (defs:readonly DeepDigFeatureDef[]=[]):BoxStopRule => freezeBoxStop({version:BOX_BREAK_VERSION,structure:{...defaultStructureAddition('dbl5',defs),kSource:'guard',buffer:0,bufferUnit:'atr'},update:'follow',confirmation:'guard-break',closes:1});
+export function defaultBoxBreak(defs: readonly DeepDigFeatureDef[] = [], guardVersion?: Dbl5GuardVersion): BoxStopRule {
+  const structure: StructureAdditionRule = {...defaultStructureAddition('dbl5', defs), kSource:'guard', buffer:0, bufferUnit:'atr'};
+  return freezeBoxStop({
+    version: BOX_BREAK_VERSION,
+    structure: guardVersion ? selectStructureGuardVersion(structure, guardVersion) : structure,
+    update: 'follow',
+    confirmation: 'guard-break',
+    closes: 1,
+  });
+}
 export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule {
   if (!rule || ![BOX_STOP_VERSION,BOX_BREAK_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
   validateStructureAddition(rule.structure);

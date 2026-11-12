@@ -1,5 +1,5 @@
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { DBL5_DEFAULTS, DBL5_GUARD_DEFAULTS, type Dbl5Config } from '@/lib/dbl5m';
+import { DBL5_DEFAULTS, DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, type Dbl5Config } from '@/lib/dbl5m';
 import { SBS5M_DEFAULTS, SBS5M_PARAMETER_SPECS } from '@/lib/sbs5m';
 import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
 import { CURRENT_GUARD_VERSION, freezeStructureVersions, selectStructureGuardVersion, structureVersionLabel, structureVersions } from '@/lib/fish/boxAlgorithmVersions';
@@ -31,6 +31,8 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
       </>:<>{SBS5M_PARAMETER_SPECS.map(spec=><span key={spec.key} title={spec.description}>{number(spec.label+'（'+spec.unit+'）',def.SBS5M_config?.[spec.key]??SBS5M_DEFAULTS[spec.key],n=>putStructure({definition:{...def,SBS5M_config:{...def.SBS5M_config,[spec.key]:n}}}),spec.min,spec.max,spec.integer?'1':'any')}</span>)}<label className="text-[11px]">成交量口径 <select aria-label={prefix+'成交量口径'} className={field} value={def.SBS5M_config?.volume_mode??SBS5M_DEFAULTS.volume_mode} onChange={e=>putStructure({definition:{...def,SBS5M_config:{...def.SBS5M_config,volume_mode:e.target.value as 'quote'|'base_times_close'}}})}><option value="quote">原始成交额</option><option value="base_times_close">成交量 × 收盘价</option></select></label></>}
     </div></details>
     <p className="text-[10px] leading-relaxed text-muted-foreground">{admission?'沿用原箱体和防守线公式、参数及已收盘 5 分钟确认时点，仅记录新线事件；断裂本身不构成准入。':entry?(eventMode?'筛选起点后的已收盘 5 分钟结构确认原生红叉时，该分钟不入选。沿用原箱体公式、参数与红叉事件，不模拟卖出。':'只读此前已收盘 5 分钟结构，K＝所选基准−冗余；尚无有效线时等待。分钟触及 K 或满足收盘确认时，该分钟不入选；不模拟卖出。'):eventMode?'只认持仓后已收盘 5 分钟结构的原生防守线断裂事件。上涨期 1 根收盘严格低于防守线确认；震荡期按细节设置的连续根数确认。影线触碰、尚无支撑或数据缺失不当作红叉。与图表使用相同参数和历史时才能逐点对齐。与其他一票否决、加仓 K 各自独立，任一条件先触发都会先卖出；不改变加仓定量。':'只读已收盘 5 分钟结构，K＝所选基准−冗余；额外 ATR 沿用盘面 ATR(14)。尚无有效线时等待；已有 K 在结构失效后继续保护。K 改变后重新累计收盘确认根数。触价模式开盘越线按开盘价，否则按 K 模拟卖出全部持仓；收盘确认按下一分钟开盘价。独立于加仓 K，不改变加仓定量。'}</p>
+    {eventMode && !admission && structureVersions(s).guard === DBL5_RETEST_GUARD_VERSION &&
+      <p className="text-[10px] leading-relaxed text-muted-foreground">遇到需独立回踩的首根低点，新防守线在回踩确认后才生效。等待期间仍检查已有防守线的断裂。</p>}
     <p className="text-[10px] font-mono text-primary">{rule.version} · {structureVersionLabel(s)} · 保存时冻结参数与版本</p>
   </fieldset>;
 }

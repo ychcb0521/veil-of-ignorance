@@ -3,21 +3,39 @@ import {cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {afterEach,it,expect} from 'vitest';
 import {FishQualityHoldingVetoEditor} from '../FishQualityHoldingVetoEditor';
 import {holdingVetoDraft,parseHoldingVetoDraft,planHoldingVetoDraft} from '@/lib/fish/qualityFilters';
-import {holdingVetoIdentity} from '@/lib/fish/qualityVeto';
+import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION } from '@/lib/dbl5m';
+import {defaultBoxBreak} from '@/lib/fish/qualityBoxStop';
+import {holdingVetoIdentity,type QualityHoldingVeto} from '@/lib/fish/qualityVeto';
 afterEach(cleanup);
-function Editor({plan=false}:{plan?:boolean}={}){const [draft,setDraft]=useState(plan?planHoldingVetoDraft():holdingVetoDraft());return <><FishQualityHoldingVetoEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存</button><output/></>}
+function Editor({plan=false,entry=false,saved=[]}:{plan?:boolean;entry?:boolean;saved?:QualityHoldingVeto[]}={}){const [draft,setDraft]=useState(plan?planHoldingVetoDraft(saved):holdingVetoDraft(saved));return <><FishQualityHoldingVetoEditor entry={entry} draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存</button><output/></>}
 it('adds an independent opt-in red-cross rule with frozen DBL-5 details and no price-stop controls',()=>{
  render(<Editor/>);fireEvent.click(screen.getByRole('button',{name:'添加支撑断裂终止'}));
  expect(screen.getByLabelText('启用持仓否决 3')).not.toBeChecked();
  expect(screen.getByLabelText('持仓否决 3 指标')).toHaveValue('box-support-break');
  expect(screen.queryByLabelText('箱体止损 3 更新方式')).toBeNull();
  expect(screen.queryByLabelText('箱体止损 3 额外冗余')).toBeNull();
+ expect(screen.getByLabelText('箱体止损 3 防守线版本')).toHaveValue(DBL5_RETEST_GUARD_VERSION);
  fireEvent.click(screen.getByLabelText('启用持仓否决 3'));
  fireEvent.change(screen.getByLabelText('箱体止损 3 防守线震荡断线根数'),{target:{value:'3'}});
  fireEvent.click(screen.getByRole('button',{name:'保存'}));
  const saved=JSON.parse(document.querySelector('output')!.textContent!);
- expect(saved).toMatchObject([{kind:'box-stop',enabled:true,boxStop:{version:'holding-support-break-v1',confirmation:'guard-break',structure:{algorithm:'dbl5',kSource:'guard',buffer:0,definition:{DBL5_config:{guard_range_closes:3}}}}}]);
+ expect(saved).toMatchObject([{kind:'box-stop',enabled:true,boxStop:{version:'holding-support-break-v1',confirmation:'guard-break',structure:{algorithm:'dbl5',kSource:'guard',buffer:0,versions:{guard:DBL5_RETEST_GUARD_VERSION},definition:{DBL5_config:{guard_range_closes:3,guard_version:DBL5_RETEST_GUARD_VERSION}}}}}]);
  expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);
+});
+it('defaults new screening red-cross rules to the retest guard while restoring existing rules verbatim',()=>{
+ const existing=parseHoldingVetoDraft([{choice:'box-support-break',direction:'<=',threshold:'0',enabled:true,boxStop:defaultBoxBreak()}]);
+ const original=structuredClone(existing);
+ render(<Editor entry saved={existing}/>);
+ expect(screen.getByLabelText('箱体止损 1 防守线版本')).toHaveValue(DBL5_GUARD_VERSION);
+ fireEvent.click(screen.getByRole('button',{name:'添加否决条件'}));
+ fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'box-support-break'}});
+ expect(screen.getByLabelText('箱体止损 2 防守线版本')).toHaveValue(DBL5_RETEST_GUARD_VERSION);
+ fireEvent.click(screen.getByLabelText('启用持仓否决 2'));
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));
+ const saved=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved[0]).toEqual(original[0]);
+ expect(saved[1].boxStop.structure.versions.guard).toBe(DBL5_RETEST_GUARD_VERSION);
+ expect(existing).toEqual(original);
 });
 it('adds an opt-in box hard stop with independent algorithm, parameters and execution choices',()=>{
  render(<Editor/>);fireEvent.click(screen.getByRole('button',{name:'添加箱体终止'}));

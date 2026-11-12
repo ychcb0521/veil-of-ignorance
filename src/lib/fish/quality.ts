@@ -545,9 +545,11 @@ export function materializePlanBuyFilters(study: FishQualityStudy): FishQualityS
 export type QualityFilterStatus = { state: 'none' | 'pass' | 'fail' | 'pending' | 'error'; detail: string };
 /** 一行在某套卖出方案下是否买入：没有启用的条件 = none；任一条件缺数据 = error；任一不满足 = fail；还没读数 = pending。 */
 export function qualityFilterStatus(study: FishQualityStudy, row: QualitySample, plan: QualityGroup | undefined, readings: ReadonlyMap<string, QualityFilterReading> = new Map((study.filterReadings ?? []).map(r => [r.key, r]))): QualityFilterStatus {
-  const filters = activeBuyFilters(study, plan);
+  return filterStatusForConditions(qualityMonitoringSample(row), activeBuyFilters(study, plan), readings);
+}
+
+function filterStatusForConditions(row: QualitySample, filters: readonly QualityBuyFilter[], readings: ReadonlyMap<string, QualityFilterReading>): QualityFilterStatus {
   if (!filters.length) return { state: 'none', detail: '' };
-  row=qualityMonitoringSample(row);
   const parts: string[] = []; let pending = false, error = false, fail = false;
   for (const f of filters) {
     const r = readings.get(qualityFilterReadingKey(row, f));
@@ -829,7 +831,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };
   }
 }
-export interface QualityProgress { done: number; total: number; current: string; waitingUntil?: number }
+export interface QualityProgress { done: number; total: number; current: string; waitingUntil?: number; matched?: number }
 /** 持仓监测同时计算的行数：取数是瓶颈（逐个等交易所返回），并行能把等待叠起来；请求总量仍由限频预算控制。 */
 export const QUALITY_CONCURRENCY = 4, QUALITY_CONCURRENCY_MAX = 8;
 export interface QualityRunTiming { sampleId: string; groupId: string; symbol: string; ms: number }
@@ -892,22 +894,23 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     const {study,signal} = options, filters = activeStandaloneBuyFilters(study);
     const rows = new Map(qualityRunSamples(study).map(row => [row.id,row]));
     const total = rows.size, readings = new Map((study.filterReadings ?? []).filter(r => !r.error && Number.isFinite(r.value)).map(r=>[r.key,r]));
-    let done = 0;
+    let done = 0, matched = 0;
     while (rows.size) {
       abort(signal);
       const id = options.priority?.().find(id=>rows.has(id)) ?? rows.keys().next().value!;
       const row = rows.get(id)!; rows.delete(id);
-      options.onProgress({done,total,current:row.source.symbol});
+      options.onProgress({done,total,matched,current:row.source.symbol});
       for (const f of filters) {
         const key = qualityFilterReadingKey(row,f);
         if (readings.has(key)) continue;
         const reading = await evaluateQualityFilter(row,f,now,load,signal);
         abort(signal); readings.set(key,reading); options.onFilterReading?.(reading);
       }
+      if (filterStatusForConditions(row, filters, readings).state === 'pass') matched++;
       done++;
       await fishDelay(0, signal);
     }
-    options.onProgress({done,total,current:''}); return;
+    options.onProgress({done,total,matched,current:''}); return;
   }
   const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
   const filtersOnly = options.task === 'filter' || options.task !== 'monitor' && onlyQualityFilters(study);

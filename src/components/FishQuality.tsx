@@ -56,6 +56,7 @@ import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
 import { FishMonitorLibrary } from '@/components/FishMonitorLibrary';
 import { FishFilterLibrary } from '@/components/FishFilterLibrary';
+import { FishQualityProgress } from '@/components/FishQualityProgress';
 import { fishInfoTrigger, fishRail, fishSectionHeading, FishCount } from './FishSection';
 import { FishQualityInfo, FishQualityModule, FishQualityModuleGroup, qualitySplitPauseAction, qualitySplitPrimaryAction, qualitySplitMenuAction, qualitySettingsAction } from '@/components/FishQualityModule';
 import { FishProcessButton } from '@/components/FishProcess';
@@ -755,7 +756,9 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   // 【用户要求】2026-10-27 买前过滤、持仓监测只处理「当前筛选下可见、且已勾选」的行；筛选外勾着的不动
   const selectedBatch = batch.filter(r => selectedIds.has(r.id)), scopedSelected = sortedRows.filter(r => selectedIds.has(r.id));
   const selectedCount = countSignals(scopedSelected), selectedTotal = countSignals(selectedBatch);
-  const staticRunning = state.filterRunning || state.signalValues?.running;
+  const readingsRunning = !!state.signalValues?.running;
+  const staticRunning = state.filterRunning || readingsRunning;
+  const staticProgress = readingsRunning ? state.signalValues?.progress : state.filterProgress;
   const canStartStatic = !!selectedCount && (filtersOn || readingsOn);
   const lockSelection = () => {
     if (!ready || !scopedSelected.length || state.archiving) return;
@@ -992,7 +995,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         <FishQualityModuleGroup>
           <FishQualityModule level="submodule" title="静态过滤" icon={Filter} testId="quality-static-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={()=>toggleHidden('filter')} count={study.filterReadings?.length??0} onClear={lockedBatch ? undefined : state.clearFilterResults} disabled={!ready||state.signalValues?.running}/>}
             summary={<FishQualityInfo label="静态过滤说明"><p>信号时点读数按原信号时间生成。买前过滤检查原入场时点之前最后一根已收盘的 5 分钟 K 线。两项都只处理当前范围内已勾选的记录。</p><p>过滤库按时间目录查看各轮结果，表格与组合表一致。本模块的眼睛和擦除独立于动态筛选、持仓监测。</p></FishQualityInfo>}
-            status={state.filterProgress&&<span role="status">{state.filterRunning?'过滤中':resumeFiltering?'已暂停':state.filterError?'过滤未完成':state.filterProgress.done===state.filterProgress.total?'过滤完成':'过滤未完成'} {state.filterProgress.done}/{state.filterProgress.total}</span>}>
+            status={!staticRunning&&state.filterProgress&&<span role="status">{resumeFiltering?'已暂停':state.filterError?'过滤未完成':state.filterProgress.done===state.filterProgress.total?'过滤完成':'过滤未完成'} {state.filterProgress.done}/{state.filterProgress.total}</span>}>
           <div role="group" aria-label="静态过滤运行" className="inline-flex h-6 shrink-0 items-stretch">
             {staticRunning
               ? <button type="button" className={qualitySplitPauseAction} onClick={state.signalValues?.running ? state.cancelSignalValues : state.cancelFilter}>
@@ -1019,16 +1022,24 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             </Popover>
           </div>
           {/* 【用户要求】2026-10-28 旁边已有「条件设置」，原「未设置过滤条件 · 点此设置」等行内提示纯属重复，已删除；为何不能开始见按钮悬停 */}
-          {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
             <FishConditionSettings title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={state.account} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
           </PopoverContent></Popover>
-          {state.signalValues?.error && <p role="alert" className="text-[11px] text-destructive">{state.signalValues.error}</p>}
-          {state.signalValues?.running && <span role="status" className="inline-flex items-center gap-2 text-[10px] text-muted-foreground">生成读数 {state.signalValues.progress.done}/{state.signalValues.progress.total}</span>}
           <FishFilterLibrary onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
+          {staticRunning && <FishQualityProgress
+            testId="static-filter-progress"
+            label={staticProgress?.waitingUntil ? '行情限流 · 等待自动续跑' : readingsRunning ? '生成读数中' : '过滤中'}
+            progressLabel={readingsRunning ? '信号时点读数处理进度' : '买前过滤处理进度'}
+            done={staticProgress?.done ?? 0} total={staticProgress?.total ?? 0} waitingUntil={staticProgress?.waitingUntil}
+            hitCount={!readingsRunning && staticProgress?.matched != null
+              ? {value:staticProgress.matched,title:'本轮满足全部买前过滤条件的记录数'}
+              : undefined}
+          />}
+          {state.signalValues?.error && <p role="alert" className="text-[11px] text-destructive">{state.signalValues.error}</p>}
+          {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls"
-            progress={<FishScreened key={state.account} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
+            subsection={<FishScreened key={state.account} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
               jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>} trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li><strong>判断是否值得锁定。</strong>静态门槛在原信号时点检查一次。两项都勾选时，静态达标就直接观察新事件，未通过才启动动态门槛，在原截止时间内继续追踪。</li><li><strong>寻找时机。</strong>必要条件通过后观察。任一启用的新事件出现，就以它的时刻为候选；没有事件就继续等到本轮时限。</li><li><strong>回看历史硬伤。</strong>从候选时刻向前按各排除条件的范围回看。任何一项触发，就从候选之后继续找下一次新事件。通过检查才报告入选，首次满足时间记为该候选时刻。</li></ol><p>以上适用于采用信号时点判断的新方案。已有方案按保存的版本运行。</p></FishQualityInfo>}>
             <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>

@@ -33,8 +33,8 @@ export function FishScreened({ library, ratings, onJump, canJump, onRate, jumpin
     });
   }, [library.rounds, library.records, ratings]);
   const byId = useMemo(() => new Map(rows.map(row => [row.id, row])), [rows]);
-  return <div className="mt-2 border-l border-border/50 pl-3">
-    <FishLibrary title="筛选鱼" level="sub" testId="fish-screened" signals={rows} showScreeningTime defaultOpen={false}
+  return <div className="ml-1 mt-1 border-l border-border/50 pl-2">
+    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime defaultOpen={false}
       emptyText="还没有自动筛选入选的鱼。" tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} jumpingSignalId={jumpingSignalId ?? null}
       onJump={id => {
         const row = byId.get(id), at = row?.preEntryMonitor?.matchedAt;

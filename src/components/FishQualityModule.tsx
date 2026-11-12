@@ -25,25 +25,26 @@ export function FishQualityInfo({ label, children }: { label: string; children: 
 
 /** 鱼质量的三个工作模块共用尺寸、留白和标题层级。 */
 /** trailing：放在行尾最右侧的次要操作（如组合表结果的隐藏 / 清除），不打乱三行按钮的逐列对齐。 */
-export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, trailing, testId, titleTestId, level='module' }: {
+export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, subsection, trailing, testId, titleTestId, level='module' }: {
   title: string;
   icon: LucideIcon;
   summary?: ReactNode;
   children: ReactNode;
   status?: ReactNode;
   progress?: ReactNode;
+  subsection?: ReactNode;
   trailing?: ReactNode;
   testId?: string;
   titleTestId?: string;
   level?: 'module' | 'submodule';
 }) {
-  const [open, setOpen] = useState(true), contentId = useId();
+  const [open, setOpen] = useState(true), contentId = useId(), subsectionId = useId();
   const Heading = level==='module'?'h4':'h5';
   return <section aria-label={`${title}模块`} data-testid={testId} data-module-level={level} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-1.5 last:border-b-0">
     {/* 顶层标题列补齐子模块的左缩进（ml-1.5 + border-l + pl-3 / sm:pl-4），让四行操作按钮对齐。 */}
     <div className={`flex h-7 ${level==='submodule'?'w-28':'w-[calc(8.125rem+1px)] sm:w-[calc(8.375rem+1px)]'} shrink-0 items-center gap-0.5`}>
       <Heading className="min-w-0">
-        <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen(!open)} className={level==='module'?fishSubHeading:submoduleHeading}><Icon aria-hidden className={`${level==='module'?'h-3.5 w-3.5':'h-3 w-3'} text-muted-foreground`}/><span data-testid={titleTestId}>{title}</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button>
+        <button type="button" aria-expanded={open} aria-controls={subsection ? contentId + ' ' + subsectionId : contentId} onClick={() => setOpen(!open)} className={level==='module'?fishSubHeading:submoduleHeading}><Icon aria-hidden className={`${level==='module'?'h-3.5 w-3.5':'h-3 w-3'} text-muted-foreground`}/><span data-testid={titleTestId}>{title}</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}/></button>
       </Heading>
       <div className="flex min-w-0 items-center text-[10px] text-muted-foreground">{summary}</div>
     </div>
@@ -51,6 +52,7 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
       <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-1.5 text-[11px]">{children}{status&&<div className="ml-1 inline-flex min-w-0 flex-wrap items-center gap-2 text-[10px] text-muted-foreground">{status}</div>}{trailing&&<div className="ml-auto inline-flex shrink-0 items-center">{trailing}</div>}</div>
       {progress}
     </div>
+    {subsection && <div id={subsectionId} hidden={!open} className="min-w-0 basis-full">{subsection}</div>}
   </section>;
 }
 
