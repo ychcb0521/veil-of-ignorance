@@ -261,18 +261,17 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
               qualification = {status:'pending',reason:gate.reason ? '必要条件继续追踪 · '+gate.reason : '等待必要条件读数'};
             }
           }
-          const admissionEvents = retry && (!signalGate || !zeroTrade) ? [
-            ...(guard.event ? ['原生防守线新事件'] : []),
-            ...admissionAlgorithms.filter(condition => {
-              const met = map.get(condition.id)?.met;
-              if (!signalGate) return met === true;
-              if (met === false) activeAdmissions.delete(condition.id);
-              if (met !== true || activeAdmissions.has(condition.id)) return false;
-              activeAdmissions.add(condition.id);
-              return true;
-            }).map(condition => condition.label),
-          ] : [];
-          const metAdmission = qualification.status === 'pass' ? admissionEvents : [];
+          const observeAdmission = retry && (!signalGate || !zeroTrade);
+          const indicatorEvents = observeAdmission ? admissionAlgorithms.filter(condition => {
+            const met = map.get(condition.id)?.met;
+            if (!signalGate) return met === true;
+            if (met === false) activeAdmissions.delete(condition.id);
+            if (met !== true || activeAdmissions.has(condition.id)) return false;
+            activeAdmissions.add(condition.id);
+            return true;
+          }) : [];
+          const metAdmission = observeAdmission && qualification.status === 'pass'
+            ? [...(guard.event ? ['原生防守线新事件'] : []), ...indicatorEvents.map(condition => condition.label)] : [];
           const candidate = !signalGate || metAdmission.length > 0;
           // v8 checks historical rules only at a candidate time. The readers
           // rebuild the intervening history through that minute's close.
@@ -317,7 +316,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
           // Replaying up to the persisted cursor restores locks and confirmation
           // counts; it cannot admit or duplicate a previously observed event.
           if(at<=resumeAt)continue;
-          record={...record,cursor:at,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction}:{})};})}),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
+          record={...record,cursor:at,threeStage:evidence,exclusionProcess:recordEntryEvidence(record.exclusionProcess!,{...evidence,readings:observations.map(r=>{const condition=conditions.find(c=>c.id===r.id);return {...r,...(admissionIds.has(r.id)?{role:'admission' as const}:{}),...(condition?{threshold:condition.threshold,direction:condition.direction}:{})};})}, indicatorEvents.map(condition => condition.id)),readings:observations.filter(r=>r.value!=null).map(r=>({key:r.id,at:r.at,value:r.value!}))};
           if(waiting&&at>(record.zeroTradeWait?.lastAt??-Infinity))record.zeroTradeWait={count:(record.zeroTradeWait?.count??0)+1,firstAt:record.zeroTradeWait?.firstAt??at,lastAt:at};
           if(v6){if(evidence.state==='zero-blocked'||evidence.state==='first-blocked'||evidence.state==='second-blocked')record.lastVeto={at,reason:evidence.state==='zero-blocked'?evidence.zero!.reason!:evidence.state==='first-blocked'?evidence.first.reason!:evidence.second.reason!,count:(record.lastVeto?.count??0)+1};}
           else if(first.status==='blocked'||second.status==='blocked')record.lastVeto={at,reason:first.status==='blocked'?first.reason!:second.reason!,count:(record.lastVeto?.count??0)+1};

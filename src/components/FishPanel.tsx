@@ -584,6 +584,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} info={<><p><a href="/guide#fish-cabin" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">阅读完整说明 · 3.3.3 鱼舱</a></p><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${groupFishCabin(old.filter(signal => !signal.freshCatch)).length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality} jumpingSignalId={p.qualityJumpPending ? p.jumpingSignalId : null}/></ModuleErrorBoundary>}
+    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality} jumpingSignalId={p.qualityJumpPending ? p.jumpingSignalId : null}/></ModuleErrorBoundary>}
   </section>;
 }

@@ -21,6 +21,7 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   onExport?: () => void;
   /** 列表名：「新鱼」或「鱼舱」。 */
   title?: string;
+  showScreeningTime?: boolean;
   testId?: string;
   defaultOpen?: boolean;
   emptyText?: string;
@@ -46,7 +47,8 @@ function readView(key?:string):FishView {
 }
 /** The catch stays inside 渔. Use the same table, columns, sorting and rating behavior as 信号库. */
 export const FishLibrary = memo(function FishLibrary(p: Props) {
-  const bulk = useFishBulkDelete();
+  const bulkDelete = useFishBulkDelete();
+  const bulk = p.onDelete ? bulkDelete : undefined;
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const title = p.title ?? '鱼舱';
   const isCabin = title === '鱼舱' && p.level !== 'sub';
@@ -77,13 +79,13 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const requestDelete = useCallback((rowIds: string[]) => {
     const ids = new Set(rowIds.flatMap(id => cabinRows.get(id)?.captures.map(signal => signal.id) ?? [id]));
     if (bulk) bulk({kind:'hold', ids:[...ids], targets:p.signals.filter(signal => ids.has(signal.id)).map(fishDeleteTarget)});
-    else for (const id of ids) p.onDelete(id);
+    else for (const id of ids) p.onDelete?.(id);
   }, [bulk, cabinRows, p.signals, p.onDelete]);
   const deleteRow = useCallback((id: string) => requestDelete([id]), [requestDelete]);
   const rowAlgorithmTypes = useCallback((signal: (typeof p.signals)[number]) => {
     const group = cabinRows.get(signal.id);
-    return group?.algorithms ?? fishCaughtBy(signal);
-  }, [cabinRows]);
+    return group?.algorithms ?? (p.showScreeningTime && !signal.fish ? [] : fishCaughtBy(signal));
+  }, [cabinRows, p.showScreeningTime]);
   const rowProcessSignals = useCallback((signal: (typeof p.signals)[number]) => cabinRows.get(signal.id)?.captures, [cabinRows]);
   const testId = p.testId ?? 'fish-library';
   const [saved] = useState(()=>readView(p.rememberViewKey));
@@ -174,7 +176,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     <div className="flex items-center justify-between gap-2">
     <span className="flex items-center gap-0.5">
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={p.level === 'sub' ? fishSubHeading : fishSectionHeading}>
-      {p.title === '新鱼' ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
+      {p.title === '新鱼' || p.showScreeningTime ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
       {title !== '鱼舱' && <FishCount n={displaySignals.length}/>}
       <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
@@ -198,11 +200,11 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       </div>
       {rows.length ? <div className="isolate min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(834px + var(--fish-algorithm-width))` } as CSSProperties}>
         <SignalLibraryHeader selection={bulk?{checked:!!rows.length&&rows.every(r=>selected.has(selectedKey(r))),toggle:()=>setSelected(s=>{const n=new Set(s),all=rows.every(r=>n.has(selectedKey(r)));for(const r of rows)if(all)n.delete(selectedKey(r));else n.add(selectedKey(r));return n;})}:undefined}
-          sortKey={sortKey === 'algorithm' || sortKey === 'algorithmCount' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess
+          sortKey={sortKey === 'algorithm' || sortKey === 'algorithmCount' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess showScreeningTime={p.showScreeningTime}
           algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }}
           algorithmCountSort={{ active: sortKey === 'algorithmCount', onClick: () => toggleSort('algorithmCount') }}
           caughtAtSort={canSortCaughtAt ? { active: sortKey === 'caughtAt', onClick: () => toggleSort('caughtAt') } : undefined} />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={deleteRow} selectedIds={bulk?selectedIds:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={rowAlgorithmTypes} rowProcessSignals={rowProcessSignals} nested showProcess confirmDelete={!bulk} />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={p.onDelete ? deleteRow : undefined} selectedIds={bulk?selectedIds:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={rowAlgorithmTypes} rowProcessSignals={rowProcessSignals} nested showProcess showScreeningTime={p.showScreeningTime} confirmDelete={!bulk} />
       </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{displaySignals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;

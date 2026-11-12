@@ -52,3 +52,30 @@ it('shows the latest decision, latest veto readings and latest screening run wit
  const process=results[0].record.exclusionProcess!;process.entries.push({kind:'observation',stage:'exclusion',status:'blocked',from:T+180000,through:T+240000,count:2,reason:'此前的初始否决',lastReason:'最后否决：回撤 12% ≥ 10%',readings:[{id:'v',label:'回撤',at:T+180000,value:11,met:true,role:'veto',threshold:10,direction:'>='}],lastReadings:[{id:'v',label:'回撤',at:T+240000,value:12,met:true,role:'veto',threshold:10,direction:'>='}]},{kind:'restart',from:T+300000,through:T+300000,count:1,reason:'旧的重建过程'},{kind:'matched',from:T+360000,through:T+360000,count:1,reason:'最终入选'});const all=[old,...results],before=structuredClone(all);
  render(<FishScreeningProcessButton results={all}/>);fireEvent.click(screen.getByLabelText('排除过程'));expect(screen.getAllByTestId('screening-process-item')).toHaveLength(1);const dialog=screen.getByTestId('screening-process-dialog');expect(dialog).toHaveTextContent('最后否决：回撤 12% ≥ 10%');expect(dialog).not.toHaveTextContent('此前的初始否决');expect(dialog).not.toHaveTextContent('旧轮次噪音');expect(dialog).not.toHaveTextContent('旧的重建过程');expect(screen.getByTestId('screening-process-unmet')).toHaveTextContent('回撤 = 12');expect(all).toEqual(before);
 });
+
+it('shows the confirmed admission time and actual trigger before the veto', () => {
+ const results = result(), entry = results[0].record.exclusionProcess!.entries[0], at = entry.through;
+ entry.admission = {at, labels:['状态 S'], indicatorIds:['state']};
+ entry.lastReadings = [
+   {id:'state', label:'状态 S', at, value:.71, threshold:.65, direction:'>', met:true, role:'admission'},
+   {id:'already', label:'此前已经达标', at, value:10, met:true, role:'admission'},
+ ];
+ render(<FishScreeningProcessButton results={results}/>);
+ fireEvent.click(screen.getByLabelText('排除过程'));
+ const card = screen.getByTestId('screening-admission');
+ expect(card).toHaveTextContent('确认时间 2026-11-08 08:02:00');
+ expect(card).toHaveTextContent('状态 S = 0.71');
+ expect(card).not.toHaveTextContent('此前已经达标');
+ expect(card.nextElementSibling).toHaveAttribute('data-testid','screening-process-item');
+ expect(screeningResultsSheet(results).rows[0][5]).toContain('准入 2026-11-08 08:02:00 · 状态 S');
+});
+it('shows saved historical readings at the veto time without inferring a trigger', () => {
+ const results = result(), entry = results[0].record.exclusionProcess!.entries[0];
+ entry.lastReadings = [{id:'state', label:'状态 S', at:entry.through, value:.72, threshold:.65, direction:'>', met:true, role:'admission'}];
+ render(<FishScreeningProcessButton results={results}/>);
+ fireEvent.click(screen.getByLabelText('排除过程'));
+ const card = screen.getByTestId('screening-admission');
+ expect(card).toHaveTextContent('观测时间 2026-11-08 08:02:00');
+ expect(card).toHaveTextContent('状态 S = 0.72');
+ expect(card).toHaveTextContent('未单独记录触发项');
+});

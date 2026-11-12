@@ -8,13 +8,14 @@ export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax
 export const SIGNAL_LIBRARY_FISH_GRID = 'grid grid-cols-[148px_128px_128px_52px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Shared column widths and sort controls for the main library and 鱼. */
-export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, algorithmSort, algorithmCountSort, caughtAtSort, selection }: {
+export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, showScreeningTime = false, algorithmSort, algorithmCountSort, caughtAtSort, selection }: {
   selection?:{checked:boolean;toggle:()=>void};
   /** 「渔」的鱼：兜底区换成可排序的「算法类型」。 */
   algorithmSort?: { active: boolean; onClick: () => void };
   algorithmCountSort?: { active: boolean; onClick: () => void };
   caughtAtSort?: { active: boolean; onClick: () => void };
   showMatch?: boolean;
+  showScreeningTime?: boolean;
   /** 「渔」的鱼：这一列标「捕捞过程」。 */
   showProcess?: boolean;
   sortKey: SignalSortKey | undefined; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
@@ -28,7 +29,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
     <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => onSort('time')} />
     {algorithmSort && (caughtAtSort
       ? <SortHeader label="捕捞时间" active={caughtAtSort.active} dir={sortDir} onClick={caughtAtSort.onClick} />
-      : <span title="实际捕获这条鱼的时间（北京时间）">捕捞时间</span>)}
+      : <span title={showScreeningTime ? "动态筛选首次满足的时间（北京时间）" : "实际捕获这条鱼的时间（北京时间）"}>{showScreeningTime ? "首次满足时间" : "捕捞时间"}</span>)}
     {algorithmSort && (algorithmCountSort
       ? <SortHeader label="算法数量" active={algorithmCountSort.active} dir={sortDir} onClick={algorithmCountSort.onClick} />
       : <span title="实际命中的不同算法类型数量">算法数量</span>)}

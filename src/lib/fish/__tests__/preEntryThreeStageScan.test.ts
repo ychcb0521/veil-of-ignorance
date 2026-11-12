@@ -94,6 +94,7 @@ it.each(['indicator','drop-1m'] as const)('checks a historical %s trigger at the
  const result=await run(p,{load:loader([85,105,105,95,105])});
  expect(result).toMatchObject({status:'matched',matchedAt:T+5*M,lastVeto:{at:T+2*M,reason:expect.stringMatching(/历史硬伤.*历史触发于/)}});
  expect(result.exclusionProcess!.entries.filter(e=>e.kind==='restart')).toHaveLength(1);
+ expect(result.exclusionProcess!.entries.find(e=>e.stage==='exclusion')?.admission).toEqual({at:T+2*M,labels:['准入'],indicatorIds:['准入']});
 });
 it('rejects at the original signal time without borrowing stronger readings from the later screening start',async()=>{
  const p=stateOnlyPlan();

@@ -10,13 +10,14 @@ export function latestScreeningExclusion(process: EntryExclusionProcess): EntryP
   const latest = candidates.filter(e => e.through === at);
   const observations = latest.filter(e => e.kind === 'observation');
   const event = latest.find(e => e.event)?.event;
+  const admission = latest.find(e => e.admission?.at === at)?.admission;
   const chosen = observations.length ? observations : latest.slice(-1);
   const base = chosen.find(e => e.stage === 'exclusion') ?? chosen[0];
   const readings = new Map<string, EntryProcessReading>();
   for (const e of chosen) for (const r of e.lastReadings ?? e.readings ?? []) readings.set(`${r.id}:${r.role ?? ''}:${r.at}`, r);
   const reason = chosen.map(e => (chosen.length > 1 && e.stage ? entryProcessStageLabels[e.stage] + '：' : '') + (e.lastReason ?? e.reason)).join('；');
   return [{ ...base, from: at, through: at, count: 1, reason, readings: [...readings.values()],
-    lastReason: undefined, lastReadings: undefined, endedAt: undefined, nextStatus: undefined, event: base.event ?? event }];
+    lastReason: undefined, lastReadings: undefined, endedAt: undefined, nextStatus: undefined, event: base.event ?? event, admission }];
 }
 
 /** Ignore older screening runs when a table row contains several histories. */

@@ -222,7 +222,7 @@ interface RowProps {
   /** 任意一行正在跳转时，所有行的按钮都禁用。 */
   disabled: boolean;
   onJump: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onRate: (id: string, next: number) => void;
   /** 行内任一控件拿到焦点时报上自己的 id，列表据此把这一行钉在 DOM 里。 */
   onFocusRow: (id: string) => void;
@@ -244,7 +244,7 @@ function SignalLibraryRowImpl({
   // 【用户要求】2026-10-21「鱼那里的数据…不能轻易删除」：× 紧挨着跳转箭头，容易点错——鱼要再点一次「确认删除」
   const [armed, setArmed] = useState(false);
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 3000); return () => clearTimeout(t); }, [armed]);
-  const handleDelete = useCallback(() => { if (confirmDelete && !armed) { setArmed(true); return; } setArmed(false); onDelete(id); }, [onDelete, id, confirmDelete, armed]);
+  const handleDelete = useCallback(() => { if (confirmDelete && !armed) { setArmed(true); return; } setArmed(false); onDelete?.(id); }, [onDelete, id, confirmDelete, armed]);
   const handleRate = useCallback((next: number) => onRate(id, next), [onRate, id]);
   // React 的 onFocus 走 focusin，会冒泡：行内哪个按钮拿到焦点都算这一行。
   const handleFocus = useCallback(() => onFocusRow(id), [onFocusRow, id]);
@@ -336,7 +336,7 @@ function SignalLibraryRowImpl({
           ? <Loader2 className="h-4 w-4 animate-spin" />
           : <ArrowRightCircle className="h-4 w-4" />}
       </button>
-      {armed
+      {!onDelete ? <span aria-hidden/> : armed
         // 最后一列只有 × 那么宽：确认按钮从 × 的位置向左浮出，盖住跳转箭头（第二下不会误点成跳转）
         ? <span className="relative h-5 w-5 shrink-0"><button onClick={handleDelete} onBlur={() => setArmed(false)} autoFocus className="absolute right-0 top-0 z-10 h-5 whitespace-nowrap rounded bg-destructive px-1.5 text-[10.5px] font-medium text-destructive-foreground shadow-sm hover:bg-destructive/90" aria-label={`确认删除 ${symbol}`}>确认删除</button></span>
         : <button
@@ -364,6 +364,7 @@ interface Props {
   nested?: boolean;
   /** 「渔」的鱼：每行加「捕捞过程」入口。 */
   showProcess?: boolean;
+  showScreeningTime?: boolean;
   /** 「渔」的鱼：兜底区这一列换成「算法类型」。 */
   rowAlgorithmTypes?: (signal: TradeSignal) => string[];
   rowProcessSignals?: (signal: TradeSignal) => readonly TradeSignal[] | undefined;
@@ -381,7 +382,7 @@ interface Props {
    */
   resetKey: string;
   onJump: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onRate: (id: string, next: number) => void;
 }
 
@@ -402,7 +403,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect,
-  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
+  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, showScreeningTime = false, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef(rows); rowsRef.current = rows;
@@ -604,7 +605,7 @@ function SignalLibraryListImpl({
         market={sig.market}
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
-        caughtAt={rowAlgorithmTypes ? sig.caughtAt : undefined}
+        caughtAt={rowAlgorithmTypes ? (showScreeningTime ? sig.preEntryMonitor?.matchedAt : sig.caughtAt) : undefined}
         fallbackZone={sig.fallbackZone}
         turingReplaySample={sig.turingReplaySample}
         quality={normalizeSignalQuality(sig.quality)}
