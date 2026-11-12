@@ -14,9 +14,9 @@ const signals:TradeSignal[]=['AAAUSDT','BBBUSDT'].map((symbol,i)=>({id:symbol,sy
 const load=vi.fn(async({symbol}:{symbol:string},cut:number,plan:FishProgram)=>Array.from({length:plan.N},(_,i)=>({openTime:cut-(plan.N-i)*plan.step,open:1,close:symbol==='AAAUSDT'?1:3,high:4,low:0,volume:1,quoteVolume:symbol==='AAAUSDT'?100:300,takerBuyQuoteVolume:50,takerBuyVolume:null,refClose:50000})));
 const suggest=vi.fn((options:FishSuggestionOptions)=>collectFishSuggestion(options,load));
 const start=vi.fn();
-function Harness({onSuggest=suggest}:{onSuggest?:FishPanelProps['onSuggest']}){
+function Harness({onSuggest=suggest,onTestHitRate}:{onSuggest?:FishPanelProps['onSuggest'];onTestHitRate?:FishPanelProps['onTestHitRate']}){
  const [inputs,onInputsChange]=useState({time:'',threshold:''}),[selection,onSelectionChange]=useState<FishPanelProps['selection']>({exchanges:['binance'],includeDuplicates:false}),[library,setLibrary]=useState(signals);
- return <><button onClick={()=>setLibrary([...signals,{...signals[0],id:'extra',timeMs:signals[0].timeMs+300000}])}>增加信号</button><FishPanel librarySignals={library} onSuggest={onSuggest} signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/></>;
+ return <><button onClick={()=>setLibrary([...signals,{...signals[0],id:'extra',timeMs:signals[0].timeMs+300000}])}>增加信号</button><FishPanel librarySignals={library} onSuggest={onSuggest} onTestHitRate={onTestHitRate} signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/></>;
 }
 function select(){fireEvent.change(screen.getByLabelText('捕捞算法'),{target:{value:def.id}});expect(screen.queryByLabelText('捕捞平均时长')).toBeNull();}
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));localStorage.setItem(getUserPrefix()+FEATURES_KEY,JSON.stringify([def]));suggest.mockClear();load.mockClear();start.mockClear();});
@@ -102,3 +102,25 @@ it('账号已保存的阈值保持固定，后台建议重算与信号库变化�
  await act(()=>new Promise(resolve=>setTimeout(resolve,1000)));
  expect(screen.getByLabelText('捕捞阈值')).toHaveValue(77);
 });
+
+it('漏报测试等待后台建议释放取数器，保留已选样本，并在结束后恢复建议',async()=>{
+  let release!: () => void;
+  const delayed=vi.fn((o:FishSuggestionOptions)=>new Promise<FishSuggestion>((_resolve,reject)=>{
+    o.signal.addEventListener('abort',()=>{release=()=>reject(new DOMException('已取消','AbortError'));},{once:true});
+  }));
+  const run=vi.fn(async()=>{});
+  sessionStorage.setItem('veil.fish.open',JSON.stringify({settings:true,captureQuality:true,hitRate:true}));
+  render(<Harness onSuggest={delayed} onTestHitRate={run}/>);
+  select();
+  fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'2'}});
+  await waitFor(()=>expect(delayed).toHaveBeenCalled(),{timeout:3500});
+  fireEvent.click(screen.getByRole('radio',{name:'粘贴标的和时间'}));
+  fireEvent.change(screen.getByLabelText('样本清单（北京时间）'),{target:{value:'BTCUSDT 2026-10-18 14:30:00'}});
+  fireEvent.click(screen.getByRole('button',{name:'开始测试'}));
+  expect(delayed.mock.calls[0][0].signal.aborted).toBe(true);
+  expect(screen.getByText('正在结束后台阈值建议，随后开始测试…')).toBeVisible();
+  expect(run).not.toHaveBeenCalled();
+  await act(async()=>release());
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({samples:[expect.objectContaining({symbol:'BTCUSDT'})]}));
+  await waitFor(()=>expect(delayed).toHaveBeenCalledTimes(2),{timeout:3500});
+},12000);

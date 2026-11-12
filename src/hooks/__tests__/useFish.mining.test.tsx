@@ -3,6 +3,8 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('@/lib/simStateSync', () => ({ queueSimStatePush: vi.fn() }));
 vi.mock('@/lib/fish/session', () => ({ saveFishSession: vi.fn(async () => {}), loadFishSession: vi.fn(async () => null) }));
+const runHitRate = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}));
+vi.mock('@/lib/fish/hitRate', async original => ({...await original<typeof import('@/lib/fish/hitRate')>(),runFishHitRate:runHitRate}));
 const calls = vi.hoisted(() => [] as { anchorMs?: number; aborted: () => boolean; checkpoint?: unknown }[]);
 vi.mock('@/lib/fishScanner', async original => {
   const real = await original<typeof import('@/lib/fishScanner')>();
@@ -102,4 +104,19 @@ it('never reuses mining decisions after switching accounts', async () => {
   await act(async () => { const next = h.result.current.mine({ anchorMs: 123 }).catch(e => e); h.result.current.stopMining(); await next; });
   expect(calls.at(-1)!.checkpoint).not.toBe(previous);
   vi.useRealTimers();
+});
+
+it('漏报测试让批量捕捞结束当前档，等取数器释放后只启动一次', async () => {
+  const { result } = renderHook(() => useFish(undefined));
+  const waiting = vi.fn();
+  let mined!: Promise<unknown>;
+  act(() => { mined = result.current.mine({ anchorMs: 123 },undefined,'round'); void mined.catch(()=>{}); });
+  await act(async () => {
+    await result.current.testHitRate({samples:[],mode:'targets',settings:{},signal:new AbortController().signal,onProgress:vi.fn(),onWindow:vi.fn(),onWaiting:waiting});
+  });
+  await expect(mined).rejects.toMatchObject({name:'AbortError'});
+  expect(calls[0].aborted()).toBe(true);
+  expect(waiting).toHaveBeenCalledWith('等待批量捕捞结束当前档…');
+  expect(runHitRate).toHaveBeenCalledTimes(1);
+  expect(result.current.busy()).toBe(false);
 });

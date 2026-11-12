@@ -1,3 +1,4 @@
+import type { FishHitRateExportRun } from '@/lib/fish/hitRateExport';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -60,10 +61,14 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
   const [windows, setWindows] = useState<FishHitRateWindow[]>([]);
   const [testedSamples, setTestedSamples] = useState<TradeSignal[]>([]);
   const [resultMode, setResultMode] = useState<FishHitRateMode>('targets');
+  const [exportContext, setExportContext] = useState<Pick<FishHitRateExportRun,'window'|'startedAt'>>();
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const [selectedWindow, setSelectedWindow] = useState<number>();
   const marketResults = useRef<HTMLElement>(null);
   const [progress, setProgress] = useState<FishHitRateProgress>();
   const [running, setRunning] = useState(false);
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [error, setError] = useState('');
   const controller = useRef<AbortController>();
@@ -133,10 +138,13 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
     const windowConfig = { ...selectedSettings.window };
     controller.current = task;
     setRunning(true);
+    setWaiting(null);
     onRunningChange(true);
     setStopped(false);
     setArchivedCount(undefined);
     setWindows([]);
+    setExportContext({window:windowConfig,startedAt});
+    setExportError('');
     setResultMode(mode);
     const samplesForRun = samples.map(sample => ({ ...sample }));
     setTestedSamples(samplesForRun);
@@ -153,6 +161,7 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
           if (updates.length) void updateLibrary({ owner, updates });
         },
         onProgress: value => { if (!task.signal.aborted) setProgress(value); },
+        onWaiting: reason => { if (!task.signal.aborted) setWaiting(reason); },
       });
       if (!task.signal.aborted && finishedWindows.length === checkedWindows) {
         const round = makeFishMissRound({ id: runId, startedAt, completedAt: Date.now(), mode, window: windowConfig }, finishedWindows);
@@ -168,10 +177,23 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
       if (controller.current === task) {
         controller.current = undefined;
         setRunning(false);
+        setWaiting(null);
         onRunningChange(false);
         setStopped(task.signal.aborted);
       }
     }
+  };
+
+  const exportResults = async () => {
+    if (exporting || running || !windows.length || !exportContext) return;
+    setExporting(true);
+    setExportError('');
+    try {
+      const {downloadFishHitRate}=await import('@/lib/fish/hitRateExport');
+      downloadFishHitRate({...exportContext,mode:resultMode,windows,samples:testedSamples,outcome:stopped?'已停止':error?'测试异常':'测试结束'});
+    } catch (cause) {
+      setExportError(cause instanceof Error ? cause.message : '导出测试结果失败');
+    } finally { setExporting(false); }
   };
 
   return <div className="min-w-0 space-y-2 text-[11px]">
@@ -210,13 +232,13 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
           </p>}
           <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex items-center gap-2">
-              <input type="radio" name={sourceName} checked={source === 'monitor'} onChange={() => setSource('monitor')}/>检测库
+              <input type="radio" name={sourceName} checked={source === 'monitor'} onChange={() => setSource('monitor')}/>监测库
             </label>
             {source === 'monitor' && quality?.ready && <FishMonitorSamplePicker state={quality} selected={monitorSamples}
               onSelect={setMonitorSamples} onJump={onJump} canJump={canJump}/>}
           </div>
           {source === 'monitor' && <p className="text-muted-foreground">
-            {quality?.ready ? '按所选标的的信号时间建立测试窗口。' : '检测库暂不可用。'}
+            {quality?.ready ? '按所选标的的信号时间建立测试窗口。' : '监测库暂不可用。'}
           </p>}
           <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex items-center gap-2">
@@ -245,6 +267,7 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
           ? <button type="button" className="rounded-md border border-border px-3 py-1.5 hover:bg-muted" onClick={() => controller.current?.abort()}>停止测试</button>
           : <button type="button" className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40" disabled={disabled || !samples.length || !!pasted?.errors.length} onClick={() => void start()}>开始测试</button>}
       </div>
+      {running && waiting && <p role="status" className="text-muted-foreground">{waiting}</p>}
       {progress && <p role="status" className="text-muted-foreground tabular-nums">
         {stopped ? '已停止' : running ? '测试中' : '测试结束'} · 窗口 {progress.windowsDone} / {progress.windowsTotal}
         {running && <> · 截止 {formatUTC8(progress.anchorMs)}{progress.marketTotal > 0 && <> · 已扫 {progress.marketDone} / {progress.marketTotal} 个标的</>}</>}
@@ -263,7 +286,8 @@ export function FishHitRateTest({ quality, captureSettings, defs, run, disabled,
         <FishMarketHitResults key={selectedWindow ?? 'all-windows'} rows={marketHits} anchorMs={selectedWindow}
           windows={windows} clearWindow={() => setSelectedWindow(undefined)}/>
       </section>}
-      <FishHitRateResults windows={windows} onShowMarketWindow={resultMode === 'market' ? anchorMs => {
+      {exportError && <p role="alert" className="text-destructive">{exportError}</p>}
+      <FishHitRateResults windows={windows} onExport={!running && exportContext ? () => void exportResults() : undefined} exporting={exporting} onShowMarketWindow={resultMode === 'market' ? anchorMs => {
         setSelectedWindow(anchorMs);
         marketResults.current?.scrollIntoView?.({ block: 'nearest' });
       } : undefined}/>

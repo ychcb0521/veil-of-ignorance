@@ -39,8 +39,8 @@ it('selects samples in the full monitoring archive and tests their original sign
  try {
   render(<FishHitRateTest quality={quality} captureSettings={()=>settings} defs={[]} run={run} onRunningChange={()=>{}}/>);
   expect(screen.getByRole('radio',{name:'筛选库'})).toBeChecked();
-  fireEvent.click(screen.getByRole('radio',{name:'检测库'}));
-  fireEvent.click(screen.getByRole('button',{name:'从检测库选择标的'}));
+  fireEvent.click(screen.getByRole('radio',{name:'监测库'}));
+  fireEvent.click(screen.getByRole('button',{name:'从监测库选择标的'}));
   fireEvent.click(screen.getByRole('button',{name:'打开监测归档 '+archive.id}));
   const board = await screen.findByTestId('quality-archive-board');
   expect(loadMonitorArchive).toHaveBeenCalledWith(directory);
@@ -49,7 +49,7 @@ it('selects samples in the full monitoring archive and tests their original sign
   expect(screen.getByText('已选 1 条测试样本')).toBeVisible();
   fireEvent.click(screen.getByRole('button',{name:'使用所选样本'}));
   fireEvent.click(screen.getByRole('radio',{name:'筛选库'}));
-  fireEvent.click(screen.getByRole('radio',{name:'检测库'}));
+  fireEvent.click(screen.getByRole('radio',{name:'监测库'}));
   expect(screen.getByText('1 条样本 · 1 个不同时间窗口')).toBeVisible();
   fireEvent.click(screen.getByRole('button',{name:'开始测试'}));
   await waitFor(()=>expect(run).toHaveBeenCalledOnce());

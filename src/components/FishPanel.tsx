@@ -25,7 +25,7 @@ import type {FishNotify} from '@/hooks/useFishNotify';
 import {FishNotifySettings} from './FishNotifySettings';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { Activity, ChevronDown, CircleHelp, Clock3, Copy, Gauge, History, ListChecks, Play, Plus, ScanSearch, Settings, ShieldAlert, Square } from 'lucide-react';
 import { fishInfoTrigger, fishRail, fishSectionHeading, fishSubHeading } from './FishSection';
@@ -113,6 +113,11 @@ export function FishPanel(p: FishPanelProps) {
   const [error,setError]=useState(''),defs=useFishFeatures();
   const [open, setOpenState] = useState(readOpen);
   const [hitRateRunning, setHitRateRunning] = useState(false);
+  const hitRateActive = useRef(false);
+  const updateHitRateRunning = useCallback((running: boolean) => {
+    hitRateActive.current = running;
+    setHitRateRunning(running);
+  }, []);
   const setOpen = (patch: Partial<FishOpen>) => setOpenState(o => {
     const next = { ...o, ...patch };
     try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(next)); } catch { /* 记不住只是下次要再点 */ }
@@ -256,7 +261,7 @@ export function FishPanel(p: FishPanelProps) {
     if(p.hasRound||!library.length||scanning||hitRateRunning||p.reconstruction?.running||suggestionRun.current)return;
     const next=queue.find(q=>!autoTried.current.has(q.key)&&!readFishSuggestion(q.key));
     if(!next)return;
-    const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
+    const timer=setTimeout(()=>{if(hitRateActive.current||suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
     return()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[queueKeys,selected,firstEnabled,scanning,library.length,autoSuggesting,hitRateRunning,p.reconstruction?.running,p.hasRound]);
@@ -274,6 +279,16 @@ export function FishPanel(p: FishPanelProps) {
     const turnoverFloors = currentTurnover.enabled ? currentTurnover.floors : [];
     for(const plan of plans){const checked=fishProgramForLookback(plan,hours,turnoverFloors);if(checked.unavailable)throw new Error(checked.unavailable);}
     p.onStart({...settings,lookbackHours:hours,downwardWick:readFishDownwardWick(owner),feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+  const runHitRate = async (options: FishHitRateOptions) => {
+    const pending = suggestionRun.current;
+    if (pending?.mode === 'auto') {
+      options.onWaiting?.('正在结束后台阈值建议，随后开始测试…');
+      autoTried.current.delete(pending.key);
+      suggestionController.current?.abort();
+      await pending.done;
+    }
+    if (!options.signal.aborted) await p.onTestHitRate?.(options);
+  };
   const windowAnchor=p.progress?.anchorMs,windowHours=p.progress?.lookbackHours;
   const scanWindow = windowAnchor != null && Number.isFinite(windowAnchor) && windowHours !== undefined
     ? { start: formatUTC8(windowAnchor - windowHours * 3_600_000), end: formatUTC8(windowAnchor) }
@@ -558,7 +573,7 @@ export function FishPanel(p: FishPanelProps) {
         {!open.hitRate && hitRateRunning && <span role="status" className="text-muted-foreground">测试中</span>}
       </div>
       <div id="fish-hit-rate" role="region" aria-labelledby="fish-hit-rate-title" hidden={!open.hitRate} className="min-w-0">
-        <FishHitRateTest key={owner} quality={p.quality} onJump={jumpQuality} canJump={canJumpQuality} captureSettings={captureHitRateSettings} defs={defs} run={p.onTestHitRate} disabled={running} onRunningChange={setHitRateRunning}/>
+        <FishHitRateTest key={owner} quality={p.quality} onJump={jumpQuality} canJump={canJumpQuality} captureSettings={captureHitRateSettings} defs={defs} run={runHitRate} disabled={running} onRunningChange={updateHitRateRunning}/>
       </div>
       </div>
     </section>}

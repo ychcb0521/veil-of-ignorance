@@ -175,7 +175,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     <span className="flex items-center gap-0.5">
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={p.level === 'sub' ? fishSubHeading : fishSectionHeading}>
       {p.title === '新鱼' ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
-      <FishCount n={displaySignals.length}/>
+      {title !== '鱼舱' && <FishCount n={displaySignals.length}/>}
       <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}

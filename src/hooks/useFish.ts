@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, deriveFishRound, saveFishMemberRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import type { FishProgram } from '@/lib/fish/algorithm';
 import { runFishHitRate, type FishHitRateOptions } from '@/lib/fish/hitRate';
+import { fishDelay } from '@/lib/fish/shared';
 import { fishRuleText } from '@/lib/fishRule';
 import type { FishCombination } from '@/lib/fish/intersection';
 import { backupFishSignals, restoreFishSignals, loadFishSignals, loadFishTombstones, saveFishSignals, recordFishDeletion, FISH_STORAGE_KEY, FISH_DELETED_KEY } from '@/lib/fishSignals';
@@ -163,15 +164,18 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     return typeof scanner.current.estimateMarkets==='function'?scanner.current.estimateMarkets(settings,signal):null;
   },[]);
   const suggest=useCallback(async(options:import('@/lib/fish/suggestions').FishSuggestionOptions)=>{
+    if (hitRateBusy.current) throw new Error('漏报测试进行中，请在测试结束后再试');
     scanner.current??=pageScanner??=new FishScanner();
     return scanner.current.suggest(options);
   },[]);
   /** 信号库成交额统计（不入库）：与建议区间同一个取数器，捕捞时不能同时跑。 */
   const turnover=useCallback(async(options:import('@/lib/signalTurnover').SignalTurnoverOptions)=>{
+    if (hitRateBusy.current) throw new Error('漏报测试进行中，请在测试结束后再试');
     scanner.current??=pageScanner??=new FishScanner();
     return scanner.current.turnover(options);
   },[]);
   const reconstruct=useCallback(async(options:import('@/lib/fish/reconstruction').FishReconstructionOptions)=>{
+    if (hitRateBusy.current) throw new Error('漏报测试进行中，请在测试结束后再试');
     scanner.current??=pageScanner??=new FishScanner();
     return scanner.current.reconstruct(options);
   },[]);
@@ -204,10 +208,29 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
   const stopMining = useCallback(() => mineController.current?.abort(), []);
   const testHitRate = useCallback(async (options: FishHitRateOptions) => {
     const sc = scanner.current ??= pageScanner ??= new FishScanner();
-    if (controller.current || mineController.current || hitRateBusy.current || sc.isBusy()) throw new Error('取数器正忙，请在当前任务结束后开始测试');
+    if (hitRateBusy.current) throw new Error('已有一轮漏报测试进行中');
+    if (options.signal.aborted) return;
+    const owner = ownerRef.current;
     hitRateBusy.current = true;
-    try { await runFishHitRate(sc, options); }
-    finally { hitRateBusy.current = false; }
+    try {
+      const mining = mineController.current;
+      if (mining) {
+        options.onWaiting?.('等待批量捕捞结束当前档…');
+        mining.abort();
+      } else if (controller.current || sc.isBusy()) {
+        options.onWaiting?.(controller.current ? '等待当前捕捞结束…' : '等待当前行情任务结束…');
+      }
+      while (controller.current || mineController.current || sc.isBusy()) {
+        await fishDelay(150,options.signal);
+        if (ownerRef.current !== owner) return;
+      }
+      if (options.signal.aborted || ownerRef.current !== owner) return;
+      options.onWaiting?.(null);
+      await runFishHitRate(sc, options);
+    } finally {
+      hitRateBusy.current = false;
+      options.onWaiting?.(null);
+    }
   }, []);
   /**
    * 任选本轮算法子集与交集 / 并集：用保存的逐币结论直接重新合并，「新鱼」换成另一种结果，不用重扫。

@@ -130,6 +130,7 @@ export interface FishHitRateOptions {
   signal: AbortSignal;
   onWindow: (window: FishHitRateWindow) => void;
   onProgress: (progress: FishHitRateProgress) => void;
+  onWaiting?: (reason: string | null) => void;
 }
 
 /** One production-equivalent scan per distinct event time, without archiving test catches or summaries. */

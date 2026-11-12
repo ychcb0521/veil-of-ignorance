@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Download } from 'lucide-react';
 import { FishWickEvidence } from './FishWickDetails';
 import { FishTurnoverEvidence } from './FishTurnoverDetails';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
@@ -77,9 +77,11 @@ function OutsideDetails({ rows, window }: { rows: FishHitRateOutsideDetail[]; wi
   </>;
 }
 
-export function FishHitRateResults({ windows, onShowMarketWindow, selection }: {
+export function FishHitRateResults({ windows, onShowMarketWindow, selection, onExport, exporting }: {
   windows: readonly FishHitRateWindow[];
   onShowMarketWindow?: (anchorMs: number) => void;
+  onExport?: () => void;
+  exporting?: boolean;
   selection?: { disabled?: boolean; checked: (sample: TradeSignal) => boolean; toggle: (samples: readonly TradeSignal[], checked: boolean) => void };
 }) {
   const detailId = useId();
@@ -131,9 +133,14 @@ export function FishHitRateResults({ windows, onShowMarketWindow, selection }: {
         <strong>{verified ? `命中率 ${(100 * hitCount / verified).toFixed(1)}%` : '暂无可判定样本'}</strong>
         <span className="ml-2 text-muted-foreground">{hitCount} 命中 · {missCount} 未命中 · {rows.length - verified} 无法判定</span>
       </p>
+      <div className="flex flex-wrap items-center gap-2">
+      {onExport && <button type="button" title="导出本轮已完成窗口的全部结果及判定明细" onClick={onExport} disabled={exporting}
+        className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2.5 py-1.5 hover:bg-muted disabled:opacity-40">
+        <Download aria-hidden className="h-3 w-3"/>{exporting?'正在导出…':'导出测试结果'}
+      </button>}
       <select className="min-w-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-foreground" aria-label="筛选测试结果" value={filter} onChange={event => { setDetail(undefined); setFilter(event.target.value as typeof filter); }}>
         <option value="all">全部结果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="unverified">无法判定</option>
-      </select></>}
+      </select></div></>}
     </div>
     <div ref={resultScroll} className="isolate max-h-80 min-w-0 overflow-auto rounded-lg border border-border/60">
       <table className="w-full min-w-[46rem] text-[11px]" aria-label={selection ? '未命中归档结果' : '漏报测试结果'}>

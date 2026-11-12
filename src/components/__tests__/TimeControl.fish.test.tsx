@@ -198,7 +198,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.getByRole('button',{name:/^新鱼/})).toHaveTextContent('0');
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('BBBUSDT'));
-    expect(screen.getByRole('button',{name:/^鱼舱/})).toHaveTextContent('1');
+    expect(screen.getByRole('button',{name:'鱼舱',exact:true})).toHaveTextContent(/^鱼舱$/);
     expect(loadFishSignals().filter(s => s.freshCatch).map(s => s.symbol)).toEqual(['BBBUSDT']);
     // 第二轮：命中 AAA（以前就有），BBB 归入鱼
     mocks.scan.mockImplementation(async o => { o.onSignal(SIGNAL); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });
@@ -321,14 +321,14 @@ it.each(['新鱼','鱼舱'])('从 %s 跳转到币种后返回，恢复外层位�
  expect(screen.getByTestId('fish-panel').scrollTop).toBe(320);
 });
 
-it('鱼舱把截图中的三轮相同行合成一条，徽标/月计数一致，评分后刷新和删除都只操作这一条',async()=>{
+it('鱼舱合并三轮相同行，标题不显示数量，月份计数正确，评分刷新和删除都只操作这一条',async()=>{
  const rows=[100,200,300].map((caughtAt,i)=>archiveFishForNextRound([{...SIGNAL,caughtAt,quality:i===0?4:undefined}],caughtAt+10)[0]);
  localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify(rows));
  const view=render(control());
  fireEvent.click(screen.getByRole('button',{name:/^渔/}));
  const cabin=screen.getByTestId('fish-old');
  expect(within(cabin).getAllByText('AAAUSDT')).toHaveLength(1);
- expect(within(cabin).getByRole('button',{name:/^鱼舱/})).toHaveTextContent('1');
+ expect(within(cabin).getByRole('button',{name:'鱼舱',exact:true})).toHaveTextContent(/^鱼舱$/);
  expect(within(cabin).getByLabelText('鱼舱的月份')).toHaveDisplayValue('全部月份（1）');
  expect(screen.getByRole('button',{name:'渔'})).toBeInTheDocument();
  fireEvent.click(within(cabin).getByRole('radio',{name:'5 星'}));

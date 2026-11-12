@@ -131,7 +131,7 @@ export function FishMonitorSamplePicker({ state, selected, onSelect, onJump, can
     onOpenChange={open => { if (open) setDraft(new Map(selected.map(sample => [sample.id, sample]))); }}
     renderStudy={study => <MonitorSampleBoard study={study} draft={draft} setDraft={setDraft} onJump={onJump} canJump={canJump}/>}
     picker={{
-      triggerLabel: '从检测库选择标的',
+      triggerLabel: '从监测库选择标的',
       footer: close => <SamplePickerFooter count={draft.size} hadSelection={selected.length > 0} close={close}
         apply={() => onSelect([...draft.values()].sort((a, b) => b.timeMs - a.timeMs))}/>,
     }}/>;
