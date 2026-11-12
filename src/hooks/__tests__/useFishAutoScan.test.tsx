@@ -6,7 +6,7 @@ import {fishFeatureDefinitions} from '@/lib/fish/features';
 const DEFS=fishFeatureDefinitions([CBI2_DEF,STATE_DEF,CBA_DEF,DRIFT_SPEED_Z_DEF,BSS_DEF]);
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>DEFS}));
 import {useFishAutoScan} from '@/hooks/useFishAutoScan';
-import {readFishAuto,saveFishAuto,FISH_AUTO_INTERVALS,fishAutoKey} from '@/lib/fish/autoScan';
+import {readFishAuto,saveFishAuto,FISH_AUTO_INTERVALS,fishAutoKey,fishAutoAccountSchedule} from '@/lib/fish/autoScan';
 import {writePersistedStateRaw,notifyPersistedStateHydrated} from '@/lib/persistedStateStorage';
 import {FISH_ACCOUNT_SETTINGS_KEY} from '@/lib/fish/accountSettings';
 import {buildFishScanSettings} from '@/lib/fish/scanPlan';
@@ -23,7 +23,7 @@ afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 const hook=(start=vi.fn(async(_s:unknown)=>{}),busy=()=>false)=>({start,view:renderHook(()=>useFishAutoScan({account:'a',selection,start,busy}))});
 const flush=async(ms=0)=>{await act(async()=>{await vi.advanceTimersByTimeAsync(ms);});};
 it('默认自动、每 1 小时：立即捕第一次，未到下一次时间不重复',async()=>{
- expect([...FISH_AUTO_INTERVALS]).toEqual([0.5,1,2,4,8,16,32,64]);
+ expect([...FISH_AUTO_INTERVALS]).toEqual([5/60,15/60,0.5,1,2,4,8,16,32,64]);
  const {start,view}=hook();await flush();
  expect(view.result.current.mode).toBe('auto');expect(view.result.current.hours).toBe(1);expect(start).toHaveBeenCalledTimes(1);
  await flush(HOUR-60_000);expect(start).toHaveBeenCalledTimes(1);
@@ -150,4 +150,19 @@ it('reads the latest saved wick and turnover settings on the next automatic scan
  await flush(HOUR);
  expect(start).toHaveBeenCalledTimes(2);
  expect(start.mock.calls[1][0]).toMatchObject({downwardWick:rule,lookbackHours:1,turnoverFloors:turnover.floors});
+});
+
+it.each([5,15] as const)('uses the chosen %s minute interval after reopening and keeps a legacy hours fallback', async minutes => {
+  const schedule = {mode:'auto' as const,hours:minutes/60};
+  expect(fishAutoAccountSchedule(schedule,{mode:'auto',hours:1})).toEqual({mode:'auto',hours:1,intervalMinutes:minutes});
+  const {view}=hook();
+  await flush();
+  act(()=>view.result.current.setSchedule(schedule));
+  view.unmount();
+  const reopened=hook();
+  await flush(minutes*60_000-1);
+  expect(reopened.start).not.toHaveBeenCalled();
+  await flush(1);
+  expect(reopened.start).toHaveBeenCalledOnce();
+  expect(reopened.view.result.current.hours).toBe(minutes/60);
 });

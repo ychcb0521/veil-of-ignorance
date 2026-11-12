@@ -8,10 +8,20 @@ import { readFishAccountSettings } from './accountSettings';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 
-export const FISH_AUTO_INTERVALS = [0.5, 1, 2, 4, 8, 16, 32, 64] as const;
+const SHORT_INTERVAL_MINUTES = [5, 15] as const;
+const HOURLY_INTERVALS = [0.5, 1, 2, 4, 8, 16, 32, 64] as const;
+export const FISH_AUTO_INTERVALS = [...SHORT_INTERVAL_MINUTES.map(minutes => minutes / 60), ...HOURLY_INTERVALS];
+export const fishAutoIntervalLabel = (hours: number) => hours < 1 ? `每 ${Math.round(hours * 60)} 分钟` : `每 ${hours} 小时`;
 export type FishAutoMode = 'manual' | 'auto';
 export interface FishAutoState { mode: FishAutoMode; hours: number; lastRunAt: number | null }
 export type FishAutoSchedule = Pick<FishAutoState, 'mode' | 'hours'>;
+export type FishAccountAutoSchedule = FishAutoSchedule & { intervalMinutes?: typeof SHORT_INTERVAL_MINUTES[number] };
+
+export function fishAutoAccountSchedule(schedule: FishAutoSchedule, previous?: FishAccountAutoSchedule): FishAccountAutoSchedule {
+  const intervalMinutes = SHORT_INTERVAL_MINUTES.find(minutes => minutes / 60 === schedule.hours);
+  // Keep the hours field readable by open pages that predate minute intervals.
+  return intervalMinutes ? { mode: schedule.mode, hours: previous?.hours ?? 0.5, intervalMinutes } : schedule;
+}
 const HOUR = 3_600_000;
 export const fishAutoKey = () => `${getUserPrefix()}fish-auto.v1`;
 const scheduleKey = () => `${getUserPrefix()}fish-auto-schedule.v1`;
@@ -29,8 +39,8 @@ export function readFishAuto(): FishAutoState {
 export function saveFishAuto(state: FishAutoState): void {
   try { writePersistedStateRaw(fishAutoKey(), JSON.stringify({ ...state, defaultsVersion: 1 })); } catch { /* 记不住只是下次要重新设 */ }
 }
-function scheduleSignature(schedule?: FishAutoSchedule): string {
-  return schedule ? `${schedule.mode}:${schedule.hours}` : '';
+function scheduleSignature(schedule?: FishAccountAutoSchedule): string {
+  return schedule ? `${schedule.mode}:${schedule.hours}${schedule.intervalMinutes ? ':' + schedule.intervalMinutes : ''}` : '';
 }
 
 export function saveFishAutoSchedule(schedule: FishAutoSchedule): void {
@@ -38,7 +48,7 @@ export function saveFishAutoSchedule(schedule: FishAutoSchedule): void {
   writePersistedStateRaw(scheduleKey(), JSON.stringify({ ...schedule, account }));
 }
 
-function readFishAutoSchedule(account?: FishAutoSchedule): FishAutoSchedule | undefined {
+function readFishAutoSchedule(account?: FishAccountAutoSchedule): FishAutoSchedule | undefined {
   try {
     const value = JSON.parse(readPersistedStateRaw(scheduleKey()) ?? 'null');
     if (value?.account === scheduleSignature(account)
@@ -47,7 +57,9 @@ function readFishAutoSchedule(account?: FishAutoSchedule): FishAutoSchedule | un
       return { mode: value.mode, hours: value.hours };
     }
   } catch { /* Fall back to the saved account schedule. */ }
-  return account;
+  if (!account) return undefined;
+  const interval = SHORT_INTERVAL_MINUTES.find(minutes => minutes === account.intervalMinutes);
+  return { mode: account.mode, hours: interval ? interval / 60 : account.hours };
 }
 
 /** Restore an explicit local schedule or the latest account schedule when reopening. */

@@ -18,14 +18,18 @@ import { preEntryPlanFilters } from '@/lib/fish/preEntryIntrabar';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { activeStandaloneBuyFilters, newQualityStudy, qualityRunSamples, type FishQualityStudy, type QualityRunOptions, type QualityProgress, type QualityGroup } from '@/lib/fish/quality';
 
+export type AutomaticScreeningMatch = { record: PreEntryRecord; round: PreEntryRound };
+type ScreeningLane = { controller?: AbortController; execution?: Promise<void>; timer?: ReturnType<typeof setTimeout> };
+
 export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, run: (options: QualityRunOptions) => Promise<void>, workspaceMode = false) {
   const [library, setLibrary] = useState<PreEntryLibrary>(emptyPreEntryLibrary);
   const [ready, setReady] = useState(false), [running, setRunning] = useState(false);
   const [automaticRunning, setAutomaticRunning] = useState(false);
   const [error, setError] = useState(''), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [reload, setReload] = useState(0);
-  const current = useRef(library), runner = useRef(run), controller = useRef<AbortController | null>(null);
-  const epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout>>();
+  const current = useRef(library), runner = useRef(run);
+  const lanes = useRef<{ manual: ScreeningLane; automatic: ScreeningLane }>({ manual: {}, automatic: {} });
+  const epoch = useRef(0);
   const persistence = useMemo(() => createPreEntryCheckpoint(async value => {
     if (!workspaceMode) return savePreEntryLibrary(owner,value);
     const draftIds = new Set(current.current.rounds.filter(round => round.workspaceDraft).map(round => round.id));
@@ -34,7 +38,6 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const saved = {...value,rounds:value.rounds.filter(round => !draftIds.has(round.id)),records:value.records.filter(record => !draftIds.has(record.roundId))};
     if (saved.rounds.length || saved.records.length || saved.settings || saved.settingsHistory || saved.directoryEdits || saved.tableClears) await savePreEntryLibrary(owner,saved);
   },true), [owner,workspaceMode]);
-  const execution = useRef<Promise<void> | null>(null);
   const savingDraft = useRef(false);
   const [savingWorkspaceDraft,setSavingWorkspaceDraft] = useState(false);
   const tableClearLock=useRef(false);
@@ -76,101 +79,152 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     const flush = () => { if (loaded) void persistence.save(current.current).catch(() => undefined); };
     window.addEventListener('pagehide', flush);
     return () => {
-      controller.current?.abort(); controller.current = null; flush(); epoch.current = generation + 1;
-      if (timer.current) { clearTimeout(timer.current); timer.current = undefined; }
+      for (const lane of Object.values(lanes.current)) {
+        lane.controller?.abort();
+        clearTimeout(lane.timer);
+      }
+      lanes.current = { manual: {}, automatic: {} };
+      flush(); epoch.current = generation + 1;
       window.removeEventListener('pagehide', flush);
     };
   }, [owner, enabled, reload, commit, persistence, workspaceMode]);
 
-  const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy) => {
-    if (!readyRef.current || controller.current||tableClearLock.current||savingDraft.current) return;
-    const generation = epoch.current, aborter = new AbortController(); controller.current = aborter;
+  const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy, onMatch?: (match: AutomaticScreeningMatch) => void) => {
+    const lane = round.automatic ? lanes.current.automatic : lanes.current.manual;
+    if (!readyRef.current || lane.controller || tableClearLock.current || !round.automatic && savingDraft.current) return;
+    const generation = epoch.current, aborter = new AbortController(); lane.controller = aborter;
     let finish!: () => void;
-    const finished = new Promise<void>(resolve => { finish = resolve; }); execution.current = finished;
+    const finished = new Promise<void>(resolve => { finish = resolve; }); lane.execution = finished;
     let lastRecordPaint = 0, lastProgressPaint = 0;
     const live = () => epoch.current === generation;
+    const saveSnapshot = (snapshot: PreEntryLibrary) => round.automatic
+      ? savePreEntryLibrary(owner, { version: 1, rounds: snapshot.rounds.filter(r => r.id === round.id), records: snapshot.records.filter(r => r.roundId === round.id) })
+      : persistence.save(snapshot);
+    // Release completed histories after durability without making the email wait for archive projection.
+    const projectCompleted = async (records: PreEntryRecord[]) => {
+      if (!live()) return;
+      const currentRows = new Map(current.current.records.map(record => [record.id, record]));
+      const cold = records.filter(record => !preEntryRecordPending(record) && !record.processRef
+        && (record.exclusionProcess?.entries.length ?? 0) > 16 && currentRows.get(record.id) === record);
+      if (!cold.length) return;
+      const projected = await projectPreEntryBatch(owner, cold);
+      const byId = new Map(cold.map((record, index) => [record.id, { before: record, after: projected[index] }]));
+      if (live()) {
+        persistence.project(cold, projected);
+        commit({ ...current.current, records: current.current.records.map(record => {
+          const projection = byId.get(record.id);
+          return projection?.before === record ? projection.after : record;
+        }) });
+      }
+    };
+    let matchCheckpoint: Promise<boolean> | undefined;
+    const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound) =>
+      savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [record] }).then(() => {
+        if (live()) onMatch?.({ record, round: completed });
+        void projectCompleted([record]).catch(() => undefined);
+        return true;
+      }).catch(() => false);
     const save = async () => {
       try {
-        const snapshot=current.current;
-        await persistence.save(snapshot);
-        if(!live())return;
-        // Release finished histories throughout a long batch, after durability
-        // is acknowledged. A late callback must never replace a newer row.
-        const currentRows=new Map(current.current.records.map(r=>[r.id,r]));
-        const cold=snapshot.records.filter(r=>!preEntryRecordPending(r)&&!r.processRef&&(r.exclusionProcess?.entries.length??0)>16&&currentRows.get(r.id)===r);
-        if(cold.length){
-          const projected=await projectPreEntryBatch(owner,cold),byId=new Map(cold.map((r,i)=>[r.id,{before:r,after:projected[i]}]));
-          if(live()){persistence.project(cold,projected);commit({...current.current,records:current.current.records.map(r=>byId.get(r.id)?.before===r?byId.get(r.id)!.after:r)});}
-        }
+        const snapshot = current.current;
+        await saveSnapshot(snapshot);
+        if (round.automatic) {
+          void projectCompleted(snapshot.records.filter(record => record.roundId === round.id)).catch(() => undefined);
+        } else await projectCompleted(snapshot.records);
+      } catch (reason) {
+        if (live()) setError(reason instanceof Error ? reason.message : '保存失败，请保留页面并重试');
       }
-      catch (reason) { if (live()) setError(reason instanceof Error ? reason.message : '保存失败，请保留页面并重试'); }
     };
     const scheduleSave = () => {
-      if (timer.current) return;
+      if (lane.timer) return;
       const handle = setTimeout(() => {
         const snapshot = current.current;
-        if (!live()) { if (timer.current === handle) timer.current = undefined; return; }
+        if (!live()) { if (lane.timer === handle) lane.timer = undefined; return; }
         // Keep the timer occupied until storage settles. Slow disks cannot
         // accumulate a queue of copies; the next checkpoint uses the latest data.
         void save().finally(() => {
-          if (timer.current !== handle) return;
-          timer.current = undefined;
-          if (live() && controller.current === aborter && current.current !== snapshot) scheduleSave();
+          if (lane.timer !== handle) return;
+          lane.timer = undefined;
+          if (live() && lane.controller === aborter && current.current !== snapshot && !matchCheckpoint) scheduleSave();
         });
       }, 1500);
-      timer.current = handle;
+      lane.timer = handle;
     };
     const accept = (record: PreEntryRecord) => {
       if (!live()) return;
+      const previous = round.automatic ? current.current.records.find(r => r.id === record.id) : undefined;
+      if (previous && record.updatedAt <= previous.updatedAt) record = { ...record, updatedAt: previous.updatedAt + 1 };
       const next = { ...current.current, records: current.current.records.map(r => r.id === record.id ? record : r) };
       current.current = next;
       // Fast local archives must not redraw the whole combination table every scanned minute.
       if (record.status !== 'scanning' || performance.now() - lastRecordPaint >= 150) {
         lastRecordPaint = performance.now(); setLibrary(next);
       }
-      scheduleSave();
+      if (round.automatic && record.status === 'matched' && !matchCheckpoint) {
+        clearTimeout(lane.timer); lane.timer = undefined;
+        const completed = { ...round, state: 'complete' as const, updatedAt: record.updatedAt };
+        matchCheckpoint = checkpointMatch(record, completed);
+      } else if (!matchCheckpoint) scheduleSave();
     };
-    setRunning(true); setAutomaticRunning(!!round.automatic); setProgress(null); setError('');
+    if (round.automatic) setAutomaticRunning(true);
+    else { setRunning(true); setProgress(null); setError(''); }
     commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id ? { ...r, state: 'running', updatedAt: Date.now() } : r) });
     try {
       // Save the frozen batch before executing it. Storage failure must not create an unrecorded run.
-      await persistence.save(current.current);
+      await saveSnapshot(current.current);
       if (!live() || aborter.signal.aborted) return;
       await runner.current({ study, signal: aborter.signal, task: 'pre-entry',
         preEntry: { round, records: current.current.records.filter(r => r.roundId === round.id), onRecord: accept },
-        onProgress: p => { if (live() && (p.done === p.total || performance.now() - lastProgressPaint >= 150)) {
+        onProgress: p => { if (!round.automatic && live() && (p.done === p.total || performance.now() - lastProgressPaint >= 150)) {
           lastProgressPaint = performance.now(); setProgress(p);
         } }, onResult: () => undefined });
     } catch (reason) { if (live() && !aborter.signal.aborted) setError(reason instanceof Error ? reason.message : '买前监测失败'); }
     finally {
       if (live()) {
-        if (timer.current) { clearTimeout(timer.current); timer.current = undefined; }
+        clearTimeout(lane.timer); lane.timer = undefined;
         const records = current.current.records.filter(r => r.roundId === round.id);
+        const matched = round.automatic ? records.find(record => record.status === 'matched') : undefined;
         const pending = records.some(preEntryRecordPending);
-        commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id
-          ? { ...r, state: aborter.signal.aborted || pending ? 'paused' : 'complete', updatedAt: Date.now() } : r) });
-        setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
-        await save();
-        setRunning(false); setAutomaticRunning(false);
+        const ended: PreEntryRound = { ...round, state: matched ? 'complete' : aborter.signal.aborted || pending ? 'paused' : 'complete',
+          updatedAt: matched?.updatedAt ?? Date.now() };
+        commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id ? ended : r) });
+        if (!round.automatic) setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
+        if (!(await matchCheckpoint)) {
+          if (!matched || !await checkpointMatch(matched, ended)) await save();
+        }
+        if (live()) {
+          if (round.automatic) setAutomaticRunning(false);
+          else setRunning(false);
+        }
       }
-      if (controller.current === aborter) controller.current = null;
-      if (execution.current === finished) execution.current = null;
+      if (lane.controller === aborter) lane.controller = undefined;
+      if (lane.execution === finished) lane.execution = undefined;
       finish();
     }
   }, [commit, persistence, owner]);
-  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false) => {
-    if (!readyRef.current || controller.current||tableClearLock.current||savingDraft.current) return;
+  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void) => {
+    const lane = automaticId ? lanes.current.automatic : lanes.current.manual;
+    if (!readyRef.current || lane.controller || tableClearLock.current || !automaticId && savingDraft.current) return;
     if (automaticId) {
       if (owner && recover) {
         const generation = epoch.current;
         const saved = await readAutomaticPreEntryCheckpoint(owner, automaticId);
-        if (generation !== epoch.current || !readyRef.current || controller.current || tableClearLock.current) return;
+        if (generation !== epoch.current || !readyRef.current || lane.controller || tableClearLock.current) return;
         if (saved) commit(mergePreEntryLibraries(current.current, saved));
       }
       const existing = current.current.rounds.find(round => round.id === automaticId);
       if (existing) {
-        if (current.current.records.some(record => record.roundId === automaticId && (preEntryRecordPending(record) || record.status === 'error'))) {
-          await execute(existing, newQualityStudy(study.startedAt));
+        const record = current.current.records.find(record => record.roundId === automaticId);
+        if (record && (preEntryRecordPending(record) || record.status === 'error')) {
+          await execute(existing, newQualityStudy(study.startedAt), onMatch);
+        } else if (record?.status === 'matched' && onMatch) {
+          const generation = epoch.current;
+          try {
+            await savePreEntryLibrary(owner, { version: 1, rounds: [existing], records: [record] });
+            if (generation === epoch.current) onMatch({ record, round: existing });
+          } catch (reason) {
+            if (generation === epoch.current) setError(reason instanceof Error ? reason.message : '入选结果尚未保存');
+          }
         }
         return;
       }
@@ -200,15 +254,15 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
     // The screening engine reads its frozen round and records, never the research history.
     // Do not duplicate hundreds of MB of unrelated results when starting a task.
-    await execute(round, newQualityStudy(study.startedAt));
+    await execute(round, newQualityStudy(study.startedAt), onMatch);
   }, [execute, commit, owner, workspaceMode]);
   const resume = useCallback(async (roundId: string, study: FishQualityStudy) => {
     const round = current.current.rounds.find(r => r.id === roundId);
     if (round) await execute(round, newQualityStudy(study.startedAt));
   }, [execute]);
   const restart = useCallback(async (study: FishQualityStudy, hours: number) => {
-    const generation = epoch.current, pending = execution.current;
-    controller.current?.abort();
+    const generation = epoch.current, pending = lanes.current.manual.execution;
+    lanes.current.manual.controller?.abort();
     await pending;
     if (epoch.current === generation) await start(study, hours);
   }, [start]);
@@ -235,7 +289,9 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   const clearTableResults=useCallback(async(extraRecords:readonly Pick<PreEntryRecord,'id'|'updatedAt'>[]=[])=>{
     if(!readyRef.current||tableClearLock.current)return false;
     const generation=epoch.current;tableClearLock.current=true;
-    controller.current?.abort();await execution.current;
+    const activeLanes = Object.values(lanes.current);
+    for (const lane of activeLanes) lane.controller?.abort();
+    await Promise.all(activeLanes.map(lane => lane.execution));
     if(epoch.current!==generation)return false;
     const records=[...current.current.records,...extraRecords];
     const at=records.reduce((at,r)=>Math.max(at,r.updatedAt+1,current.current.tableClears?.[r.id]??0),Date.now());
@@ -245,7 +301,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     finally{if(epoch.current===generation)tableClearLock.current=false;}
   },[commit,owner]);
   const importLibrary=useCallback(async(value:PreEntryLibrary)=>{
-    if(!readyRef.current||controller.current)return false;
+    if (!readyRef.current || Object.values(lanes.current).some(lane => lane.controller)) return false;
     const generation=epoch.current;
     // Imported process records are historical; no task is started or resumed.
     const historical={...value,settings:undefined,rounds:value.rounds.map(r=>r.state==='running'?{...r,state:'paused' as const}:r),records:value.records.map(r=>r.status==='scanning'?{...r,status:'paused' as const}:r)};
@@ -279,6 +335,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     }
   },[commit,owner]);
   return { library, savedLibrary, saveWorkspaceScreening, savingWorkspaceDraft, ready, running, automaticRunning, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
-    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean) => start(study, newPreEntryHours(current.current.settings?.hours), id, recover),
-    pause: () => controller.current?.abort(), retry: () => setReload(n => n + 1) };
+    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void) =>
+      start(study, newPreEntryHours(current.current.settings?.hours), id, recover, onMatch),
+    pauseAutomatic: () => lanes.current.automatic.controller?.abort(),
+    pause: () => lanes.current.manual.controller?.abort(), retry: () => setReload(n => n + 1) };
 }

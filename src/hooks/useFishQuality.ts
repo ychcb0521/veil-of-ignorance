@@ -8,7 +8,7 @@ import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
 import { useQualityPlanCatalog } from './useQualityPlanCatalog';
 import {useQualitySavedPlans} from './useQualitySavedPlans';
 import {applySavedQualityPlans,editSavedQualityPlans,seedSavedQualityPlans,readSavedQualityPlans} from '@/lib/fish/qualitySavedPlans';
-import { usePreEntryMonitor } from './usePreEntryMonitor';
+import { usePreEntryMonitor, type AutomaticScreeningMatch } from './usePreEntryMonitor';
 import { preEntrySignal } from '@/lib/fish/preEntryMonitor';
 import {withQualityScreeningEntries,type QualityScreeningScope} from '@/lib/fish/qualityScreeningResults';
 import { readQualityBatchLock, saveQualityBatchLock, sameQualityBatch, type QualityBatchLock } from '@/lib/fish/qualityBatchScope';
@@ -856,16 +856,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return samples.length > 0 && sameQualityBatch(samples, prior);
   };
   const preEntryState = { ...preEntry,
-    startAutomatic: (id: string, signal: TradeSignal, recover: boolean) => preEntry.startAutomatic(id, importQualityFish({
+    startAutomatic: (id: string, signal: TradeSignal, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void) => preEntry.startAutomatic(id, importQualityFish({
       ...newQualityStudy(current.current.startedAt), entryMode: current.current.entryMode,
-    }, [signal]), recover),
+    }, [signal]), recover, onMatch),
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
     restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
     resume: async (roundId: string) => { if (canResumeScreening(roundId)) await preEntry.resume(roundId, current.current); } };
   return {workspace: workspaceMode ? {sources:workspaceSources,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
 type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'>>;
-type AutomationMonitorFields = 'startAutomatic' | 'automaticRunning' | 'savedLibrary' | 'saveWorkspaceScreening' | 'savingWorkspaceDraft';
+type AutomationMonitorFields = 'startAutomatic' | 'pauseAutomatic' | 'automaticRunning' | 'savedLibrary' | 'saveWorkspaceScreening' | 'savingWorkspaceDraft';
 type QualityPreEntryView = Omit<CompleteFishQualityState['preEntry'], AutomationMonitorFields> & Partial<Pick<CompleteFishQualityState['preEntry'], AutomationMonitorFields>>;
 export type FishQualityState=Omit<CompleteFishQualityState,'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'> & Partial<Pick<CompleteFishQualityState,'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'>> & { preEntry?: QualityPreEntryView; automaticScreening?: { paused: boolean; pending: number; awaitingMail: number; storageIssue: boolean; setAutoPaused: (paused: boolean) => void } };
 

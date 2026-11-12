@@ -1,7 +1,7 @@
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import type { FishScanSelection } from './scanPlan';
 import type { FishDownwardWick } from './downwardWick';
-import type { FishAutoMode } from './autoScan';
+import type { FishAccountAutoSchedule } from './autoScan';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
 
@@ -14,7 +14,7 @@ export interface FishAccountSettings {
   lookbackHours: number;
   downwardWick: FishDownwardWick;
   selection: FishScanSelection;
-  auto?: { mode: FishAutoMode; hours: number };
+  auto?: FishAccountAutoSchedule;
 }
 export function readFishAccountSettings(fullKey = getUserPrefix() + FISH_ACCOUNT_SETTINGS_KEY): FishAccountSettings | null {
   try {

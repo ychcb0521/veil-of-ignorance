@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { FISH_AUTO_INTERVALS, type FishAutoSchedule } from '@/lib/fish/autoScan';
+import { FISH_AUTO_INTERVALS, fishAutoIntervalLabel, type FishAutoSchedule } from '@/lib/fish/autoScan';
 import { FishCheck } from './FishAlgorithmCard';
 
 const fieldClass = 'h-8 w-full rounded-md border border-border/70 bg-background px-2.5 text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60';
@@ -79,7 +79,7 @@ export function FishCaptureFrequencySettings({ value, onSave }: {
     <label className="block space-y-1">
       <span>自动扫描间隔</span>
       <select className={fieldClass} disabled={mode === 'manual'} value={hours} onChange={event => setHours(Number(event.target.value))}>
-        {FISH_AUTO_INTERVALS.map(interval => <option key={interval} value={interval}>{interval === .5 ? '每 30 分钟' : `每 ${interval} 小时`}</option>)}
+        {FISH_AUTO_INTERVALS.map(interval => <option key={interval} value={interval}>{fishAutoIntervalLabel(interval)}</option>)}
       </select>
     </label>
     <p className="text-muted-foreground">保存在此浏览器。切到自动时，空闲且联网就会开始捕捞。</p>

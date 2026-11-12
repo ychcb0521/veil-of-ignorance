@@ -19,7 +19,7 @@ import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
 import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards,fishCombinationKey as combinationKey,readFishCombination as readCombination} from '@/lib/fish/cards';
 import { FISH_MAX_ALGORITHMS, formatTurnoverWan } from '@/lib/fish/shared';
 import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
-import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
+import { FISH_AUTO_INTERVALS, fishAutoAccountSchedule, fishAutoIntervalLabel } from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
 import type {FishNotify} from '@/hooks/useFishNotify';
 import {FishNotifySettings} from './FishNotifySettings';
@@ -203,7 +203,7 @@ export function FishPanel(p: FishPanelProps) {
     return '刚改的设置上一轮没算过，下面仍是上一轮的结果；点「开始捕捞」按新设置重算。';
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[selectionSignature,p.roundPlans]);
-  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:validateFishLookback(lookbackDraft),downwardWick:readLegacyFishDownwardWick(owner),selection:p.selection,...(p.auto?{auto:{mode:p.auto.mode,hours:p.auto.hours}}:{})});
+  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:validateFishLookback(lookbackDraft),downwardWick:readLegacyFishDownwardWick(owner),selection:p.selection,...(p.auto?{auto:fishAutoAccountSchedule({mode:p.auto.mode,hours:p.auto.hours}, savedAccountSettings?.auto)}:{})});
   const saveParameters=async()=>{setSavingParameters(true);setError('');try{if(multiple.error)throw new Error(multiple.error);if(!p.selection.exchanges.length)throw new Error('请至少选择一家交易所');await saveAccountSettings(parameterDraft());toast.success('捕捞参数已保存到账号');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setSavingParameters(false);}};
 
   const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
@@ -488,7 +488,7 @@ export function FishPanel(p: FishPanelProps) {
             {auto.mode === 'auto' && <span className="relative shrink-0">
               <select aria-label="自动捕捞间隔" value={auto.hours} onChange={event => auto.setHours(Number(event.target.value))}
                 className="h-7 appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 tabular-nums outline-none hover:bg-muted focus-visible:border-ring/60">
-                {FISH_AUTO_INTERVALS.map(hours => <option key={hours} value={hours}>每 {hours}h</option>)}
+                {FISH_AUTO_INTERVALS.map(hours => <option key={hours} value={hours}>{fishAutoIntervalLabel(hours)}</option>)}
               </select>
               <ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/>
             </span>}

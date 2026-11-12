@@ -115,7 +115,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const canStart = monitor.ready && state.ready && selectedCount > 0 && filtersOn;
   return <div className="contents" data-testid="pre-entry-controls">
     <div role="group" aria-label="筛选运行" className="inline-flex h-6 shrink-0 items-stretch">
-      {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={() => monitor.automaticRunning && automatic ? automatic.setAutoPaused(true) : monitor.pause()}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
+      {monitor.running ? <button type="button" className={qualitySplitPauseAction} onClick={monitor.pause}><Pause aria-hidden className="h-3 w-3"/>暂停筛选</button>
         : <button type="button" className={qualitySplitPrimaryAction} disabled={resumable ? !monitor.ready || !state.ready : !canStart}
           title={resumable ? '继续上轮：沿用已冻结的信号和条件，从暂停处继续筛选' : !filtersOn ? '先设置并启用筛选条件' : !selectedCount ? '当前筛选下没有已勾选的信号' : `对已勾选的 ${selectedCount} 条信号向后筛选，首次满足全部条件时保存到筛选库`}
           onClick={() => void (resumable ? monitor.resume(resumable.id) : monitor.start(Number(hours)))}><Filter aria-hidden className="h-3 w-3"/>{resumable ? "继续筛选" : "开始筛选"}</button>}

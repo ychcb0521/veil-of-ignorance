@@ -3,6 +3,7 @@ import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { fishNotifyMissing } from '@/lib/fish/notify';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
+import type { AutomaticScreeningMatch } from './usePreEntryMonitor';
 import type { FishQualityState } from './useFishQuality';
 import type { useFishNotify } from './useFishNotify';
 
@@ -15,6 +16,8 @@ interface Job {
   source: TradeSignal;
   nextCheckAt: number;
   nextMailAt?: number;
+  matched?: true;
+  mailFailures?: number;
   sent?: string[];
   failures?: number;
   runner?: string;
@@ -45,6 +48,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
   const current = useRef({ jobs, ready, monitor, notify, paused });
   current.current = { jobs, ready, monitor, notify, paused };
   const busy = useRef({ scan: false, mail: false });
+  const wake = useRef<() => void>();
   const tab = useRef<string>();
   if (!tab.current) tab.current = crypto.randomUUID();
 
@@ -63,17 +67,20 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     const key = queuePrefix(owner) + 'job:' + identity;
     if (readPersistedStateRaw(key) != null) return;
     save({ key, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0 });
+    wake.current?.();
   }, [owner, save]);
 
   const setAutoPaused = useCallback((value: boolean) => {
     if (!pauseKey) return;
     if (!writePersistedStateRaw(pauseKey, value ? '1' : '0')) setStorageIssue(true);
+    current.current.paused = value;
     setPaused(value);
-    if (value && current.current.monitor?.automaticRunning) current.current.monitor.pause();
+    if (value) current.current.monitor?.pauseAutomatic?.();
     if (!value) for (const entry of current.current.jobs) {
       const job = readJob(entry.key);
       if (job) save({ ...job, nextCheckAt: 0 });
     }
+    if (!value) wake.current?.();
   }, [pauseKey, save]);
 
   useEffect(() => {
@@ -86,26 +93,69 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         const next = readPersistedStateRaw(pauseKey) === '1';
         current.current.paused = next;
         setPaused(next);
-        if (next && current.current.monitor?.automaticRunning) current.current.monitor.pause();
+        if (next) current.current.monitor?.pauseAutomatic?.();
       }
       if (!event.key || event.key.startsWith(queuePrefix(owner) + 'job:')) {
         current.current.jobs = readQueue(owner);
         setJobs(current.current.jobs);
       }
+      if (!event.key || event.key === pauseKey || event.key.startsWith(queuePrefix(owner) + 'job:')) wake.current?.();
     };
     window.addEventListener('storage', refresh);
-    const exclusive = async (kind: 'scan' | 'mail', run: () => Promise<void>) => {
+    const exclusive = async (kind: 'scan' | 'mail', run: () => Promise<boolean | void>) => {
       if (busy.current[kind] || lifetime.signal.aborted) return;
       busy.current[kind] = true;
+      let advanced: boolean | void = undefined;
       try {
-        if (navigator.locks) await navigator.locks.request(queuePrefix(owner) + kind, { ifAvailable: true }, lock => lock ? run() : undefined);
-        else await run();
+        advanced = navigator.locks
+          ? await navigator.locks.request(queuePrefix(owner) + kind, { ifAvailable: true }, lock => lock ? run() : undefined)
+          : await run();
       } catch {
         if (!lifetime.signal.aborted) setStorageIssue(true);
-      } finally { busy.current[kind] = false; }
+      } finally {
+        busy.current[kind] = false;
+        if (advanced && !lifetime.signal.aborted) queueMicrotask(() => wake.current?.());
+      }
+    };
+    const mail = (entry: Job, match?: AutomaticScreeningMatch) => {
+      const config = current.current.notify.config;
+      if (config.enabled && fishNotifyMissing(config)) return;
+      void exclusive('mail', async () => {
+        const job = readJob(entry.key);
+        if (!job || (job.nextMailAt ?? 0) > Date.now() || lifetime.signal.aborted) return;
+        const saved = match ? undefined : await readAutomaticPreEntryCheckpoint(owner, job.id);
+        const round = match?.round ?? saved?.rounds[0], record = match?.record ?? saved?.records[0];
+        if (!round || round.id !== job.id || !round.automatic || record?.roundId !== job.id || record.status !== 'matched'
+          || !Number.isFinite(record.matchedAt) || record.matchedAt! <= 0 || lifetime.signal.aborted) return;
+        const live = current.current.notify;
+        if (!live.config.enabled) { save(job, true); return true; }
+        if (fishNotifyMissing(live.config)) return;
+        const sent = new Set(job.sent);
+        const recipients = live.config.emails.filter(recipient => !sent.has(recipient));
+        if (!recipients.length) { save(job, true); return true; }
+        // Keep a recovery delay if the tab closes during an unacknowledged request.
+        save({ ...job, matched: true, nextMailAt: Date.now() + MINUTE });
+        const delivered = await live.sendAdmission(record, round, recipients, {
+          signal: lifetime.signal,
+          onRecipient: recipient => {
+            sent.add(recipient);
+            const latest = readJob(job.key);
+            if (latest) save({ ...latest, sent: [...sent], nextMailAt: Date.now() + MINUTE });
+          },
+        });
+        if (lifetime.signal.aborted) return;
+        const latest = readJob(job.key);
+        if (!latest) return;
+        if (delivered) save(latest, true);
+        else {
+          const mailFailures = (latest.mailFailures ?? 0) + 1;
+          save({ ...latest, mailFailures, nextMailAt: Date.now() + Math.min(MINUTE, 5000 * 2 ** Math.min(mailFailures - 1, 4)) });
+        }
+        return true;
+      });
     };
     const tick = () => {
-      const { jobs, ready, monitor, notify, paused } = current.current;
+      const { jobs, ready, monitor, paused } = current.current;
       if (!ready || !monitor?.ready || !jobs.length || lifetime.signal.aborted) return;
       const ids = new Set(jobs.map(job => job.id));
       const records = new Map(monitor.library.records.filter(record => ids.has(record.roundId)).map(record => [record.roundId, record]));
@@ -114,15 +164,22 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         const record = records.get(job.id);
         if (!monitor.automaticRunning && (record?.status === 'unmatched' || record?.status === 'warming')) save(job, true);
       }
-      const next = jobs.filter(job => job.nextCheckAt <= now && (!records.has(job.id) || ['queued', 'paused', 'error'].includes(records.get(job.id)!.status)))
+      const next = jobs.filter(job => !job.matched && job.nextCheckAt <= now && (!records.has(job.id) || ['queued', 'paused', 'error', 'matched'].includes(records.get(job.id)!.status)))
         .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
-      if (next && !paused && !monitor.running && (records.has(next.id) || monitor.library.settings?.plans.length)) void exclusive('scan', async () => {
+      if (next && !paused && !(monitor.automaticRunning ?? monitor.running) && (records.has(next.id) || monitor.library.settings?.plans.length)) void exclusive('scan', async () => {
         const job = readJob(next.key);
         const active = current.current.monitor;
-        if (!job || job.nextCheckAt > Date.now() || !active?.startAutomatic || active.running || current.current.paused || lifetime.signal.aborted) return;
+        if (!job || job.matched || job.nextCheckAt > Date.now() || !active?.startAutomatic
+          || (active.automaticRunning ?? active.running) || current.current.paused || lifetime.signal.aborted) return;
         // Persist the next attempt before starting, so a reload can safely resume the same frozen round.
         save({ ...job, runner: tab.current, nextCheckAt: Date.now() + MINUTE });
-        await active.startAutomatic(job.id, job.source, !!job.runner && job.runner !== tab.current);
+        await active.startAutomatic(job.id, job.source, !!job.runner && job.runner !== tab.current, match => {
+          const latest = readJob(job.key);
+          if (!latest || lifetime.signal.aborted) return;
+          const matched = { ...latest, matched: true as const };
+          save(matched);
+          mail(matched, match);
+        });
         if (lifetime.signal.aborted) return;
         const saved = readJob(job.key);
         if (!saved) return;
@@ -130,38 +187,31 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         const failures = record?.status === 'error' ? (job.failures ?? 0) + 1 : 0;
         const nextClose = (Math.floor(Date.now() / MINUTE) + 1) * MINUTE + 2000;
         save({ ...saved, failures, nextCheckAt: failures ? Date.now() + Math.min(15, 2 ** Math.min(failures, 4)) * MINUTE : nextClose });
+        return true;
       });
-      const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && records.get(job.id)?.status === 'matched');
-      if (pendingMail && (!notify.config.enabled || !fishNotifyMissing(notify.config))) void exclusive('mail', async () => {
-        const job = readJob(pendingMail.key);
-        if (!job || (job.nextMailAt ?? 0) > Date.now() || lifetime.signal.aborted) return;
-        const saved = await readAutomaticPreEntryCheckpoint(owner, job.id);
-        const round = saved?.rounds[0], record = saved?.records[0];
-        const live = current.current;
-        if (!round || record?.status !== 'matched' || lifetime.signal.aborted) return;
-        if (!live.notify.config.enabled) { save(job, true); return; }
-        if (fishNotifyMissing(live.notify.config)) return;
-        const sent = new Set(job.sent);
-        const recipients = live.notify.config.emails.filter(recipient => !sent.has(recipient));
-        if (!recipients.length) { save(job, true); return; }
-        save({ ...job, nextMailAt: Date.now() + MINUTE });
-        const delivered = await live.notify.sendAdmission(record, round, recipients, {
-          signal: lifetime.signal,
-          onRecipient: recipient => {
-            sent.add(recipient);
-            save({ ...job, sent: [...sent], nextMailAt: Date.now() + MINUTE });
-          },
-        });
-        if (!lifetime.signal.aborted && delivered) save(job, true);
-      });
+      const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && (job.matched || records.get(job.id)?.status === 'matched'));
+      if (pendingMail) mail(pendingMail);
     };
+    wake.current = tick;
     const timer = setInterval(tick, 1200);
+    window.addEventListener('online', tick);
+    window.addEventListener('focus', tick);
+    document.addEventListener('visibilitychange', tick);
     tick();
-    return () => { lifetime.abort(); clearInterval(timer); window.removeEventListener('storage', refresh); };
+    return () => {
+      lifetime.abort();
+      wake.current = undefined;
+      clearInterval(timer);
+      window.removeEventListener('storage', refresh);
+      window.removeEventListener('online', tick);
+      window.removeEventListener('focus', tick);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [owner, pauseKey, save]);
+  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, notify.config]);
 
-  const jobIds = new Set(jobs.map(job => job.id));
-  const awaitingMail = jobs.length ? monitor?.library.records.filter(record => record.status === 'matched' && jobIds.has(record.roundId)).length ?? 0 : 0;
+  const matchedIds = jobs.length ? new Set(monitor?.library.records.filter(record => record.status === 'matched').map(record => record.roundId)) : undefined;
+  const awaitingMail = jobs.filter(job => job.matched || matchedIds?.has(job.id)).length;
   const pending = jobs.length - awaitingMail;
   return { enqueue, paused, setAutoPaused, pending, awaitingMail: jobs.length - pending, storageIssue };
 }

@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useFishScreeningAutomation } from '../useFishScreeningAutomation';
+import type { AutomaticScreeningMatch } from '../usePreEntryMonitor';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -58,4 +59,29 @@ it('queues a capture once, waits for a durable match, and retries only the unsen
   act(() => view.result.current.enqueue(source));
   await wait(2500);
   expect(send).toHaveBeenCalledTimes(2);
+});
+
+it('sends immediately after a committed match while manual screening is still running', async () => {
+  vi.useFakeTimers({now:T});
+  const library:PreEntryLibrary={version:1,rounds:[],records:[],settings:{updatedAt:T,plans:[{} as never],hours:48}};
+  let confirm: (() => void) | undefined;
+  const monitor={ready:true,running:true,automaticRunning:false,library,startAutomatic:vi.fn(async (id:string,source:TradeSignal,_recover:boolean,onMatch:(match:AutomaticScreeningMatch)=>void)=>{
+    await new Promise<void>(resolve=>{confirm=resolve;});
+    const round:PreEntryRound={id,startedAt:T,updatedAt:T,filters:[],hours:48,state:'complete',automatic:true};
+    const record:PreEntryRecord={id:id+':0:p',roundId:id,status:'matched',startTime:T,cursor:T,matchedAt:T,updatedAt:T,readings:[],
+      sample:{id:source.id,source,basis:'signal',groups:[],importedAt:T,enteredAt:T}};
+    onMatch({record,round});
+  })};
+  const sendAdmission=vi.fn(async()=>true);
+  const notify={config:{enabled:true,emails:['a@example.test'],serviceId:'service_demo',templateId:'template_demo',publicKey:'key'},sendAdmission};
+  const view=renderHook(()=>useFishScreeningAutomation('instant-owner',true,monitor as never,notify as never));
+  await act(async()=>{view.result.current.enqueue(signal('INSTANTUSDT'));});
+  expect(monitor.startAutomatic).toHaveBeenCalledOnce();
+  expect(sendAdmission).not.toHaveBeenCalled();
+  await act(async()=>confirm?.());
+  expect(Date.now()).toBe(T);
+  expect(monitor.running).toBe(true);
+  expect(sendAdmission).toHaveBeenCalledOnce();
+  expect(view.result.current.awaitingMail).toBe(0);
+  expect(view.result.current.pending).toBe(0);
 });
