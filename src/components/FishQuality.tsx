@@ -69,7 +69,7 @@ import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { hasQualityExit, qualityEntryIdentity, importQualityLibrary, newQualityStudy, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
-import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, makeQualitySignalMetric, qualityFilterChoiceKey, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
+import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, makeQualitySignalMetrics, qualityFilterChoiceKey, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { qualityResultMap, qualityRowResult, qualitySellSuggestions } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
 import { signalReadingCell, signalReadingKey } from '@/lib/fish/qualitySignalReadings';
@@ -176,7 +176,7 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
   const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]), groups = [...new Set(choices.map(c => c.group))];
   const [draft, setDraft] = useState<FilterDraft[]>(() => standaloneBuyFilters(state.study).map(f => ({ choice: qualityFilterChoiceKey(f), direction: f.direction, threshold: String(f.threshold), enabled: f.enabled })));
   const [error, setError] = useState('');
-  const [signalChoice, setSignalChoice] = useState('');
+  const [selectedSignalChoices, setSelectedSignalChoices] = useState<string[]>([]);
   const signalChoices = useMemo(() => qualityFilterMenuChoices(definitions,true), [definitions]);
   const signalGroups = [...new Set(signalChoices.map(choice=>choice.group))];
   const patch = (i: number, p: Partial<FilterDraft>) => setDraft(draft.map((d, j) => j === i ? { ...d, ...p } : d));
@@ -188,23 +188,38 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
   };
   const generate = () => {
     try {
-      const metric = makeQualitySignalMetric(signalChoice,definitions);
+      const metrics = makeQualitySignalMetrics(selectedSignalChoices, definitions);
       setError('');
-      void state.generateSignalValues?.(metric);
+      void state.generateSignalValues?.(metrics);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '请选择有效算法'); }
   };
   return <div className="space-y-3" data-testid="quality-buy-filter-editor">
     {state.generateSignalValues && <section className="space-y-2 rounded-md border border-border/60 p-2.5" aria-label="信号时点读数">
       <h4 className="text-xs font-medium">信号时点读数</h4>
       <div className="flex flex-wrap items-center gap-2">
-        <select aria-label="信号读数算法" className={`${field} min-w-32 flex-1`} value={signalChoice} onChange={event=>setSignalChoice(event.target.value)}>
-          <option value="">选择算法</option>
-          {signalGroups.map(group=><optgroup key={group} label={group}>{signalChoices.filter(choice=>choice.group===group).map(choice=><option key={choice.key} value={choice.key}>{choice.label}</option>)}</optgroup>)}
+        <select aria-label="添加信号读数算法" className={`${field} min-w-32 flex-1`} value="" onChange={event => {
+          const choice = event.target.value;
+          if (choice) setSelectedSignalChoices(previous => [...previous, choice]);
+        }}>
+          <option value="">添加算法（可多选）</option>
+          {signalGroups.map(group => <optgroup key={group} label={group}>
+            {signalChoices.filter(choice => choice.group === group).map(choice =>
+              <option key={choice.key} value={choice.key} disabled={selectedSignalChoices.includes(choice.key)}>{choice.label}</option>)}
+          </optgroup>)}
         </select>
-        <button type="button" className={`${button} text-primary`} disabled={!state.ready || !signalChoice || !selectedCount || state.filterRunning || state.signalValues?.running} onClick={generate}>生成信号读数</button>
+        <button type="button" className={`${button} text-primary`} disabled={!state.ready || !selectedSignalChoices.length || !selectedCount || state.filterRunning || state.signalValues?.running} onClick={generate}>生成信号读数</button>
       </div>
+      {!!selectedSignalChoices.length && <ul aria-label="本次选择的算法" className="flex flex-wrap gap-2">
+        {selectedSignalChoices.map(key => {
+          const label = signalChoices.find(choice => choice.key === key)?.label ?? key;
+          return <li key={key} className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10.5px]">
+            {label}<button type="button" className="rounded p-0.5 hover:bg-accent" aria-label={`从本次移除 ${label}`} onClick={() => setSelectedSignalChoices(previous => previous.filter(choice => choice !== key))}><X aria-hidden className="h-3 w-3"/></button>
+          </li>;
+        })}
+      </ul>}
       <p className="text-[10.5px] text-muted-foreground">{selectedCount ? `对当前已勾选的 ${selectedCount} 条信号生成组合表读数` : '先在组合表勾选信号'}。按原信号时间读取算法数值。支持盘中计算的算法用已结束的分钟复原。</p>
-      {!!state.study.signalMetrics?.length && <div className="flex flex-wrap gap-2">
+      {!!state.study.signalMetrics?.length && <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10.5px] text-muted-foreground">已生成的列</span>
         {state.study.signalMetrics.map(metric=><span key={metric.id} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10.5px]">
           {metric.label}<button type="button" className="rounded p-0.5 hover:bg-accent" disabled={state.signalValues?.running} aria-label={`移除信号读数列 ${metric.label}`} onClick={()=>state.removeSignalMetric?.(metric.id)}><X aria-hidden className="h-3 w-3"/></button>
         </span>)}

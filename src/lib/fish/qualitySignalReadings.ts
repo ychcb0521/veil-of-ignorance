@@ -7,6 +7,10 @@ import type { QualityBuyFilter, QualityFilterReading, QualityRunOptions, Quality
 import type { FishReconstructionLoader } from './reconstruction';
 
 export type QualitySignalMetric = Pick<QualityBuyFilter, 'id' | 'label' | 'metric' | 'snapshot'>;
+export interface QualitySignalReadingBatch {
+  metric: QualitySignalMetric;
+  rows: readonly QualitySample[];
+}
 export const signalReadingKey = (row: QualitySample, metric: QualitySignalMetric) =>
   'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id]));
 
@@ -20,12 +24,14 @@ export function signalReadingCell(row: QualitySample, metric: QualitySignalMetri
 }
 
 export async function collectQualitySignalReadings(options: QualityRunOptions, load: FishReconstructionLoader, now: number) {
-  const metric = options.signalMetric;
-  if (!metric) throw Error('请选择信号读数算法');
-  const {signal} = options, rows = options.signalReadingRows ?? [];
-  const unique = new Map(rows.map(row=>[signalReadingKey(row,metric),row]));
+  const {signal, signalReadingBatches} = options;
+  if (!signalReadingBatches?.length) throw Error('请选择信号读数算法');
+  const unique = new Map<string, {metric: QualitySignalMetric; row: QualitySample}>();
+  for (const {metric, rows} of signalReadingBatches) {
+    for (const row of rows) unique.set(signalReadingKey(row, metric), {metric, row});
+  }
   let done = 0;
-  for (const [key,row] of unique) {
+  for (const [key, {metric, row}] of unique) {
     if (signal.aborted) throw new DOMException('已取消','AbortError');
     options.onProgress({done,total:unique.size,current:row.source.symbol});
     let reading: QualityFilterReading;

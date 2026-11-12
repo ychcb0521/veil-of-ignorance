@@ -50,11 +50,14 @@ export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', th
 function metricSnapshot(choice: QualityFilterChoice, def: DeepDigFeatureDef, threshold: number, direction: '<' | '>'): QualityBuyFilter['snapshot'] {
   return {featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:intervalOf(def),scale:1,unit:'',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0};
 }
-export function makeQualitySignalMetric(choiceKey: string, definitions: readonly DeepDigFeatureDef[]): QualitySignalMetric {
-  const {choices,defs}=build(definitions,true), choice=choices.find(choice=>choice.key===choiceKey), def=choice&&defs.get(choice.featureId);
-  if (!choice || !def) throw Error('未知的读数算法，请检查账号公式');
-  const snapshot=metricSnapshot(choice,def,0,'>');
-  return {id:shortFishHash(JSON.stringify([choiceKey,snapshot.definitionKey,snapshot.interval])),label:choice.label,metric:choice.metric,snapshot};
+export function makeQualitySignalMetrics(choiceKeys: readonly string[], definitions: readonly DeepDigFeatureDef[]): QualitySignalMetric[] {
+  const {choices, defs} = build(definitions, true);
+  return choiceKeys.map(key => {
+    const choice = choices.find(choice => choice.key === key), def = choice && defs.get(choice.featureId);
+    if (!choice || !def) throw Error('未知的读数算法，请检查账号公式');
+    const snapshot = metricSnapshot(choice, def, 0, '>');
+    return {id:shortFishHash(JSON.stringify([key,snapshot.definitionKey,snapshot.interval])),label:choice.label,metric:choice.metric,snapshot};
+  });
 }
 export const qualityFilterChoiceKey = (f: QualityBuyFilter) => `${f.snapshot.featureId}:${f.metric}`;
 export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {

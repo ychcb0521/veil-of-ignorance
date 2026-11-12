@@ -1,6 +1,6 @@
 import {expect,it,vi} from 'vitest';
 import {definitionKey} from '@/lib/deepDig/features';
-import {makeQualitySignalMetric,qualityFilterMenuChoices} from '@/lib/fish/qualityFilters';
+import {makeQualitySignalMetrics,qualityFilterMenuChoices} from '@/lib/fish/qualityFilters';
 import {signalReadingKey} from '@/lib/fish/qualitySignalReadings';
 import {preserveQualitySignalReadings} from '@/lib/fish/qualitySignalReadingsStore';
 import {qualityEntryKey,qualityEntryParts,evaluateQualityEntry,mergeQualityEntryReading,preserveQualityEntry,type QualityEntryTarget} from '@/lib/fish/qualityEntry';
@@ -52,27 +52,30 @@ it('reads the original signal in the configured algorithm period, with no future
     id: 'screened', enteredAt: matched, importedAt: matched, basis: 'signal', groups: [],
     source: {...source, timeMs: matched, preEntryMonitor: {recordId:'r',roundId:'p',sourceId:source.id,sourceTime:original,matchedAt:matched}},
   };
-  const definitions = [{...def,interval:'15m' as const}];
+  const definitions = [
+    {...def,interval:'15m' as const},
+    {...def,id:'entry-closed',interval:'15m' as const,chartTemplate:'ctba' as const},
+  ];
   const choice = qualityFilterMenuChoices(definitions,true).find(choice=>choice.label.endsWith('原值'));
   expect(choice?.key).toBe('entry-test:raw');
-  const metric = makeQualitySignalMetric(choice!.key,definitions);
-  expect(metric.snapshot.interval).toBe('15m');
-  const onSignalReading = vi.fn(), onResult = vi.fn(), spy = vi.fn(load);
+  const [metric, closed] = makeQualitySignalMetrics([choice!.key, 'entry-closed:raw'], definitions);
+  expect([metric.snapshot.interval, closed.snapshot.interval]).toEqual(['15m','5m']);
+  const onSignalReading = vi.fn(), onResult = vi.fn(), onProgress = vi.fn(), spy = vi.fn(load);
   const study = newQualityStudy();
-  await collectFishQuality({study,task:'signal-values',signalMetric:metric,signalReadingRows:[sample,{...sample,id:'duplicate'}],signal:signal(),onProgress:()=>{},onResult,onSignalReading},spy,T+20*M);
-  const key = signalReadingKey(sample,metric);
-  expect(onSignalReading).toHaveBeenCalledExactlyOnceWith({key,value:103,at:T+2*M});
+  await collectFishQuality({study,task:'signal-values',signalReadingBatches:[
+    {metric,rows:[sample,{...sample,id:'duplicate'}]}, {metric:closed,rows:[sample]},
+  ],signal:signal(),onProgress,onResult,onSignalReading},spy,T+20*M);
+  expect(onSignalReading.mock.calls).toEqual([
+    [{key:signalReadingKey(sample,metric),value:103,at:T+2*M}],
+    [{key:signalReadingKey(sample,closed),value:101,at:T}],
+  ]);
+  expect(onProgress).toHaveBeenLastCalledWith({done:2,total:2,current:''});
   expect(onResult).not.toHaveBeenCalled();
-  expect(spy.mock.calls.map(([, ,to, program])=>[to,program.step])).toEqual([[T,15*M],[T+2*M,M]]);
-  const closed = makeQualitySignalMetric('entry-test:raw', [{...def,interval:'15m',chartTemplate:'ctba'}]);
-  onSignalReading.mockClear(); spy.mockClear();
-  await collectFishQuality({study,task:'signal-values',signalMetric:closed,signalReadingRows:[sample],signal:signal(),onProgress:()=>{},onResult,onSignalReading},spy,T+20*M);
-  expect(onSignalReading).toHaveBeenCalledExactlyOnceWith({key:signalReadingKey(sample,closed),value:101,at:T});
-  expect(spy.mock.calls.every(([, ,to, program])=>to===T&&program.step===5*M)).toBe(true);
+  expect(spy.mock.calls.map(([, ,to, program])=>[to,program.step])).toEqual([[T,15*M],[T+2*M,M],[T,5*M]]);
 });
 
 it('retains stored signal values through a failed retry or an old tab save and preserves column removal', () => {
-  const study = newQualityStudy(), metric = makeQualitySignalMetric('entry-test:raw', [def]);
+  const study = newQualityStudy(), [metric] = makeQualitySignalMetrics(['entry-test:raw'], [def]);
   const saved = {...study,signalMetrics:[metric],signalMetricsUpdatedAt:T,signalReadings:[{key:'r',value:0,at:T}]};
   expect(preserveQualitySignalReadings(saved,study)).toMatchObject(saved);
   const removed = {...study,signalMetrics:[],signalMetricsUpdatedAt:T+1,signalReadings:[{key:'r',error:'断线'}]};

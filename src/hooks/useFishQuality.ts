@@ -401,28 +401,42 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     setFilterRunning(false);
     setSignalValues(previous => previous?.running ? {...previous,running:false} : previous);
   }, []);
-  const generateSignalValues = useCallback(async (metric: QualitySignalMetric) => {
-    if (!readyRef.current || filterController.current) return;
-    const rows = new Map(qualityRunSamples(scoped(current.current)).map(row=>[signalReadingKey(row,metric),row]));
-    if (!rows.size) return;
-    const saved = new Set((current.current.signalReadings ?? []).filter(reading=>!reading.error && Number.isFinite(reading.value)).map(reading=>reading.key));
-    const pending = [...rows].filter(([key])=>!saved.has(key)).map(([,row])=>row);
-    const offset = rows.size - pending.length;
-    change(study=>study.signalMetrics?.some(column=>column.id===metric.id) ? study
-      : {...study,signalMetrics:[...study.signalMetrics??[],structuredClone(metric)],signalMetricsUpdatedAt:Math.max(Date.now(),(study.signalMetricsUpdatedAt??0)+1)});
-    setSignalValues({running:pending.length>0,progress:{done:offset,total:rows.size,current:''},error:''});
-    if (!pending.length) return;
+  const generateSignalValues = useCallback(async (selectedMetrics: readonly QualitySignalMetric[]) => {
+    if (!readyRef.current || filterController.current || !selectedMetrics.length) return;
+    const rows = qualityRunSamples(scoped(current.current));
+    if (!rows.length) return;
+    const metrics = [...new Map(selectedMetrics.map(metric => [metric.id, metric])).values()];
+    const saved = new Set((current.current.signalReadings ?? []).filter(reading => !reading.error && Number.isFinite(reading.value)).map(reading => reading.key));
+    const pendingKeys = new Set<string>();
+    let total = 0;
+    const batches = metrics.map(metric => {
+      const unique = new Map(rows.map(row => [signalReadingKey(row, metric), row]));
+      total += unique.size;
+      const missing = [...unique].filter(([key]) => !saved.has(key));
+      missing.forEach(([key]) => pendingKeys.add(key));
+      return {metric, rows: missing.map(([, row]) => row)};
+    }).filter(batch => batch.rows.length);
+    const offset = total - pendingKeys.size;
+    change(study => {
+      const savedColumns = study.signalMetrics ?? [];
+      const savedIds = new Set(savedColumns.map(metric => metric.id));
+      const added = metrics.filter(metric => !savedIds.has(metric.id));
+      return added.length ? {...study, signalMetrics: [...savedColumns, ...structuredClone(added)],
+        signalMetricsUpdatedAt: Math.max(Date.now(), (study.signalMetricsUpdatedAt ?? 0) + 1)} : study;
+    });
+    setSignalValues({running: batches.length > 0, progress: {done: offset, total, current: ''}, error: ''});
+    if (!batches.length) return;
     const aborter = new AbortController(), epoch = generation.current, revision = ++filterRevision.current;
     filterController.current = aborter;
     const active = () => epoch===generation.current && revision===filterRevision.current && filterController.current===aborter && !aborter.signal.aborted;
     let missing = 0;
     try {
       await latestRun.current({
-        study:newQualityStudy(current.current.startedAt),task:'signal-values',signalMetric:metric,signalReadingRows:pending,
+        study:newQualityStudy(current.current.startedAt),task:'signal-values',signalReadingBatches:batches,
         signal:aborter.signal,onResult:()=>{},
-        onProgress:progress=>{if(active())setSignalValues({running:true,progress:{...progress,done:offset+progress.done,total:rows.size},error:''});},
+        onProgress:progress=>{if(active())setSignalValues({running:true,progress:{...progress,done:offset+progress.done,total},error:''});},
         onSignalReading:reading=>{
-          if (!active() || !rows.has(reading.key)) return;
+          if (!active() || !pendingKeys.delete(reading.key)) return;
           if (reading.error || !Number.isFinite(reading.value)) missing++;
           change(study=>({...study,signalReadings:[...(study.signalReadings??[]).filter(prior=>prior.key!==reading.key),reading]}));
         },

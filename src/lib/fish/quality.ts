@@ -847,8 +847,7 @@ export interface QualityRunOptions {
   mode?: 'filter' | 'filter-only' | 'restart';
   /** Independent UI tasks; filtering never evaluates exits. Legacy callers retain automatic filter-only behavior. */
   task?: 'filter' | 'monitor' | 'post-exit' | 'entry' | 'pre-entry' | 'signal-values';
-  signalMetric?: import('./qualitySignalReadings').QualitySignalMetric;
-  signalReadingRows?: readonly QualitySample[];
+  signalReadingBatches?: readonly import('./qualitySignalReadings').QualitySignalReadingBatch[];
   onSignalReading?: (reading: QualityFilterReading) => void;
   entryTargets?: readonly import('./qualityEntry').QualityEntryTarget[];
   onEntryReading?: (r: import('./qualityEntry').QualityEntryReading) => void;
