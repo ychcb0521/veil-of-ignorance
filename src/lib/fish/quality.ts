@@ -164,6 +164,9 @@ export interface FishQualityStudy {
   filterLibrary?: QualityFilterLibrary;
   campaignRepair?: QualityRepairBatch;
   buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
+  signalMetrics?: import('./qualitySignalReadings').QualitySignalMetric[];
+  signalMetricsUpdatedAt?: number;
+  signalReadings?: QualityFilterReading[];
   /** New workflow: filters are standalone experiments and never gate sell monitoring. */
   independentFilters?: true;
   /** Exact pre-migration bindings retained for historical provenance, never executed. */
@@ -841,7 +844,10 @@ export interface QualityRunOptions {
   /** Filter modes reuse saved trades; restart replays selected sell experiments from entry, including completed results. */
   mode?: 'filter' | 'filter-only' | 'restart';
   /** Independent UI tasks; filtering never evaluates exits. Legacy callers retain automatic filter-only behavior. */
-  task?: 'filter' | 'monitor' | 'post-exit' | 'entry' | 'pre-entry';
+  task?: 'filter' | 'monitor' | 'post-exit' | 'entry' | 'pre-entry' | 'signal-values';
+  signalMetric?: import('./qualitySignalReadings').QualitySignalMetric;
+  signalReadingRows?: readonly QualitySample[];
+  onSignalReading?: (reading: QualityFilterReading) => void;
   entryTargets?: readonly import('./qualityEntry').QualityEntryTarget[];
   onEntryReading?: (r: import('./qualityEntry').QualityEntryReading) => void;
   postExitTargets?: readonly import('./qualityPostExit').QualityPostExitTarget[];
@@ -868,6 +874,11 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
+  if (options.task === 'signal-values') {
+    const {collectQualitySignalReadings} = await import('./qualitySignalReadings');
+    await collectQualitySignalReadings(options,load,now);
+    return;
+  }
   if (options.task === 'pre-entry') {
     if (!options.preEntry) throw new Error('缺少买前监测任务');
     const { collectPreEntryMonitor } = await import('./preEntryMonitor');

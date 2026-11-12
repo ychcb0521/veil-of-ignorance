@@ -78,6 +78,9 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
     ...('avgRange' in (template ?? {}) ? { avgRange: (template as ResearchIndicator).avgRange } : {}), templateId: template?.id, ...('neutralLabel' in (template ?? {})?{neutralLabel:(template as ResearchIndicator).neutralLabel}:{}), ...('components' in (template ?? {})?{components:(template as ResearchIndicator).components}:{}), ...('parameterUnit' in (template ?? {})?{parameterUnit:(template as ResearchIndicator).parameterUnit}:{}), ...(def.retentionSourceId?{components:retentionComponents(def.retentionPrefix),parameter:'原算法参数',neutral:0,avgNeutral:0}: {}) };
 }
+export function researchReadsClosedOnly(def: DeepDigFeatureDef, item = researchIndicatorForFeature(def)): boolean {
+  return !!item.marketEvidence || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba';
+}
 const accountRegistryCache = new WeakMap<readonly DeepDigFeatureDef[], ResearchIndicator[]>();
 export function accountResearchIndicators(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): ResearchIndicator[] {
   const cached = accountRegistryCache.get(definitions);
@@ -387,7 +390,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const closedOnly = item.marketEvidence || featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba';
+  const closedOnly = researchReadsClosedOnly(def,item);
   const step = closedOnly ? chartInterval(data) : 0;
   const now = Date.now();
   const unclosed = (index: number) => data[index].cba2Closed === false || data[index].timestamp + step > now;

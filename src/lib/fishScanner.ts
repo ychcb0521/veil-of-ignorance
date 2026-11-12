@@ -211,6 +211,7 @@ export class FishScanner {
   /** Paper quality studies share the public-data cache and request pool, without stopping live catches. */
   async quality(options: QualityRunOptions): Promise<void> {
     const rows = options.task === 'pre-entry' ? options.preEntry?.records.map(r => r.sample) ?? []
+      : options.task === 'signal-values' ? options.signalReadingRows ?? []
       : options.task === 'entry' ? options.entryTargets ?? []
       : options.task === 'post-exit' ? options.postExitTargets ?? [] : qualityRunSamples(options.study);
     let progress = {done:0,total:rows.length,current:''}, waitingUntil:number|undefined;

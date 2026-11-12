@@ -9,6 +9,7 @@ import {evaluateFishProgram} from './algorithm';
 import {aggregateQualityMinute,minuteTransport} from './qualityIntrabar';
 import {activeHoldingVetoes} from './qualityVeto';
 import {validateFishBars} from './shared';
+import {researchReadsClosedOnly} from '@/lib/researchIndicators';
 import type {FishReconstructionLoader} from './reconstruction';
 export interface QualityEntryPart {id:'main'|'before'|'after';label:string;metric:string;snapshot:FishSnapshot}
 export interface QualityEntryTarget {source:TradeSignal;result:QualityResult;plan:QualityGroup;part:QualityEntryPart}
@@ -22,20 +23,43 @@ export function qualityEntryKey(source:TradeSignal,result:QualityResult|undefine
 export const validEntryReading=(r:QualityEntryReading|undefined)=>!!r&&!r.error&&Number.isFinite(r.value)&&Number.isFinite(r.at)&&r.at!<=r.entryTime&&(r.barOpenTime==null||Number.isFinite(r.barOpenTime)&&r.barOpenTime<=r.at!);
 export function mergeQualityEntryReading(a:QualityEntryReading|undefined,b:QualityEntryReading):QualityEntryReading {if(!a||a.key!==b.key)return b;if(validEntryReading(a)&&!validEntryReading(b))return a;if(validEntryReading(b)&&!validEntryReading(a))return b;return a.evaluatedAt>b.evaluatedAt?a:b;}
 export function preserveQualityEntry(saved:FishQualityStudy|undefined,incoming:FishQualityStudy):FishQualityStudy {if(!saved?.entryReadings?.length)return incoming;const map=new Map(saved.entryReadings.map(r=>[r.key,r]));for(const r of incoming.entryReadings??[])map.set(r.key,mergeQualityEntryReading(map.get(r.key),r));return {...incoming,entryReadings:[...map.values()]};}
+export async function readQualityMetricAt(source: TradeSignal, snapshot: FishSnapshot, metric: string, time: number,
+  mode: QualityEntryReading['mode'] | 'signal', load: FishReconstructionLoader, now: number, signal: AbortSignal, label = '买入') {
+  if (signal.aborted) throw new DOMException('已取消','AbortError');
+  const {plan,scale} = qualityMetricPlan(snapshot,metric);
+  const closed = mode === 'closed' || mode === 'signal' && (researchReadsClosedOnly(plan.def) || plan.compiled.usesDbl5 || plan.compiled.usesSbs5m || plan.compiled.usesPrs6h);
+  const minute = Math.floor(time/60000)*60000;
+  if (!Number.isFinite(time) || time <= 0) throw Error(`缺少有效${label}时间`);
+  if (minute>Math.floor(now/60000)*60000) throw Error(`${label}时刻尚未到达，不能提前读取`);
+  const cut = Math.floor(minute/plan.step)*plan.step;
+  const from = qualityHistoryFrom(load,cut-(plan.warm+(closed?1:0))*plan.step,plan.step);
+  if (from<0) throw Error(`${label === '买入' ? '入场' : label}公式预热所需历史不足`);
+  const row={...source,timeMs:now},history=from<cut?[...await load(row,from,cut,plan,signal)]:[];
+  if (signal.aborted) throw new DOMException('已取消','AbortError');
+  if (from<cut) validateFishBars(history,cut,(cut-from)/plan.step,plan.step);
+  let bars=history,at=cut;
+  if(!closed&&cut<minute){
+    const minutes=await load(row,cut,minute,minuteTransport(plan),signal);
+    if (signal.aborted) throw new DOMException('已取消','AbortError');
+    validateFishBars(minutes,minute,(minute-cut)/60000,60000);
+    let partial:ResearchBar|undefined;
+    for(const bar of minutes)partial=aggregateQualityMinute(partial,bar,plan.step);
+    if(partial)bars=[...history,partial];
+    at=minute;
+  }
+  const values=evaluateFishProgram(bars,plan).average,value=values.at(-1)!*scale;
+  if(!Number.isFinite(value)){
+    if(qualityInitializationPending(load,values,values.length-1))return {initializing:true as const};
+    throw Error(`${label}时刻的算法读数缺失`);
+  }
+  return {value,at,barOpenTime:bars.at(-1)?.openTime};
+}
 export async function evaluateQualityEntry(t:QualityEntryTarget,load:FishReconstructionLoader,now:number,signal:AbortSignal):Promise<QualityEntryReading>{
  const key=qualityEntryKey(t.source,t.result,t.plan,t.part);if(!key)throw Error('入场读数需要有效买入记录');
  const base={key,evaluatedAt:now,entryTime:t.result.entryTime!,mode:qualityEntryMode(t.plan),metric:t.part.metric};
  const abort=()=>{if(signal.aborted)throw new DOMException('已取消','AbortError');};
- try{abort();if(t.plan.initialization)load=withTuringInitialization(load,t.source.symbol,t.result.initialization?.startMs??NaN);const {plan,scale}=qualityMetricPlan(t.part.snapshot,t.part.metric),entry=Math.floor(base.entryTime/60000)*60000;
-  if(entry>Math.floor(now/60000)*60000)throw Error('买入时刻尚未到达，不能提前读取');
-  const cut=Math.floor(entry/plan.step)*plan.step,from=qualityHistoryFrom(load,cut-(plan.warm+(base.mode==='closed'?1:0))*plan.step,plan.step);
-  if(from<0)throw Error('入场公式预热所需历史不足');
-  const source={...t.source,timeMs:now},history=from<cut?[...await load(source,from,cut,plan,signal)]:[];abort();if(from<cut)validateFishBars(history,cut,(cut-from)/plan.step,plan.step);
-  let bars=history,at=cut;
-  if(base.mode==='intrabar'&&cut<entry){const minutes=await load(source,cut,entry,minuteTransport(plan),signal);abort();validateFishBars(minutes,entry,(entry-cut)/60000,60000);let partial:ResearchBar|undefined;for(const m of minutes)partial=aggregateQualityMinute(partial,m,plan.step);if(partial)bars=[...history,partial];at=entry;}
-  const values=evaluateFishProgram(bars,plan).average,value=values.at(-1)!*scale;
-  if(!Number.isFinite(value)){if(qualityInitializationPending(load,values,values.length-1))return {...base,initializing:true};throw Error('买入时刻的算法读数缺失');}
-  return {...base,value,at,barOpenTime:bars.at(-1)?.openTime};
+ try{abort();if(t.plan.initialization)load=withTuringInitialization(load,t.source.symbol,t.result.initialization?.startMs??NaN);
+  return {...base,...await readQualityMetricAt(t.source,t.part.snapshot,t.part.metric,base.entryTime,base.mode,load,now,signal)};
  }catch(error){abort();return {...base,error:error instanceof Error?error.message:'入场行情读取失败'};}
 }
 export async function collectQualityEntry(targets:readonly QualityEntryTarget[],load:FishReconstructionLoader,now:number,signal:AbortSignal,onReading:(r:QualityEntryReading)=>void,onProgress:(p:QualityProgress)=>void){

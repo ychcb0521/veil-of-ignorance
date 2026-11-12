@@ -5,6 +5,7 @@ import {loadDurableQualityPlans} from './qualitySavedPlansStore';
 import {preserveSourceDeletions,applySourceDeletions} from './libraryDeletion';
 import { preserveQualityPostExit } from './qualityPostExit';
 import { preserveQualityEntry } from './qualityEntry';
+import { preserveQualitySignalReadings, readStoredQualityWithSignalReadings, signalReadingsStorageKey, writeStoredQualityWithSignalReadings } from './qualitySignalReadingsStore';
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
@@ -21,7 +22,7 @@ const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
 // 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
 const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualitySourceRatings(saved,preserveSourceDeletions(saved,preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming))))));
 const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => {
-  const next = preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
+  const next = preserveQualitySignalReadings(saved,preserveLibraries(saved, preserveQualityRepairs(saved, incoming)));
   // 旧标签页或后台监测写回总表时，保留新存模板和删除墓碑。
   return { ...next, planTemplates: mergeQualityPlanTemplates(saved?.planTemplates, next.planTemplates) };
 };
@@ -76,10 +77,7 @@ async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQuality
   try {
     const db = await open();
     try {
-      const stored = await new Promise<unknown>((resolve, reject) => {
-        const req = db.transaction(STORE).objectStore(STORE).get(keyOf(owner));
-        req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
-      });
+      const stored = await readStoredQualityWithSignalReadings(db.transaction(STORE).objectStore(STORE),keyOf(owner));
       // A fallback can be newer if a previous durable write failed.
       if (stored != null && !valid(stored)) throw new Error('invalid saved study');
       const study=valid(fallback)?preserveStudy(valid(stored)?stored:undefined,fallback):valid(stored)?applySourceDeletions(stored):newQualityStudy();
@@ -173,8 +171,13 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
       const db = await open();
       try {
         await new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), read = store.get(key);
-          read.onsuccess = () => { durablePrevious = valid(read.result) ? read.result : undefined; const next = merge(read.result); leftInline = qualityStudyHasInlineArchives(next); store.put(next, key); };
+          const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+          void readStoredQualityWithSignalReadings(store,key).then(previous => {
+            durablePrevious = valid(previous) ? previous : undefined;
+            const next = merge(previous);
+            leftInline = qualityStudyHasInlineArchives(next);
+            writeStoredQualityWithSignalReadings(store,key,next);
+          }).catch(error => { tx.abort(); reject(error); });
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
       } finally { db.close(); }
@@ -254,10 +257,7 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     try {
       const db = await open();
       try {
-        const stored = await new Promise<unknown>((resolve, reject) => {
-          const req = db.transaction(STORE).objectStore(STORE).get(key);
-          req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
-        });
+        const stored = await readStoredQualityWithSignalReadings(db.transaction(STORE).objectStore(STORE),key);
         // 上传的总表不带归档正文：正文各有各的云端存档（qualityArchiveBodyBlob）。
         if (valid(fallback)) return withoutQualityArchiveBodies(applySavedQualityPlans(preserveStudy(valid(stored) ? stored : undefined, fallback),readSavedQualityPlans(owner)));
         return valid(stored) ? withoutQualityArchiveBodies(applySavedQualityPlans(stored,readSavedQualityPlans(owner))) : undefined;
@@ -273,9 +273,14 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
           if (incoming && valid(incoming)) {
-            const read = store.get(key);
-            read.onsuccess = () => store.put(compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner, preserveLibraries(valid(read.result) ? read.result : undefined, incoming))), key);
-          } else store.delete(key);
+            void readStoredQualityWithSignalReadings(store,key).then(previous => {
+              const next = preserveQualitySignalReadings(valid(previous) ? previous : undefined,incoming);
+              writeStoredQualityWithSignalReadings(store,key,compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner,preserveLibraries(valid(previous) ? previous : undefined,next))));
+            }).catch(error => { tx.abort(); reject(error); });
+          } else {
+            store.delete(key);
+            store.delete(signalReadingsStorageKey(key));
+          }
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
       } finally { db.close(); }
@@ -286,5 +291,5 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     void task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {});
     return task.then(() => undefined);
   },
-  weight: study => study ? Object.keys(study.deletedSources??{}).length + Object.keys(study.monitorLibrary?.directoryEdits??{}).length + (study.monitorLibrary?.archives?.length??0) + (study.postExitReadings?.length ?? 0) + study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
+  weight: study => study ? Object.keys(study.deletedSources??{}).length + Object.keys(study.monitorLibrary?.directoryEdits??{}).length + (study.monitorLibrary?.archives?.length??0) + (study.postExitReadings?.length ?? 0) + (study.signalReadings?.length ?? 0) + study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
 };

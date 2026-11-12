@@ -1,22 +1,23 @@
 import { algorithmMetricMenu } from './algorithmMetricMenu';
 import {BOX_STOP_KIND,BOX_BREAK_CHOICE,isBoxBreak,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
-import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { compileFeatureFormula, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researchIndicators';
 import { shortFishHash } from './algorithm';
 import type { QualityBuyFilter } from './quality';
+import type { QualitySignalMetric } from './qualitySignalReadings';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
 import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, PAYOFF_STOP_LABEL } from './qualityVeto';
 export interface QualityFilterChoice { key: string; featureId: string; metric: string; label: string; group: string }
-function build(definitions: readonly DeepDigFeatureDef[]) {
+function build(definitions: readonly DeepDigFeatureDef[], originalPeriod = false) {
   const choices: QualityFilterChoice[] = [], defs = new Map<string,DeepDigFeatureDef>();
   for (const def of definitions) {
     const item = researchIndicatorForFeature(def);
     try {
       const formula = item ? researchChartFormula(item,def.formula) : def.formula;
       const names = [...new Set(compileFeatureFormula(formula).program.statements.flatMap(s => s.name ? [s.name] : []))];
-      defs.set(def.id,{...def,formula,interval:'5m'});
+      defs.set(def.id,{...def,formula,interval:originalPeriod ? intervalOf(def) : '5m'});
       const preferred = item ? [item.core,`avg_${item.core}`,`avg_${item.core}_2`] : [];
       for (const metric of [...new Set([...preferred.filter(n => names.includes(n)),...names,'结果'])]) {
         const suffix = item && metric === item.core ? '原始值' : item && metric === `avg_${item.core}` ? 'avg' : item && metric === `avg_${item.core}_2` ? 'avg₂' : metric;
@@ -28,12 +29,12 @@ function build(definitions: readonly DeepDigFeatureDef[]) {
 }
 export const qualityFilterChoices = (definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityFilterChoice[] => build(definitions).choices;
 /** Only these three series can be newly selected; legacy builders above remain complete. */
-export function qualityFilterMenuChoices(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityFilterChoice[] {
-  const {choices,defs}=build(definitions);
+export function qualityFilterMenuChoices(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs(), originalPeriod = false): QualityFilterChoice[] {
+  const {choices,defs}=build(definitions,originalPeriod);
   return definitions.flatMap(def=>{
     const compiled=defs.get(def.id);if(!compiled)return [];
     const own=choices.filter(c=>c.featureId===def.id);
-    return algorithmMetricMenu(compiled,own.map(c=>({name:c.metric,label:c.label}))).flatMap(metric=>{
+    return algorithmMetricMenu(originalPeriod ? def : compiled,own.map(c=>({name:c.metric,label:c.label}))).flatMap(metric=>{
       const choice=own.find(c=>c.metric===metric.name);
       return choice?[{...choice,label:`${choice.group} ${metric.label}`}]:[];
     });
@@ -44,7 +45,16 @@ export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', th
   if (!choice || !def) throw new Error('未知的过滤指标，请检查账号公式');
   if (!Number.isFinite(threshold)) throw new Error('过滤阈值须为有限数字');
   return { id:`buy-${shortFishHash(JSON.stringify([choiceKey,direction,threshold]))}`,label:choice.label,metric:choice.metric,direction,threshold,enabled,
-    snapshot:{featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:'5m',scale:1,unit:'',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0} };
+    snapshot:metricSnapshot(choice,def,threshold,direction) };
+}
+function metricSnapshot(choice: QualityFilterChoice, def: DeepDigFeatureDef, threshold: number, direction: '<' | '>'): QualityBuyFilter['snapshot'] {
+  return {featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:intervalOf(def),scale:1,unit:'',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0};
+}
+export function makeQualitySignalMetric(choiceKey: string, definitions: readonly DeepDigFeatureDef[]): QualitySignalMetric {
+  const {choices,defs}=build(definitions,true), choice=choices.find(choice=>choice.key===choiceKey), def=choice&&defs.get(choice.featureId);
+  if (!choice || !def) throw Error('未知的读数算法，请检查账号公式');
+  const snapshot=metricSnapshot(choice,def,0,'>');
+  return {id:shortFishHash(JSON.stringify([choiceKey,snapshot.definitionKey,snapshot.interval])),label:choice.label,metric:choice.metric,snapshot};
 }
 export const qualityFilterChoiceKey = (f: QualityBuyFilter) => `${f.snapshot.featureId}:${f.metric}`;
 export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {

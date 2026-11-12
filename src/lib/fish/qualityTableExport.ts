@@ -37,6 +37,8 @@ function headerLabels(th: HTMLTableCellElement): string[] {
   return [visibleText(th)];
 }
 function cellValues(td: HTMLTableCellElement, labels: readonly string[]): XlsxCell[] {
+  const signalValue=td.getAttribute('data-signal-reading-value');
+  if(signalValue!==null&&Number.isFinite(Number(signalValue)))return [Number(signalValue)];
   if (labels.length === 4) {
     const parts = SELL_PART_IDS.map(id => td.querySelector(`[data-testid="${id}"]`));
     if (parts.every(Boolean)) return parts.map(p => asCell(visibleText(p!)));
