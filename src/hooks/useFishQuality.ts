@@ -99,6 +99,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   // templates remain in their original formats.
   const monitorBatch = useRef<PausableQualityRun<QualityMonitorCapture> | null>(null);
   const filterBatch = useRef<PausableQualityRun<QualityFilterCapture> | null>(null);
+  const filterRecalculationPending = useRef(new Set<string>());
   const priorityRef = useRef<readonly string[]>([]);
   /**
    * 【用户要求】2026-10-27「买前过滤、持仓监测都只针对被选中的数据」：运行范围 = 已勾选 ∩ 当前筛选下可见的行
@@ -163,7 +164,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     archiveLock.current=false;setArchiving(false);
     readyRef.current = false; rerun.current = false; selectionApproved.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
     setFilterRunning(false); setFilterProgress(null); setFilterError(''); setSignalValues(null); filterController.current = null;
-    monitorBatch.current = null; filterBatch.current = null;
+    monitorBatch.current = null; filterBatch.current = null; filterRecalculationPending.current.clear();
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
@@ -335,7 +336,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }
   }, [change, defer, acceptReading, workspaceMode]);
   /** Separate lifetime and cancellation: filtering never submits sell outcomes or controls monitoring. */
-  const startFilter = useCallback(async (resume = false, rowIds?: FishQualityStudy['selectedRowIds']) => {
+  const startFilter = useCallback(async (resume = false, rowIds?: FishQualityStudy['selectedRowIds'], force = false) => {
     if (!readyRef.current || filterController.current) return;
     const scopeForRun = (study: FishQualityStudy) => rowIds ? {...study, selectedRowIds: rowIds} : scoped(study);
     const paused = resume && filterBatch.current?.paused ? filterBatch.current : null;
@@ -350,7 +351,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       : qualityExecutionSnapshot(scopeForRun(current.current));
     const total = qualityRunSamples(frozen).length;
     const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => activeStandaloneBuyFilters(frozen).map(f => qualityFilterReadingKey(row, f))));
-    frozen.filterReadings = frozen.filterReadings?.filter(r => !r.error && Number.isFinite(r.value));
+    const pending = filterRecalculationPending.current;
+    if (force) for (const key of readingKeys) pending.add(key);
+    const requiresFreshReadings = [...readingKeys].some(key => pending.has(key));
+    frozen.filterReadings = frozen.filterReadings?.filter(r => !pending.has(r.key) && !r.error && Number.isFinite(r.value));
     setFilterError('');
     // 【用户要求】2026-10-27 过滤有自己的库：每一轮冻结当时的条件与判断（只改门槛、读数可复用的也算一轮）
     const epoch = generation.current, savedOwner = account.current;
@@ -378,15 +382,24 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         onFilterReading: reading => {
           if (!active() || !readingKeys.has(reading.key)) return;
           // 有效读数覆盖；缺数据只在这一轮还没有读数时记下（不拿失败盖掉成功）
-          if (capture && !finished && (!reading.error && Number.isFinite(reading.value) || !capture.readings.has(reading.key))) capture.readings.set(reading.key, structuredClone(reading));
+          const valid = !reading.error && Number.isFinite(reading.value);
+          if (valid) pending.delete(reading.key);
+          if (capture && !finished && (valid || !capture.readings.has(reading.key))) capture.readings.set(reading.key, structuredClone(reading));
           acceptReading(reading);
         },
         onResult: () => {},
       });
       if (active()) {
-        const readings=new Map((current.current.filterReadings??[]).map(r=>[r.key,r]));
-        const missing=[...readingKeys].filter(key=>{const r=readings.get(key);return !r||r.error||!Number.isFinite(r.value);}).length;
-        if(missing){const message=`本轮 ${missing} 项过滤读数仍缺数据；已完成的读数已保存，可点击「重试缺数据」补算`;setFilterError(message);finishRound('failed',message);}
+        const readings = requiresFreshReadings ? capture?.readings : new Map((current.current.filterReadings ?? []).map(r => [r.key, r]));
+        const missing = [...readingKeys].filter(key => {
+          const reading = readings?.get(key);
+          return !reading || reading.error || !Number.isFinite(reading.value);
+        }).length;
+        if (missing) {
+          const message = `本轮 ${missing} 项过滤读数仍缺数据；已完成的读数已保存，可点击「重试缺数据」补算`;
+          setFilterError(message);
+          finishRound('failed', message);
+        }
         else finishRound('complete');
         setFilterProgress({ done: total, total, current: '' });
       }
@@ -394,7 +407,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     finally { if (filterController.current === aborter) { filterController.current = null; if (epoch === generation.current) setFilterRunning(false); } }
   }, [acceptReading, change]);
   const stopFilter = useCallback((manual = false, signalOnly = false) => {
-    if (!manual) filterBatch.current = null;
+    if (!manual) {
+      filterBatch.current = null;
+      filterRecalculationPending.current.clear();
+    }
     else if (!signalOnly && filterController.current && filterBatch.current) filterBatch.current.paused = true;
     filterRevision.current++;
     filterController.current?.abort();
@@ -407,9 +423,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     stopFilter(); setFilterProgress(null); setFilterError('');
     change(s => ({...s,buyFilters:structuredClone(filters)}));
   }, [change,stopFilter]);
-  const generateSignalValues = useCallback(async (selectedMetrics: readonly QualitySignalMetric[]) => {
+  const generateSignalValues = useCallback(async (selectedMetrics: readonly QualitySignalMetric[], rowIds: FishQualityStudy['selectedRowIds'], force: boolean) => {
     if (!readyRef.current || filterController.current || !selectedMetrics.length) return;
-    const rows = qualityRunSamples(scoped(current.current));
+    const rows = qualityRunSamples({...current.current, selectedRowIds: rowIds});
     if (!rows.length) return;
     const metrics = [...new Map(selectedMetrics.map(metric => [metric.id, metric])).values()];
     const saved = new Set((current.current.signalReadings ?? []).filter(reading => !reading.error && Number.isFinite(reading.value)).map(reading => reading.key));
@@ -418,7 +434,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const batches = metrics.map(metric => {
       const unique = new Map(rows.map(row => [signalReadingKey(row, metric), row]));
       total += unique.size;
-      const missing = [...unique].filter(([key]) => !saved.has(key));
+      const missing = [...unique].filter(([key]) => force || !saved.has(key));
       missing.forEach(([key]) => pendingKeys.add(key));
       return {metric, rows: missing.map(([, row]) => row)};
     }).filter(batch => batch.rows.length);
@@ -436,12 +452,19 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         onProgress:progress=>{if(active())setSignalValues({running:true,progress:{...progress,done:offset+progress.done,total},error:''});},
         onSignalReading:reading=>{
           if (!active() || !pendingKeys.delete(reading.key)) return;
-          if (reading.error || !Number.isFinite(reading.value)) missing++;
+          if (reading.error || !Number.isFinite(reading.value)) {
+            missing++;
+            if (saved.has(reading.key)) return;
+          }
           change(study=>({...study,signalReadings:[...(study.signalReadings??[]).filter(prior=>prior.key!==reading.key),reading]}));
         },
       });
       if (active() && !await saveQualityStudy(account.current, current.current)) throw Error('读数尚未保存，请保留页面并重试');
-      if (active() && missing) setSignalValues(previous=>previous && {...previous,error:`${missing} 条缺数据，可再次生成补算`});
+      if (active() && (missing || pendingKeys.size)) {
+        const count = missing + pendingKeys.size;
+        const retry = force ? '可通过「重新开始」再算一轮' : '可再次生成补算';
+        setSignalValues(previous => previous && {...previous, error: `${count} 项读数缺数据，${retry}`});
+      }
     } catch (error) {
       if (active()) setSignalValues(previous=>previous && {...previous,error:error instanceof Error ? error.message : '信号读数失败'});
     } finally {
@@ -464,17 +487,27 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const saved = await saveQualityStudy(account.current, current.current);
     return saved && epoch === generation.current;
   }, [change, setFilters]);
-  const runStaticSettings = useCallback(async () => {
-    if (!readyRef.current || filterController.current) return;
+  const runStaticSettings = useCallback(async (force = false) => {
+    if (!readyRef.current || (!force && filterController.current)) return;
     const snapshot = scoped(current.current);
+    const rowIds = snapshot.selectedRowIds ?? [];
+    const metrics = snapshot.signalMetrics ?? [];
+    const filtersOn = anyBuyFilters(snapshot);
+    if (!qualityRunSamples(snapshot).length || (!metrics.length && !filtersOn)) return;
+    if (force) {
+      stopFilter();
+      setFilterProgress(null);
+      setFilterError('');
+      setSignalValues(null);
+    }
     const ownerEpoch = generation.current;
-    const readings = generateSignalValues(snapshot.signalMetrics ?? []);
+    const readings = generateSignalValues(metrics, rowIds, force);
     const revision = filterRevision.current;
     await readings;
-    if (ownerEpoch === generation.current && revision === filterRevision.current && anyBuyFilters(snapshot)) {
-      await startFilter(false, snapshot.selectedRowIds ?? []);
+    if (ownerEpoch === generation.current && revision === filterRevision.current && filtersOn) {
+      await startFilter(false, rowIds, force);
     }
-  }, [generateSignalValues, startFilter]);
+  }, [generateSignalValues, startFilter, stopFilter]);
   const cancelSignalValues = useCallback(() => stopFilter(true, true), [stopFilter]);
   const cancelFilter = useCallback(() => stopFilter(true), [stopFilter]);
   // 「暂停监测」按钮直接把 cancel 当点击处理函数：收到的是事件对象，不是原因

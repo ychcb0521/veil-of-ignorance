@@ -783,6 +783,63 @@ it('selects every requested mining entry, preserves distinct anchors and shows t
   expect(run).not.toHaveBeenCalled();
 });
 
+it('restarts filtering with the current selection, recomputes cached readings and preserves earlier rounds', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const other = { ...signal, id: 'b', symbol: 'BBBUSDT', timeMs: T - 60_000 };
+  const filter = makeQualityBuyFilter('state:state', '>', .7);
+  const tasks: QualityRunOptions[] = [];
+  const releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('static-restart', [signal, other], async task => {
+    tasks.push(task);
+    await new Promise<void>(resolve => releases.push(resolve));
+  }));
+  await flush();
+  const rows = qualityDisplayRows(h.result.current.study);
+  act(() => {
+    h.result.current.setFilters([filter]);
+    h.result.current.setSelectedRows(rows.map(row => row.id));
+    void h.result.current.runStaticSettings();
+  });
+  await flush();
+  const firstTask = tasks[0];
+  const firstReading = { key: qualityFilterReadingKey(qualityRunSamples(firstTask.study)[0], filter), value: .9 };
+  act(() => {
+    firstTask.onFilterReading?.(firstReading);
+    h.result.current.setSelectedRows([rows[0].id]);
+    void h.result.current.runStaticSettings(true);
+  });
+  await flush();
+  expect(firstTask.signal.aborted).toBe(true);
+  expect(tasks).toHaveLength(2);
+  const restartedTask = tasks[1];
+  expect(qualityRunSamples(restartedTask.study)).toHaveLength(1);
+  expect(restartedTask.study.filterReadings ?? []).toEqual([]);
+  await act(async () => {
+    firstTask.onFilterReading?.({ ...firstReading, value: .1 });
+    releases[0]();
+    restartedTask.onFilterReading?.({ ...firstReading, value: NaN, error: 'missing' });
+    releases[1]();
+  });
+  expect(h.result.current.study.filterReadings).toContainEqual(firstReading);
+  expect(h.result.current.filterError).toContain('1 项过滤读数仍缺数据');
+  const rounds = h.result.current.study.filterLibrary!.rounds;
+  expect(rounds.map(round => round.state)).toEqual(['paused', 'failed']);
+  expect(rounds[0].filterSnapshot?.records.flatMap(record => record.readings)).toContainEqual(firstReading);
+  expect(rounds[1].filterSnapshot?.records[0].readings[0]?.error).toBe('missing');
+  act(() => { void h.result.current.runStaticSettings(); });
+  await flush();
+  expect(tasks).toHaveLength(3);
+  const retry = tasks[2];
+  expect(retry.study.filterReadings?.some(reading => reading.key === firstReading.key)).toBe(false);
+  await act(async () => {
+    retry.onFilterReading?.({ ...firstReading, value: .8 });
+    releases[2]();
+  });
+  expect(h.result.current.filterError).toBe('');
+  expect(h.result.current.study.filterLibrary!.rounds.map(round => round.state)).toEqual(['paused', 'failed', 'complete']);
+});
+
 it('continues paused monitoring and filtering in place with frozen rows and completed work', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
