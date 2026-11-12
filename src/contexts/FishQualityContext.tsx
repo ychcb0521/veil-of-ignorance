@@ -6,6 +6,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { miningRecordSignal } from '@/lib/fish/miningLibrary';
 import {loadMiningLibrary,MINING_LIBRARY_EVENT} from '@/lib/fish/miningLibraryStore';
 import { useFishNotify } from '@/hooks/useFishNotify';
+import { useFishCdaTracking } from '@/hooks/useFishCdaTracking';
 import { useFishScreeningAutomation } from '@/hooks/useFishScreeningAutomation';
 
 const EMPTY: readonly TradeSignal[] = [];
@@ -20,7 +21,8 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const state = useFishQuality(owner, input.fish, run, input.library,mined, requested, input.turing, true);
   const notify = useFishNotify(owner, undefined, undefined, true);
   const automaticScreening = useFishScreeningAutomation(owner, !!state.preEntry?.ready, state.preEntry, notify);
-  const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0;
+  const cdaTracking = useFishCdaTracking(owner, state.preEntry?.library, !!state.preEntry?.ready, notify);
+  const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0 || cdaTracking.enabled;
   useEffect(() => { if (hasAutomaticWork) setRequested(true); }, [hasAutomaticWork]);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[]) => {
     setRequested(true);
@@ -28,7 +30,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   }, []);
   const activate = useCallback(() => setRequested(true), []);
   const location = useLocation();
-  return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
+  return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening, cdaTracking }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
     {children}
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}

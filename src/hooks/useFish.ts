@@ -2,7 +2,8 @@ import {loadFishSession,saveFishSession} from '@/lib/fish/session';
 import { archiveFishForNextRound, collapseVisibleFish, mergeFishSignals, fishCatchKey, fishDedupKey, fishVisibleCatchKey } from '@/lib/fish/records';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, deriveFishRound, saveFishMemberRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
-import type { FishProgram } from '@/lib/fish/algorithm';
+import type { OnScreenedCdaRead, ScreenedCdaTask } from '@/lib/fish/screenedCda';
+import type { FishProgram, FishSnapshot } from '@/lib/fish/algorithm';
 import { runFishHitRate, type FishHitRateOptions } from '@/lib/fish/hitRate';
 import { fishDelay } from '@/lib/fish/shared';
 import { fishRuleText } from '@/lib/fishRule';
@@ -50,6 +51,12 @@ const pageMiningCheckpoint: { current: { key: string; results: import('@/lib/fis
 export async function runPageFishQuality(options: import('@/lib/fish/quality').QualityRunOptions): Promise<void> {
   pageScanner ??= new FishScanner();
   await pageScanner.quality(options);
+}
+
+export async function readPageScreenedCda(tasks: readonly ScreenedCdaTask[], snapshot: FishSnapshot, target: number,
+  signal: AbortSignal, onRead: OnScreenedCdaRead): Promise<void> {
+  pageScanner ??= new FishScanner();
+  await pageScanner.trackScreenedCda(tasks, snapshot, target, signal, onRead);
 }
 
 export function useFish(userId: string | undefined, options: { onNewFish?: (fish: TradeSignal) => void } = {}) {

@@ -25,6 +25,7 @@ export function FishScreened({ state, library, ratings, onJump, canJump, onRate,
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const automatic = state?.automaticScreening;
+  const cda = state?.cdaTracking;
   const save = automatic?.saveSettings;
   const planLabel = automatic?.settings?.plans[0]?.label;
   const settings = state && save ? <div className="ml-2 flex min-w-0 items-center gap-1">
@@ -55,7 +56,19 @@ export function FishScreened({ state, library, ratings, onJump, canJump, onRate,
   }, [library.rounds, library.records, ratings]);
   const byId = useMemo(() => new Map(rows.map(row => [row.id, row])), [rows]);
   return <div className="ml-1 mt-1 border-l border-border/50 pl-2">
-    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime defaultOpen={false} headerAction={settings}
+    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime defaultOpen={false} headerAction={<>
+        {settings}
+        {cda && <Popover><PopoverTrigger asChild>
+          <button type="button" className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground">
+            CDA 追踪{cda.enabled ? ' · ' + cda.active : ''}
+          </button>
+        </PopoverTrigger><PopoverContent align="start" className="w-64 space-y-2 text-[11px]">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={cda.enabled} onChange={event => cda.setEnabled(event.target.checked)}/>启用 CDA 追踪</label>
+          <p className="text-muted-foreground">启用后新入选的鱼，每根 5 分钟 K 线收盘确认。CDA 原始值首次低于 -10 时发邮件。</p>
+          {cda.enabled && <p role="status">追踪中 {cda.active} 条{cda.awaitingMail > 0 && ' · 待发邮件 ' + cda.awaitingMail + ' 条'}</p>}
+          {cda.error && <p role="alert" className="text-destructive">{cda.error}</p>}
+        </PopoverContent></Popover>}
+      </>}
       emptyText="还没有自动筛选入选的鱼。" tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} jumpingSignalId={jumpingSignalId ?? null}
       onJump={id => {
         const row = byId.get(id), at = row?.preEntryMonitor?.matchedAt;

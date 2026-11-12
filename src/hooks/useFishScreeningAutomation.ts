@@ -17,6 +17,7 @@ import type { useFishNotify } from './useFishNotify';
 const MINUTE = 60_000;
 const QUEUE_KEY = 'veil.fish-screening-queue.v1:';
 const queuePrefix = (owner: string) => `${QUEUE_KEY}${encodeURIComponent(owner)}:`;
+export const screenedFishMailLock = (owner: string) => queuePrefix(owner) + 'mail';
 interface Job {
   key: string;
   id: string;
@@ -145,7 +146,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       let advanced: boolean | void = undefined;
       try {
         advanced = navigator.locks
-          ? await navigator.locks.request(queuePrefix(owner) + kind, { ifAvailable: true }, lock => lock ? run() : undefined)
+          ? await navigator.locks.request(kind === 'mail' ? screenedFishMailLock(owner) : queuePrefix(owner) + kind, { ifAvailable: true }, lock => lock ? run() : undefined)
           : await run();
       } catch {
         if (!lifetime.signal.aborted) setStorageIssue(true);

@@ -7,6 +7,7 @@ import {collectSignalTurnover,TURNOVER_BARS,TURNOVER_STEP,type SignalTurnoverOpt
 import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import {createQualityMarketRetry} from '@/lib/fish/qualityMarketRetry';
+import { readScreenedCda, type OnScreenedCdaRead, type ScreenedCdaTask } from '@/lib/fish/screenedCda';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -227,6 +228,24 @@ export class FishScanner {
       return;
     }
     await collectFishQuality(marketEnd ? { ...activeOptions, marketEnd, marketStart } : activeOptions, load, now);
+  }
+
+  async trackScreenedCda(tasks: readonly ScreenedCdaTask[], snapshot: import('@/lib/fish/algorithm').FishSnapshot,
+    target: number, signal: AbortSignal, onRead: OnScreenedCdaRead): Promise<void> {
+    const { now, load } = await this.qualityMarket(tasks.map(task => task.source.symbol), signal);
+    let next = 0;
+    const read = async () => {
+      while (next < tasks.length && !signal.aborted) {
+        const task = tasks[next++];
+        try {
+          const result = await readScreenedCda(task.source, task.after, Math.min(now, target), snapshot, load, signal);
+          onRead(task.id, result);
+        } catch (cause) {
+          if (!signal.aborted) onRead(task.id, undefined, cause);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(tasks.length, 3) }, read));
   }
 
   private async qualityMarket(symbols: readonly string[], signal: AbortSignal, onWaiting?: (until?:number)=>void) {

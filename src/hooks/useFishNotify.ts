@@ -71,6 +71,12 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length) return Promise.resolve(false);
     return deliverContent(composeScreenedFishEmail(record, round), { ...configRef.current, emails: recipients }, false, delivery);
   }, [deliverContent]);
+  const sendCdaAlert = useCallback((record: PreEntryRecord, round: PreEntryRound, reading: number, recipients: string[], delivery: {
+    onRecipient: (recipient: string) => void; signal: AbortSignal;
+  }) => {
+    if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length || !Number.isFinite(reading)) return Promise.resolve(false);
+    return deliverContent(composeScreenedFishEmail(record, round, reading), { ...configRef.current, emails: recipients }, false, delivery);
+  }, [deliverContent]);
   const test = useCallback(async () => {
     const now = Date.now(), source = { id: 'test', symbol: 'TESTUSDT', timeMs: now, timeLabel: '', fallbackZone: '' };
     if (screening) {
@@ -82,5 +88,5 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     const fresh = (getFresh?.() ?? []).filter(signal => fishEmailMatches(signal, configRef.current));
     await deliver(fresh.length ? fresh : [{ ...source, fish: { average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: now, threshold: 0, featureShort: '示例' } }], true);
   }, [deliver, deliverContent, getFresh, screening]);
-  return { config, status, sending, update, send, test, sendAdmission, screening };
+  return { config, status, sending, update, send, test, sendAdmission, sendCdaAlert, screening };
 }

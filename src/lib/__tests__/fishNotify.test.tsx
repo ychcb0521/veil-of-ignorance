@@ -243,4 +243,8 @@ it('入选邮件用原信号的实际命中类型及本轮筛选模板，纯文�
    ['信号时间', '2026-10-21 09:00:00'], ['筛选模板', '<本轮模板>'], ['首次满足时间', '2026-10-21 09:02:00'],
  ]);
  expect(content.message_html).toContain('&lt;本轮模板&gt;');
+ const alert=composeScreenedFishEmail(record,round,-11.75);
+ expect(alert.subject).toBe('CDA 卖出提醒 · AAAUSDT');
+ expect(alert.message.replace('卖出！（-11.75）\n','')).toBe(content.message);
+ expect(alert.message_html.replace('<p><strong>卖出！（-11.75）</strong></p>','')).toBe(content.message_html);
 });
