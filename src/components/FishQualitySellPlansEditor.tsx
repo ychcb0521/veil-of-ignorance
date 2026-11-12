@@ -34,7 +34,7 @@ const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, l
 
 export interface SellPlansDraftView { plans: QualityGroup[]; dirty: boolean; algorithmsDirty: boolean; error: string; build: (after?: (plans: QualityGroup[]) => QualityGroup[]) => QualityGroup[]; save: (after?: (plans: QualityGroup[]) => QualityGroup[]) => boolean }
 /** 【用户要求】2026-11-02 模板：方案卡片「存为模板」、顶部「从模板新建」；模板保存的是已保存的整套设置。 */
-export interface PlanTemplateActions { owner?:string;restore?:(t:QualityPlanTemplate)=>void; templates: readonly (QualityPlanTemplate & { plan: QualityGroup })[]; save: (planId: string, name: string) => void; remove: (id: string) => void }
+export interface PlanTemplateActions { owner?:string;restore?:(t:QualityPlanTemplate)=>void | Promise<void>; templates: readonly (QualityPlanTemplate & { plan: QualityGroup })[]; save: (planId: string, name: string) => void; remove: (id: string) => void }
 export function SaveTemplateButton({ index, defaultName, disabledReason, onSave,ariaLabel }: { index: number; defaultName: string; disabledReason?: string; onSave: (name: string) => void;ariaLabel?:string }) {
   const [open, setOpen] = useState(false), [name, setName] = useState(defaultName), [error, setError] = useState('');
   const submit = () => { try { onSave(name); setOpen(false); } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败'); } };

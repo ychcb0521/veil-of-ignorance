@@ -4,7 +4,7 @@ import { fishNotifyMissing } from '@/lib/fish/notify';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
-import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
+import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
 import type { useFishNotify } from './useFishNotify';
@@ -27,11 +27,12 @@ export interface FishCdaTracking {
   active: number;
   awaitingMail: number;
   error: string;
-  setEnabled: (enabled: boolean) => void;
+  saving: boolean;
+  setEnabled: (enabled: boolean) => Promise<void>;
 }
 
 function readLocal<T>(key: string): T | undefined {
-  try { return JSON.parse(readPersistedStateRaw(key) ?? 'null') ?? undefined; }
+  try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? undefined; }
   catch { return undefined; }
 }
 
@@ -45,19 +46,29 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   notify: ReturnType<typeof useFishNotify>): FishCdaTracking {
   const configKey = owner ? CONFIG_KEY + encodeURIComponent(owner) : '';
   const jobPrefix = configKey + ':';
-  const [settings, setSettings] = useState(() => configKey ? readLocal<Settings>(configKey) : undefined);
+  const [settings, setSettings] = useState<Settings>();
+  const [saving, setSaving] = useState(!!configKey);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
-  const setEnabled = useCallback((enabled: boolean) => {
+  const checkpoints = useRef(new Map<string, Checkpoint>());
+  const changes = useRef<BroadcastChannel>();
+  const setEnabled = useCallback(async (enabled: boolean) => {
     if (!configKey) return;
+    setSaving(true);
     try {
       const next = enabled ? { enabledAt: Date.now(), snapshot: freezeScreenedCda() } : undefined;
-      if (!writePersistedStateRaw(configKey, JSON.stringify(next ?? null))) throw Error('本机未能保存 CDA 追踪设置，请重试');
+      await writeFishPreference(configKey, next ?? null);
+      // An already open 630 tab still reads its own saved toggle.
+      if (!enabled && readLocal<Settings>(configKey)) {
+        try { localStorage.setItem(configKey, 'null'); } catch { /* The new toggle is already durable. */ }
+      }
       setSettings(next);
+      changes.current?.postMessage('settings');
       setError('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'CDA 追踪设置保存失败');
-    }
+      setError(cause instanceof DOMException ? 'CDA 追踪设置未能保存到浏览器数据库，请重试'
+        : cause instanceof Error ? cause.message : 'CDA 追踪设置保存失败');
+    } finally { setSaving(false); }
   }, [configKey]);
   const entries = useMemo(() => {
     if (!settings || !ready || !library) return [];
@@ -74,16 +85,47 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
 
   useEffect(() => {
     if (!configKey) return;
-    const refresh = (event: StorageEvent) => {
-      if (event.key === configKey || event.key === null) setSettings(readLocal<Settings>(configKey));
-      if (event.key === null || event.key.startsWith(jobPrefix)) {
-        setRevision(value => value + 1);
-        wake.current?.();
-      }
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const [saved] = await readFishPreferences<Settings | null>([configKey]);
+        if (alive) setSettings(saved === undefined ? readLocal<Settings>(configKey) : saved ?? undefined);
+      } catch {
+        if (alive) setError('CDA 追踪的浏览器数据库暂不可用，请重新打开页面');
+      } finally { if (alive) setSaving(false); }
     };
-    window.addEventListener('storage', refresh);
-    return () => window.removeEventListener('storage', refresh);
-  }, [configKey, jobPrefix]);
+    const refreshLegacy = (event: StorageEvent) => {
+      if (event.key === configKey || event.key === null) void refresh();
+    };
+    try {
+      changes.current = new BroadcastChannel(configKey);
+      changes.current.onmessage = event => { if (event.data === 'settings') void refresh(); };
+    } catch { /* The stored settings will also be read when the page opens. */ }
+    window.addEventListener('storage', refreshLegacy);
+    void refresh();
+    return () => {
+      alive = false;
+      window.removeEventListener('storage', refreshLegacy);
+      changes.current?.close();
+      changes.current = undefined;
+    };
+  }, [configKey]);
+
+  useEffect(() => {
+    if (!entries.length) return;
+    let active = true;
+    const keys = entries.map(({record}) => jobPrefix + encodeURIComponent(record.id));
+    void readFishPreferences<Checkpoint>(keys).then(rows => {
+      if (!active) return;
+      keys.forEach((key, i) => {
+        const saved = rows[i] ?? readLocal<Checkpoint>(key);
+        if (saved && !checkpoints.current.has(key)) checkpoints.current.set(key, saved);
+      });
+      setRevision(value => value + 1);
+      wake.current?.();
+    }, () => { if (active) setError('CDA 追踪进度读取失败，请重试'); });
+    return () => { active = false; };
+  }, [entries, jobPrefix]);
 
   useEffect(() => {
     if (!settings || !owner) return;
@@ -92,12 +134,28 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     const retry = new Map<string, number>();
     const errors = new Map<string, string>();
     const keyOf = (record: PreEntryRecord) => jobPrefix + encodeURIComponent(record.id);
-    const read = (record: PreEntryRecord) => readLocal<Checkpoint>(keyOf(record));
-    const save = (record: PreEntryRecord, value: Checkpoint) => {
-      const stored = writePersistedStateRaw(keyOf(record), JSON.stringify(value));
-      if (!stored) setError('本机未能保存 CDA 追踪记录，请保留页面');
+    const read = (record: PreEntryRecord) => checkpoints.current.get(keyOf(record)) ?? readLocal<Checkpoint>(keyOf(record));
+    const refresh = async (records: readonly PreEntryRecord[]) => {
+      const keys = records.map(keyOf), values = await readFishPreferences<Checkpoint>(keys);
+      let changed = false;
+      keys.forEach((key, i) => {
+        const value = values[i] ?? readLocal<Checkpoint>(key);
+        if (value && JSON.stringify(checkpoints.current.get(key)) !== JSON.stringify(value)) {
+          checkpoints.current.set(key, value);
+          changed = true;
+        }
+      });
+      if (changed) setRevision(revision => revision + 1);
+    };
+    const save = async (record: PreEntryRecord, value: Checkpoint) => {
+      const key = keyOf(record);
+      await writeFishPreference(key, value);
+      checkpoints.current.set(key, value);
+      // Keep receipts visible to a concurrently open 630 page using a legacy watch.
+      if (readLocal<Settings>(configKey)) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* IndexedDB is the durable source. */ }
+      }
       setRevision(revision => revision + 1);
-      return stored;
     };
     const lock = (name: string, callback: () => Promise<void>) => navigator.locks
       ? navigator.locks.request(name, { ifAvailable: true }, found => found ? callback() : undefined)
@@ -114,26 +172,25 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       if (!next) return;
       mailing = true;
       void lock(screenedFishMailLock(owner), async () => {
-        const { record, round } = next, checkpoint = read(record);
+        const { record, round } = next;
+        await refresh([record]);
+        const checkpoint = read(record);
         if (lifetime.signal.aborted || !checkpoint?.alert || checkpoint.delivered || (checkpoint.nextMailAt ?? 0) > Date.now()) return;
         const live = current.current.notify;
         if (!live.config.enabled || fishNotifyMissing(live.config)) return;
         const sent = new Set(checkpoint.sent);
         const recipients = live.config.emails.filter(email => !sent.has(email));
-        if (!recipients.length) { save(record, { ...checkpoint, delivered: true }); return; }
+        if (!recipients.length) { await save(record, { ...checkpoint, delivered: true }); return; }
         // Keep a recovery delay for a tab that closes after requesting an email.
         const inFlight = { ...checkpoint, nextMailAt: Date.now() + 60_000 };
-        if (!save(record, inFlight)) {
-          save(record, { ...checkpoint, nextMailAt: Date.now() + 5000 });
-          return;
-        }
+        await save(record, inFlight);
         const ok = await live.sendCdaAlert(record, round, checkpoint.alert.value, recipients, {
           signal: lifetime.signal,
-          onRecipient: email => { sent.add(email); save(record, { ...inFlight, sent: [...sent] }); },
+          onRecipient: async email => { sent.add(email); await save(record, { ...inFlight, sent: [...sent] }); },
         });
         if (lifetime.signal.aborted) return;
         const failures = (checkpoint.failures ?? 0) + 1;
-        save(record, ok ? { ...checkpoint, delivered: true, sent: [...sent] }
+        await save(record, ok ? { ...checkpoint, delivered: true, sent: [...sent] }
           : { ...checkpoint, sent: [...sent], failures, nextMailAt: Date.now() + Math.min(60_000, 5000 * 2 ** Math.min(failures - 1, 4)) });
       }).catch(() => { if (!lifetime.signal.aborted) setError('CDA 邮件待重试'); })
         .finally(() => { mailing = false; });
@@ -153,6 +210,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       scanning = true;
       void lock(configKey + ':scan', async () => {
         // The admission record must be durable before its first CDA evaluation.
+        await refresh(due.map(entry => entry.record));
         const work = await Promise.all(due.filter(entry => eligible(entry, target)).map(async entry => {
           const { record, round } = entry;
           const checkpoint = read(record);
@@ -177,7 +235,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         const tasks = work.filter(task => task !== undefined);
         if (!tasks.length) return;
         const records = new Map(due.map(({ record }) => [record.id, record]));
-        await readPageScreenedCda(tasks, settings.snapshot, target, lifetime.signal, (id, result, cause) => {
+        await readPageScreenedCda(tasks, settings.snapshot, target, lifetime.signal, async (id, result, cause) => {
           if (lifetime.signal.aborted) return;
           const record = records.get(id);
           if (!record) return;
@@ -190,7 +248,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           retry.delete(id);
           if (errors.delete(id)) setError(errors.values().next().value ?? '');
           if (result.through > (read(record)?.after ?? initialCursor(record, settings))) {
-            save(record, { after: result.through, alert: result.trigger });
+            await save(record, { after: result.through, alert: result.trigger });
             if (result.trigger) send();
           }
         });
@@ -221,12 +279,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const counts = useMemo(() => {
     let active = 0, awaitingMail = 0;
     for (const { record } of entries) {
-      const checkpoint = readLocal<Checkpoint>(jobPrefix + encodeURIComponent(record.id));
+      const key = jobPrefix + encodeURIComponent(record.id);
+      const checkpoint = checkpoints.current.get(key) ?? readLocal<Checkpoint>(key);
       if (!checkpoint?.alert) active++;
       else if (!checkpoint.delivered) awaitingMail++;
     }
     return { active, awaitingMail };
   }, [entries, jobPrefix, revision]);
   const mailIssue = settings && counts.awaitingMail ? !notify.config.enabled ? '邮件提醒已关闭' : fishNotifyMissing(notify.config) : '';
-  return { enabled: !!settings, error: error || mailIssue || '', setEnabled, ...counts };
+  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, ...counts };
 }

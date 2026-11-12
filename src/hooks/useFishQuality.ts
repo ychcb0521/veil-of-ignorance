@@ -7,7 +7,7 @@ import {preserveQualitySourceRatings,rateQualitySource} from '@/lib/fish/quality
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {editLibraryDirectory,renameLibraryDirectory} from '@/lib/fish/qualityMonitorArchive';
 import type {QualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
-import { useQualityPlanCatalog } from './useQualityPlanCatalog';
+import { saveDurableQualityPlanCatalog, useQualityPlanCatalog } from './useQualityPlanCatalog';
 import {useQualitySavedPlans} from './useQualitySavedPlans';
 import {applySavedQualityPlans,editSavedQualityPlans,seedSavedQualityPlans,readSavedQualityPlans} from '@/lib/fish/qualitySavedPlans';
 import { usePreEntryMonitor, type AutomaticScreeningMatch } from './usePreEntryMonitor';
@@ -42,6 +42,13 @@ import { resumeLibraryRound } from '@/lib/fish/libraryRounds';
 import { beginQualityFilterRound, finishQualityFilterRound, recoverQualityFilterRounds, type QualityFilterCapture } from '@/lib/fish/qualityFilterLibrary';
 import { archiveQualityMonitorStudy, adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds, type QualityMonitorCapture } from '@/lib/fish/qualityMonitorLibrary';
 import {migrateQualitySourceRows,type QualityRunTiming} from '@/lib/fish/quality';
+
+function sameQualityResearch(left: FishQualityStudy, right: FishQualityStudy): boolean {
+  if (left === right) return true;
+  const differs = (a: FishQualityStudy, b: FishQualityStudy) =>
+    (Object.keys(a) as (keyof FishQualityStudy)[]).some(key => key !== 'planTemplates' && a[key] !== b[key]);
+  return !differs(left, right) && !differs(right, left);
+}
 
 interface PausableQualityRun<Capture> {
   frozen: FishQualityStudy;
@@ -107,6 +114,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const rerun = useRef<false | { mode?: QualityRunOptions['mode']; timeBasis?: QualityMonitorTimeBasis }>(false);
   const selectionApproved = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastObservedStudy = useRef<{epoch:number; study:FishQualityStudy}>();
   const intentRevision = useRef(0);
   const filterController = useRef<AbortController | null>(null), filterRevision = useRef(0);
   // Keep only the current session's executable batches. Historical rounds and saved
@@ -252,8 +260,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   },[preEntry.library.directoryEdits,preEntry.ready,ready,change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
-    if (saveTimer.current) return;
-    const epoch = generation.current;
+    const epoch = generation.current, observed = lastObservedStudy.current;
+    lastObservedStudy.current = {epoch, study};
+    // Template-only edits already persist through the independent catalog.
+    if (saveTimer.current || observed?.epoch === epoch && sameQualityResearch(observed.study, study)) return;
     const schedule=()=>{
       const handle=setTimeout(()=>{
         if(epoch!==generation.current)return;
@@ -265,7 +275,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
           saveTimer.current=null;
           // One save in flight, then the latest immutable state. Slow storage
           // cannot accumulate deep copies while both engines publish results.
-          if(epoch===generation.current&&readyRef.current&&current.current!==snapshot)schedule();
+          if(epoch===generation.current&&readyRef.current&&!sameQualityResearch(current.current,snapshot))schedule();
         });
       },400);
       saveTimer.current=handle;
@@ -760,7 +770,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!await saveQualityStudy(savedOwner, next)) throw new Error('模板尚未保存成功，请保留页面并重试');
     if (epoch !== generation.current || savedOwner !== account.current) throw new Error('账号已切换，请回到原账号查看模板');
   }, [changeTemplates]);
-  const restorePlanTemplate=useCallback((template:QualityPlanTemplate)=>changeTemplates(s=>restoreQualityPlanTemplate(s,template)),[changeTemplates]);
+  const restorePlanTemplate = useCallback(async (template: QualityPlanTemplate) => {
+    if (!readyRef.current) throw Error('模板目录尚在读取，请稍后重试');
+    const savedOwner = account.current, epoch = generation.current;
+    const copy = restoreQualityPlanTemplate(current.current, template).planTemplates!.at(-1)!;
+    try { await saveDurableQualityPlanCatalog(savedOwner, [copy]); }
+    catch { throw Error('浏览器数据库暂未保存这份模板，请重试'); }
+    if (epoch !== generation.current || savedOwner !== account.current) throw Error('账号已切换，请回到原账号查看恢复的模板');
+    changeTemplates(study => ({...study, planTemplates: mergeQualityPlanTemplates(study.planTemplates, [copy])}));
+  }, [changeTemplates]);
   const deletePlanTemplate = useCallback((id: string) => changeTemplates(s => deleteQualityPlanTemplate(s, id)), [changeTemplates]);
   const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); changeTemplates(s => renameQualityPlanTemplate(s, id, name)); }, [changeTemplates]);
   /** Save this plan’s holding settings without starting or restarting monitoring. */

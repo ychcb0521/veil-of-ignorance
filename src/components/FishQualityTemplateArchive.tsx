@@ -5,7 +5,7 @@ import type { QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 export function FishQualityTemplateArchive({ owner, purpose, restore }: {
   owner?: string;
   purpose: QualityTemplatePurpose;
-  restore?: (template: QualityPlanTemplate) => void;
+  restore?: (template: QualityPlanTemplate) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<QualityTemplateArchiveRow[]>([]);
@@ -54,7 +54,8 @@ export function FishQualityTemplateArchive({ owner, purpose, restore }: {
       if (Boolean(template.plan?.preEntryThreeStage) !== (purpose === 'entry')) {
         throw Error('这份存档属于另一类模板，请到对应的模板库恢复');
       }
-      restore(template);
+      await restore(template);
+      if (!isCurrent()) return;
       setMessage('已恢复到模板库，原有模板保留。');
     } catch (cause) {
       if (isCurrent()) setError(cause instanceof Error ? cause.message : '恢复失败');

@@ -239,9 +239,9 @@ export class FishScanner {
         const task = tasks[next++];
         try {
           const result = await readScreenedCda(task.source, task.after, Math.min(now, target), snapshot, load, signal);
-          onRead(task.id, result);
+          await onRead(task.id, result);
         } catch (cause) {
-          if (!signal.aborted) onRead(task.id, undefined, cause);
+          if (!signal.aborted) await onRead(task.id, undefined, cause);
         }
       }
     };

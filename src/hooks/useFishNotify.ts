@@ -33,7 +33,7 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   }, [account]);
   const update = useCallback((next: FishNotifyConfig) => { saveFishNotify(next); const saved = readFishNotify(); configRef.current = saved; setConfig(saved); }, []);
   const deliverContent = useCallback(async (content: ReturnType<typeof composeFishEmail>, c: FishNotifyConfig, test: boolean,
-    delivery?: { onRecipient: (recipient: string) => void; signal: AbortSignal }) => {
+    delivery?: { onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal }) => {
     if (test) { content.subject = `测试邮件 · ${content.subject}`; }
     deliveries.current++;
     setSending(true);
@@ -66,13 +66,13 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     await deliver(table, false, change.added, () => saveLastFishTable(change.keys));
   }, [deliver]);
   const sendAdmission = useCallback((record: PreEntryRecord, round: PreEntryRound, recipients: string[], delivery: {
-    onRecipient: (recipient: string) => void; signal: AbortSignal;
+    onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal;
   }) => {
     if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length) return Promise.resolve(false);
     return deliverContent(composeScreenedFishEmail(record, round), { ...configRef.current, emails: recipients }, false, delivery);
   }, [deliverContent]);
   const sendCdaAlert = useCallback((record: PreEntryRecord, round: PreEntryRound, reading: number, recipients: string[], delivery: {
-    onRecipient: (recipient: string) => void; signal: AbortSignal;
+    onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal;
   }) => {
     if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length || !Number.isFinite(reading)) return Promise.resolve(false);
     return deliverContent(composeScreenedFishEmail(record, round, reading), { ...configRef.current, emails: recipients }, false, delivery);

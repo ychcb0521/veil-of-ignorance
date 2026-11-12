@@ -5,9 +5,14 @@ import { readPageScreenedCda } from '../useFish';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 
+const preferences = vi.hoisted(() => new Map<string, unknown>());
+vi.mock('@/lib/fish/fishPreferencesDb', () => ({
+  readFishPreferences: async (keys: string[]) => keys.map(key => preferences.get(key)),
+  writeFishPreference: async (key: string, value: unknown) => { preferences.set(key, structuredClone(value)); },
+}));
 vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn() }));
 vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn() }));
-afterEach(() => { localStorage.clear(); vi.useRealTimers(); vi.resetAllMocks(); });
+afterEach(() => { localStorage.clear(); preferences.clear(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 it('watches newly admitted automatic fish after enabling, survives reload and retries only unsent mail', async () => {
   const T=Date.UTC(2026,10,12), M=60000;
@@ -21,8 +26,8 @@ it('watches newly admitted automatic fish after enabling, survives reload and re
   };
   const records = [make('OLD',T,true),make('MANUAL',T+2*M,false),make('NEW',T+2*M,true)];
   const library:PreEntryLibrary = {version:1,records:records.map(x=>x.record),rounds:records.map(x=>x.round)};
-  const sendCdaAlert = vi.fn(async (_r:PreEntryRecord,_s:PreEntryRound,_value:number,emails:string[], options:{onRecipient:(value:string)=>void}) => {
-    options.onRecipient(emails[0]);
+  const sendCdaAlert = vi.fn(async (_r:PreEntryRecord,_s:PreEntryRound,_value:number,emails:string[], options:{onRecipient:(value:string)=>void|Promise<void>}) => {
+    await options.onRecipient(emails[0]);
     return emails.length===1;
   });
   const notify = {config:{enabled:true,emails:['a@example.test','b@example.test'],serviceId:'service_test',templateId:'template_test',publicKey:'test'},sendCdaAlert};
@@ -31,12 +36,20 @@ it('watches newly admitted automatic fish after enabling, survives reload and re
     return {version:1,records:[source.record],rounds:[source.round]};
   });
   vi.mocked(readPageScreenedCda).mockImplementation(async (tasks,_snapshot,through,_signal,onRead) => {
-    for(const {id} of tasks) onRead(id,{through,trigger:{at:through,value:-11.75}});
+    for(const {id} of tasks) await onRead(id,{through,trigger:{at:through,value:-11.75}});
   });
   const mount = () => renderHook(() => useFishCdaTracking('fixture-cda',library,true,notify as never));
   let view=mount();
   expect(view.result.current.enabled).toBe(false);
-  act(()=>view.result.current.setEnabled(true));
+  await act(async () => {});
+  const originalSet = Storage.prototype.setItem;
+  const quota = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    if (key.startsWith('veil.fish-cda-tracking')) throw new DOMException('storage full', 'QuotaExceededError');
+    originalSet.call(this, key, value);
+  });
+  await act(() => view.result.current.setEnabled(true));
+  expect(quota).not.toHaveBeenCalled();
+  quota.mockRestore();
   expect(view.result.current.active).toBe(1);
   await act(()=>vi.advanceTimersByTimeAsync(4*M-1));
   expect(readPageScreenedCda).not.toHaveBeenCalled();

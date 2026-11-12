@@ -12,7 +12,7 @@ export const SCREENED_CDA_STEP = 300_000;
 
 export interface ScreenedCdaTrigger { at: number; value: number }
 export interface ScreenedCdaTask { id: string; source: TradeSignal; after: number }
-export type OnScreenedCdaRead = (id: string, result?: ScreenedCdaRead, error?: unknown) => void;
+export type OnScreenedCdaRead = (id: string, result?: ScreenedCdaRead, error?: unknown) => void | Promise<void>;
 export interface ScreenedCdaRead { through: number; trigger?: ScreenedCdaTrigger }
 
 export function freezeScreenedCda(): FishSnapshot {

@@ -190,7 +190,7 @@ async function privateDelivery(task: () => Promise<void>): Promise<void> {
 }
 /** Each request contains one recipient; the private template parameter also blocks legacy group-send pages. */
 export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch,
-  delivery?: { onRecipient: (recipient: string) => void; signal: AbortSignal }): Promise<void> {
+  delivery?: { onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal }): Promise<void> {
   // Normalize again at the network boundary: a manually altered saved string cannot inject a recipient list.
   const normalized = normalizeFishNotify(config), missing = fishNotifyMissing(normalized);
   if (missing) throw new Error(missing);
@@ -209,7 +209,7 @@ export async function sendFishEmail(config: FishNotifyConfig, content: { subject
           const detail = (await response.text().catch(() => '')).slice(0, 200);
           throw new Error(`EmailJS 拒绝发送（${response.status}）${detail ? `：${detail}` : ''}`);
         }
-        delivery?.onRecipient(recipient);
+        await delivery?.onRecipient(recipient);
       });
     } catch (error) {
       failures.push(`第 ${index + 1} 个邮箱：${error instanceof Error ? error.message : String(error)}`);
