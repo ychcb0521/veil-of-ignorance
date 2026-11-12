@@ -1,5 +1,5 @@
 import {mergeLibraryDirectoryEdits} from './libraryDirectoryEdits';
-import {qualityMonitoringSample} from './qualityAdmissionTime';
+import { qualityMonitoringSample, qualityRowMonitorTimeBasis, type QualityMonitorTimeBasis } from './qualityAdmissionTime';
 import { qualityAdvantageIdentity } from './qualityAdvantage';
 import {qualityVetoStagesIdentity} from './qualityVetoStages';
 import { isLegacyQualityPlan, LEGACY_QUALITY_ENGINE } from './qualityLegacyEngine';
@@ -7,7 +7,7 @@ import {qualitySellStagesIdentity} from './qualitySellStages';
 import { additionIdentity, additionMirrorIdentity } from './qualityAddition';
 import { mirrorIdentity, mirrorExecutionIdentity } from './qualityMirror';
 import { shortFishHash } from './algorithm';
-import { QUALITY_NOTIONAL, activeBuyFilters, qualityComparisonRows, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityVetoVersion, type FishQualityStudy, type QualityFilterReading, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityComboIdentity } from './quality';
+import { QUALITY_NOTIONAL, activeBuyFilters, qualityComparisonRows, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, qualityRunGroups, qualityMonitorRunSamples, qualityVetoVersion, type FishQualityStudy, type QualityFilterReading, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityComboIdentity } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity } from './qualityVeto';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -32,6 +32,7 @@ export interface QualityMonitorRound {
   id: string; startedAt: number; updatedAt: number; finishedAt?: number;
   state: 'running' | 'complete' | 'paused' | 'failed'; recordIds?: string[]; base?: string; added?: string[]; removed?: string[];
   legacy?: boolean; error?: string;
+  timeBasis?: QualityMonitorTimeBasis;
 }
 /** 还原某一轮的完整记录编号（沿差异链回溯到存完整清单的那一轮）。基准缺失时只算本轮新增的部分。 */
 export function qualityMonitorRoundRecordIds(library: Pick<QualityMonitorLibrary, 'rounds'>, round: QualityMonitorRound, cache = new Map<string, string[]>()): string[] {
@@ -144,13 +145,13 @@ export function beginQualityMonitorRound(study: FishQualityStudy, frozen: FishQu
   const tasks = new Map<string, MonitorTask>(), readings = new Map((frozen.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Map((restart ? [] : frozen.results).map(r => [r.key, r]));
   const records = new Map(library.records.map(r => [r.id, r]));
-  for (const sample of qualityRunSamples(frozen).map(qualityMonitoringSample)) for (const plan of qualityRunGroups(frozen).filter(g => frozen.sellPlans || sample.groups.includes(g.id))) {
+  for (const sample of qualityMonitorRunSamples(frozen)) for (const plan of qualityRunGroups(frozen).filter(g => frozen.sellPlans || sample.groups.includes(g.id))) {
     const task = taskFor(frozen, sample, plan, catalog);
     if (isolatedRound) task.id = roundId + ':' + task.id;
     tasks.set(task.resultKey, task);
     records.set(task.id, recordFor(task, readings, results.get(task.resultKey), at, records.get(task.id)));
   }
-  const round: QualityMonitorRound = { id: roundId, startedAt: at, updatedAt: at, state: 'running', ...encodeRound(library, [...new Set([...tasks.values()].map(t => t.id))]) };
+  const round: QualityMonitorRound = { id: roundId, startedAt: at, updatedAt: at, state: 'running', ...(frozen.monitorTimeBasis ? { timeBasis: frozen.monitorTimeBasis } : {}), ...encodeRound(library, [...new Set([...tasks.values()].map(t => t.id))]) };
   return { study: { ...study, monitorLibrary: { ...library, settings: [...catalog.values()], records: [...records.values()], rounds: [...library.rounds, round] } }, capture: { roundId, tasks, readings, results } };
 }
 export function captureQualityMonitorResult(study: FishQualityStudy, capture: QualityMonitorCapture, result: QualityResult, at: number): FishQualityStudy {
@@ -182,7 +183,9 @@ export function adoptQualityMonitorHistory(study: FishQualityStudy): FishQuality
   const samples = new Map(qualityComparisonRows(study).map(s => [s.id, s]));
   for (const result of study.results) if (!archived.has(result.key)) {
     const sample = samples.get(result.sampleId), plan = qualityRunGroups(study).find(p => p.id === result.groupId);
-    if (sample && plan && qualityResultKey(sample, plan, study.observeHours) === result.key) add(sample, { ...plan, buyFilters: undefined }, [], result, study.observeHours, false, false);
+    if (!sample || !plan) continue;
+    const timeBasis = qualityRowMonitorTimeBasis(study, sample);
+    if (qualityResultKey(sample, plan, study.observeHours, timeBasis) === result.key) add(qualityMonitoringSample(sample, timeBasis), { ...plan, buyFilters: undefined }, [], result, study.observeHours, false, false);
   }
   const round: QualityMonitorRound | undefined = ids.size ? { id: 'monitor-legacy-history', startedAt: earliest, updatedAt: latest, finishedAt: latest, state: 'complete', recordIds: [...ids], legacy: true } : undefined;
   return { ...study, monitorLibrary: { ...library, importedLegacy: true, settings: [...catalog.values()], records: [...records.values()], rounds: round ? [...library.rounds, round] : library.rounds } };

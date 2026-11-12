@@ -1,3 +1,4 @@
+import { qualityRowMonitorTimeBasis } from './qualityAdmissionTime';
 import { researchChartFormula, researchIndicatorForFeature } from '@/lib/researchIndicators';
 import { isLegacyQualityPlan } from './qualityLegacyEngine';
 import { compileFeatureFormula, BUILTIN_FEATURES } from '@/lib/deepDig/features';
@@ -136,7 +137,7 @@ export function syncQualityThresholdDefinitions(study: FishQualityStudy, definit
 
 export const qualitySellSuggestions = (plan: Pick<QualityGroup, 'snapshot'>) => plan.snapshot.featureId === 'state' ? [.5, .45, .4] : [0, -8, -15];
 export function qualityResultMap(study: Pick<FishQualityStudy, 'results'>) { return new Map(study.results.map(r => [r.key, r])); }
-export const qualityRowResult = (study: FishQualityStudy, row: QualitySample, plan: QualityGroup, results = qualityResultMap(study)) => results.get(qualityResultKey(row, plan, study.observeHours));
+export const qualityRowResult = (study: FishQualityStudy, row: QualitySample, plan: QualityGroup, results = qualityResultMap(study)) => results.get(qualityResultKey(row, plan, study.observeHours, qualityRowMonitorTimeBasis(study, row)));
 export function qualityBatchRows(study: FishQualityStudy): QualitySample[] {
   return qualityComparisonRows(study);
 }

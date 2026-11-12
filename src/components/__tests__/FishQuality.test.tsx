@@ -142,7 +142,7 @@ it('does not crash the route when monitoring starts and live results arrive in a
  try {
   const view=render(<RouteLoadBoundary><FishQuality state={s}/></RouteLoadBoundary>);
   const box=screen.getByTestId('quality-fish-table');box.scrollTop=3300;fireEvent.scroll(box);
-  fireEvent.click(screen.getByRole('button',{name:'开始监测'}));expect(s.start).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'开始监测'}));fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).toHaveBeenCalledTimes(1);
   s.running=true;s.progress={done:0,total:350,current:''};
   s.study={...s.study,results:[...s.study.results]};
   view.rerender(<RouteLoadBoundary><FishQuality state={s}/></RouteLoadBoundary>);
@@ -650,10 +650,17 @@ it('folds restart into the start button menu, during a run too, and requires a s
   expect(more).toBeEnabled();
   fireEvent.click(more);
   expect(screen.getByText(/先停止当前批次/)).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '从头重新计算' })); expect(s.restart).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: '从头重新计算' })).toBeNull();
+  expect(screen.getByText('从头重新计算')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '基于筛选时间' }));
+  expect(s.restart).toHaveBeenCalledExactlyOnceWith('screening'); expect(s.start).not.toHaveBeenCalled();
+  expect(screen.queryByText('从头重新计算')).toBeNull();
   s.running = false; view.rerender(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '开始监测' })); expect(s.start).toHaveBeenCalledOnce(); expect(s.restart).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: '开始监测' }));
+  expect(s.start).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '基于筛选时间' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '基于信号时间' }));
+  expect(s.start).toHaveBeenCalledExactlyOnceWith(false, undefined, false, 'signal');
+  expect(s.restart).toHaveBeenCalledOnce();
   s.study = { ...s.study, selectedRowIds: [] }; view.rerender(<FishQuality state={s}/>);
   expect(screen.getByRole('button', { name: '开始监测的其他方式' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
@@ -801,7 +808,7 @@ it('starts and pauses filtering and monitoring independently while bulk mining i
   const filter = () => screen.getByRole('region', { name: '买前过滤模块' }), monitor = () => screen.getByRole('region', { name: '持仓监测模块' });
   fireEvent.click(within(filter()).getByRole('button', { name: '开始过滤' })); expect(s.startFilter).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
   s.filterRunning = true; s.filterProgress = { done: 1, total: 2, current: '', matched: 1 }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
-  const start = within(monitor()).getByRole('button', { name: '开始监测' }); expect(start).toBeEnabled(); fireEvent.click(start); expect(s.start).toHaveBeenCalledOnce();
+  const start = within(monitor()).getByRole('button', { name: '开始监测' }); expect(start).toBeEnabled(); fireEvent.click(start); fireEvent.click(screen.getByRole('button',{name:'基于筛选时间'})); expect(s.start).toHaveBeenCalledExactlyOnceWith(false,undefined,false,'screening');
   s.running = true; s.progress = { done: 0, total: 2, current: '' }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
   expect(within(filter()).getByRole('status')).toHaveTextContent(/过滤中\s*1\s*\/\s*2 · 50.0%\s*命中 1/);
   expect(within(filter()).getByRole('progressbar',{name:'买前过滤处理进度'})).toHaveAttribute('aria-valuenow','1'); expect(within(monitor()).getByRole('status')).toHaveTextContent(/监测中\s*0\s*\/\s*2/);
@@ -1238,7 +1245,7 @@ it.each([true,false])('saves a routed template and explicitly starts selected si
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));fireEvent.click(screen.getByRole('button',{name:'用模板 条件分支 新建方案'}));
  const run=screen.getByRole('button',{name:'保存并开始监测'});expect(screen.getByRole('button',{name:'保存方案'})).toBeEnabled();expect(s.start).not.toHaveBeenCalled();
  if(!selected){expect(run).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'保存方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();}
- else{expect(run).toBeEnabled();fireEvent.click(run);expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(s.start).mock.invocationCallOrder[0]);}
+ else{expect(run).toBeEnabled();fireEvent.click(run);fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.setSellPlans).toHaveBeenCalledOnce();expect(s.start).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(s.start).mock.invocationCallOrder[0]);}
  expect(screen.queryByTestId('quality-router-editor')).toBeNull();
 },60000);
 
@@ -1257,7 +1264,7 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  s.savePlanTemplate=vi.fn((id,name)=>{s.study=saveQualityPlanTemplate(s.study,s.study.sellPlans!.find(p=>p.id===id)!,name);});s.deletePlanTemplate=vi.fn();
  const view=render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:'复制卖出算法 1'}));
  const copyEditor=screen.getAllByTestId('quality-router-editor').at(-1)!,shared=within(copyEditor).getByTestId('router-branch-structure');
- fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));expect(s.start).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('请填写分支状态 S 门槛');
+ fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('请填写分支状态 S 门槛');
  fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:'.8'}});
  fireEvent.change(within(shared).getByLabelText('镜像止盈卖出百分比'),{target:{value:'23'}});
  fireEvent.change(within(shared).getByLabelText('卖出算法 1 门槛'),{target:{value:'.45'}});
@@ -1265,7 +1272,7 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  fireEvent.change(within(copyEditor).getByTestId('router-branch-attack').querySelector('[aria-label="最多加仓次数"]')!,{target:{value:'4'}});
  // Switching back keeps unfinished edits; the root action builds both branch forms without an inner save.
  fireEvent.click(within(copyEditor).getByRole('tab',{name:'结构分支'}));expect(within(shared).getByLabelText('镜像止盈卖出百分比')).toHaveValue(23);
- fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));expect(s.start).toHaveBeenCalledOnce();
+ fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).toHaveBeenCalledOnce();
  const copied=s.study.sellPlans![1];expect(planVersionChanges(copied)).toEqual([]);expect(copied.router!.threshold).toBe(.8);
  expect(copied.router!.structure.rule!.threshold).toBe(.45);expect(copied.router!.attack.rule!.threshold).toBe(.45);
  expect(copied.router!.structure.mirrorTakeProfit!.sellPct).toBe(23);expect(copied.router!.attack.mirrorTakeProfit!.sellPct).toBe(23);

@@ -1,4 +1,4 @@
-import {qualityMonitoringSample} from './qualityAdmissionTime';
+import {qualityMonitoringSample, qualityRowMonitorTimeBasis} from './qualityAdmissionTime';
 import { qualityAdvantageIdentity } from './qualityAdvantage';
 import {routerRuleLabel, routerResultFingerprint} from './qualityPlanRouter';
 import {qualityVetoStagesLabel} from './qualityVetoStages';
@@ -49,7 +49,7 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   if (!hasQualityEntry(result)) return study;
   let index = rowIndexes.get(study.samples);
   if (!index) { index = new Map(qualityComparisonRows(study).map(row => [row.id, row])); rowIndexes.set(study.samples, index); }
-  const original = index.get(result.sampleId), sample = original && qualityMonitoringSample(original);
+  const original = index.get(result.sampleId), sample = original && qualityMonitoringSample(original, qualityRowMonitorTimeBasis(study, original));
   const plan = (study.sellPlans ?? study.groups).find(group => group.id === result.groupId);
   // 未设置普通门槛、也没有启用否决的方案只是登记买入，不存成战役
   if (!sample || !plan || !hasQualityExit(plan) || !hasQualityCampaign(result) || qualityResultKey(sample, plan, study.observeHours) !== result.key) return study;

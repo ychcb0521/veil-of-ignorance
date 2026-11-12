@@ -77,7 +77,7 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 }
 
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
-import { collectFishQuality, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
+import { collectFishQuality, qualityMonitorRunSamples, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
 import { fetchResearchKlines } from '@/lib/deepRsa/marketData';
 import { readTuringCupKlines } from '@/lib/turingCupMarketData';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
@@ -213,7 +213,9 @@ export class FishScanner {
     const rows = options.task === 'pre-entry' ? options.preEntry?.records.map(r => r.sample) ?? []
       : options.task === 'signal-values' ? options.signalReadingBatches?.flatMap(batch => batch.rows) ?? []
       : options.task === 'entry' ? options.entryTargets ?? []
-      : options.task === 'post-exit' ? options.postExitTargets ?? [] : qualityRunSamples(options.study);
+      : options.task === 'post-exit' ? options.postExitTargets ?? []
+      : options.task === 'monitor' && options.study.monitorTimeBasis ? qualityMonitorRunSamples(options.study)
+      : qualityRunSamples(options.study);
     let progress = {done:0,total:rows.length,current:''}, waitingUntil:number|undefined;
     const publish = () => options.onProgress({...progress,...(waitingUntil?{waitingUntil}:{})});
     const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal, until=>{waitingUntil=until;publish();});

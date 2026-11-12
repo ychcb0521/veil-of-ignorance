@@ -1,5 +1,5 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
-import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,type QualityMonitorEntry} from './qualityAdmissionTime';
+import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,qualityRowMonitorTimeBasis,type QualityMonitorEntry,type QualityMonitorTimeBasis} from './qualityAdmissionTime';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
 import { evaluateQualityRouter, routerResultFingerprint } from './qualityPlanRouter';
@@ -146,6 +146,10 @@ export interface FishQualityStudy {
   entryReadings?: import('./qualityEntry').QualityEntryReading[];
   postExitReadings?: import('./qualityPostExit').QualityPostExitReading[];
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
+  /** Explicit entry-time input for the most recent holding batch. Older studies retain their original basis. */
+  monitorTimeBasis?: QualityMonitorTimeBasis;
+  /** Each live row retains its last monitoring input even when another selection runs. */
+  monitorTimeBasisByRow?: Record<string, QualityMonitorTimeBasis>;
   /** Legacy saved field; automatic periodic evaluation has been removed. */
   tracking: boolean;
   groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
@@ -409,8 +413,8 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
   }
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
 }
-export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
-  const identity: unknown[] = [s.signalId ?? s.id, qualityMonitorEntryAt(s), g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number, timeBasis?: QualityMonitorTimeBasis) => {
+  const identity: unknown[] = [s.signalId ?? s.id, qualityMonitorEntryAt(s, timeBasis), g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.initialization) identity.push(g.initialization);
   if (g.router) identity.push(routerResultFingerprint(g.router));
   const advantage=qualityAdvantageIdentity(g);if(advantage)identity.push(advantage);
@@ -498,6 +502,12 @@ export function selectMinedRows(study: FishQualityStudy): FishQualityStudy {
   return { ...study, selectedRowIds: [...selected], minedAutoSelected: [...done, ...new Set(fresh.map(r => r.signalId!))] };
 }
 /** 参与运行的卖出方案；还没设前段门槛的组合方案不跑（否则只是重复登记 CDA 那套的买入）。 */
+export function qualityMonitorRunSamples(study: FishQualityStudy): QualitySample[] {
+  return qualityRunSamples(study)
+    .filter(row => !study.monitorTimeBasis || qualityMonitorEntryAt(row, study.monitorTimeBasis) != null)
+    .map(row => qualityMonitoringSample(row, study.monitorTimeBasis));
+}
+
 export const qualityRunGroups = (study: FishQualityStudy) => study.sellPlans ? study.sellPlans.filter(p => !p.combo || !!p.rule) : study.groups;
 export function qualityExitSuggestions(group: QualityGroup): { label: string; rule: QualityExitRule }[] {
   const t = group.snapshot.threshold, direction: '<' | '>' = group.snapshot.direction === '<' ? '>' : '<';
@@ -545,7 +555,7 @@ export function materializePlanBuyFilters(study: FishQualityStudy): FishQualityS
 export type QualityFilterStatus = { state: 'none' | 'pass' | 'fail' | 'pending' | 'error'; detail: string };
 /** 一行在某套卖出方案下是否买入：没有启用的条件 = none；任一条件缺数据 = error；任一不满足 = fail；还没读数 = pending。 */
 export function qualityFilterStatus(study: FishQualityStudy, row: QualitySample, plan: QualityGroup | undefined, readings: ReadonlyMap<string, QualityFilterReading> = new Map((study.filterReadings ?? []).map(r => [r.key, r]))): QualityFilterStatus {
-  return filterStatusForConditions(qualityMonitoringSample(row), activeBuyFilters(study, plan), readings);
+  return filterStatusForConditions(qualityMonitoringSample(row, qualityRowMonitorTimeBasis(study, row)), activeBuyFilters(study, plan), readings);
 }
 
 function filterStatusForConditions(row: QualitySample, filters: readonly QualityBuyFilter[], readings: ReadonlyMap<string, QualityFilterReading>): QualityFilterStatus {
@@ -869,7 +879,7 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   const filtersOnly = onlyQualityFilters(study);
   const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Set(study.results.map(r => r.key));
-  for (const row of qualityRunSamples(study).map(qualityMonitoringSample)) for (const plan of study.sellPlans ?? []) {
+  for (const row of qualityMonitorRunSamples(study)) for (const plan of study.sellPlans ?? []) {
     if (activeBuyFilters(study, plan).some(f => !readings.has(qualityFilterReadingKey(row, f)))) return true;
     const state = qualityFilterStatus(study, row, plan, readings).state;
     if (mode === 'filter' && !filtersOnly && (state === 'none' || state === 'pass' || plan.id === study.selectedSellId) && !results.has(qualityResultKey(row, plan, study.observeHours))) return true;
@@ -919,10 +929,14 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     const {planVersionChanges,planVersionChangeText} = await import('./qualityPlanVersions');
     for (const g of qualityRunGroups(study)) { const changes = planVersionChanges(g); if (changes.length) throw new Error(`「${g.label}」保存时冻结的算法版本与当前代码不同，已停止运行：${planVersionChangeText(changes)}。如确认改用新版本，请在条件设置里重新保存这套方案。`); }
   }
+  const explicitEntry = !filtersOnly && !!study.monitorTimeBasis;
+  const rows = explicitEntry ? qualityMonitorRunSamples(study) : study.sellPlans ? qualityRunSamples(study) : study.samples;
   const tasks = study.sellPlans
-    ? qualityRunSamples(study).flatMap(s => qualityRunGroups(study).map(g => ({ s, g })))
-    : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
-  if (!study.independentFilters || !filtersOnly) for (const task of tasks) task.s = qualityMonitoringSample(task.s);
+    ? rows.flatMap(s => qualityRunGroups(study).map(g => ({ s, g })))
+    : rows.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
+  if (!explicitEntry && (!study.independentFilters || !filtersOnly)) {
+    for (const task of tasks) task.s = qualityMonitoringSample(task.s);
+  }
   // 【用户要求】2026-10-26「运行完的币种，结果要立即显示出来」：按界面顺序挑下一行，同一行的几条卖出规则连着算完
   const pending = new Map<string, { s: QualitySample; g: QualityGroup }[]>();
   for (const task of tasks) { const list = pending.get(task.s.id); if (list) list.push(task); else pending.set(task.s.id, [task]); }
@@ -941,7 +955,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
       const key = qualityFilterReadingKey(row, f);
       if (!readings.has(key)) { abort(signal); const r = await evaluateQualityFilter(row, f, now, load, signal); readings.set(key, r); options.onFilterReading?.(r); }
     }
-    const state = qualityFilterStatus(study, row, plan, readings).state;
+    const state = filterStatusForConditions(row, filters, readings).state;
     return state === 'none' || state === 'pass';
   };
   let done = 0, failure: unknown;
@@ -994,7 +1008,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
 }
 export function qualityGroupSummary(study: FishQualityStudy, group: QualityGroup) {
   const samples = study.samples.filter(s => s.groups.includes(group.id));
-  const keys = new Set(samples.map(s => qualityResultKey(s, group, study.observeHours)));
+  const keys = new Set(samples.map(s => qualityResultKey(s, group, study.observeHours, qualityRowMonitorTimeBasis(study, s))));
   const results = study.results.filter(r => keys.has(r.key));
   const valid = results.filter(r => r.status === 'open' || r.status === 'closed'), closed = valid.filter(r => r.status === 'closed');
   const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;

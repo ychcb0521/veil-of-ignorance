@@ -1,3 +1,4 @@
+import { qualityMonitorEntryAt, qualityMonitoringSample, qualityRowMonitorTimeBasis } from './qualityAdmissionTime';
 import { activeStandaloneBuyFilters, activeBuyFilters, hasQualityExit, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityTableMembers, type QualityTableRow } from './qualityTableRows';
 
@@ -29,11 +30,14 @@ export function qualityRunStatusMap(study: FishQualityStudy, rows: readonly Qual
       if (reading && !reading.error && Number.isFinite(reading.value)) filter.finished++;
       else if (reading) filter.errors++;
     }
+    const timeBasis = qualityRowMonitorTimeBasis(study, row);
+    const monitorRow = timeBasis ? qualityMonitoringSample(row, timeBasis) : row;
     for (const plan of plans) {
+      if (timeBasis && qualityMonitorEntryAt(monitorRow) == null) continue;
       const conditions = activeBuyFilters(study, plan);
       let known = true;
       for (const condition of conditions) {
-        const key = qualityFilterReadingKey(row, condition), reading = readings.get(key), valid = !!reading && !reading.error && Number.isFinite(reading.value);
+        const key = qualityFilterReadingKey(monitorRow, condition), reading = readings.get(key), valid = !!reading && !reading.error && Number.isFinite(reading.value);
         if (!valid) known = false;
         if (seen.has(key)) continue;
         seen.add(key); filter.total++;
@@ -45,7 +49,7 @@ export function qualityRunStatusMap(study: FishQualityStudy, rows: readonly Qual
       if (!known) continue;
       // Non-bought entries need no sell simulation, except the explicitly fixed detector comparison.
       if (plan.id !== study.selectedSellId && qualityFilterStatus(study, row, plan, readings).state === 'fail') { monitor.finished++; continue; }
-      const result = results.get(qualityResultKey(row, plan, study.observeHours));
+      const result = results.get(qualityResultKey(monitorRow, plan, study.observeHours));
       if (result && (result.status === 'closed' || result.status === 'open') && Number.isFinite(result.returnPct)) {
         monitor.finished++;
         if (result.status === 'open' && !result.complete) monitor.refreshable++;

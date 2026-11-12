@@ -2,7 +2,7 @@ import {act,cleanup,renderHook,waitFor} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {useFishQuality} from '../useFishQuality';
 import {firstMatchFixture,SIGNAL_AT,MATCHED_AT} from '@/lib/fish/__tests__/qualityFirstMatch.fixture';
-import {qualityDisplayRows,qualityRunSamples,qualityResultKey,type QualityRunOptions} from '@/lib/fish/quality';
+import {qualityDisplayRows,qualityMonitorRunSamples,qualityRunSamples,qualityResultKey,type QualityRunOptions} from '@/lib/fish/quality';
 import {qualityMonitorEntryAt} from '@/lib/fish/qualityAdmissionTime';
 import {qualityRowResult} from '@/lib/fish/qualityComparison';
 
@@ -44,4 +44,33 @@ it('waits for screening history before freezing a monitoring buy time',async()=>
  screeningReady=true;h.rerender();
  await waitFor(()=>expect(qualityMonitorEntryAt(h.result.current.study.samples[0])).toBe(MATCHED_AT));
  expect(run).not.toHaveBeenCalled();
+});
+
+it('can start from the original signal while screening is loading, then use the first match on a new run', async () => {
+  screeningReady = false;
+  const run = vi.fn(async (options: QualityRunOptions) => {
+    const sample = qualityMonitorRunSamples(options.study)[0], plan = options.study.sellPlans![0];
+    options.onResult({
+      key: qualityResultKey(sample, plan, options.study.observeHours), sampleId: sample.id, groupId: plan.id,
+      status: 'open', entryTime: sample.enteredAt!, entryPrice: 104, endTime: MATCHED_AT + 60000,
+      endPrice: 104, returnPct: 0, pnl: 0, evaluatedAt: MATCHED_AT + 60000,
+    });
+  });
+  const empty: never[] = [];
+  const { result, rerender } = renderHook(() => useFishQuality('explicit-first-match', empty, run));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  await act(() => result.current.start(false, undefined, false, 'screening'));
+  expect(run).not.toHaveBeenCalled();
+  await act(() => result.current.start(false, undefined, false, 'signal'));
+  expect(run).toHaveBeenCalledOnce();
+  expect(qualityMonitorRunSamples(run.mock.calls[0][0].study)[0].enteredAt).toBe(SIGNAL_AT);
+  screeningReady = true;
+  rerender();
+  await waitFor(() => expect(qualityMonitorEntryAt(result.current.study.samples[0])).toBe(MATCHED_AT));
+  await act(() => result.current.start(false, undefined, false, 'screening'));
+  expect(run).toHaveBeenCalledTimes(2);
+  expect(qualityMonitorRunSamples(run.mock.calls[1][0].study)[0].enteredAt).toBe(MATCHED_AT);
+  expect(result.current.study.monitorLibrary!.rounds.map(round => round.timeBasis)).toEqual(['signal', 'screening']);
+  expect(result.current.study.monitorLibrary!.records.map(record => record.enteredAt).sort()).toEqual([SIGNAL_AT, MATCHED_AT]);
+  expect(result.current.study.campaignRuns!.map(run => run.sample.enteredAt)).toEqual([SIGNAL_AT, MATCHED_AT]);
 });

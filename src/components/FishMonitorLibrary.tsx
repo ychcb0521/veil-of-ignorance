@@ -1,3 +1,4 @@
+import { qualityMonitorTimeLabels } from '@/lib/fish/qualityAdmissionTime';
 import {useMemo,type ReactNode} from 'react';
 import {FishLibraryDataActions} from './FishLibraryTransferContext';
 import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryPicker,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
@@ -12,7 +13,7 @@ export function FishMonitorLibrary({study,renderStudy,onCopyStudy,onSetHidden,on
  const state={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
  const items:FishDirectoryItem[]=[
   ...archives.map(a=>({id:a.id,at:a.createdAt,label:a.reason==='copy'?'载入副本前归档':a.reason==='copy-source'?'监测轮次快照':'重算前完整归档',summary:qualityMonitorArchiveResultCount(a)==null?'完整快照':qualityMonitorArchiveResultCount(a)+' 项运行结果',revision:a,study:()=>{if(a.study)return a.study as FishQualityStudy;if(!loadArchive)throw Error('这份归档的正文不在当前页面');return loadArchive(a).then(s=>s as FishQualityStudy);}})),
-  ...rounds.filter(r=>!frozen.has(r.id)).map(r=>({id:r.id,at:r.startedAt,label:r.legacy?'历史记录':'监测轮次',summary:qualityMonitorRoundRecordIds(library!,r).length+' 条记录 · '+state[r.state],revision:library?.records,sourceRoundId:r.id,study:()=>monitorRoundStudy(study,r),note:'早期轮次仅保存记录引用，重复条件可能已更新，展示当前仍保存的版本；未保存的探测值、入场读数和反事实保持缺失。重算前完整归档则保留当时的独立快照。'}))
+  ...rounds.filter(r=>!frozen.has(r.id)).map(r=>({id:r.id,at:r.startedAt,label:r.legacy?'历史记录':'监测轮次',summary:qualityMonitorRoundRecordIds(library!,r).length+' 条记录 · '+state[r.state]+(r.timeBasis?' · '+qualityMonitorTimeLabels[r.timeBasis]:''),revision:library?.records,sourceRoundId:r.id,study:()=>monitorRoundStudy(study,r),note:'早期轮次仅保存记录引用，重复条件可能已更新，展示当前仍保存的版本；未保存的探测值、入场读数和反事实保持缺失。重算前完整归档则保留当时的独立快照。'}))
  ];
  const records=(library?.records??[]).filter(r=>settings.has(r.settingId));
  return <FishLibraryTimeDirectory name="监测库" prefix="monitor" openRequest={openRequest} picker={picker} onOpenChange={onOpenChange} items={items} edits={library?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={records.length} download={()=>downloadMonitorRecords(records,settings)} dataActions={!picker&&<FishLibraryDataActions scope="monitor"/>}

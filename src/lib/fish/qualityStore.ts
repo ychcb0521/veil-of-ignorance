@@ -24,7 +24,15 @@ const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQu
 const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => {
   const next = preserveQualitySignalReadings(saved,preserveLibraries(saved,preserveQualityRepairs(saved,preserveQualityWorkspace(saved,incoming))));
   // 旧标签页或后台监测写回总表时，保留新存模板和删除墓碑。
-  return { ...next, planTemplates: mergeQualityPlanTemplates(saved?.planTemplates, next.planTemplates) };
+  const priorBases = saved?.monitorTimeBasisByRow;
+  return {
+    ...next,
+    planTemplates: mergeQualityPlanTemplates(saved?.planTemplates, next.planTemplates),
+    ...(priorBases ? {
+      monitorTimeBasis: next.monitorTimeBasis ?? saved.monitorTimeBasis,
+      monitorTimeBasisByRow: { ...priorBases, ...next.monitorTimeBasisByRow },
+    } : {}),
+  };
 };
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
