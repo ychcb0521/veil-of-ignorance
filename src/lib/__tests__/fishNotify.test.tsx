@@ -1,7 +1,7 @@
 // 【用户要求】2026-10-21「我希望捕捉到的新鱼能够及时发送到我的邮箱，并且邮箱地址数量可以添加」
 import {beforeEach,expect,it,vi} from 'vitest';
 import {act,fireEvent,render,renderHook,screen} from '@testing-library/react';
-import {fishEmailAlgorithm,fishEmailMatches,fishEmailSourceLabel,FISH_EMAIL_MAX_ROWS,composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
+import {fishEmailAlgorithm,fishEmailMatches,fishEmailSourceLabel,FISH_EMAIL_MAX_ROWS,composeFishEmail,composeScreenedFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
 import {useFishNotify} from '@/hooks/useFishNotify';
 import {fishVisibleCatchKey} from '@/lib/fish/records';
 import {notifyPersistedStateHydrated} from '@/lib/persistedStateStorage';
@@ -213,4 +213,34 @@ it('来源选择界面默认折叠，手动切换交并集和算法立即保存�
  fireEvent.click(screen.getByText(/来源算法 ·/));
  expect(screen.getByRole('button',{name:'交集'})).toHaveAttribute('aria-pressed','true');
  expect(screen.getByRole('checkbox',{name:'邮件来源：CDA 原值'})).toBeChecked();
+});
+
+it('入选邮件用原信号的实际命中类型及本轮筛选模板，纯文本和 HTML 都包含六项', () => {
+ const source = res('AAAUSDT', 1);
+ const capture = source.fish!;
+ capture.algorithms!.push({...capture.algorithms![0], threshold: 5});
+ capture.hitAlgorithms!.push(4);
+ const matchedAt = source.timeMs + 120_000;
+ const record = {
+   sample: {id: source.id, source, basis: 'signal' as const, groups: [], enteredAt: source.timeMs, importedAt: matchedAt},
+   matchedAt,
+   planId: 'screening-plan',
+ };
+ const round = {plans: [
+   {id: 'other', label: '其他模板', snapshot: capture, metric: 'raw'},
+   {id: 'screening-plan', label: '<本轮模板>', snapshot: capture, metric: 'raw'},
+ ]};
+ const content = composeScreenedFishEmail(record, round);
+ expect(content.subject).toBe('动态筛选已入选 · AAAUSDT');
+ expect(content.message.split('\n').slice(1, -1)).toEqual([
+   '标的名称　AAAUSDT', '算法数量　2', '算法类型　CBI-2·avg₂ · CBA·avg₂',
+   '信号时间　2026-10-21 09:00:00', '筛选模板　<本轮模板>', '首次满足时间　2026-10-21 09:02:00',
+ ]);
+ const container = document.createElement('div');
+ container.innerHTML = content.message_html;
+ expect([...container.querySelectorAll('tr')].map(row => [row.querySelector('th')?.textContent, row.querySelector('td')?.textContent])).toEqual([
+   ['标的名称', 'AAAUSDT'], ['算法数量', '2'], ['算法类型', 'CBI-2·avg₂ · CBA·avg₂'],
+   ['信号时间', '2026-10-21 09:00:00'], ['筛选模板', '<本轮模板>'], ['首次满足时间', '2026-10-21 09:02:00'],
+ ]);
+ expect(content.message_html).toContain('&lt;本轮模板&gt;');
 });

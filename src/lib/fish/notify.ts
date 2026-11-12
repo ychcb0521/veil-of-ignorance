@@ -148,13 +148,15 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
 
 export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' | 'matchedAt' | 'planId'>, round?: Pick<PreEntryRound, 'plans'>) {
   const source = record.sample.source;
-  const plan = round?.plans?.find(plan => plan.id === record.planId)?.label ?? '动态筛选';
+  const algorithms = source.fish ? fishCaughtBy(source) : [];
+  const template = round?.plans?.find(plan => plan.id === record.planId)?.label ?? '—';
   const rows = [
-    ['标的', source.symbol],
-    ['市场', source.market === 'us_stock' ? '美股' : EXCHANGE_NAMES[source.exchange ?? 'binance']],
-    ['原信号时间', formatUTC8(qualitySignalTime(source))],
+    ['标的名称', source.symbol],
+    ['算法数量', String(algorithms.length)],
+    ['算法类型', algorithms.join(' · ') || '—'],
+    ['信号时间', formatUTC8(qualitySignalTime(source))],
+    ['筛选模板', template],
     ['首次满足时间', formatUTC8(record.matchedAt!)],
-    ['筛选方案', plan],
   ];
   const esc = (value: string) => value.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   const subject = `动态筛选已入选 · ${source.symbol}`;

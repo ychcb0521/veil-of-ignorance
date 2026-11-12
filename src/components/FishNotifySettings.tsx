@@ -28,7 +28,7 @@ export function FishNotifySettings({ notify, algorithms = [] }: { notify: FishNo
   return <div className="space-y-2 rounded-lg bg-muted/30 px-3 py-2.5 text-[11px]" data-testid="fish-notify" aria-label="邮件提醒设置">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <label className="flex items-center gap-1.5 font-medium"><FishCheck aria-label={notify.screening ? '已入选发到邮箱' : '新鱼发到邮箱'} checked={config.enabled} onChange={e => notify.update({ ...config, enabled: e.target.checked })} />{notify.screening ? '已入选发到邮箱' : '新鱼发到邮箱'}</label>
-      <span className="text-[10.5px] text-muted-foreground">{notify.screening ? '新鱼自动进入动态筛选。入选后发送标的、原信号时间、首次满足时间和筛选方案。' : '每轮捕捞结束（手动或自动）按已保存的来源筛选；和上一封比有变化才发，多出来的标「新」'}</span>
+      <span className="text-[10.5px] text-muted-foreground">{notify.screening ? '新鱼自动进入动态筛选，入选后发送邮件。' : '每轮捕捞结束（手动或自动）按已保存的来源筛选；和上一封比有变化才发，多出来的标「新」'}</span>
     </div>
     {!notify.screening && <details className="rounded-md bg-background/40 px-2.5 py-2" data-testid="fish-notify-sources">
       <summary className="cursor-pointer list-none text-[10.5px] text-muted-foreground hover:text-foreground">来源算法 · <span className="text-foreground/75">{fishEmailSourceLabel(config)}</span></summary>
