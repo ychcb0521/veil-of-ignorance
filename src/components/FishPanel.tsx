@@ -2,7 +2,7 @@ import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
 import { readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import { FISH_PANEL_DEFAULTS } from './fishPanelDefaults';
-import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
+import { FISH_DEFAULT_LOOKBACK_HOURS, resolveFishCaptureLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
 import {fishSignalInRoundWindow} from '@/lib/fish/roundWindow';
 import { downloadFishCabin } from '@/lib/fish/export';
 import { groupFishCabin } from '@/lib/fish/cabinRows';
@@ -107,6 +107,8 @@ function readOpen(): FishOpen {
   try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { settings: v.settings === true, catching: pick(v.catching, catching), cabin: pick(v.cabin, FISH_PANEL_DEFAULTS.cabin), algorithms: v.algorithms !== false, captureQuality: v.captureQuality === true, hitRate: v.hitRate === true }; }
   catch { return { settings: false, catching, cabin: FISH_PANEL_DEFAULTS.cabin, algorithms: true, captureQuality: false, hitRate: false }; }
 }
+const coverageUnits = (hours: number) => hours < 1 && Number.isInteger(hours * 60) ? 60 : 1;
+const coverageText = (hours: number) => coverageUnits(hours) === 60 ? (hours * 60) + ' 分钟' : hours + ' 小时';
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
 
 export function FishPanel(p: FishPanelProps) {
@@ -128,19 +130,23 @@ export function FishPanel(p: FishPanelProps) {
   const jumpQuality = (source: TradeSignal) => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id);
   const canJumpQuality = (source: TradeSignal) => (!p.jumpingSignalId || p.qualityJumpPending && p.jumpingSignalId !== source.id) && !!signalChartSymbol(source)
     && (!!p.onJumpQuality || p.signals.some(signal => signal.id === source.id));
-  const {settings: savedAccountSettings, save: saveAccountSettings, saveLookback, downwardWick, saveDownwardWick, turnover, saveTurnover}=useFishAccountSettings();
+  const {settings: savedAccountSettings, save: saveAccountSettings, lookback, saveLookback, downwardWick, saveDownwardWick, turnover, saveTurnover}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
-  const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
-  useEffect(()=>{const h=readFishLookback();setLookbackHours(h);setLookbackDraft(String(h));},[owner]);
-  const applyLookback=async()=>{
-    const editingOwner=owner;
-    try {
-      const hours=validateFishLookback(lookbackDraft);
-      setLookbackHours(hours);setError('');
-      await saveLookback(hours);
-    } catch(e) {
-      if(getUserPrefix()===editingOwner)setError(e instanceof Error?e.message:'覆盖时间无效');
-    }
+  const [lookbackDraft, setLookbackDraft] = useState<{ value: string; units: number } | null>(null);
+  useEffect(() => setLookbackDraft(null), [owner]);
+  const lookbackHours = resolveFishCaptureLookback(lookback, p.auto);
+  const units = lookbackDraft?.units ?? coverageUnits(lookbackHours);
+  const draftHours = () => lookbackDraft ? validateFishLookback(Number(lookbackDraft.value) / lookbackDraft.units) : lookbackHours;
+  const updateLookback = async (hours: number, followsInterval = false) => {
+    setLookbackDraft(null);
+    setError('');
+    try { await saveLookback(hours, followsInterval); }
+    catch (e) { if (getUserPrefix() === owner) setError(e instanceof Error ? e.message : '覆盖时间无效'); }
+  };
+  const applyLookback = () => {
+    if (!lookbackDraft) return;
+    try { void updateLookback(draftHours()); }
+    catch (e) { setError(e instanceof Error ? e.message : '覆盖时间无效'); }
   };
   const loadCards=()=>{const cards=p.defaultAlgorithms?defaultCards(p.defaultAlgorithms,defs.map(d=>d.id)):[];return cards.length?cards:readCards();};
   const [initialCards]=useState(loadCards);
@@ -161,12 +167,10 @@ export function FishPanel(p: FishPanelProps) {
   const autoTried=useRef(new Set<string>());
   // Saving the coverage alone must preserve edits in the algorithm cards and other controls.
   const accountAlgorithmKey=JSON.stringify([savedAccountSettings?.cards,savedAccountSettings?.combination]);
-  const accountLookbackHours=savedAccountSettings?.lookbackHours;
   const accountSelectionKey=JSON.stringify(savedAccountSettings?.selection);
   useEffect(()=>()=>{suggestionController.current?.abort();suggestionController.current=null;},[owner]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);},[owner,accountAlgorithmKey]);
-  useEffect(()=>{if(accountLookbackHours===undefined)return;setLookbackHours(accountLookbackHours);setLookbackDraft(String(accountLookbackHours));},[owner,accountLookbackHours]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{if(savedAccountSettings)p.onSelectionChange(savedAccountSettings.selection);},[owner,accountSelectionKey]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
@@ -203,7 +207,7 @@ export function FishPanel(p: FishPanelProps) {
     return '刚改的设置上一轮没算过，下面仍是上一轮的结果；点「开始捕捞」按新设置重算。';
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[selectionSignature,p.roundPlans]);
-  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:validateFishLookback(lookbackDraft),downwardWick:readLegacyFishDownwardWick(owner),selection:p.selection,...(p.auto?{auto:fishAutoAccountSchedule({mode:p.auto.mode,hours:p.auto.hours}, savedAccountSettings?.auto)}:{})});
+  const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:lookbackDraft?draftHours():lookback.hours,lookbackFollowsInterval:!lookbackDraft&&lookback.followsInterval,downwardWick:readLegacyFishDownwardWick(owner),selection:p.selection,...(p.auto?{auto:fishAutoAccountSchedule({mode:p.auto.mode,hours:p.auto.hours}, savedAccountSettings?.auto)}:{})});
   const saveParameters=async()=>{setSavingParameters(true);setError('');try{if(multiple.error)throw new Error(multiple.error);if(!p.selection.exchanges.length)throw new Error('请至少选择一家交易所');await saveAccountSettings(parameterDraft());toast.success('捕捞参数已保存到账号');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setSavingParameters(false);}};
 
   const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
@@ -271,7 +275,7 @@ export function FishPanel(p: FishPanelProps) {
     if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
     else update({...pref,direction});
   };
-  const start=async()=>{try{const hours=saveFishLookback(lookbackDraft);setLookbackHours(hours);void applyLookback();const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
+  const start=async()=>{try{const hours=draftHours();if(lookbackDraft)void updateLookback(hours);const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const plans=p.onRecombine?pool:multiple.plans;
@@ -323,7 +327,7 @@ export function FishPanel(p: FishPanelProps) {
       downwardWick, turnoverFloors: turnover.enabled ? turnover.floors : [] });
     if (!built.settings) throw new Error(built.error);
     const auto = readFishAccountSettings()?.auto;
-    const profile: FishAccountSettings = { version: 1, cards: fixedCards, combination, selection, lookbackHours,
+    const profile: FishAccountSettings = { version: 1, cards: fixedCards, combination, selection, lookbackHours, lookbackFollowsInterval: false,
       downwardWick: readLegacyFishDownwardWick(owner), ...(auto && { auto }) };
     setSavingParameters(true);
     setError('');
@@ -336,8 +340,7 @@ export function FishPanel(p: FishPanelProps) {
       setPref(first.pref);
       setExtraCards(rest);
       setCombinationState(combination);
-      setLookbackHours(lookbackHours);
-      setLookbackDraft(String(lookbackHours));
+      setLookbackDraft(null);
       p.onSelectionChange(selection);
       setCaptureCopyRevision(value => value + 1);
       const results = await Promise.allSettled(writes);
@@ -379,7 +382,7 @@ export function FishPanel(p: FishPanelProps) {
         <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">流程</h4>
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
-            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 1 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。排除稳定币。{turnover.enabled ? `成交额门槛 ${turnover.floors.map(floor => `${floor.hours}h ≥ ${formatTurnoverWan(floor.min)}`).join('、')} USDT，截止前与信号起点前都要满足。` : '成交额过滤已关闭。'}</li>
+            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。自动模式下，覆盖时间默认跟随频率，手动改过后使用所填时长；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。排除稳定币。{turnover.enabled ? `成交额门槛 ${turnover.floors.map(floor => `${floor.hours}h ≥ ${formatTurnoverWan(floor.min)}`).join('、')} USDT，截止前与信号起点前都要满足。` : '成交额过滤已关闭。'}</li>
             <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
             <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「捕捞设置」可调整算法、市场、时间、频率、过滤和提醒。</li>
           </ol></section>
@@ -404,7 +407,14 @@ export function FishPanel(p: FishPanelProps) {
           <input aria-label="捕捞时间（UTC+8）" autoComplete="off" spellCheck={false} placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
           <span className="shrink-0 text-[9px] text-muted-foreground/60">UTC+8</span>
         </label>
-        <label className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。每个勾选算法分别按此范围判定；指标计算保留必要历史。默认 1 小时；修改后按回车或离开输入框，自动随账号保存。自动捕捞间隔另行设置。">扫描过去<input aria-label="扫描覆盖时间（小时）" type="number" min="0.01" max="8784" step="any" disabled={running} value={lookbackDraft} onChange={e=>setLookbackDraft(e.target.value)} onBlur={()=>void applyLookback()} onKeyDown={e=>{if(e.key==='Enter')void applyLookback();}} className="h-6 w-12 rounded bg-transparent px-1 text-center font-mono tabular-nums text-foreground outline-none focus:bg-background disabled:opacity-40"/>小时</label>
+        <label className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。自动捕捞默认随频率；手动修改后按回车或离开输入框保存。">扫描过去
+          <input aria-label={units === 60 ? '扫描覆盖时间（分钟）' : '扫描覆盖时间（小时）'} type="number" min="0" max={8784 * units} step="any"
+            disabled={running} value={lookbackDraft?.value ?? String(lookbackHours * units)}
+            onChange={event => setLookbackDraft({ value: event.target.value, units })}
+            onBlur={applyLookback} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+            className="h-6 w-12 rounded bg-transparent px-1 text-center font-mono tabular-nums text-foreground outline-none focus:bg-background disabled:opacity-40"/>
+          {units === 60 ? '分钟' : '小时'}
+        </label>
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||hitRateRunning||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
@@ -417,8 +427,8 @@ export function FishPanel(p: FishPanelProps) {
         {p.auto?.mode === 'auto' && <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>}
         {x && <div className="inline-flex shrink-0 items-center gap-1.5">
           <p role="status" aria-live="polite" className="inline-flex items-center gap-1.5 whitespace-nowrap" data-testid="fish-status" title={[
-            ...(x.lookbackHours !== undefined ? [`本轮覆盖过去 ${x.lookbackHours} 小时${x.counts.outside ? `，${x.counts.outside} 个起点超出范围` : ''}`] : []),
-            ...(lookbackHours !== x.lookbackHours ? [`覆盖时间改为过去 ${lookbackHours} 小时，下一轮生效`] : []),
+            ...(x.lookbackHours !== undefined ? [`本轮覆盖过去 ${coverageText(x.lookbackHours)}${x.counts.outside ? `，${x.counts.outside} 个起点超出范围` : ''}`] : []),
+            ...(lookbackHours !== x.lookbackHours ? [`覆盖时间改为过去 ${coverageText(lookbackHours)}，下一轮生效`] : []),
             ...(x.algorithmHits?.map((n, i) => `算法 ${enabledCardNumbers[i] ?? i+1} 命中 ${n}`) ?? []),
           ].join('\n') || undefined}>
             <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
@@ -492,6 +502,10 @@ export function FishPanel(p: FishPanelProps) {
               </select>
               <ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/>
             </span>}
+            {lookback.followsInterval
+              ? <span className="text-[10.5px] text-muted-foreground">自动捕捞覆盖时间随频率</span>
+              : <button type="button" disabled={running} onClick={() => void updateLookback(FISH_DEFAULT_LOOKBACK_HOURS, true)}
+                  className="rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">覆盖时间跟随频率</button>}
           </div>
         </fieldset>}
       </div>

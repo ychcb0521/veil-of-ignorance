@@ -31,6 +31,7 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   level?: 'section' | 'sub' | 'nested';
   /** 标题旁 ⓘ 里的说明。 */
   info?: ReactNode;
+  headerAction?: ReactNode;
 }
 type FishSortKey = SignalSortKey | 'algorithm' | 'algorithmCount' | 'caughtAt';
 interface FishView { open?: boolean; algorithm?: string; query?: string; month?: string; sortKey?: FishSortKey; sortDir?: 'asc'|'desc'; scroll?: SignalScrollPosition; frozen?: {key:string;values:[string,number|null][]} }
@@ -182,6 +183,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}
+    {p.headerAction}
     </span>
     {open && p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel：列表信息、具体指标和捕获阈值，不受当前筛选影响" disabled={!displaySignals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
     </div>

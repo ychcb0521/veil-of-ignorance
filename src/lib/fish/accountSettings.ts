@@ -12,6 +12,7 @@ export interface FishAccountSettings {
   cards: FishCard[];
   combination: 'and' | 'or';
   lookbackHours: number;
+  lookbackFollowsInterval?: boolean;
   downwardWick: FishDownwardWick;
   selection: FishScanSelection;
   auto?: FishAccountAutoSchedule;

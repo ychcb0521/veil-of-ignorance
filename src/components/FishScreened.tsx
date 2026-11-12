@@ -1,4 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Settings2 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { FishPreEntrySettings } from './FishPreEntrySettings';
+import type { FishQualityState } from '@/hooks/useFishQuality';
 import { FishLibrary } from './FishLibrary';
 import { preEntrySignal, type PreEntryLibrary } from '@/lib/fish/preEntryMonitor';
 import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
@@ -8,7 +12,8 @@ import { formatUTC8 } from '@/lib/timeFormat';
 
 const noDays = new Set<string>();
 
-export function FishScreened({ library, ratings, onJump, canJump, onRate, jumpingSignalId, tradedDayIndex = noDays, campaignDayIndex = noDays }: {
+export function FishScreened({ state, library, ratings, onJump, canJump, onRate, jumpingSignalId, tradedDayIndex = noDays, campaignDayIndex = noDays }: {
+  state?: FishQualityState;
   library: PreEntryLibrary;
   ratings?: QualitySourceRatings;
   onJump?: (source: TradeSignal) => void;
@@ -18,6 +23,22 @@ export function FishScreened({ library, ratings, onJump, canJump, onRate, jumpin
   tradedDayIndex?: Set<string>;
   campaignDayIndex?: Set<string>;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const automatic = state?.automaticScreening;
+  const save = automatic?.saveSettings;
+  const planLabel = automatic?.settings?.plans[0]?.label;
+  const settings = state && save ? <div className="ml-2 flex min-w-0 items-center gap-1">
+    <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <PopoverTrigger asChild><button type="button" aria-label="筛选鱼条件设置" disabled={!state.ready || !state.preEntry?.ready}
+        className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+        <Settings2 aria-hidden className="h-3 w-3"/>条件设置
+      </button></PopoverTrigger>
+      <PopoverContent align="start" collisionPadding={12} className="fish-condition-settings screening-settings-popover">
+        <FishPreEntrySettings state={state} selectedCount={0} done={() => setSettingsOpen(false)} automatic={{settings: automatic?.settings, save}}/>
+      </PopoverContent>
+    </Popover>
+    <span className="max-w-48 truncate text-[10px] text-muted-foreground" title={planLabel}>{planLabel ?? '沿用动态筛选'}</span>
+  </div> : undefined;
   const rows = useMemo(() => {
     const automatic = new Set(library.rounds.filter(round => round.automatic).map(round => round.id));
     return library.records.flatMap(record => {
@@ -34,7 +55,7 @@ export function FishScreened({ library, ratings, onJump, canJump, onRate, jumpin
   }, [library.rounds, library.records, ratings]);
   const byId = useMemo(() => new Map(rows.map(row => [row.id, row])), [rows]);
   return <div className="ml-1 mt-1 border-l border-border/50 pl-2">
-    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime defaultOpen={false}
+    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime defaultOpen={false} headerAction={settings}
       emptyText="还没有自动筛选入选的鱼。" tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} jumpingSignalId={jumpingSignalId ?? null}
       onJump={id => {
         const row = byId.get(id), at = row?.preEntryMonitor?.matchedAt;

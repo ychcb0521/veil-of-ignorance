@@ -1,4 +1,5 @@
-import { readFishAccountSettings } from './accountSettings';
+import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings } from './accountSettings';
+import type { FishAutoSchedule } from './autoScan';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { FishProgram } from './algorithm';
@@ -6,7 +7,9 @@ import type { FishMemberResult } from './intersection';
 import { FISH_MAX_HISTORY_BARS, type FishTurnoverFloor } from './shared';
 export const FISH_DEFAULT_LOOKBACK_HOURS=1;
 export const FISH_LOOKBACK_KEY='fish-lookback-hours.v1';
+export const FISH_LOOKBACK_POLICY_KEY = 'fish-lookback-policy.v1';
 export const fishLookbackKey=()=>getUserPrefix()+FISH_LOOKBACK_KEY;
+export interface FishLookbackPreference { hours: number; followsInterval: boolean }
 const defaultVersionKey=()=>`${getUserPrefix()}fish-lookback-default.v2`;
 export function validateFishLookback(value:unknown):number {
  const n=typeof value==='number'?value:typeof value==='string'&&value.trim()?Number(value):NaN;
@@ -14,18 +17,36 @@ export function validateFishLookback(value:unknown):number {
  return n;
 }
 export function readFishLookback():number {
- const saved=readFishAccountSettings();if(saved)return saved.lookbackHours;
+ return readFishAccountSettings()?.lookbackHours ?? readLegacyFishLookback(getUserPrefix());
+}
+function readLegacyFishLookback(prefix: string): number {
+ const key = prefix + FISH_LOOKBACK_KEY;
+ const versionKey = prefix + 'fish-lookback-default.v2';
  try{
   // Upgrade the former 12h default once; other custom hours and subsequent explicit 12h edits survive.
-  if(readPersistedStateRaw(defaultVersionKey())!=='1'){
-   const previous=readPersistedStateRaw(fishLookbackKey());
-   if(previous!==null&&Number(previous)===12)writePersistedStateRaw(fishLookbackKey(),'1');
-   writePersistedStateRaw(defaultVersionKey(),'1');
+  if(readPersistedStateRaw(versionKey)!=='1'){
+   const previous=readPersistedStateRaw(key);
+   if(previous!==null&&Number(previous)===12&&!readPersistedStateRaw(prefix + FISH_LOOKBACK_POLICY_KEY))writePersistedStateRaw(key,'1');
+   writePersistedStateRaw(versionKey,'1');
   }
-  return validateFishLookback(readPersistedStateRaw(fishLookbackKey()));
+  return validateFishLookback(readPersistedStateRaw(key));
  }catch{return FISH_DEFAULT_LOOKBACK_HOURS;}
 }
 export function saveFishLookback(value:unknown):number {const hours=validateFishLookback(value);writePersistedStateRaw(fishLookbackKey(),String(hours));writePersistedStateRaw(defaultVersionKey(),'1');return hours;}
+export function readFishLookbackPreference(prefix = getUserPrefix()): FishLookbackPreference {
+ const saved = readFishAccountSettings(prefix + FISH_ACCOUNT_SETTINGS_KEY);
+ const hours = saved?.lookbackHours ?? readLegacyFishLookback(prefix);
+ if (saved) return { hours, followsInterval: saved.lookbackFollowsInterval ?? (hours === FISH_DEFAULT_LOOKBACK_HOURS) };
+ try {
+  const policy = JSON.parse(readPersistedStateRaw(prefix + FISH_LOOKBACK_POLICY_KEY) ?? 'null');
+  // The numeric preference remains readable by old tabs. An older tab's distinct value is a custom edit.
+  if (policy?.hours === hours && typeof policy.followsInterval === 'boolean') return { hours, followsInterval: policy.followsInterval };
+ } catch { /* Use the legacy preference when the policy is invalid. */ }
+ return { hours, followsInterval: hours === FISH_DEFAULT_LOOKBACK_HOURS };
+}
+export function resolveFishCaptureLookback(preference: FishLookbackPreference, schedule?: FishAutoSchedule): number {
+ return preference.followsInterval && schedule?.mode === 'auto' ? schedule.hours : preference.hours;
+}
 /** The coverage window never replaces formula warm-up or liquidity-gate history. */
 export function fishProgramForLookback(plan:FishProgram,hours?:number,floors?:readonly FishTurnoverFloor[]):FishProgram {
  if(hours===undefined)return plan;

@@ -2,33 +2,56 @@ import { useCallback, useEffect, useState } from 'react';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { notifyPersistedStateHydrated, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { hydrateSimState, pushSimStateImmediately } from '@/lib/simStateSync';
+import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
 import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
-import { FISH_LOOKBACK_KEY, saveFishLookback } from '@/lib/fish/lookback';
+import { FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, readFishLookbackPreference, saveFishLookback } from '@/lib/fish/lookback';
 import { FISH_WICK_SETTINGS_KEY, readFishDownwardWick, saveFishDownwardWick, validateFishDownwardWick, type FishDownwardWick } from '@/lib/fish/downwardWick';
 
 import { FISH_CAPTURE_TURNOVER_KEY, readCaptureTurnoverSettings, validateFishTurnoverSettings, type FishTurnoverSettings } from '@/lib/fish/turnoverSettings';
 
+export async function persistFishAccountPreference(userId: string, key: string, value: unknown) {
+  const storageKey = getUserPrefix(userId) + key;
+  writePersistedStateRaw(storageKey, JSON.stringify(value));
+  notifyPersistedStateHydrated(storageKey);
+  let timer: ReturnType<typeof setTimeout>;
+  const confirmed = await Promise.race([
+    pushSimStateImmediately(userId, key, value),
+    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 15_000); }),
+  ]).finally(() => clearTimeout(timer));
+  if (!confirmed) {
+    throw new Error('参数已暂存本机，云端尚未确认；请联网后再次保存，确认后再换设备');
+  }
+}
+
 export function useFishAccountSettings(refreshOnFocus = false) {
   const userId = getUserId(), prefix = getUserPrefix();
   const fullKey = prefix + FISH_ACCOUNT_SETTINGS_KEY, wickKey = prefix + FISH_WICK_SETTINGS_KEY, turnoverKey = prefix + FISH_CAPTURE_TURNOVER_KEY;
+  const lookbackKey = prefix + FISH_LOOKBACK_KEY, policyKey = prefix + FISH_LOOKBACK_POLICY_KEY;
   const [snapshot, setSnapshot] = useState(() => ({ fullKey, value: readFishAccountSettings(fullKey) }));
+  const [lookbackSnapshot, setLookbackSnapshot] = useState(() => ({ prefix, value: readFishLookbackPreference(prefix) }));
   const [wickSnapshot, setWickSnapshot] = useState(() => ({ prefix, value: readFishDownwardWick(prefix) }));
   const [turnoverSnapshot, setTurnoverSnapshot] = useState(() => ({ prefix, value: readCaptureTurnoverSettings(prefix) }));
   const turnover = turnoverSnapshot.prefix === prefix ? turnoverSnapshot.value : readCaptureTurnoverSettings(prefix);
   const settings = snapshot.fullKey === fullKey ? snapshot.value : readFishAccountSettings(fullKey);
+  const lookback = lookbackSnapshot.prefix === prefix ? lookbackSnapshot.value : readFishLookbackPreference(prefix);
   const downwardWick = wickSnapshot.prefix === prefix ? wickSnapshot.value : readFishDownwardWick(prefix);
   useEffect(() => {
     const refreshWick = () => setWickSnapshot({ prefix, value: readFishDownwardWick(prefix) });
     const refreshTurnover = () => setTurnoverSnapshot({ prefix, value: readCaptureTurnoverSettings(prefix) });
+    const refreshLookback = () => setLookbackSnapshot({ prefix, value: readFishLookbackPreference(prefix) });
     const refreshSettings = () => {
       setSnapshot({ fullKey, value: readFishAccountSettings(fullKey) });
       refreshWick();
+      refreshLookback();
     };
     const unsubscribeSettings = subscribePersistedStateHydration(fullKey, refreshSettings);
+    const unsubscribeLookback = subscribePersistedStateHydration(lookbackKey, refreshLookback);
+    const unsubscribePolicy = subscribePersistedStateHydration(policyKey, refreshLookback);
     const unsubscribeWick = subscribePersistedStateHydration(wickKey, refreshWick);
     const unsubscribeTurnover = subscribePersistedStateHydration(turnoverKey, refreshTurnover);
     const onStorage = (event: StorageEvent) => {
       if (event.key === fullKey) refreshSettings();
+      else if (event.key === lookbackKey || event.key === policyKey) refreshLookback();
       else if (event.key === wickKey) refreshWick();
       else if (event.key === turnoverKey) refreshTurnover();
     };
@@ -37,18 +60,20 @@ export function useFishAccountSettings(refreshOnFocus = false) {
     refreshTurnover();
     return () => {
       unsubscribeSettings();
+      unsubscribeLookback();
+      unsubscribePolicy();
       unsubscribeWick();
       unsubscribeTurnover();
       window.removeEventListener('storage', onStorage);
     };
-  }, [prefix, fullKey, wickKey, turnoverKey]);
+  }, [prefix, fullKey, lookbackKey, policyKey, wickKey, turnoverKey]);
   useEffect(() => {
     if (!userId || !refreshOnFocus) return;
     let pending = false;
     const refresh = async () => {
       if (pending || document.hidden) return;
       pending = true;
-      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY]); }
+      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY]); }
       finally { pending = false; }
     };
     void refresh();
@@ -63,29 +88,24 @@ export function useFishAccountSettings(refreshOnFocus = false) {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [userId, refreshOnFocus]);
-  const persist = useCallback(async (key: string, value: unknown) => {
+  const persist = useCallback((key: string, value: unknown) => {
     if (!userId) throw new Error('请先登录后保存账号参数');
-    const storageKey = getUserPrefix(userId) + key;
-    writePersistedStateRaw(storageKey, JSON.stringify(value));
-    notifyPersistedStateHydrated(storageKey);
-    let timer: ReturnType<typeof setTimeout>;
-    const confirmed = await Promise.race([
-      pushSimStateImmediately(userId, key, value),
-      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 15_000); }),
-    ]).finally(() => clearTimeout(timer));
-    if (!confirmed) {
-      throw new Error('参数已暂存本机，云端尚未确认；请联网后再次保存，确认后再换设备');
-    }
+    return persistFishAccountPreference(userId, key, value);
   }, [userId]);
   const save = useCallback((value: FishAccountSettings) => persist(FISH_ACCOUNT_SETTINGS_KEY, value), [persist]);
-  const saveLookback = useCallback(async (value: unknown) => {
+  const saveLookback = useCallback(async (value: unknown, followsInterval = false) => {
     const hours = saveFishLookback(value);
-    if (!userId) return hours;
-    const latest = readFishAccountSettings(fullKey);
-    if (latest) await save({ ...latest, lookbackHours: hours });
-    else await persist(FISH_LOOKBACK_KEY, hours);
+    const policy = { hours, followsInterval };
+    if (!userId) {
+      writePersistedStateRaw(policyKey, JSON.stringify(policy));
+      notifyPersistedStateHydrated(policyKey);
+    } else {
+      const latest = readFishAccountSettings(fullKey);
+      if (latest) await save({ ...latest, lookbackHours: hours, lookbackFollowsInterval: followsInterval });
+      else await Promise.all([persist(FISH_LOOKBACK_POLICY_KEY, policy), persist(FISH_LOOKBACK_KEY, hours)]);
+    }
     return hours;
-  }, [userId, fullKey, persist, save]);
+  }, [userId, fullKey, policyKey, persist, save]);
   const saveDownwardWick = useCallback(async (value: FishDownwardWick) => {
     if (userId) await persist(FISH_WICK_SETTINGS_KEY, validateFishDownwardWick(value));
     else if (!saveFishDownwardWick(value, prefix)) throw new Error('浏览器暂时无法保存插针设置，请重试');
@@ -98,5 +118,5 @@ export function useFishAccountSettings(refreshOnFocus = false) {
       notifyPersistedStateHydrated(turnoverKey);
     }
   }, [userId, turnoverKey, persist]);
-  return { settings, downwardWick, turnover, save, saveLookback, saveDownwardWick, saveTurnover };
+  return { settings, lookback, downwardWick, turnover, save, saveLookback, saveDownwardWick, saveTurnover };
 }

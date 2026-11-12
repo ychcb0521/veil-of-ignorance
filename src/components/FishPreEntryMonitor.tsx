@@ -139,7 +139,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
     <FishPreEntryLibrary state={state} onSelected={onSelected} onJump={onJump} openRequest={openRequest}
       onSelectDirectory={onSelectDirectory} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy}/>
     {automatic && (automatic.pending > 0 || automatic.awaitingMail > 0 || automatic.paused || automatic.storageIssue) && <span className="text-[10px] text-muted-foreground" role="status">
-      {automatic.paused ? '新鱼自动筛选已暂停' : automatic.pending > 0 ? '自动筛选待处理 ' + automatic.pending + (!monitor.library.settings?.plans.length ? ' · 请先保存筛选方案' : '') : ''}
+      {automatic.paused ? '新鱼自动筛选已暂停' : automatic.pending > 0 ? '自动筛选待处理 ' + automatic.pending + (!(automatic.settings ?? monitor.library.settings)?.plans.length ? ' · 请先保存筛选鱼条件' : '') : ''}
       {automatic.awaitingMail > 0 && ' · ' + automatic.awaitingMail + ' 条已入选待发邮件'}
       {automatic.storageIssue && ' · 本机队列保存遇到问题，请保留页面'}
     </span>}

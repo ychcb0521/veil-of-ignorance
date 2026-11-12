@@ -1,7 +1,7 @@
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
+import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
@@ -202,7 +202,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       finish();
     }
   }, [commit, persistence, owner]);
-  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void) => {
+  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings) => {
+    const settings = automaticSettings ?? current.current.settings;
     const lane = automaticId ? lanes.current.automatic : lanes.current.manual;
     if (!readyRef.current || lane.controller || tableClearLock.current || !automaticId && savingDraft.current) return;
     if (automaticId) {
@@ -228,10 +229,10 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         }
         return;
       }
-      if (!current.current.settings?.plans.length) return;
+      if (!settings?.plans.length) return;
     }
     const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
-    let plans = current.current.settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
+    let plans = settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
     const chosen=selectedPreEntryPlan(plans);
     if(plans.length>1&&(automaticId||plans.some(p=>!!p.preEntryThreeStage))){if(!chosen){setError('请在条件设置中选择并保存唯一的筛选方案');return;}plans=[chosen];}
     let filters;
@@ -251,7 +252,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         status: 'queued' as const, startTime, cursor: startTime, readings: [], updatedAt: at };
     }));
     const base=!automaticId&&current.current.settings&&current.current.settings.plans.length>plans.length?archivePreEntrySettings(current.current,{...current.current.settings,plans:structuredClone(plans),updatedAt:at}):current.current;
-    commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
+    commit({...mergePreEntryLibraries(base, { version: 1, rounds: [round], records }), settings: automaticId ? base.settings : base.settings ?? {updatedAt:at,plans:structuredClone(plans.map(freezeQualityPlan)),hours}});
     // The screening engine reads its frozen round and records, never the research history.
     // Do not duplicate hundreds of MB of unrelated results when starting a task.
     await execute(round, newQualityStudy(study.startedAt), onMatch);
@@ -335,8 +336,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     }
   },[commit,owner]);
   return { library, savedLibrary, saveWorkspaceScreening, savingWorkspaceDraft, ready, running, automaticRunning, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
-    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void) =>
-      start(study, newPreEntryHours(current.current.settings?.hours), id, recover, onMatch),
+    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void, settings?: PreEntrySettings) =>
+      start(study, newPreEntryHours((settings ?? current.current.settings)?.hours), id, recover, onMatch, settings),
     pauseAutomatic: () => lanes.current.automatic.controller?.abort(),
     pause: () => lanes.current.manual.controller?.abort(), retry: () => setReload(n => n + 1) };
 }

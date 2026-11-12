@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { fishNotifyMissing } from '@/lib/fish/notify';
-import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
+import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
+import { FISH_AUTOMATIC_SCREENING_KEY, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
+import type { PreEntrySettings } from '@/lib/fish/preEntryMonitor';
+import type { QualityGroup } from '@/lib/fish/quality';
+import { validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { persistFishAccountPreference } from './useFishAccountSettings';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import type { AutomaticScreeningMatch } from './usePreEntryMonitor';
 import type { FishQualityState } from './useFishQuality';
@@ -14,6 +21,7 @@ interface Job {
   key: string;
   id: string;
   source: TradeSignal;
+  settings?: PreEntrySettings;
   nextCheckAt: number;
   nextMailAt?: number;
   matched?: true;
@@ -41,6 +49,32 @@ type Monitor = NonNullable<FishQualityState['preEntry']>;
 
 /** The authenticated app shell owns capture work and email receipts across panel changes. */
 export function useFishScreeningAutomation(owner: string | undefined, ready: boolean, monitor: Monitor | undefined, notify: ReturnType<typeof useFishNotify>) {
+  const [saved, setSaved] = useState(() => ({ owner, value: owner ? readAutomaticScreeningSettings(owner) : undefined }));
+  const settings = saved.owner === owner ? saved.value : owner ? readAutomaticScreeningSettings(owner) : undefined;
+  useEffect(() => {
+    if (!owner) return;
+    const key = getUserPrefix(owner) + FISH_AUTOMATIC_SCREENING_KEY;
+    const refresh = () => setSaved({ owner, value: readAutomaticScreeningSettings(owner) });
+    const onStorage = (event: StorageEvent) => { if (event.key === key) refresh(); };
+    const unsubscribe = subscribePersistedStateHydration(key, refresh);
+    window.addEventListener('storage', onStorage);
+    refresh();
+    return () => { unsubscribe(); window.removeEventListener('storage', onStorage); };
+  }, [owner]);
+
+  const saveSettings = useCallback(async (plans: QualityGroup[], hours: number) => {
+    if (!owner) throw Error('请先登录后保存筛选鱼条件');
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 8784) throw Error('单标的筛选时限须大于 0 且不超过 8784 小时');
+    if (plans.length !== 1 || !plans[0].preEntryThreeStage) throw Error('请保存一套三阶筛选方案');
+    validatePreEntryThreeStage(plans[0].preEntryThreeStage);
+    const previous = readAutomaticScreeningSettings(owner);
+    const frozen = structuredClone(freezeSavedPlans(previous?.plans, plans));
+    if (planVersionChanges(frozen[0]).length) throw Error('冻结的算法版本已变化，请保留原方案并使用可执行的副本');
+    await persistFishAccountPreference(owner, FISH_AUTOMATIC_SCREENING_KEY, {
+      plans: frozen, hours, updatedAt: Math.max(Date.now(), (previous?.updatedAt ?? 0) + 1),
+    } satisfies PreEntrySettings);
+  }, [owner]);
+
   const [jobs, setJobs] = useState<Job[]>(() => owner ? readQueue(owner) : []);
   const pauseKey = owner ? queuePrefix(owner) + 'paused' : '';
   const [paused, setPaused] = useState(() => !!pauseKey && readPersistedStateRaw(pauseKey) === '1');
@@ -66,7 +100,10 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     const identity = encodeURIComponent(signalDedupKey(source));
     const key = queuePrefix(owner) + 'job:' + identity;
     if (readPersistedStateRaw(key) != null) return;
-    save({ key, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0 });
+    const monitor = current.current.monitor;
+    const settings = readAutomaticScreeningSettings(owner) ?? (monitor?.ready ? monitor.library.settings : undefined);
+    save({ key, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0,
+      settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined });
     wake.current?.();
   }, [owner, save]);
 
@@ -166,20 +203,22 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       }
       const next = jobs.filter(job => !job.matched && job.nextCheckAt <= now && (!records.has(job.id) || ['queued', 'paused', 'error', 'matched'].includes(records.get(job.id)!.status)))
         .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
-      if (next && !paused && !(monitor.automaticRunning ?? monitor.running) && (records.has(next.id) || monitor.library.settings?.plans.length)) void exclusive('scan', async () => {
+      if (next && !paused && !(monitor.automaticRunning ?? monitor.running) && (records.has(next.id) || (next.settings ?? readAutomaticScreeningSettings(owner) ?? monitor.library.settings)?.plans.length)) void exclusive('scan', async () => {
         const job = readJob(next.key);
         const active = current.current.monitor;
         if (!job || job.matched || job.nextCheckAt > Date.now() || !active?.startAutomatic
           || (active.automaticRunning ?? active.running) || current.current.paused || lifetime.signal.aborted) return;
         // Persist the next attempt before starting, so a reload can safely resume the same frozen round.
-        save({ ...job, runner: tab.current, nextCheckAt: Date.now() + MINUTE });
+        const settings = job.settings ?? readAutomaticScreeningSettings(owner) ?? active.library.settings;
+        save({ ...job, settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined,
+          runner: tab.current, nextCheckAt: Date.now() + MINUTE });
         await active.startAutomatic(job.id, job.source, !!job.runner && job.runner !== tab.current, match => {
           const latest = readJob(job.key);
           if (!latest || lifetime.signal.aborted) return;
           const matched = { ...latest, matched: true as const };
           save(matched);
           mail(matched, match);
-        });
+        }, settings);
         if (lifetime.signal.aborted) return;
         const saved = readJob(job.key);
         if (!saved) return;
@@ -208,10 +247,10 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       document.removeEventListener('visibilitychange', tick);
     };
   }, [owner, pauseKey, save]);
-  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, notify.config]);
+  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, settings, notify.config]);
 
   const matchedIds = jobs.length ? new Set(monitor?.library.records.filter(record => record.status === 'matched').map(record => record.roundId)) : undefined;
   const awaitingMail = jobs.filter(job => job.matched || matchedIds?.has(job.id)).length;
   const pending = jobs.length - awaitingMail;
-  return { enqueue, paused, setAutoPaused, pending, awaitingMail: jobs.length - pending, storageIssue };
+  return { enqueue, paused, setAutoPaused, pending, awaitingMail: jobs.length - pending, storageIssue, settings, saveSettings };
 }

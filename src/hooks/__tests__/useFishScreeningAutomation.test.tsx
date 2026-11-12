@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { useFishScreeningAutomation } from '../useFishScreeningAutomation';
 import type { AutomaticScreeningMatch } from '../usePreEntryMonitor';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
-import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
+import type { PreEntryLibrary, PreEntryRecord, PreEntryRound, PreEntrySettings } from '@/lib/fish/preEntryMonitor';
+import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
+import { emptyPreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
+import { notifyPersistedStateHydrated, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn() }));
@@ -84,4 +87,39 @@ it('sends immediately after a committed match while manual screening is still ru
   expect(sendAdmission).toHaveBeenCalledOnce();
   expect(view.result.current.awaitingMail).toBe(0);
   expect(view.result.current.pending).toBe(0);
+});
+
+it('freezes the independently saved settings per catch, including queued work resumed after a reload', async () => {
+  vi.useFakeTimers({now:T});
+  const owner = 'independent-owner', key = 'sim_'+owner+'_'+FISH_AUTOMATIC_SCREENING_KEY;
+  const config = (label: string, hours: number): PreEntrySettings => ({
+    updatedAt: T, hours, plans: [{id:label,label,preEntryThreeStage:emptyPreEntryThreeStage()} as PreEntrySettings['plans'][number]],
+  });
+  const savedA = config('自动 A', 4), savedB = config('自动 B', 6);
+  const library: PreEntryLibrary = {version:1,rounds:[],records:[],settings:config('手动 A', 48)};
+  const startAutomatic = vi.fn(async (_id:string,_source:TradeSignal,_recover:boolean,_onMatch:unknown,_settings?:PreEntrySettings) => {});
+  const monitor = {ready:true,running:false,automaticRunning:false,library,startAutomatic};
+  const notify = {config:{enabled:false},sendAdmission:vi.fn()};
+  writePersistedStateRaw(key, JSON.stringify(savedA));
+  const mount = () => renderHook(() => useFishScreeningAutomation(owner,true,monitor as never,notify as never));
+  const first = mount();
+  act(() => {
+    first.result.current.setAutoPaused(true);
+    first.result.current.enqueue(signal('EARLYUSDT'));
+    library.settings = config('手动 B', 72);
+    writePersistedStateRaw(key, JSON.stringify(savedB));
+    notifyPersistedStateHydrated(key);
+    first.result.current.enqueue(signal('LATEUSDT'));
+  });
+  expect(startAutomatic).not.toHaveBeenCalled();
+  first.unmount();
+  const second = mount();
+  await act(async () => {
+    second.result.current.setAutoPaused(false);
+    await vi.advanceTimersByTimeAsync(2500);
+  });
+  expect(startAutomatic.mock.calls.map(([,source,,,settings])=>[source.symbol,settings])).toEqual([
+    ['EARLYUSDT',savedA],['LATEUSDT',savedB],
+  ]);
+  expect(library.settings?.plans[0].label).toBe('手动 B');
 });

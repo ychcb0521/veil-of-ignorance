@@ -282,3 +282,14 @@ it('checkpoints only changed records and never queues repeated whole-library sav
   expect(h.result.current.running).toBe(false);
  }finally{vi.useRealTimers();h.unmount();}
 });
+
+it('executes the dedicated automatic plan without creating manual settings', async () => {
+  const filter = study().buyFilters[0];
+  const plan = freezeQualityPlan({id:'auto-only',label:'自动专用',metric:filter.metric,snapshot:filter.snapshot,preEntryThreeStage:emptyPreEntryThreeStage()});
+  const tasks: QualityRunOptions[] = [];
+  const {result} = renderHook(() => usePreEntryMonitor('automatic-only',true,async task => { tasks.push(task); }));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  await act(() => result.current.startAutomatic('catch-one',study(),false,undefined,{plans:[plan],updatedAt:t,hours:4}));
+  expect(tasks[0].preEntry?.round).toMatchObject({id:'catch-one',automatic:true,hours:4,plans:[plan]});
+  expect(result.current.library.settings).toBeUndefined();
+});

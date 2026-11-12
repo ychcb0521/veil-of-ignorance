@@ -16,7 +16,7 @@ import { useFishAccountSettings } from '../useFishAccountSettings';
 import { __resetSimStateSyncForTests, hydrateSimState } from '@/lib/simStateSync';
 import { FISH_ACCOUNT_SETTINGS_KEY, type FishAccountSettings } from '@/lib/fish/accountSettings';
 import { readFishCards, readFishCombination } from '@/lib/fish/cards';
-import { readFishLookback } from '@/lib/fish/lookback';
+import { readFishLookback, resolveFishCaptureLookback } from '@/lib/fish/lookback';
 import { resetFishAuto } from '@/lib/fish/autoScan';
 import { FISH_WICK_SETTINGS_KEY, readFishDownwardWick } from '@/lib/fish/downwardWick';
 const login=(id:string)=>localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id}}));
@@ -71,7 +71,7 @@ it('updates coverage in saved account settings without replacing fixed algorithm
  const first=renderHook(()=>useFishAccountSettings());
  await act(()=>first.result.current.save(value));
  await act(()=>first.result.current.saveLookback(1));
- expect(cloud.rows.get('A'+FISH_ACCOUNT_SETTINGS_KEY)?.value).toEqual({...value,lookbackHours:1});
+ expect(cloud.rows.get('A'+FISH_ACCOUNT_SETTINGS_KEY)?.value).toEqual({...value,lookbackHours:1,lookbackFollowsInterval:false});
  expect(readFishLookback()).toBe(1);
  first.unmount();localStorage.clear();__resetSimStateSyncForTests();login('A');
  await hydrateSimState('A');
@@ -118,11 +118,24 @@ it('saves custom wick settings separately and adopts them on another device with
   await hydrateSimState('A');
   const second=renderHook(()=>useFishAccountSettings(true));
   expect(second.result.current.downwardWick).toEqual(wick);
-  expect(second.result.current.settings).toEqual({...value,lookbackHours:2});
+  expect(second.result.current.settings).toEqual({...value,lookbackHours:2,lookbackFollowsInterval:false});
   const remote = {...wick,hours:24,atrMultiple:3.75};
   cloud.rows.set('A'+FISH_WICK_SETTINGS_KEY,{key:FISH_WICK_SETTINGS_KEY,value:remote,updated_at:'2000-01-01T00:00:00.000Z'});
   await act(()=>hydrateSimState('A',[FISH_WICK_SETTINGS_KEY]));
   expect(second.result.current.downwardWick).toEqual(remote);
   login('B');second.rerender();
   expect(second.result.current.downwardWick).toEqual({enabled:true,hours:48,atrMultiple:3});
+});
+
+it('restores an explicit one-hour override without a fixed snapshot and can resume following the frequency', async () => {
+  const schedule = {mode:'auto' as const, hours:5/60};
+  const first = renderHook(() => useFishAccountSettings());
+  expect(resolveFishCaptureLookback(first.result.current.lookback, schedule)).toBe(5/60);
+  await act(() => first.result.current.saveLookback(1));
+  first.unmount();localStorage.clear();__resetSimStateSyncForTests();login('A');
+  await hydrateSimState('A');
+  const second = renderHook(() => useFishAccountSettings());
+  expect(resolveFishCaptureLookback(second.result.current.lookback, schedule)).toBe(1);
+  await act(() => second.result.current.saveLookback(1, true));
+  expect(resolveFishCaptureLookback(second.result.current.lookback, schedule)).toBe(5/60);
 });
