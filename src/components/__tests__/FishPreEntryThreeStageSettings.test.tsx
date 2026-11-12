@@ -11,6 +11,7 @@ import { newQualityStudy } from '@/lib/fish/quality';
 import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
 import { emptyPreEntryThreeStage, trackedGatePreEntryThreeStage, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import type { FishQualityState } from '@/hooks/useFishQuality';
+import {DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import {defaultEntryStallTurn} from '@/lib/fish/preEntryStallTurn';
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();localStorage.clear();});
@@ -304,4 +305,29 @@ it('saves and restores three independent switches in a new copy, including all t
   expect(screen.getByLabelText('三阶硬性终止 持仓否决 1 阈值')).toHaveValue(7);
   expect(required()).not.toBeChecked();
   expect(admission()).not.toBeChecked();
+});
+
+it('saves and reopens the independent DBL-5 distance switch, fractional threshold and guard version',()=>{
+ const f=setup(),before=structuredClone(f.plan);
+ const checkbox='启用入选前否决 距 DBL-5 防守线过远',atr='距 DBL-5 防守线过远 ATR倍数',version='距 DBL-5 防守线过远 防守线版本';
+ expect(within(screen.getByTestId('three-stage-second')).getByLabelText(checkbox)).not.toBeChecked();
+ fireEvent.click(screen.getByLabelText(checkbox));
+ fireEvent.change(screen.getByLabelText(atr),{target:{value:'0'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ expect(screen.getByRole('alert')).toHaveTextContent('大于 0');
+ expect(f.configure).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText(atr),{target:{value:'3.25'}});
+ fireEvent.change(screen.getByLabelText(version),{target:{value:DBL5_RETEST_GUARD_VERSION}});
+ fireEvent.click(screen.getByRole('button',{name:'保存三阶方案'}));
+ const [drafts,hours]=f.configure.mock.calls[0];
+ const saved=freezeQualityPlan(drafts[0]);
+ expect(saved.preEntryThreeStage?.additionVetoes).toMatchObject([{kind:'guard-distance',atr:3.25,guardDistance:{guardVersion:DBL5_RETEST_GUARD_VERSION}}]);
+ expect(saved.frozenVersions?.some(v=>v.key==='shared-guard-distance')).toBe(true);
+ expect(f.plan).toEqual(before);
+ cleanup();
+ f.state.preEntry!.library.settings={updatedAt:2,plans:[saved],hours};
+ render(<TooltipProvider><FishPreEntrySettings state={f.state} selectedCount={1} done={vi.fn()}/></TooltipProvider>);
+ expect(screen.getByLabelText(checkbox)).toBeChecked();
+ expect(screen.getByLabelText(atr)).toHaveValue(3.25);
+ expect(screen.getByLabelText(version)).toHaveValue(DBL5_RETEST_GUARD_VERSION);
 });

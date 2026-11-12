@@ -5,7 +5,7 @@ import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
-import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
+import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, GUARD_DISTANCE_VETO_VERSION, additionVetoIdentity, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
 import { compatibleHoldingParameterOrder, compatibleAdditionParameterOrder } from './qualityPlanParameterCompatibility';
 import { freezePreEntryThreeStage, threeStageFingerprint, stableEntryJson, PRE_ENTRY_OPTIONAL_STAGES_VERSION, PRE_ENTRY_SIGNAL_ANCHOR_VERSION } from './preEntryThreeStage';
 import { ENTRY_STALL_TURN_5M_VERSION, PULLBACK_NEW_HIGH_5M_VERSION } from './preEntryStallTurn5m';
@@ -67,9 +67,12 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   const out: PlanVersionEntry[] = [...initialization];
   const stallTurn=plan.preEntryThreeStage?.stallTurn;
   if(stallTurn?.enabled)out.push({key:'entry-stall-turn',part:'动态筛选·一票否决',name:'上涨后滞涨转弱／猛烈回调未创新高',version:stallTurn.version+' · 参数 #'+shortFishHash(stableEntryJson(stallTurn)),summary:stallTurn.version===ENTRY_STALL_TURN_5M_VERSION?'仅用已收盘5分钟K线；三段时间为5分钟整数倍，涨不动且转弱时锁定；连续5分钟收盘递升并收复局部高点才解除。猛烈回调锁定须5分钟收盘严格突破冻结前高。盘中不更新触发或解除，独立历史重建；原1分钟模板继续按原版本执行。':'上涨、滞涨、转弱依次成立时锁定，连续收盘递升且收复局部收盘高点才解除；可同时启用猛烈回调锁定，须分钟收盘严格突破冻结前高才解除。两者任一成立即否决，仅用已收盘分钟，独立历史重建。研究初值，不改变旧模板。'});
-  const historicalVetoes=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.historyHours!=null&&!isFiveMinuteShapeVeto(v));
+  const sharedVetoes=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled);
+  const historicalVetoes=sharedVetoes.filter(v=>v.historyHours!=null&&!isFiveMinuteShapeVeto(v));
   if(historicalVetoes.length)out.push({key:'veto-history',part:'一票否决',name:'独立历史扫描范围',version:VETO_HISTORY_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(historicalVetoes)),summary:'按每次判断时点向前回看，包含入选和持仓之前的行情；影线与插针扫描整个历史窗口，高震荡检查窗口内观测，急跌检查窗口内分钟线；未收复高点锁定不因重筛或窗口滑动清除。旧范围另行保留。'});
-  const shapeVetoes=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&isFiveMinuteShapeVeto(v));
+  const distances=sharedVetoes.filter(v=>v.kind==='guard-distance');
+  if(distances.length)out.push({key:'shared-guard-distance',part:'共用一票否决',name:'距 DBL-5 防守线过远',version:GUARD_DISTANCE_VETO_VERSION+' · 参数 #'+shortFishHash(stableEntryJson(additionVetoIdentity(distances))),summary:'候选时点的最近 1 分钟收盘价高出已收盘 5 分钟防守线超过 N 倍原生 ATR(14) 即否决；缺有效读数时暂不放行。'});
+  const shapeVetoes=sharedVetoes.filter(isFiveMinuteShapeVeto);
   for(const kind of ['stall-turn','pullback-new-high'] as const){const rules=shapeVetoes.filter(v=>v.kind===kind);if(rules.length)out.push({key:'shared-'+kind,part:'共用一票否决',name:kind==='stall-turn'?'滞涨转弱（5分钟）':'猛烈回调未创新高（5分钟）',version:(kind==='stall-turn'?ENTRY_STALL_TURN_5M_VERSION:PULLBACK_NEW_HIGH_5M_VERSION)+' · 参数 #'+shortFishHash(stableEntryJson(rules)),summary:'动态筛选与持仓加仓共用、独立开关；只在5分钟收盘后更新，独立回看和恢复锁定，不改写旧模板。'});}
   const lowerWicks=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.kind==='lower-wick');
   if(lowerWicks.length)out.push({key:'lower-wick-veto',part:'一票否决',name:'长下影线',version:LOWER_WICK_VETO_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(lowerWicks)),summary:'只读已收盘 5 分钟 K 线；下影＝min(开盘,收盘)−最低价，长度达到 ATR 倍数且占整根振幅达到比例时否决，与长上影线对称。'});

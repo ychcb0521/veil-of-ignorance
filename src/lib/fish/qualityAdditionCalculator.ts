@@ -260,13 +260,22 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:fills.length+1,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
   }
   if(round.entryVetoes?.some(v=>v.enabled)){
-   await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
-   const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
-   const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
-   if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:fills.length+1,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
-   if(round.entryVetoes.some(v=>v.enabled&&v.historyHours!=null)){
+   if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='guard-distance')){
+    await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
+    const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='guard-distance'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
+    const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
+    if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:fills.length+1,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
+   }
+   if(round.entryVetoes.some(v=>v.enabled&&(v.historyHours!=null||v.kind==='guard-distance'))){
     let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes,entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
-    const result=await history(hit.at);if(result.hit||result.pending){vetoed.push({at:hit.at,round:fills.length+1,...(result.hit??{kind:'history-pending',label:'历史扫描等待',reading:result.pending!})});after=hit.at;continue;}
+    const minute=o.prices[(hit.at-MINUTE-(o.prices[0]?.openTime??hit.at))/MINUTE];
+    const result=await history(hit.at,minute);
+    if(result.hit||result.pending){
+     const distancePending=result.pendingKind==='guard-distance';
+     const detail=result.hit??{kind:distancePending?'guard-distance-pending':'history-pending',
+      label:distancePending?'防守线距离待判定':'历史扫描等待',reading:result.pending!};
+     vetoed.push({at:hit.at,round:fills.length+1,...detail});after=hit.at;continue;
+    }
    }
   }
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);

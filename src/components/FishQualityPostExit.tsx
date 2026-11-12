@@ -4,17 +4,17 @@ import type { QualityGroup, QualityResult, QualitySample } from '@/lib/fish/qual
 import { POST_EXIT_HOURS, qualityPostExitKey, postExitValue, postExitWindow, type PostExitMetric, type QualityPostExitReading } from '@/lib/fish/qualityPostExit';
 import { qualityTableRange } from '@/lib/fish/qualityTableRows';
 import { formatUTC8 } from '@/lib/timeFormat';
-const cell='border-t border-border/40 px-2 py-1.5';
+const cell='border-t border-border/40 px-1.5 py-1';
 const pct=(v:number)=>`${v>0?'+':''}${v.toFixed(2)}%`;
 export type PostExitSortKey=`post-exit:${number}:${PostExitMetric}:${string}`;
 export const postExitSortKey=(id:string,hours:number,metric:PostExitMetric):PostExitSortKey=>`post-exit:${hours}:${metric}:${id}`;
 const formula=(metric:PostExitMetric)=>metric==='peak'?'max(0，卖后最高价 ÷ 卖出价 − 1) × 100%':'max(0，1 − 卖后最低价 ÷ 卖出价) × 100%';
 export function PostExitHeaders({plan,expanded,toggle,sort,ascending,onSort}:{plan:QualityGroup;expanded:boolean;toggle:()=>void;sort:string;ascending:boolean;onSort:(key:PostExitSortKey)=>void}){
  const control=<button type="button" aria-label={`${expanded?'收起':'展开'}${plan.label}卖后反事实`} aria-expanded={expanded} onClick={toggle} className="inline-flex items-center gap-1 text-primary hover:underline">{expanded?'收起':'展开'}<ChevronDown className={`h-3 w-3 ${expanded?'rotate-180':''}`}/></button>;
- if(!expanded)return <th className="min-w-[140px] border-l border-border/50 px-2 py-1.5 font-medium" data-testid="quality-post-exit-folded" data-sell-plan={plan.id}><span className="inline-flex items-center gap-2">卖后反事实 {control}</span><span className="mt-0.5 block text-[9px] font-normal text-muted-foreground/60">5个窗口 · 10项读数</span></th>;
+ if(!expanded)return <th className="border-l border-border/50 px-1.5 py-1 font-medium" data-testid="quality-post-exit-folded" data-sell-plan={plan.id}><span className="inline-flex items-center gap-2">卖后反事实 {control}</span><span className="mt-0.5 block text-[9px] font-normal text-muted-foreground/60">5个窗口 · 10项读数</span></th>;
  return <>{POST_EXIT_HOURS.map((hours,index)=><Fragment key={hours}>{(['peak','drawdown2'] as const).map(metric=>{
   const key=postExitSortKey(plan.id,hours,metric),label=`${hours}h ${metric==='peak'?'峰值涨幅':'静态最大回撤2'}`;
-  return <th key={metric} className={`min-w-[148px] px-2 py-1.5 font-medium ${metric==='peak'?'border-l border-border/40':''}`} data-testid="quality-post-exit-header" data-sell-plan={plan.id} data-hours={hours} data-metric={metric} aria-sort={sort===key?ascending?'ascending':'descending':'none'} title={`卖出后${hours}小时，以本方案实际最终卖出价为基准。${formula(metric)}。仅使用已完成窗口；盘中成交所在分钟先后不明时排除该分钟。`}>
+  return <th key={metric} className={`px-1.5 py-1 font-medium ${metric==='peak'?'border-l border-border/40':''}`} data-testid="quality-post-exit-header" data-sell-plan={plan.id} data-hours={hours} data-metric={metric} aria-sort={sort===key?ascending?'ascending':'descending':'none'} title={`卖出后${hours}小时，以本方案实际最终卖出价为基准。${formula(metric)}。仅使用已完成窗口；盘中成交所在分钟先后不明时排除该分钟。`}>
    <span className="inline-flex items-center gap-2"><button type="button" aria-label={`按${plan.label}卖后${label}排序`} className="hover:text-foreground" onClick={()=>onSort(key)}>{label}{sort===key?ascending?' ↑':' ↓':''}</button>{index===0&&metric==='peak'&&control}</span>
   </th>;
  })}</Fragment>)}</>;

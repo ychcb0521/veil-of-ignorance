@@ -7,7 +7,8 @@ import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
 import { withTuringInitialization } from '../qualityInitialization';
 import { defaultEntryStallTurn } from '../preEntryStallTurn';
-import { ADDITION_VETO_DEFAULTS } from '../qualityAdditionVeto';
+import { sample as dblBars } from '@/lib/__tests__/fixtures/dblBars';
+import { ADDITION_VETO_DEFAULTS, guardDistanceConfig } from '../qualityAdditionVeto';
 
 const mocked=vi.hoisted(()=>({events:[] as number[],broken:[] as number[]}));
 vi.mock('../preEntryGuardEvent',async original=>{
@@ -544,4 +545,25 @@ it('records the admitted event time when events are enabled in the new engine', 
   expect(await run(p,{load:loader([100,120,121,126])})).toMatchObject({
     status:'matched',matchedAt:T+4*M,trackedGate:{at:T+2*M},threeStage:{admission:{met:['事件']}},
   });
+});
+
+it('vetoes a distant candidate and admits a later event with a valid nearby close',async()=>{
+ const p=retryPlan();
+ p.preEntryThreeStage=signalAnchoredPreEntryThreeStage(p.preEntryThreeStage!);
+ p.preEntryThreeStage.additionVetoes=[{...ADDITION_VETO_DEFAULTS['guard-distance'],enabled:true,guardDistance:guardDistanceConfig()}];
+ const five=5*M,structure=new Map(dblBars().map((bar,i)=>[T+(i-14)*five,{...bar,openTime:T+(i-14)*five,volume:1}]));
+ const other=loader([100,100,100,100,125,100,100,100,100,100]);
+ const load:FishReconstructionLoader=async(row,from,to,program,signal)=>{
+  if(!program.compiled.usesDbl5)return other(row,from,to,program,signal);
+  return Array.from({length:(to-from)/five},(_,i)=>{
+   const openTime=from+i*five;
+   return structure.get(openTime)??{openTime,open:103,high:104,low:102,close:103,volume:1,takerBuyVolume:.5,DBL5_tick_size:1};
+  });
+ };
+ const result=await run(p,{load});
+ expect(result).toMatchObject({status:'matched',matchedAt:T+10*M});
+ expect(result.exclusionProcess?.entries.some(e=>e.status==='blocked'&&e.reason.includes('距 DBL-5 防守线过远')&&e.reason.includes('超过阈值 3 ATR'))).toBe(true);
+ const old=structuredClone(p);
+ old.preEntryThreeStage!.additionVetoes=[];
+ expect(await run(old,{load})).toMatchObject({status:'matched',matchedAt:T+5*M});
 });

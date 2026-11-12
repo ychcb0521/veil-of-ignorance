@@ -2,8 +2,9 @@ import { advanceChartAtr, type ChartAtrState } from '../atr';
 import type { ResearchBar } from '../deepRsa/window';
 import type { TradeSignal } from '../signalLibrary';
 import { compileFishProgram } from './algorithm';
-import { evaluateAdditionVetoes, validateAdditionVetoes, isFiveMinuteShapeVeto, ADDITION_VETO_LABELS, type AdditionVetoHit, type QualityAdditionEntryVeto } from './qualityAdditionVeto';
+import { evaluateAdditionVetoes, validateAdditionVetoes, isFiveMinuteShapeVeto, ADDITION_VETO_LABELS, type AdditionEntryVetoKind, type AdditionVetoHit, type QualityAdditionEntryVeto, type VetoBar } from './qualityAdditionVeto';
 import {createEntryStallTurn5mReader,createPullbackNewHigh5mReader,defaultEntryStallTurn5m} from './preEntryStallTurn5m';
+import { createGuardDistanceVetoReader } from './qualityGuardDistance';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { doubleDropState } from './qualityDoubleDrop';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -12,29 +13,37 @@ import { screeningTimeSlice } from './screeningYield';
 
 const M=60000,FIVE=5*M,WARM=87;
 const plan=(interval:'1m'|'5m')=>compileFishProgram({id:'veto-history-'+interval,name:'否决历史扫描',short:'历史',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval},{statistic:'结果',direction:'>',threshold:0,constraints:[]});
-export interface HistoryVetoResult {hit?:AdditionVetoHit;pending?:string}
+export interface HistoryVetoResult {hit?:AdditionVetoHit;pending?:string;pendingKind?:AdditionEntryVetoKind}
 /** Separately versioned opt-in history. Original veto formulas remain executable.
  * Each decision scans its rolling history; sticky damage survives retries and
  * window expiry until a CLOSED 5m candle recovers the recorded peak. Resume
  * replays the same fixed seed and the original entry's historical prefix. */
-type VetoHistoryOptions={rules:readonly QualityAdditionEntryVeto[];entry:number;row:TradeSignal;load:FishReconstructionLoader;signal:AbortSignal};
+type VetoHistoryOptions={rules:readonly QualityAdditionEntryVeto[];entry:number;row:TradeSignal;load:FishReconstructionLoader;signal:AbortSignal;availableStart?:number};
 export function createVetoHistoryReader(o:VetoHistoryOptions){
  const shapes=o.rules.filter(v=>v.enabled&&isFiveMinuteShapeVeto(v));
- if(!shapes.length)return createLegacyVetoHistoryReader(o);
+ const distances=o.rules.filter(v=>v.enabled&&v.kind==='guard-distance');
+ if(!shapes.length&&!distances.length)return createLegacyVetoHistoryReader(o);
  validateAdditionVetoes(shapes);
- const original=createLegacyVetoHistoryReader({...o,rules:o.rules.filter(v=>!isFiveMinuteShapeVeto(v))});
+ const original=createLegacyVetoHistoryReader({...o,rules:o.rules.filter(v=>!isFiveMinuteShapeVeto(v)&&v.kind!=='guard-distance')});
  const readers=shapes.map(v=>{const common={row:o.row,load:o.load,signal:o.signal,origin:o.entry};return {rule:v,read:v.kind==='stall-turn'?createEntryStallTurn5mReader({...common,condition:{...defaultEntryStallTurn5m(),historyHours:v.historyHours!,riseMinutes:v.riseMinutes!,risePct:v.risePct!,stallMinutes:v.stallMinutes!,maxProgressPct:v.maxProgressPct!,turnMinutes:v.turnMinutes!,pullback:undefined}}):createPullbackNewHigh5mReader({...common,historyHours:v.historyHours!,pct:v.pct!})};});
- return async(at:number):Promise<HistoryVetoResult>=>{
+ const distanceReaders=distances.map(v=>createGuardDistanceVetoReader(v,{row:o.row,start:o.entry,load:o.load,signal:o.signal},o.availableStart));
+ return async(at:number,minute?:VetoBar):Promise<HistoryVetoResult>=>{
   // Advance every independent lock, even while another rule already blocks.
   const results=[];for(const {rule,read} of readers)results.push({rule,result:await read(at,{openTime:at-M} as ResearchBar)});
   const old=await original(at);if(old.hit)return old;
   for(const {rule,result}of results)if(result.blocked)return {hit:{kind:rule.kind,label:ADDITION_VETO_LABELS[rule.kind],reading:result.blocked}};
-  return {pending:old.pending??results.find(r=>r.result.pending)?.result.pending};
+  let pending:HistoryVetoResult={pending:old.pending??results.find(r=>r.result.pending)?.result.pending};
+  for(const read of distanceReaders){
+   const result=await read(at,minute);
+   if(result.hit)return result;
+   if(!pending.pending&&result.pending)pending=result;
+  }
+  return pending;
  };
 }
 function createLegacyVetoHistoryReader(o:VetoHistoryOptions){
  const rules=o.rules.filter(v=>v.enabled&&v.historyHours!=null);validateAdditionVetoes(rules);
- if(!rules.length)return async(_at:number):Promise<HistoryVetoResult>=>({});
+ if(!rules.length)return async(_at:number,_minute?:VetoBar):Promise<HistoryVetoResult>=>({});
  const timeSlice=screeningTimeSlice(o.signal);
  const maxHours=Math.max(0,...rules.map(v=>v.historyHours!)),first=Math.floor((o.entry-maxHours*3600000)/FIVE)*FIVE;
  let cursor=qualityHistoryFrom(o.load,first-WARM*FIVE,FIVE),atrState:ChartAtrState|undefined,lastAt=-Infinity;
@@ -56,7 +65,7 @@ function createLegacyVetoHistoryReader(o:VetoHistoryOptions){
   if(rule.kind==='lower-spike'&&start>0){window.unshift(bars[start-1]);values.unshift(atr[start-1]);}
   return evaluateAdditionVetoes([{...original,...(wick?{lookbackBars:end-start}:{})}],window,values,from);
  };
- return async(at:number):Promise<HistoryVetoResult>=>{
+ return async(at:number,_minute?:VetoBar):Promise<HistoryVetoResult>=>{
   if(!rules.length)return {};
   if(at<lastAt)throw Error('否决历史扫描时间不能倒退');lastAt=at;
   if(o.signal.aborted)throw new DOMException('已暂停','AbortError');

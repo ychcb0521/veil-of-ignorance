@@ -1,5 +1,5 @@
 import { compileFishProgram, shortFishHash } from './algorithm';
-import { evaluateOnBars, featureWindowMs } from '../deepDig/features';
+import { evaluateOnBars, featureWindowMs, type DeepDigFeatureDef } from '../deepDig/features';
 import { dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '../dbl5m';
 import type { TradeSignal } from '../signalLibrary';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -29,12 +29,14 @@ export function nativeGuardEvent(previous:Dbl5Row|undefined, row:Dbl5Row, scanSt
   return {id:'entry-guard-'+shortFishHash(stableEntryJson(evidence)),...evidence};
 }
 /** Read-only adapter; checkpoints, parameters and initialization follow the original native engine. */
-export function createPreEntryGuardReader(o:{config:PreEntryThreeStage;row:TradeSignal;start:number;load:FishReconstructionLoader;signal:AbortSignal}) {
-  const def=o.config.guard.rule.structure.definition,plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
-  const from=qualityHistoryFrom(o.load,Math.floor(o.start/FIVE)*FIVE-Math.ceil(featureWindowMs(def)/FIVE)*FIVE,FIVE);
+type NativeGuardOptions = {row:TradeSignal;start:number;load:FishReconstructionLoader;signal:AbortSignal};
+export function createNativeGuardReader(o:NativeGuardOptions,def:DeepDigFeatureDef,availableStart?:number) {
+  const plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
+  const warmStart=Math.floor(o.start/FIVE)*FIVE-Math.ceil(featureWindowMs(def)/FIVE)*FIVE;
+  const from=qualityHistoryFrom(o.load,Math.max(warmStart,Number.isFinite(availableStart)?Math.ceil(availableStart!/FIVE)*FIVE:-Infinity),FIVE);
   if(from<0)throw Error('三阶防守线初始化历史不足');
   let cursor=from,checkpoint:Dbl5Checkpoint|undefined,previous:Dbl5Row|undefined;
-  return async(at:number):Promise<{event?:EntryGuardEvent;line?:number;regime?:string;broken:boolean}>=>{
+  return async(at:number):Promise<{event?:EntryGuardEvent;row?:Dbl5Row;broken:boolean}>=>{
     let event:EntryGuardEvent|undefined,broken=false;
     const cut=Math.floor(at/FIVE)*FIVE;
     while(cursor<cut){
@@ -53,6 +55,14 @@ export function createPreEntryGuardReader(o:{config:PreEntryThreeStage;row:Trade
       }
       cursor=to;
     }
-    return {event,line:previous?.darvas_5m_guard??undefined,regime:previous?.darvas_5m_guard_regime??undefined,broken};
+    return {event,row:previous,broken};
+  };
+}
+
+export function createPreEntryGuardReader(o:NativeGuardOptions & {config:PreEntryThreeStage}) {
+  const read = createNativeGuardReader(o, o.config.guard.rule.structure.definition);
+  return async (at: number) => {
+    const {event,row,broken} = await read(at);
+    return {event,line:row?.darvas_5m_guard??undefined,regime:row?.darvas_5m_guard_regime??undefined,broken};
   };
 }

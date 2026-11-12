@@ -250,7 +250,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         let active:Awaited<ReturnType<typeof createPreEntryMarketReader>>|undefined,origin=record.startTime;
         return {condition,plan,start:available,async prepare(at:number){if(!active&&at>=available)active=await createPreEntryMarketReader({condition,row,since:available,origin,load,signal});},push(minute:Parameters<NonNullable<typeof active>['push']>[0]){active?.push(minute);},read(at:number,minute:Parameters<NonNullable<typeof active>['read']>[1]):EntryConditionReading{return active?.read(at,minute)??{id:condition.id,at,pending:'等待准入算法预热'};},trim(){active?.trim();},resetObservationOrigin(at:number){origin=at;active?.resetObservationOrigin(at);}};
       }));
-      const firstGate=exclusionEnabled ? createPreEntryGate({conditions:firstConfig,start:record.startTime,row,load,signal,allowEmptyObservation:fixedMinute!=null}) : undefined;
+      const firstGate=exclusionEnabled ? createPreEntryGate({conditions:firstConfig,start:record.startTime,row,load,signal,availableStart:start,allowEmptyObservation:fixedMinute!=null}) : undefined;
       const secondGate=exclusionEnabled ? createPreEntryGate({conditions:secondConfig,start:record.startTime,row,load,signal,latchHardStops:signalGate,allowEmptyObservation:fixedMinute!=null}) : undefined;
       const guardReader:(at:number)=>Promise<{event?:EntryGuardEvent;line?:number;regime?:string}>=admissionEnabled&&(!retry||config.admission!.guardEnabled)?createPreEntryGuardReader({config,row,start:record.startTime,load,signal}):async()=>({});
       const confirmations=new Map<string,{count:number;lastAt?:number}>();

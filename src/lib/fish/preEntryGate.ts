@@ -15,16 +15,16 @@ import { formatUTC8 } from '../timeFormat';
 const M = 60000, FIVE = 5 * M;
 const pricePlan = (interval: '1m' | '5m') => compileFishProgram({id:'pre-entry-price',name:'筛选价格',short:'价格',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval}, {statistic:'结果',direction:'>',threshold:0,constraints:[]});
 export const preEntryGuardWarmBars = (conditions?: PreEntryConditions) => {
-  const guards = activeAdditionVetoes(conditions?.entryVetoes).filter(v=>v.kind!=='fast-drop'&&v.historyHours==null);
+  const guards = activeAdditionVetoes(conditions?.entryVetoes).filter(v=>v.kind!=='fast-drop'&&v.kind!=='guard-distance'&&v.historyHours==null);
   return guards.length ? Math.max(87, ...guards.map(v=>v.lookbackBars??0)) : 0;
 };
 
 /** Price-path state is rebuilt causally from the original scan start on resume.
  * No position, quantity, fill, profit or account data is invented. */
-export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal; latchHardStops?: boolean; allowEmptyObservation?: boolean }) {
+export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal; latchHardStops?: boolean; allowEmptyObservation?: boolean; availableStart?: number }) {
   let entry = Math.ceil(o.start / M) * M;
-  const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes).filter(v=>v.historyHours==null);
-  const history=createVetoHistoryReader({rules:o.conditions.entryVetoes,entry:o.start,row:o.row,load:o.load,signal:o.signal});
+  const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes).filter(v=>v.historyHours==null&&v.kind!=='guard-distance');
+  const history=createVetoHistoryReader({rules:o.conditions.entryVetoes,entry:o.start,row:o.row,load:o.load,signal:o.signal,availableStart:o.availableStart});
   const priceVetoes = vetoes.filter(v=>v.kind!=='indicator'&&v.kind!=='box-stop');
   const boxes = vetoes.filter(v=>v.kind==='box-stop');
   const boxReader = createBoxStopReader({vetoes:boxes,row:o.row,entry,since:entry,load:o.load,signal:o.signal});
@@ -77,7 +77,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
       validateFishBars(prefix,to,(to-cursor)/M,M);
       for (const bar of prefix) await consume(bar);
     }
-    const historical=await history(at);
+    const historical=await history(at,minute);
     let blocked = boxHit??(historical.hit?`${historical.hit.label}：${historical.hit.reading}`:undefined);
     if (historicalHardStop) blocked ??= historicalHardStop.at === at ? historicalHardStop.reason : `${historicalHardStop.reason} · 历史触发于 ${formatUTC8(historicalHardStop.at)}`;
     blocked ??= priceHit(at);

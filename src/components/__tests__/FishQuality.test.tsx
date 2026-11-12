@@ -162,13 +162,12 @@ it('allows a veto-only sell plan to run and be fixed for detector comparison wit
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
  const s=state(),plan=s.study.sellPlans![0];plan.holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',5)];
  render(<FishQuality state={s}/>);
- const editor=screen.getByRole('button',{name:'设置状态 S 原始值卖出算法'});expect(editor).toHaveAttribute('title',expect.stringContaining('仅一票否决'));
+ expect(screen.queryByRole('button',{name:'设置状态 S 原始值卖出算法'})).toBeNull();
  // 【用户要求】2026-11-01 卖出列表头只留三栏名称（进程已删），与「静态最大回撤」同一行
  expect(screen.getAllByTestId('quality-sell-parts')[0]).toHaveTextContent(/^加仓次数.*几何仓位.*相对涨幅.*盈亏比$/);
- fireEvent.click(editor);fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
+ fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
  expect(s.selectSell).toHaveBeenCalledWith(plan.id);expect(screen.queryByRole('button',{name:'清除门槛'})).toBeNull();
- fireEvent.click(editor);
- expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
+
 });
 it('defaults to one row per symbol/time, toggles detector details from the header and preserves partial and bulk selection',()=>{
  const s=state(), ids=s.study.selectedRowIds!;
@@ -248,25 +247,26 @@ it('matches the cabin row layout, with two sells, one detector column, and three
   fireEvent.click(screen.getByRole('button', { name: /^鱼质量/, expanded: true })); expect(screen.queryByTestId('quality-fish-table')).toBeNull();
   expect(s.study.samples).toHaveLength(3);
 });
-it('edits raw S and CDA sell thresholds from their headers, applies explicitly, and does not configure detectors as exits', () => {
+it('opens sell parameter editing from monitoring conditions, outside the combination table', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '设置状态 S 原始值卖出算法' }));
-  fireEvent.click(screen.getByRole('button', { name: '0.45' }));
+  const table = within(screen.getByTestId('quality-fish-table'));
+  expect(table.queryByRole('button', { name: /^设置.*卖出算法$/ })).toBeNull();
+  fireEvent.click(screen.getByLabelText('持仓监测条件'));
+  expect(screen.getByTestId('sell-plan-draft-0')).toBeVisible();
   expect(s.setRule).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '保存参数' }));
-  expect(s.setRule).toHaveBeenCalledWith('sell-state-raw', { metric: 'state', direction: '<', threshold: .45 });
-  fireEvent.change(screen.getByLabelText('状态 S 原始值卖出门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '保存参数' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('有限数字');
+  expect(s.setSellPlans).not.toHaveBeenCalled();
 });
-it('lets the user fix one sell plan for detector comparisons from its header (no profit-distribution panel)', () => {
+it('lets the user fix one sell plan for detector comparisons from monitoring settings', () => {
   const s = state(), row = qualityComparisonRows(s.study)[0];
   s.study.cohortIds = []; // Old saved batches must not hide the list after removing this feature.
   s.study.sellPlans!.forEach((p, i) => { p.rule = { metric: p.metric, direction: '<', threshold: i ? -8 : .5 }; s.study.results.push({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed', returnPct: i ? -5 : 10 }); });
   render(<FishQuality state={s}/>);
   // 【用户要求】2026-10-26 盈亏分布模块删掉
   expect(screen.queryByRole('button', { name: /盈亏分布/ })).toBeNull(); expect(screen.queryByTestId('quality-distribution')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '设置状态 S 原始值卖出算法' }));
+  const settings=screen.getByLabelText('持仓监测条件');
+  fireEvent.click(settings);
   fireEvent.click(screen.getByRole('button', { name: '固定此方案，比较探测算法' }));
+  fireEvent.click(settings);
   expect(s.selectSell).toHaveBeenCalledWith('sell-state-raw');
   expect(screen.queryByRole('button', { name: /固定当前批次|换用全部/ })).toBeNull();
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
@@ -828,7 +828,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 });
 
 
-it('keeps sell settings and grouping while removing all combination-table statistics', () => {
+it('keeps grouping and removes combination-table statistics and sell settings', () => {
   const s = state(); render(<FishQuality state={s}/>);
   expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '14');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
@@ -841,9 +841,7 @@ it('keeps sell settings and grouping while removing all combination-table statis
   expect(screen.queryAllByRole('button', { name: /统计分析/ })).toHaveLength(0);
   expect(screen.queryByTestId('quality-statistics-dialog')).not.toBeInTheDocument();
   expect(screen.queryByTestId('quality-screening-statistics-dialog')).not.toBeInTheDocument();
-  const settings = within(screen.getAllByTestId('quality-sell-column')[0]).getByRole('button', { name: /^设置.*卖出算法$/ });
-  fireEvent.click(settings);
-  expect(settings).toHaveAttribute('aria-expanded', 'true');
+  expect(within(screen.getByTestId('quality-fish-table')).queryByRole('button', { name: /^设置.*卖出算法$/ })).toBeNull();
   expect(s.setRule).not.toHaveBeenCalled(); expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
 });
 
@@ -1230,8 +1228,18 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:'.8'}});
  fireEvent.change(within(shared).getByLabelText('镜像止盈卖出百分比'),{target:{value:'23'}});
  fireEvent.change(within(shared).getByLabelText('卖出算法 1 门槛'),{target:{value:'.45'}});
+ const guardSwitch='启用加仓否决 距 DBL-5 防守线过远',guardAtr='距 DBL-5 防守线过远 ATR倍数';
+ const editGuard=(branch:HTMLElement,atr:string)=>{
+  fireEvent.click(within(branch).getByRole('tab',{name:'第 3 次'}));
+  expect(within(branch).getByLabelText(guardSwitch)).not.toBeChecked();
+  fireEvent.click(within(branch).getByLabelText(guardSwitch));
+  fireEvent.change(within(branch).getByLabelText(guardAtr),{target:{value:atr}});
+ };
+ editGuard(shared,'2.25');
  fireEvent.click(within(copyEditor).getByRole('tab',{name:'进攻分支'}));
- fireEvent.change(within(copyEditor).getByTestId('router-branch-attack').querySelector('[aria-label="最多加仓次数"]')!,{target:{value:'4'}});
+ const attack=within(copyEditor).getByTestId('router-branch-attack');
+ fireEvent.change(within(attack).getByLabelText('最多加仓次数'),{target:{value:'4'}});
+ editGuard(attack,'4.75');
  // Switching back keeps unfinished edits; the root action builds both branch forms without an inner save.
  fireEvent.click(within(copyEditor).getByRole('tab',{name:'结构分支'}));expect(within(shared).getByLabelText('镜像止盈卖出百分比')).toHaveValue(23);
  fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).toHaveBeenCalledOnce();
@@ -1239,10 +1247,14 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  expect(copied.router!.structure.rule!.threshold).toBe(.45);expect(copied.router!.attack.rule!.threshold).toBe(.45);
  expect(copied.router!.structure.mirrorTakeProfit!.sellPct).toBe(23);expect(copied.router!.attack.mirrorTakeProfit!.sellPct).toBe(23);
  expect(copied.router!.attack.addition!.maxRounds).toBe(4);expect(copied.router!.structure.addition!.maxRounds).toBe(3);
+ expect(copied.router!.structure.addition!.rounds![2].entryVetoes).toMatchObject([{kind:'guard-distance',atr:2.25}]);
+ expect(copied.router!.attack.addition!.rounds![2].entryVetoes).toMatchObject([{kind:'guard-distance',atr:4.75}]);
  expect(s.study.sellPlans![0]).toEqual(preserved);expect(s.study.planTemplates![0].plan).toEqual(preserved);
  s.study=JSON.parse(JSON.stringify(s.study));view.rerender(<FishQuality state={s}/>);
  fireEvent.click(screen.getByLabelText('持仓监测条件'));fireEvent.click(screen.getByRole('button',{name:'把卖出算法 2 存为模板'}));fireEvent.change(screen.getByLabelText('模板名称'),{target:{value:'副本新组合'}});fireEvent.click(screen.getByRole('button',{name:'保存模板'}));
  expect(s.savePlanTemplate).toHaveBeenCalledWith(copied.id,'副本新组合');expect(s.study.planTemplates).toHaveLength(2);expect(s.study.planTemplates![1].plan!.router!.threshold).toBe(.8);expect(planVersionChanges(s.study.planTemplates![1].plan!)).toEqual([]);
+ expect(s.study.planTemplates![1].plan!.router!.structure.addition!.rounds![2].entryVetoes).toEqual(copied.router!.structure.addition!.rounds![2].entryVetoes);
+ expect(s.study.planTemplates![1].plan!.router!.attack.addition!.rounds![2].entryVetoes).toEqual(copied.router!.attack.addition!.rounds![2].entryVetoes);
 },60000);
 
 function chooseSource(value:string){const names:Record<string,string>={library:'信号库',fish:'鱼舱',mined:'捕捞库',turing:'图灵杯','pre-entry':'筛选库','':'全部来源'};fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:new RegExp('^'+names[value])}));}
