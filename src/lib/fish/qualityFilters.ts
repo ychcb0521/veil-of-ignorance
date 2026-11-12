@@ -1,7 +1,9 @@
 import { algorithmMetricMenu } from './algorithmMetricMenu';
+import { guardDistanceConfig } from './qualityAdditionVeto';
+import { guardDistanceSignalChoices } from './qualityGuardDistance';
 import {BOX_STOP_KIND,BOX_BREAK_CHOICE,isBoxBreak,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
-import { compileFeatureFormula, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { compileFeatureFormula, DBL5_DEF, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researchIndicators';
 import { shortFishHash } from './algorithm';
@@ -31,7 +33,7 @@ export const qualityFilterChoices = (definitions: readonly DeepDigFeatureDef[] =
 /** Only these three series can be newly selected; legacy builders above remain complete. */
 export function qualityFilterMenuChoices(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs(), originalPeriod = false): QualityFilterChoice[] {
   const {choices,defs}=build(definitions,originalPeriod);
-  return definitions.flatMap(def=>{
+  const menu = definitions.flatMap(def=>{
     const compiled=defs.get(def.id);if(!compiled)return [];
     const own=choices.filter(c=>c.featureId===def.id);
     return algorithmMetricMenu(originalPeriod ? def : compiled,own.map(c=>({name:c.metric,label:c.label}))).flatMap(metric=>{
@@ -39,6 +41,7 @@ export function qualityFilterMenuChoices(definitions: readonly DeepDigFeatureDef
       return choice?[{...choice,label:`${choice.group} ${metric.label}`}]:[];
     });
   });
+  return originalPeriod ? [...menu, ...guardDistanceSignalChoices] : menu;
 }
 export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', threshold: number, enabled = true, definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityBuyFilter {
   const {choices,defs}=build(definitions),choice=choices.find(c=>c.key===choiceKey),def=choice&&defs.get(choice.featureId);
@@ -54,9 +57,13 @@ export function makeQualitySignalMetrics(choiceKeys: readonly string[], definiti
   if (!choiceKeys.length) return [];
   const {choices, defs} = build(definitions, true);
   return choiceKeys.map(key => {
-    const choice = choices.find(choice => choice.key === key), def = choice && defs.get(choice.featureId);
+    const distance = guardDistanceSignalChoices.find(choice => choice.key === key);
+    const choice = distance ?? choices.find(choice => choice.key === key);
+    const def = distance ? {...DBL5_DEF, DBL5_config:guardDistanceConfig(distance.version).parameters}
+      : choice && defs.get(choice.featureId);
     if (!choice || !def) throw Error('未知的读数算法，请检查账号公式');
     const snapshot = metricSnapshot(choice, def, 0, '>');
+    if (distance) snapshot.unit = 'ATR';
     return {id:shortFishHash(JSON.stringify([key,snapshot.definitionKey,snapshot.interval])),label:choice.label,metric:choice.metric,snapshot};
   });
 }

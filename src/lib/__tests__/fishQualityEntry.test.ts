@@ -1,7 +1,10 @@
 import {expect,it,vi} from 'vitest';
 import {definitionKey} from '@/lib/deepDig/features';
+import {computeDbl5, DBL5_STEP, DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
+import {sample as dblBars} from './fixtures/dblBars';
+import {guardDistanceConfig} from '@/lib/fish/qualityAdditionVeto';
 import {makeQualitySignalMetrics,qualityFilterMenuChoices} from '@/lib/fish/qualityFilters';
-import {signalReadingKey} from '@/lib/fish/qualitySignalReadings';
+import {signalReadingCell,signalReadingKey} from '@/lib/fish/qualitySignalReadings';
 import {preserveQualitySignalReadings} from '@/lib/fish/qualitySignalReadingsStore';
 import {qualityEntryKey,qualityEntryParts,evaluateQualityEntry,mergeQualityEntryReading,preserveQualityEntry,type QualityEntryTarget} from '@/lib/fish/qualityEntry';
 import {collectFishQuality,evaluateQualitySample,newQualityStudy,type QualityGroup,type QualityResult,type QualitySample} from '@/lib/fish/quality';
@@ -80,4 +83,54 @@ it('retains stored signal values through a failed retry or an old tab save and p
   expect(preserveQualitySignalReadings(saved,study)).toMatchObject(saved);
   const removed = {...study,signalMetrics:[],signalMetricsUpdatedAt:T+1,signalReadings:[{key:'r',error:'断线'}]};
   expect(preserveQualitySignalReadings(saved,removed)).toMatchObject({signalMetrics:[],signalMetricsUpdatedAt:T+1,signalReadings:saved.signalReadings});
+});
+
+it('adds versioned DBL-5 ATR distance only to signal readings and reads signed values at the original signal time', async () => {
+  const choices = qualityFilterMenuChoices([],true);
+  expect(choices.map(choice=>choice.label)).toEqual([
+    '距 DBL-5 防守线（ATR） · 防守线 v1',
+    '距 DBL-5 防守线（ATR） · 防守线-20261112',
+  ]);
+  expect(qualityFilterMenuChoices([])).toEqual([]);
+  const [metric,retest] = makeQualitySignalMetrics(choices.map(choice=>choice.key),[]);
+  expect(metric.id).not.toBe(retest.id);
+  expect(JSON.parse(retest.snapshot.definitionKey).some((value:unknown)=>typeof value==='string'&&value.includes(DBL5_RETEST_GUARD_VERSION))).toBe(true);
+
+  const five=DBL5_STEP, structure=new Map(dblBars().map((bar,i)=>[T+(i-14)*five,{...bar,openTime:T+(i-14)*five,volume:1}]));
+  const barAt=(openTime:number)=>structure.get(openTime)??{
+    openTime,open:100,high:101,low:99,close:100,volume:1,takerBuyVolume:.5,DBL5_tick_size:1,
+  };
+  const native=computeDbl5(Array.from({length:288},(_,i)=>barAt(T-288*five+i*five)),{
+    symbol:source.symbol,config:guardDistanceConfig().parameters,
+  }).rows.at(-1)!;
+  expect(native.darvas_5m_guard).toBeGreaterThan(0);
+  const line=native.darvas_5m_guard!,atr=native.darvas_5m_guard_atr!;
+  const load:FishReconstructionLoader=async(_row,from,to,program)=>Array.from({length:(to-from)/program.step},(_,i)=>{
+    const openTime=from+i*program.step;
+    if(program.step===five)return barAt(openTime);
+    const close=openTime===T?line+2*atr:openTime===T+M?line-3*atr:line;
+    return {openTime,open:close,high:close,low:close,close,volume:1,takerBuyVolume:.5};
+  });
+  const samples=[1,2,3].map(i=>{
+    const original=T+i*M+19_000,matched=T+20*M;
+    return {id:'screened-'+i,enteredAt:matched,importedAt:matched,basis:'signal' as const,groups:[],
+      source:{...source,timeMs:matched,preEntryMonitor:{recordId:'r'+i,roundId:'p',sourceId:source.id,sourceTime:original,matchedAt:matched}}};
+  });
+  const spy=vi.fn(load),onSignalReading=vi.fn(),onResult=vi.fn();
+  const options={study:newQualityStudy(),task:'signal-values' as const,signalReadingBatches:[{metric,rows:samples}],signal:signal(),
+    onProgress:vi.fn(),onResult,onSignalReading};
+  await collectFishQuality(options,spy,T+25*M);
+  const readings=onSignalReading.mock.calls.map(([reading])=>reading);
+  expect(readings.map(reading=>reading.at)).toEqual([T+M,T+2*M,T+3*M]);
+  expect(readings[0].value).toBeCloseTo(2);
+  expect(readings[1].value).toBeCloseTo(-3);
+  expect(readings[2].value).toBe(0);
+  expect(spy.mock.calls.filter(([, , ,p])=>p.step===five).map(([, ,to])=>to)).toEqual([T,T,T]);
+  expect(spy.mock.calls.filter(([, , ,p])=>p.step===M).map(([, ,to])=>to)).toEqual([T+M,T+2*M,T+3*M]);
+  expect(spy.mock.calls.every(([, , ,p])=>!p.compiled.usesBtc)).toBe(true);
+  expect(signalReadingCell(samples[0],metric,new Map([[readings[0].key,readings[0]]])).text).toBe('+2 ATR');
+  expect(onResult).not.toHaveBeenCalled();
+  onSignalReading.mockClear();
+  await collectFishQuality({...options,signalReadingBatches:[{metric,rows:[samples[0]]}],marketStart:async()=>T},load,T+25*M);
+  expect(onSignalReading).toHaveBeenCalledWith({key:signalReadingKey(samples[0],metric),error:expect.stringContaining('等待有效防守线')});
 });
