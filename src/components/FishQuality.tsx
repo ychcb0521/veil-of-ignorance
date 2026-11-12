@@ -621,10 +621,11 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   useLayoutEffect(()=>()=>{if(!archiveView&&currentHistoryEntry()===mountedEntry.current)rememberLatestView.current();},[archiveView]);
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
   const [statistics, setStatistics] = useState<QualityStatisticsRequest | null>(null);
+  const { samples, results } = study;
   const allRows = useMemo(() => {
-    const rows = qualityDisplayRows(study);
+    const rows = qualityDisplayRows({ samples });
     return archiveView ? rows : rows.filter(row => !isDelayedTuringReplaySample(row.source));
-  }, [study, archiveView]);
+  }, [samples, archiveView]);
   const [screeningStatistics,setScreeningStatistics]=useState(false);
   const screeningResults=useMemo(()=>qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library),[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView]);
   const screeningIndex=useMemo(()=>screeningResultIndex(screeningResults),[screeningResults]);
@@ -655,7 +656,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const detectorSignals = useMemo(() => { const ids = new Map<string, Set<string>>(); for (const r of searched) if (r.detectorId) { if (!ids.has(r.detectorId)) ids.set(r.detectorId, new Set()); ids.get(r.detectorId)!.add(r.signalId ?? r.id); } return ids; }, [searched]);
   // 一项默认算法可能对应几个历史版本的组：按信号去重计数
   const signalsOf = (ids: readonly string[]) => new Set(ids.flatMap(id => [...(detectorSignals.get(id) ?? [])])).size;
-  const resultMap = useMemo(() => qualityResultMap(study), [study]);
+  const resultMap = useMemo(() => qualityResultMap({ results }), [results]);
   // 旧试验兼容绑定过滤；新工作流的过滤列与卖出结果各自显示。
   const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings, signalMetrics = study.signalMetrics;
   const readingsOn = !!state.runStaticSettings && !!signalMetrics?.length;

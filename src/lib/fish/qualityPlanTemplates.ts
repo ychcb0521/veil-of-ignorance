@@ -60,6 +60,16 @@ export function campaignPlanForTemplate(plan: QualityGroup): QualityGroup {
   if (hasPreBoxAdditionShape(plan)) return withLegacyEngine(plan);
   throw new Error('这场战役算于 2026-11-02 版本保护之前，当时的算法版本没有记录，用现在的代码重跑不能保证得到同样的结果，所以不能存为模板');
 }
+export function sameQualityPlanTemplates(
+  left: readonly QualityPlanTemplate[] | undefined,
+  right: readonly QualityPlanTemplate[],
+): boolean {
+  if (left === right) return true;
+  if (!left) return right.length === 0;
+  return left.length === right.length && left.every((item, index) =>
+    item === right[index] || JSON.stringify(item) === JSON.stringify(right[index]));
+}
+
 /** 两台设备合并：同一模板取 updatedAt 较新的一份（含删除墓碑）。 */
 export function mergeQualityPlanTemplates(left?: readonly QualityPlanTemplate[], right?: readonly QualityPlanTemplate[]): QualityPlanTemplate[] | undefined {
   if (!left?.length && !right?.length) return left?.length === 0 || right?.length === 0 ? [] : undefined;

@@ -48,6 +48,16 @@ export function SaveTemplateButton({ index, defaultName, disabledReason, onSave,
       <button type="button" className="rounded bg-primary px-2 py-1 text-primary-foreground" onClick={submit}>保存模板</button></div>
   </PopoverContent></Popover>;
 }
+// Saved plan objects are immutable. Renders of an open library reuse their version checks.
+const templateDetails = new WeakMap<QualityGroup, { summary: string; versionChanged: boolean }>();
+function getTemplateDetails(plan: QualityGroup) {
+  const cached = templateDetails.get(plan);
+  if (cached) return cached;
+  const details = { summary: qualityPlanTemplateSummary(plan), versionChanged: planVersionChanges(plan).length > 0 };
+  templateDetails.set(plan, details);
+  return details;
+}
+
 export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,purpose='sell' }: {purpose?:'sell'|'entry'; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void }) {
   const templates=actions.templates.filter(t=>purpose==='entry'?!!t.plan.preEntryThreeStage:!t.plan.preEntryThreeStage);
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
@@ -87,15 +97,18 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,p
       </li>)}</ul>
     </div>}
     {!templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。</p>
-      : <ul className="max-h-80 overflow-y-auto">{templates.map(t => <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
-        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="truncate text-[10px] text-muted-foreground" title={qualityPlanTemplateSummary(t.plan)}>{qualityPlanTemplateSummary(t.plan)}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${planVersionChanges(t.plan).length ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${t.name} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{planVersionChanges(t.plan).length ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
+      : <ul className="max-h-80 overflow-y-auto">{templates.map(t => {
+        const { summary, versionChanged } = getTemplateDetails(t.plan);
+        return <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
+        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="truncate text-[10px] text-muted-foreground" title={summary}>{summary}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${versionChanged ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${t.name} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{versionChanged ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
           {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5"><PlanVersionList plan={t.plan}/></div>}</div>
-        <button type="button" disabled={planVersionChanges(t.plan).length > 0} title={planVersionChanges(t.plan).length ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${t.name} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
+        <button type="button" disabled={versionChanged} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${t.name} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
         {confirm === t.id
           ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${t.name}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>
           : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${t.name}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}
-      </li>)}</ul>}
-    <FishQualityTemplateArchive owner={actions.owner} restore={actions.restore}/>
+      </li>;
+      })}</ul>}
+    <FishQualityTemplateArchive owner={actions.owner} purpose={purpose} restore={actions.restore}/>
   </PopoverContent></Popover>;
 }
 export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell' }: {

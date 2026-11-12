@@ -15,7 +15,7 @@ import { readQualityBatchLock, saveQualityBatchLock, sameQualityBatch, type Qual
 import {qualityMonitoringSample} from '@/lib/fish/qualityAdmissionTime';
 import { backfillPlanVersions, freezeQualityPlan, refreezeSyncedFormulas } from '@/lib/fish/qualityPlanVersions';
 import { validatePayoffStops } from '@/lib/fish/qualityVeto';
-import { restoreQualityPlanTemplate, mergeQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
+import { restoreQualityPlanTemplate, mergeQualityPlanTemplates, sameQualityPlanTemplates, campaignPlanForTemplate, deleteQualityPlanTemplate, renameQualityPlanTemplate, saveQualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
 import {copyMonitorStudy,editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 import {preserveQualityMonitorLibrary} from '@/lib/fish/qualityMonitorLibrary';
 import { qualityOrigins } from '@/lib/fish/qualitySources';
@@ -138,15 +138,27 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return()=>channel.close();
   },[owner,change]);
   // Backfill legacy study templates into the independent catalog. The server archives every revision.
-  useEffect(()=>{
-    if(!readyRef.current||account.current!==owner)return;
-    const merged=mergeQualityPlanTemplates(current.current.planTemplates,templateCatalog)??[];
-    if(JSON.stringify(merged)!==JSON.stringify(current.current.planTemplates??[]))change(s=>({...s,planTemplates:mergeQualityPlanTemplates(s.planTemplates,templateCatalog)}));
-    if(merged.length&&JSON.stringify(merged)!==JSON.stringify(templateCatalog))setTemplateCatalog(merged);
-  },[templateCatalog,owner,ready,change,setTemplateCatalog]);
-  const changeTemplates=useCallback((apply:(s:FishQualityStudy)=>FishQualityStudy)=>change(s=>{
-    const next=apply(s);setTemplateCatalog(next.planTemplates??[]);return next;
-  }),[change,setTemplateCatalog]);
+  useEffect(() => {
+    if (!readyRef.current || account.current !== owner) return;
+    const previous = current.current;
+    if (previous.planTemplates === templateCatalog) return;
+    const merged = mergeQualityPlanTemplates(previous.planTemplates, templateCatalog) ?? [];
+    if (!sameQualityPlanTemplates(previous.planTemplates, merged)) {
+      const next = { ...previous, planTemplates: merged };
+      current.current = next;
+      setStudy(next);
+    }
+    if (!sameQualityPlanTemplates(templateCatalog, merged)) setTemplateCatalog(merged);
+  }, [templateCatalog, owner, ready, setTemplateCatalog]);
+  const changeTemplates = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
+    const previous = current.current;
+    const next = apply(previous);
+    if (next === previous) return;
+    // Template edits leave samples, ratings and source deletion marks intact.
+    setTemplateCatalog(next.planTemplates ?? []);
+    current.current = next;
+    setStudy(next);
+  }, [setTemplateCatalog]);
   const postExit=useQualityPostExit(owner,ready && readyRef.current,study,run,change);
   const entry=useQualityEntryReadings(owner,ready && readyRef.current,study,run,change);
   const acceptReading = useCallback((reading: QualityFilterReading) => change(s => {

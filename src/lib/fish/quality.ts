@@ -433,14 +433,14 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
 // 样本数组不变时复用合并结果：评估中每出一个结果 study 都会换，但 samples 不变，不必整表重算。
 const comparisonCache = new WeakMap<readonly QualitySample[], QualitySample[]>();
-export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] {
+export function qualityComparisonRows(study: Pick<FishQualityStudy, 'samples'>): QualitySample[] {
   const cached = comparisonCache.get(study.samples);
   if (cached) return cached;
   const built = buildComparisonRows(study);
   comparisonCache.set(study.samples, built);
   return built;
 }
-function buildComparisonRows(study: FishQualityStudy): QualitySample[] {
+function buildComparisonRows(study: Pick<FishQualityStudy, 'samples'>): QualitySample[] {
   const rows = new Map<string, QualitySample>();
   for (const sample of study.samples) {
     const identity = qualityEntryIdentity(sample.source, sample.enteredAt);
@@ -477,7 +477,7 @@ export function migrateQualitySourceRows(study:FishQualityStudy):FishQualityStud
  const newest=new Map<string,QualityResult>();for(const r of results)if(!newest.has(r.key)||newest.get(r.key)!.evaluatedAt<=r.evaluatedAt)newest.set(r.key,r);
  return {...study,results:[...newest.values()],selectedRowIds:[...new Set(selectedRowIds)]};
 }
-export const qualityDisplayRows = (study: FishQualityStudy) => expandQualityRows(qualityComparisonRows(study));
+export const qualityDisplayRows = (study: Pick<FishQualityStudy, 'samples'>) => expandQualityRows(qualityComparisonRows(study));
 export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
   if (!study.sellPlans && !study.independentFilters) return study.samples.filter(s => !isDelayedTuringReplaySample(s.source));
   const signals = qualityComparisonRows(study).filter(s => !isDelayedTuringReplaySample(s.source));

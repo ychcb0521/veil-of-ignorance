@@ -338,7 +338,7 @@ export function setActiveSyncUser(userId: string | null): void {
  * usePersistedState 每次写 localStorage 后调用。按逻辑键防抖合并，
  * 同一键连续写只推最后一版。
  */
-export function queueSimStatePush(userId: string, key: string, value: unknown): void {
+export function queueSimStatePush(userId: string, key: string, value: unknown, serializedValue?: string): void {
   if (!userId || EXCLUDED_KEYS.has(key) || tableMissing) return;
   // 第一次见到某个用户的写入即认定会话归属，晚于它的监听器才有正确的 id 可读。
   if (activeUserId !== userId) setActiveSyncUser(userId);
@@ -351,7 +351,7 @@ export function queueSimStatePush(userId: string, key: string, value: unknown): 
   // 先按入队时刻记一次，保证「写了但还没推上去」的本地值也受护栏保护；
   // 推送成功后会再对齐到那一行真正的 updated_at（writeShadowTs 只进不退）。
   try {
-    writePersistedValueShadowTs(storageKeyFor(key, userId), JSON.stringify(value), Date.now());
+    writePersistedValueShadowTs(storageKeyFor(key, userId), serializedValue ?? JSON.stringify(value), Date.now());
   } catch {
     /* 非序列化值由推送路径处理，不能阻断当前状态更新。 */
   }

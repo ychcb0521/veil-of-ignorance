@@ -135,7 +135,7 @@ export function syncQualityThresholdDefinitions(study: FishQualityStudy, definit
 }
 
 export const qualitySellSuggestions = (plan: Pick<QualityGroup, 'snapshot'>) => plan.snapshot.featureId === 'state' ? [.5, .45, .4] : [0, -8, -15];
-export function qualityResultMap(study: FishQualityStudy) { return new Map(study.results.map(r => [r.key, r])); }
+export function qualityResultMap(study: Pick<FishQualityStudy, 'results'>) { return new Map(study.results.map(r => [r.key, r])); }
 export const qualityRowResult = (study: FishQualityStudy, row: QualitySample, plan: QualityGroup, results = qualityResultMap(study)) => results.get(qualityResultKey(row, plan, study.observeHours));
 export function qualityBatchRows(study: FishQualityStudy): QualitySample[] {
   return qualityComparisonRows(study);
