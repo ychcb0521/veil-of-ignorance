@@ -398,19 +398,17 @@ it('saves standalone conditions and shows their judgments without masking sellin
   expect(screen.queryByTestId('quality-holding-veto-editor')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '保存过滤条件' }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
   expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setFilters).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: '保存过滤条件' }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
   expect(s.setFilters).toHaveBeenCalledWith([expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })]);
   cleanup();
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
   s.study = separateQualityFilters({ ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] });
   render(<FishQuality state={s}/>);
-  // 旧版本的全局过滤沿用到每套方案
-  expect(screen.queryByText('1 条买入条件')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '买前过滤说明' }));
-  expect(screen.getByText('1 条买入条件')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '买前过滤说明' }));
+  fireEvent.click(screen.getByRole('button', { name: '静态过滤说明' }));
+  expect(screen.getByText(/信号时点读数按原信号时间生成/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '静态过滤说明' }));
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('未买入')).toBeNull();
   expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveAttribute('data-filter-state','fail');
   // 【用户要求】2026-10-26 比较卖出与比较探测合并为一个视图：没有分页
@@ -631,7 +629,7 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));
   expect(screen.queryByRole('tablist',{name:'选择要设置过滤的卖出方案'})).toBeNull();
   fireEvent.change(screen.getByLabelText('买入条件 1 门槛'),{target:{value:'0.8'}});
-  fireEvent.click(screen.getByRole('button',{name:'保存过滤条件'}));
+  fireEvent.click(screen.getByRole('button',{name:'保存设置'}));
   expect(s.setFilters).toHaveBeenLastCalledWith([expect.objectContaining({metric:'state',threshold:.8})]);
   expect(s.start).not.toHaveBeenCalled(); expect(s.startFilter).not.toHaveBeenCalled();
 });
@@ -897,11 +895,11 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  const s=state();s.study=separateQualityFilters(s.study);const h=render(<FishQuality state={s}/>);
  expect(screen.getByRole('button',{name:'开始过滤'})).toBeDisabled();
  // 旁边已有「条件设置」，不再另写「未设置过滤条件 · 点此设置」；原因放在按钮悬停里
- expect(screen.queryByText(/点此设置/)).toBeNull();expect(screen.getByRole('button',{name:'开始过滤'})).toHaveAttribute('title','先设置并启用买入过滤条件');
+ expect(screen.queryByText(/点此设置/)).toBeNull();expect(screen.getByRole('button',{name:'开始过滤'})).toHaveAttribute('title','先设置并启用买入过滤条件，或添加读数算法');
  fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
  cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
  s.resumeFiltering=vi.fn();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.resumeFiltering).toHaveBeenCalledOnce();expect(s.startFilter).not.toHaveBeenCalled();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
- cleanup();render(<FishQuality state={{...s,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
+ cleanup();render(<FishQuality state={{...s,resumeFiltering:undefined,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
 });
 
 it('offers mirror defaults and applies custom percentages atomically with holding vetoes, rejecting invalid values',()=>{

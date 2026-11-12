@@ -51,6 +51,7 @@ function metricSnapshot(choice: QualityFilterChoice, def: DeepDigFeatureDef, thr
   return {featureId:def.id,featureShort:def.short,featureName:def.name,definitionKey:definitionKey(def),statistic:choice.metric,interval:intervalOf(def),scale:1,unit:'',threshold,direction,cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0};
 }
 export function makeQualitySignalMetrics(choiceKeys: readonly string[], definitions: readonly DeepDigFeatureDef[]): QualitySignalMetric[] {
+  if (!choiceKeys.length) return [];
   const {choices, defs} = build(definitions, true);
   return choiceKeys.map(key => {
     const choice = choices.find(choice => choice.key === key), def = choice && defs.get(choice.featureId);
@@ -59,7 +60,7 @@ export function makeQualitySignalMetrics(choiceKeys: readonly string[], definiti
     return {id:shortFishHash(JSON.stringify([key,snapshot.definitionKey,snapshot.interval])),label:choice.label,metric:choice.metric,snapshot};
   });
 }
-export const qualityFilterChoiceKey = (f: QualityBuyFilter) => `${f.snapshot.featureId}:${f.metric}`;
+export const qualityFilterChoiceKey = <T extends Pick<QualityBuyFilter, 'snapshot' | 'metric'>>(f: T) => `${f.snapshot.featureId}:${f.metric}`;
 export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {
   if(choiceKey===PAYOFF_STOP_KIND){const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,'>=',threshold]))}`,label:PAYOFF_STOP_LABEL,kind:PAYOFF_STOP_KIND,direction:'>=',threshold,enabled};validateHoldingVeto(v);return v;}
   const risk=isHoldingPriceChoice(choiceKey),addition=choiceKey===ADDITION_PROFIT_KIND;

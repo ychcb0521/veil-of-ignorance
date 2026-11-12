@@ -399,6 +399,10 @@ it('defaults to a one-time signal gate and fingerprints the tracking path separa
   expect(planVersionChanges({...saved,preEntryThreeStage:tracked.preEntryThreeStage}).length).toBeGreaterThan(0);
   expect(await run(saved,{load:loader([110,120])})).toMatchObject({status:'unmatched',signalGate:{status:'blocked'}});
   expect((await run(tracked,{load:loader([70,110,120])})).trackedGate?.at).toBe(T+2*M);
+  const staticPass = {...tracked,preEntryThreeStage:{...tracked.preEntryThreeStage,required:[condition('门槛',95)]}};
+  const result = await run(staticPass,{load:loader([75,110])});
+  expect(result).toMatchObject({status:'matched',matchedAt:T+2*M,signalGate:{status:'pass',at:T}});
+  expect(result.trackedGate).toBeUndefined();
 });
 
 it.each([true,false])('tracks until the first simultaneous gate pass and ignores a stale event (static selected=%s)', async (staticPath) => {
