@@ -21,7 +21,7 @@ export function FishScreeningProcessButton({results}:{results:readonly QualitySc
             {reading.label??reading.id} = {reading.value??'—'}（{reading.direction} {reading.threshold}） · {reading.pending??(reading.met?'满足':'未满足')}
           </p>)}
         </article>}
-        {r.trackedGate&&<p className="rounded-md border border-border/60 p-3">⓪ 追踪捕捉通过 · {time(r.trackedGate.at)}</p>}
+        {r.trackedGate&&<p className="rounded-md border border-border/60 p-3">⓪ 动态门槛通过 · {time(r.trackedGate.at)}</p>}
         {(r.signalGate?.status!=='blocked'||round.plans?.some(plan=>plan.id===r.planId&&plan.preEntryThreeStage?.requiredPaths?.tracking))&&(!r.exclusionProcess?<div className="space-y-1 text-muted-foreground"><p>这条历史记录未保存完整排除过程，以下仅列最后一次已保存摘要。</p>{(()=>{const last=[...(r.lastVeto?[{at:r.lastVeto.at,reason:r.lastVeto.reason}]:[]),...(r.missedGuard?[{at:r.missedGuard.event.at,reason:r.missedGuard.reason}]:[])].reduce<{at:number;reason:string}|undefined>((a,e)=>!a||e.at>=a.at?e:a,undefined);return last?<p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 font-semibold text-destructive">{time(last.at)} · 最后排除：{last.reason}</p>:<p>{r.detail??'暂无排除摘要'}</p>;})()}</div>:<>
           {!latestScreeningExclusion(r.exclusionProcess).length&&<p className="text-muted-foreground">尚未记录排除原因。</p>}
           {latestScreeningExclusion(r.exclusionProcess).map((e,i)=>{

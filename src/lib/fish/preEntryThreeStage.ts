@@ -87,7 +87,7 @@ export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is
   if (c.version === PRE_ENTRY_TRACKED_GATE_VERSION) {
     const paths = c.requiredPaths;
     if (!paths || typeof paths.static !== 'boolean' || typeof paths.tracking !== 'boolean' || !paths.static && !paths.tracking) throw Error('请至少选择一种必要条件路径');
-  } else if (c.requiredPaths) throw Error('追踪捕捉须另存为新方案');
+  } else if (c.requiredPaths) throw Error('动态门槛须另存为新方案');
   if (c.observationBasis !== (retry ? 'retry-origin-v2' : 'scan-origin-v1')) throw Error('三阶筛选版本不可用，请保留原方案');
   const ids = new Set<string>();
   const unique = (id: string) => { if (!id || ids.has(id)) throw Error('三阶条件编号重复'); ids.add(id); };

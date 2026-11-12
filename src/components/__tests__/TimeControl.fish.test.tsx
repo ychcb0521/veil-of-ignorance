@@ -198,7 +198,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.getByRole('button',{name:/^新鱼/})).toHaveTextContent('0');
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('BBBUSDT'));
-    expect(screen.getByRole('button',{name:'鱼舱',exact:true})).toHaveTextContent(/^鱼舱$/);
+    expect(screen.getByRole('button',{name:'鱼舱'})).toHaveTextContent(/^鱼舱$/);
     expect(loadFishSignals().filter(s => s.freshCatch).map(s => s.symbol)).toEqual(['BBBUSDT']);
     // 第二轮：命中 AAA（以前就有），BBB 归入鱼
     mocks.scan.mockImplementation(async o => { o.onSignal(SIGNAL); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });
@@ -328,7 +328,7 @@ it('鱼舱合并三轮相同行，标题不显示数量，月份计数正确，�
  fireEvent.click(screen.getByRole('button',{name:/^渔/}));
  const cabin=screen.getByTestId('fish-old');
  expect(within(cabin).getAllByText('AAAUSDT')).toHaveLength(1);
- expect(within(cabin).getByRole('button',{name:'鱼舱',exact:true})).toHaveTextContent(/^鱼舱$/);
+ expect(within(cabin).getByRole('button',{name:'鱼舱'})).toHaveTextContent(/^鱼舱$/);
  expect(within(cabin).getByLabelText('鱼舱的月份')).toHaveDisplayValue('全部月份（1）');
  expect(screen.getByRole('button',{name:'渔'})).toBeInTheDocument();
  fireEvent.click(within(cabin).getByRole('radio',{name:'5 星'}));

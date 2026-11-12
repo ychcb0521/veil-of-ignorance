@@ -138,14 +138,14 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         </div><p className="mt-2 text-muted-foreground">仅复制所选轮次的市场条件；原探测算法按每条原信号的冻结公式和门槛判断。实际成本、分段持仓及动态退出确认不能直接转换。来源配置和旧模板保持原样。</p>
       </details>
       <section className="screening-stage space-y-3" data-testid="three-stage-zero">
-        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">⓪ 必要条件</h4><FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才具备入选资格。未设置必要条件时，直接检查后两阶段。</p><p>{trackedGate?'静态门槛在原信号时点判断一次。追踪捕捉在原截止时间内逐步检查，首次全部满足后观察新事件。两项都启用时，任一路径通过即可。':signalGate?'只在原信号时点判断一次。逐分钟复原使用截至信号时刻已结束的分钟，收盘模式读取当时已收盘的原周期。重筛沿用本次判定。':'此版本逐分钟判断，必要条件须在准入时点同时满足。'}</p><p>原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">{trackedGate?'至少一条路径':signalGate?'仅信号时点':'全部满足'}</span></div>
+        <div className="flex items-center gap-0.5"><h4 className="text-xs font-medium">⓪ 必要条件</h4><FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才具备入选资格。未设置必要条件时，直接检查后两阶段。</p><p>{trackedGate?'静态门槛在原信号时点判断一次。动态门槛在原截止时间内逐步检查，首次全部满足后观察新事件。两项都启用时，任一路径通过即可。':signalGate?'只在原信号时点判断一次。逐分钟复原使用截至信号时刻已结束的分钟，收盘模式读取当时已收盘的原周期。重筛沿用本次判定。':'此版本逐分钟判断，必要条件须在准入时点同时满足。'}</p><p>原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">{trackedGate?'至少一条路径':signalGate?'仅信号时点':'全部满足'}</span></div>
         {trackedGate && c.requiredPaths ? <fieldset className="flex flex-wrap gap-4 text-[11px]">
           <legend className="mb-1 text-muted-foreground">必要条件路径</legend>
           <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={c.requiredPaths.static} onChange={event=>patch({requiredPaths:{...c.requiredPaths!,static:event.target.checked}})}/>静态门槛</label>
-          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={c.requiredPaths.tracking} onChange={event=>patch({requiredPaths:{...c.requiredPaths!,tracking:event.target.checked}})}/>追踪捕捉</label>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={c.requiredPaths.tracking} onChange={event=>patch({requiredPaths:{...c.requiredPaths!,tracking:event.target.checked}})}/>动态门槛</label>
         </fieldset> : <>
           <p className="text-muted-foreground">{signalGate?'所有已启用的条件须在原信号时点满足。':'所有已启用的条件须在准入时点同时满足。'}</p>
-          <button type="button" className={button+' text-primary'} onClick={createSignalGateCopy}>使用静态门槛 / 追踪捕捉（另存副本）</button>
+          <button type="button" className={button+' text-primary'} onClick={createSignalGateCopy}>使用静态门槛 / 动态门槛（另存副本）</button>
         </>}
         {c.required.map((f,i)=><div key={f.id}>{conditionEditor(f,value=>patch({required:c.required.map((old,j)=>j===i?value:old)}),()=>patch({required:c.required.filter((_,j)=>j!==i)}),'必要条件 '+(i+1)+' ')}</div>)}
         {!c.required.length&&<p className="text-[11px] text-muted-foreground">{retry?'未设置额外必要条件；满足任一启用的准入标准后，继续检查排除门槛。':'未设置额外指标门槛；仍须通过防守线事件与排除门槛。'}</p>}
