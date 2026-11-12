@@ -26,10 +26,10 @@ it('removes seller-error columns and keeps counterfactuals directly after holdin
  expect(screen.queryAllByTestId('quality-sell-error-summary')).toHaveLength(0);
  const held=screen.getByRole('button',{name:'按'+a.label+'持仓时间排序'}).closest('th')!;
  expect(held.nextElementSibling).toHaveAttribute('data-testid','quality-post-exit-folded');
- expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','14');
+ expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan','14');
  expect(s.postExit.request).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole('button',{name:'展开'+a.label+'卖后反事实'}));
- expect(screen.getByLabelText('卖出类别统计')).toHaveAttribute('colspan','23');
+ expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan','23');
  const columns=screen.getByTestId('quality-fish-table').querySelectorAll('col').length;
  for(const bodyRow of screen.getAllByTestId('quality-fish-row'))expect(within(bodyRow).getAllByRole('cell')).toHaveLength(columns);
  expect(screen.getAllByTestId('quality-post-exit-header')).toHaveLength(10);

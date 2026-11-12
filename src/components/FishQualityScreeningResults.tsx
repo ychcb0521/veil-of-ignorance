@@ -1,6 +1,5 @@
 import {FishScreeningProcessButton} from './FishScreeningProcess';
-import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from './ui/dialog';
-import {screeningCell,screeningStatus,type QualityScreeningResult} from '@/lib/fish/qualityScreeningResults';
+import {screeningCell,type QualityScreeningResult} from '@/lib/fish/qualityScreeningResults';
 export type ScreeningSortKey='screening:plan'|'screening:status'|'screening:time';
 const columns=[['screening:plan','筛选方案'],['screening:status','筛选结果'],['screening:time','首次满足时间']] as const;
 export function ScreeningHeaders({cell,sort,ascending,onSort}:{cell:string;sort:string;ascending:boolean;onSort:(key:ScreeningSortKey)=>void}){
@@ -9,8 +8,4 @@ export function ScreeningHeaders({cell,sort,ascending,onSort}:{cell:string;sort:
 export function ScreeningCells({cell,results}:{cell:string;results:QualityScreeningResult[]}){
  const value=screeningCell(results);
  return <><td className={`${cell} border-l border-t border-border/40 text-muted-foreground`} data-testid="quality-screening-plan" title={value.detail}>{value.plan}</td><td className={`${cell} border-l border-t border-border/40 ${value.matched?'text-emerald-600 dark:text-emerald-400':value.error?'text-destructive':'text-muted-foreground'}`} data-testid="quality-screening-result" title={value.detail}>{value.status}</td><td className={`${cell} border-l border-t border-border/40 font-mono text-muted-foreground`} data-testid="quality-screening-time" title={value.detail}>{value.at}</td><td className={`${cell} border-l border-t border-border/40`} data-testid="quality-screening-process"><FishScreeningProcessButton results={results}/></td></>;
-}
-export function ScreeningStatistics({results,onClose}:{results:QualityScreeningResult[];onClose:()=>void}){
- const counts=Object.entries(screeningStatus).map(([status,label])=>({status,label,n:results.filter(r=>r.record.status===status).length}));
- return <Dialog open onOpenChange={open=>{if(!open)onClose();}}><DialogContent className="flex max-h-[90dvh] w-[calc(100vw-2rem)] max-w-6xl flex-col gap-0 overflow-hidden p-0" data-testid="quality-screening-statistics-dialog"><DialogHeader className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5 text-left"><DialogTitle className="pr-8 text-base">动态筛选 · 统计分析</DialogTitle><DialogDescription className="text-[11px] leading-relaxed">当前组合表筛选范围内的动态筛选记录 · 同一记录仅计一次 · 不重算条件或收益</DialogDescription></DialogHeader><div className="space-y-3 overflow-auto p-5 text-[11px]">{!results.length?<p className="py-8 text-center text-muted-foreground">暂无动态筛选结果</p>:counts.map(c=><div key={c.status} className="flex items-center gap-3"><span className="w-16 shrink-0">{c.label}</span><div className="h-2 flex-1 rounded bg-muted"><div className="h-full rounded bg-primary/60" style={{width:`${c.n/results.length*100}%`}}/></div><span className="w-24 text-right font-mono tabular-nums">{c.n} · {(c.n/results.length*100).toFixed(1)}%</span></div>)}</div></DialogContent></Dialog>;
 }

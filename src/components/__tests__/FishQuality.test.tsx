@@ -828,9 +828,9 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 });
 
 
-it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
+it('keeps sell settings and grouping while removing all combination-table statistics', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '14');
+  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '14');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
@@ -838,53 +838,15 @@ it('groups detector thresholds as levels, spans all sellers with a parent header
   expect(within(screen.getByTestId('quality-detector-picker')).getByText('当前数据里没有默认探测算法的信号')).toBeInTheDocument();
   expect(within(screen.getByTestId('quality-detector-picker')).queryAllByRole('checkbox')).toHaveLength(0);
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
-  const launch = screen.getByRole('button', { name: '统计分析 · 全部卖出算法' });
-  expect(launch.className).toContain('text-muted-foreground/30'); fireEvent.click(launch);
-  const dialog = screen.getByTestId('quality-statistics-dialog');
-  expect(within(dialog).getByRole('heading', { name: '卖出算法 · 统计分析' })).toBeInTheDocument();
-  for (const n of [5, 8, 10]) expect(within(dialog).getByRole('region', { name: `静态回撤${n}%以内` })).toBeInTheDocument();
+  expect(screen.queryAllByRole('button', { name: /统计分析/ })).toHaveLength(0);
+  expect(screen.queryByTestId('quality-statistics-dialog')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('quality-screening-statistics-dialog')).not.toBeInTheDocument();
+  const settings = within(screen.getAllByTestId('quality-sell-column')[0]).getByRole('button', { name: /^设置.*卖出算法$/ });
+  fireEvent.click(settings);
+  expect(settings).toHaveAttribute('aria-expanded', 'true');
   expect(s.setRule).not.toHaveBeenCalled(); expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
 });
 
-it('statistics counts one actual entry across detector display rows and invalidates inference after level changes', async () => {
-  const s = state(), plan = s.study.sellPlans![0]; plan.rule = {metric: plan.metric,direction:'<',threshold:.5};
-  s.study.results = qualityComparisonRows(s.study).map(row => ({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',returnPct:4,adversePct:-5,heldHours:3}));
-  render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button',{name:'统计分析 · 全部卖出算法'}));
-  const dialog = screen.getByTestId('quality-statistics-dialog');
-  expect(within(dialog).getByRole('region',{name:'静态回撤5%以内'})).toHaveTextContent('已卖出 1 笔');
-  expect(within(within(dialog).getByRole('region',{name:'静态回撤5%以内'})).getByRole('img',{name:/盈利涨幅分布/})).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('tab',{name:'推断统计'}));
-  fireEvent.click(within(dialog).getByRole('button',{name:'运行推断统计'}));
-  expect(await within(dialog).findByText('参照水平 · 标的簇')).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('tab',{name:'统计结果'}));
-  expect(within(dialog).getByText(/有效已卖出 1 笔，胜率 100.00%/)).toBeInTheDocument();
-  fireEvent.change(within(dialog).getByLabelText('统计算法水平'),{target:{value:s.study.sellPlans![1].id}});
-  expect(within(dialog).getByText(/尚未运行当前范围/)).toBeInTheDocument();
-  expect(s.setFilters).not.toHaveBeenCalled(); expect(s.setHoldingVetoes).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();
-});
-
-it('offers six high-return cohorts and five composition pies, across all sellers, with a separate variable/level view', () => {
-  const s = state();
-  s.study.sellPlans = s.study.sellPlans!.map(p => ({...p,rule:{metric:p.metric,direction:'<',threshold:p.snapshot.threshold}}));
-  const row = qualityComparisonRows(s.study)[0];
-  s.study.results = s.study.sellPlans.map((p,i) => ({key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T,status:'closed',returnPct:i===0?100:50,adversePct:-5}));
-  render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button',{name:'统计分析 · 全部卖出算法'}));
-  const dialog = screen.getByTestId('quality-statistics-dialog');
-  fireEvent.click(within(dialog).getByRole('button',{name:'按收益门槛'}));
-  expect(within(dialog).queryByLabelText('统计算法水平')).toBeNull();
-  expect(within(dialog).getByTestId('quality-return-trial-count')).toHaveTextContent('1 次达标试验');
-  for (const value of [100,50,40,30,20,10]) expect(within(dialog).getByRole('button',{name:`收益率至少${value}%`})).toBeInTheDocument();
-  for (const name of ['静态最大回撤区间占比','卖出算法占比','过滤算法组合占比','探测算法命中组合占比','卖出类型占比']) expect(within(dialog).getByRole('figure',{name})).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('button',{name:'收益率至少50%'}));
-  expect(within(dialog).getByTestId('quality-return-trial-count')).toHaveTextContent('2 次达标试验');
-  fireEvent.click(within(dialog).getByRole('button',{name:'阈值水平'}));
-  expect(within(dialog).getByRole('figure',{name:'卖出阈值水平占比'})).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('button',{name:'按静态回撤'}));
-  expect(within(dialog).getByLabelText('统计算法水平')).toBeInTheDocument();
-  expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
-});
 // 【用户要求】2026-10-27「买前过滤、持仓监测都只针对被选中的数据」：提示本轮范围，筛选外勾着的不算
 it('tells the hook which rows are in view and shows how many checked signals this run will process', () => {
   const s = state(); render(<FishQuality state={s}/>);
@@ -948,7 +910,7 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  // 未启用镜像的方案也保留独立状态列，不能挤入探测标签。
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
- expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 7));
+ expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 7));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
