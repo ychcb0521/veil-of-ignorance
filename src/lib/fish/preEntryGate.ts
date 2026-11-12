@@ -21,7 +21,7 @@ export const preEntryGuardWarmBars = (conditions?: PreEntryConditions) => {
 
 /** Price-path state is rebuilt causally from the original scan start on resume.
  * No position, quantity, fill, profit or account data is invented. */
-export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal; latchHardStops?: boolean }) {
+export function createPreEntryGate(o: { conditions: PreEntryConditions; start: number; row: TradeSignal; load: FishReconstructionLoader; signal: AbortSignal; latchHardStops?: boolean; allowEmptyObservation?: boolean }) {
   let entry = Math.ceil(o.start / M) * M;
   const vetoes = preEntryVetoes(o.conditions), guards = activeAdditionVetoes(o.conditions.entryVetoes).filter(v=>v.historyHours==null);
   const history=createVetoHistoryReader({rules:o.conditions.entryVetoes,entry:o.start,row:o.row,load:o.load,signal:o.signal});
@@ -29,7 +29,8 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
   const boxes = vetoes.filter(v=>v.kind==='box-stop');
   const boxReader = createBoxStopReader({vetoes:boxes,row:o.row,entry,since:entry,load:o.load,signal:o.signal});
   const bars: ResearchBar[] = [], atr: number[] = [], minutes: ResearchBar[] = [];
-  const slowGuards = guards.filter(v=>v.kind!=='fast-drop');
+  const slowGuards = guards.filter(v => v.kind !== 'fast-drop' && (!o.allowEmptyObservation
+    || v.kind !== 'pullback' && v.kind !== 'pullback-atr' && v.kind !== 'double-drop'));
   const fast = guards.filter(v=>v.kind==='fast-drop');
   const minutePlan = pricePlan('1m'), fivePlan = pricePlan('5m');
   let cursor = entry, fiveCursor = qualityHistoryFrom(o.load, Math.floor(entry/FIVE)*FIVE-preEntryGuardWarmBars(o.conditions)*FIVE, FIVE);
@@ -81,7 +82,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
     if (historicalHardStop) blocked ??= historicalHardStop.at === at ? historicalHardStop.reason : `${historicalHardStop.reason} · 历史触发于 ${formatUTC8(historicalHardStop.at)}`;
     blocked ??= priceHit(at);
     if (fastHit) blocked??=`${fastHit.label}：${fastHit.reading}`;
-    if ((priceVetoes.length||guards.length||boxes.length) && !path) return {blocked,pending:'等待筛选起点后的首根完整分钟行情'};
+    if ((priceVetoes.length||guards.length||boxes.length) && !path && !o.allowEmptyObservation) return {blocked,pending:'等待筛选起点后的首根完整分钟行情'};
     if (slowGuards.length) {
       const cut=Math.floor(at/FIVE)*FIVE;
       while (fiveCursor<cut) {
@@ -113,7 +114,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
       }
     }
     const states=boxReader.states();
-    if (boxes.some(v=>!isBoxBreak(v.boxStop!)&&states[v.id]?.line==null)) return {blocked,pending:'等待有效箱体 K 基准，尚不入选'};
+    if ((path || !o.allowEmptyObservation) && boxes.some(v=>!isBoxBreak(v.boxStop!)&&states[v.id]?.line==null)) return {blocked,pending:'等待有效箱体 K 基准，尚不入选'};
     return {blocked,...(historical.pending?{pending:historical.pending}:{})};
   };
   // v7 only: reuse causal indicator/ATR warmup, never reload the same market

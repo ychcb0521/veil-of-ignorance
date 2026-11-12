@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
-import { collectPreEntryMonitor, type PreEntryRecord } from '../preEntryMonitor';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, trackedGatePreEntryThreeStage, optionalStagesPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
+import { collectPreEntryMonitor, preEntrySignal, type PreEntryRecord } from '../preEntryMonitor';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, trackedGatePreEntryThreeStage, optionalStagesPreEntryThreeStage, signalAnchoredPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
 import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
 import type { QualityGroup } from '../quality';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -478,4 +478,70 @@ it('does not admit through an enabled exclusion at the original deadline',async(
   p.preEntryThreeStage.hardVetoes=[{id:'never',label:'全程排除',enabled:true,kind:'indicator',metric:'raw',snapshot:snapshot(),direction:'>',threshold:0}];
   expect(await run(p,{load:loader([110,115,120]),hours:2/60,end:T+4*M}))
     .toMatchObject({status:'unmatched',cursor:T+2*M,endTime:T+2*M,lastVeto:{at:T+2*M,count:2}});
+});
+
+function gateTimePlan() {
+  const p = stateOnlyPlan();
+  p.preEntryThreeStage = signalAnchoredPreEntryThreeStage(p.preEntryThreeStage!);
+  p.preEntryThreeStage.steps!.admission = false;
+  return p;
+}
+
+it('anchors a passing static gate to the exact original signal time and reads no later candle', async () => {
+  const p = gateTimePlan(), config = p.preEntryThreeStage!;
+  config.required = [condition('静态门槛', 90)];
+  config.hardVetoes = [{id:'five',label:'五分钟否决',enabled:true,kind:'indicator',metric:'raw',snapshot:snapshot('raw=C','5m'),direction:'>',threshold:150}];
+  const at = T + 27_000;
+  const old: PreEntryRecord = {id:'r',roundId:'round',planId:p.id,sample:{...sample,enteredAt:at,source:{...sample.source,timeMs:at}},
+    status:'queued',startTime:at,cursor:at,readings:[],updatedAt:T};
+  const read = loader([170,180,190]);
+  const load: FishReconstructionLoader = async (row,from,to,plan,signal) => {
+    expect(to).toBeLessThanOrEqual(T);
+    return read(row,from,to,plan,signal);
+  };
+  const result = await run(p,{old,load});
+  expect(result).toMatchObject({status:'matched',matchedAt:at,cursor:at,entryTimeBasis:'signal',signalGate:{signalAt:at,at:T,status:'pass'},
+    threeStage:{at,admission:{skipped:true},readings:[{at:T,value:100,met:false}]}});
+  expect(preEntrySignal(result)).toMatchObject({timeMs:at,preEntryMonitor:{sourceTime:at,matchedAt:at}});
+});
+
+it('uses the static signal time when all steps are skipped, without requesting a later minute', async () => {
+  const p=gateTimePlan();
+  p.preEntryThreeStage!.steps={required:false,admission:false,exclusion:false};
+  const load=vi.fn(loader());
+  expect(await run(p,{load,end:T})).toMatchObject({status:'matched',matchedAt:T,cursor:T,entryTimeBasis:'signal'});
+  expect(load).not.toHaveBeenCalled();
+});
+
+it('uses the first tracked pass when the static gate fails or only tracking is selected', async () => {
+  const p=gateTimePlan(), config=p.preEntryThreeStage!;
+  config.requiredPaths={static:true,tracking:true};
+  config.required=[condition('动态门槛',115)];
+  expect(await run(p,{load:loader([110,120,125])})).toMatchObject({status:'matched',matchedAt:T+2*M,entryTimeBasis:'tracked',trackedGate:{at:T+2*M}});
+  config.requiredPaths={static:false,tracking:true};
+  config.required=[condition('动态门槛',95)];
+  expect(await run(p,{load:loader([110,120])})).toMatchObject({status:'matched',matchedAt:T+M,entryTimeBasis:'tracked',trackedGate:{at:T+M}});
+});
+
+it('checks the configured closed history and stops at the only candidate when it is excluded', async () => {
+  const p=gateTimePlan(), config=p.preEntryThreeStage!;
+  const sell={...condition('历史卖出',99),snapshot:snapshot('raw=C','5m'),timing:'closed' as const};
+  config.sellRules=[{id:'history',label:'两根确认',enabled:true,expression:{condition:sell},confirmation:{samples:2,minutes:5}}];
+  expect(await run(p)).toMatchObject({status:'unmatched',cursor:T,lastVeto:{at:T,reason:expect.stringContaining('两根确认')}});
+  config.sellRules=[];
+  config.requiredPaths={static:true,tracking:true};
+  config.required=[condition('门槛',115)];
+  config.hardVetoes=[{id:'hard',label:'首次通过时排除',enabled:true,kind:'indicator',metric:'raw',snapshot:snapshot(),direction:'>',threshold:110}];
+  expect(await run(p,{load:loader([100,120,85,120])})).toMatchObject({status:'unmatched',cursor:T+2*M,trackedGate:{at:T+2*M},lastVeto:{at:T+2*M}});
+});
+
+it('records the admitted event time when events are enabled in the new engine', async () => {
+  const p=gateTimePlan(), config=p.preEntryThreeStage!;
+  config.steps!.admission=true;
+  config.requiredPaths={static:true,tracking:true};
+  config.required=[condition('动态门槛',115)];
+  config.admission!.algorithms=[condition('事件',125)];
+  expect(await run(p,{load:loader([100,120,121,126])})).toMatchObject({
+    status:'matched',matchedAt:T+4*M,trackedGate:{at:T+2*M},threeStage:{admission:{met:['事件']}},
+  });
 });

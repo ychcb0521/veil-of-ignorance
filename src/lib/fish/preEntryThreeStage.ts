@@ -22,7 +22,9 @@ export const PRE_ENTRY_SIGNAL_GATE_VERSION = 'pre-entry-three-stage-v8' as const
 export const PRE_ENTRY_TRACKED_GATE_VERSION = 'pre-entry-three-stage-v9' as const;
 /** 三个步骤可独立跳过。指标准入从首次具备资格的观察时点开始计数。 */
 export const PRE_ENTRY_OPTIONAL_STAGES_VERSION = 'pre-entry-three-stage-v10' as const;
-const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION, PRE_ENTRY_OPTIONAL_STAGES_VERSION] as const;
+/** 跳过事件准入时，在原信号时点或动态门槛首次达标时点检查排除并决定入选。 */
+export const PRE_ENTRY_SIGNAL_ANCHOR_VERSION = 'pre-entry-three-stage-v11' as const;
+const THREE_STAGE_VERSIONS = [PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_SIGNAL_GATE_VERSION, PRE_ENTRY_TRACKED_GATE_VERSION, PRE_ENTRY_OPTIONAL_STAGES_VERSION, PRE_ENTRY_SIGNAL_ANCHOR_VERSION] as const;
 export type PreEntryThreeStageVersion = typeof THREE_STAGE_VERSIONS[number];
 export const isPreEntryThreeStageVersion = (version: unknown): version is PreEntryThreeStageVersion =>
   THREE_STAGE_VERSIONS.some(candidate => candidate === version);
@@ -88,8 +90,13 @@ export function optionalStagesPreEntryThreeStage(config: PreEntryThreeStage, alg
     steps: config.steps ? {...config.steps} : {required:true,admission:true,exclusion:true},
   };
 }
+export function signalAnchoredPreEntryThreeStage(config: PreEntryThreeStage, algorithms: EntryMarketCondition[] = []): PreEntryThreeStage {
+  return { ...optionalStagesPreEntryThreeStage(config, algorithms), version: PRE_ENTRY_SIGNAL_ANCHOR_VERSION };
+}
+const usesOptionalStages = (version: unknown): boolean =>
+  version === PRE_ENTRY_OPTIONAL_STAGES_VERSION || version === PRE_ENTRY_SIGNAL_ANCHOR_VERSION;
 export const usesTrackedGate = (version: unknown): boolean =>
-  version === PRE_ENTRY_TRACKED_GATE_VERSION || version === PRE_ENTRY_OPTIONAL_STAGES_VERSION;
+  version === PRE_ENTRY_TRACKED_GATE_VERSION || usesOptionalStages(version);
 export const usesSignalTimeGate = (version: unknown): boolean => version === PRE_ENTRY_SIGNAL_GATE_VERSION || usesTrackedGate(version);
 export const expressionConditions = (e: EntryMarketExpression): EntryMarketCondition[] => 'condition' in e ? [e.condition] : e.children.flatMap(expressionConditions);
 export function validateEntryCondition(c: EntryMarketCondition) {
@@ -99,7 +106,7 @@ export function validateEntryCondition(c: EntryMarketCondition) {
 export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is PreEntryThreeStage {
   if (!c || !isPreEntryThreeStageVersion(c.version) || c.guard?.version !== PRE_ENTRY_GUARD_EVENT_VERSION) throw Error('三阶筛选版本不可用，请保留原方案');
   const retry = c.version === PRE_ENTRY_RETRY_VERSION || usesSignalTimeGate(c.version);
-  if (c.version === PRE_ENTRY_OPTIONAL_STAGES_VERSION) {
+  if (usesOptionalStages(c.version)) {
     if (!c.steps || [c.steps.required,c.steps.admission,c.steps.exclusion].some(enabled=>typeof enabled !== 'boolean')) {
       throw Error('三步筛选开关不完整');
     }

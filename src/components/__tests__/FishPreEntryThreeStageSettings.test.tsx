@@ -9,7 +9,7 @@ import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { newQualityStudy } from '@/lib/fish/quality';
 import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
-import { emptyPreEntryThreeStage, trackedGatePreEntryThreeStage, PRE_ENTRY_OPTIONAL_STAGES_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, trackedGatePreEntryThreeStage, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION } from '@/lib/fish/preEntryThreeStage';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import {defaultEntryStallTurn} from '@/lib/fish/preEntryStallTurn';
 
@@ -289,7 +289,7 @@ it('saves and restores three independent switches in a new copy, including all t
   const [saved]=f.configure.mock.calls[0][0];
   expect(saved.id).not.toBe(original.id);
   expect(saved.preEntryThreeStage).toMatchObject({
-    version:PRE_ENTRY_OPTIONAL_STAGES_VERSION,
+    version:PRE_ENTRY_SIGNAL_ANCHOR_VERSION,
     steps:{required:false,admission:false,exclusion:false},
     requiredPaths:config.requiredPaths,hardVetoes:config.hardVetoes,
   });

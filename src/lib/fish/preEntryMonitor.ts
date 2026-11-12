@@ -9,6 +9,7 @@ import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
 import { PRE_ENTRY_CONDITIONS_VERSION } from './preEntryConditions';
 import { isPreEntryThreeStageVersion } from './preEntryThreeStage';
+import { qualitySignalTime } from './qualityAdmissionTime';
 
 export type PreEntryStatus = 'queued' | 'scanning' | 'paused' | 'matched' | 'unmatched' | 'warming' | 'error';
 export interface PreEntryRecord {
@@ -27,6 +28,7 @@ export interface PreEntryRecord {
   planId?: string;
   id: string; roundId: string; sample: QualitySample; status: PreEntryStatus;
   startTime: number; cursor: number; endTime?: number; matchedAt?: number;
+  entryTimeBasis?: 'signal' | 'tracked';
   readings: QualityFilterReading[]; detail?: string; updatedAt: number;
 }
 /** A failed record has been attempted; only unprocessed work keeps a round paused. */
@@ -81,7 +83,7 @@ export function preEntrySignal(record: PreEntryRecord): TradeSignal | null {
   return { id: `pre-entry:${record.id}`, symbol: source.symbol, exchange: source.exchange, market: source.market,
     underlying: source.underlying, binanceSymbol: source.binanceSymbol,
     timeMs: matchedAt, timeLabel: formatUTC8(matchedAt), fallbackZone: source.fallbackZone,
-    preEntryMonitor: { recordId: record.id, roundId: record.roundId, sourceId: source.id, sourceTime: source.timeMs, matchedAt } };
+    preEntryMonitor: { recordId: record.id, roundId: record.roundId, sourceId: source.id, sourceTime: record.entryTimeBasis ? qualitySignalTime(source) : source.timeMs, matchedAt } };
 }
 export interface PreEntryRun {
   round: PreEntryRound; records: readonly PreEntryRecord[];

@@ -9,7 +9,7 @@ import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterMenuChoices, holdingVetoDraft, parseHoldingVetoDraft, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
-import { emptyPreEntryThreeStage, retryPreEntryThreeStage, optionalStagesPreEntryThreeStage, usesSignalTimeGate, usesTrackedGate, type PreEntryStageSwitches, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
+import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalAnchoredPreEntryThreeStage, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, usesSignalTimeGate, usesTrackedGate, type PreEntryStageSwitches, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
 import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
@@ -38,27 +38,28 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const contentId=useId();
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
-  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=optionalStagesPreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
+  const [plans,setPlans]=useState<QualityGroup[]>(()=>{const chosen=selectedPreEntryPlan(monitor.library.settings?.plans);if(chosen)return [copyAsThreeStage(chosen)];if(monitor.library.settings?.plans.length)return [];if(!choices.length)return [];const plan=makeQualitySellPlan(choices[0].key,'>',0,definitions);plan.label='三阶筛选';plan.preEntryThreeStage=signalAnchoredPreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);return [plan];});
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(monitor.library.settings?.hours))),[error,setError]=useState('');
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
   const retry=c?.observationBasis==='retry-origin-v2';
   const signalGate=usesSignalTimeGate(c?.version), trackedGate=usesTrackedGate(c?.version), steps=c?.steps;
+  const signalAnchored = c?.version === PRE_ENTRY_SIGNAL_ANCHOR_VERSION;
   const sources=state.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
   const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
   const createOptionalStagesCopy=()=>guardAction(()=>{
-    if(!active||!c||steps)return;
+    if (!active || !c || signalAnchored) return;
     const {frozenVersions:_old,...base}=active;
     const config={
       ...c,
       additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,
       hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):c.hardVetoes,
     };
-    const copy={...structuredClone(base),id:id(),label:active.label+' · 三步可选副本',preEntryThreeStage:optionalStagesPreEntryThreeStage(config,c.admission?[]:[defaultAdmission()])};
+    const copy={...structuredClone(base),id:id(),label:active.label+(steps?' · 信号时点副本':' · 三步可选副本'),preEntryThreeStage:signalAnchoredPreEntryThreeStage(config,c.admission?[]:[defaultAdmission()])};
     setPlans([copy]);setActiveId(copy.id);setVetoDrafts({});setHardDrafts({});
   });
   const stageTitle = (key:keyof PreEntryStageSwitches,label:string,number:string) => <>
@@ -136,9 +137,9 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         <label className="screening-form-label">方案名称<input className={field+' w-full'} aria-label="三阶方案名称" value={active.label} onChange={e=>setPlans(plans.map(p=>p.id===active.id?{...p,label:e.target.value}:p))}/></label>
         <label className="screening-form-label">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>
       </div>
-      {!steps && <button type="button" className={button+' mt-3'} onClick={createOptionalStagesCopy}>另存三步可选方案</button>}
+      {!signalAnchored && <button type="button" className={button+' mt-3'} onClick={createOptionalStagesCopy}>{steps?'另存信号时点副本':'另存三步可选方案'}</button>}
       {steps && !Object.values(steps).some(Boolean) &&
-        <p role="status" className="mt-3 text-muted-foreground">三个步骤均已跳过。各信号在首个可观察时点入选。</p>}
+        <p role="status" className="mt-3 text-muted-foreground">三个步骤均已跳过。{signalAnchored?'各信号按原信号时间入选。':'各信号在首个可观察时点入选。'}</p>}
       <details className="screening-detail mt-4"><summary className="cursor-pointer">从持仓方案复制市场条件</summary>
         <div className="mt-2 flex flex-wrap gap-2"><select aria-label="复制条件来源方案" className={field} value={sourceId} onChange={e=>{setSourceId(e.target.value);setRoundIndex('0');}}><option value="">选择明确的来源方案</option>{sources.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select>
           <select aria-label="复制加仓轮次" className={field} value={roundIndex} onChange={e=>setRoundIndex(e.target.value)}>{rounds.map((_,i)=><option key={i} value={i}>第 {i+1} 次加仓 · 主分支</option>)}</select>
@@ -170,11 +171,12 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
           {stageTitle('admission','事件准入','①')}
           <FishQualityInfo label="事件准入使用说明">
             <p>防守线、状态 S 和其他指标彼此是“或”的关系。任一已启用项触发，就以该时点作为候选。</p>
-            {steps&&<p>首次进入本步时，已经达标的指标也可以触发。跳过本步时，具备资格的观察时点直接成为候选。</p>}
+            {steps&&<p>首次进入本步时，已经达标的指标也可以触发。{signalAnchored?'跳过本步时，采用原信号或动态门槛首次达标的时点。':'跳过本步时，具备资格的观察时点直接成为候选。'}</p>}
             <p>各指标按自己的确认方式取读数。防守线读取已收盘的 5 分钟结构。</p>
           </FishQualityInfo>
           <span className="screening-stage-note">{steps?.admission===false?'已跳过':'任一满足'}</span>
         </div>
+        {signalAnchored && steps?.admission === false && <p className="text-[11px] text-muted-foreground">静态门槛通过或无需必要条件时，按原信号时点检查排除条件。动态门槛通过时，按首次达标时点检查。通过后在该时点入选。</p>}
         {steps?.admission!==false && <>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-muted-foreground">{signalGate?'同一指标持续达标只记一次。读到未达标后，再次达标才会产生候选。':'各模块互为“或”：满足任一已勾选事件即可。'}</p>{retry?<div className="flex gap-2"><button type="button" className={button} aria-label="全选准入标准" onClick={()=>patch({admission:{...c.admission!,guardEnabled:true,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:true}))}})}>全选</button><button type="button" className={button} onClick={()=>patch({admission:{...c.admission!,guardEnabled:false,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:false}))}})}>取消全选</button></div>:<button type="button" className={button+' text-primary'} onClick={()=>createEventAdmissionCopy()}>配置事件准入（另存副本）</button>}</div>
         {!retry&&<p className="text-[10px] text-muted-foreground">原方案保留。配置事件准入时创建独立副本，新副本默认全选。</p>}
