@@ -33,6 +33,8 @@ import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, valida
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
+import { BOX_MARKET_REPAIR_VERSION, BOX_STOP_INVALID_DATA, qualityBoxMarketRepair } from './qualityBoxMarketRepair';
+
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
@@ -95,6 +97,7 @@ export interface QualitySample {
   signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
+  boxMarketRepair?: typeof BOX_MARKET_REPAIR_VERSION;
   initialization?: NonNullable<FishReconstructionLoader['turingInitialization']>;
   advantageState?: QualityAdvantageState;
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
@@ -843,6 +846,20 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };
   }
 }
+export async function evaluateQualitySampleWithMarketRepair(sample: QualitySample, group: QualityGroup, hours: number, now: number,
+  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult): Promise<QualityResult> {
+  const repair = qualityBoxMarketRepair(load, sample.source.symbol);
+  if (previous?.boxMarketRepair && repair) {
+    const result = await evaluateQualitySample(sample, group, hours, now, repair, signal, previous);
+    return { ...result, boxMarketRepair: BOX_MARKET_REPAIR_VERSION };
+  }
+  const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous);
+  if (!repair || original.status !== 'error' || original.reason !== BOX_STOP_INVALID_DATA) return original;
+  const recovered = await evaluateQualitySample(sample, group, hours, now, repair, signal);
+  return recovered.status === 'open' || recovered.status === 'closed'
+    ? { ...recovered, boxMarketRepair: BOX_MARKET_REPAIR_VERSION } : original;
+}
+
 export interface QualityProgress { done: number; total: number; current: string; waitingUntil?: number; matched?: number }
 /** 持仓监测同时计算的行数：取数是瓶颈（逐个等交易所返回），并行能把等待叠起来；请求总量仍由限频预算控制。 */
 export const QUALITY_CONCURRENCY = 4, QUALITY_CONCURRENCY_MAX = 8;
@@ -987,9 +1004,11 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
             // Batch 5m transport per trade; every engine still receives its exact closed prefix.
             const tradeLoad = preEntryWindowLoader(load, marketEnd);
             const initializedLoad = g.initialization ? withTuringInitialization(tradeLoad, s.source.symbol, await options.marketStart?.(s.source.symbol) ?? NaN) : tradeLoad;
-            result = isLegacyQualityPlan(g)
-              ? await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, tradeLoad, signal, qualityResultKey(s, g, study.observeHours))
-              : await evaluateQualitySample(s, g, study.observeHours, marketEnd, initializedLoad, signal, cached);
+            if (isLegacyQualityPlan(g)) {
+              result = await evaluateLegacyQualitySample(s, g, study.observeHours, marketEnd, tradeLoad, signal, qualityResultKey(s, g, study.observeHours));
+            } else {
+              result = await evaluateQualitySampleWithMarketRepair(s, g, study.observeHours, marketEnd, initializedLoad, signal, cached);
+            }
             if (initializedLoad.turingInitialization) result = {...result, initialization: initializedLoad.turingInitialization};
           } catch (cause) {
             abort(signal);

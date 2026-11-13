@@ -40,6 +40,7 @@ export interface FishReconstructionOptions {
   onProgress:(progress:FishReconstructionProgress)=>void;
 }
 export type FishReconstructionLoader = ((row:TradeSignal,from:number,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>) & {
+  boxStopMarketLoad?: FishReconstructionLoader;
   turingInitialization?: { version: import('./qualityInitialization').QualityInitialization; startMs: number };
 };
 const coinKey = (row:TradeSignal) => `${row.exchange??'binance'}|${row.market??'crypto'}|${row.symbol}`;

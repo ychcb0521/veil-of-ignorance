@@ -414,6 +414,7 @@ export interface TradeCampaign {
     /** 持仓监测：这场战役运行时冻结的整套方案（组合算法、半仓镜像、加仓细节、硬性终止等），只读展示用。 */
     monitorPlan?: import('@/lib/fish/quality').QualityGroup;
     sellEvidence?: {
+      boxMarketRepair?: typeof import('@/lib/fish/qualityBoxMarketRepair').BOX_MARKET_REPAIR_VERSION;
       /** Actual frozen final-sale reason; independent of the configured condition list. */
       exitReason?:string;
       activeSellStage?:QualitySellStageActivation;sellStageSwitches?:QualitySellStageActivation[];

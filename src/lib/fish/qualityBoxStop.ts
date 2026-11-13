@@ -13,6 +13,8 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import type { QualityHoldingVeto } from './qualityVeto';
 import type { QualityTrigger } from './qualityIntrabar';
 
+import { BOX_STOP_INVALID_DATA } from './qualityBoxMarketRepair';
+
 export const BOX_STOP_KIND = 'box-stop' as const;
 export const BOX_STOP_VERSION = 'holding-box-stop-v1';
 export const BOX_STOP_GUARD_REGIME_VERSION = 'holding-box-stop-guard-regime-v2';
@@ -79,6 +81,7 @@ export const boxStopLabel = (r: BoxStopRule) => isBoxBreak(r)?'DBL-5 支撑断�
 
 /** Only already closed native 5m structures can place a stop for the next minute. */
 export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
+  const load = o.load.boxStopMarketLoad ?? o.load;
   let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).map(v=>{
     validateBoxStop(v.boxStop);
@@ -102,14 +105,14 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       const cut=Math.floor(observedAt/300000)*300000;
       while(r.cursor<cut){
         if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
-        const to=Math.min(cut,r.cursor+500*300000),bars=await o.load(o.row,r.cursor,to,r.plan,o.signal);
+        const to=Math.min(cut,r.cursor+500*300000),bars=await load(o.row,r.cursor,to,r.plan,o.signal);
         validateFishBars(bars,to,(to-r.cursor)/300000,300000);
         const out=evaluateOnBars(bars,r.plan.compiled,{...r.def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:r.from,DBL5_initialization_id:`box-stop:${r.from}`,DBL5_checkpoint:r.dbl,SBS5M_symbol:o.row.symbol,SBS5M_initialization_id:`box-stop:${r.from}`,SBS5M_checkpoint:r.sbs});
         r.dbl=out.DBL5_checkpoint;r.sbs=out.SBS5M_checkpoint;
         const rows=r.rule.structure.algorithm==='dbl5'?out.DBL5_details:out.SBS5M_details;
         if(!rows||rows.length!==bars.length)throw Error('箱体硬止损缺少结构读数');
         rows.forEach((row,i)=>{
-          if(!row.data_valid)throw Error('箱体硬止损行情或报价精度无效，不能跳过缺口');
+          if(!row.data_valid)throw Error(BOX_STOP_INVALID_DATA);
           r.atr=advanceChartAtr(r.atr,bars[i]);
           const at=bars[i].openTime+300000;
           // Older history initializes the box/ATR, never moves an already saved stop backwards.
