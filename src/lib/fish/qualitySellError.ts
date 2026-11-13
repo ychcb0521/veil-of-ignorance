@@ -2,6 +2,7 @@
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { QualityGroup, QualityResult } from './quality';
 import { qualityConditionMet } from './qualityVeto';
+import { isStaticDrawdownSell } from './qualityStaticDrawdownSell';
 import { POST_EXIT_HOURS, qualityPostExitKey, postExitWindow, type PostExitHours, type QualityPostExitReading } from './qualityPostExit';
 
 export const SELL_ERROR_MULTIPLIER = 2;
@@ -17,14 +18,14 @@ export function qualityAlgorithmExit(plan:QualityGroup,result?:QualityResult,ski
  if(result.status!=='closed')return label('pending','持仓中','镜像平衡减仓不作为本标签起点，须等待余仓最终卖出。');
  if(!Number.isFinite(result.entryTime)||!(result.entryTime!>0)||!Number.isFinite(result.entryPrice)||!(result.entryPrice!>0)||!Number.isFinite(result.endTime)||!(result.endTime!>=result.entryTime!)||!Number.isFinite(result.endPrice)||!(result.endPrice!>0))return label('error','缺数据','缺少有效的买入或最终卖出时间、价格。');
  const snapshot=result.exitSnapshot,cause=snapshot?.cause;
- if(cause)return label('other-exit','非算法触发',`实际离场由${cause.kind==='mirror-take-profit'?'镜像止盈':'一票否决'}「${cause.label}」触发，不归因于本卖出算法。`);
+ if(cause && cause.kind !== 'sell-static-drawdown')return label('other-exit','非算法触发',`实际离场由${cause.kind==='mirror-take-profit'?'镜像止盈':'一票否决'}「${cause.label}」触发，不归因于本卖出算法。`);
  if(result.mirrorFill?.fraction===1&&result.mirrorFill.at===result.endTime)return label('other-exit','非算法触发','镜像止盈卖出全部币数，不归因于本卖出算法。');
  if(/^(一票否决：|镜像止盈：)/.test(result.reason??''))return label('other-exit','非算法触发',`实际离场记录：${result.reason}。不归因于本卖出算法。`);
  const stage=snapshot?.stage;
  const rule=plan.combo ? stage==='before'?plan.rule:stage==='after'?plan.combo.after.rule:undefined : plan.rule;
  const observed=snapshot&&Number.isFinite(snapshot.barOpenTime)&&snapshot.barOpenTime<=snapshot.observedAt&&snapshot.observedAt===result.endTime;
  const legacy=!snapshot&&!plan.combo&&['指标收盘确认，下一分钟开盘卖出','盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出'].includes(result.reason??'');
- if(!rule||!['<','>'].includes(rule.direction)||!Number.isFinite(rule.threshold)||!Number.isFinite(result.exitReading)||!qualityConditionMet(result.exitReading!,rule.direction,rule.threshold)||!(observed||legacy))return label('unknown-cause','触发原因未知','现有记录不足以证明由本卖出算法（或组合相应阶段）的条件触发，不用当前行情或门槛反推触发原因。');
+ if(!rule||(isStaticDrawdownSell(rule) ? cause?.kind !== 'sell-static-drawdown' || cause.threshold !== rule.threshold : !['<','>'].includes(rule.direction))||!Number.isFinite(rule.threshold)||!Number.isFinite(result.exitReading)||!qualityConditionMet(result.exitReading!,isStaticDrawdownSell(rule)?'>=':rule.direction,rule.threshold)||!(observed||legacy))return label('unknown-cause','触发原因未知','现有记录不足以证明由本卖出算法（或组合相应阶段）的条件触发，不用当前行情或门槛反推触发原因。');
  return null;
 }
 

@@ -22,6 +22,7 @@ import { ENTRY_STALL_TURN_5M_VERSION, PULLBACK_NEW_HIGH_5M_VERSION } from './pre
 import { shortFishHash } from './algorithm';
 import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
+import { isStaticDrawdownSell, qualityExitThresholdText, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from './qualityStaticDrawdownSell';
 import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
 import { activeDetectorPrerequisite, additionIdentity, additionIncreaseIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
@@ -105,13 +106,17 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     '同一条均值序列可独立设置公式本身的回看或半衰期，以及均值窗口。');
   if(plan.advantage)add('advantage','优势筛选与退出灵敏度','逐次筛选 · 软退出动态确认',QUALITY_ADVANTAGE_VERSION+' · 参数 #'+qualityAdvantageFingerprint(plan),
     `W 同步走弱筛选${plan.advantage.screenWeak?'开':'关'}；首加前确认${plan.advantage.beforeFirst?'开':'关'}，加仓后 A 级确认${plan.advantage.afterAddition?'开':'关'}，${plan.advantage.confirmations} 根已完成 1 分钟；其余单次，原定量/K/硬止损不变；候选未验证收益。`);
-  if (plan.rule || plan.combo) add('sell', '卖出算法', `${s.featureShort ?? plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : ''}`.trim(), formulaFingerprint(s),
+  if (isStaticDrawdownSell(plan.rule)) add('sell', '卖出算法', `${STATIC_DRAWDOWN_SELL_LABEL} ${qualityExitThresholdText(plan.rule)}`,
+    `${STATIC_DRAWDOWN_SELL_VERSION} · 参数 #${shortFishHash(JSON.stringify(plan.rule))}`, '按首仓买入价计算止损线，按分钟行情触价或跳空开盘价成交。');
+  else if (plan.rule || plan.combo) add('sell', '卖出算法', `${s.featureShort ?? plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : ''}`.trim(), formulaFingerprint(s),
     `${plan.definitionSource === 'account' ? '账号公式（保存时冻结全文）' : '历史公式'} · ${s.interval ?? '5m'}`);
   if (plan.combo) {
     const a = plan.combo.after;
-    add('combo', '组合切换', `涨 ${plan.combo.switchPct}% 后改用 ${a.snapshot.featureShort ?? a.label} ${a.rule.direction} ${a.rule.threshold}`,
+    add('combo', '组合切换', `涨 ${plan.combo.switchPct}% 后改用 ${a.snapshot.featureShort ?? a.label} ${qualityExitThresholdText(a.rule)}`,
       join([...versionTags(qualityComboIdentity(plan)), formulaFingerprint(a.snapshot)]), '持仓最高价首次比买入价高出切换涨幅的那一分钟收盘起，改用后段算法');
   }
+  if (isStaticDrawdownSell(plan.combo?.after.rule)) add('sell-after-static', '卖出算法后段', STATIC_DRAWDOWN_SELL_LABEL,
+    `${STATIC_DRAWDOWN_SELL_VERSION} · 参数 #${shortFishHash(JSON.stringify(plan.combo.after.rule))}`, '切换后的首根分钟起，按首仓买入价的固定止损线模拟成交。');
   const closePeriod = hasMetricPeriodOverride(s) ? s.interval : undefined;
   add('execution', '卖出执行', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : (closePeriod??'5 分钟')+'收盘确认', plan.execution === 'intrabar-1m' ? 'intrabar-1m-v1' : 'close-confirm',
     plan.execution === 'intrabar-1m' ? (periodSnapshots.length ? '用 1 分钟线复原所选周期指标，盘中达标即卖' : '用 1 分钟线复原 5 分钟指标，盘中达标即卖') : '只认 '+(closePeriod??'5 分钟')+'收盘读数');

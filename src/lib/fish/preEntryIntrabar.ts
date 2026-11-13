@@ -9,7 +9,7 @@ import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions, hasPreEntryVe
 import { createPreEntryGate, preEntryGuardWarmBars } from './preEntryGate';
 
 export function preEntryPlanFilters(plan: QualityGroup): QualityBuyFilter[] {
-  if (!plan.rule || !Number.isFinite(plan.rule.threshold)) throw Error(`「${plan.label}」需要填写买入门槛`);
+  if (!plan.rule || plan.rule.version != null || plan.rule.direction === '>=' || !Number.isFinite(plan.rule.threshold)) throw Error(`「${plan.label}」需要填写买入门槛`);
   return [{ id: 'primary', label: plan.label, metric: plan.rule.metric, snapshot: plan.snapshot, direction: plan.rule.direction, threshold: plan.rule.threshold, enabled: true }, ...(plan.buyFilters ?? []).filter(f => f.enabled)];
 }
 

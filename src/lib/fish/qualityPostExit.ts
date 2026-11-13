@@ -17,7 +17,7 @@ export interface QualityPostExitReading {
 }
 export interface QualityPostExitTarget { source:TradeSignal; result:QualityResult; plan:QualityGroup }
 export const postExitIntraminute = (result:QualityResult,plan:QualityGroup) => result.exitSnapshot?.atOpen!==true &&
- (result.exitSnapshot?.cause?.kind==='mirror-take-profit' || plan.vetoFill==='stop' && ['static-drawdown','dynamic-drawdown'].includes(result.exitSnapshot?.cause?.kind??''));
+ (['mirror-take-profit','sell-static-drawdown'].includes(result.exitSnapshot?.cause?.kind ?? '') || plan.vetoFill==='stop' && ['static-drawdown','dynamic-drawdown'].includes(result.exitSnapshot?.cause?.kind??''));
 export function qualityPostExitKey(source:TradeSignal,result:QualityResult|undefined,plan:QualityGroup):string|null {
  if(result?.status!=='closed'||!(result.endPrice!>0)||!Number.isFinite(result.endPrice)||!(result.endTime!>0)||!Number.isFinite(result.endTime))return null;
  return JSON.stringify(['post-exit-v1',source.exchange??'binance',source.market??'crypto',source.symbol,source.underlying??null,result.endTime,result.endPrice,postExitIntraminute(result,plan)]);

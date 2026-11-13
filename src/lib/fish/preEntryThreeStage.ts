@@ -63,7 +63,7 @@ export interface PreEntryThreeStage {
 export const entryCondition = (f: QualityBuyFilter, timing: EntryMarketCondition['timing'] = 'intrabar'): EntryMarketCondition => ({ ...structuredClone(f), timing });
 /** 方案里的全部生效买前条件：主规则 + 启用的附加确认。 */
 export function preEntryPlanFilters(plan: QualityGroup): QualityBuyFilter[] {
-  if (!plan.rule || !Number.isFinite(plan.rule.threshold)) throw Error(`「${plan.label}」需要填写买入门槛`);
+  if (!plan.rule || plan.rule.version != null || plan.rule.direction === '>=' || !Number.isFinite(plan.rule.threshold)) throw Error(`「${plan.label}」需要填写买入门槛`);
   return [{ id: 'primary', label: plan.label, metric: plan.rule.metric, snapshot: plan.snapshot, direction: plan.rule.direction, threshold: plan.rule.threshold, enabled: true }, ...(plan.buyFilters ?? []).filter(f => f.enabled)];
 }
 export const emptyPreEntryThreeStage = (): PreEntryThreeStage => ({
@@ -171,6 +171,7 @@ export function copyAdditionMarketConditions(rule: QualityAdditionRoundRule) {
 }
 /** Preserve the complete portable ordinary seller, reject stateful overlays as a whole. */
 export function copyOrdinaryMarketSeller(p: QualityGroup): EntrySellRule {
+  if (p.rule?.version != null || p.rule?.direction === '>=') throw Error('静态最大回撤止损依赖首仓买入价，只用于持仓卖出');
   if (!p.rule || p.router || p.combo || p.advantage || p.engine || p.sellStages?.length) throw Error('该卖出方案包含持仓分段、动态确认或旧引擎依赖，不能完整转为观察条件；本次未复制');
   const condition: EntryMarketCondition = { id:crypto.randomUUID(), label:p.label, snapshot:structuredClone(p.snapshot), metric:p.rule.metric, direction:p.rule.direction, threshold:p.rule.threshold, enabled:true, timing:p.execution==='intrabar-1m'?'intrabar':'closed' };
   validateEntryCondition(condition);

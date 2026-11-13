@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { definitionKey, evaluateOnBars } from '@/lib/deepDig/features';
 import { evaluateQualitySample, qualityMetricPlan, qualityResultKey, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
 import { aggregateQualityMinute, findQualityIntrabarExit } from '@/lib/fish/qualityIntrabar';
+import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
+import { STATIC_DRAWDOWN_SELL_CHOICE } from '@/lib/fish/qualityStaticDrawdownSell';
+import { freezeQualityPlan, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
+import { qualityAlgorithmExit } from '@/lib/fish/qualitySellError';
+import { postExitIntraminute } from '@/lib/fish/qualityPostExit';
 import type { FishReconstructionLoader } from '@/lib/fish/reconstruction';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 
@@ -14,6 +19,55 @@ function group(formula='raw = C',threshold=95):QualityGroup {
 }
 const loader=(minute:(t:number)=>ResearchBar,coarse:(t:number)=>ResearchBar=(t)=>bar(t)):FishReconstructionLoader=>async(_row,a,b,p)=>Object.freeze(Array.from({length:(b-a)/p.step},(_,i)=>Object.freeze((p.step===M?minute:coarse)(a+i*p.step))));
 const run=(g:QualityGroup,load:FishReconstructionLoader,now=T+10*M,s=sample,previous?:Awaited<ReturnType<typeof evaluateQualitySample>>)=>evaluateQualitySample(s,g,0,now,load,signal(),previous);
+
+describe('ordinary static drawdown seller', () => {
+  const stop = (threshold = 2) => makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', threshold, [], undefined, 'stop');
+
+  it('fills a 2% touch at 98, attributes the exit to the selected seller, and carries the same entry across resume', async () => {
+    const g = freezeQualityPlan(stop());
+    const path = vi.fn(loader(t => t === T+M ? { ...bar(t), low: 98, high: 110 } : bar(t)));
+    const prior = await run(g, path, T+M);
+    const whole = await run(g, path, T+2*M);
+    const resumed = await run(g, path, T+2*M, sample, prior);
+    expect(resumed).toEqual(whole);
+    expect(whole).toMatchObject({ status: 'closed', endTime: T+M, endPrice: 98, exitReading: 2, peakPct: 0,
+      exitSnapshot: { atOpen: false, cause: { kind: 'sell-static-drawdown', direction: '>=', threshold: 2 } } });
+    expect(qualityAlgorithmExit(g, whole)).toBeNull();
+    expect(postExitIntraminute(whole, g)).toBe(true);
+    expect(path.mock.calls.every(([, from, , plan]) => from >= T && plan.step === M && !plan.compiled.usesBtc)).toBe(true);
+    expect(g.holdingVetoes).toBeUndefined();
+    expect(planVersionChanges(g)).toEqual([]);
+    expect(planVersionChanges({ ...g, rule: { ...g.rule!, threshold: 2.5 } })).toHaveLength(1);
+    for (const value of [undefined, 0, -1, NaN, 100]) {
+      expect(() => makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', value, [])).toThrow(/阈值/);
+    }
+  });
+
+  it('fills a gap at the opening price and keeps an earlier mirror reduction', async () => {
+    const g = { ...stop(), mirrorTakeProfit: { enabled: true, gainPct: 3, sellPct: 50 } };
+    const path = loader(t => t === T ? { ...bar(t), high: 104 } : bar(t, 90, 97));
+    const result = await run(g, path, T+2*M);
+    expect(result).toMatchObject({ status: 'closed', endTime: T+M, endPrice: 97, exitReading: 3,
+      mirrorFill: { price: 103, fraction: 0.5 }, remainingFraction: 0, exitSnapshot: { atOpen: true } });
+    expect(result.pnl).toBeCloseTo(0);
+    expect(postExitIntraminute(result, g)).toBe(false);
+  });
+
+  it('uses the stop only in the selected stage and freezes both stage thresholds', async () => {
+    const g = stop(), inactive = group('raw = C', 1);
+    const after = { ...inactive, combo: { beforeLabel: '前段指标', switchPct: 5, after: { ...g, rule: g.rule! } } };
+    const before = { ...g, combo: { beforeLabel: g.label, switchPct: 5, after: { ...inactive, rule: inactive.rule! } } };
+    const path = loader(t => t === T ? { ...bar(t), high: 106, low: 98 } : { ...bar(t), low: 97 });
+    expect(await run(before, path, T+2*M)).toMatchObject({ endTime: T, endPrice: 98, exitSnapshot: { stage: 'before' } });
+    const result = await run(after, path, T+2*M);
+    expect(result).toMatchObject({ endTime: T+M, endPrice: 98, exitSnapshot: { stage: 'after' } });
+    expect(qualityAlgorithmExit(after, result)).toBeNull();
+    expect(freezeQualityPlan(after).frozenVersions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'sell-after-static', version: expect.stringContaining('sell-static-drawdown-v1') }),
+    ]));
+    expect(await run(before, loader(t => t === T ? { ...bar(t), high: 106 } : { ...bar(t), low: 97 }), T+2*M)).toMatchObject({ status: 'open' });
+  });
+});
 
 describe('causal intrabar sell replay',()=>{
   it('catches the first minute breach even when the original 5m candle recovers, and excludes exit-minute extremes',async()=>{

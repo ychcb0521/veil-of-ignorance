@@ -6,6 +6,7 @@
 import { routerTemplateSummary } from './qualityPlanRouter';
 import type { FishQualityStudy, QualityGroup } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
+import { qualityExitThresholdText } from './qualityStaticDrawdownSell';
 import { freezeQualityPlan, planVersionChanges } from './qualityPlanVersions';
 import { hasPreBoxAdditionShape, withLegacyEngine } from './qualityLegacyEngine';
 
@@ -89,8 +90,8 @@ export const qualityPlanFromTemplate = (template: QualityPlanTemplate & { plan: 
 export function qualityPlanTemplateSummary(plan: QualityGroup): string {
   if(plan.preEntryThreeStage){const c=plan.preEntryThreeStage;return `三阶筛选 · 必要条件 ${c.required.filter(f=>f.enabled).length} 项 · 原生防守线 · 排除条件 ${c.additionVetoes.filter(v=>v.enabled).length+c.sellRules.filter(r=>r.enabled).length+c.hardVetoes.filter(v=>v.enabled).length} 项`;}
   if(plan.router)return routerTemplateSummary(plan.router);
-  const sell = plan.combo && plan.rule ? `${plan.combo.beforeLabel} ${plan.rule.direction} ${plan.rule.threshold} → 涨 ${plan.combo.switchPct}% 后 ${plan.combo.after.label} ${plan.combo.after.rule.direction} ${plan.combo.after.rule.threshold}`
-    : plan.rule ? `${plan.snapshot.featureShort ?? plan.label} ${plan.rule.direction} ${plan.rule.threshold}` : '无普通卖出门槛';
+  const sell = plan.combo && plan.rule ? `${plan.combo.beforeLabel} ${qualityExitThresholdText(plan.rule)} → 涨 ${plan.combo.switchPct}% 后 ${plan.combo.after.label} ${qualityExitThresholdText(plan.combo.after.rule)}`
+    : plan.rule ? `${plan.snapshot.featureShort ?? plan.label} ${qualityExitThresholdText(plan.rule)}` : '无普通卖出门槛';
   const mirror = plan.mirrorTakeProfit?.enabled ? `镜像 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%` : '镜像关';
   const addition = plan.addition?.enabled ? `加仓最多 ${plan.addition.maxRounds ?? (plan.addition.repeat === false ? 1 : '多')} 次` : '加仓关';
   const stops = activeHoldingVetoes(plan.holdingVetoes).length;

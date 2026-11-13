@@ -13,6 +13,7 @@ import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
 import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
+import { isStaticDrawdownSell, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
 import { syncQualitySellDefinitions } from './qualityComparison';
 import { isMonitorCampaignId, monitorCampaignRecordId, qualityMonitorCampaignId, qualityMonitorCampaignRun } from './qualityMonitorCampaign';
 import type { QualityMonitorRecord, QualityMonitorSetting } from './qualityMonitorLibrary';
@@ -38,7 +39,10 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
   const legId = `${id}-main`, recordId = r.mirrorFill?.fraction === 1 ? `${id}-mirror-close` : `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
   const detectorLabels = run.detectors.map(d => ({ id: d.id, label: `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}` }));
-  const effective=effectiveQualitySellPlan(plan,r),definition = qualityDefinition(effective.snapshot);
+  const effective=effectiveQualitySellPlan(plan,r);
+  const after = effective.combo?.after;
+  const active = r.exitSnapshot?.stage === 'after' && after && (isStaticDrawdownSell(after.rule) || isStaticDrawdownSell(effective.rule)) ? after : effective;
+  const definition = qualityDefinition(active.snapshot), staticSell = isStaticDrawdownSell(active.rule);
   const opening: CampaignEvent = {
     id: `${id}-entry`, timestamp: iso(entry), event_type: 'main_opened', leg_role: 'main_open', journal_id: legId,
     trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, pending_order_id: null, price, size_usdt: notional,
@@ -69,10 +73,12 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     comparison: { section, planLabel:storedPlan.label, monitorPlan: structuredClone(storedPlan), runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
       holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??notional,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
       sellEvidence: { exitReason:closed?r.reason:undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
-        ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: definition.formula, definitionKey: effective.snapshot.definitionKey!, featureId: effective.snapshot.featureId!,
-        metric: effective.rule?.metric ?? effective.metric, version: qualityFormulaVersion(effective), interval: effective.snapshot.interval ?? '5m',
+        ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: staticSell ? '静态最大回撤 =（首仓买入价 − 持仓最低价）÷ 首仓买入价 × 100%' : definition.formula,
+        definitionKey: active.snapshot.definitionKey!, featureId: active.snapshot.featureId!,
+        metric: staticSell ? STATIC_DRAWDOWN_SELL_LABEL : active.rule?.metric ?? active.metric,
+        version: staticSell ? active.rule?.version ?? '' : qualityFormulaVersion({ ...effective, snapshot: active.snapshot, rule: active.rule }), interval: active.snapshot.interval ?? '5m',
         halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: effective.definitionSource === 'account' ? 'account' : 'historical',
-        direction: effective.rule?.direction, threshold: effective.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
+        direction: active.rule?.direction, threshold: active.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
         confirmedAt: closed ? r.endTime : r.pendingExit?.at,
         ...(r.boxMarketRepair ? { boxMarketRepair: r.boxMarketRepair } : {}),
         execution: effective.execution,barOpenAt:r.exitSnapshot?.barOpenTime,

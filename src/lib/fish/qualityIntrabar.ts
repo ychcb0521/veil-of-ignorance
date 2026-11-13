@@ -15,6 +15,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
 import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror';
+import { STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
@@ -65,7 +66,8 @@ export async function findQualityIntrabarExit(o: {
   onObservation?: (at: number, observation?: { waitingForTrade: boolean; entryBlocked?: string; entryPending?: string; readings?: QualityTrigger['readings'] }) => void;
   /** Only new entry rounds supply this gate; existing holding/entry rules are unchanged. */
   entryGate?: (at: number, minute?: ResearchBar) => Promise<{ blocked?: string; pending?: string }>;
-  row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
+  row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:QualityOperator;threshold:number };
+  staticSell?: StaticDrawdownSellRule; afterStaticSell?: StaticDrawdownSellRule;
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
   boxStopStates?:Record<string,BoxStopState>;
@@ -103,6 +105,26 @@ export async function findQualityIntrabarExit(o: {
    * 在每分钟收盘时判断，所以分水岭那一分钟的收盘起就按后段条件；续算时由已记下的最大涨幅还原。
    */
   const switched=()=>o.switchPct!=null&&!!holding&&Math.max(sellerPeak,holding.peak)>=holding.entry*(1+o.switchPct/100)*(1-1e-12);
+  let staticPrevious: QualityTrigger['previous'] = o.resumed && holding && (o.staticSell || o.afterStaticSell)
+    ? { at: o.since, reading: holdingVetoReading(holding, 'static-drawdown') } : undefined;
+  const staticSellAt = (minute: ResearchBar, atOpen: boolean): QualityTrigger | undefined => {
+    if (!holding || o.ordinaryUntil != null && (atOpen ? minute.openTime > o.ordinaryUntil : minute.openTime >= o.ordinaryUntil)) return;
+    // A price stop belongs to the stage active at the minute's opening. The
+    // current minute's high can switch stages only when that minute closes.
+    const after = switched(), rule = after ? o.afterStaticSell : o.staticSell;
+    if (!rule) return;
+    const level = holding.entry * (1 - rule.threshold / 100);
+    const observed = atOpen ? minute.open : minute.low;
+    if (![holding.entry, minute.open, observed].every(price => Number.isFinite(price) && price > 0)) {
+      throw new Error('静态最大回撤止损缺少有效分钟价格');
+    }
+    if (!(level > 0) || observed > level * (1 + 1e-12)) return;
+    const price = atOpen ? minute.open : level;
+    return { at: minute.openTime, barOpenTime: minute.openTime, atOpen, reading: atOpen ? Math.max(rule.threshold, (holding.entry - price) / holding.entry * 100) : rule.threshold,
+      fillPrice: price, fillPeak: Math.max(holding.peak, minute.open), previous: staticPrevious,
+      ...(o.switchPct != null ? { stage: after ? 'after' : 'before' } : {}),
+      cause: { id: STATIC_DRAWDOWN_SELL_VERSION, label: STATIC_DRAWDOWN_SELL_LABEL, kind: 'sell-static-drawdown', direction: '>=', threshold: rule.threshold } };
+  };
   const enabled = activeHoldingVetoes(o.vetoes);
   const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates});
   const boxState=()=>enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
@@ -219,10 +241,17 @@ export async function findQualityIntrabarExit(o: {
         const trigger=checkRisk(minute.openTime,opening);
         if(trigger) {prices.push(minute);return {trigger:{...trigger,barOpenTime:minute.openTime,atOpen:true},prices,mirrorFill};}
         if(boxTrigger?.atOpen){prices.push(minute);return {trigger:boxTrigger,prices,mirrorFill,...boxState()};}
+        const openSeller = staticSellAt(minute, true);
+        if (openSeller) { prices.push(minute); return { trigger: openSeller, prices, mirrorFill, ...boxState() }; }
         const openProfit=mirrorAt(minute,true);
         if(openProfit) {prices.push(minute);return {trigger:openProfit,prices,mirrorFill};}
         // 开盘没越线：盘中碰到回撤止损价就按止损价卖出，不等这一分钟收完
         const stop=qualityIntrabarStop(holding,minute,risk);
+        const priceSeller = staticSellAt(minute, false);
+        if (priceSeller && priceSeller.fillPrice! > Math.max(stop?.price ?? 0, boxTrigger?.fillPrice ?? 0)) {
+          prices.push(minute);
+          return { trigger: priceSeller, prices, mirrorFill, ...boxState() };
+        }
         if(stop && !(boxTrigger?.fillPrice!=null && boxTrigger.fillPrice>stop.price)) {
           prices.push(minute);
           const v=stop.veto;
@@ -237,7 +266,11 @@ export async function findQualityIntrabarExit(o: {
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding){holding=advanceQualityHolding(holding,minute);sellerPeak=Math.max(sellerPeak,minute.high);}}
       if(drops.length&&minute.openTime>=o.entry) {dropMinutes.push(minute);while(dropMinutes.length>maxDropWindow)dropMinutes.shift();}
-      const at=minute.openTime+MINUTE,trigger=boxTrigger??await check(at,minute);
+      const at=minute.openTime+MINUTE;
+      if (holding && minute.openTime >= o.since && (o.staticSell || o.afterStaticSell)) {
+        staticPrevious = { at, reading: holdingVetoReading(holding, 'static-drawdown') };
+      }
+      const trigger=boxTrigger??await check(at,minute);
       if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices,mirrorFill,...boxState()};}
       for(const s of streams)if(s.partial&&at%s.plan.step===0) {s.history.push(s.partial);s.partial=undefined;}
       if(i%20===19)await fishDelay(0,signal);

@@ -29,6 +29,7 @@ import { fishDelay, validateFishBars } from './shared';
 import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
+import { isStaticDrawdownSell, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
@@ -37,7 +38,7 @@ import { BOX_MARKET_REPAIR_VERSION, BOX_STOP_INVALID_DATA, qualityBoxMarketRepai
 
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
-export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
+export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION }
 export interface QualityGroup {
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
   preEntryConditions?: import('./preEntryConditions').PreEntryConditions;
@@ -73,10 +74,10 @@ export interface QualityGroup {
 export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
 /** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
 export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo ? ['combo-v1', g.combo.switchPct, g.combo.after.metric, g.combo.after.snapshot.featureId,
-  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold] : null;
+  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold, ...(g.combo.after.rule.version ? [g.combo.after.rule.version] : [])] : null;
 /** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
 export function qualityRuleText(g: QualityGroup): string {
-  const base = g.combo && g.rule ? `${g.combo.beforeLabel} ${g.rule.direction} ${g.rule.threshold} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${g.combo.after.rule.direction} ${g.combo.after.rule.threshold}` : g.rule ? `${g.rule.direction} ${g.rule.threshold}` : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
+  const base = g.combo && g.rule ? `${g.combo.beforeLabel} ${qualityExitThresholdText(g.rule)} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${qualityExitThresholdText(g.combo.after.rule)}` : g.rule ? qualityExitThresholdText(g.rule) : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
   const stages=qualitySellStagesLabel(g);return stages?`${base} · ${stages}`:base;
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
@@ -638,7 +639,7 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
    const active=selected?switches.filter(s=>s.afterAdditions===selected.afterAdditions).at(-1)??{...selected,at:qualityAdditionFills(result)[selected.afterAdditions-1]?.at??result.entryTime!}:undefined;
    const activeVeto=selectedVeto?vetoSwitches.filter(s=>s.afterAdditions===selectedVeto.afterAdditions).at(-1):undefined;
    const reason=result.status==='closed'&&!result.exitSnapshot?.cause&&active?`第 ${active.afterAdditions} 次加仓后，按 ${active.label} ${active.rule.direction} ${active.rule.threshold} 卖出；${result.reason}`:result.reason;
-   return {...result,key,evaluatedAt:now,reason:result.status==='closed'&&activeVeto&&result.exitSnapshot?.cause&&!['addition-support','mirror-take-profit','payoff-ratio'].includes(result.exitSnapshot.cause.kind)?`第 ${activeVeto.afterAdditions} 次加仓后一票条件：${reason}`:reason,...(activeVeto?{activeVetoStage:activeVeto,vetoStageSwitches:vetoSwitches}:{}),...(active?{activeSellStage:active}:{}),...(switches.length?{sellStageSwitches:switches}:{})};
+   return {...result,key,evaluatedAt:now,reason:result.status==='closed'&&activeVeto&&result.exitSnapshot?.cause&&!['addition-support','mirror-take-profit','payoff-ratio','sell-static-drawdown'].includes(result.exitSnapshot.cause.kind)?`第 ${activeVeto.afterAdditions} 次加仓后一票条件：${reason}`:reason,...(activeVeto?{activeVetoStage:activeVeto,vetoStageSwitches:vetoSwitches}:{}),...(active?{activeSellStage:active}:{}),...(switches.length?{sellStageSwitches:switches}:{})};
   }
   throw Error('卖出算法阶段切换未完成');
  }catch(error){abort(signal);return {...base,status:'error',reason:error instanceof Error?error.message:'卖出阶段计算失败'};}
@@ -685,26 +686,32 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let boxStopStateAt:((at:number)=>Record<string,import('./qualityBoxStop').BoxStopState>)|undefined;
     if (!trigger) {
       const rule = group.rule, combo = group.combo;
-      if (rule && (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction))) throw new Error('卖出规则无效');
-      if (combo && (!rule || !(combo.switchPct > 0) || !Number.isFinite(combo.after.rule.threshold) || !['<', '>'].includes(combo.after.rule.direction))) throw new Error('组合卖出规则无效：前段、后段门槛与分水岭都要设置');
-      const { plan, scale } = rule ? qualityMetricPlan(group.snapshot, rule.metric) : { plan: pp, scale: 1 };
+      if (rule) validateQualityExitRule(group.snapshot, rule);
+      if (combo) {
+        if (!rule || !(combo.switchPct > 0)) throw new Error('组合卖出规则无效：前段、后段门槛与分水岭都要设置');
+        validateQualityExitRule(combo.after.snapshot, combo.after.rule);
+      }
+      const staticSell = isStaticDrawdownSell(rule) ? rule : undefined;
+      const afterStaticSell = isStaticDrawdownSell(combo?.after.rule) ? combo.after.rule : undefined;
+      const indicatorRule = isStaticDrawdownSell(rule) ? undefined : rule;
+      const { plan, scale } = indicatorRule ? qualityMetricPlan(group.snapshot, indicatorRule.metric) : { plan: pp, scale: 1 };
       const vetoes=activeHoldingVetoes(group.holdingVetoes);
       vetoes.forEach(validateHoldingVeto);
-      if (group.execution === 'intrabar-1m' || vetoes.length || group.mirrorTakeProfit?.enabled || combo) {
+      if (group.execution === 'intrabar-1m' || vetoes.length || group.mirrorTakeProfit?.enabled || combo || staticSell) {
         let holding;
         // 组合卖出要跟踪最高价（判断是否已过分水岭），与回撤否决、镜像止盈共用同一条持仓路径
-        if(vetoes.some(v=>v.kind!=='indicator') || group.mirrorTakeProfit?.enabled || combo) {
+        if(vetoes.some(v=>v.kind!=='indicator') || group.mirrorTakeProfit?.enabled || combo || staticSell) {
           const initial=prior?.entryPrice ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
           if(initial)validateFishBars(initial,entry+QUALITY_MINUTE,1,QUALITY_MINUTE);
           const entryPrice=prior?.entryPrice??initial![0].open;
           holding=trackVetoPath&&prior?.vetoPath?{...prior.vetoPath}:{entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
-        if (combo) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
+        if (combo && !afterStaticSell) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule:indicatorRule,staticSell,afterStaticSell,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,boxStopStates,mirror:group.mirrorTakeProfit,mirrorFill,ordinaryUntil,conditionsUntil,confirmOrdinary,sellerPeak:prior?.entryPrice?prior.entryPrice*(1+(prior.peakPct??0)/100):undefined,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; boxStopStates = replay.boxStopStates; boxStopStateAt = replay.boxStopStateAt; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
-      } else if (rule) {
+      } else if (indicatorRule) {
         let cursor = Math.floor(since / plan.step) * plan.step;
         const stop = Math.floor(end / plan.step) * plan.step;
         while (cursor < stop && !trigger) {
@@ -718,7 +725,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
             if (at <= entry || at <= cursor || at > end) continue;
             const reading = readings[i] * scale;
             if (!Number.isFinite(reading)) { if (qualityInitializationPending(load, readings, i)) continue; throw new Error('卖出指标存在缺失读数，不能越过缺口判断成交'); }
-            if (rule.direction === '<' ? reading < rule.threshold : reading > rule.threshold) { trigger = { at, reading }; break; }
+            if (indicatorRule.direction === '<' ? reading < indicatorRule.threshold : reading > indicatorRule.threshold) { trigger = { at, reading }; break; }
           }
           cursor = cut;
           await fishDelay(0, signal);
@@ -839,6 +846,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       reason: closed&&trigger?.advantage?`优势分级 ${trigger.advantage.observation.grade}：原软退出连续 ${trigger.advantage.count} 根已完成 1 分钟读数确认（要求 ${trigger.advantage.required} 根），下一分钟开盘卖出`:closed&&trigger?.cause?.geometricLock?`保住有效涨幅：几何仓位 ${trigger.cause.geometricLock.multiple.toFixed(2)} > ${trigger.cause.geometricLock.threshold}，止损从 Kₘ ${+trigger.cause.geometricLock.k.toPrecision(8)} 上移到 ${+trigger.cause.geometricLock.line.toPrecision(8)}（＋${trigger.cause.geometricLock.pct}% × 首次开仓价）；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按该价卖出全部持仓'}`:closed&&trigger?.cause?.payoffBasis?`盈亏比止盈：整笔盈亏 ${trigger.cause.payoffBasis.pnl.toFixed(2)} ÷ L₀ ${+trigger.cause.payoffBasis.l0.toPrecision(8)}（初始仓位 × ${trigger.cause.payoffBasis.l0Pct}%）≥ ${trigger.cause.threshold}R；${trigger.atOpen?'开盘跳过目标价，按开盘价':`盘中触及 ${+trigger.cause.payoffBasis.targetPrice.toPrecision(8)}，按目标价`}卖出全部持仓`:closed&&trigger?.cause?.supportDrops?`K 连续下移 ${trigger.cause.supportDrops.count} 次全仓卖出：支撑下移到 ${trigger.cause.supportDrops.support}，K ${trigger.cause.supportDrops.previousK} → ${trigger.cause.supportDrops.newK}；下一分钟开盘价卖出全部持仓`:closed&&trigger?.cause?.kind==='addition-geometric-profit'?`加仓止盈：几何仓位 ${trigger.cause.additionBasis!.geometricMultiple.toPrecision(8)}× ≥ ${trigger.cause.geometricMultiple}×，价格 ${finalPrice.toPrecision(8)} ≥ 均衡价 K ${trigger.cause.additionBasis!.equilibriumPrice.toPrecision(8)} ×（1＋${trigger.cause.threshold}%）；${trigger.atOpen?'开盘达标，按开盘价':'盘中触价，按目标价'}卖出全部余仓与加仓`:closed&&trigger?.cause?.id==='addition-floor'?`保本底线 F 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越过 F，按开盘价':'盘中触及 F，按 F'}卖出全部持仓（加仓量按 F 算，整笔保本）`:closed&&trigger?.cause?.kind==='addition-support'&&trigger.cause.confirmCloses?`防守线 K 止损：${trigger.cause.threshold}；5 分钟收盘连续 ${trigger.cause.confirmCloses} 根低于 K，下一分钟开盘卖出`:closed&&trigger?.cause?.kind==='addition-support'?`加仓支撑线 K 止损：${trigger.cause.threshold}；${trigger.atOpen?'开盘跳空越线，按开盘价卖出':'盘中触线，按支撑价卖出'}`:closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && !trigger?.cause && trigger?.stage && group.combo ? (trigger.stage === 'after'
         ? `组合卖出：涨幅已达 ${group.combo.switchPct}%，按 ${group.combo.after.label} ${group.combo.after.rule.direction} ${group.combo.after.rule.threshold} 盘中复原达标，下一分钟开盘卖出`
         : `组合卖出：涨幅未达 ${group.combo.switchPct}%，按 ${group.combo.beforeLabel} ${group.rule!.direction} ${group.rule!.threshold} 盘中复原达标，下一分钟开盘卖出`)
+        : closed && trigger?.cause?.kind === 'sell-static-drawdown' ? `卖出算法${trigger.stage === 'before' ? '前段' : trigger.stage === 'after' ? '后段' : ''}：${trigger.cause.label} ≥ ${trigger.cause.threshold}%；${trigger.atOpen ? '开盘跳空越线，按开盘价' : '盘中触及止损价，按止损价'}卖出全部余仓`
         : closed && trigger?.cause?.boxBreakEvidence ? '一票否决：DBL-5 防守线断裂（红叉已确认），按下一分钟开盘价卖出全部持仓'
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${['indicator','box-stop'].includes(trigger.cause.kind)?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {

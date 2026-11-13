@@ -424,7 +424,7 @@ export interface TradeCampaign {
       initialStaticStopPct?:number|null;
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';
-      direction?: '<' | '>'; threshold?: number; reading?: number; confirmedAt?: number;
+      direction?: '<' | '>' | '>='; threshold?: number; reading?: number; confirmedAt?: number;
       execution?: 'intrabar-1m'; barOpenAt?: number; previousAt?: number; previousReading?: number;
       executedAt?: number;
       triggerAtOpen?:boolean;

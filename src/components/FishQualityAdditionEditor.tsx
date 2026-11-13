@@ -79,7 +79,7 @@ const conditionDraft=(f?:QualityBuyFilter):ConditionDraft=>f
  ? {choice:f.snapshot.featureId+':'+f.metric,direction:f.direction,threshold:String(f.threshold),time:additionMetricTime(f.snapshot),savedCondition:structuredClone(f)}
  : {choice:'',direction:'>',threshold:''};
 const sellSwitchDraft=(stage?:QualitySellStage):SellSwitchDraft=>stage
- ? {enabled:true,choice:stage.snapshot.featureId+':'+stage.metric,direction:stage.rule.direction,threshold:String(stage.rule.threshold),time:additionMetricTime(stage.snapshot),savedStage:structuredClone(stage)}
+ ? {enabled:true,choice:stage.snapshot.featureId+':'+stage.metric,direction:stage.rule.direction === '>=' ? '>' : stage.rule.direction,threshold:String(stage.rule.threshold),time:additionMetricTime(stage.snapshot),savedStage:structuredClone(stage)}
  : {enabled:false,choice:'',direction:'<',threshold:''};
 /**
  * 【用户要求】2026-11-01 位置只用箱体算法（DBL / SBS），下方一行 K = 旧C − n×ATR。

@@ -10,7 +10,7 @@ export function validateQualitySellStages(g:Pick<QualityGroup,'sellStages'|'addi
  const seen=new Set<number>();for(const s of g.sellStages??[]){
   if(!Number.isInteger(s.afterAdditions)||s.afterAdditions<1||s.afterAdditions>100)throw Error('切换的加仓次数须为 1 至 100 的整数');
   if(seen.has(s.afterAdditions))throw Error('同一次加仓只能设置一个卖出算法切换');seen.add(s.afterAdditions);
-  if(!s.snapshot?.definitionKey||!s.metric||!s.rule||s.rule.metric!==s.metric||!['<','>'].includes(s.rule.direction)||!Number.isFinite(s.rule.threshold))throw Error('每个卖出阶段须选择指标、方向并填写有限数字门槛');
+  if(!s.snapshot?.definitionKey||!s.metric||!s.rule||s.rule.metric!==s.metric||s.rule.version!=null||!['<','>'].includes(s.rule.direction)||!Number.isFinite(s.rule.threshold))throw Error('每个卖出阶段须选择指标、方向并填写有限数字门槛');
  }
  if(g.sellStages?.length&&g.addition?.enabled&&g.addition.quantityMode!=='calculator')throw Error('次数切换须使用按平衡公式定量的加仓方案');
 }

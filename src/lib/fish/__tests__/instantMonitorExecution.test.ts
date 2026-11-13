@@ -8,6 +8,8 @@ import { instantMonitorSale, evaluateInstantMonitor, manualInstantMonitorClose }
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from '../instantMonitorSettings';
 import { buildInstantCampaignData, freezeInstantCampaign, instantCampaignInput } from '../instantCampaign';
 import { qualityCampaignStaticRisk } from '../qualityCampaignRisk';
+import { makeQualitySellPlan } from '../qualitySellPlans';
+import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import type { FishReconstructionLoader } from '../reconstruction';
 
@@ -62,6 +64,22 @@ it('freezes the original template, applies its mirror and stop to the 200 USDT s
   expect(qualityCampaignStaticRisk(data.campaign)?.loss).toBe(10);
   expect(template).toEqual(before);
   expect(instantMonitorTemplateIssue({ id: 'entry', name: 'Entry', plan: screening, savedAt: entry, updatedAt: entry })).toBeDefined();
+});
+
+it('executes a saved ordinary static drawdown seller in instant trading and preserves its campaign evidence', async () => {
+  const plan = freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 2, []));
+  const template = { id: 'price-stop', name: '静态回撤 2%', savedAt: entry, updatedAt: entry, plan };
+  expect(instantMonitorTemplateIssue(template)).toBeUndefined();
+  const instantMonitor = { ...monitor, templateId: template.id, name: template.name, plan };
+  const closed = await evaluateInstantMonitor(sample, instantMonitor, entry + 3*m, load, signal);
+  expect(closed).toMatchObject({ status: 'closed', endPrice: 98, endTime: entry + 2*m, pnl: expect.closeTo(-4) });
+  const input = instantCampaignInput(record, { ...round, instantMonitor }, instantMonitorSale(closed), closed)!;
+  const { campaign } = buildInstantCampaignData('account', await freezeInstantCampaign(input, load, signal));
+  expect(campaign.comparison).toMatchObject({ monitorPlan: plan, sellEvidence: {
+    featureId: 'sell-static-drawdown-v1', interval: '1m', threshold: 2, reading: 2,
+    triggerCause: { kind: 'sell-static-drawdown', direction: '>=', threshold: 2 },
+  } });
+  expect(campaign.comparison?.sellEvidence?.holdingVetoes).toEqual([]);
 });
 
 it('uses the same remaining quantity on manual close and keeps the actual adds and reductions in the campaign', async () => {

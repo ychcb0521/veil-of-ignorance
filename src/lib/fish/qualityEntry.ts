@@ -8,6 +8,7 @@ import type {FishSnapshot} from './algorithm';
 import {evaluateFishProgram} from './algorithm';
 import {aggregateQualityMinute,minuteTransport} from './qualityIntrabar';
 import {activeHoldingVetoes} from './qualityVeto';
+import { isStaticDrawdownSellSnapshot } from './qualityStaticDrawdownSell';
 import {FishError, validateFishBars} from './shared';
 import {researchReadsClosedOnly} from '@/lib/researchIndicators';
 import type {FishReconstructionLoader} from './reconstruction';
@@ -58,7 +59,9 @@ export async function evaluateQualityEntry(t:QualityEntryTarget,load:FishReconst
  const key=qualityEntryKey(t.source,t.result,t.plan,t.part);if(!key)throw Error('入场读数需要有效买入记录');
  const base={key,evaluatedAt:now,entryTime:t.result.entryTime!,mode:qualityEntryMode(t.plan),metric:t.part.metric};
  const abort=()=>{if(signal.aborted)throw new DOMException('已取消','AbortError');};
- try{abort();if(t.plan.initialization)load=withTuringInitialization(load,t.source.symbol,t.result.initialization?.startMs??NaN);
+ try{abort();
+  if (isStaticDrawdownSellSnapshot(t.part.snapshot)) return { ...base, value: 0, at: base.entryTime };
+  if(t.plan.initialization)load=withTuringInitialization(load,t.source.symbol,t.result.initialization?.startMs??NaN);
   return {...base,...await readQualityMetricAt(t.source,t.part.snapshot,t.part.metric,base.entryTime,base.mode,load,now,signal)};
  }catch(error){abort();return {...base,error:error instanceof Error?error.message:'入场行情读取失败'};}
 }
