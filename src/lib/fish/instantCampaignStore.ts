@@ -69,10 +69,12 @@ export async function syncInstantCampaign(owner: string, snapshot: InstantCampai
 
 function decodeSnapshot(row: unknown): InstantCampaignSnapshot | undefined {
   const { key, value } = (row ?? {}) as { key?: string; value?: InstantCampaignSnapshot };
-  if (!value || value.version !== 1 || key !== KEY + value.id || !isInstantCampaignId(value.id) || !value.source?.symbol
+  if (!value || (value.version !== 1 && value.version !== 2) || key !== KEY + value.id || !isInstantCampaignId(value.id) || !value.source?.symbol
     || !value.recordId || !Number.isSafeInteger(value.buyAt) || value.buyAt <= 0 || !Number.isSafeInteger(value.sell?.at) || value.sell.at <= value.buyAt
     || !Number.isFinite(value.sell.value) || value.sell.value >= SCREENED_CDA_LIMIT || !Array.isArray(value.detectors)
     || ![value.entryPrice, value.exitPrice, value.recordedAt].every(n => Number.isFinite(n) && n > 0)) return;
+  if (value.version === 2 && ![value.marginUsdt, value.leverage, value.marginUsdt * value.leverage]
+    .every(n => Number.isFinite(n) && n > 0)) return;
   return value;
 }
 

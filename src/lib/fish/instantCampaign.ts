@@ -12,9 +12,8 @@ import type { FishReconstructionLoader } from './reconstruction';
 import type { QualityCampaignData } from './qualityCampaignProjection';
 import type { PreEntryRecord, PreEntryRound } from './preEntryMonitor';
 
-export const INSTANT_MARGIN = 100;
-export const INSTANT_LEVERAGE = 5;
-export const INSTANT_NOTIONAL = INSTANT_MARGIN * INSTANT_LEVERAGE;
+const LEGACY_POSITION = { marginUsdt: 100, leverage: 5 } as const;
+const NEW_POSITION = { marginUsdt: 40, leverage: 5 } as const;
 const MINUTE = 60_000;
 const PRICE_WINDOW_MINUTES = 720;
 const SELL_RULE = 'CDA 原始值首次 < -10';
@@ -30,8 +29,7 @@ export interface InstantCampaignInput {
   detectors: string[];
 }
 
-export interface InstantCampaignSnapshot extends InstantCampaignInput {
-  version: 1;
+interface InstantCampaignExecution extends InstantCampaignInput {
   entryPrice: number;
   exitPrice: number;
   peakPct: number;
@@ -39,6 +37,10 @@ export interface InstantCampaignSnapshot extends InstantCampaignInput {
   staticDrawdown: number | null;
   recordedAt: number;
 }
+
+type SizedInstantCampaignSnapshot = InstantCampaignExecution & { version: 2; marginUsdt: number; leverage: number };
+// v1 has implicit sizing; v2 freezes sizing alongside the fill prices.
+export type InstantCampaignSnapshot = (InstantCampaignExecution & { version: 1 }) | SizedInstantCampaignSnapshot;
 
 export function instantCampaignInput(record: PreEntryRecord, round: PreEntryRound, sell: ScreenedCdaTrigger): InstantCampaignInput | undefined {
   const buyAt = record.matchedAt;
@@ -59,7 +61,7 @@ export const instantPricePlan = (interval: ResearchInterval) => compileFishProgr
 }, { statistic: '结果', direction: '>', threshold: 0, constraints: [] });
 
 /** Use the same venue as the screened signal. The sale is priced at the confirming close. */
-export async function freezeInstantCampaign(input: InstantCampaignInput, load: FishReconstructionLoader, signal: AbortSignal): Promise<InstantCampaignSnapshot> {
+export async function freezeInstantCampaign(input: InstantCampaignInput, load: FishReconstructionLoader, signal: AbortSignal): Promise<SizedInstantCampaignSnapshot> {
   const { buyAt, sell } = input;
   const from = Math.floor(buyAt / MINUTE) * MINUTE;
   const source: TradeSignal = { ...input.source, timeMs: sell.at, timeLabel: '', fallbackZone: '' };
@@ -97,7 +99,7 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
   }
   if (!(exitPrice > 0 && Number.isFinite(exitPrice))) throw Error('即时交易缺少有效 CDA 卖出价');
   return {
-    ...input, version: 1, entryPrice, exitPrice,
+    ...input, version: 2, ...NEW_POSITION, entryPrice, exitPrice,
     peakPct: 100 * (Math.max(peakPrice, exitPrice) / entryPrice - 1),
     drawdown: Math.max(dynamic, 100 * (1 - exitPrice / peakPrice)),
     staticDrawdown: 100 * (1 - Math.min(lowest, exitPrice) / entryPrice),
@@ -108,20 +110,22 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
 export function buildInstantCampaignData(owner: string, frozen: InstantCampaignSnapshot): QualityCampaignData {
   const { id, buyAt, sell, source, entryPrice, exitPrice, recordedAt, detectors, planLabel } = frozen;
   const { symbol } = source;
+  const { marginUsdt, leverage } = frozen.version === 1 ? LEGACY_POSITION : frozen;
+  const notional = marginUsdt * leverage;
   const opened = new Date(buyAt).toISOString(), closed = new Date(sell.at).toISOString(), recorded = new Date(recordedAt).toISOString();
-  const legId = id + '-main', recordId = id + '-close', quantity = INSTANT_NOTIONAL / entryPrice;
+  const legId = id + '-main', recordId = id + '-close', quantity = notional / entryPrice;
   const pnl = quantity * (exitPrice - entryPrice);
   const reason = `CDA 原始值 ${sell.value} < -10，5 分钟收盘确认`;
   const notes = [
     `筛选鱼 · 信号 ${new Date(source.timeMs).toISOString()}`,
     ...(planLabel ? [`筛选方案 ${planLabel}`] : []),
-    '模拟多单 · 保证金 100 USDT · 5 倍杠杆 · 名义仓位 500 USDT',
+    `模拟多单 · 保证金 ${marginUsdt} USDT · ${leverage} 倍杠杆 · 名义仓位 ${notional} USDT`,
     '买入取首次满足时点所在分钟开盘，卖出取 CDA 触发收盘。盈亏沿用持仓监测模拟成交口径，费用、滑点和强平未纳入。',
   ].join('\n');
   const opening: CampaignEvent = {
     id: id + '-entry', timestamp: opened, event_type: 'main_opened', leg_role: 'main_open',
-    journal_id: legId, trade_record_id: recordId, pending_order_id: null, price: entryPrice, size_usdt: INSTANT_NOTIONAL,
-    notes: '首次满足时间', recorded_at: recorded, direction: 'long', leverage: INSTANT_LEVERAGE, leg_sequence: 1,
+    journal_id: legId, trade_record_id: recordId, pending_order_id: null, price: entryPrice, size_usdt: notional,
+    notes: '首次满足时间', recorded_at: recorded, direction: 'long', leverage: leverage, leg_sequence: 1,
     order_kind: 'main', open_time: opened, entry_price: entryPrice,
   };
   const exit: CampaignEvent = {
@@ -132,25 +136,25 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
     id, user_id: owner, campaign_code: 'IT-' + id.slice('fish-instant-'.length), symbol,
     direction: 'main_long', status: campaignStatusFromRealizedPnl({ settled: true, total: pnl }, closed),
     strategy_template: 'main_only', title: `${symbol} · ${planLabel ?? 'CDA 即时交易'}`,
-    opened_at: opened, closed_at: closed, initial_main_size_usdt: INSTANT_NOTIONAL, initial_leverage: INSTANT_LEVERAGE,
-    final_realized_pnl: pnl, final_r_multiple: null, peak_unrealized_pnl: INSTANT_NOTIONAL * frozen.peakPct / 100,
+    opened_at: opened, closed_at: closed, initial_main_size_usdt: notional, initial_leverage: leverage,
+    final_realized_pnl: pnl, final_r_multiple: null, peak_unrealized_pnl: notional * frozen.peakPct / 100,
     peak_drawdown: frozen.drawdown, importance_weight: 0, notes, actual_evolution: [opening, exit],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: recorded,
     comparison: {
       section: 'instant', runKey: frozen.recordId, sellKey: PRICE_VERSION, planLabel: planLabel ?? 'CDA 即时交易',
       sellLabel: SELL_RULE, detectors: detectors.map(label => ({ id: label, label })),
       category: detectors.join(' + ') || undefined, valuedAt: sell.at,
-      holdingMetrics: { status: 'closed', entryPrice, initialNotional: INSTANT_NOTIONAL, totalInvested: INSTANT_MARGIN, returnPct: pnl / INSTANT_MARGIN * 100, peakPct: frozen.peakPct },
-      instant: { source, cdaValue: sell.value, marginUsdt: INSTANT_MARGIN, drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown },
+      holdingMetrics: { status: 'closed', entryPrice, initialNotional: notional, totalInvested: marginUsdt, returnPct: pnl / marginUsdt * 100, peakPct: frozen.peakPct },
+      instant: { source, cdaValue: sell.value, marginUsdt, drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown },
     },
   };
   const leg: TradeJournal = {
     id: legId, user_id: owner, trade_record_id: recordId, campaign_id: id, leg_role: 'main_open', leg_sequence: 1,
-    source: 'retroactive_from_record', symbol, direction: 'long', leverage: INSTANT_LEVERAGE, position_mode: 'isolated', order_kind: 'main',
+    source: 'retroactive_from_record', symbol, direction: 'long', leverage: leverage, position_mode: 'isolated', order_kind: 'main',
     pre_simulated_time: opened, pre_real_time: opened, pre_entry_price: entryPrice, pre_planned_stop_loss: null, pre_planned_take_profit: null,
     pre_entry_reason: notes, pre_falsification_signal: SELL_RULE, pre_mental_state: 3, pre_mental_trigger: null,
     pre_risk_awareness: null, pre_risk_management: null, pre_checklist_items: null, pre_checklist_passed: null,
-    pre_position_size: INSTANT_NOTIONAL, pre_account_equity_usdt: INSTANT_MARGIN, pre_max_loss_usdt: null,
+    pre_position_size: notional, pre_account_equity_usdt: marginUsdt, pre_max_loss_usdt: null,
     pre_settlement_mode: 'usdt', pre_settlement_asset: 'USDT',
     post_outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven', post_realized_pnl: pnl, post_r_multiple: null,
     post_reflection: null, post_correct_action: null, post_reviewed_at: null, reason_was_rewritten: false,
@@ -159,7 +163,7 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
   };
   const trade: TradeRecord = {
     id: recordId, symbol, side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice, exitPrice,
-    quantity, leverage: INSTANT_LEVERAGE, settlementMode: 'usdt', settlementAsset: 'USDT',
+    quantity, leverage, settlementMode: 'usdt', settlementAsset: 'USDT',
     pnl, fee: 0, openFeeUsd: 0, openFeeRate: 0, closeFeeRate: 0, slippage: 0,
     openTime: buyAt, closeTime: sell.at, openedRealAt: buyAt, closedRealAt: sell.at, operationAt: recordedAt, exit_reason_text: reason,
   };

@@ -37,23 +37,34 @@ it('builds one frozen 5× simulated trade from the two saved times, prices and C
   });
   const frozen = await freezeInstantCampaign(input, load, signal);
   expect(load).toHaveBeenCalledTimes(2); // legacy trigger has no saved close price
+  expect(frozen).toMatchObject({ version: 2, marginUsdt: 40, leverage: 5 });
   const data = buildInstantCampaignData('account-a', frozen);
   const { campaign, legs, tradeRecords } = data;
   expect(campaign).toMatchObject({
     user_id: 'account-a', opened_at: new Date(buyAt).toISOString(), closed_at: new Date(sellAt).toISOString(),
-    initial_main_size_usdt: 500, initial_leverage: 5, final_realized_pnl: 50, status: 'closed_profit',
-    comparison: { section: 'instant', holdingMetrics: { returnPct: 50 }, instant: { marginUsdt: 100, cdaValue: -10.5 } },
+    initial_main_size_usdt: 200, initial_leverage: 5, final_realized_pnl: 20, status: 'closed_profit',
+    comparison: { section: 'instant', holdingMetrics: { returnPct: 50 }, instant: { marginUsdt: 40, cdaValue: -10.5 } },
   });
-  expect(tradeRecords[0]).toMatchObject({ entryPrice: 100, exitPrice: 110, quantity: 5, openTime: buyAt, closeTime: sellAt });
-  expect(computeCampaignRealizedPnl(campaign, legs, tradeRecords, {}).total).toBe(50);
+  expect(tradeRecords[0]).toMatchObject({ entryPrice: 100, exitPrice: 110, quantity: 2, openTime: buyAt, closeTime: sellAt });
+  expect(computeCampaignRealizedPnl(campaign, legs, tradeRecords, {}).total).toBe(20);
+  expect(legs[0]).toMatchObject({ pre_account_equity_usdt: 40, pre_position_size: 200 });
+  expect(campaign.notes).toContain('保证金 40 USDT · 5 倍杠杆 · 名义仓位 200 USDT');
   const frozenPath = buildCampaignPricePathTask(buildCampaignCardData(data)).frozen!;
   expect(frozenPath.peak).toBeCloseTo(20);
   expect(frozenPath.drawdown).toBeCloseTo(12.5);
   expect(frozenPath.staticDrawdown).toBeCloseTo(1);
-  expect(qualityCampaignSheets(campaign)[0].rows).toContainEqual(['保证金 USDT', 100, '']);
+  expect(qualityCampaignSheets(campaign)[0].rows).toContainEqual(['保证金 USDT', 40, '']);
+  // A 643 snapshot had no sizing fields; reading it still produces its original dollars and return.
+  const { marginUsdt: _margin, leverage: _leverage, ...execution } = frozen;
+  const legacy = buildInstantCampaignData('account-a', { ...execution, version: 1 });
+  expect(legacy.campaign).toMatchObject({ initial_main_size_usdt: 500, initial_leverage: 5, final_realized_pnl: 50,
+    comparison: { holdingMetrics: { returnPct: 50 }, instant: { marginUsdt: 100 } } });
+  expect(legacy.tradeRecords[0].quantity).toBe(5);
+  expect(qualityCampaignSheets(legacy.campaign)[0].rows).toContainEqual(['保证金 USDT', 100, '']);
+
   const current = await freezeInstantCampaign({ ...input, sell: { ...alert, closePrice: 90 } }, load, signal);
   expect(load).toHaveBeenCalledTimes(3);
-  expect(buildInstantCampaignData('account-a', current).campaign).toMatchObject({ status: 'closed_loss', final_realized_pnl: -50 });
+  expect(buildInstantCampaignData('account-a', current).campaign).toMatchObject({ status: 'closed_loss', final_realized_pnl: -20 });
 });
 
 it('does not turn a missing buy candle into a priced campaign', async () => {
