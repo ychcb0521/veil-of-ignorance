@@ -5,7 +5,7 @@ import {fishCaughtBy} from '@/lib/fish/records';
 import {groupFishCabin} from '@/lib/fish/cabinRows';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown, Database, Download, Search, Sparkles } from 'lucide-react';
-import { fishSectionHeading, fishSubHeading, fishNestedHeading, FishCount } from './FishSection';
+import { fishSectionHeading, fishSubHeading, FishCount } from './FishSection';
 import { FishQualityInfo } from './FishQualityModule';
 // 筛选行与「渔」的输入同一套：浅底无框、圆角、统一 28px 高
 const filterCls = 'h-7 w-full appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 text-[11px] text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60';
@@ -28,8 +28,8 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   emptyText?: string;
   /** 紧跟在上一个列表下面：不再画分隔线。 */
   bare?: boolean;
-  /** 标题层级用于区分鱼舱、捕捞下的新鱼和动态筛选下的筛选鱼。 */
-  level?: 'section' | 'sub' | 'nested';
+  /** 鱼舱使用一级标题，新鱼和筛选鱼使用相同的子标题。 */
+  level?: 'section' | 'sub';
   /** 标题旁 ⓘ 里的说明。 */
   info?: ReactNode;
   headerAction?: ReactNode;
@@ -210,9 +210,9 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   return <div className={'min-w-0'} data-testid={testId}>
     <div className="flex items-center justify-between gap-2">
     <span className="flex items-center gap-0.5">
-    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={isSection ? fishSectionHeading : p.level === 'nested' ? fishNestedHeading : fishSubHeading}>
+    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={isSection ? fishSectionHeading : fishSubHeading}>
       {p.title === '新鱼' || p.showScreeningTime ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
-      {title !== '鱼舱' && <FishCount n={displaySignals.length - soldSignalIds.size} compact={p.level === 'nested'}/>}
+      {title !== '鱼舱' && <FishCount n={displaySignals.length - soldSignalIds.size}/>}
       <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}

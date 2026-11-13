@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { FishLibrary } from './FishLibrary';
+import { fishRail } from './FishSection';
 import { isAutomaticPreEntryRound, preEntrySignal, type PreEntryLibrary } from '@/lib/fish/preEntryMonitor';
 import { qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
 import type { QualitySourceRatings } from '@/lib/fish/qualitySourceRatings';
@@ -35,8 +36,9 @@ export function FishScreened({ state, library, ratings, onJump, canJump, onRate,
     });
   }, [library.rounds, library.records, ratings]);
   const byId = useMemo(() => new Map(rows.map(row => [row.id, row])), [rows]);
-  return <div className="ml-1 mt-1 border-l border-border/50 pl-2">
-    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime collapseSoldRows cdaAlerts={state?.cdaTracking?.alerts} defaultOpen={false}
+  return <div className={fishRail + " mt-2"}>
+    <FishLibrary title="筛选鱼" level="sub" testId="fish-screened" signals={rows} showScreeningTime collapseSoldRows cdaAlerts={state?.cdaTracking?.alerts} defaultOpen={false}
+      info={<p>通过即时交易买前筛选的鱼。标题只统计仍有余仓的鱼，全部平仓后归入「已卖出」。</p>}
       emptyText="还没有自动筛选入选的鱼。" tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} jumpingSignalId={jumpingSignalId ?? null}
       onJump={id => {
         const row = byId.get(id), at = row?.preEntryMonitor?.matchedAt;
