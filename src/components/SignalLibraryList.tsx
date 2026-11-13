@@ -31,7 +31,7 @@ import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
-import type { ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
+import { screenedSellReason, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID, SIGNAL_LIBRARY_SCREENED_GRID } from '@/components/SignalLibraryHeader';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
@@ -296,7 +296,7 @@ function SignalLibraryRowImpl({
         </span>}
         {showCda && <span className="flex items-center gap-1.5 whitespace-nowrap text-[10px] text-muted-foreground" data-testid="fish-cda-sell">
           {cda ? <><time className="font-mono tabular-nums" dateTime={new Date(cda.at).toISOString()}>{formatBeijingTime(cda.at)}</time>
-            <strong className="rounded bg-amber-500/15 px-1.5 font-semibold text-amber-800 dark:text-amber-300" title={`CDA ${cda.value} · 收盘触发卖出信号`}>已卖出</strong></> : '—'}
+            <strong className="rounded bg-amber-500/15 px-1.5 font-semibold text-amber-800 dark:text-amber-300" title={screenedSellReason(cda)}>已卖出</strong></> : '—'}
         </span>}
         {algorithmTypes && <span className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-algorithm-count">{algorithmTypes.length}</span>}
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}

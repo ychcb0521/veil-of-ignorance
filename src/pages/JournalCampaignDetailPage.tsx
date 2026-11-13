@@ -2822,8 +2822,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
         {campaign.comparison?.instant && <div data-testid="instant-campaign-execution" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border/70 bg-card px-3 py-2 text-[11px]">
-          <span className="font-medium">CDA 卖出</span>
-          <span>收盘读数 {campaign.comparison.instant.cdaValue}</span>
+          <span className="font-medium">{campaign.comparison.sellLabel ?? 'CDA 卖出'}</span>
+          {campaign.comparison.instant.sellEvidence && <span>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</span>}
+          {campaign.comparison.instant.cdaValue != null && <span>CDA 收盘读数 {campaign.comparison.instant.cdaValue}</span>}
           <span>保证金 {campaign.comparison.instant.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</span>
           <span className="ml-auto font-mono text-muted-foreground">{formatBeijingTime(campaign.comparison.valuedAt)}</span>
         </div>}

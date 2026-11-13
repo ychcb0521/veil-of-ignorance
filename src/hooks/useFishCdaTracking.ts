@@ -3,10 +3,12 @@ import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishNotifyMissing } from '@/lib/fish/notify';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
-import { freezeScreenedCda, SCREENED_CDA_STEP, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
+import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, validScreenedSale, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import { readFishPreferences, readFishPreferenceEntries, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
-import { readPageScreenedCda } from './useFish';
+import { markPageInstantPosition, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
+import type { InstantPositionInput } from '@/lib/fish/instantCampaign';
+import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
 import type { useFishNotify } from './useFishNotify';
 
 const CONFIG_KEY = 'veil.fish-cda-tracking.v1:';
@@ -17,6 +19,7 @@ export interface ScreenedFishAdmission { record: PreEntryRecord; round: PreEntry
 interface Checkpoint {
   after: number;
   alert?: ScreenedCdaTrigger;
+  progress?: ScreenedCdaGuardProgress;
   sent?: string[];
   delivered?: true;
   nextMailAt?: number;
@@ -31,6 +34,7 @@ export interface FishCdaTracking {
   localSales?: readonly ScreenedFishAdmission[];
   hasSavedSales?: boolean;
   campaignIssue?: string;
+  closePosition?: (input: InstantPositionInput) => Promise<void>;
   error: string;
   saving: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -48,10 +52,15 @@ function initialCursor(record: PreEntryRecord, settings: Settings) {
 
 /** Opt-in watches are owned by the authenticated app, regardless of the open panel. */
 export function useFishCdaTracking(owner: string | undefined, library: PreEntryLibrary | undefined, ready: boolean,
-  notify: ReturnType<typeof useFishNotify>): FishCdaTracking {
+  notify: ReturnType<typeof useFishNotify>, autoPositions = false): FishCdaTracking {
   const configKey = owner ? CONFIG_KEY + encodeURIComponent(owner) : '';
   const jobPrefix = configKey + ':';
   const [settings, setSettings] = useState<Settings>();
+  const activeSettings = useMemo(() => {
+    if (!autoPositions || settings) return settings;
+    try { return { enabledAt: 0, snapshot: freezeScreenedCda() }; }
+    catch { return undefined; }
+  }, [autoPositions, settings]);
   const [saving, setSaving] = useState(!!configKey);
   const [error, setError] = useState('');
   const [savedSales, setSavedSales] = useState<{ owner: string; admitted: ScreenedFishAdmission[] }>();
@@ -86,10 +95,15 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         ? [{ record, round }] : [];
     });
   }, [library?.records, library?.rounds, owner, ready]);
-  const entries = useMemo(() => settings ? admitted.filter(({record}) => record.updatedAt >= settings.enabledAt) : [], [admitted, settings]);
+  const entries = useMemo(() => autoPositions ? admitted : settings ? admitted.filter(({record}) => record.updatedAt >= settings.enabledAt) : [], [admitted, autoPositions, settings]);
   const current = useRef({ entries, notify });
   current.current = { entries, notify };
   const wake = useRef<() => void>();
+  const manual = useRef<(input: InstantPositionInput) => Promise<void>>();
+  const closePosition = useCallback(async (input: InstantPositionInput) => {
+    if (!manual.current) throw Error('即时交易正在初始化，请稍后再试');
+    await manual.current(input);
+  }, []);
 
   useEffect(() => {
     if (!configKey) return;
@@ -177,6 +191,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   }, [admitted, jobPrefix, refreshVersion]);
 
   useEffect(() => {
+    const settings = activeSettings;
     if (!settings || !owner) return;
     const lifetime = new AbortController();
     let scanning = false, mailing = false;
@@ -245,10 +260,15 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         .finally(() => { mailing = false; });
     };
 
+    // Re-read open legacy watches from their original start to recover either
+    // condition already reached. Confirmed sales and delivery receipts stay as saved.
+    const start = (record: PreEntryRecord) => initialCursor(record, autoPositions ? { ...settings, enabledAt: 0 } : settings);
+    const cursor = (record: PreEntryRecord, checkpoint?: Checkpoint) => !autoPositions || checkpoint?.progress?.version === SCREENED_CDA_GUARD_RULE
+      ? checkpoint?.after ?? start(record) : start(record);
     const eligible = (entry: ScreenedFishAdmission, target: number) => {
       const checkpoint = read(entry.record);
       return !checkpoint?.alert && (retry.get(entry.record.id) ?? 0) <= Date.now()
-        && (checkpoint?.after ?? initialCursor(entry.record, settings)) < target;
+        && cursor(entry.record, checkpoint) < target;
     };
     const tick = () => {
       send();
@@ -267,12 +287,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
             if (!checkpoint) {
               const durable = await readAutomaticPreEntryCheckpoint(owner, round.id);
               const match = durable?.records.find(saved => saved.id === record.id && saved.status === 'matched');
-              if (!match || match.updatedAt < settings.enabledAt) {
+              if (!match || (!autoPositions && match.updatedAt < settings.enabledAt)) {
                 retry.set(record.id, Date.now() + 5000);
                 return;
               }
             }
-            return { id: record.id, source: record.sample.source, after: checkpoint?.after ?? initialCursor(record, settings) };
+            return { id: record.id, source: record.sample.source, after: cursor(record, checkpoint),
+              ...(autoPositions ? { observeAfter: record.matchedAt!, progress: checkpoint?.progress } : {}) };
           } catch {
             retry.set(record.id, Date.now() + 5000);
             errors.set(record.id, record.sample.source.symbol + ' · 等待入选记录恢复');
@@ -296,8 +317,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           }
           retry.delete(id);
           if (errors.delete(id)) setError(errors.values().next().value ?? '');
-          if (result.through > (read(record)?.after ?? initialCursor(record, settings))) {
-            await save(record, { after: result.through, alert: result.trigger });
+          if (result.through > cursor(record, read(record))) {
+            await save(record, { after: result.through, alert: result.trigger, progress: result.progress });
             if (result.trigger) {
               changes.current?.postMessage('alert');
               send();
@@ -311,6 +332,29 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         }
       }).finally(() => { scanning = false; });
     };
+    manual.current = async input => {
+      const perform = async () => {
+        const key = jobPrefix + encodeURIComponent(input.recordId);
+        const [saved] = await readFishPreferences<Checkpoint>([key]);
+        if (validScreenedSale(saved?.alert ?? checkpoints.current.get(key)?.alert ?? readLocal<Checkpoint>(key)?.alert)) throw Error('这笔仓位已经卖出');
+        const mark = await markPageInstantPosition(input, lifetime.signal);
+        if (lifetime.signal.aborted) throw Error('平仓已取消');
+        const value = { after: mark.at, alert: { at: Math.max(mark.at, input.buyAt + 1, Date.now()), closePrice: mark.price,
+          evidence: { version: SCREENED_CDA_GUARD_RULE, reason: 'manual' as const, priceAt: mark.at } } };
+        await writeFishPreference(key, value);
+        checkpoints.current.set(key, value);
+        changes.current?.postMessage('alert');
+        setRevision(revision => revision + 1);
+        await saveInstantCampaignInput(owner, { ...input, sell: value.alert }).catch(() => undefined);
+        send();
+      };
+      if (navigator.locks) await navigator.locks.request(configKey + ':scan', { signal: lifetime.signal }, perform);
+      else {
+        if (scanning) throw Error('正在核对自动卖出，请稍后重试');
+        scanning = true;
+        try { await perform(); } finally { scanning = false; }
+      }
+    };
     wake.current = tick;
     const timer = window.setInterval(tick, POLL_MS);
     window.addEventListener('online', tick);
@@ -320,12 +364,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     return () => {
       lifetime.abort();
       wake.current = undefined;
+      manual.current = undefined;
       window.clearInterval(timer);
       window.removeEventListener('online', tick);
       window.removeEventListener('focus', tick);
       document.removeEventListener('visibilitychange', tick);
     };
-  }, [configKey, jobPrefix, owner, settings]);
+  }, [configKey, jobPrefix, owner, activeSettings, autoPositions]);
 
   useEffect(() => { wake.current?.(); }, [entries, notify.config]);
   const counts = useMemo(() => {
@@ -343,10 +388,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     for (const { record } of [...(localSales ?? []), ...admitted]) {
       const key = jobPrefix + encodeURIComponent(record.id);
       const alert = (checkpoints.current.get(key) ?? readLocal<Checkpoint>(key))?.alert;
-      if (alert && Number.isFinite(alert.at) && Number.isFinite(alert.value)) result.set(record.id, alert);
+      if (validScreenedSale(alert)) result.set(record.id, alert);
     }
     return result;
   }, [admitted, localSales, jobPrefix, revision]);
   const mailIssue = settings && counts.awaitingMail ? !notify.config.enabled ? '邮件提醒已关闭' : fishNotifyMissing(notify.config) : '';
-  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
+  return { enabled: !!activeSettings, closePosition, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
 }

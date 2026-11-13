@@ -59,6 +59,16 @@ export async function readPageScreenedCda(tasks: readonly ScreenedCdaTask[], sna
   await pageScanner.trackScreenedCda(tasks, snapshot, target, signal, onRead);
 }
 
+export async function openPageInstantPosition(input: import('@/lib/fish/instantCampaign').InstantPositionInput, signal: AbortSignal) {
+  pageScanner ??= new FishScanner();
+  return pageScanner.openInstantPosition(input, signal);
+}
+
+export async function markPageInstantPosition(input: import('@/lib/fish/instantCampaign').InstantPositionInput, signal: AbortSignal) {
+  pageScanner ??= new FishScanner();
+  return pageScanner.markInstantPosition(input, signal);
+}
+
 export async function buildPageInstantCampaign(input: import('@/lib/fish/instantCampaign').InstantCampaignInput, signal: AbortSignal) {
   pageScanner ??= new FishScanner();
   return pageScanner.buildInstantCampaign(input, signal);

@@ -402,7 +402,8 @@ export interface TradeCampaign {
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     instant?: {
       source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;
-      cdaValue: number;
+      cdaValue?: number;
+      sellEvidence?: import('@/lib/fish/screenedCda').ScreenedCdaGuardEvidence;
       marginUsdt: number;
       drawdown: number | null;
       staticDrawdown: number | null;

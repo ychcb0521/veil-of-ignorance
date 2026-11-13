@@ -2,9 +2,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { INSTANT_CAMPAIGN_HEADER } from '@/lib/authGateway';
 import { runAccountSyncRequest } from '@/lib/accountSyncTransport';
 import { isInstantCampaignId } from '@/lib/campaignSections';
-import { SCREENED_CDA_LIMIT } from './screenedCda';
+import { validScreenedSale } from './screenedCda';
 import { readFishPreferences, readFishPreferencesWithPrefix, updateFishPreference } from './fishPreferencesDb';
-import type { InstantCampaignInput, InstantCampaignSnapshot } from './instantCampaign';
+import type { InstantCampaignInput, InstantCampaignSnapshot, InstantPositionFill, InstantPositionInput } from './instantCampaign';
 
 export const INSTANT_CAMPAIGN_EVENT = 'veil-instant-campaign-saved';
 const KEY = 'idb:instant-campaign-v1/';
@@ -14,7 +14,7 @@ const KEY_END = KEY + 'fish-instanu';
 const CLOUD_READ_MS = 30_000;
 const localPrefix = (owner: string) => KEY + encodeURIComponent(owner) + '/';
 const table = () => supabase.from('user_sim_state' as never);
-type Saved = { input: InstantCampaignInput; snapshot?: InstantCampaignSnapshot; synced?: true };
+type Saved = { input: InstantPositionInput | InstantCampaignInput; opened?: InstantPositionFill; snapshot?: InstantCampaignSnapshot; synced?: true };
 
 function publish(owner: string) {
   window.dispatchEvent(new CustomEvent(INSTANT_CAMPAIGN_EVENT, { detail: { owner } }));
@@ -43,8 +43,19 @@ export async function readInstantCampaignJobs(owner: string): Promise<Saved[]> {
   return readFishPreferencesWithPrefix<Saved>(localPrefix(owner));
 }
 
-export function saveInstantCampaignInput(owner: string, input: InstantCampaignInput): Promise<Saved> {
-  return updateFishPreference<Saved>(localPrefix(owner) + input.id, previous => previous ?? { input });
+export async function saveInstantCampaignInput(owner: string, input: InstantCampaignInput): Promise<Saved> {
+  const saved = await updateFishPreference<Saved>(localPrefix(owner) + input.id, previous => previous?.snapshot || previous && 'sell' in previous.input ? previous : { ...previous, input });
+  publish(owner);
+  return saved;
+}
+
+export async function saveInstantPosition(owner: string, input: InstantPositionInput, opened?: InstantPositionFill) {
+  const saved = await updateFishPreference<Saved>(localPrefix(owner) + input.id, previous => {
+    if (previous?.snapshot || previous?.opened || (previous && !opened)) return previous;
+    return { ...previous, input: previous?.input ?? input, ...(opened ? { opened } : {}) };
+  });
+  publish(owner);
+  return saved;
 }
 
 export async function saveInstantCampaignSnapshot(owner: string, snapshot: InstantCampaignSnapshot): Promise<InstantCampaignSnapshot> {
@@ -76,7 +87,7 @@ function decodeSnapshot(row: unknown): InstantCampaignSnapshot | undefined {
   const { key, value } = (row ?? {}) as { key?: string; value?: InstantCampaignSnapshot };
   if (!value || (value.version !== 1 && value.version !== 2) || key !== KEY + value.id || !isInstantCampaignId(value.id) || !value.source?.symbol
     || !value.recordId || !Number.isSafeInteger(value.buyAt) || value.buyAt <= 0 || !Number.isSafeInteger(value.sell?.at) || value.sell.at <= value.buyAt
-    || !Number.isFinite(value.sell.value) || value.sell.value >= SCREENED_CDA_LIMIT || !Array.isArray(value.detectors)
+    || !validScreenedSale(value.sell) || !Array.isArray(value.detectors)
     || ![value.entryPrice, value.exitPrice, value.recordedAt].every(n => Number.isFinite(n) && n > 0)) return;
   if (value.version === 2 && ![value.marginUsdt, value.leverage, value.marginUsdt * value.leverage]
     .every(n => Number.isFinite(n) && n > 0)) return;

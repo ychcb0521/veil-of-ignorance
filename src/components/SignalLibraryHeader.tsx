@@ -33,7 +33,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
     {algorithmSort && (caughtAtSort
       ? <SortHeader label="捕捞时间" active={caughtAtSort.active} dir={sortDir} onClick={caughtAtSort.onClick} />
       : <span title={showScreeningTime ? "动态筛选首次满足的时间（北京时间）" : "实际捕获这条鱼的时间（北京时间）"}>{showScreeningTime ? "首次满足时间" : "捕捞时间"}</span>)}
-    {showCda && <span title="CDA 原始值首次低于 −10 的 5 分钟收盘时间（北京时间）">CDA 卖出时间</span>}
+    {showCda && <span title="CDA、DBL-5 或手动卖出的实际确认时间（北京时间）">卖出时间</span>}
     {algorithmSort && (algorithmCountSort
       ? <SortHeader label="算法数量" active={algorithmCountSort.active} dir={sortDir} onClick={algorithmCountSort.onClick} />
       : <span title="实际命中的不同算法类型数量">算法数量</span>)}

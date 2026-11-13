@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
+import { InstantPositionRow } from '@/components/InstantPositionRow';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
@@ -297,6 +299,8 @@ export function PositionPanel({
    */
   const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('entry');
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
+  const instant = useScreenedInstantPositions();
+  const instantPositions = (instant?.positions ?? []).filter(row => !hideOtherContracts || row.source.symbol === activeSymbol);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
   // Rollback modal state
   const [rollbackOpen, setRollbackOpen] = useState(false);
@@ -693,7 +697,7 @@ export function PositionPanel({
   }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
   const TABS = [
-    { key: 'positions', label: '仓位', count: mergedPositions.length, showCount: true },
+    { key: 'positions', label: '仓位', count: mergedPositions.length + instantPositions.length, showCount: true },
     { key: 'pending', label: '当前委托', count: allOrders.length, showCount: true },
     { key: 'history', label: '历史委托', count: 0, showCount: false },
     { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: true },
@@ -1005,7 +1009,10 @@ export function PositionPanel({
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
-              {mergedPositions.length === 0 ? (
+              {instant?.close && instantPositions.length > 0 && <div className="space-y-2 px-3 pt-3">
+                {instantPositions.map(position => <InstantPositionRow key={position.id} position={position} close={instant.close!} />)}
+              </div>}
+              {mergedPositions.length === 0 ? instantPositions.length ? null : (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
                     <rect x="3" y="5" width="18" height="14" rx="2" />

@@ -1,19 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { instantCampaignInput } from '@/lib/fish/instantCampaign';
-import { readInstantCampaignJobs, saveInstantCampaignInput, saveInstantCampaignSnapshot, syncInstantCampaign } from '@/lib/fish/instantCampaignStore';
-import { buildPageInstantCampaign } from './useFish';
+import { instantCampaignInput, instantPositionInput, type InstantPositionFill, type InstantPositionInput, type InstantCampaignInput } from '@/lib/fish/instantCampaign';
+import { readInstantCampaignJobs, saveInstantCampaignInput, saveInstantPosition, saveInstantCampaignSnapshot, subscribeInstantCampaigns, syncInstantCampaign } from '@/lib/fish/instantCampaignStore';
+import { buildPageInstantCampaign, openPageInstantPosition } from './useFish';
 import type { FishCdaTracking } from './useFishCdaTracking';
 
-export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTracking) {
-  const inputs = useMemo(() => [...(cda.localSales ?? []), ...(cda.admitted ?? [])].flatMap(({ record, round }) => {
+export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTracking, autoPositions = false) {
+  const inputs = useMemo<(InstantPositionInput | InstantCampaignInput)[]>(() => [...(cda.localSales ?? []), ...(cda.admitted ?? [])].flatMap(({ record, round }) => {
     const alert = cda.alerts.get(record.id);
-    const input = alert && instantCampaignInput(record, round, alert);
+    const input = alert ? instantCampaignInput(record, round, alert) : autoPositions ? instantPositionInput(record, round) : undefined;
     return input ? [input] : [];
-  }), [cda.admitted, cda.localSales, cda.alerts]);
+  }), [cda.admitted, cda.localSales, cda.alerts, autoPositions]);
   const latest = useRef(inputs);
   latest.current = inputs;
   const wake = useRef<() => void>();
   const [issue, setIssue] = useState('');
+  const [open, setOpen] = useState<{ owner?: string; rows: InstantPositionFill[] }>({ rows: [] });
+  useEffect(() => {
+    if (!owner || !autoPositions) return;
+    let alive = true, revision = 0;
+    const read = async () => {
+      const epoch = ++revision;
+      const jobs = await readInstantCampaignJobs(owner);
+      if (alive && epoch === revision) setOpen({ owner, rows: jobs.flatMap(job =>
+        job.opened && !job.snapshot && !('sell' in job.input) ? [job.opened] : []) });
+    };
+    const refresh = () => void read().catch(() => undefined);
+    const unsubscribe = subscribeInstantCampaigns(owner, refresh);
+    refresh();
+    return () => { alive = false; unsubscribe(); };
+  }, [owner, autoPositions]);
 
   useEffect(() => {
     setIssue('');
@@ -28,19 +43,32 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
     const process = async () => {
       for (const input of latest.current) {
         if (signal.aborted) return;
-        if (seen.has(input.id)) continue;
-        await saveInstantCampaignInput(owner, input);
-        seen.add(input.id);
+        const key = input.id + ('sell' in input ? ':sold' : ':admitted');
+        if (seen.has(key)) continue;
+        if ('sell' in input) await saveInstantCampaignInput(owner, input);
+        else await saveInstantPosition(owner, input);
+        seen.add(key);
+        retryAt.delete(input.id);
       }
       if (navigator.onLine === false) return;
       const errors: string[] = [];
-      for (const job of await readInstantCampaignJobs(owner)) {
+      const jobs = await readInstantCampaignJobs(owner);
+      // Record new positions before attempting potentially slow cloud writes for earlier sales.
+      jobs.sort((a, b) => Number('sell' in a.input) - Number('sell' in b.input));
+      for (const job of jobs) {
         if (signal.aborted) return;
         if (job.synced || (retryAt.get(job.input.id) ?? 0) > Date.now()) continue;
         let snapshot = job.snapshot;
         try {
+          if (!('sell' in job.input)) {
+            if (!autoPositions || job.opened) continue;
+            const opened = await openPageInstantPosition(job.input, signal);
+            if (!signal.aborted) await saveInstantPosition(owner, job.input, opened);
+            retryAt.delete(job.input.id);
+            continue;
+          }
           if (!snapshot) {
-            const frozen = await buildPageInstantCampaign(job.input, signal);
+            const frozen = await buildPageInstantCampaign({ ...job.input, opened: job.opened }, signal);
             if (signal.aborted) return;
             snapshot = await saveInstantCampaignSnapshot(owner, frozen);
           }
@@ -49,7 +77,7 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
         } catch (error) {
           if (signal.aborted) return;
           retryAt.set(job.input.id, Date.now() + 30_000);
-          errors.push(job.input.source.symbol + (snapshot ? ' · 战役待同步' : ' · 战役待生成')
+          errors.push(job.input.source.symbol + (snapshot ? ' · 战役待同步' : 'sell' in job.input ? ' · 战役待生成' : ' · 等待开仓价')
             + (error instanceof Error ? '（' + error.message + '）' : ''));
         }
       }
@@ -69,7 +97,7 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
         running = false;
         if (signal.aborted) return;
         if (requested) { requested = false; tick(); }
-        else if (retryAt.size || latest.current.some(input => !seen.has(input.id))) {
+        else if (retryAt.size || latest.current.some(input => !seen.has(input.id + ('sell' in input ? ':sold' : ':admitted')))) {
           clearTimeout(retryTimer);
           retryTimer = setTimeout(tick, 30_000);
         }
@@ -79,16 +107,19 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
     wake.current = tick;
     window.addEventListener('online', online);
     window.addEventListener('focus', tick);
+    const unsubscribe = subscribeInstantCampaigns(owner, tick);
     tick();
     return () => {
       lifetime.abort();
+      unsubscribe();
       wake.current = undefined;
       clearTimeout(retryTimer);
       window.removeEventListener('online', online);
       window.removeEventListener('focus', tick);
     };
-  }, [owner]);
+  }, [owner, autoPositions]);
 
   useEffect(() => { wake.current?.(); }, [inputs]);
-  return issue;
+  const sold = useMemo(() => new Set(inputs.filter(input => 'sell' in input).map(input => input.id)), [inputs]);
+  return { issue, positions: open.owner === owner ? open.rows.filter(row => !sold.has(row.id)) : [] };
 }

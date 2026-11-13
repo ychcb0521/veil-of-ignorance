@@ -18,7 +18,7 @@ import { qualityMembers } from './quality';
 import { focusDetector, FOCUS_DETECTORS } from './qualityFocusSignals';
 import type { PreEntryRecord, PreEntryRound } from './preEntryMonitor';
 import { qualitySignalTime } from './qualityAdmissionTime';
-import type { ScreenedCdaTrigger } from './screenedCda';
+import { SCREENED_CDA_GUARD_LABEL, screenedSellReason, type ScreenedCdaTrigger } from './screenedCda';
 
 /**
  * 【用户要求】2026-10-27「推送的邮件内容只包括 avg_CBI2_2、avg_CBA_2 共振的信号，也就是两者捕捉到的信号的交集」。
@@ -160,13 +160,24 @@ export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' |
     ['首次满足时间', formatUTC8(record.matchedAt!)],
   ];
   const esc = (value: string) => value.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-  const alert = cda ? `卖出！（${cda.value}）` : undefined;
-  if (cda) rows.push(['CDA 低于 −10 的时间', formatUTC8(cda.at)]);
-  const subject = `${cda ? '⚠️ ' : ''}${source.symbol} · ${cda ? 'CDA 卖出提醒' : '动态筛选已入选'}`;
-  const message = ['新鱼已通过动态筛选。', ...rows.map(([label, value]) => `${label}　${value}`), ...(alert ? [alert] : []), '时间为 UTC+8。'].join('\n');
+  const evidence = cda?.evidence;
+  const alert = evidence && cda ? `卖出！${screenedSellReason(cda)}` : cda ? `卖出！（${cda.value}）` : undefined;
+  if (cda && evidence) {
+    rows.push(
+      ['卖出原因', screenedSellReason(cda)],
+      ['卖出时间', formatUTC8(cda.at)],
+      ['模拟成交价', String(cda.closePrice)],
+    );
+    if (evidence.priceAt !== undefined) rows.push(['成交价对应的行情收盘时间', formatUTC8(evidence.priceAt)]);
+    if (cda.value !== undefined) rows.push(['卖出时 CDA 原始值', String(cda.value)]);
+    if (evidence.guardVersion) rows.push(['防守线', `${SCREENED_CDA_GUARD_LABEL} · 5 分钟收盘红叉确认`]);
+  } else if (cda) rows.push(['CDA 低于 −10 的时间', formatUTC8(cda.at)]);
+  const rule = evidence?.reason === 'manual' ? '本次由你手动平仓，成交价取最近一根已收盘的 1 分钟 K 线收盘价。' : evidence ? 'CDA 和防守线断裂，任一条件先在 5 分钟收盘确认即卖出。' : '';
+  const subject = `${cda ? '⚠️ ' : ''}${source.symbol} · ${evidence?.reason === 'manual' ? '手动卖出提醒' : evidence?.reason === 'guard' ? 'DBL-5 卖出提醒' : evidence?.reason === 'both' ? 'CDA / DBL-5 卖出提醒' : cda ? 'CDA 卖出提醒' : '动态筛选已入选'}`;
+  const message = ['新鱼已通过动态筛选。', ...rows.map(([label, value]) => `${label}　${value}`), ...(alert ? [alert] : []), ...(rule ? [rule] : []), '时间为 UTC+8。'].join('\n');
   const message_html = '<div style="font:14px sans-serif;color:#111827"><p>新鱼已通过动态筛选。</p><table style="border-collapse:collapse">'
     + rows.map(([label,value]) => `<tr><th style="padding:6px 12px;text-align:left">${esc(label)}</th><td style="padding:6px 12px">${esc(value)}</td></tr>`).join('')
-    + '</table>' + (alert ? '<p><strong>' + esc(alert) + '</strong></p>' : '') + '<p>时间为 UTC+8。</p></div>';
+    + '</table>' + (alert ? '<p><strong>' + esc(alert) + '</strong></p>' : '') + (rule ? '<p>' + esc(rule) + '</p>' : '') + '<p>时间为 UTC+8。</p></div>';
   return { subject, message, message_html, count: 1 };
 }
 

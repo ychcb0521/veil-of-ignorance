@@ -250,4 +250,14 @@ it('入选邮件用原信号的实际命中类型及本轮筛选模板，纯文�
  container.innerHTML = alert.message_html;
  expect(container.querySelector('tr:last-child')?.textContent).toBe('CDA 低于 −10 的时间2026-10-21 09:10:00');
  expect(container.querySelector('strong')?.textContent).toBe('卖出！（-11.75）');
+ const guard=composeScreenedFishEmail(record,round,{at:source.timeMs+900_000,closePrice:93,value:-4,evidence:{
+   version:'screened-first-exit-v3',reason:'guard',guardVersion:'dbl5-guard-v1-20261112',
+ }});
+ expect(guard.subject).toBe('⚠️ AAAUSDT · DBL-5 卖出提醒');
+ const reasons=['卖出原因　DBL-5 防守线断裂', '卖出时间　2026-10-21 09:15:00','模拟成交价　93',
+   '卖出时 CDA 原始值　-4', '防守线　防守线-20261112 · 5 分钟收盘红叉确认'];
+ expect(guard.message).toContain(reasons.join('\n'));
+ expect(guard.message).toContain('任一条件先在 5 分钟收盘确认即卖出');
+ container.innerHTML=guard.message_html;
+ expect([...container.querySelectorAll('tr')].slice(-5).map(row=>row.textContent)).toEqual(reasons.map(row=>row.replace('　','')));
 });
