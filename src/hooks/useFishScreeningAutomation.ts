@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { fishNotifyMissing } from '@/lib/fish/notify';
 import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { FISH_AUTOMATIC_SCREENING_KEY, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
 import { isAutomaticPreEntryRound, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
+import { isScreeningJob, readLocalScreeningQueue, readLocalScreeningValue, readScreeningQueue, readScreeningValue,
+  screeningQueueJobKey, screeningQueuePrefix, writeScreeningQueueValue, type ScreeningJob as Job, type ScreeningQueueValue } from '@/lib/fish/screeningQueue';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
@@ -15,37 +17,19 @@ import type { FishQualityState } from './useFishQuality';
 import type { useFishNotify } from './useFishNotify';
 
 const MINUTE = 60_000;
-const QUEUE_KEY = 'veil.fish-screening-queue.v1:';
-const queuePrefix = (owner: string) => `${QUEUE_KEY}${encodeURIComponent(owner)}:`;
-const isJobKey = (owner: string, key: string) => key.startsWith(queuePrefix(owner) + 'job:') || key.startsWith(queuePrefix(owner) + 'instant-job:');
-export const screenedFishMailLock = (owner: string) => queuePrefix(owner) + 'mail';
-interface Job {
-  key: string;
-  id: string;
-  source: TradeSignal;
-  settings?: PreEntrySettings;
-  instantTrading?: true;
-  nextCheckAt: number;
-  nextMailAt?: number;
-  matched?: true;
-  mailFailures?: number;
-  sent?: string[];
-  failures?: number;
-  runner?: string;
-}
+export const screenedFishMailLock = (owner: string) => screeningQueuePrefix(owner) + 'mail';
 
-function readJob(key: string): Job | undefined {
-  try {
-    const value = JSON.parse(readPersistedStateRaw(key) ?? 'null');
-    return value?.source && value.key === key && typeof value.id === 'string' ? value as Job : undefined;
-  } catch { return undefined; }
-}
-
-function readQueue(owner: string): Job[] {
-  try {
-    return Object.keys(localStorage).filter(key => isJobKey(owner, key))
-      .map(readJob).filter((job): job is Job => !!job);
-  } catch { return []; }
+function createQueueSession(owner?: string) {
+  const prefix = owner ? screeningQueuePrefix(owner) : '';
+  return {
+    prefix,
+    entries: prefix ? readLocalScreeningQueue(prefix) : new Map<string, ScreeningQueueValue>(),
+    pendingWrites: new Map<string, ScreeningQueueValue>(),
+    failedWrites: new Set<string>(),
+    ready: typeof indexedDB === 'undefined',
+    channel: undefined as BroadcastChannel | undefined,
+    tails: new Map<string, Promise<boolean>>(),
+  };
 }
 
 type Monitor = NonNullable<FishQualityState['preEntry']>;
@@ -78,88 +62,167 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     } satisfies PreEntrySettings);
   }, [owner]);
 
-  const [jobs, setJobs] = useState<Job[]>(() => owner ? readQueue(owner) : []);
-  const pauseKey = owner ? queuePrefix(owner) + 'paused' : '';
+  const queue = useMemo(() => createQueueSession(owner), [owner]);
+  const { prefix } = queue;
+  const pauseKey = prefix ? prefix + 'paused' : '';
   const [paused, setPaused] = useState(() => !!pauseKey && readPersistedStateRaw(pauseKey) === '1');
   const [storageIssue, setStorageIssue] = useState(false);
-  const current = useRef({ jobs, ready, monitor, notify, paused });
-  current.current = { jobs, ready, monitor, notify, paused };
-  const busy = useRef({ scan: false, mail: false });
-  const wake = useRef<() => void>();
+  const [attemptIssues, setAttemptIssues] = useState({ scan: '', mail: '' });
+  const [jobs, setJobs] = useState(() => [...queue.entries.values()].filter(isScreeningJob));
+  const current = useRef({ ready, monitor, notify, paused });
+  current.current = { ready, monitor, notify, paused };
+  const currentQueue = useRef(queue);
+  currentQueue.current = queue;
+  const wake = useRef<(resume?: boolean) => void>();
   const tab = useRef<string>();
   if (!tab.current) tab.current = crypto.randomUUID();
 
+  const publish = useCallback(() => {
+    if (currentQueue.current !== queue) return;
+    setJobs([...queue.entries.values()].filter(isScreeningJob));
+    setStorageIssue(queue.failedWrites.size > 0);
+  }, [queue]);
+
+  const persist = useCallback((key: string, value: ScreeningQueueValue) => {
+    const previous = queue.tails.get(key);
+    const write = async () => {
+      if (queue.pendingWrites.get(key) !== value) return false;
+      const durable = await writeScreeningQueueValue(prefix, key, value);
+      if (queue.pendingWrites.get(key) === value) {
+        if (durable) {
+          queue.pendingWrites.delete(key);
+          queue.failedWrites.delete(key);
+          try { queue.channel?.postMessage(key); } catch { /* Another tab can still recover on focus. */ }
+        } else queue.failedWrites.add(key);
+        publish();
+      }
+      return durable;
+    };
+    const task = previous ? previous.then(write) : write();
+    queue.tails.set(key, task);
+    void task.then(() => { if (queue.tails.get(key) === task) queue.tails.delete(key); });
+    return task;
+  }, [queue, prefix, publish]);
+
   const save = useCallback((job: Job, done = false) => {
-    const durable = writePersistedStateRaw(job.key, JSON.stringify(done ? { done: true } : job));
-    if (!durable) setStorageIssue(true);
-    const previous = current.current.jobs;
-    const next = done ? previous.filter(value => value.key !== job.key)
-      : previous.some(value => value.key === job.key) ? previous.map(value => value.key === job.key ? job : value) : [...previous, job];
-    current.current.jobs = next;
-    setJobs(next);
-    return durable;
-  }, []);
+    const revision = Math.max(Date.now(), (queue.entries.get(job.key)?.revision ?? 0) + 1);
+    const value: ScreeningQueueValue = done ? { done: true, revision } : { ...job, revision };
+    queue.entries.set(job.key, value);
+    queue.pendingWrites.set(job.key, value);
+    publish();
+    return persist(job.key, value);
+  }, [queue, publish, persist]);
 
   const enqueue = useCallback((source: TradeSignal) => {
     if (!owner) return;
     const identity = encodeURIComponent(signalDedupKey(source));
-    const legacyKey = queuePrefix(owner) + 'job:' + identity;
-    const instantKey = queuePrefix(owner) + 'instant-job:' + identity;
-    if (readPersistedStateRaw(legacyKey) != null || readPersistedStateRaw(instantKey) != null) return;
+    const legacyKey = prefix + 'job:' + identity;
+    const instantKey = prefix + 'instant-job:' + identity;
     const monitor = current.current.monitor;
     const settings = readAutomaticScreeningSettings(owner) ?? (monitor?.ready ? monitor.library.settings : undefined);
     const job: Job = { key: instantKey, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0,
       settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined, instantTrading: true };
-    // Earlier tabs only understand the legacy queue and its done receipts.
-    const durable = save(job);
-    if (durable && !writePersistedStateRaw(legacyKey, JSON.stringify({ done: true }))) setStorageIssue(true);
-    wake.current?.();
-  }, [owner, save]);
+    const add = async () => {
+      if (queue.entries.has(legacyKey) || queue.entries.has(instantKey)) return;
+      if (readLocalScreeningValue(legacyKey) || readLocalScreeningValue(instantKey)) return;
+      const prior = typeof indexedDB === 'undefined' ? [] : await Promise.all([readScreeningValue(legacyKey), readScreeningValue(instantKey)]);
+      if (prior.some(Boolean) || queue.entries.has(instantKey)) return;
+      await save(job);
+    };
+    const lock = navigator.locks;
+    const added = lock ? lock.request(instantKey + ':enqueue', add).catch(add) : add();
+    void added.then(() => { if (currentQueue.current === queue) wake.current?.(); });
+  }, [owner, prefix, queue, save]);
 
   const setAutoPaused = useCallback((value: boolean) => {
     if (!pauseKey) return;
-    if (!writePersistedStateRaw(pauseKey, value ? '1' : '0')) setStorageIssue(true);
+    const durable = writePersistedStateRaw(pauseKey, value ? '1' : '0');
+    if (durable) queue.failedWrites.delete(pauseKey); else queue.failedWrites.add(pauseKey);
+    publish();
     current.current.paused = value;
     setPaused(value);
     if (value) current.current.monitor?.pauseAutomatic?.();
-    if (!value) for (const entry of current.current.jobs) {
-      const job = readJob(entry.key);
-      if (job) save({ ...job, nextCheckAt: 0 });
-    }
-    if (!value) wake.current?.();
-  }, [pauseKey, save]);
+    if (!value) queueMicrotask(() => wake.current?.(true));
+  }, [pauseKey, queue, publish]);
 
   useEffect(() => {
     if (!owner) return;
-    setJobs(readQueue(owner));
-    setPaused(readPersistedStateRaw(pauseKey) === '1');
+    const initialPause = readPersistedStateRaw(pauseKey) === '1';
+    current.current.paused = initialPause;
+    setPaused(initialPause);
+    setAttemptIssues({ scan: '', mail: '' });
+    publish();
     const lifetime = new AbortController();
+    const busy = { scan: false, mail: false };
+    const refreshKey = async (key: string) => {
+      const value = await readScreeningValue(key);
+      if (lifetime.signal.aborted || queue.pendingWrites.has(key)) return;
+      if (value && (value.revision ?? 0) >= (queue.entries.get(key)?.revision ?? 0)) {
+        queue.entries.set(key, value);
+        publish();
+      }
+      wake.current?.();
+    };
+    let loading = false, queueReadFailed = false;
+    const hydrate = async () => {
+      if (loading || lifetime.signal.aborted) return;
+      loading = true;
+      try {
+        for (const [key, value] of await readScreeningQueue(prefix)) {
+          if (lifetime.signal.aborted) return;
+          if (!queue.pendingWrites.has(key) && (value.revision ?? 0) >= (queue.entries.get(key)?.revision ?? 0)) queue.entries.set(key, value);
+        }
+        queueReadFailed = false;
+      } catch { queueReadFailed = true; }
+      finally {
+        loading = false;
+        if (!lifetime.signal.aborted) {
+          queue.ready = true;
+          publish();
+          wake.current?.();
+        }
+      }
+    };
+    try {
+      queue.channel = new BroadcastChannel(prefix);
+      queue.channel.onmessage = event => {
+        if (typeof event.data === 'string' && screeningQueueJobKey(prefix, event.data)) void refreshKey(event.data);
+      };
+    } catch { /* Existing tabs can also signal changes through local storage. */ }
     const refresh = (event: StorageEvent) => {
       if (event.key === pauseKey) {
         const next = readPersistedStateRaw(pauseKey) === '1';
         current.current.paused = next;
         setPaused(next);
         if (next) current.current.monitor?.pauseAutomatic?.();
+        else wake.current?.(true);
       }
-      if (!event.key || isJobKey(owner, event.key)) {
-        current.current.jobs = readQueue(owner);
-        setJobs(current.current.jobs);
-      }
-      if (!event.key || event.key === pauseKey || isJobKey(owner, event.key)) wake.current?.();
+      if (!event.key) void hydrate();
+      else if (screeningQueueJobKey(prefix, event.key)) void refreshKey(event.key);
     };
     window.addEventListener('storage', refresh);
+    const readJob = async (key: string) => {
+      const stored = await readScreeningValue(key);
+      const previous = queue.entries.get(key);
+      const value = queue.pendingWrites.get(key) ?? (stored && (stored.revision ?? 0) >= (previous?.revision ?? 0) ? stored : previous);
+      if (value && value !== previous) {
+        queue.entries.set(key, value);
+        publish();
+      }
+      return isScreeningJob(value) ? value : undefined;
+    };
     const exclusive = async (kind: 'scan' | 'mail', run: () => Promise<boolean | void>) => {
-      if (busy.current[kind] || lifetime.signal.aborted) return;
-      busy.current[kind] = true;
+      if (busy[kind] || lifetime.signal.aborted) return;
+      busy[kind] = true;
       let advanced: boolean | void = undefined;
       try {
         advanced = navigator.locks
-          ? await navigator.locks.request(kind === 'mail' ? screenedFishMailLock(owner) : queuePrefix(owner) + kind, { ifAvailable: true }, lock => lock ? run() : undefined)
+          ? await navigator.locks.request(kind === 'mail' ? screenedFishMailLock(owner) : prefix + kind, { ifAvailable: true }, lock => lock ? run() : undefined)
           : await run();
       } catch {
-        if (!lifetime.signal.aborted) setStorageIssue(true);
+        if (!lifetime.signal.aborted) setAttemptIssues(issues => ({ ...issues, [kind]: kind === 'scan' ? '筛选处理中断，将自动重试' : '入选通知待重试' }));
       } finally {
-        busy.current[kind] = false;
+        busy[kind] = false;
         if (advanced && !lifetime.signal.aborted) queueMicrotask(() => wake.current?.());
       }
     };
@@ -167,99 +230,135 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
       const config = current.current.notify.config;
       if (config.enabled && fishNotifyMissing(config)) return;
       void exclusive('mail', async () => {
-        const job = readJob(entry.key);
+        const job = await readJob(entry.key);
         if (!job || (job.nextMailAt ?? 0) > Date.now() || lifetime.signal.aborted) return;
         const saved = match ? undefined : await readAutomaticPreEntryCheckpoint(owner, job.id);
         const round = match?.round ?? saved?.rounds[0], record = match?.record ?? saved?.records[0];
-        if (!round || round.id !== job.id || !isAutomaticPreEntryRound(round) || record?.roundId !== job.id || record.status !== 'matched'
+        if (!round || round.id !== job.id || round.state !== 'complete' || !isAutomaticPreEntryRound(round) || record?.roundId !== job.id || record.status !== 'matched'
           || !Number.isFinite(record.matchedAt) || record.matchedAt! <= 0 || lifetime.signal.aborted) return;
         const live = current.current.notify;
-        if (!live.config.enabled) { save(job, true); return true; }
+        if (!live.config.enabled) { await save(job, true); setAttemptIssues(issues => issues.mail ? { ...issues, mail: '' } : issues); return true; }
         if (fishNotifyMissing(live.config)) return;
         const sent = new Set(job.sent);
         const recipients = live.config.emails.filter(recipient => !sent.has(recipient));
-        if (!recipients.length) { save(job, true); return true; }
+        if (!recipients.length) { await save(job, true); return true; }
         // Keep a recovery delay if the tab closes during an unacknowledged request.
-        save({ ...job, matched: true, nextMailAt: Date.now() + MINUTE });
+        if (!await save({ ...job, matched: true, nextMailAt: Date.now() + MINUTE })) return;
+        if (lifetime.signal.aborted) return;
         const delivered = await live.sendAdmission(record, round, recipients, {
           signal: lifetime.signal,
-          onRecipient: recipient => {
+          onRecipient: async recipient => {
             sent.add(recipient);
-            const latest = readJob(job.key);
-            if (latest) save({ ...latest, sent: [...sent], nextMailAt: Date.now() + MINUTE });
+            const latest = await readJob(job.key);
+            if (latest && !await save({ ...latest, sent: [...sent], nextMailAt: Date.now() + MINUTE })) throw Error('邮件回执保存待重试');
           },
         });
         if (lifetime.signal.aborted) return;
-        const latest = readJob(job.key);
+        const latest = await readJob(job.key);
         if (!latest) return;
-        if (delivered) save(latest, true);
+        if (delivered) { await save(latest, true); setAttemptIssues(issues => issues.mail ? { ...issues, mail: '' } : issues); }
         else {
           const mailFailures = (latest.mailFailures ?? 0) + 1;
-          save({ ...latest, mailFailures, nextMailAt: Date.now() + Math.min(MINUTE, 5000 * 2 ** Math.min(mailFailures - 1, 4)) });
+          await save({ ...latest, mailFailures, nextMailAt: Date.now() + Math.min(MINUTE, 5000 * 2 ** Math.min(mailFailures - 1, 4)) });
         }
         return true;
       });
     };
-    const tick = () => {
-      const { jobs, ready, monitor, paused } = current.current;
-      if (!ready || !monitor?.ready || !jobs.length || lifetime.signal.aborted) return;
+    let retryAt = 0;
+    const resumeJobs = new Set<string>();
+    const tick = (resumeNow = false) => {
+      if (lifetime.signal.aborted) return;
+      if (resumeNow) for (const [key, value] of queue.entries) if (isScreeningJob(value)) resumeJobs.add(key);
+      const now = Date.now();
+      if (now >= retryAt && (queue.failedWrites.size || queueReadFailed)) {
+        retryAt = now + 5000;
+        if (queueReadFailed) void hydrate();
+        for (const key of queue.failedWrites) {
+          if (key === pauseKey) {
+            if (writePersistedStateRaw(key, current.current.paused ? '1' : '0')) { queue.failedWrites.delete(key); publish(); }
+          } else {
+            const value = queue.pendingWrites.get(key);
+            if (value && !queue.tails.has(key)) void persist(key, value);
+          }
+        }
+      }
+      const { ready, monitor, paused } = current.current;
+      if (!queue.ready || !ready || !monitor?.ready) return;
+      const jobs = [...queue.entries.values()].filter(isScreeningJob);
+      if (!jobs.length) return;
       const ids = new Set(jobs.map(job => job.id));
       const records = new Map(monitor.library.records.filter(record => ids.has(record.roundId)).map(record => [record.roundId, record]));
-      const now = Date.now();
-      for (const job of jobs) {
-        const record = records.get(job.id);
-        if (!monitor.automaticRunning && (record?.status === 'unmatched' || record?.status === 'warming')) save(job, true);
-      }
-      const next = jobs.filter(job => !job.matched && job.nextCheckAt <= now && (!records.has(job.id) || ['queued', 'paused', 'error', 'matched'].includes(records.get(job.id)!.status)))
+      const completed = new Set(monitor.library.rounds.filter(round => ids.has(round.id) && round.state === 'complete').map(round => round.id));
+      const defaultSettings = readAutomaticScreeningSettings(owner) ?? monitor.library.settings;
+      const next = jobs.filter(job => !job.matched && (resumeJobs.has(job.key) || job.nextCheckAt <= now)
+        && (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length))
         .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
-      if (next && !paused && !(monitor.automaticRunning ?? monitor.running) && (records.has(next.id) || (next.settings ?? readAutomaticScreeningSettings(owner) ?? monitor.library.settings)?.plans.length)) void exclusive('scan', async () => {
-        const job = readJob(next.key);
+      if (next && !paused && !(monitor.automaticRunning ?? monitor.running)) void exclusive('scan', async () => {
+        const job = await readJob(next.key);
         const active = current.current.monitor;
-        if (!job || job.matched || job.nextCheckAt > Date.now() || !active?.startAutomatic
+        if (!job || job.matched || !resumeJobs.has(job.key) && job.nextCheckAt > Date.now() || !active?.startAutomatic
           || (active.automaticRunning ?? active.running) || current.current.paused || lifetime.signal.aborted) return;
         // Persist the next attempt before starting, so a reload can safely resume the same frozen round.
         const settings = job.settings ?? readAutomaticScreeningSettings(owner) ?? active.library.settings;
-        save({ ...job, settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined,
+        resumeJobs.delete(job.key);
+        await save({ ...job, settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined,
           runner: tab.current, nextCheckAt: Date.now() + MINUTE });
+        if (lifetime.signal.aborted || current.current.paused) return;
+        let matchedWrite: Promise<boolean> | undefined;
         await active.startAutomatic(job.id, job.source, !!job.runner && job.runner !== tab.current, match => {
-          const latest = readJob(job.key);
-          if (!latest || lifetime.signal.aborted) return;
-          const matched = { ...latest, matched: true as const };
-          save(matched);
-          mail(matched, match);
+          const latest = queue.entries.get(job.key);
+          if (!isScreeningJob(latest) || lifetime.signal.aborted) return;
+          matchedWrite = save({ ...latest, matched: true });
+          void matchedWrite.then(() => mail(job, match));
         }, settings, job.instantTrading);
         if (lifetime.signal.aborted) return;
-        const saved = readJob(job.key);
-        if (!saved) return;
-        const record = current.current.monitor?.library.records.find(record => record.roundId === job.id);
+        setAttemptIssues(issues => issues.scan ? { ...issues, scan: '' } : issues);
+        if (matchedWrite) { await matchedWrite; return true; }
+        const saved = await readJob(job.key);
+        if (!saved || saved.matched) return true;
+        const checkpoint = typeof indexedDB === 'undefined' ? undefined : await readAutomaticPreEntryCheckpoint(owner, job.id);
+        const record = checkpoint?.records[0] ?? current.current.monitor?.library.records.find(record => record.roundId === job.id);
+        if ((record?.status === 'unmatched' || record?.status === 'warming') && (checkpoint || typeof indexedDB === 'undefined')) {
+          await save(saved, true);
+          return true;
+        }
         const failures = record?.status === 'error' ? (job.failures ?? 0) + 1 : 0;
         const nextClose = (Math.floor(Date.now() / MINUTE) + 1) * MINUTE + 2000;
-        save({ ...saved, failures, nextCheckAt: failures ? Date.now() + Math.min(15, 2 ** Math.min(failures, 4)) * MINUTE : nextClose });
+        await save({ ...saved, failures, nextCheckAt: failures ? Date.now() + Math.min(15, 2 ** Math.min(failures, 4)) * MINUTE : nextClose });
         return true;
       });
-      const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && (job.matched || records.get(job.id)?.status === 'matched'));
+      const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && (job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched'));
       if (pendingMail) mail(pendingMail);
     };
     wake.current = tick;
-    const timer = setInterval(tick, 1200);
-    window.addEventListener('online', tick);
-    window.addEventListener('focus', tick);
-    document.addEventListener('visibilitychange', tick);
+    const poll = () => tick();
+    const refreshAndPoll = () => { void hydrate(); tick(); };
+    const timer = setInterval(poll, 1200);
+    window.addEventListener('online', refreshAndPoll);
+    window.addEventListener('focus', refreshAndPoll);
+    document.addEventListener('visibilitychange', poll);
+    void hydrate();
     tick();
     return () => {
       lifetime.abort();
       wake.current = undefined;
       clearInterval(timer);
       window.removeEventListener('storage', refresh);
-      window.removeEventListener('online', tick);
-      window.removeEventListener('focus', tick);
-      document.removeEventListener('visibilitychange', tick);
+      window.removeEventListener('online', refreshAndPoll);
+      window.removeEventListener('focus', refreshAndPoll);
+      document.removeEventListener('visibilitychange', poll);
+      queue.channel?.close();
+      queue.channel = undefined;
     };
-  }, [owner, pauseKey, save]);
-  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, settings, notify.config]);
+  }, [owner, pauseKey, persist, prefix, publish, queue, save]);
+  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config]);
 
-  const matchedIds = jobs.length ? new Set(monitor?.library.records.filter(record => record.status === 'matched').map(record => record.roundId)) : undefined;
+  const matchedIds = useMemo(() => {
+    if (!jobs.length || !monitor) return undefined;
+    const complete = new Set(monitor.library.rounds.filter(round => round.state === 'complete').map(round => round.id));
+    return new Set(monitor.library.records.filter(record => record.status === 'matched' && complete.has(record.roundId)).map(record => record.roundId));
+  }, [jobs.length, monitor?.library]);
   const awaitingMail = jobs.filter(job => job.matched || matchedIds?.has(job.id)).length;
   const pending = jobs.length - awaitingMail;
-  return { enqueue, paused, setAutoPaused, pending, awaitingMail: jobs.length - pending, storageIssue, settings, saveSettings };
+  return { enqueue, paused, setAutoPaused, pending, awaitingMail: jobs.length - pending, storageIssue, attemptIssue: attemptIssues.scan || attemptIssues.mail, settings, saveSettings };
 }

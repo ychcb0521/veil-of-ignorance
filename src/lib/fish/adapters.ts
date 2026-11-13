@@ -1,5 +1,5 @@
 import {ArrayLruCache} from '../arrayLruCache';
-import {ati6hTickSize} from '@/lib/ati6hMarketData';
+import {ati6hTickSize, peekAti6hTickSize} from '@/lib/ati6hMarketData';
 import { assertBinancePublicAllowed, noteBinanceRateLimit, publicRateLimitDeadline, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import {binanceStockMarket,bitgetStockMarket} from './stockMetadata';
 import {nativeFishInterval,fishBarLabel} from './periods';
@@ -96,7 +96,33 @@ export class FishAdapter implements FishDataAdapter {
     rows.sort((a,b)=>a.openTime-b.openTime);this.cache.set(key,rows);
   }
   private markets: FishMarket[] = [];
-  constructor(readonly exchange: FishExchange, readonly request: FishRequest) {}
+  private livePrecision = new WeakMap<AbortSignal, Promise<Map<string, number>>>();
+  constructor(readonly exchange: FishExchange, readonly request: FishRequest, private isLive?: (signal: AbortSignal) => boolean) {}
+
+  private async tickSize(symbol: string, signal: AbortSignal): Promise<number | null> {
+    if (!this.isLive?.(signal)) return ati6hTickSize(symbol, undefined, signal);
+    const known = peekAti6hTickSize(symbol);
+    if (known != null) return known;
+    let precision = this.livePrecision.get(signal);
+    if (!precision) {
+      precision = this.request('exchangeInfo', 1, signal).then(response => {
+        const symbols = (response as { symbols?: { symbol: string; filters?: { filterType: string; tickSize?: string }[] }[] }).symbols;
+        if (!Array.isArray(symbols)) throw new FishError('交易所精度响应无效', 'readings');
+        const result = new Map<string, number>();
+        for (const entry of symbols) {
+          const tick = Number(entry.filters?.find(filter => filter.filterType === 'PRICE_FILTER')?.tickSize);
+          if (Number.isFinite(tick) && tick > 0) result.set(entry.symbol, tick);
+        }
+        return result;
+      }).catch(error => { this.livePrecision.delete(signal); throw error; });
+      this.livePrecision.set(signal, precision);
+    }
+    try { return (await precision).get(symbol) ?? null; }
+    catch (error) {
+      if (signal.aborted || error instanceof FishError && [418, 429].includes(error.detail?.status ?? 0)) throw error;
+      return null;
+    }
+  }
   async list(signal: AbortSignal): Promise<FishMarket[]> {
     let markets: FishMarket[];
     if (this.exchange==='binance') {
@@ -129,7 +155,7 @@ export class FishAdapter implements FishDataAdapter {
   }
   async candles(market: FishMarket, cut: number, signal: AbortSignal, query: FishBarQuery = {interval:'5m',count:FISH_BARS}): Promise<ResearchBar[]> {
     const step=intervalMs(query.interval), cacheKey=`${market.instrument}|${query.interval}${query.marketEvidence?'|evidence':''}`;
-    const tick=query.marketEvidence?(market.tickSize??(this.exchange==='binance'?await ati6hTickSize(market.symbol,undefined,signal):null)):null;
+    const tick=query.marketEvidence?(market.tickSize??(this.exchange==='binance'?await this.tickSize(market.symbol, signal):null)):null;
     const evidence=(bars:ResearchBar[])=>query.marketEvidence?bars.map(b=>({...b,PRS6H_tick_size:tick,ATI6H_tick_size:tick,PRS6H_symbol:market.symbol,PRS6H_data_source:this.exchange==='binance'?'binance-usdm':this.exchange})):bars;
     const from=cut-query.count*step,native=nativeFishInterval(this.exchange,query.interval);
     if(native!==query.interval){
@@ -242,7 +268,7 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
   async function read(url:string,path:string,weight:number,signal:AbortSignal,attempt=0):Promise<unknown>{
     let result:{data:unknown}|{wait:number};
     try{result=await pool.run(async()=>{
-      abort(signal);if(exchange==='binance')assertBinancePublicAllowed();const wait=budget.tryTake(weight);if(wait)return {wait};
+      abort(signal);if(exchange==='binance')assertBinancePublicAllowed();const wait=budget.tryTake(weight,pool.reservedWeight(signal));if(wait)return {wait};
       return withFishRequestDeadline(async requestSignal => {
       const response=await fetcher.call(globalThis,url,{signal:requestSignal});
       if(response.status===429||response.status===418){budget.pauseUntil(publicRateLimitDeadline(response));if(exchange==='binance')noteBinanceRateLimit(response); }

@@ -64,15 +64,19 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
   const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
   const pending = automatic?.pending ?? 0;
   const screeningStatus = screening ? '筛选中' : automatic?.paused ? '已暂停' : pending ? `待筛选 ${pending} 条` : '空闲';
+  const needsSettings = pending > 0 && !(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length;
+  const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={children}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
       <span role="status">{screeningStatus}</span>
+      {needsSettings && <span>请先保存买前设置</span>}
       {screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {!!cda?.active && <span>持仓监测中 {cda.active} 条</span>}
       {!!cda?.awaitingMail && <span>待发邮件 {cda.awaitingMail} 条</span>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
-      {automatic.storageIssue && <span role="alert" className="text-destructive">即时交易队列保存异常</span>}
+      {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
+      {automatic.storageIssue && <span role="alert" className="text-destructive">本机队列暂未保存，正在重试，请保留页面</span>}
     </>}>
     <button type="button" className={automatic?.paused ? qualityPrimaryAction : qualityPauseAction} disabled={!automatic}
       onClick={() => automatic?.setAutoPaused(!automatic.paused)}>

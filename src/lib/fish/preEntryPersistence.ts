@@ -159,7 +159,7 @@ export async function writePreEntryTableClears(owner: string | undefined, marks:
 /** Atomic record-level checkpoints. The original monolithic library is left
  * untouched for already-open legacy pages; every new reader/export merges it
  * with these durable rows. A stale legacy save cannot erase the new histories. */
-export async function writePreEntrySnapshot(owner: string | undefined, delta: PreEntryLibrary): Promise<void> {
+export async function writePreEntrySnapshot(owner: string | undefined, delta: PreEntryLibrary, immediate = false): Promise<void> {
   if (!validPreEntryLibrary(delta)) throw Error('入选库存档格式无效');
   let completeIndex=false;
   const generation=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -202,14 +202,19 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
       request.onsuccess=()=>{try{const record=request.result;if(!record||record.id!==delta.records[index].id||record.processRef)throw Error('筛选恢复暂存不完整，原库保留');save(record);}catch(error){failure=error;tx.abort();}};
     };
     updateRow(0);
-    const cached=store.get(viewKey(owner));
-    cached.onsuccess=()=>{try{const previous=validReadModel(cached.result)?cached.result:undefined;completeIndex=!!previous?.complete&&previous.meta===previousMeta;store.put({version:1,generation,complete:false,library:previous?.library??emptyPreEntryLibrary()},viewKey(owner));}catch(error){failure=error;tx.abort();}};
+    if (!immediate) {
+      const cached=store.get(viewKey(owner));
+      cached.onsuccess=()=>{try{const previous=validReadModel(cached.result)?cached.result:undefined;completeIndex=!!previous?.complete&&previous.meta===previousMeta;store.put({version:1,generation,complete:false,library:previous?.library??emptyPreEntryLibrary()},viewKey(owner));}catch(error){failure=error;tx.abort();}};
+    }
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? Error('入选库保存失败'));
   }); } finally {
     if(staged){try{await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);for(let i=0;i<delta.records.length;i++)store.delete(stageKey(i));tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});}catch{/* Only this attempt's private staging keys; canonical history is untouched. */}}
     db.close();
   }
+  // A live save only acknowledges the canonical row. The metadata comparison
+  // invalidates any older read index, which can be rebuilt off this path.
+  if (immediate) return;
   // Canonical data is durable FIRST. A cache/quota failure cannot undo a saved
   // result; the incomplete flag makes the next read rebuild from the original.
   try{

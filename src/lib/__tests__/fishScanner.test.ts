@@ -3,6 +3,7 @@ import {CBI2_DEF} from '@/lib/deepDig/features';
 const DEFAULT_N=compileFishProgram(CBI2_DEF,{H:24,direction:'>',threshold:.3,constraints:[]}).N;
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BINANCE_COOLDOWN_KEY } from '@/lib/binanceRateLimit';
+import { FishRequestPool } from '@/lib/fish/shared';
 beforeEach(()=>localStorage.removeItem(BINANCE_COOLDOWN_KEY));
 import { parseFishSettings, FishScanner, FishWeightBudget, calculateFishReadings, classifyFishReadings, FISH_STEP, FISH_FIRST_USABLE, type FishProgress } from '@/lib/fishScanner';
 import { computeCbi2 } from '@/lib/cbi2';
@@ -10,6 +11,44 @@ import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepD
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
 import { mergeSignals, type TradeSignal } from '@/lib/signalLibrary';
+
+it('reserves network and weight for live fish and suspends queued background requests until the live attempt yields', async () => {
+  const pool = new FishRequestPool(true);
+  const background = new AbortController();
+  const live = new AbortController();
+  const events: string[] = [];
+  const endBackground: (() => void)[] = [];
+  const slow = (name: string) => pool.run(() => {
+    events.push(name);
+    return new Promise<void>(resolve => endBackground.push(resolve));
+  }, background.signal);
+  const first = slow('batch 1'), second = slow('batch 2');
+  const cancelled = new AbortController();
+  const abandoned = pool.run(async () => events.push('cancelled'), cancelled.signal);
+  const cancelledResult = expect(abandoned).rejects.toMatchObject({ name: 'AbortError' });
+  const third = slow('batch 3');
+  await Promise.resolve();
+  expect(events).toEqual(['batch 1', 'batch 2']);
+  cancelled.abort();
+
+  const finish = pool.prioritize(live.signal);
+  const budget = new FishWeightBudget(() => 100, undefined, 10, 60_000);
+  expect(budget.tryTake(5, pool.reservedWeight(background.signal))).toBe(0);
+  expect(budget.tryTake(1, pool.reservedWeight(background.signal))).toBe(60_000);
+  expect(budget.tryTake(5, pool.reservedWeight(live.signal))).toBe(0);
+
+  await pool.run(async () => events.push('live clock'), live.signal);
+  endBackground.shift()!();
+  await first;
+  expect(events).toEqual(['batch 1', 'batch 2', 'live clock']);
+  await pool.run(async () => events.push('live candles'), live.signal);
+  pool.setPriorityWaiting(live.signal, true);
+  await Promise.resolve();
+  expect(events).toEqual(['batch 1', 'batch 2', 'live clock', 'live candles', 'batch 3']);
+  finish();
+  endBackground.splice(0).forEach(resolve => resolve());
+  await Promise.all([second, third, cancelledResult]);
+});
 
 function research(n: number): ResearchBar[] {
   const rand = mulberry32(123); let price = 100, btc = 50000;

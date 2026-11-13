@@ -75,6 +75,20 @@ it('writes in a dedicated worker and returns only an acknowledgement, releasing 
  vi.stubGlobal('Worker',Writer);const value=fixture();await persistPreEntrySnapshot('alice',value);
  expect(urls[0].pathname).toMatch(/preEntryPersistence.worker.ts$/);expect(posted).toEqual([{owner:'alice',delta:value}]);expect(stopped).toHaveBeenCalledOnce();expect(await readPreEntrySnapshot('alice')).toEqual(value);
 });
+it('commits a live round and row while a background archive owns the shared archive queue', async () => {
+  let release!: () => void;
+  const archive = serializeArchiveWork(() => new Promise<void>(resolve => { release = resolve; }));
+  await Promise.resolve();
+  try {
+    const value = fixture();
+    await persistPreEntrySnapshot('live-owner', value, true);
+    expect(await readPreEntrySnapshot('live-owner')).toEqual(value);
+  } finally {
+    release();
+    await archive;
+  }
+});
+
 it('reports worker failures without retrying a large write on the UI thread',async()=>{
  const stopped=vi.fn();class Writer{onerror:()=>void;terminate(){stopped();}postMessage(){queueMicrotask(()=>this.onerror());}}
  vi.stubGlobal('Worker',Writer);await expect(persistPreEntrySnapshot('alice',fixture())).rejects.toThrow('后台保存失败');expect(stopped).toHaveBeenCalledOnce();expect(disk.size).toBe(0);

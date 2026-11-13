@@ -5,12 +5,15 @@ function openPreferences(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => {
+    const fail = (error: Error) => {
+      clearTimeout(timer);
       request.onsuccess = () => request.result.close();
-      reject(Error('浏览器存储暂时无法打开'));
+      reject(error);
     };
+    const timer = setTimeout(() => fail(Error('浏览器存储打开超时')), 8000);
+    request.onsuccess = () => { clearTimeout(timer); resolve(request.result); };
+    request.onerror = () => fail(request.error ?? Error('浏览器存储暂时无法打开'));
+    request.onblocked = () => fail(Error('浏览器存储暂时无法打开'));
   });
 }
 

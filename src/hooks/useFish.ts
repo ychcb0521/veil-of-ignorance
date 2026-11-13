@@ -174,7 +174,6 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
             const key = fishDedupKey(signal);
             const next = applyCatch(signalsRef.current, signal, writesRef.current);
             if (!next) return;
-            commit(next);
             const identity = signalDedupKey(signal);
             if (!knownSignals.has(identity) && writesRef.current.added.has(key)) {
               const caught = next.find(source => fishDedupKey(source) === key);
@@ -183,6 +182,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
                 onNewFish.current?.(caught);
               }
             }
+            commit(next);
           }
         },
         onRound: round => { if (valid()) {roundRef.current = { data: round, mode: combinationRef.current,keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);setRoundPlans(round.plans);} },

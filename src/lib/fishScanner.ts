@@ -7,6 +7,7 @@ import {collectSignalTurnover,TURNOVER_BARS,TURNOVER_STEP,type SignalTurnoverOpt
 import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import {createQualityMarketRetry} from '@/lib/fish/qualityMarketRetry';
+import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import type { OnScreenedCdaRead, ScreenedCdaTask } from '@/lib/fish/screenedCda';
 import { readScreenedPositionExit } from '@/lib/fish/screenedPriceExit';
 import { evaluateInstantMonitor, instantMonitorSample } from '@/lib/fish/instantMonitorExecution';
@@ -216,6 +217,13 @@ export class FishScanner {
   isBusy(): boolean { return this.running; }
   /** Paper quality studies share the public-data cache and request pool, without stopping live catches. */
   async quality(options: QualityRunOptions): Promise<void> {
+    const release = options.preEntry && isAutomaticPreEntryRound(options.preEntry.round)
+      ? this.pool.prioritize(options.signal) : undefined;
+    try { await this.runQuality(options); }
+    finally { release?.(); }
+  }
+
+  private async runQuality(options: QualityRunOptions): Promise<void> {
     const rows = options.task === 'pre-entry' ? options.preEntry?.records.map(r => r.sample) ?? []
       : options.task === 'signal-values' ? options.signalReadingBatches?.flatMap(batch => batch.rows) ?? []
       : options.task === 'entry' ? options.entryTargets ?? []
@@ -224,7 +232,11 @@ export class FishScanner {
       : qualityRunSamples(options.study);
     let progress = {done:0,total:rows.length,current:''}, waitingUntil:number|undefined;
     const publish = () => options.onProgress({...progress,...(waitingUntil?{waitingUntil}:{})});
-    const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal, until=>{waitingUntil=until;publish();});
+    const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal, until => {
+      this.pool.setPriorityWaiting(options.signal, !!until);
+      waitingUntil = until;
+      publish();
+    });
     const activeOptions={...options,onProgress:(next:typeof progress)=>{progress=next;publish();}};
     if(options.task==='pre-entry'){
       if(!options.preEntry)throw Error('缺少买前监测任务');
@@ -329,7 +341,7 @@ export class FishScanner {
     return { now, load, marketEnd, marketStart };
   }
   private latestServerTime = 0;
-  private pool = new FishRequestPool();
+  private pool = new FishRequestPool(true);
   readonly budget: FishWeightBudget;
   private adapters = new Map<FishExchange, FishDataAdapter>();
   private requests = new Map<FishExchange, ReturnType<typeof fishTransport>>();
@@ -338,7 +350,7 @@ export class FishScanner {
     for (const exchange of AUDITED_EXCHANGES) {
       const pool = exchange === 'binance' ? budget : new FishWeightBudget(Date.now, fishDelay, exchange === 'gate' ? 200 : exchange === 'bitget' ? 10 : 20, exchange === 'gate' ? 10000 : exchange === 'bitget' ? 1000 : 2000);
       const transport = fishTransport(exchange, request, pool, this.pool);
-      this.requests.set(exchange, transport); this.adapters.set(exchange, provided[exchange] ?? new FishAdapter(exchange, transport));
+      this.requests.set(exchange, transport); this.adapters.set(exchange, provided[exchange] ?? new FishAdapter(exchange, transport, signal => this.pool.isPrioritized(signal)));
     }
   }
   /**

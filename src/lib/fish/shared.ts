@@ -58,11 +58,11 @@ export class FishWeightBudget {
   constructor(private now = Date.now, private sleep = fishDelay, private limit = 1200, private windowMs = 60_000) {}
   pauseUntil(time: number) { this.cooldown = Math.max(this.cooldown, time); }
   /** Atomically reserve at actual dispatch time; positive return means wait without occupying a network slot. */
-  tryTake(weight:number):number {
+  tryTake(weight:number, reserve=0):number {
     if(!(weight>0)||weight>this.limit)throw new Error('Invalid request weight');
     const now=this.now();this.events=this.events.filter(e=>now-e.at<this.windowMs);
     const used=this.events.reduce((sum,e)=>sum+e.weight,0);
-    const wait=Math.max(this.cooldown-now,used+weight>this.limit?this.events[0].at+this.windowMs-now:0);
+    const wait=Math.max(this.cooldown-now,used+weight>Math.max(weight,this.limit-reserve)?this.events[0].at+this.windowMs-now:0);
     if(wait<=0){this.events.push({at:now,weight});return 0;}return wait;
   }
   wait(ms:number,signal:AbortSignal){return this.sleep(ms,signal);}
@@ -83,22 +83,57 @@ export function validateFishBars(bars: readonly ResearchBar[], cutoffMs: number,
 
 }
 
-/** Shared network cap, without sharing any exchange's request-weight counter. */
+/** Shared network cap. Live screening has a reserved slot and takes the next available slot. */
 export class FishRequestPool {
-  private active=0;
-  private waiters: (()=>void)[]=[];
-  async run<T>(task:()=>Promise<T>,signal:AbortSignal):Promise<T>{
-    check(signal);
-    while(this.active>=3){
-      await new Promise<void>((resolve,reject)=>{
-        const ready=()=>{signal.removeEventListener('abort',stop);resolve();};
-        const stop=()=>{this.waiters=this.waiters.filter(x=>x!==ready);reject(new DOMException('已取消','AbortError'));};
-        this.waiters.push(ready);signal.addEventListener('abort',stop,{once:true});
-      });
-      check(signal);
+  private active = 0;
+  private urgent: (() => void)[] = [];
+  private ordinary: (() => void)[] = [];
+  private liveSignals = new Map<AbortSignal, boolean>();
+
+  constructor(private reserveForLive = false) {}
+
+  prioritize(signal: AbortSignal) {
+    this.liveSignals.set(signal, true);
+    return () => { this.liveSignals.delete(signal); this.dispatch(); };
+  }
+
+  isPrioritized(signal: AbortSignal) { return this.liveSignals.has(signal); }
+
+  setPriorityWaiting(signal: AbortSignal, waiting: boolean) {
+    if (!this.liveSignals.has(signal)) return;
+    this.liveSignals.set(signal, !waiting);
+    this.dispatch();
+  }
+
+  reservedWeight(signal: AbortSignal) {
+    // The largest individual request in this transport costs five.
+    return this.reserveForLive && !this.isPrioritized(signal) ? 5 : 0;
+  }
+
+  private dispatch() {
+    while (this.active < 3) {
+      const start = this.urgent.shift() ?? (![...this.liveSignals.values()].some(Boolean) && this.active < (this.reserveForLive ? 2 : 3) ? this.ordinary.shift() : undefined);
+      if (!start) return;
+      this.active++;
+      start();
     }
-    this.active++;
-    try{return await task();}finally{this.active--;this.waiters.shift()?.();}
+  }
+
+  async run<T>(task: () => Promise<T>, signal: AbortSignal): Promise<T> {
+    check(signal);
+    const queue = this.isPrioritized(signal) ? this.urgent : this.ordinary;
+    await new Promise<void>((resolve, reject) => {
+      const start = () => { signal.removeEventListener('abort', stop); resolve(); };
+      const stop = () => {
+        queue.splice(queue.indexOf(start), 1);
+        reject(new DOMException('已取消', 'AbortError'));
+      };
+      queue.push(start);
+      signal.addEventListener('abort', stop, { once: true });
+      this.dispatch();
+    });
+    try { check(signal); return await task(); }
+    finally { this.active--; this.dispatch(); }
   }
 }
 
