@@ -1,5 +1,5 @@
 /** Bound auth connection + body reads. Other database/storage requests retain their existing behavior. */
-import {authGatewayUrl,productionAuthOrigin} from './authGateway';
+import {authGatewayUrl,instantCampaignGatewayUrl,INSTANT_CAMPAIGN_HEADER,productionAuthOrigin} from './authGateway';
 import {authServiceFailure} from './authErrorText';
 /** The installed SDK serializes a 5xx Response itself instead of reading its
  * JSON body, yielding "{}". Supply a safe message while preserving status,
@@ -32,7 +32,19 @@ export async function boundedAuthAction<T>(action:()=>Promise<T>, timeoutMs=AUTH
 export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,init),timeoutMs=AUTH_REQUEST_TIMEOUT_MS,siteOrigin=productionAuthOrigin()):typeof fetch {
   return async(input,init)=>{
     const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
-    if(!new URL(url).pathname.startsWith('/auth/v1/'))return fetcher(input,init);
+    const parsed = new URL(url);
+    const instantHeaders = parsed.pathname === '/rest/v1/user_sim_state' ? new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)) : undefined;
+    if (instantHeaders?.has(INSTANT_CAMPAIGN_HEADER)) {
+      const headers = instantHeaders;
+      headers.delete(INSTANT_CAMPAIGN_HEADER);
+      const gateway = instantCampaignGatewayUrl(url, siteOrigin);
+      if (gateway) {
+        const request = input instanceof Request ? new Request(gateway, input) : gateway;
+        return fetcher(request, { ...init, headers, cache: 'no-store', credentials: 'omit' });
+      }
+      return fetcher(input, { ...init, headers });
+    }
+    if(!parsed.pathname.startsWith('/auth/v1/'))return fetcher(input,init);
     const gateway=authGatewayUrl(url,siteOrigin),method=(init?.method??(input instanceof Request?input.method:'GET')).toUpperCase();
     // Refresh rotation, signup and OTP requests must never be duplicated by this transport.
     const repeatable=method==='GET'||method==='HEAD'||method==='POST'&&new URL(url).pathname==='/auth/v1/token'&&new URL(url).searchParams.get('grant_type')==='password';

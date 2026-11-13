@@ -1,5 +1,12 @@
 /** Keep the SDK's backend URL/storage key intact; route only auth HTTP traffic. */
 export const AUTH_BACKEND_ORIGIN='https://elynuzxnvjzypjgzkemc.supabase.co';
+export const INSTANT_CAMPAIGN_HEADER = 'x-veil-instant-campaign';
+export function instantCampaignGatewayUrl(url: string, siteOrigin?: string): string | null {
+  if (!siteOrigin) return null;
+  const target = new URL(url), site = new URL(siteOrigin);
+  if (!authGatewayUrl(target.origin + '/auth/v1/user', siteOrigin) || target.pathname !== '/rest/v1/user_sim_state') return null;
+  return site.origin + '/instant-campaign-api' + target.search;
+}
 export function authGatewayUrl(url:string,siteOrigin?:string):string|null {
  if(!siteOrigin)return null;
  const target=new URL(url),site=new URL(siteOrigin);

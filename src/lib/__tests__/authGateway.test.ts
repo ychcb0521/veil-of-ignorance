@@ -2,7 +2,7 @@
 import {readFileSync} from 'node:fs';
 import {afterEach,expect,it,vi} from 'vitest';
 import {createClient} from '@supabase/supabase-js';
-import {AUTH_BACKEND_ORIGIN,authGatewayUrl} from '../authGateway';
+import {AUTH_BACKEND_ORIGIN,authGatewayUrl,INSTANT_CAMPAIGN_HEADER} from '../authGateway';
 import {createAuthFetch,AUTH_REQUEST_TIMEOUT_MS} from '../authTransport';
 const site='https://veil-of-ignorance-ten.vercel.app',token=AUTH_BACKEND_ORIGIN+'/auth/v1/token?grant_type=password';
 afterEach(()=>{vi.useRealTimers();vi.unstubAllEnvs();vi.unstubAllGlobals();});
@@ -112,6 +112,24 @@ it('preserves the existing SDK storage namespace and restores a session produced
  expect(fetcher).toHaveBeenCalledOnce();expect(fetcher.mock.calls[0][0]).toContain('/auth-api/token?grant_type=password');
  const restored=createClient(AUTH_BACKEND_ORIGIN,'fixture-anon',{global:{fetch:fetcher},auth:{storage:adapter,autoRefreshToken:false,detectSessionInUrl:false}});
  expect((await restored.auth.getSession()).data.session?.user.id).toBe(user.id);expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('routes the authenticated instant query through the same-origin gateway with its filters and no cache', async () => {
+ const upstream=AUTH_BACKEND_ORIGIN+'/rest/v1/user_sim_state?key=lt.idb%3Ainstant-campaign-v1%2Ffish-instanu&key=gte.idb%3Ainstant-campaign-v1%2Ffish-instant-';
+ const fetcher=vi.fn<typeof fetch>(async()=>reply(200,'[]'));
+ const fetch=createAuthFetch(fetcher,30000,site);
+ const headers={Authorization:'Bearer fixture',apikey:'fixture',[INSTANT_CAMPAIGN_HEADER]:'1'};
+ await fetch(upstream,{headers});
+ const [url,init]=fetcher.mock.calls[0];
+ expect(url).toBe(site+'/instant-campaign-api?'+new URL(upstream).searchParams.toString());
+ expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer fixture');
+ expect(new Headers(init?.headers).get(INSTANT_CAMPAIGN_HEADER)).toBeNull();
+ expect(init).toMatchObject({cache:'no-store',credentials:'omit'});
+ await fetch(upstream,{headers:{apikey:'fixture'}});
+ expect(fetcher.mock.calls[1][0]).toBe(upstream);
+ const config=JSON.parse(readFileSync('vercel.json','utf8'));
+ expect(config.rewrites.find((r:{source:string})=>r.source==='/instant-campaign-api').destination).toBe(AUTH_BACKEND_ORIGIN+'/rest/v1/user_sim_state');
+ expect(config.rewrites.find((r:{destination:string})=>r.destination==='/index.html').source).toContain('instant-campaign-api');
 });
 
 it('routes auth before SPA fallback to the same recorded backend and forbids CDN/browser caching',()=>{

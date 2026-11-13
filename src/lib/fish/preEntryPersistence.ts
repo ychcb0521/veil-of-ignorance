@@ -1,4 +1,4 @@
-import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary } from './preEntryMonitor';
+import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from './preEntryMonitor';
 import {restorePreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
 import { mergePreEntryTableClears, validPreEntryTableClears, withPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 
@@ -39,6 +39,33 @@ export async function readAutomaticPreEntryCheckpoint(owner: string, id: string)
     });
   } finally { db.close(); }
 }
+/** Restore only records with a saved CDA event; never read the whole historical library here. */
+export async function readAutomaticPreEntrySales(owner: string, recordIds: readonly string[]): Promise<{record: PreEntryRecord; round: PreEntryLibrary['rounds'][number]}[]> {
+  if (!recordIds.length) return [];
+  const db = await open();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly'), store = tx.objectStore(STORE);
+      const result: {record: PreEntryRecord; round: PreEntryLibrary['rounds'][number]}[] = [];
+      const meta = store.get(metaKey(owner));
+      meta.onsuccess = () => {
+        if (!validPreEntryLibrary(meta.result)) return;
+        const rounds = new Map(meta.result.rounds.filter(round => round.automatic && round.state === 'complete').map(round => [round.id, round]));
+        for (const id of recordIds) {
+          const row = store.get(rowPrefix(owner) + id);
+          row.onsuccess = () => {
+            const record = row.result as PreEntryRecord | undefined;
+            const round = record?.id === id ? rounds.get(record.roundId) : undefined;
+            if (record && round && record.status === 'matched') result.push({ record, round });
+          };
+        }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('读取筛选鱼卖出记录失败'));
+    });
+  } finally { db.close(); }
+}
+
 /** Complete lightweight index is an additive private cache. Existing canonical
  * keys and old-page writes remain intact; explicit recovery can always rebuild it. */
 export async function readPreEntryReadModel(owner?:string):Promise<PreEntryLibrary|undefined>{

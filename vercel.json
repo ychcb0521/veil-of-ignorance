@@ -10,13 +10,25 @@
       "destination": "https://elynuzxnvjzypjgzkemc.supabase.co/auth/v1/:path*"
     },
     {
-      "source": "/((?!assets/|auth-api/).*)",
+      "source": "/((?!assets/|auth-api/|instant-campaign-api$).*)",
       "destination": "/index.html"
+    },
+    {
+      "source": "/instant-campaign-api",
+      "destination": "https://elynuzxnvjzypjgzkemc.supabase.co/rest/v1/user_sim_state"
     }
   ],
   "headers": [
     {
       "source": "/auth-api/:path*",
+      "headers": [
+        {"key": "Cache-Control", "value": "private, no-store, max-age=0"},
+        {"key": "CDN-Cache-Control", "value": "no-store"},
+        {"key": "Vercel-CDN-Cache-Control", "value": "no-store"}
+      ]
+    },
+    {
+      "source": "/instant-campaign-api",
       "headers": [
         {"key": "Cache-Control", "value": "private, no-store, max-age=0"},
         {"key": "CDN-Cache-Control", "value": "no-store"},

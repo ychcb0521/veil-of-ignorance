@@ -7,6 +7,10 @@ function openPreferences(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    request.onblocked = () => {
+      request.onsuccess = () => request.result.close();
+      reject(Error('浏览器存储暂时无法打开'));
+    };
   });
 }
 
@@ -39,6 +43,19 @@ export function readFishPreferencesWithPrefix<T>(prefix: string): Promise<T[]> {
   return transact('readonly', (store, complete) => {
     const request = store.getAll(IDBKeyRange.bound(prefix, prefix + '\uffff'));
     request.onsuccess = () => complete(request.result);
+  });
+}
+
+export function readFishPreferenceEntries<T>(prefix: string): Promise<[string, T][]> {
+  return transact('readonly', (store, complete) => {
+    const entries: [string, T][] = [];
+    const request = store.openCursor(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) { complete(entries); return; }
+      entries.push([String(cursor.key).slice(prefix.length), cursor.value]);
+      cursor.continue();
+    };
   });
 }
 

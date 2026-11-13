@@ -5,11 +5,11 @@ import { buildPageInstantCampaign } from './useFish';
 import type { FishCdaTracking } from './useFishCdaTracking';
 
 export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTracking) {
-  const inputs = useMemo(() => cda.admitted?.flatMap(({ record, round }) => {
+  const inputs = useMemo(() => [...(cda.localSales ?? []), ...(cda.admitted ?? [])].flatMap(({ record, round }) => {
     const alert = cda.alerts.get(record.id);
     const input = alert && instantCampaignInput(record, round, alert);
     return input ? [input] : [];
-  }) ?? [], [cda.admitted, cda.alerts]);
+  }), [cda.admitted, cda.localSales, cda.alerts]);
   const latest = useRef(inputs);
   latest.current = inputs;
   const wake = useRef<() => void>();

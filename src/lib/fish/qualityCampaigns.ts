@@ -8,7 +8,7 @@ import {QualityCampaignPacketDecoder,type QualityCampaignReply} from './qualityC
 import { campaignSectionLabel, isInstantCampaignId, qualityCampaignTrashKey } from '@/lib/campaignSections';
 import { loadQualityCampaignTrash, readQualityCampaignTrash } from './qualityCampaignTrash';
 import { buildInstantCampaignData } from './instantCampaign';
-import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot } from './instantCampaignStore';
+import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readLocalInstantCampaignSnapshots } from './instantCampaignStore';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -42,6 +42,10 @@ function projectInWorker(request: QualityCampaignReadRequest,signal?:AbortSignal
     try { worker.postMessage(request); } catch (error) { fail(error); }
   }));
 }
+export async function listLocalInstantCampaignData(owner: string) {
+  return (await readLocalInstantCampaignSnapshots(owner)).map(snapshot => buildInstantCampaignData(owner, snapshot));
+}
+
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal) {
   if (section === 'instant') {
     const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);

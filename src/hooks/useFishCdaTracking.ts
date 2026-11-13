@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishNotifyMissing } from '@/lib/fish/notify';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
-import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
+import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
-import { readFishPreferences, readFishPreferencesWithPrefix, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
+import { readFishPreferences, readFishPreferenceEntries, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
 import type { useFishNotify } from './useFishNotify';
@@ -28,6 +28,7 @@ export interface FishCdaTracking {
   awaitingMail: number;
   alerts: ReadonlyMap<string, ScreenedCdaTrigger>;
   admitted?: readonly ScreenedFishAdmission[];
+  localSales?: readonly ScreenedFishAdmission[];
   hasSavedSales?: boolean;
   campaignIssue?: string;
   error: string;
@@ -53,7 +54,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const [settings, setSettings] = useState<Settings>();
   const [saving, setSaving] = useState(!!configKey);
   const [error, setError] = useState('');
-  const [savedSalesOwner, setSavedSalesOwner] = useState<string>();
+  const [savedSales, setSavedSales] = useState<{ owner: string; admitted: ScreenedFishAdmission[] }>();
   const [revision, setRevision] = useState(0);
   const [refreshVersion, refreshCheckpoints] = useState(0);
   const checkpoints = useRef(new Map<string, Checkpoint>());
@@ -114,18 +115,49 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     } catch { /* The stored settings will also be read when the page opens. */ }
     window.addEventListener('storage', refreshLegacy);
     void refresh();
-    if (typeof indexedDB !== 'undefined' && typeof readFishPreferencesWithPrefix === 'function') {
-      void readFishPreferencesWithPrefix<Checkpoint>(jobPrefix).then(rows => {
-        if (alive && rows.some(row => row?.alert)) setSavedSalesOwner(owner);
-      }).catch(() => undefined);
-    }
     return () => {
       alive = false;
       window.removeEventListener('storage', refreshLegacy);
       changes.current?.close();
       changes.current = undefined;
     };
-  }, [configKey, jobPrefix, owner]);
+  }, [configKey, jobPrefix]);
+
+  useEffect(() => {
+    if (!owner || typeof indexedDB === 'undefined') return;
+    let active = true;
+    void (async () => {
+      const stored = await readFishPreferenceEntries<Checkpoint>(jobPrefix);
+      const sales = new Map<string, Checkpoint>();
+      for (const [key, saved] of stored) if (saved?.alert) sales.set(key, saved);
+      // Existing browser checkpoints from before IndexedDB are read without rewriting.
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (!key?.startsWith(jobPrefix)) continue;
+          const suffix = key.slice(jobPrefix.length);
+          const saved = readLocal<Checkpoint>(key);
+          if (!sales.has(suffix) && saved?.alert) sales.set(suffix, saved);
+        }
+      } catch { /* The IndexedDB sales remain available. */ }
+      if (!active || !sales.size) return;
+      for (const [suffix, saved] of sales) {
+        const key = jobPrefix + suffix;
+        if (!checkpoints.current.get(key)?.alert) checkpoints.current.set(key, saved);
+      }
+      setSavedSales(previous => previous?.owner === owner ? previous : { owner, admitted: [] });
+      const ids = [...sales.keys()].flatMap(key => {
+        try { return [decodeURIComponent(key)]; } catch { return []; }
+      });
+      const saved = await readAutomaticPreEntrySales(owner, ids);
+      if (!active) return;
+      setSavedSales({ owner, admitted: saved });
+      setRevision(value => value + 1);
+    })().catch(() => undefined); // Full library recovery remains available for older archives.
+    return () => { active = false; };
+  }, [owner, jobPrefix, refreshVersion]);
+
+  const localSales = owner && savedSales?.owner === owner ? savedSales.admitted : undefined;
 
   useEffect(() => {
     if (!admitted.length) return;
@@ -308,13 +340,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   }, [entries, jobPrefix, revision]);
   const alerts = useMemo(() => {
     const result = new Map<string, ScreenedCdaTrigger>();
-    for (const { record } of admitted) {
+    for (const { record } of [...(localSales ?? []), ...admitted]) {
       const key = jobPrefix + encodeURIComponent(record.id);
       const alert = (checkpoints.current.get(key) ?? readLocal<Checkpoint>(key))?.alert;
       if (alert && Number.isFinite(alert.at) && Number.isFinite(alert.value)) result.set(record.id, alert);
     }
     return result;
-  }, [admitted, jobPrefix, revision]);
+  }, [admitted, localSales, jobPrefix, revision]);
   const mailIssue = settings && counts.awaitingMail ? !notify.config.enabled ? '邮件提醒已关闭' : fishNotifyMissing(notify.config) : '';
-  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, hasSavedSales: !!owner && savedSalesOwner === owner, ...counts };
+  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
 }
