@@ -4,8 +4,9 @@ import { readPersistedStateRaw,writePersistedStateRaw } from '@/lib/persistedSta
 import type { FishConstraint } from './algorithm';
 import { isSellerFeature, SELLER_FEATURE_CORES, compileFeatureFormula } from '@/lib/deepDig/features';
 import { accountFeatureDef } from '@/lib/featureSource';
+import type { AdditionMetricTime } from './qualityAdditionMetric';
 /** 旧设置里的 H（外层 avg 小时数）读到也不再用：渔已去掉外层 avg。 */
-export interface FishPreference { sellerSignVersion?:1; thresholdDefaultsVersion?:number; statistic?:string; lastSuggestion?:string; direction:'>'|'<';threshold:string;constraints:FishConstraint[] }
+export interface FishPreference { sellerSignVersion?:1; thresholdDefaultsVersion?:number; statistic?:string; lastSuggestion?:string; direction:'>'|'<';threshold:string;constraints:FishConstraint[]; time?:AdditionMetricTime }
 export const fishPreferenceKey=(id:string)=>`${getUserPrefix()}fish-algorithm-settings.v1:${id}`;
 /** 用户截图指定的「结果 · avg_X」默认门槛，按显示单位填写。 */
 export const FISH_DEFAULTS_VERSION=1;
@@ -29,6 +30,6 @@ export function withFishDefaultThreshold(id:string,p:FishPreference,fillDefault=
 /** 已保存的偏好原样读取；默认门槛仅用于首次新建偏好。 */
 export function readFishPreference(id:string):FishPreference {
   const fallback=withFishDefaultThreshold(id,{statistic:'结果',direction:isSellerFeature(id)?'<':'>',threshold:'',constraints:[],...(isSellerFeature(id)?{sellerSignVersion:1 as const}:{})});
-  try{const x=JSON.parse(readPersistedStateRaw(fishPreferenceKey(id))??'null');if(!x)return fallback;return withFishDefaultThreshold(id,{sellerSignVersion:x.sellerSignVersion===1?1:undefined,thresholdDefaultsVersion:typeof x.thresholdDefaultsVersion==='number'?x.thresholdDefaultsVersion:undefined,statistic:typeof x.statistic==='string'?x.statistic:'结果',lastSuggestion:typeof x.lastSuggestion==='string'?x.lastSuggestion:undefined,direction:x.direction==='<'?'<':'>',threshold:typeof x.threshold==='string'?x.threshold:'',constraints:Array.isArray(x.constraints)?x.constraints.filter((c:any)=>c&&typeof c.id==='string'&&typeof c.text==='string'&&typeof c.enabled==='boolean'):[]},false);}catch{return fallback;}
+  try{const x=JSON.parse(readPersistedStateRaw(fishPreferenceKey(id))??'null');if(!x)return fallback;return withFishDefaultThreshold(id,{sellerSignVersion:x.sellerSignVersion===1?1:undefined,thresholdDefaultsVersion:typeof x.thresholdDefaultsVersion==='number'?x.thresholdDefaultsVersion:undefined,statistic:typeof x.statistic==='string'?x.statistic:'结果',lastSuggestion:typeof x.lastSuggestion==='string'?x.lastSuggestion:undefined,direction:x.direction==='<'?'<':'>',threshold:typeof x.threshold==='string'?x.threshold:'',constraints:Array.isArray(x.constraints)?x.constraints.filter((c:any)=>c&&typeof c.id==='string'&&typeof c.text==='string'&&typeof c.enabled==='boolean'):[],...(x.time?{time:x.time}:{})},false);}catch{return fallback;}
 }
 export const saveFishPreference=(id:string,p:FishPreference)=>writePersistedStateRaw(fishPreferenceKey(id),JSON.stringify({...p,...(isSellerFeature(id)?{sellerSignVersion:1}:{}),...(FISH_DEFAULT_THRESHOLDS[id]&&(p.statistic??'结果')==='结果'?{thresholdDefaultsVersion:fishDefaultThresholdVersion(id)}:{})}));

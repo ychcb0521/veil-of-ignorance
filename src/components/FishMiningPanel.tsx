@@ -1,3 +1,4 @@
+import { FishMetricTimeFields } from './FishMetricTimeFields';
 import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import type {ReactNode} from 'react';
 import type {FishQualityStudy} from '@/lib/fish/quality';
@@ -147,14 +148,17 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
     {draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic),menu=choice?.menuStatistics??choice?.statistics??[];return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
       <FishCheck aria-label={`启用批量捕捞算法 ${i+1}`} checked={rule.enabled!==false}
         onChange={event=>setDraft(draft.map((r,j)=>i===j?{...r,enabled:event.target.checked}:r))}/>
-      <select aria-label={`批量捕捞算法 ${i+1} 特征值`} className="h-7 w-28 min-w-0 rounded bg-muted px-2" value={rule.featureId} onChange={e=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,featureId:e.target.value,statistic:choices.find(c=>c.featureId===e.target.value)?.menuStatistics?.[0]?.name??'结果',threshold:''}:r));}}>
+      <select aria-label={`批量捕捞算法 ${i+1} 特征值`} className="h-7 w-28 min-w-0 rounded bg-muted px-2" value={rule.featureId} onChange={e=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,featureId:e.target.value,time:undefined,statistic:choices.find(c=>c.featureId===e.target.value)?.menuStatistics?.[0]?.name??'结果',threshold:''}:r));}}>
         {!choices.some(c=>c.featureId===rule.featureId)&&<option value={rule.featureId}>{rule.featureId}（已失效）</option>}{choices.map(c=><option key={c.featureId} value={c.featureId}>{c.label}</option>)}
       </select>
-      <select aria-label={`批量捕捞算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value}:r))}>{!menu.some(s=>s.name===rule.statistic)&&<option hidden disabled value={rule.statistic}>{rule.statistic}（{valid?'已保存指标':'已失效'}）</option>}{menu.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><select aria-label={`批量捕捞算法 ${i+1} 方向`} className="h-7 rounded bg-muted px-1" value={rule.direction??'>'}
+      <select aria-label={`批量捕捞算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value,time:undefined}:r))}>{!menu.some(s=>s.name===rule.statistic)&&<option hidden disabled value={rule.statistic}>{rule.statistic}（{valid?'已保存指标':'已失效'}）</option>}{menu.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><select aria-label={`批量捕捞算法 ${i+1} 方向`} className="h-7 rounded bg-muted px-1" value={rule.direction??'>'}
         onChange={event=>setDraft(draft.map((r,j)=>i===j?{...r,direction:event.target.value as '>' | '<'}:r))}>
         <option value=">">&gt;</option><option value="<">&lt;</option>
       </select><input aria-label={`批量捕捞算法 ${i+1} 门槛`} className="h-7 w-20 rounded bg-muted px-2 font-mono" type="number" step="any" value={rule.threshold} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,threshold:e.target.value}:r))}/>
       <button type="button" aria-label={`移除批量捕捞算法 ${i+1}`} disabled={draft.length<=1} onClick={()=>setDraft(draft.filter((_,j)=>j!==i))} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground disabled:opacity-30"><X aria-hidden className="h-3 w-3"/></button>
+      <FishMetricTimeFields label={'批量捕捞算法 '+(i+1)} metric={rule.statistic}
+        definition={mining.defs.find(def=>def.id===rule.featureId)} time={rule.time} className="basis-full pl-5"
+        onChange={time=>setDraft(previous=>previous.map((r,j)=>i===j?{...r,time}:r))}/>
     </div>;})}
       <div className="grid gap-3 sm:grid-cols-2">
         <fieldset className="min-w-0 rounded-md border border-border/60 px-3 pb-3">

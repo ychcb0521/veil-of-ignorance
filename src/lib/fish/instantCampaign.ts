@@ -194,7 +194,9 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
       category: detectors.join(' + ') || undefined, valuedAt: sell.at,
       holdingMetrics: { status: 'closed', entryPrice, initialNotional: notional, totalInvested: marginUsdt, returnPct: pnl / marginUsdt * 100, peakPct: frozen.peakPct,
         ...(mirror ? { mirrorRealizedPnl: breakdown.mirrorPnl, remainingPnl: breakdown.remainingPnl } : {}) },
-      instant: { source, cdaValue: sell.value, sellEvidence: sell.evidence, marginUsdt, ...(withPriceRules ? { mirrorTakeProfit: SCREENED_MIRROR, mirrorFill: mirror } : {}), drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown },
+      instant: { source, cdaValue: sell.value, sellEvidence: sell.evidence, marginUsdt,
+        ...(withPriceRules ? { initialStaticStopPct: SCREENED_STOP_PCT, mirrorTakeProfit: SCREENED_MIRROR, mirrorFill: mirror } : {}),
+        drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown },
     },
   };
   const leg: TradeJournal = {

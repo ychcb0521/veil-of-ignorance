@@ -4,6 +4,8 @@ import { qualityDefinition, type QualityGroup } from './quality';
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { freezeQualityPlan, planVersionChanges } from './qualityPlanVersions';
 import { newQualitySellPlanId } from './qualitySellPlans';
+import { additionMetricTime, withMetricSnapshotTime } from './qualityAdditionMetric';
+import { researchChartFormula, researchIndicatorForFeature } from '../researchIndicators';
 
 /** Copy only: original formulas, thresholds, positions and archived results remain untouched. */
 export function createTuringQualityPlan(source: QualityGroup, definitions: readonly DeepDigFeatureDef[], id = newQualitySellPlanId()): QualityGroup {
@@ -20,6 +22,15 @@ export function createTuringQualityPlan(source: QualityGroup, definitions: reado
         const variant = definitions.find(d => d.btcFreeSourceId === snapshot.featureId);
         if (!variant || compileFeatureFormula(variant.formula).usesBtc) throw Error(`「${snapshot.featureShort ?? snapshot.featureId}」依赖 BTC，但没有可用的独立无 BTC 版本；原方案未修改`);
         Object.assign(copy, { featureId: variant.id, featureShort: variant.short, featureName: variant.name, definitionKey: definitionKey(variant), interval: variant.interval ?? snapshot.interval });
+        const time = additionMetricTime(snapshot);
+        if (Object.keys(time).length) {
+          const formula = researchChartFormula(researchIndicatorForFeature(variant), variant.formula);
+          const metric = snapshot.statistic ?? '结果';
+          const tuned = withMetricSnapshotTime({label:variant.short, metric, snapshot:{
+            ...(copy as unknown as FishSnapshot), definitionKey:definitionKey({...variant,formula}),
+          }}, time);
+          Object.assign(copy,tuned.snapshot);
+        }
       }
     }
     return copy;

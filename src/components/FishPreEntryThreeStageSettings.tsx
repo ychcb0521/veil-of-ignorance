@@ -19,6 +19,8 @@ import { FishQualityInfo } from './FishQualityModule';
 import { PlanVersionList } from './FishQualityPlanVersions';
 import { planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { defaultEntryStallTurn5m } from '@/lib/fish/preEntryStallTurn5m';
+import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
+import { FishMetricTimeFields } from './FishMetricTimeFields';
 
 const field='min-w-0 rounded border border-border/60 bg-background px-2';
 const button='screening-button disabled:opacity-40';
@@ -59,6 +61,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(initialSettings?.hours))),[error,setError]=useState('');
   const [savingAutomatic, setSavingAutomatic] = useState(false);
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
+  const [metricTimes,setMetricTimes]=useState<Record<string,AdditionMetricTime>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
   const retry=c?.observationBasis==='retry-origin-v2';
@@ -69,13 +72,22 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
+  const applyConditionTime=(condition:EntryMarketCondition)=>withMetricSnapshotTime(condition,metricTimes[condition.id]);
+  const applyExpressionTimes=(expression:EntryMarketExpression):EntryMarketExpression=>'condition' in expression
+    ? {condition:applyConditionTime(expression.condition)}
+    : {...expression,children:expression.children.map(applyExpressionTimes)};
+  const applyTimes=(config:NonNullable<typeof c>):NonNullable<typeof c>=>({
+    ...config,required:config.required.map(applyConditionTime),
+    ...(config.admission?{admission:{...config.admission,algorithms:config.admission.algorithms.map(applyConditionTime)}}:{}),
+    sellRules:config.sellRules.map(rule=>({...rule,expression:applyExpressionTimes(rule.expression)})),
+  });
   const createOptionalStagesCopy=()=>guardAction(()=>{
     if (!active || !c || signalAnchored) return;
     const {frozenVersions:_old,...base}=active;
     const config={
-      ...c,
+      ...applyTimes(c),
       additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,
-      hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):c.hardVetoes,
+      hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id],definitions):c.hardVetoes,
     };
     const copy={...structuredClone(base),id:id(),label:active.label+(steps?' · 信号时点副本':' · 三步可选副本'),preEntryThreeStage:signalAnchoredPreEntryThreeStage(config,c.admission?[]:[defaultAdmission()])};
     setPlans([copy]);setActiveId(copy.id);setVetoDrafts({});setHardDrafts({});
@@ -88,7 +100,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const createFiveMinuteStallCopy=()=>guardAction(()=>{
     if(!active||!c?.stallTurn)return;
     const {frozenVersions:_old,...base}=active,previous=c.stallTurn;
-    const next:QualityGroup={...structuredClone(base),id:id(),label:active.label+' · 5分钟转弱副本',preEntryThreeStage:{...structuredClone(c),additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):structuredClone(c.additionVetoes),hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):structuredClone(c.hardVetoes),stallTurn:{...defaultEntryStallTurn5m(),risePct:previous.risePct,maxProgressPct:previous.maxProgressPct,pullback:structuredClone(previous.pullback)}}};
+    const next:QualityGroup={...structuredClone(base),id:id(),label:active.label+' · 5分钟转弱副本',preEntryThreeStage:{...structuredClone(applyTimes(c)),additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):structuredClone(c.additionVetoes),hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id],definitions):structuredClone(c.hardVetoes),stallTurn:{...defaultEntryStallTurn5m(),risePct:previous.risePct,maxProgressPct:previous.maxProgressPct,pullback:structuredClone(previous.pullback)}}};
     const config=next.preEntryThreeStage!,rule=config.stallTurn!;
     config.additionVetoes=[...config.additionVetoes.filter(v=>v.kind!=='stall-turn'&&v.kind!=='pullback-new-high'),{kind:'stall-turn',enabled:true,historyHours:rule.historyHours,riseMinutes:rule.riseMinutes,risePct:rule.risePct,stallMinutes:rule.stallMinutes,maxProgressPct:rule.maxProgressPct,turnMinutes:rule.turnMinutes},...(rule.pullback?.enabled?[{kind:'pullback-new-high' as const,enabled:true,historyHours:rule.historyHours,pct:rule.pullback.pct}]:[])];
     delete config.stallTurn;
@@ -97,7 +109,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const createEventAdmissionCopy=(guardEnabled=true,extra?:EntryMarketCondition)=>guardAction(()=>{
     if(!active||!c)return;
     const {frozenVersions:_old,...base}=active;
-    const config={...c,additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id]):c.hardVetoes};
+    const config={...applyTimes(c),additionVetoes:vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes,hardVetoes:hardDrafts[active.id]?parseHoldingVetoDraft(hardDrafts[active.id],definitions):c.hardVetoes};
     const next=retryPreEntryThreeStage(config,[defaultAdmission(),...(extra?[extra]:[])]);
     next.admission={...next.admission!,guardEnabled};
     const copy={...structuredClone(base),id:id(),label:active.label+' · 事件准入副本',preEntryThreeStage:next};
@@ -108,7 +120,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
     if(!plans.length)throw Error('请先新增三阶方案');
     const next=plans.map(p=>{
       const current=p.preEntryThreeStage!;
-      const config={...current,additionVetoes:vetoDrafts[p.id]?parseAdditionVetoDraft(vetoDrafts[p.id]):current.additionVetoes,hardVetoes:hardDrafts[p.id]?parseHoldingVetoDraft(hardDrafts[p.id]):current.hardVetoes};
+      const config={...applyTimes(current),additionVetoes:vetoDrafts[p.id]?parseAdditionVetoDraft(vetoDrafts[p.id]):current.additionVetoes,hardVetoes:hardDrafts[p.id]?parseHoldingVetoDraft(hardDrafts[p.id],definitions):current.hardVetoes};
       if(!p.label.trim())throw Error('请填写方案名称');
       validatePreEntryThreeStage(config);return {...p,preEntryThreeStage:config};
     });
@@ -121,9 +133,19 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
     }
     monitor.configure(next,Number(hours));done();if(start)void monitor.restart(Number(hours));
   });
+  const conditionTime = (condition:EntryMarketCondition, prefix:string) =>
+    <FishMetricTimeFields label={prefix.trim()} className="col-span-full basis-full"
+      metric={condition.metric} snapshot={condition.snapshot} time={metricTimes[condition.id] ?? additionMetricTime(condition.snapshot)}
+      onChange={time=>setMetricTimes(previous=>({...previous,[condition.id]:time}))}/>;
+  const changeIndicator = (condition:EntryMarketCondition, choice:string) => {
+    const next=makeQualityBuyFilter(choice,condition.direction.startsWith('<')?'<':'>',
+      Number.isFinite(condition.threshold)?condition.threshold:0,condition.enabled,definitions);
+    setMetricTimes(previous=>({...previous,[condition.id]:{}}));
+    return {...condition,label:next.label,metric:next.metric,snapshot:next.snapshot};
+  };
   const conditionEditor=(condition:EntryMarketCondition,put:(c:EntryMarketCondition)=>void,remove:()=>void,prefix:string)=><div className="screening-condition-row">
     <input type="checkbox" aria-label={prefix+'启用'} checked={condition.enabled} onChange={e=>put({...condition,enabled:e.target.checked})}/>
-    <select className={field+' max-w-full flex-1'} aria-label={prefix+'指标'} value={qualityFilterChoiceKey({...condition,direction:'>'})} onChange={e=>put({...entryCondition({...makeQualityBuyFilter(e.target.value,'>',condition.threshold,condition.enabled,definitions),id:condition.id},condition.timing),direction:condition.direction})}>
+    <select className={field+' max-w-full flex-1'} aria-label={prefix+'指标'} value={qualityFilterChoiceKey(condition)} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
       {!choices.some(choice=>choice.key===qualityFilterChoiceKey({...condition,direction:'>'}))&&<option hidden disabled value={qualityFilterChoiceKey({...condition,direction:'>'})}>{condition.label}（保存的公式）</option>}
       {choices.map(choice=><option key={choice.key} value={choice.key}>{choice.group} · {choice.label}</option>)}
     </select>
@@ -131,16 +153,18 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
     <input className={field+' w-20'} aria-label={prefix+'门槛'} type="number" step="any" value={Number.isFinite(condition.threshold)?condition.threshold:''} onChange={e=>put({...condition,threshold:e.target.value.trim()?Number(e.target.value):NaN})}/>
     <select className={field} aria-label={prefix+'时点'} value={condition.timing} onChange={e=>put({...condition,timing:e.target.value as EntryMarketCondition['timing']})}><option value="intrabar">逐分钟复原</option><option value="closed">只读已收盘原周期</option></select>
     <button type="button" className={button} aria-label={prefix+'删除'} onClick={remove}>删除</button>
+    {conditionTime(condition,prefix)}
   </div>;
   const eventConditionEditor=(condition:EntryMarketCondition,put:(c:EntryMarketCondition)=>void,prefix:string)=>{
     const choice=qualityFilterChoiceKey({...condition,direction:'>'});
     return <div className="screening-event-fields min-w-0">
-      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>指标</span><select className={field+' w-full text-foreground'} aria-label={prefix+'指标'} value={choice} onChange={e=>put({...entryCondition({...makeQualityBuyFilter(e.target.value,'>',condition.threshold,condition.enabled,definitions),id:condition.id},condition.timing),direction:condition.direction})}>
+      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>指标</span><select className={field+' w-full text-foreground'} aria-label={prefix+'指标'} value={choice} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
         {!choices.some(item=>item.key===choice)&&<option hidden disabled value={choice}>{condition.label}（保存的公式）</option>}{choices.map(item=><option key={item.key} value={item.key}>{item.group} · {item.label}</option>)}
       </select></label>
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>方向</span><select className={field+' w-full text-foreground'} aria-label={prefix+'方向'} value={condition.direction} onChange={e=>put({...condition,direction:e.target.value as EntryMarketCondition['direction']})}>{['>','>=','<','<='].map(v=><option key={v}>{v}</option>)}</select></label>
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>门槛</span><input className={field+' w-full text-foreground'} aria-label={prefix+'门槛'} type="number" step="any" value={Number.isFinite(condition.threshold)?condition.threshold:''} onChange={e=>put({...condition,threshold:e.target.value.trim()?Number(e.target.value):NaN})}/></label>
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>确认时点</span><select className={field+' w-full text-foreground'} aria-label={prefix+'时点'} value={condition.timing} onChange={e=>put({...condition,timing:e.target.value as EntryMarketCondition['timing']})}><option value="intrabar">逐分钟复原</option><option value="closed">只读已收盘原周期</option></select></label>
+      {conditionTime(condition,prefix)}
     </div>;
   };
   const expressionEditor=(expression:EntryMarketExpression,put:(e:EntryMarketExpression)=>void,prefix:string,depth=0):React.ReactNode=>{

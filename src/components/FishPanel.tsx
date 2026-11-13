@@ -14,7 +14,7 @@ import type { FishReconstructionState } from '@/hooks/useFishReconstruction';
 import {FishAlgorithmCard,FishCheck,RECORDED_RANGES,type FishCard} from './FishAlgorithmCard';
 import {getUserId,getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
-import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
+import {type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
 import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards,fishCombinationKey as combinationKey,readFishCombination as readCombination} from '@/lib/fish/cards';
 import { FISH_MAX_ALGORITHMS, formatTurnoverWan } from '@/lib/fish/shared';
@@ -41,7 +41,7 @@ import { FishHitRateTest } from '@/components/FishHitRateTest';
 import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
 import { DEFAULT_FISH_HIT_RATE_WINDOW, validateFishHitRateWindow, type FishHitRateOptions } from '@/lib/fish/hitRate';
 import { readSavedFishHitRateSettings, type FishHitRateSettings } from '@/lib/fish/hitRateSettings';
-import { buildFishScanSettings } from '@/lib/fish/scanPlan';
+import { buildFishScanSettings, compileFishPreference } from '@/lib/fish/scanPlan';
 import { FishWickDetails } from '@/components/FishWickDetails';
 import { FishWickSettings } from '@/components/FishWickSettings';
 import { FishCaptureOpenSettings } from '@/components/FishCaptureSettings';
@@ -181,14 +181,14 @@ export function FishPanel(p: FishPanelProps) {
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const [autoSuggesting,setAutoSuggesting]=useState(false);
   const {exchanges,includeDuplicates,includeUsStocks=false}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=savingParameters||p.progress?.status==='running'||suggesting||!!p.reconstruction?.running;
-  const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:[]});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
+  const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishPreference(def,pref);return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const multiple=useMemo(()=>{
     const plans=[];let error='';
     const cards=[{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards];
-    for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
+    for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishPreference(d,c.pref);if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
     return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
   },[selected,firstEnabled,pref,extraCards,defs,compiled]);
-  const pool=useMemo(()=>[{featureId:selected,pref},...extraCards].flatMap(c=>{try{const d=defs.find(d=>d.id===c.featureId);if(!d)return [];const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});return plan.unavailable?[]:[plan];}catch{return [];}}),[selected,pref,extraCards,defs]);
+  const pool=useMemo(()=>[{featureId:selected,pref},...extraCards].flatMap(c=>{try{const d=defs.find(d=>d.id===c.featureId);if(!d)return [];const plan=compileFishPreference(d,c.pref);return plan.unavailable?[]:[plan];}catch{return [];}}),[selected,pref,extraCards,defs]);
   const selectionKeys=multiple.plans.map(fishSelectionKey),selectionSignature=JSON.stringify(selectionKeys);
   const [staleRound,setStaleRound]=useState(false);
   // 只有用户自己改了勾选 / 合并方式 / 阈值才重新合并本轮结果；刚出现一轮（扫完或刷新后恢复）时不动它——
@@ -211,7 +211,7 @@ export function FishPanel(p: FishPanelProps) {
   const parameterDraft=():FishAccountSettings=>({version:1,cards:[{id:'first',featureId:selected,enabled:firstEnabled,pref:{...pref,lastSuggestion:undefined}},...extraCards.map(c=>({...c,pref:{...c.pref,lastSuggestion:undefined}}))],combination,lookbackHours:lookbackDraft?draftHours():lookback.hours,lookbackFollowsInterval:!lookbackDraft&&lookback.followsInterval,downwardWick:readLegacyFishDownwardWick(owner),selection:p.selection,...(p.auto?{auto:fishAutoAccountSchedule({mode:p.auto.mode,hours:p.auto.hours}, savedAccountSettings?.auto)}:{})});
   const saveParameters=async()=>{setSavingParameters(true);setError('');try{if(multiple.error)throw new Error(multiple.error);if(!p.selection.exchanges.length)throw new Error('请至少选择一家交易所');await saveAccountSettings(parameterDraft());toast.success('捕捞参数已保存到账号');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setSavingParameters(false);}};
 
-  const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
+  const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishPreference(def,pref,pref.threshold.trim()?Number(pref.threshold):0);}catch{return null;}},[def,pref]);
   const library=p.librarySignals??[],suggestionKey=suggestionCompiled?fishSuggestionKey(suggestionCompiled,library):'';
   useEffect(()=>{const cached=readFishSuggestion(suggestionKey);setSuggestion(previous=>previous?.key===suggestionKey?previous:cached?{...cached,cacheHit:true}:previous?.featureId===def?.id?previous:def?latestFishSuggestion(def.id):null);},[suggestionKey,def?.id,owner]);
   const plan=compiled.plan??suggestionCompiled;
@@ -224,7 +224,7 @@ export function FishPanel(p: FishPanelProps) {
   /** 这次打开算出但没进缓存的结果（有临时失败时不缓存），也照样显示。 */
   const memResults=useRef(new Map<string,FishSuggestion>());
   const extraSuggest=useMemo(()=>extraCards.map(c=>{
-    try{const d=defs.find(d=>d.id===c.featureId);if(!d||!c.enabled)return null;const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:0,constraints:[]});if(plan.unavailable)return null;const key=fishSuggestionKey(plan,library);return {id:c.id,plan,key,cached:readFishSuggestion(key)??memResults.current.get(key)??null,queued:!RECORDED_RANGES[c.featureId]&&!autoTried.current.has(key)};}catch{return null;}
+    try{const d=defs.find(d=>d.id===c.featureId);if(!d||!c.enabled)return null;const plan=compileFishPreference(d,c.pref,0);if(plan.unavailable)return null;const key=fishSuggestionKey(plan,library);return {id:c.id,plan,key,cached:readFishSuggestion(key)??memResults.current.get(key)??null,queued:!RECORDED_RANGES[c.featureId]&&!autoTried.current.has(key)};}catch{return null;}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }),[extraCards,defs,library,suggestionVersion]);
   const calculateSuggestion=async(mode:'auto'|'manual'='manual',target:{id:string;plan:FishProgram}|null=null)=>{

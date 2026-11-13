@@ -1,13 +1,29 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQualitySellPlansEditor } from '../FishQualitySellPlansEditor';
-import { enableQualityComparison, ensureQualitySellCombo } from '@/lib/fish/qualityComparison';
+import { enableQualityComparison, ensureQualitySellCombo, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { newQualityStudy, type QualityGroup } from '@/lib/fish/quality';
 import { makeQualitySellPlan, replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { buildFusionTemplatePlan } from '@/lib/fish/qualityBuiltinTemplates';
 import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 afterEach(() => { cleanup(); localStorage.clear(); });
+it('keeps the selected period for both sell stages after account definition sync',()=>{
+ const before=initial().find(plan=>plan.combo)!;
+ const save=vi.fn();
+ const view=render(<FishQualitySellPlansEditor plans={[before]} ready onSave={save}/>);
+ fireEvent.change(screen.getByLabelText('卖出算法 1 K 线周期'),{target:{value:'15m'}});
+ fireEvent.change(screen.getByLabelText('卖出算法 1 后段 K 线周期'),{target:{value:'30m'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+ const [plan]:QualityGroup[]=save.mock.calls[0][0];
+ const synced=syncQualitySellDefinitions({...newQualityStudy(),sellPlans:[plan]},BUILTIN_FEATURES).sellPlans![0];
+ expect(synced.snapshot).toEqual(plan.snapshot);
+ expect(synced.combo!.after.snapshot).toEqual(plan.combo!.after.snapshot);
+ view.unmount();
+ render(<FishQualitySellPlansEditor plans={[synced]} ready onSave={save}/>);
+ expect(screen.getByLabelText('卖出算法 1 K 线周期')).toHaveValue('15m');
+ expect(screen.getByLabelText('卖出算法 1 后段 K 线周期')).toHaveValue('30m');
+});
 it('preserves a newly synchronized plan when an older open form saves its own edits',()=>{
  const original=initial()[0],remote={...structuredClone(original),id:'remote-attack',label:'另一设备的进攻型'},save=vi.fn();
  const view=render(<FishQualitySellPlansEditor plans={[original]} ready onSave={save}/>);

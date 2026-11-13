@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCampaignPricePathTask } from '@/hooks/useCampaignPricePaths';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
+import { sortCampaignRows } from '@/lib/campaignListSort';
 import { buildInstantCampaignData, freezeInstantCampaign, instantCampaignInput } from '../instantCampaign';
 import { qualityCampaignSheets } from '../qualityCampaignExport';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
@@ -60,6 +61,13 @@ it('builds one frozen 5× simulated trade from the two saved times, prices and C
   expect(legacy.campaign).toMatchObject({ initial_main_size_usdt: 500, initial_leverage: 5, final_realized_pnl: 50,
     comparison: { holdingMetrics: { returnPct: 50 }, instant: { marginUsdt: 100 } } });
   expect(legacy.tradeRecords[0].quantity).toBe(5);
+  const legacyCard={...buildCampaignCardData(legacy),arithmeticExpectancy:null,geometricExpectancy:null};
+  expect(legacyCard.profitCaptureRatio).toBeNull();
+  for (const direction of ['asc','desc'] as const) {
+    expect(sortCampaignRows([legacyCard], [{mode:'captureRate',direction}])).toEqual([legacyCard]);
+    const priced=Array.from({length:8},(_,i)=>({...legacyCard,profitCaptureRatio:i*100}));
+    expect(sortCampaignRows([legacyCard,...priced],[{mode:'captureRate',direction},{mode:'time',direction:'desc'}]).at(-1)).toBe(legacyCard);
+  }
   expect(qualityCampaignSheets(legacy.campaign)[0].rows).toContainEqual(['保证金 USDT', 100, '']);
 
   const current = await freezeInstantCampaign({ ...input, sell: { ...alert, closePrice: 90 } }, load, signal);

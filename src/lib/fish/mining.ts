@@ -18,7 +18,7 @@ import { queueSimStatePush } from '@/lib/simStateSync';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { FISH_DEFAULT_RULES } from './defaultRules';
 import { fishCatchKey } from './records';
-import { MINING_CONFIGURED_ROUND_KEY, MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, normalizeMiningState, newMiningState, nextMiningAnchor, type FishMiningRule, type FishMiningState } from './miningState';
+import { MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, normalizeMiningState, newMiningState, nextMiningAnchor, type FishMiningRule, type FishMiningState } from './miningState';
 export * from './miningState';
 
 export const miningKey = (logicalKey = MINING_LOGICAL_KEY) => `${getUserPrefix()}${logicalKey}`;
@@ -26,11 +26,11 @@ const leaseKey = () => `${getUserPrefix()}${MINING_LEASE_LOGICAL_KEY}`;
 export const currentDefaultRules = (): FishMiningRule[] => FISH_DEFAULT_RULES.map(r => ({ ...r }));
 
 export function readMiningState({ userId = getUserId(), persistPresetUpgrade = true } = {}): FishMiningState {
-  for (const logicalKey of [MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]) {
+  for (const logicalKey of [MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]) {
     try {
       const raw = JSON.parse(readPersistedStateRaw(getUserPrefix(userId) + logicalKey) ?? 'null');
       const state = normalizeMiningState(raw);
-      if (!state || (logicalKey !== MINING_LOGICAL_KEY && !state.round) || (logicalKey === MINING_CONFIGURED_ROUND_KEY && !state.scan)) continue;
+      if (!state || (logicalKey !== MINING_LOGICAL_KEY && !state.round) || ([MINING_TIMED_ROUND_KEY,MINING_CONFIGURED_ROUND_KEY].includes(logicalKey) && !state.scan)) continue;
       // Persist and sync the one-time replacement; otherwise old saved configuration errors return on refresh.
       if (persistPresetUpgrade && raw.presetRevision !== state.presetRevision) saveMiningState(state);
       return state;
@@ -40,7 +40,8 @@ export function readMiningState({ userId = getUserId(), persistPresetUpgrade = t
 }
 export function saveMiningState(state: FishMiningState, now = Date.now()): void {
   const value = { ...state, savedAt: now };
-  const logicalKey = state.scan && state.round ? MINING_CONFIGURED_ROUND_KEY : state.endMs!=null&&state.round ? MINING_RANGE_LOGICAL_KEY : state.round ? MINING_ROUND_LOGICAL_KEY : MINING_LOGICAL_KEY;
+  const logicalKey = state.scan && state.round ? (state.rules.some(r=>Object.keys(r.time??{}).length) || readPersistedStateRaw(miningKey(MINING_TIMED_ROUND_KEY))!=null ? MINING_TIMED_ROUND_KEY : MINING_CONFIGURED_ROUND_KEY)
+    : state.endMs!=null&&state.round ? MINING_RANGE_LOGICAL_KEY : state.round ? MINING_ROUND_LOGICAL_KEY : MINING_LOGICAL_KEY;
   try { writePersistedStateRaw(miningKey(logicalKey), JSON.stringify(value)); } catch { /* 本机写不进时云端那份仍会更新 */ }
   try { const uid = getUserId(); if (uid) queueSimStatePush(uid, logicalKey, value); } catch { /* 同步失败只是换设备时接不上，本机照常 */ }
 }
@@ -70,7 +71,7 @@ export function miningDueAnchor(s: FishMiningState, now: number): number | null 
 }
 /** 冻结的规则拼成捕捞卡（旧规则默认启用，方向为 >）。 */
 export function miningCards(rules: readonly FishMiningRule[]): FishCard[] {
-  return rules.map(r => ({ id: r.id, featureId: r.featureId, enabled: r.enabled !== false, pref: { statistic: r.statistic, direction: r.direction ?? '>', threshold: r.threshold, constraints: [] } }));
+  return rules.map(r => ({ id: r.id, featureId: r.featureId, enabled: r.enabled !== false, pref: { statistic: r.statistic, direction: r.direction ?? '>', threshold: r.threshold, constraints: [], ...(r.time?{time:r.time}:{}) } }));
 }
 /**
  * 一档扫完：去掉挖过的信号，其余作为鱼舱记录（不是新鱼、不发邮件），标上锚点；游标前进一档。

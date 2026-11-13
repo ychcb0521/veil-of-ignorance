@@ -491,10 +491,11 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       tieBreak: (a, b) => importanceDesc(a, b) || pnlDesc(a, b) || alphaAsc(a, b),
       day: operationDay,
     },
-    captureRate: metric(
-      row => row.profitCaptureRatio,
-      (a, b, direction) => comparePnl(a.campaign, b.campaign, direction) || importanceTimeAlpha(a, b),
-    ),
+    captureRate: {
+      ...metric(row => row.profitCaptureRatio,
+        (a, b, direction) => comparePnl(a.campaign, b.campaign, direction) || importanceTimeAlpha(a, b)),
+      include: row => row.campaign.comparison?.section === 'instant' || finite(row.profitCaptureRatio),
+    },
     expectedDrawdownPct: {
       include: row => Number.isFinite(row.initialExpectedMaxDrawdownPct) && row.initialExpectedMaxDrawdownPct > 0,
       missing: row => !(Number.isFinite(row.initialExpectedMaxDrawdownPct) && row.initialExpectedMaxDrawdownPct > 0),
@@ -916,7 +917,11 @@ export function sortCampaignRows<T extends CampaignSortRow>(rows: readonly T[], 
     ? binnedCompare(firstKey, binning, first.direction)
     : primaryKey.compare;
   return included.sort((a, b) => {
-    // 第一级：原来的比较（缺值已被过滤；操作时间缺值按原口径记 0）；分档时先比档
+    // 即时交易的旧记录可能没有初始风险，分档排序时也留在有读数的记录之后。
+    if (first.mode === 'captureRate' && binning) {
+      const aMissing = firstKey.missing(a), bMissing = firstKey.missing(b);
+      if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    }
     const primary = primaryCompare(a, b, first.direction);
     if (primary) return primary;
     for (const { key, direction } of thenKeys) {
@@ -1037,6 +1042,7 @@ export function describeSortLevelEffects<T extends CampaignSortRow>(
  */
 export type SortGroupKey =
   | { kind: 'quartile'; quartile: SortQuartile; lower: number | null }
+  | { kind: 'missing' }
   | { kind: 'value'; value: number }
   | { kind: 'day'; day: string | null }
   | { kind: 'all' };
@@ -1104,8 +1110,10 @@ function groupSortedRows<T extends CampaignSortRow>(
       const value = read(row);
       return quartileOf(value == null ? Number.NaN : sortBinValue(binning.mode, value), binning.thresholds);
     };
-    groupOf = row => `q${quartile(row)}`;
+    const missingPayoff = (row:T) => first.mode === 'captureRate' && firstKey.missing(row);
+    groupOf = row => missingPayoff(row) ? 'missing' : `q${quartile(row)}`;
     keyOf = row => {
+      if (missingPayoff(row)) return { kind:'missing' };
       const q = quartile(row);
       return { kind: 'quartile', quartile: q, lower: q === 1 ? null : binning.thresholds[q - 2] };
     };

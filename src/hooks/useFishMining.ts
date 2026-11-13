@@ -21,7 +21,7 @@ import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
 import { buildConfiguredMiningScan, continuousMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
 type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'> & { settings?: FishMiningSettings };
@@ -152,7 +152,7 @@ export function useFishMining(o: {
     const run = () => { void tickRef.current(); };
     const timer = setInterval(run, TICK_MS);
     const onStorage = (event: StorageEvent) => {
-      if ([MINING_ROUND_LOGICAL_KEY,MINING_RANGE_LOGICAL_KEY,MINING_CONFIGURED_ROUND_KEY].some(key=>event.key===miningKey(key)) && readMiningState().round?.id !== stateRef.current.round?.id) run();
+      if ([MINING_ROUND_LOGICAL_KEY,MINING_RANGE_LOGICAL_KEY,MINING_CONFIGURED_ROUND_KEY,MINING_TIMED_ROUND_KEY].some(key=>event.key===miningKey(key)) && readMiningState().round?.id !== stateRef.current.round?.id) run();
     };
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
@@ -187,7 +187,7 @@ export function useFishMining(o: {
     const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
     const configured = settings && continuousMiningSettings(settings);
     cancelScan();
-    if (previous.enabled && (!previous.round || (configured && !previous.scan))) saveMiningState({ ...previous, enabled: false });
+    if (previous.enabled && (!previous.round || (configured && (!previous.scan || configured.rules.some(rule=>Object.keys(rule.time??{}).length))))) saveMiningState({ ...previous, enabled: false });
     if (configured) saveMiningSettings(configured);
     setState({
       ...newMiningState(), enabled: true, startMs, ...(endMs!=null?{endMs}:{}), cursorMs: startMs, target,

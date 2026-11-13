@@ -78,6 +78,7 @@ it.each(['mirror-then-stop','same-minute-stop','gap-below-stop'] as const)('sett
   const {readScreenedPositionExit}=await import('../screenedPriceExit');
   const {buildInstantCampaignData,freezeInstantCampaign}=await import('../instantCampaign');
   const {computeCampaignRealizedPnl}=await import('@/lib/campaignRealizedPnl');
+  const {buildCampaignCardData}=await import('@/lib/campaignListCache');
   const task={id:'fish-instant-risk',source,after:T,observeAfter:T};
   const first=await readScreenedPositionExit(task,T+M,snapshot,load,signal);
   if(scenario==='same-minute-stop'){
@@ -92,11 +93,15 @@ it.each(['mirror-then-stop','same-minute-stop','gap-below-stop'] as const)('sett
   expect(result.trigger).toMatchObject({at:T+M,closePrice:exit,mirror:{price:102,fraction:.715},evidence:{reason:'static-stop'}});
   const frozen=await freezeInstantCampaign({id:task.id,recordId:'risk',source,buyAt:T,sell:result.trigger!,detectors:[]},load,signal);
   expect(frozen.staticDrawdown).toBeCloseTo(100-exit);
-  const {campaign,legs,tradeRecords}=buildInstantCampaignData('fixture',frozen);
+  const data=buildInstantCampaignData('fixture',frozen);
+  const {campaign,legs,tradeRecords}=data;
   expect(tradeRecords).toHaveLength(2);
   expect(tradeRecords[0].quantity).toBeCloseTo(1.43);
   expect(tradeRecords[1].quantity).toBeCloseTo(.57);
   const pnl=1.43*2+.57*(exit-100);
   expect(campaign.final_realized_pnl).toBeCloseTo(pnl);
   expect(computeCampaignRealizedPnl(campaign,legs,tradeRecords,{}).total).toBeCloseTo(pnl);
+  const card=buildCampaignCardData(data);
+  expect(card.initialExpectedMaxLoss).toBe(10);
+  expect(card.profitCaptureRatio).toBeCloseTo(pnl/10*100);
 });

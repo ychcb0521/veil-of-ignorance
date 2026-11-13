@@ -68,6 +68,7 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
     if (!builtin) return plan;
     const def = definitions.find(d => d.id === builtin.id) ?? builtin, key = definitionKey({ ...executableThresholdDef(def, plan.combo.after.metric), interval: '5m' });
     const after = plan.combo.after;
+    if (hasAdditionMetricTime(after.snapshot)) return plan;
     if (after.snapshot.definitionKey === key && after.snapshot.interval === '5m') return plan;
     changed = true;
     return { ...plan, combo: { ...plan.combo, after: { ...after, snapshot: { ...after.snapshot, definitionKey: key, interval: '5m', scale: 1, statistic: after.metric, H: undefined, featureName: def.name, featureShort: def.short } } } };
@@ -77,6 +78,7 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
     if (isLegacyQualityPlan(plan) || plan.router) return plan;
     // 回撤否决改为止损价成交（2026-10-26）：同步时给方案打上新版本，旧试验已在调用方先归档
     if (plan.vetoFill !== 'stop') { changed = true; plan = { ...plan, vetoFill: 'stop' as const }; }
+    if (hasAdditionMetricTime(plan.snapshot)) return plan;
     const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.snapshot.featureId);
     if (!builtin) return plan;
     // Same fallback as charts: a hidden built-in still has its built-in definition.

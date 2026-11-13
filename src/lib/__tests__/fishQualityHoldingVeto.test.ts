@@ -1,7 +1,7 @@
 import { expect,it } from 'vitest';
 import { definitionKey, STATE_DEF } from '@/lib/deepDig/features';
 import { evaluateQualitySample, qualityResultKey, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
-import { makeQualityHoldingVeto, makeQualityBuyFilter, qualityFilterChoices } from '@/lib/fish/qualityFilters';
+import { makeQualityHoldingVeto, makeQualityBuyFilter, parseHoldingVetoDraft, qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { advanceQualityHolding, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
 import { qualitySellKey } from '@/lib/fish/qualityCampaignArchive';
 import { buildQualityCampaignData } from '@/lib/fish/qualityCampaigns';
@@ -14,6 +14,21 @@ const group=():QualityGroup=>({id:'g',label:'主规则',metric:'raw',execution:'
 const bar=(t:number,open=100,high=open,low=open,close=open):ResearchBar=>({openTime:t,open,high,low,close,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50});
 const loader=(f:(t:number)=>ResearchBar):FishReconstructionLoader=>async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>p.step===M?f(a+i*M):bar(a+i*p.step));
 const run=(g:QualityGroup,l:FishReconstructionLoader,now=T+8*M,prior?:Awaited<ReturnType<typeof evaluateQualitySample>>)=>evaluateQualitySample(sample,g,0,now,l,signal(),prior);
+it('reconstructs the selected veto period from minute candles instead of using the default 5m',async()=>{
+ const metric={...def,formula:'raw = O'};
+ const boundary=T+15*M;
+ const path=loader(t=>t>=T+5*M?bar(t,90):bar(t));
+ const veto=(interval:'5m'|'15m')=>parseHoldingVetoDraft([
+   {choice:'custom:raw',direction:'<',threshold:'95',enabled:true,time:{interval}},
+ ],[metric]);
+ const base={...group(),rule:undefined,vetoFill:'stop' as const};
+ const [fast,slow]=await Promise.all([
+   run({...base,holdingVetoes:veto('5m')},path,boundary+3*M),
+   run({...base,holdingVetoes:veto('15m')},path,boundary+3*M),
+ ]);
+ expect(fast).toMatchObject({status:'closed',endTime:T+6*M});
+ expect(slow).toMatchObject({status:'closed',endTime:boundary+M});
+});
 it('lets any veto sell independently when no ordinary sell threshold is configured',async()=>{
  const base={...group(),rule:undefined,vetoFill:'stop' as const};
  const staticVeto=makeQualityHoldingVeto('static-drawdown','>=',5),dynamicVeto=makeQualityHoldingVeto('dynamic-drawdown','>=',30);

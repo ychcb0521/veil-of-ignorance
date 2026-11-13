@@ -407,6 +407,7 @@ export interface TradeCampaign {
       mirrorTakeProfit?: import('@/lib/fish/qualityMirror').QualityMirrorTakeProfit;
       mirrorFill?: import('@/lib/fish/qualityMirror').QualityMirrorFill;
       marginUsdt: number;
+      initialStaticStopPct?: number;
       drawdown: number | null;
       staticDrawdown: number | null;
     };

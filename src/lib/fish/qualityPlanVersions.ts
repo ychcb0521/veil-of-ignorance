@@ -1,4 +1,5 @@
-import { ADDITION_INDICATOR_TIME_VERSION, hasAdditionMetricTime } from './qualityAdditionMetric';
+import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
+import { expressionConditions } from './preEntryThreeStage';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
@@ -81,6 +82,27 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (plan.preEntryConditions) out.push({ key: 'pre-entry-conditions', part: '动态筛选', name: '入选条件与三组否决', version: preEntryConditionsVersion(plan), summary: '同一分钟入选条件全部满足且无否决；从筛选起点累计观察，不模拟持仓，旧轮次不升级。' });
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
   const s = plan.snapshot;
+  const screening = plan.preEntryThreeStage;
+  const metricSnapshots = [
+    s, plan.combo?.after.snapshot, ...(plan.buyFilters??[]).map(rule=>rule.snapshot),
+    ...(plan.holdingVetoes??[]).map(rule=>rule.snapshot),
+    ...(plan.vetoStages??[]).flatMap(stage=>stage.conditions.map(rule=>rule.snapshot)),
+    ...(plan.sellStages??[]).map(stage=>stage.snapshot),
+    ...[plan.addition,...(plan.addition?.rounds??[]),...(plan.addition?.alternativeRounds??[])].flatMap(round=>round ? [
+      ...qualityAdditionConditions(round),...qualityAdditionPrerequisites(round),...(round.indicatorIncrease?.metrics??[]),
+    ].map(rule=>rule.snapshot) : []),
+    ...(screening?.required??[]).map(rule=>rule.snapshot), ...(screening?.admission?.algorithms??[]).map(rule=>rule.snapshot),
+    ...(screening?.sellRules??[]).flatMap(rule=>expressionConditions(rule.expression).map(condition=>condition.snapshot)),
+    ...(screening?.hardVetoes??[]).map(rule=>rule.snapshot),
+  ].filter((snapshot):snapshot is FishSnapshot=>!!snapshot);
+  const periodSnapshots = metricSnapshots.filter(hasMetricPeriodOverride);
+  if (periodSnapshots.length) add('indicator-period','指标周期','逐条冻结 K 线周期',
+    join([INDICATOR_PERIOD_VERSION,...new Set(periodSnapshots.map(formulaFingerprint))]),
+    '按每条指标保存的周期读数或逐分钟复原，时间参数随公式快照冻结。');
+  const formulaTimes = metricSnapshots.filter(hasMetricFormulaTimeOverride);
+  if (formulaTimes.length) add('indicator-formula-time','指标时间参数','逐条冻结计算窗口与公式参数',
+    join([INDICATOR_FORMULA_TIME_VERSION,...new Set(formulaTimes.map(formulaFingerprint))]),
+    '同一条均值序列可独立设置公式本身的回看或半衰期，以及均值窗口。');
   if(plan.advantage)add('advantage','优势筛选与退出灵敏度','逐次筛选 · 软退出动态确认',QUALITY_ADVANTAGE_VERSION+' · 参数 #'+qualityAdvantageFingerprint(plan),
     `W 同步走弱筛选${plan.advantage.screenWeak?'开':'关'}；首加前确认${plan.advantage.beforeFirst?'开':'关'}，加仓后 A 级确认${plan.advantage.afterAddition?'开':'关'}，${plan.advantage.confirmations} 根已完成 1 分钟；其余单次，原定量/K/硬止损不变；候选未验证收益。`);
   if (plan.rule || plan.combo) add('sell', '卖出算法', `${s.featureShort ?? plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : ''}`.trim(), formulaFingerprint(s),
@@ -90,8 +112,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     add('combo', '组合切换', `涨 ${plan.combo.switchPct}% 后改用 ${a.snapshot.featureShort ?? a.label} ${a.rule.direction} ${a.rule.threshold}`,
       join([...versionTags(qualityComboIdentity(plan)), formulaFingerprint(a.snapshot)]), '持仓最高价首次比买入价高出切换涨幅的那一分钟收盘起，改用后段算法');
   }
-  add('execution', '卖出执行', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : '5 分钟收盘确认', plan.execution === 'intrabar-1m' ? 'intrabar-1m-v1' : 'close-confirm',
-    plan.execution === 'intrabar-1m' ? '用 1 分钟线复原 5 分钟指标，盘中达标即卖' : '只认 5 分钟收盘读数');
+  const closePeriod = hasMetricPeriodOverride(s) ? s.interval : undefined;
+  add('execution', '卖出执行', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : (closePeriod??'5 分钟')+'收盘确认', plan.execution === 'intrabar-1m' ? 'intrabar-1m-v1' : 'close-confirm',
+    plan.execution === 'intrabar-1m' ? (periodSnapshots.length ? '用 1 分钟线复原所选周期指标，盘中达标即卖' : '用 1 分钟线复原 5 分钟指标，盘中达标即卖') : '只认 '+(closePeriod??'5 分钟')+'收盘读数');
   const mirror = [...versionTags(mirrorIdentity(plan.mirrorTakeProfit)), ...versionTags(mirrorExecutionIdentity(plan))];
   if (plan.mirrorTakeProfit?.enabled) add('mirror', '镜像平衡减仓', `涨 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%`, join(mirror), '限价镜像止盈，只卖一次');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);

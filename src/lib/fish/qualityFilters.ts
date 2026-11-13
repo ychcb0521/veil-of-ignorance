@@ -11,6 +11,7 @@ import type { QualityBuyFilter } from './quality';
 import type { QualitySignalMetric } from './qualitySignalReadings';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
 import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, PAYOFF_STOP_LABEL } from './qualityVeto';
+import { additionMetricTime, withAdditionMetricTime, type AdditionMetricTime } from './qualityAdditionMetric';
 export interface QualityFilterChoice { key: string; featureId: string; metric: string; label: string; group: string }
 function build(definitions: readonly DeepDigFeatureDef[], originalPeriod = false) {
   const choices: QualityFilterChoice[] = [], defs = new Map<string,DeepDigFeatureDef>();
@@ -30,6 +31,7 @@ function build(definitions: readonly DeepDigFeatureDef[], originalPeriod = false
   return {choices,defs};
 }
 export const qualityFilterChoices = (definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): QualityFilterChoice[] => build(definitions).choices;
+export const qualityFilterDefinitions = (definitions: readonly DeepDigFeatureDef[], originalPeriod = false) => build(definitions, originalPeriod).defs;
 /** Only these three series can be newly selected; legacy builders above remain complete. */
 export function qualityFilterMenuChoices(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs(), originalPeriod = false): QualityFilterChoice[] {
   const {choices,defs}=build(definitions,originalPeriod);
@@ -77,18 +79,33 @@ export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperato
   validateHoldingVeto(v);return v;
 }
 
-export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;geometricMultiple?:string;boxStop?:BoxStopRule};
+export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;geometricMultiple?:string;boxStop?:BoxStopRule;time?:AdditionMetricTime;saved?:QualityHoldingVeto};
 /** 【用户要求】2026-11-03 每套卖出算法的硬性终止框都默认带一条「盈亏比止盈」（不勾选、预填 5000R），用不用由用户选。 */
 export const PAYOFF_STOP_DEFAULT_R='5000';
 const withPayoffRow=(rows:HoldingVetoDraft[]):HoldingVetoDraft[]=>rows.some(r=>r.choice===PAYOFF_STOP_KIND)?rows:[...rows,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:PAYOFF_STOP_DEFAULT_R,enabled:false}];
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind===BOX_STOP_KIND&&v.boxStop&&isBoxBreak(v.boxStop)?BOX_BREAK_CHOICE:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind===BOX_STOP_KIND&&v.boxStop&&isBoxBreak(v.boxStop)?BOX_BREAK_CHOICE:v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
   [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}]);
 /** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
 export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
-export function parseHoldingVetoDraft(draft:HoldingVetoDraft[]):QualityHoldingVeto[] {
+export function parseHoldingVetoDraft(draft:HoldingVetoDraft[], definitions?:readonly DeepDigFeatureDef[]):QualityHoldingVeto[] {
   const boxes=draft.filter(d=>d.choice===BOX_STOP_KIND||d.choice===BOX_BREAK_CHOICE).map(d=>{validateBoxStop(d.boxStop);if((d.choice===BOX_BREAK_CHOICE)!==isBoxBreak(d.boxStop))throw Error('支撑断裂与触价条件的执行版本不符');return {id:'veto-box-'+shortFishHash(JSON.stringify(boxStopIdentity(d.boxStop))),label:boxStopLabel(d.boxStop),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:0,enabled:d.enabled,boxStop:freezeBoxStop(structuredClone(d.boxStop))};});
   draft=draft.filter(d=>d.choice!==BOX_STOP_KIND&&d.choice!==BOX_BREAK_CHOICE);
   if(draft.some(d=>(d.enabled||d.threshold.trim())&&(!d.threshold.trim()||!Number.isFinite(Number(d.threshold)))))throw new Error('请为启用的否决条件填写有限数字阈值');
   // 没勾选、还是默认 5000R 的那条盈亏比止盈只是预留位，不存进方案（下次打开会自动补上）
-  return [...boxes,...new Map(draft.filter(d=>(d.enabled||d.threshold.trim())&&!(d.choice===PAYOFF_STOP_KIND&&!d.enabled&&d.threshold.trim()===PAYOFF_STOP_DEFAULT_R)).map(d=>{const v=makeQualityHoldingVeto(d.choice,d.direction,Number(d.threshold),d.enabled,undefined,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);return [v.id,v];})).values()];
+  const rules = draft.filter(d => (d.enabled || d.threshold.trim()) && !(d.choice === PAYOFF_STOP_KIND && !d.enabled && d.threshold.trim() === PAYOFF_STOP_DEFAULT_R)).map(d => {
+    const threshold = Number(d.threshold);
+    const saved = d.saved?.snapshot && qualityFilterChoiceKey({ snapshot:d.saved.snapshot, metric:d.saved.metric! }) === d.choice ? d.saved : undefined;
+    const direction: '<' | '>' = d.direction.startsWith('<') ? '<' : '>';
+    const veto = saved ? { ...saved, enabled:d.enabled, direction:d.direction, threshold,
+      snapshot:{ ...saved.snapshot!, direction, threshold } }
+      : makeQualityHoldingVeto(d.choice,d.direction,threshold,d.enabled,definitions,d.geometricMultiple==null?100:d.geometricMultiple.trim()?Number(d.geometricMultiple):NaN);
+    if (veto.kind !== 'indicator') return veto;
+    if (!saved && !Object.keys(d.time ?? {}).length) return veto;
+    if (saved && saved.direction === d.direction && saved.threshold === threshold &&
+        JSON.stringify(d.time ?? {}) === JSON.stringify(additionMetricTime(saved.snapshot!))) return { ...saved, enabled:d.enabled };
+    const timed = withAdditionMetricTime({ ...veto, metric:veto.metric!, snapshot:veto.snapshot!, direction }, d.time);
+    return { ...veto, label:timed.label, snapshot:timed.snapshot,
+      id:'veto-' + shortFishHash(JSON.stringify([d.choice,d.direction,threshold,timed.snapshot.definitionKey,timed.snapshot.interval])) };
+  });
+  return [...boxes, ...new Map(rules.map(v => [v.id, v])).values()];
 }

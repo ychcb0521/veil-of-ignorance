@@ -1,15 +1,15 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
-import {DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
-import { useId, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { additionMetricBaseDefinition, additionMetricTime, additionMetricTimeFields, withAdditionMetricTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
-import { AVG_HOURS_PRESETS, HALF_LIFE_PRESETS, avgHoursOf, halfLifeOf } from '@/lib/deepDig/features';
+import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
+import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { additionMetricTime, withAdditionMetricTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import type { QualityBuyFilter } from '@/lib/fish/quality';
-import { researchChartFormula, researchIndicatorForFeature } from '@/lib/researchIndicators';
+import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { defaultBreakevenFloor, defaultGeometricLock, defaultQualityAddition, defaultSupportReduction, qualityAdditionAtrSettings, qualityAdditionConditions, qualityAdditionPrerequisites, validateQualityAddition, type QualityAdditionRule, type QualityAdditionRoundRule } from '@/lib/fish/qualityAddition';
 import {useSettingsImageCapture} from './SettingsImageExport';
-import { qualityFilterMenuChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
+import { qualityFilterDefinitions, qualityFilterMenuChoices, makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { orderedSellStages, type QualitySellStage } from '@/lib/fish/qualitySellStages';
 import {defaultStructureAddition,guardTrendOnly,type StructureAdditionRule} from '@/lib/fish/qualityAdditionStructure';
@@ -197,7 +197,6 @@ function Part({title,role,info,children,testId}:{title:string;role:string;info:R
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
 export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean}) {
  const imageCapture=useSettingsImageCapture();
- const presetId=useId();
  const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(defs),[defs]);
  const features=[...new Map(choices.map(c=>[c.featureId,c.group])).entries()];
  const [selectedRound,setSelectedRound]=useState(0),count=Math.min(100,Math.max(1,Math.floor(Number(all.maxRounds)||1))),index=imageRound??Math.min(selectedRound,count-1);
@@ -216,6 +215,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   setSelectedRound(next);
   event.currentTarget.parentElement?.querySelectorAll('button')[next]?.focus({preventScroll:true});
  }
+ const metricDefinitions=useMemo(()=>qualityFilterDefinitions(defs),[defs]);
  const current=index?all.otherRounds[index-1]??all:all,d={...all,...current};
  const growth=d.increaseMetrics??[];
  const availableGrowth=choices.filter(choice=>!growth.some(row=>row.choice===choice.key));
@@ -224,38 +224,9 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
  const timeControls = (row: MetricDraft, label: string, disabled: boolean, setTime: (time: AdditionMetricTime) => void,
   snapshot?: QualityBuyFilter['snapshot'], metric?: string) => {
-  const choice = choices.find(c => c.key === row.choice);
-  const selectedMetric = metric ?? choice?.metric;
-  if (!selectedMetric) return null;
-  let definition: DeepDigFeatureDef | undefined;
-  let fields: ReturnType<typeof additionMetricTimeFields>;
-  try {
-   definition = snapshot?.definitionKey ? additionMetricBaseDefinition(snapshot) : defs.find(def => def.id === choice?.featureId);
-   if (!definition) return null;
-   const formula = snapshot ? definition.formula : researchChartFormula(researchIndicatorForFeature(definition),definition.formula);
-   fields = additionMetricTimeFields(formula,selectedMetric);
-  } catch { return null; }
-  if (!fields.length) return null;
-  return <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-   {fields.map(key => {
-    const name = key === 'window' ? '均值窗口' : key === 'avgh' ? '公式回看' : '半衰期';
-    const hours = row.time?.[key] ?? '';
-    const defaultHours = key === 'hl' ? halfLifeOf(definition) : avgHoursOf(definition);
-    const set = (value: string) => setTime({...row.time,[key]:value});
-    return <div key={key} className="inline-flex flex-wrap items-center gap-1 whitespace-nowrap text-muted-foreground">
-     <label className="inline-flex items-center gap-1">
-      {name}
-      <input aria-label={`${label} ${name}（小时）`} type="number" inputMode="decimal" min={0}
-       step="any" list={presetId+(key==='hl'?'-hl':'-avg')} placeholder={key === 'window' ? '原公式' : String(defaultHours)} title="留空使用原公式参数"
-       disabled={disabled} value={hours} onChange={e=>set(e.target.value)} className={field+' w-20 font-mono tabular-nums'}/>
-      <span>小时</span>
-     </label>
-     {key === 'window' && ['1','24'].map(preset => <button key={preset} type="button" disabled={disabled}
-      aria-label={`${label} ${name} ${preset} 小时`} aria-pressed={hours !== '' && Number(hours) === Number(preset)}
-      onClick={()=>set(preset)} className="h-6 rounded border border-border/60 px-1.5 text-[11px] hover:text-foreground aria-pressed:border-primary/50 aria-pressed:text-primary disabled:opacity-40">{preset}h</button>)}
-    </div>;
-   })}
-  </div>;
+  const choice = choices.find(item => item.key === row.choice);
+  return <FishMetricTimeFields label={label} disabled={disabled} time={row.time} onChange={setTime}
+    metric={metric ?? choice?.metric} snapshot={snapshot} definition={choice && metricDefinitions.get(choice.featureId)}/>;
  };
  /** 特征值、变量、方向、门槛与公式时间参数。 */
  const indicator=(row:ConditionDraft,label:string,update:(change:Partial<ConditionDraft>)=>void,disabled=!d.enabled)=>{
@@ -338,8 +309,6 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     <div className={`flex items-center gap-1.5 text-muted-foreground ${d.gainEnabled?'':'opacity-55'}`}>{/* 2026-11-04 涨幅门槛基准可选：相对成本线 S（11-01 起）或相对持仓均价（10-31 版） */}<select aria-label="涨幅门槛基准" disabled={!d.enabled||!d.gainEnabled} value={d.gainBasis??'cost-line'} onChange={e=>patch({gainBasis:e.target.value as 'average'|'cost-line'})} className={field+' h-7 px-1.5'}><option value="cost-line">相对最新成本线 S</option><option value="average">相对持仓均价</option></select>上涨 ≥<input aria-label="加仓涨幅门槛" type="number" min="0" step="any" disabled={!d.enabled||!d.gainEnabled} className={cell+' w-14'} value={d.minGainPct} onChange={e=>patch({minGainPct:e.target.value})}/>%</div>
     <span className="self-start pt-1.5 text-muted-foreground">指标条件</span>
     <div className="space-y-1.5">{d.extraConditions.map(prerequisiteRow)}<button type="button" disabled={!d.enabled} className="text-[11px] text-primary disabled:opacity-40" onClick={()=>patch({extraConditions:[...d.extraConditions,{choice:choices[0]?.key??'',direction:'>',threshold:'0'}]})}>＋ 添加方向条件</button></div>
-    <datalist id={presetId+'-hl'}>{HALF_LIFE_PRESETS.map(h=><option key={h} value={h}/>)}</datalist>
-    <datalist id={presetId+'-avg'}>{AVG_HOURS_PRESETS.map(h=><option key={h} value={h}/>)}</datalist>
     <span className="self-start pt-1.5 text-muted-foreground">指标读数递增</span>
     <div className="min-w-0 space-y-1.5">
      <p className="text-muted-foreground">首次与首仓买入时比，之后与上一次实际加仓时比。所选算法的已收盘读数都须严格增大。</p>
@@ -403,6 +372,16 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-sttk-k">T −<input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={cell+' w-14'}/>× ATR</div></>}
     {box&&<><span className="text-muted-foreground">箱体算法</span>
     <div className="flex min-w-0 items-center gap-2"><select aria-label="箱体加仓算法" className={field+' h-7 min-w-0 flex-1'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:e.target.value==='sbs5m'&&d.structure.kSource==='guard'?'previous':d.structure.kSource}})}><option value="dbl5">{boxAlgorithmVersion(CURRENT_BOX_VERSION.dbl5)!.label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select><span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-primary" data-testid="addition-box-version" title="保存时冻结的版本">{structureVersionLabel(d.structure)}</span><FishQualityInfo label="箱体算法版本说明"><BoxAlgorithmVersionNotes/></FishQualityInfo></div>
+    <span className="text-muted-foreground">箱体时间</span>
+    <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+      <span>K 线周期 5m</span>
+      {d.structure.algorithm==='dbl5' ? <label>几何窗口 <input aria-label="箱体加仓几何窗口（分钟）" type="number" min="20" max="10080" step="5"
+        disabled={!d.enabled} className={cell+' w-24'} value={Number.isNaN(d.structure.definition.DBL5_config?.window_minutes) ? '' : d.structure.definition.DBL5_config?.window_minutes ?? DBL5_DEFAULTS.window_minutes}
+        onChange={e=>{const window_minutes=e.target.valueAsNumber;patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,window_minutes}}}});}}/> 分钟</label>
+        : <label>箱体形成 <input aria-label="箱体加仓形成窗口（根）" type="number" min="2" max="288" step="1" disabled={!d.enabled}
+          className={cell+' w-24'} value={Number.isNaN(d.structure.definition.SBS5M_config?.box_formation_bars) ? '' : d.structure.definition.SBS5M_config?.box_formation_bars ?? SBS5M_DEFAULTS.box_formation_bars}
+          onChange={e=>{const box_formation_bars=e.target.valueAsNumber;patch({structure:{...d.structure,definition:{...d.structure.definition,SBS5M_config:{...d.structure.definition.SBS5M_config,box_formation_bars}}}});}}/> 根</label>}
+    </div>
     <span className="text-muted-foreground">触发事件</span>
     <select aria-label="箱体加仓时机" className={field+' h-7 w-full'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></>}
     {box&&<><span className="text-muted-foreground">K =</span>

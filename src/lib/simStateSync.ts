@@ -20,7 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './accountSyncTransport';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
-import { mergeMiningStates, MINING_CONFIGURED_ROUND_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY } from '@/lib/fish/miningState';
+import { mergeMiningStates, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
 import { FISH_ACCOUNT_SETTINGS_KEY } from '@/lib/fish/accountSettings';
 import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
@@ -75,6 +75,7 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
   [MINING_ROUND_LOGICAL_KEY]: mergeMiningStates,
   [MINING_RANGE_LOGICAL_KEY]: mergeMiningStates,
   [MINING_CONFIGURED_ROUND_KEY]: mergeMiningStates,
+  [MINING_TIMED_ROUND_KEY]: mergeMiningStates,
 };
 
 /**

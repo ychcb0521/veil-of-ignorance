@@ -4,7 +4,8 @@ import { isSellerFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features'
 import type { FishScanSettings } from '@/lib/fishScanner';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { compileFishProgram } from './algorithm';
+import { compileFishPreference } from './scanPlan';
+import { RESEARCH_INTERVALS } from '@/lib/deepRsa/marketData';
 import { validateFishDownwardWick } from './downwardWick';
 import { AUDITED_EXCHANGES, type FishExchange } from './exchanges';
 import { validateFishHitRateWindow } from './hitRate';
@@ -22,6 +23,7 @@ const settingsSchema = z.object({
       direction: z.enum(['>', '<']), threshold: z.string(), statistic: z.string().optional(),
       constraints: z.array(z.object({ id: z.string(), text: z.string(), enabled: z.boolean() })),
       sellerSignVersion: z.literal(1).optional(), thresholdDefaultsVersion: z.number().optional(), lastSuggestion: z.string().optional(),
+      time: z.object({interval:z.enum(RESEARCH_INTERVALS).optional(),window:z.string().optional(),avgh:z.string().optional(),hl:z.string().optional()}).optional(),
     }),
   })).min(1).max(FISH_MAX_ALGORITHMS),
   combination: z.enum(['and', 'or']),
@@ -74,9 +76,7 @@ export function buildFishHitRateSettings(settings: FishHitRateSettings, defs: re
     const feature = defs.find(def => def.id === card.featureId);
     if (!feature) throw new Error(`算法 ${index + 1} 已不可用，请重新选择`);
     try {
-      const algorithm = { statistic: card.pref.statistic ?? '结果', direction: card.pref.direction,
-        threshold: card.pref.threshold.trim() ? Number(card.pref.threshold) : NaN, constraints: [] };
-      const plan = fishProgramForLookback(compileFishProgram(feature, algorithm), lookbackHours, turnoverFloors);
+      const plan = fishProgramForLookback(compileFishPreference(feature, card.pref), lookbackHours, turnoverFloors);
       if (plan.unavailable) throw new Error(plan.unavailable);
       return [{ feature: plan.def, algorithm: plan.settings }];
     } catch (cause) {

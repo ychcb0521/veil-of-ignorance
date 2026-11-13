@@ -16,7 +16,9 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
-import { qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
+import { qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
+import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
+import { FishMetricTimeFields } from './FishMetricTimeFields';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { isLegacyQualityPlan, LEGACY_ENGINE_LABEL, legacyToEditablePlan } from '@/lib/fish/qualityLegacyEngine';
 
@@ -25,11 +27,14 @@ interface Draft {
   advantageOptions?: QualityAdvantageOptions;
   id: string; original?: QualityGroup; label: string; choice: string; direction: '<' | '>'; threshold: string;
   combo: boolean; afterChoice: string; afterDirection: '<' | '>'; afterThreshold: string; switchPct: string;
+  time?: AdditionMetricTime; afterTime?: AdditionMetricTime;
 }
 const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, label: plan.label, advantageOptions: plan.advantage ? { screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations } : undefined,
   choice: plan.snapshot.featureId + ':' + plan.metric, direction: plan.rule?.direction ?? plan.snapshot.direction ?? '<',
+  time: additionMetricTime(plan.snapshot),
   threshold: plan.rule ? String(plan.rule.threshold) : '', combo: !!plan.combo,
   afterChoice: plan.combo ? plan.combo.after.snapshot.featureId + ':' + plan.combo.after.metric : 'state:state',
+  afterTime: plan.combo && additionMetricTime(plan.combo.after.snapshot),
   afterDirection: plan.combo?.after.rule.direction ?? '<', afterThreshold: plan.combo ? String(plan.combo.after.rule.threshold) : '', switchPct: String(plan.combo?.switchPct ?? 5.1) });
 
 export interface SellPlansDraftView { plans: QualityGroup[]; dirty: boolean; algorithmsDirty: boolean; error: string; build: (after?: (plans: QualityGroup[]) => QualityGroup[]) => QualityGroup[]; save: (after?: (plans: QualityGroup[]) => QualityGroup[]) => boolean }
@@ -126,6 +131,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const action = purpose === 'entry' ? '筛选' : '卖出';
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]);
+  const metricDefinitions = useMemo(() => qualityFilterDefinitions(definitions), [definitions]);
   const [drafts, setDrafts] = useState(() => plans.map(draftOf)), [dirty, setDirty] = useState(false), [error, setError] = useState('');
   const draftPlanIds=useRef(new Set(plans.map(p=>p.id)));
   useEffect(() => { if (!dirty) {draftPlanIds.current=new Set(plans.map(p=>p.id));setDrafts(plans.map(draftOf));} }, [plans, dirty]);
@@ -138,7 +144,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     return Number(value);
   };
   const baseOf = (d: Draft) => plans.find(p => p.id === d.id) ?? d.original;
-  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.switchPct]:[])]);
+  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.time??{},d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.switchPct,d.afterTime??{}]:[])]);
   const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || choices.find(c=>c.key===d.choice)?.label || base?.label || `新${action}算法`;
   const duplicate = (source: Draft, index: number) => {
     const base = structuredClone(baseOf(source)!);
@@ -208,18 +214,28 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         // 旧引擎方案只改名称，其余原样保存
         if (base && isLegacyQualityPlan(base)) return { ...structuredClone(base), label: labelOf(d,base) };
         if (base && d.original && algorithmFields(d) === algorithmFields(draftOf(d.original))) return { ...structuredClone(base), label: labelOf(d,base) };
-        const ordinaryUnchanged=!!(base&&d.original&&algorithmFields(d)===algorithmFields(draftOf(d.original)));
-        const plan = ordinaryUnchanged?structuredClone(base!):makeQualitySellPlan(d.choice, d.direction, number(d.threshold, true), definitions, baseOf(d), d.id);
-        plan.label = d.label.trim() || plan.label;
-        if (embedded && base && d.choice === draftOf(base).choice) { plan.snapshot = structuredClone(base.snapshot); plan.definitionSource = base.definitionSource; }
-        if (!ordinaryUnchanged&&d.combo) {
-          const after = makeQualitySellPlan(d.afterChoice, d.afterDirection, number(d.afterThreshold), definitions);
-          if (embedded && base?.combo && d.afterChoice === draftOf(base).afterChoice) after.snapshot = structuredClone(base.combo.after.snapshot);
+        const threshold = number(d.threshold, true);
+        const original = base && draftOf(base);
+        const plan = base && d.choice === original?.choice
+          ? { ...structuredClone(base), snapshot:{ ...structuredClone(base.snapshot), direction:d.direction, threshold:threshold ?? 0 },
+              rule:threshold == null ? undefined : {metric:base.metric,direction:d.direction,threshold} }
+          : makeQualitySellPlan(d.choice, d.direction, threshold, definitions, base, d.id);
+        const timed = withMetricSnapshotTime(plan, d.time);
+        plan.snapshot = timed.snapshot;
+        plan.label = d.label.trim() || timed.label;
+        if (d.combo) {
+          const afterThreshold = number(d.afterThreshold)!;
+          const saved = d.afterChoice === original?.afterChoice ? base?.combo?.after : undefined;
+          const after = saved
+            ? { ...saved, snapshot:{ ...saved.snapshot,direction:d.afterDirection,threshold:afterThreshold },
+                rule:{metric:saved.metric,direction:d.afterDirection,threshold:afterThreshold} }
+            : makeQualitySellPlan(d.afterChoice, d.afterDirection, afterThreshold, definitions);
+          const timedAfter = withMetricSnapshotTime(after,d.afterTime);
           const switchPct = number(d.switchPct)!;
           if (!(switchPct > 0)) throw new Error('分段切换涨幅须大于 0');
           plan.combo = { switchPct, beforeLabel: choices.find(c => c.key === d.choice)?.label ?? plan.label,
-            after: { label: after.label, metric: after.metric, snapshot: after.snapshot, rule: after.rule! } };
-        } else if(!ordinaryUnchanged)delete plan.combo;
+            after: { label: timedAfter.label, metric: after.metric, snapshot: timedAfter.snapshot, rule: after.rule! } };
+        } else delete plan.combo;
         // 按加仓次数改用的卖出算法在「加仓细节 · 卖出」里逐次设置（monitor 草稿写入 sellStages），这里保持原值。
 
         return plan;
@@ -258,7 +274,12 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       {!readOnly && !embedded && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} plans={plans} disabled={!ready} onUse={fromTemplate} onUseBuiltin={fromBuiltin}/>}</>}</div>
     {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">{purpose === 'entry' ? '筛选算法与启用的确认条件在同一分钟满足，且无否决时，纳入观察并保存到入选库。' : '每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。'}</p>}
     {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无{action}算法，点击上方新增。</p>}
-    {drafts.map((d, i) => <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
+    {drafts.map((d, i) => {
+      const base = baseOf(d);
+      const after = base?.combo?.after;
+      const mainSnapshot = base && `${base.snapshot.featureId}:${base.metric}` === d.choice ? base.snapshot : undefined;
+      const afterSnapshot = after && `${after.snapshot.featureId}:${after.metric}` === d.afterChoice ? after.snapshot : undefined;
+      return <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
       <div className="fish-plan-header flex items-center gap-1.5"><span className="text-[10px] tabular-nums text-muted-foreground">{i + 1}.</span><input aria-label={`${action}算法 ` + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
         {/* 【用户要求】2026-11-03 旧引擎方案只读（除名称）：改了参数就不是原来那套了 */}
         {isLegacyQualityPlan(baseOf(d)) && <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300" title="按 10-31 的引擎原样复算；除名称外不能修改" data-testid={'sell-plan-legacy-' + i}>{LEGACY_ENGINE_LABEL} · 只读</span>}
@@ -271,17 +292,25 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
       {!readOnly && !embedded && <><button type="button" disabled={!ready} aria-label={`复制${action}算法 ` + (i + 1)} title={purpose==='entry'?'复制整套筛选算法和确认条件':'复制整套方案：含当前填写的组合算法、加仓、镜像平衡减仓和一票条件'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" aria-label={`删除${action}算法 ` + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></>}</div>
       {baseOf(d)?.router ? <p className="text-[10.5px] text-muted-foreground">条件分支方案：在下方修改两个分支的卖出、镜像、加仓与止损设置。</p> : <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents"><div className="fish-plan-condition grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
-        {select(d.choice, `${action}算法 ` + (i + 1) + ' 指标', choice => patch(d.id, { choice }))}
+        {select(d.choice, `${action}算法 ` + (i + 1) + ' 指标', choice => patch(d.id, { choice, time:undefined }))}
         <select aria-label={`${action}算法 ` + (i + 1) + ' 方向'} className={field} value={d.direction} onChange={e => patch(d.id, { direction: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
         <input aria-label={`${action}算法 ` + (i + 1) + ' 门槛'} className={field + ' w-full'} type="number" step="any" placeholder="未设置" value={d.threshold} onChange={e => patch(d.id, { threshold: e.target.value })} />
       </div>
+      <FishMetricTimeFields label={`${action}算法 ${i+1}`} metric={d.choice.slice(d.choice.indexOf(':')+1)}
+        definition={metricDefinitions.get(d.choice.split(':')[0])} snapshot={mainSnapshot}
+        time={d.time} onChange={time=>patch(d.id,{time})}/>
       {d.combo && <div className="space-y-1.5 border-t border-border/40 pt-1.5"><label className="flex items-center gap-1 text-[11px] text-muted-foreground">相对买入价上涨<input aria-label={`${action}算法 ` + (i + 1) + ' 切换涨幅'} type="number" step="any" className={field + ' w-20'} value={d.switchPct} onChange={e => patch(d.id, { switchPct: e.target.value })} />% 后切换为</label>
-        <div className="fish-plan-condition grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">{select(d.afterChoice, `${action}算法 ` + (i + 1) + ' 后段指标', afterChoice => patch(d.id, { afterChoice }))}
+        <div className="fish-plan-condition grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">{select(d.afterChoice, `${action}算法 ` + (i + 1) + ' 后段指标', afterChoice => patch(d.id, { afterChoice, afterTime:undefined }))}
           <select aria-label={`${action}算法 ` + (i + 1) + ' 后段方向'} className={field} value={d.afterDirection} onChange={e => patch(d.id, { afterDirection: e.target.value as '<' | '>' })}><option value="<">&lt;</option><option value=">">&gt;</option></select>
           <input aria-label={`${action}算法 ` + (i + 1) + ' 后段门槛'} type="number" step="any" className={field + ' w-full'} value={d.afterThreshold} onChange={e => patch(d.id, { afterThreshold: e.target.value })} />
-        </div></div>}</fieldset>}
-      {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
-    </div>)}
+        </div>
+        <FishMetricTimeFields label={`${action}算法 ${i+1} 后段`} metric={d.afterChoice.slice(d.afterChoice.indexOf(':')+1)}
+          definition={metricDefinitions.get(d.afterChoice.split(':')[0])}
+          snapshot={afterSnapshot}
+          time={d.afterTime} onChange={afterTime=>patch(d.id,{afterTime})}/>
+      </div>}</fieldset>}
+    {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
+    </div>;})}
     {!readOnly&&!embedded&&recoverablePlans&&<FishQualitySavedPlanRecovery plans={recoverablePlans.filter(p=>!drafts.some(d=>d.id===p.plan.id))} disabled={!ready} onRestore={restoreSavedPlan}/>}
     {!readOnly&&!embedded&&drafts.some(d=>baseOf(d)?.router)&&<p className="text-[10.5px] text-muted-foreground">拆分时一并保存当前修改、原组合和两套独立方案，不启动监测。</p>}
     {!readOnly && !embedded && <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : `保存${action}算法`}</button>

@@ -1517,6 +1517,7 @@ function describeSortLevelEffect(level: number, label: string, effect: SortLevel
 /** 分组统计表的组名：分档写档界（与「分档」提示同一写法），镜像止盈写档位名，自评写分值与量表文字，杠杆写倍数。 */
 function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, thresholds: readonly number[] | null): string {
   if (key.kind === 'all') return '全部';
+  if (key.kind === 'missing') return '缺少盈亏比';
   if (key.kind === 'day') return key.day ?? '未记录日期';
   if (key.kind === 'quartile') return formatQuartileRange(mode, key.quartile, thresholds);
   if (mode === 'mirrorTp') return formatMirrorTpMetric(key.value);
@@ -6070,7 +6071,7 @@ export default function JournalCampaignsPage() {
             ) : (
               <>
                 <div className="text-[13px] font-medium">尚无战役</div>
-                <div className="text-[12px] text-muted-foreground">{section === 'instant' ? '筛选鱼确认 CDA 卖出后，战役会自动出现在这里' : comparing ? '在鱼质量中勾选信号并运行，交易会出现在这里' : '你下次开主力单时会自动创建第一个战役'}</div>
+                <div className="text-[12px] text-muted-foreground">{section === 'instant' ? '筛选鱼完全卖出后，战役会自动出现在这里' : comparing ? '在鱼质量中勾选信号并运行，交易会出现在这里' : '你下次开主力单时会自动创建第一个战役'}</div>
               </>
             )}
           </div>

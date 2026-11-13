@@ -6,6 +6,7 @@ import { evaluateLegacyQualitySample, isLegacyQualityPlan } from './qualityLegac
 import { hasQualityExit, evaluateQualitySample, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult } from './quality';
 import { hasQualityCampaign, type QualityCampaignRun } from './qualityCampaignArchive';
 import type { FishReconstructionLoader } from './reconstruction';
+import { hasAdditionMetricTime } from './qualityAdditionMetric';
 
 const REPAIR_VERSION = 2;
 export interface QualityRepairBatch {
@@ -19,6 +20,7 @@ export interface QualityRepairTask {
 }
 const finiteTime = (n?: number | null): n is number => Number.isFinite(n) && n! > 0;
 function targetPlan(run: QualityCampaignRun, definitions: readonly DeepDigFeatureDef[]): QualityGroup {
+  if (hasAdditionMetricTime(run.plan.snapshot)) return run.plan;
   const id = run.plan.snapshot.featureId;
   const def = definitions.find(d => d.id === id) ?? BUILTIN_FEATURES.find(d => d.id === id);
   if (!def) throw new Error('当前账号已无此卖出指标的定义，不能猜测替代公式');

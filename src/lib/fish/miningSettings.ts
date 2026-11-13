@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { RESEARCH_INTERVALS } from '@/lib/deepRsa/marketData';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { hydrateSimState, queueSimStatePush } from '@/lib/simStateSync';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
@@ -12,7 +13,7 @@ import { readSavedFishHitRateSettings } from './hitRateSettings';
 import { FISH_DEFAULT_LOOKBACK_HOURS, readFishLookback, validateFishLookback } from './lookback';
 import { currentDefaultRules, miningCards, readMiningState } from './mining';
 import { MINING_COMBINATION } from './defaultRules';
-import { MINING_STEP_MS, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY, type FishMiningScanConfig, type FishMiningState } from './miningState';
+import { MINING_STEP_MS, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY, type FishMiningScanConfig, type FishMiningState } from './miningState';
 import { buildFishScanSettings, type FishScanSelection } from './scanPlan';
 import { FISH_MAX_ALGORITHMS, FISH_TURNOVER_FLOORS } from './shared';
 import { readCaptureTurnoverSettings, validateFishTurnoverSettings } from './turnoverSettings';
@@ -31,6 +32,7 @@ const schema = z.object({
   rules: z.array(z.object({
     id: z.string(), featureId: z.string(), statistic: z.string(), threshold: z.string(),
     direction: z.enum(['>', '<']).optional(), enabled: z.boolean().optional(),
+    time: z.object({interval:z.enum(RESEARCH_INTERVALS).optional(),window:z.string().optional(),avgh:z.string().optional(),hl:z.string().optional()}).optional(),
   })).min(1).max(FISH_MAX_ALGORITHMS),
   selection: z.object({
     exchanges: z.enum(AUDITED_EXCHANGES).array().min(1),
@@ -69,7 +71,7 @@ export async function loadMiningSettings(userId: string, capture: FishScanSelect
   await hydrate([MINING_SETTINGS_KEY]);
   const saved = readMiningSettings(userId, true);
   if (saved) return saved;
-  await hydrate([MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]);
+  await hydrate([MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]);
   return readMiningSettings(userId, true) ?? initialMiningSettings(readMiningState({ userId, persistPresetUpgrade: false }), capture);
 }
 
@@ -93,7 +95,7 @@ export function initialMiningSettings(state: FishMiningState, capture: FishScanS
 
 function miningRulesFromCards(cards: readonly FishCard[]): FishMiningSettings['rules'] {
   return cards.map(({ id, featureId, pref, enabled }) => ({
-    id, featureId, statistic: pref.statistic ?? '结果', threshold: pref.threshold, direction: pref.direction, enabled,
+    id, featureId, statistic: pref.statistic ?? '结果', threshold: pref.threshold, direction: pref.direction, enabled, ...(pref.time?{time:pref.time}:{}),
   }));
 }
 

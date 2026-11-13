@@ -9,9 +9,12 @@ import type { FishExchange } from './exchanges';
 import { compileFishProgram, type FishProgram } from './algorithm';
 import { FISH_TURNOVER_FLOORS, type FishTurnoverFloor } from './shared';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings } from '@/lib/fishScanner';
+import { withFishDefinitionTime } from './qualityAdditionMetric';
+import type { FishPreference } from './preferences';
 
 export interface FishScanSelection { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }
-const compile = (def: DeepDigFeatureDef, c: FishCard) => compileFishProgram(def, { statistic: c.pref.statistic ?? '结果', direction: c.pref.direction, threshold: c.pref.threshold.trim() ? Number(c.pref.threshold) : NaN, constraints: [] });
+export const compileFishPreference = (def: DeepDigFeatureDef, pref: FishPreference, threshold = pref.threshold.trim() ? Number(pref.threshold) : NaN) =>
+  compileFishProgram(withFishDefinitionTime(def, pref.statistic ?? '结果', pref.time), { statistic:pref.statistic ?? '结果', direction:pref.direction, threshold, constraints:[] });
 
 /** 勾选的卡（参与显示的组合）与全部能用的卡（都扫，扫完可任意切换组合）。 */
 export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDigFeatureDef[]): { plans: FishProgram[]; pool: FishProgram[]; error: string } {
@@ -19,9 +22,9 @@ export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDig
   const defOf = (c: FishCard, i: number) => isRetiredFeature(c.featureId) ? undefined : defs.find(d => d.id === c.featureId) ?? (i === 0 ? defs.find(d => d.id === 'cbi2') ?? defs[0] : undefined);
   for (const [i, c] of cards.entries()) if (c.enabled) try {
     const d = defOf(c, i); if (!d) throw Error(i === 0 ? 'Deep dig 里没有可用特征值' : '特征值已不存在');
-    const plan = compile(d, c); if (plan.unavailable) throw Error(plan.unavailable); plans.push(plan);
+    const plan = compileFishPreference(d, c.pref); if (plan.unavailable) throw Error(plan.unavailable); plans.push(plan);
   } catch (e) { error = `算法 ${i + 1}：${e instanceof Error ? e.message : String(e)}`; }
-  const pool = cards.flatMap((c, i) => { try { const d = defOf(c, i); if (!d) return []; const plan = compile(d, c); return plan.unavailable ? [] : [plan]; } catch { return []; } });
+  const pool = cards.flatMap((c, i) => { try { const d = defOf(c, i); if (!d) return []; const plan = compileFishPreference(d, c.pref); return plan.unavailable ? [] : [plan]; } catch { return []; } });
   return { plans, pool, error: error || (!plans.length ? '请启用至少一个算法' : '') };
 }
 

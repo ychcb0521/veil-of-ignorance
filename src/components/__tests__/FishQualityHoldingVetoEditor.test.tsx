@@ -6,8 +6,34 @@ import {holdingVetoDraft,parseHoldingVetoDraft,planHoldingVetoDraft} from '@/lib
 import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION } from '@/lib/dbl5m';
 import {BOX_STOP_GUARD_REGIME_VERSION,defaultBoxBreak,defaultBoxStop} from '@/lib/fish/qualityBoxStop';
 import {holdingVetoIdentity,type QualityHoldingVeto} from '@/lib/fish/qualityVeto';
+import { qualityDefinition, qualityMetricPlan } from '@/lib/fish/quality';
 afterEach(cleanup);
 function Editor({plan=false,entry=false,saved=[]}:{plan?:boolean;entry?:boolean;saved?:QualityHoldingVeto[]}={}){const [draft,setDraft]=useState(plan?planHoldingVetoDraft(saved):holdingVetoDraft(saved));return <><FishQualityHoldingVetoEditor entry={entry} draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存</button><output/></>}
+it.each([false,true])('freezes independent indicator periods and formula hours (screening=%s)', entry=>{
+ const view=render(<Editor entry={entry}/>);
+ for (const row of [1,2]) {
+   fireEvent.change(screen.getByLabelText(`持仓否决 ${row} 指标`),{target:{value:'cda:CDA'}});
+   fireEvent.change(screen.getByLabelText(`持仓否决 ${row} 方向`),{target:{value:'<'}});
+   fireEvent.change(screen.getByLabelText(`持仓否决 ${row} 阈值`),{target:{value:'-15'}});
+   fireEvent.click(screen.getByLabelText(`启用持仓否决 ${row}`));
+ }
+ fireEvent.change(screen.getByLabelText('持仓否决 1 K 线周期'),{target:{value:'15m'}});
+ fireEvent.change(screen.getByLabelText('持仓否决 1 半衰期（小时）'),{target:{value:'1.5'}});
+ fireEvent.change(screen.getByLabelText('持仓否决 2 K 线周期'),{target:{value:'30m'}});
+ fireEvent.change(screen.getByLabelText('持仓否决 2 公式回看（小时）'),{target:{value:'12'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));
+ const saved:QualityHoldingVeto[]=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved.map(rule=>qualityMetricPlan(rule.snapshot!,rule.metric).plan.step)).toEqual([900000,1800000]);
+ expect(qualityDefinition(saved[0].snapshot!).halfLifeHours).toBe(1.5);
+ expect(qualityDefinition(saved[1].snapshot!).avgHours).toBe(12);
+ expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);
+ view.unmount();
+ render(<Editor entry={entry} saved={saved}/>);
+ expect(screen.getByLabelText('持仓否决 1 K 线周期')).toHaveValue('15m');
+ expect(screen.getByLabelText('持仓否决 1 半衰期（小时）')).toHaveValue(1.5);
+ expect(screen.getByLabelText('持仓否决 2 K 线周期')).toHaveValue('30m');
+ expect(screen.getByLabelText('持仓否决 2 公式回看（小时）')).toHaveValue(12);
+});
 it('adds an independent opt-in red-cross rule with frozen DBL-5 details and no price-stop controls',()=>{
  render(<Editor/>);fireEvent.click(screen.getByRole('button',{name:'添加支撑断裂终止'}));
  expect(screen.getByLabelText('启用持仓否决 3')).not.toBeChecked();

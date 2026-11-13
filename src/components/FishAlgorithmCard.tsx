@@ -8,6 +8,8 @@ import {Children,Fragment,isValidElement,useMemo,useEffect,type InputHTMLAttribu
 import {fishSuggestionTitle,mayFillFishThreshold,suggestedFishThreshold,type FishSuggestion} from '@/lib/fish/suggestions';
 import { Check, ChevronDown, CircleHelp, Ellipsis, RotateCw, X } from 'lucide-react';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
+import { FishMetricTimeFields } from './FishMetricTimeFields';
+import { compileFishPreference } from '@/lib/fish/scanPlan';
 // 用户于 2026-10-19 指定保留的截图区间；固定参考备注，不随新计算覆盖。
 export const RECORDED_RANGES:Record<string,{statistic:string;low:string;high:string;samples:number}>={
  bss:{statistic:'avg_BSS',low:'-0.0227936',high:'0.0827297',samples:745},
@@ -61,7 +63,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const update=(patch:Partial<FishPreference>)=>onChange({...card,pref:{...p,...patch,constraints:[]}});
  // A card added before a shared suggestion finishes must also consume that cached result.
  useEffect(()=>{if(locked||!card.enabled||!suggestion||!mayFillFishThreshold(p.threshold,p.lastSuggestion))return;const value=suggestedFishThreshold(suggestion,p.direction);if(value!==null&&String(value)!==p.threshold)update({threshold:String(value),lastSuggestion:String(value)});},[suggestion,p.threshold,p.lastSuggestion,p.direction,locked,card.enabled,onChange]);
- let stats:ReturnType<typeof fishStatistics>=[],error='';try{if(!def)throw Error('特征值已不存在');stats=fishStatistics(def);if(card.enabled){const plan=compileFishProgram(def,{statistic:p.statistic,direction:p.direction,threshold:p.threshold.trim()?Number(p.threshold):NaN,constraints:[]});error=plan.unavailable??'';}}catch(e){error=e instanceof Error?e.message:String(e);}
+ let stats:ReturnType<typeof fishStatistics>=[],error='';try{if(!def)throw Error('特征值已不存在');stats=fishStatistics(def);if(card.enabled){const plan=compileFishPreference(def,p);error=plan.unavailable??'';}}catch(e){error=e instanceof Error?e.message:String(e);}
  const menuStats=def?algorithmMetricMenu(def,stats):[];
  // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
  // 每行只保留操作字段；条件、单位、区间和计算状态统一收进淡色说明入口。
@@ -74,7 +76,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
    if (!option || option.reason) return;
    const prior = option.statistic != null && option.def.id === card.featureId ? p : initialPreference(option.def.id);
    const pref = option.statistic != null && option.statistic !== prior.statistic
-     ? { ...prior, statistic: option.statistic, threshold: '', lastSuggestion: undefined }
+     ? { ...prior, statistic: option.statistic, threshold: '', lastSuggestion: undefined, time:undefined }
      : prior;
    onChange({ ...card, featureId: option.def.id, pref: { ...pref, constraints: [] } });
  };
@@ -104,7 +106,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
      })}
    </select>{chevron}
  </span>
- <span className={`relative w-32 shrink-0 ${dim}`}><select aria-label={label('统计量')} title={stats.find(s=>s.name===(p.statistic??'结果'))?.label} className={cls} value={p.statistic??'结果'} onChange={e=>{const next=withFishDefaultThreshold(card.featureId,{...p,statistic:e.target.value,threshold:'',lastSuggestion:undefined});update({statistic:next.statistic,threshold:next.threshold,lastSuggestion:undefined});}}>{!menuStats.some(s=>s.name===(p.statistic??'结果'))&&<option hidden disabled value={p.statistic??'结果'}>已保存指标：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</option>}{menuStats.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select>{chevron}</span>
+ <span className={`relative w-32 shrink-0 ${dim}`}><select aria-label={label('统计量')} title={stats.find(s=>s.name===(p.statistic??'结果'))?.label} className={cls} value={p.statistic??'结果'} onChange={e=>{const next=withFishDefaultThreshold(card.featureId,{...p,statistic:e.target.value,threshold:'',lastSuggestion:undefined});update({statistic:next.statistic,threshold:next.threshold,lastSuggestion:undefined,time:undefined});}}>{!menuStats.some(s=>s.name===(p.statistic??'结果'))&&<option hidden disabled value={p.statistic??'结果'}>已保存指标：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</option>}{menuStats.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select>{chevron}</span>
  <span className={`relative w-11 shrink-0 ${dim}`}><select aria-label={label('方向')} className={`${cls} pl-2.5 pr-5 font-medium`} value={p.direction} onChange={e=>{const direction=e.target.value as '>'|'<',fill=suggestion?suggestedFishThreshold(suggestion,direction):null;if(fill!==null&&p.lastSuggestion!==undefined&&mayFillFishThreshold(p.threshold,p.lastSuggestion))update({direction,threshold:String(fill),lastSuggestion:String(fill)});else update({direction});}}><option value=">">&gt;</option><option value="<">&lt;</option></select>{chevron}</span>
  <span className={`relative w-24 shrink-0 ${dim}`}><input aria-label={label('阈值')} title={unit} className={`${field} px-2 pt-0.5 font-mono font-medium tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/></span>
  <Popover><PopoverTrigger asChild><button type="button" aria-label={`算法 ${index} 说明`} title="算法说明" className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" sideOffset={6} aria-label={`算法 ${index} 说明`} className="max-h-[min(60dvh,var(--radix-popover-content-available-height))] w-80 max-w-[calc(100vw-2rem)] space-y-2.5 overflow-y-auto p-3 text-[11px] leading-relaxed">
@@ -122,5 +124,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  <button type="button" aria-label={`删除算法 ${index}`} className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-muted-foreground hover:bg-accent hover:text-destructive" onClick={onDelete}><X className="h-3 w-3"/>删除这个算法</button>
  </PopoverContent></Popover>}
  </div>
+ <FishMetricTimeFields label={index===1?'捕捞算法':`算法 ${index}`} metric={p.statistic??'结果'} definition={def}
+   time={p.time} onChange={time=>update({time,lastSuggestion:undefined})} disabled={locked} className="mt-1 pl-8"/>
  {card.enabled&&error&&<p className="mt-1 break-words pl-[2.375rem] text-destructive" role="alert">{error}</p>}</fieldset>;
 }

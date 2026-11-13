@@ -69,7 +69,10 @@ import { isDelayedTuringReplaySample } from '@/lib/turingReplaySamples';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { hasQualityExit, qualityEntryIdentity, standaloneBuyFilters, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityFilterReadingKey, qualityFilterStatus, type QualityBuyFilter, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from '@/lib/fish/quality';
-import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, makeQualitySignalMetrics, qualityFilterChoiceKey, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
+import { holdingVetoDraft, planHoldingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, makeQualitySignalMetrics, qualityFilterChoiceKey, qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
+import { additionMetricTime, withAdditionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
+import { FishMetricTimeFields } from './FishMetricTimeFields';
+import { shortFishHash } from '@/lib/fish/algorithm';
 import { qualityResultMap, qualityRowResult } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
 import { signalReadingCell, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
@@ -108,21 +111,23 @@ export function heldText(hours: number | null | undefined): string {
 }
 const resultText = (r?: QualityResult) => r?.status === 'closed' ? '已卖出' : r?.status === 'open' ? '持有' : r?.status === 'error' ? '缺数据' : r?.status === 'waiting' && r.entryPrice ? '待设卖出' : '待评估';
 
-type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter };
-type SignalMetricDraft = { key: string; saved?: QualitySignalMetric };
+type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter; time?: AdditionMetricTime };
+type SignalMetricDraft = { key: string; saved?: QualitySignalMetric; time?: AdditionMetricTime };
 
 function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualityState; done: () => void; selectedCount: number }) {
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]);
+  const filterDefinitions = useMemo(() => qualityFilterDefinitions(definitions), [definitions]);
+  const readingDefinitions = useMemo(() => qualityFilterDefinitions(definitions, true), [definitions]);
   const groups = [...new Set(choices.map(choice => choice.group))];
   const signalChoices = useMemo(() => qualityFilterMenuChoices(definitions, true), [definitions]);
   const signalGroups = [...new Set(signalChoices.map(choice => choice.group))];
   const savedFilters = standaloneBuyFilters(state.study);
   const [draft, setDraft] = useState<FilterDraft[]>(() => savedFilters.map(saved => ({
-    choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold), enabled: saved.enabled, saved,
+    choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold), enabled: saved.enabled, saved, time:additionMetricTime(saved.snapshot),
   })));
   const [readingDraft, setReadingDraft] = useState<SignalMetricDraft[]>(() => (state.study.signalMetrics ?? []).map(saved => ({
-    key: qualityFilterChoiceKey(saved), saved,
+    key: qualityFilterChoiceKey(saved), saved, time:additionMetricTime(saved.snapshot),
   })));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -140,14 +145,24 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
     try {
       const filters = draft.map(row => {
         const {saved} = row;
-        if (saved && qualityFilterChoiceKey(saved) === row.choice && saved.direction === row.direction &&
-          String(saved.threshold) === row.threshold && saved.enabled === row.enabled) return saved;
         if (!row.threshold.trim() || !Number.isFinite(Number(row.threshold))) throw Error('每条条件都要填有限数字门槛');
-        return makeQualityBuyFilter(row.choice, row.direction, Number(row.threshold), row.enabled, definitions);
+        if (saved && qualityFilterChoiceKey(saved) === row.choice) {
+          const threshold=Number(row.threshold);
+          const timed=withAdditionMetricTime(saved,row.time);
+          if (timed===saved && saved.direction===row.direction && saved.threshold===threshold && saved.enabled===row.enabled) return saved;
+          return { ...timed, enabled:row.enabled, direction:row.direction, threshold,
+            id:'buy-'+shortFishHash(JSON.stringify([row.choice,row.direction,threshold,timed.snapshot.definitionKey,timed.snapshot.interval])),
+            snapshot:{...timed.snapshot,direction:row.direction,threshold} };
+        }
+        return withAdditionMetricTime(makeQualityBuyFilter(row.choice, row.direction, Number(row.threshold), row.enabled, definitions),row.time);
       });
       const newMetrics = makeQualitySignalMetrics(readingDraft.filter(row => !row.saved).map(row => row.key), definitions);
       const resolved = new Map(newMetrics.map(metric => [qualityFilterChoiceKey(metric), metric]));
-      const metrics = readingDraft.map(row => row.saved ?? resolved.get(row.key)!);
+      const metrics = readingDraft.map(row => {
+        const original=row.saved ?? resolved.get(row.key)!;
+        const timed=withMetricSnapshotTime(original,row.time);
+        return timed===original ? original : {...timed,id:shortFishHash(JSON.stringify([row.key,timed.snapshot.definitionKey,timed.snapshot.interval]))};
+      });
       const updatedFilters = filters.length !== savedFilters.length || filters.some((filter, i) => filter !== savedFilters[i]) ? filters : undefined;
       if (state.saveStaticSettings) {
         if (!await state.saveStaticSettings(metrics, updatedFilters)) throw Error('设置尚未保存，请重试');
@@ -180,9 +195,13 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
       {!!readingDraft.length && <ul aria-label="已选读数算法" className="flex flex-wrap gap-2">
         {readingDraft.map((row, index) => {
           const label = row.saved?.label ?? signalChoices.find(choice => choice.key === row.key)?.label ?? row.key;
-          return <li key={row.saved?.id ?? row.key} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/65 bg-muted/50 py-1 pl-2 pr-1">
+          return <li key={row.saved?.id ?? row.key} className="flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-border/65 bg-muted/50 py-1 pl-2 pr-1">
             <span className="min-w-0 break-words">{label}</span><button type="button" className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={'移除信号读数列 ' + label} onClick={() => setReadingDraft(previous => previous.filter((_, i) => i !== index))}><X aria-hidden className="h-3.5 w-3.5"/></button>
+            {row.key.includes(':guard-distance-atr-') ? <span className="text-muted-foreground">K 线周期 5m</span> :
+              <FishMetricTimeFields label={`信号读数 ${index+1}`} metric={row.saved?.metric ?? signalChoices.find(choice=>choice.key===row.key)?.metric}
+                definition={readingDefinitions.get(row.key.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time}
+                onChange={time=>setReadingDraft(previous=>previous.map((item,i)=>i===index?{...item,time}:item))}/>}
           </li>;
         })}
       </ul>}
@@ -191,20 +210,22 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-start gap-2.5">
           <Filter aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"/>
-          <div><h4>买前过滤</h4><p className="text-muted-foreground">按买入前最后一根已收盘的 5 分钟线判断，全部启用条件满足即通过。</p></div>
+          <div><h4>买前过滤</h4><p className="text-muted-foreground">每条条件按所选周期读取买入前最后一根已收盘的 K 线，全部启用条件满足即通过。</p></div>
         </div>
         <button type="button" className={button + ' shrink-0 border border-border/70 bg-background'} disabled={!choices.length} onClick={add}><Plus aria-hidden className="h-3.5 w-3.5"/>添加条件</button>
       </header>
       {!draft.length && <p className="pl-[26px] text-muted-foreground">未设置过滤条件</p>}
       {draft.length > 0 && <div className="space-y-2">{draft.map((row, i) => <div key={i} className="fish-static-condition items-center gap-2">
         <input type="checkbox" aria-label={'启用买入条件 ' + (i + 1)} checked={row.enabled} onChange={event => patch(i, {enabled: event.target.checked})}/>
-        <select aria-label={'买入条件 ' + (i + 1) + ' 指标'} className={field} value={row.choice} onChange={event => patch(i, {choice: event.target.value})}>
+        <select aria-label={'买入条件 ' + (i + 1) + ' 指标'} className={field} value={row.choice} onChange={event => patch(i, {choice: event.target.value,saved:undefined,time:undefined})}>
           {!choices.some(choice => choice.key === row.choice) && <option hidden disabled value={row.choice}>{row.saved?.label ?? row.choice}</option>}
           {groups.map(group => <optgroup key={group} label={group}>{choices.filter(choice => choice.group === group).map(choice => <option key={choice.key} value={choice.key}>{choice.label}</option>)}</optgroup>)}
         </select>
         <select aria-label={'买入条件 ' + (i + 1) + ' 方向'} className={field} value={row.direction} onChange={event => patch(i, {direction: event.target.value as '<' | '>'})}><option value=">">&gt;</option><option value="<">&lt;</option></select>
         <input aria-label={'买入条件 ' + (i + 1) + ' 门槛'} type="number" step="any" className={field} value={row.threshold} onChange={event => patch(i, {threshold: event.target.value})}/>
         <button type="button" aria-label={'删除买入条件 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setDraft(previous => previous.filter((_, index) => index !== i))}><X aria-hidden className="h-3.5 w-3.5"/></button>
+        <FishMetricTimeFields label={`买入条件 ${i+1}`} className="col-span-full" metric={row.saved?.metric ?? choices.find(choice=>choice.key===row.choice)?.metric}
+          definition={filterDefinitions.get(row.choice.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time} onChange={time=>patch(i,{time})}/>
       </div>)}</div>}
     </section>
     <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 bg-popover px-4 py-2.5">
@@ -227,8 +248,8 @@ type MonitorDraft = { addition: ReturnType<typeof additionDraft>; mirror: Return
 const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ addition: additionDraft(plan.addition, plan.sellStages), mirror: mirrorDraft(plan.mirrorTakeProfit ?? defaultQualityMirror()), vetoes: planHoldingVetoDraft(plan.holdingVetoes),vetoStages:{enabled:!!plan.vetoStages?.length,mode:plan.vetoStageMode??'overlay',peakBasis:plan.vetoPeakBasis??'stage',stages:(plan.vetoStages??[]).map(s=>({afterAdditions:String(s.afterAdditions),conditions:holdingVetoDraft(s.conditions)}))} });
 const monitorBaseKey = (plan: QualityGroup) => JSON.stringify([plan.holdingVetoes,plan.mirrorTakeProfit,plan.addition,plan.sellStages,plan.vetoStages,plan.vetoStageMode,plan.vetoPeakBasis]);
 function parseMonitorDraft(draft: MonitorDraft, definitions: Parameters<typeof parseAdditionDraft>[1]) {
-  const holdingVetoes = parseHoldingVetoDraft(draft.vetoes), mirrorTakeProfit = parseMirrorDraft(draft.mirror), addition = parseAdditionDraft(draft.addition,definitions), sellStages = parseAdditionSellStages(draft.addition,definitions);
-  const vetoStages=draft.vetoStages.enabled?draft.vetoStages.stages.map(s=>({afterAdditions:s.afterAdditions.trim()?Number(s.afterAdditions):NaN,conditions:parseHoldingVetoDraft(s.conditions)})).sort((a,b)=>a.afterAdditions-b.afterAdditions):undefined;
+  const holdingVetoes = parseHoldingVetoDraft(draft.vetoes,definitions), mirrorTakeProfit = parseMirrorDraft(draft.mirror), addition = parseAdditionDraft(draft.addition,definitions), sellStages = parseAdditionSellStages(draft.addition,definitions);
+  const vetoStages=draft.vetoStages.enabled?draft.vetoStages.stages.map(s=>({afterAdditions:s.afterAdditions.trim()?Number(s.afterAdditions):NaN,conditions:parseHoldingVetoDraft(s.conditions,definitions)})).sort((a,b)=>a.afterAdditions-b.afterAdditions):undefined;
   if(draft.vetoStages.enabled&&!vetoStages?.length)throw Error('请添加至少一个一票条件切换阶段');
   const staged={vetoStages,vetoStageMode:draft.vetoStages.mode,vetoPeakBasis:draft.vetoStages.peakBasis};validateQualityVetoStages({...staged,addition});
   validateQualitySellStages({sellStages,addition});validateQualityMirror(mirrorTakeProfit); return { holdingVetoes, mirrorTakeProfit, addition, sellStages,...staged };
@@ -953,7 +974,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       <p>批量捕捞、买前过滤、持仓监测独立运行和暂停。买前过滤分为静态过滤、动态筛选。开始过滤、筛选和监测，只处理当前来源、月份、探测算法和标的范围内已勾选的记录；本轮清单和条件在开始时冻结。</p>
       <p>勾选标的后点击「锁定所选」，可单独查看和处理本批。解除锁定可返回原筛选范围。</p>
       <p>批量捕捞按设置中的算法、门槛与组合方式扫描信号。开始按钮右侧的 ▾ 中可选「重新开始」。捕捞库按算法家族分目录，目录表格沿用组合表形式。</p>
-      <p>静态过滤只检查原入场时点之前最后一根已收盘的 5 分钟 K 线，不移动入场时间。动态筛选须让必要条件、准入与排除门槛同分钟共同通过。v7 支持防守线新事件与多条指标准入取或，否决后重建观察起点，原总截止时间不变；旧版方案保留原口径。</p>
+      <p>静态过滤按每条条件选择的周期检查原入场时点之前最后一根已收盘的 K 线，不移动入场时间。动态筛选须让必要条件、准入与排除门槛同分钟共同通过。v7 支持防守线新事件与多条指标准入取或，否决后重建观察起点，原总截止时间不变；旧版方案保留原口径。</p>
       <p>动态筛选在条件设置中填写「单标的筛选时限（小时）」，新筛选默认 48 小时，已有正数设置保留。首次满足即停在命中时间；到时未满足则结束并继续下一条。时限从每个标的的筛选起点计，不是现实运行耗时。行情更短、缺数据或历史不足会按实际状态显示。</p>
       <p>动态筛选运行时显示完成条数与实际扫描进度；暂停或完成后收起进度提示。运行时点击进度、停止后从开始按钮右侧的 ▾ 选择「本轮筛选结果」，可查看全部状态、原因和首次满足时间。组合表随新轮开始更新，手动保存后可在筛选库的时间目录查看。静态过滤与动态筛选的显示和擦除各自独立。</p>
       <p>暂停继续沿用本轮冻结条件；要使用新条件和时限，选「从头重新筛选」。旧的无限时暂停轮次保留，主按钮另开有限时新轮次。保存方案只保存设置；「保存并开始三阶筛选」按新设置从头运行。</p>
@@ -973,7 +994,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         } : undefined} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
         <FishQualityModuleGroup>
           <FishQualityModule level="submodule" title="静态过滤" icon={Filter} testId="quality-static-controls" trailing={<QualityResultTools kind="filter" hidden={hideFilter} onToggle={()=>toggleHidden('filter')} count={study.filterReadings?.length??0} onClear={lockedBatch ? undefined : state.clearFilterResults} disabled={!ready||state.signalValues?.running}/>}
-            summary={<FishQualityInfo label="静态过滤说明"><p>信号时点读数按原信号时间生成。买前过滤检查原入场时点之前最后一根已收盘的 5 分钟 K 线。两项都只处理当前范围内已勾选的记录。</p><p>过滤库按时间目录查看各轮结果，表格与组合表一致。本模块的眼睛和擦除独立于动态筛选、持仓监测。</p></FishQualityInfo>}
+            summary={<FishQualityInfo label="静态过滤说明"><p>信号时点读数按原信号时间生成。买前过滤按每条条件选择的周期检查原入场时点之前最后一根已收盘的 K 线。两项都只处理当前范围内已勾选的记录。</p><p>过滤库按时间目录查看各轮结果，表格与组合表一致。本模块的眼睛和擦除独立于动态筛选、持仓监测。</p></FishQualityInfo>}
             status={!staticRunning&&state.filterProgress&&<span role="status">{resumeFiltering?'已暂停':state.filterError?'过滤未完成':state.filterProgress.done===state.filterProgress.total?'过滤完成':'过滤未完成'} {state.filterProgress.done}/{state.filterProgress.total}</span>}>
           <div role="group" aria-label="静态过滤运行" className="inline-flex h-6 shrink-0 items-stretch">
             {staticRunning

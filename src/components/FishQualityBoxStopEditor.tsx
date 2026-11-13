@@ -18,6 +18,7 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
   return <fieldset disabled={disabled} className="w-full space-y-2 rounded border border-border/60 p-2" data-testid="quality-box-stop-editor">
     {admission?<p className="text-[11px]">DBL-5 原生防守线 · 新线事件准入</p>:eventMode?<p className="text-[11px]">DBL-5 防守线断裂 · 与图中红叉使用同一事件 · {entry?'确认当分钟不入选':'确认后按下一分钟开盘价卖出全部持仓'}</p>:<div className="flex flex-wrap items-center gap-2 text-[11px]">
       <label>箱体算法 <select aria-label={prefix+'算法'} className={field} value={s.algorithm} onChange={e=>putBasis(freezeStructureVersions({...defaultStructureAddition(e.target.value as typeof s.algorithm,definitions),kSource:'current'}))}><option value="dbl5">DBL-5 达瓦斯箱体</option><option value="sbs5m">SBS-5M 台阶箱体</option></select></label>
+      <span className="text-muted-foreground">K 线周期 5m</span>
       <label>K 基准 <select aria-label={prefix+'K基准'} className={field} value={s.kSource==='guard'?'guard':s.kBasis} onChange={e=>putBasis({...s,kSource:e.target.value==='guard'?'guard':'current',kBasis:e.target.value==='invalidation'?'invalidation':'support'})}><option value="support">当前已确认箱底</option>{s.algorithm==='dbl5'?<option value="guard">DBL-5 防守线</option>:<option value="invalidation">SBS 算法失效线</option>}</select></label>
       {s.algorithm === 'dbl5' && s.kSource === 'guard' && <label>防守线类型 <select aria-label={prefix+'防守线类型'} className={field}
         value={rule.guardRegime ?? 'both'} onChange={e => onChange(selectBoxStopGuardRegime(rule, e.target.value as keyof typeof BOX_STOP_GUARD_REGIMES))}>
