@@ -1,7 +1,7 @@
 /**
  * 【用户要求】2026-11-03 组合表下载里「比较重要的是当时组合算法的详细信息，以及买入、加仓、卖出信息」：
  * - 「组合算法」：每套方案一段，逐项写出卖出、组合切换、镜像、硬性终止、加仓（每一次的方向 / 否决 / 位置 / 卖出）与版本；
- * - 「买入·加仓·卖出」：选中的每条信号 × 每套方案一行，写明买入、镜像止盈、每次加仓、卖出及原因与各项结果。
+ * - 「买入·加仓·卖出」：选中的每条信号 × 每套方案一行，写明买入、镜像平衡减仓、每次加仓、卖出及原因与各项结果。
  */
 import { QUALITY_ADVANTAGE_EXPLANATION, qualityAdvantageFingerprint } from './qualityAdvantage';
 import type { XlsxCell, XlsxSheet } from '@/lib/xlsxWorkbook';
@@ -45,7 +45,7 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
     add(plan, '卖出', '卖出算法', qualityRuleText(plan), versions.get('sell')?.version ?? '');
     if (plan.combo) add(plan, '卖出', '组合切换', `涨幅 ≥ ${plan.combo.switchPct}% 后改用 ${plan.combo.after.label} ${plan.combo.after.rule.direction} ${plan.combo.after.rule.threshold}`, versions.get('combo')?.version ?? '');
     add(plan, '卖出', '执行方式', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : '5 分钟收盘确认', versions.get('execution')?.version ?? '');
-    add(plan, '镜像', '半仓镜像', mirrorLabel(plan.mirrorTakeProfit) || '未启用', versions.get('mirror')?.version ?? '');
+    add(plan, '镜像', '镜像平衡减仓', mirrorLabel(plan.mirrorTakeProfit) || '未启用', versions.get('mirror')?.version ?? '');
     const stops = activeHoldingVetoes(plan.holdingVetoes);
     add(plan, '硬性终止', '条件', stops.length ? stops.map(v => holdingVetoLabel(v)).join('；') : '未启用', versions.get('hard-stop')?.version ?? '');
     const a = plan.addition;
@@ -86,6 +86,6 @@ export function qualityTradeDetailSheet(members: readonly QualitySample[], plans
       round(r?.pnl, 4), round(r?.returnPct), round(qualityPayoffRatio(plan, r).value), round(qualityRelativeGain(plan, r).value), round(qualityGeometricPosition(r)),
       round(r?.peakPct), round(r?.drawdownPct), round(r?.heldHours)]);
   }
-  const headers = ['标的', '信号时间', '方案', '状态', '买入时间', '买入价', '镜像止盈时间', '镜像止盈价', '镜像卖出 %', '加仓次数', '各次加仓', '累计投入 USDT', '卖出 / 估值时间', '卖出 / 估值价', '卖出原因', '盈亏 USDT', '收益率 %', '盈亏比 R', '相对涨幅 %', '几何仓位 ×', '峰值涨幅 %', '动态最大回撤 %', '持仓小时'];
+  const headers = ['标的', '信号时间', '方案', '状态', '买入时间', '买入价', '镜像平衡减仓时间', '镜像平衡减仓价', '镜像卖出 %', '加仓次数', '各次加仓', '累计投入 USDT', '卖出 / 估值时间', '卖出 / 估值价', '卖出原因', '盈亏 USDT', '收益率 %', '盈亏比 R', '相对涨幅 %', '几何仓位 ×', '峰值涨幅 %', '动态最大回撤 %', '持仓小时'];
   return { name: '买入·加仓·卖出', columns: headers.map(header => ({ header, width: header === '各次加仓' || header === '卖出原因' ? 60 : Math.max(10, header.length * 2 + 4) })), rows };
 }

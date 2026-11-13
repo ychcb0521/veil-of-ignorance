@@ -66,6 +66,11 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
     ['标的', campaign.symbol, ''], ['方案', plan?.label ?? c?.planLabel ?? '', ''], ['战役编号', campaign.campaign_code, ''],
     ['信号', signalLine, '来源 · 信号时间（UTC）'], ['探测算法', (c?.detectors ?? []).map(d => d.label).join('；'), ''], ['信号类别', c?.category ?? '', ''],
     ['买入时间', time(entryAt), 'UTC+8'], ['买入价', p8(entryPrice), ''], ['首仓 USDT', campaign.initial_main_size_usdt, ''],
+    ...(c?.instant?.mirrorFill ? [
+      ['镜像平衡减仓时间', time(c.instant.mirrorFill.at), 'UTC+8'],
+      ['镜像平衡减仓成交价', p8(c.instant.mirrorFill.price), ''],
+      ['镜像平衡减仓比例 %', c.instant.mirrorFill.fraction * 100, ''],
+    ] as XlsxCell[][] : []),
     ...(c?.instant ? [['保证金 USDT', c.instant.marginUsdt, ''], ['杠杆倍数', campaign.initial_leverage, ''], ['卖出时 CDA 读数', c.instant.cdaValue ?? '', '5 分钟收盘']] as XlsxCell[][] : []),
     ['镜像止盈', mirror ? `${time(mirror.at)} @ ${p8(mirror.price)} · 卖出 ${r(mirror.fraction * 100)}% · 涨 ${r(mirror.gainPct)}%` : '未成交', ''],
     ['加仓次数', fills.length, ''], ['累计投入 USDT', r(ev?.totalInvested ?? m?.totalInvested, 4), ''], ['持仓均价', p8(ev?.averageEntryPrice), ''],

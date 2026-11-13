@@ -70,7 +70,7 @@ export function FishScreened({ state, library, ratings, onJump, canJump, onRate,
               </button>}
               {cda && <div className={save ? 'space-y-1.5 border-t px-2 pb-1 pt-2' : 'space-y-1.5 px-2 py-1'}>
                 <p className="font-medium">即时交易 · 自动持仓</p>
-                <p className="text-muted-foreground">筛选鱼入选后自动建立模拟持仓。CDA 原始值低于 −10 或 DBL-5 防守线（防守线-20261112）断裂，任一在 5 分钟收盘确认即卖出；也可在「仓位」手动卖出。</p>
+                <p className="text-muted-foreground">筛选鱼入选后自动建立模拟持仓。CDA 原始值低于 −10 或 DBL-5 防守线（防守线-20261112）断裂，任一在 5 分钟收盘确认即卖出余仓。价格相对开仓价下跌 5% 时止损，上涨 2% 时执行一次镜像平衡减仓，卖出原始数量的 71.5%。也可在「仓位」手动卖出余仓。</p>
                 {cda.enabled && <p role="status">追踪中 {cda.active} 条{cda.awaitingMail > 0 && ' · 待发邮件 ' + cda.awaitingMail + ' 条'}</p>}
                 {cda.error && <p role="alert" className="text-destructive">{cda.error}</p>}
               </div>}

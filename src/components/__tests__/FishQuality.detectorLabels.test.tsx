@@ -18,7 +18,7 @@ function state(){
 it('no longer shows a detector-label column under 持仓监测; the half mirror is followed by holding time',()=>{
  const s=state(),[a,b]=s.study.sellPlans!;render(<FishQuality state={s}/>);
  expect(screen.queryAllByTestId('quality-detector-label-header')).toHaveLength(0);expect(screen.queryByRole('button',{name:'展开'+a.label+'探测标签'})).toBeNull();
- for(const p of [a,b]){const mirror=screen.getByRole('button',{name:'按'+p.label+'半仓镜像实际涨幅排序'}).closest('th')!;expect(mirror.nextElementSibling).toHaveTextContent(/^持仓时间/);}
+ for(const p of [a,b]){const mirror=screen.getByRole('button',{name:'按'+p.label+'镜像平衡减仓实际涨幅排序'}).closest('th')!;expect(mirror.nextElementSibling).toHaveTextContent(/^持仓时间/);}
 });
 it('exports the same classifications although the table no longer shows the column',()=>{
  const s=state(),plan=s.study.sellPlans![0];render(<FishQuality state={s}/>);const sheets=buildQualitySheets(s.study,qualityComparisonRows(s.study)),main=sheets[0],col=main.columns.findIndex(c=>c.header===plan.label+' · 探测标签');expect(main.rows.map(r=>r[col])).toEqual(['轻微误报','严重误报','准确击中']);expect(main.rows.every(r=>r.length===main.columns.length)).toBe(true);

@@ -39,7 +39,7 @@ export function SaveTemplateButton({ index, defaultName, disabledReason, onSave,
   const [open, setOpen] = useState(false), [name, setName] = useState(defaultName), [error, setError] = useState('');
   const submit = () => { try { onSave(name); setOpen(false); } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败'); } };
   return <Popover open={open} onOpenChange={next => { setOpen(next); if (next) { setName(defaultName); setError(''); } }}><PopoverTrigger asChild>
-    <button type="button" disabled={!!disabledReason} aria-label={ariaLabel??'把卖出算法 ' + (index + 1) + ' 存为模板'} title={disabledReason ?? '存为模板：保存整套方案（组合算法、半仓镜像、加仓细节、硬性终止等全部参数），以后可一键新建'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"><BookmarkPlus className="h-3.5 w-3.5"/></button>
+    <button type="button" disabled={!!disabledReason} aria-label={ariaLabel??'把卖出算法 ' + (index + 1) + ' 存为模板'} title={disabledReason ?? '存为模板：保存整套方案（组合算法、镜像平衡减仓、加仓细节、硬性终止等全部参数），以后可一键新建'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"><BookmarkPlus className="h-3.5 w-3.5"/></button>
   </PopoverTrigger><PopoverContent align="end" className="w-72 space-y-2 p-3 text-[11px]">
     <p className="font-medium">存为模板</p>
     <input aria-label="模板名称" autoFocus className={field + ' w-full'} value={name} onChange={e => { setName(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') submit(); }}/>
@@ -268,7 +268,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         {!readOnly && !embedded && templates && <SaveTemplateButton index={i} defaultName={labelOf(d, baseOf(d))} disabledReason={!ready ? '尚未加载完成' : !plans.some(p => p.id === d.id) ? '新方案先点「保存全部方案」，再存为模板' : dirty || extraDirty ? '有未保存的修改：先点「保存全部方案」，模板保存的是已保存的设置' : undefined} onSave={name => templates.save(d.id, name)}/>}
         {!readOnly && !embedded && !baseOf(d)?.initialization && <button type="button" className="shrink-0 rounded border border-primary/25 px-1.5 py-0.5 text-[10px] text-primary disabled:opacity-40" disabled={!ready || dirty || extraDirty || !plans.some(p=>p.id===d.id)} title="原方案保留；新副本从图灵杯首根行情初始化，BTC 依赖改用已有独立无 BTC 版本。请先保存当前修改。" aria-label={'新建图灵杯专用副本 ' + (i + 1)} onClick={()=>turingCopy(d)}>图灵杯副本</button>}
       {baseOf(d)?.initialization && <span className="text-[10px] text-amber-600" title="从实际首根行情初始化；初期读数与完整历史预热不同。原方案另行保留。">首根初始化 v1</span>}
-      {!readOnly && !embedded && <><button type="button" disabled={!ready} aria-label={`复制${action}算法 ` + (i + 1)} title={purpose==='entry'?'复制整套筛选算法和确认条件':'复制整套方案：含当前填写的组合算法、加仓、镜像止盈和一票条件'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
+      {!readOnly && !embedded && <><button type="button" disabled={!ready} aria-label={`复制${action}算法 ` + (i + 1)} title={purpose==='entry'?'复制整套筛选算法和确认条件':'复制整套方案：含当前填写的组合算法、加仓、镜像平衡减仓和一票条件'} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" onClick={() => duplicate(d, i)}><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" aria-label={`删除${action}算法 ` + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></>}</div>
       {baseOf(d)?.router ? <p className="text-[10.5px] text-muted-foreground">条件分支方案：在下方修改两个分支的卖出、镜像、加仓与止损设置。</p> : <fieldset disabled={isLegacyQualityPlan(baseOf(d))} className="contents"><div className="fish-plan-condition grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
         {select(d.choice, `${action}算法 ` + (i + 1) + ' 指标', choice => patch(d.id, { choice }))}
@@ -285,7 +285,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     {!readOnly&&!embedded&&recoverablePlans&&<FishQualitySavedPlanRecovery plans={recoverablePlans.filter(p=>!drafts.some(d=>d.id===p.plan.id))} disabled={!ready} onRestore={restoreSavedPlan}/>}
     {!readOnly&&!embedded&&drafts.some(d=>baseOf(d)?.router)&&<p className="text-[10.5px] text-muted-foreground">拆分时一并保存当前修改、原组合和两套独立方案，不启动监测。</p>}
     {!readOnly && !embedded && <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : `保存${action}算法`}</button>
-      <span className="text-[10px] text-muted-foreground">{purpose === 'entry' ? '每套筛选方案须填写门槛；确认条件可选，启用后须与筛选算法同时满足。' : '未填普通门槛时，可单独使用该方案的加仓、镜像止盈或持仓否决。'}</span></div>}
+      <span className="text-[10px] text-muted-foreground">{purpose === 'entry' ? '每套筛选方案须填写门槛；确认条件可选，启用后须与筛选算法同时满足。' : '未填普通门槛时，可单独使用该方案的加仓、镜像平衡减仓或持仓否决。'}</span></div>}
     {error && !renderHolding && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </section></fieldset>{renderHolding?.({ plans: preview, dirty: dirty || extraDirty, algorithmsDirty: dirty, error, build, save: apply })}</>;
 }

@@ -56,3 +56,47 @@ it.each(['cda-first','guard-first','same-close'] as const)('sells at the first n
   expect(result).toMatchObject({through:soldAt,trigger:{at:soldAt,value:order==='guard-first'?-4:-12,closePrice:order==='cda-first'?117:93,
     evidence:{version:SCREENED_CDA_GUARD_RULE,reason:order==='cda-first'?'cda':order==='guard-first'?'guard':'both'}}});
 });
+
+it.each(['mirror-then-stop','same-minute-stop','gap-below-stop'] as const)('settles the screened price rules in order: %s', async scenario => {
+  const T = Date.UTC(2026, 10, 13);
+  const M = 60_000;
+  const source = { id:'price-risk',symbol:'TESTUSDT',timeMs:T,timeLabel:'',fallbackZone:'' };
+  const definition = { ...CDA_DEF, interval:'5m' as const, formula:'CDA = C - C\\navg_CDA = avg(CDA, 1)' };
+  const snapshot = { featureId:'cda',definitionKey:definitionKey(definition),interval:'5m' as const,threshold:-10,
+    cutoffMs:0,average:0,cbi2:0,startAverage:0,previousAverage:0 };
+  const load: FishReconstructionLoader = async (_row, from, end, plan) =>
+    Array.from({length:(end-from)/plan.step}, (_, i) => {
+      const openTime=from+i*plan.step;
+      const first=plan.step===M && openTime===T;
+      const second=plan.step===M && openTime===T+M;
+      const open=second&&scenario==='gap-below-stop'?91:100;
+      const high=first?102:101;
+      const low=first&&scenario==='same-minute-stop'?94:second?90:99;
+      return {openTime,open,high,low,close:100,volume:1,takerBuyVolume:.5,DBL5_tick_size:1};
+    });
+  const signal = new AbortController().signal;
+  const {readScreenedPositionExit}=await import('../screenedPriceExit');
+  const {buildInstantCampaignData,freezeInstantCampaign}=await import('../instantCampaign');
+  const {computeCampaignRealizedPnl}=await import('@/lib/campaignRealizedPnl');
+  const task={id:'fish-instant-risk',source,after:T,observeAfter:T};
+  const first=await readScreenedPositionExit(task,T+M,snapshot,load,signal);
+  if(scenario==='same-minute-stop'){
+    expect(first.trigger).toMatchObject({closePrice:95,evidence:{reason:'static-stop'}});
+    expect(first.trigger?.mirror).toBeUndefined();
+    return;
+  }
+  expect(first.trigger).toBeUndefined();
+  expect(first.risk?.mirror).toMatchObject({price:102,fraction:.715});
+  const result=await readScreenedPositionExit({...task,risk:JSON.parse(JSON.stringify(first.risk))},T+2*M,snapshot,load,signal);
+  const exit=scenario==='gap-below-stop'?91:95;
+  expect(result.trigger).toMatchObject({at:T+M,closePrice:exit,mirror:{price:102,fraction:.715},evidence:{reason:'static-stop'}});
+  const frozen=await freezeInstantCampaign({id:task.id,recordId:'risk',source,buyAt:T,sell:result.trigger!,detectors:[]},load,signal);
+  expect(frozen.staticDrawdown).toBeCloseTo(100-exit);
+  const {campaign,legs,tradeRecords}=buildInstantCampaignData('fixture',frozen);
+  expect(tradeRecords).toHaveLength(2);
+  expect(tradeRecords[0].quantity).toBeCloseTo(1.43);
+  expect(tradeRecords[1].quantity).toBeCloseTo(.57);
+  const pnl=1.43*2+.57*(exit-100);
+  expect(campaign.final_realized_pnl).toBeCloseTo(pnl);
+  expect(computeCampaignRealizedPnl(campaign,legs,tradeRecords,{}).total).toBeCloseTo(pnl);
+});

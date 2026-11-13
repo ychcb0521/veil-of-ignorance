@@ -1010,7 +1010,7 @@ export function PositionPanel({
             {/* Body */}
             <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
               {instant?.close && instantPositions.length > 0 && <div className="space-y-2 px-3 pt-3">
-                {instantPositions.map(position => <InstantPositionRow key={position.id} position={position} close={instant.close!} />)}
+                {instantPositions.map(position => <InstantPositionRow key={position.id} position={position} mirror={instant.mirrorFills?.get(position.recordId)} close={instant.close!} />)}
               </div>}
               {mergedPositions.length === 0 ? instantPositions.length ? null : (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">

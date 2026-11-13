@@ -522,7 +522,7 @@ function buildChartArtifacts(
     });
   }
 
-  const paperMirror=!!campaign.comparison?.sellEvidence?.mirrorFill;
+  const paperMirror=!!(campaign.comparison?.instant?.mirrorFill ?? campaign.comparison?.sellEvidence?.mirrorFill);
   let rollingIndex = 1;
   for (const leg of legs) {
     if(paperMirror&&leg.leg_role==='mirror_tp')continue;
@@ -616,7 +616,7 @@ function buildChartArtifacts(
         });
       }
       if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
-        const mirrorFill = campaign.comparison?.sellEvidence?.mirrorFill;
+        const mirrorFill = campaign.comparison?.instant?.mirrorFill ?? campaign.comparison?.sellEvidence?.mirrorFill;
         if (!mirrorFill || mirrorFill.fraction < 1) markers.push({
           time: closeTime,
           price: exitPrice,

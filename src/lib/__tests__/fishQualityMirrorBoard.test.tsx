@@ -36,14 +36,14 @@ describe('mirror campaign board and consistent accounting', () => {
     const summary = halfMirrorSummary(full.plan.mirrorTakeProfit, full.result);
     expect(summary.value).toBeCloseTo(8); expect(summary.text).toBe('+8.00% · 已卖 25%');
     const model = qualityMirrorBoard(full.campaign)!;
-    expect(model).toMatchObject({title:'镜像止盈',soldFraction:.25,remainingFraction:0,closed:true});
+    expect(model).toMatchObject({title:'镜像平衡减仓',soldFraction:.25,remainingFraction:0,closed:true});
     expect(model.mirrorPnl).toBeCloseTo(2); expect(model.remainingPnl).toBeCloseTo(7.5);
     expect(model.returnPct).toBeCloseTo(9.5); expect(model.quantity).toBe(.25);
     render(<QualityMirrorBoard campaign={full.campaign}/>);
     expect(screen.getByTestId('mirror-actual-gain')).toHaveTextContent('+8.00%');
     expect(screen.getByTestId('mirror-total-roi')).toHaveTextContent('+9.50%');
     expect(screen.getByTestId('quality-mirror-board')).toHaveTextContent('余仓 75% 已按原卖出条件卖出');
-    expect(screen.getByTestId('quality-mirror-board')).toHaveTextContent('止盈已兑现 +2.00 USDT');
+    expect(screen.getByTestId('quality-mirror-board')).toHaveTextContent('减仓已实现 +2.00 USDT');
     cleanup();
   });
   it('never derives a mirror fill from a later peak; legacy disabled and missing entry stay explicit', () => {
@@ -100,7 +100,7 @@ describe('mirror campaign board and consistent accounting', () => {
     try {
       drawMirrorBoard(ctx,view.container,box);
       const text=vi.mocked(ctx.fillText).mock.calls.map(call=>call[0]).join('');
-      expect(text).toContain('半仓止盈');expect(text).toContain('+5.00%');expect(text).toContain('+7.50%');expect(text.replace(/\s/g,'')).toContain('余仓50%');
+      expect(text).toContain('镜像平衡减仓');expect(text).toContain('+5.00%');expect(text).toContain('+7.50%');expect(text.replace(/\s/g,'')).toContain('余仓50%');
     } finally {range.mockRestore();cleanup();}
   });
 });

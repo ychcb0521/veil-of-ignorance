@@ -3,7 +3,8 @@ import type {CampaignEvent,TradeJournal} from '@/types/journal';
 
 /** Partition original acquisition lots: a mirror close is a separate leg, never new invested capital. */
 export function withQualityMirrorLegs(data:QualityCampaignData):QualityCampaignData{
- const fill=data.campaign.comparison?.sellEvidence?.mirrorFill;if(!fill)return data;
+ const instant=data.campaign.comparison?.instant;
+ const fill=instant?.mirrorFill??data.campaign.comparison?.sellEvidence?.mirrorFill;if(!fill)return data;
  let records=data.tradeRecords.map(r=>({...r})),events=data.campaign.actual_evolution.map(e=>({...e}));
  const legs:TradeJournal[]=[];
  for(const leg of data.legs){
@@ -13,7 +14,7 @@ export function withQualityMirrorLegs(data:QualityCampaignData):QualityCampaignD
   const mirrorId=partial?leg.id+'-mirror-tp':leg.id,remainingRef=leg.id+'-remaining-position';
   const target=mirror.entryPrice*(1+fill.gainPct/100);
   const mirrorLeg:TradeJournal={...leg,id:mirrorId,leg_role:'mirror_tp',trade_record_id:mirror.id,pre_position_size:cost,
-   pre_planned_take_profit:target,pre_entry_reason:`${fill.fraction===.5?'半仓镜像':'镜像止盈'}：卖出原始买入币数 ${fill.fraction*100}%；由原买入仓位分出。`,
+   pre_planned_take_profit:target,pre_max_loss_usdt:instant?null:leg.pre_max_loss_usdt,pre_entry_reason:`镜像平衡减仓：卖出原始买入币数 ${fill.fraction*100}%；由原买入仓位分出。`,
    post_simulated_close_time:new Date(mirror.closeTime).toISOString(),post_real_close_time:new Date(mirror.closedRealAt??mirror.closeTime).toISOString(),post_exit_price_snapshot:mirror.exitPrice,
    post_realized_pnl:mirror.pnl,post_outcome:mirror.pnl>0?'win':mirror.pnl<0?'loss':'breakeven'};
   if(partial){

@@ -293,13 +293,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       <dt className="font-mono text-foreground">C</dt><dd>箱体支撑：新 C 触发加仓；旧 C 是上一箱体的支撑，多留一个箱体作冗余</dd>
       <dt className="font-mono text-foreground">防</dt><dd>防守线（DBL-5）：新箱底抬高且与上一箱体重叠不到一半为上涨期，线＝箱底 − a×ATR、只升不降；否则为震荡期，线＝震荡区最低箱底 − b×ATR，区间内的小箱体不抬线。跌破须按 5 分钟收盘确认（上涨期 1 根、震荡期连续 2 根），确认后下一分钟开盘卖出。图上蓝色实线＝上涨期、虚线＝震荡期，都是防守线；细节见「位置」里防守线旁的 ⓘ</dd>
       <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后为上一次的 K</dd>
-      <dt className="font-mono text-foreground">Q</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'加仓前实际持币数，未卖出时为全部建仓数量':'加仓前持币数（首轮为镜像止盈后的剩余币数）'}</dd>
+      <dt className="font-mono text-foreground">Q</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'加仓前实际持币数，未卖出时为全部建仓数量':'加仓前持币数（首轮为镜像平衡减仓后的剩余币数）'}</dd>
       <dt className="font-mono text-foreground">账</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'C成本为剩余仓位的取得成本；G已实现为镜像及减仓的净盈亏（亏损保留负号）。历次加仓成本已计入，不能重复使用落袋。':'P为本轮可用落袋利润，用过的不再重复使用。'}</dd>
      </dl>
     </InfoBlock>
     <InfoBlock title="时序">
      <ul className="list-disc space-y-0.5 pl-4">
-      <li>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'不等待镜像成交；从建仓后的合格新机会开始检查。镜像成交的同一分钟不加仓，不借用未来落袋盈亏。':'历史口径：首次加仓须在镜像止盈成交之后（卖出比例不限，须留有余仓），最早从下一分钟起检查。'}</li>
+      <li>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'不等待镜像成交；从建仓后的合格新机会开始检查。镜像成交的同一分钟不加仓，不借用未来落袋盈亏。':'历史口径：首次加仓须在镜像平衡减仓成交之后（卖出比例不限，须留有余仓），最早从下一分钟起检查。'}</li>
       <li>卖出与加仓同时触发时先卖出；同一分钟先后不明时优先止损，跳空按开盘价。</li>
       <li>只用新确认的收盘读数；ATR 为加仓时已收盘的 5 分钟 ATR(14)；续算不会重复加仓。</li>
      </ul>
@@ -425,10 +425,10 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    <p>碰到 K：本次加仓后价格跌到「位置」里算出的 K 即卖出全部持仓，跳空按开盘价；同一分钟先后不明时优先止损。这一条始终生效。</p>
    <p>否决条件：本次加仓实际成交后开始检查，可添加多条，任一条达标即卖出全部持仓；条件类型与 ④ 硬性终止相同（静态 / 动态回撤、1 / 5 分钟内跌幅、指标、加仓止盈约束）。后面某次加仓没有另设时，继续沿用这里的条件。</p>
    <p>与硬性终止：「同类替换」时，这里的某类条件替换硬性终止里的同类条件（如动态回撤 20% 改为 15%），其他硬性终止条件照常生效；「整组替换」时只用这里的条件。回撤峰值可沿用持仓最高价，或从本次加仓成交价重新记录。这两项对各次加仓通用。</p>
-   <p>支撑线下移时减仓（减仓计算器同一公式）：最近一次加仓所依据的支撑线（选防守线时为防守线）在 5 分钟收盘时下移 ≥ n×ATR，而价格仍在原 K 之上，就把止损 K 挪到新支撑算出的 K′，并在下一分钟开盘价 T 减仓 X＝(S−K′)÷(T−K′)，S 为整笔保本价（扣除镜像止盈与此前减仓已落袋的利润）。这样之后碰到 K′ 时整笔仍约保本。X≤0 时只挪 K′ 不减仓；X≥1 或超过单次上限时不减仓、K 不动。减仓落袋的利润计入之后加仓的可用利润 G。</p>
+   <p>支撑线下移时减仓（减仓计算器同一公式）：最近一次加仓所依据的支撑线（选防守线时为防守线）在 5 分钟收盘时下移 ≥ n×ATR，而价格仍在原 K 之上，就把止损 K 挪到新支撑算出的 K′，并在下一分钟开盘价 T 减仓 X＝(S−K′)÷(T−K′)，S 为整笔保本价（扣除镜像平衡减仓与此前减仓已落袋的利润）。这样之后碰到 K′ 时整笔仍约保本。X≤0 时只挪 K′ 不减仓；X≥1 或超过单次上限时不减仓、K 不动。减仓落袋的利润计入之后加仓的可用利润 G。</p>
    <p>保住有效涨幅：整笔几何仓位 M（现持币数 ÷ 首仓币数）大于门槛（默认 10）时，止损线从最近一次加仓的 Kₘ 上移到 Kₘ＋x%×首次开仓价 E（默认 x＝1%），价格盘中碰到即卖出全部持仓（跳空按开盘价）。这样卖出时开仓价的有效涨幅 ΔP÷E＝(卖出价−Kₘ)÷E 至少约为 x%。这条线不等收盘确认：即使 K 取防守线，碰线也当场卖出。M 不超过门槛时照旧按 K 卖出；之后的加仓把 Kₘ 换成新的 K，线随之重算。</p>
    <p>K 连续下移 N 次即全仓卖出：自最近一次加仓起，K 每下移一次计一次（加仓把 K 上移后重新计数）；第 N 次下移确认时不再减仓，按下一分钟开盘价卖出全部持仓。</p>
-   <p>改用的卖出算法：本次加仓实际成交后，普通卖出算法换成这里设置的指标，直到下一次加仓另有设置；未设置则沿用之前的卖出算法。半仓镜像与硬性终止继续生效。</p>
+   <p>改用的卖出算法：本次加仓实际成交后，普通卖出算法换成这里设置的指标，直到下一次加仓另有设置；未设置则沿用之前的卖出算法。镜像平衡减仓与硬性终止继续生效。</p>
   </div>}>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
     <label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" checked disabled aria-label="碰到K卖出"/><span className="font-medium">碰到 K</span></label>

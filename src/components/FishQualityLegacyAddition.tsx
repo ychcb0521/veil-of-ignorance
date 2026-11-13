@@ -29,7 +29,7 @@ export function LegacyAdditionView({ plan }: { plan: QualityGroup }) {
   return <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="quality-legacy-addition">
     <div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">③ 加仓细节</h4><span className="text-[10px] text-muted-foreground">{LEGACY_ENGINE_LABEL}的设置</span></div>
     {!rows.length ? <p className="text-[11px] text-muted-foreground">未启用加仓</p> : <>
-      <p className="text-[11px] text-muted-foreground">最多加仓 {a?.maxRounds ?? rows.length} 次 · 半仓镜像后按余仓平衡定量 · 碰到 K 卖出</p>
+      <p className="text-[11px] text-muted-foreground">最多加仓 {a?.maxRounds ?? rows.length} 次 · 镜像平衡减仓后按余仓平衡定量 · 碰到 K 卖出</p>
       <table className="w-full text-[11px] tabular-nums">
         <thead><tr className="text-left text-[10px] text-muted-foreground"><th className="py-0.5 pr-2 font-normal">次</th><th className="pr-2 font-normal">加仓条件</th><th className="pr-2 font-normal">入场距离</th><th className="pr-2 font-normal">止损 K</th><th className="font-normal">涨幅门槛</th></tr></thead>
         <tbody>{rows.map(r => <tr key={r.round} className="border-t border-border/40" data-testid={`quality-legacy-round-${r.round}`}>

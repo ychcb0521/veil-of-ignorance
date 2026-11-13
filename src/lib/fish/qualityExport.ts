@@ -27,7 +27,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     { header: '标的', width: 25 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 }, { header: '探测值', width: 20 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
     ...plans.flatMap(p => [{header:`${p.label} · 入场读数`,width:36},{ header: `卖出 · ${p.label}（${hasQualityExit(p) ? qualityRuleText(p) : '未设置'}）收益率 %`, width: 34 },
-      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 首仓涨幅 %`,width:28},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 加仓次数`,width:20},{header:`${p.label} · 加仓状态`,width:22},{header:`${p.label} · 探测标签`,width:24},{header:`${p.label} · 持仓小时`,width:22},...POST_EXIT_HOURS.flatMap(h=>['峰值涨幅','静态最大回撤2'].map(metric=>({header:`${p.label} · 卖后${h}h ${metric} %（卖出价基准）`,width:34})))]),
+      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 首仓涨幅 %`,width:28},{header:`${p.label} · 镜像平衡减仓实际涨幅 %`,width:30},{header:`${p.label} · 镜像平衡减仓状态`,width:24},{header:`${p.label} · 加仓次数`,width:20},{header:`${p.label} · 加仓状态`,width:22},{header:`${p.label} · 探测标签`,width:24},{header:`${p.label} · 持仓小时`,width:22},...POST_EXIT_HOURS.flatMap(h=>['峰值涨幅','静态最大回撤2'].map(metric=>({header:`${p.label} · 卖后${h}h ${metric} %（卖出价基准）`,width:34})))]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
@@ -50,7 +50,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['卖出算法入场读数', 36], ['收益率 %', 15], ['盈亏 USDT', 15],
     ['峰值涨幅 %', 16], ['最大不利涨跌 %', 18], ['动态最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
     ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['阈值确认时间', 24], ['实际卖出公式', 60],
-    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],['卖出涨跌幅 %',28],['半仓镜像实际涨幅 %',24],['半仓镜像状态',24],['探测标签',24],
+    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],['卖出涨跌幅 %',28],['镜像平衡减仓实际涨幅 %',24],['镜像平衡减仓状态',24],['探测标签',24],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const effective=effectiveQualitySellPlan(run.plan,r),definition = qualityDefinition(effective.snapshot);

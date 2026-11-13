@@ -34,7 +34,7 @@ import { hasPreBoxAdditionShape, isLegacyQualityPlan, legacyPlanVersions, withLe
 export interface PlanVersionEntry {
   /** 稳定键：同一方案前后比较时按它对齐。 */
   key: string;
-  /** 所属部分：卖出算法、半仓镜像、硬性终止、加仓、箱体算法…… */
+  /** 所属部分：卖出算法、镜像平衡减仓、硬性终止、加仓、箱体算法…… */
   part: string;
   /** 这一项是什么（如「CDA < 0.5」「DBL-5 v2」）。 */
   name: string;
@@ -93,7 +93,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   add('execution', '卖出执行', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : '5 分钟收盘确认', plan.execution === 'intrabar-1m' ? 'intrabar-1m-v1' : 'close-confirm',
     plan.execution === 'intrabar-1m' ? '用 1 分钟线复原 5 分钟指标，盘中达标即卖' : '只认 5 分钟收盘读数');
   const mirror = [...versionTags(mirrorIdentity(plan.mirrorTakeProfit)), ...versionTags(mirrorExecutionIdentity(plan))];
-  if (plan.mirrorTakeProfit?.enabled) add('mirror', '半仓镜像', `涨 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%`, join(mirror), '限价镜像止盈，只卖一次');
+  if (plan.mirrorTakeProfit?.enabled) add('mirror', '镜像平衡减仓', `涨 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%`, join(mirror), '限价镜像止盈，只卖一次');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
   if (vetoes.length) add('hard-stop', '硬性终止', vetoes.map(v => holdingVetoLabel(v)).join(' 或 '),
     join([qualityVetoVersion(plan), ...vetoes.filter(v => v.snapshot?.definitionKey).map(v => formulaFingerprint(v.snapshot!))]),

@@ -257,7 +257,7 @@ it('入选邮件用原信号的实际命中类型及本轮筛选模板，纯文�
  const reasons=['卖出原因　DBL-5 防守线断裂', '卖出时间　2026-10-21 09:15:00','模拟成交价　93',
    '卖出时 CDA 原始值　-4', '防守线　防守线-20261112 · 5 分钟收盘红叉确认'];
  expect(guard.message).toContain(reasons.join('\n'));
- expect(guard.message).toContain('任一条件先在 5 分钟收盘确认即卖出');
+ expect(guard.message).toContain('CDA 或防守线断裂在 5 分钟收盘确认后卖出余仓');
  container.innerHTML=guard.message_html;
  expect([...container.querySelectorAll('tr')].slice(-5).map(row=>row.textContent)).toEqual(reasons.map(row=>row.replace('　','')));
 });

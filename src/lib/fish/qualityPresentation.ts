@@ -30,7 +30,7 @@ export function qualityRelativeGain(plan:Pick<QualityGroup,'holdingVetoes'>,resu
 }
 /**
  * 几何仓位 M（与交易战役同口径）＝ (1 − αf) × ∏(1 + αₖ)：加仓后相对首仓的仓位倍数。
- * αf 首次加仓前已卖出的首仓比例（这里就是半仓镜像）；αₖ 第 k 次加仓币数 ÷ 加仓前持币数。
+ * αf 首次加仓前已卖出的首仓比例（这里就是镜像平衡减仓）；αₖ 第 k 次加仓币数 ÷ 加仓前持币数。
  * 没有加仓：已卖出时 αf 计入镜像，仍持有时不计（交易战役同样只在战役结束后计入未加仓前的减仓）。
  */
 export function qualityGeometricPosition(result?:QualityResult):number|null{
@@ -65,13 +65,13 @@ export const qualityPayoffRatioText=(value:number|null)=>value==null?'—':`${va
 export const qualityRelativeGainText=(value:number|null)=>value==null?'—':`${(value/100).toFixed(2)}×`;
 export interface HalfMirrorSummary { state:'disabled'|'pending'|'error'|'untriggered'|'filled'; label:string; value:number|null; text:string; detail:string }
 const pct=(value:number)=>`${value>0?'+':''}${value.toFixed(2)}%`;
-type MirrorResult = Pick<QualityResult,'status'|'returnPct'|'entryPrice'|'initialNotional'|'mirrorRealizedPnl'|'remainingPnl'> & {mirrorFill?:QualityMirrorFill};
+type MirrorResult = Pick<QualityResult,'status'|'returnPct'|'entryPrice'|'initialNotional'|'mirrorRealizedPnl'|'remainingPnl'> & {mirrorFill?:QualityMirrorFill; marginUsdt?:number};
 export function halfMirrorSummary(rule:QualityMirrorTakeProfit|undefined,result?:MirrorResult):HalfMirrorSummary {
  const filled=result?.mirrorFill;
- if(!filled && !rule?.enabled)return {state:'disabled',label:'未启用',value:null,text:'未启用',detail:'本轮未启用镜像止盈，历史结果不套用当前设置。'};
- const config=rule?.enabled?`涨幅 ≥ ${rule.gainPct}%，卖出初始币数 ${rule.sellPct}%`:'镜像止盈历史成交';
+ if(!filled && !rule?.enabled)return {state:'disabled',label:'未启用',value:null,text:'未启用',detail:'本轮未启用镜像平衡减仓，历史结果不套用当前设置。'};
+ const config=rule?.enabled?`涨幅 ≥ ${rule.gainPct}%，卖出初始币数 ${rule.sellPct}%`:'镜像平衡减仓历史成交';
  const strategyReturn=result && ['open','closed'].includes(result.status) && Number.isFinite(result.returnPct)?result.returnPct!:null;
- if(result?.status==='error')return {state:'error',label:'缺数据',value:null,text:'缺数据',detail:`${config}；本次评估缺数据，不能确认镜像止盈结果。`};
+ if(result?.status==='error')return {state:'error',label:'缺数据',value:null,text:'缺数据',detail:`${config}；本次评估缺数据，不能确认镜像平衡减仓结果。`};
  if(!result || !['open','closed'].includes(result.status))return {state:'pending',label:'待评估',value:null,text:'待评估',detail:`${config}；尚无有效持仓评估结果。`};
  if(!filled)return {state:'untriggered',label:'未触发',value:null,text:'未触发',detail:`${config}；截至本次卖出 / 估值尚未触发。未触发不等于零收益。`};
  const label=`已卖 ${(filled.fraction*100).toFixed(2).replace(/\.?0+$/,'')}%`;
@@ -79,15 +79,15 @@ export function halfMirrorSummary(rule:QualityMirrorTakeProfit|undefined,result?
  const notional=result.initialNotional??100;
  const mirrorPnl=result.mirrorRealizedPnl??(result.entryPrice && result.entryPrice>0?notional*filled.fraction*(filled.price/result.entryPrice-1):null);
  const remainingPnl=result.remainingPnl??(strategyReturn!=null && mirrorPnl!=null?notional*strategyReturn/100-mirrorPnl:null);
- const amounts=mirrorPnl!=null && remainingPnl!=null?`镜像止盈盈亏 ${mirrorPnl.toFixed(2)} USDT + 余仓${result.status==='open'?'估值':''}盈亏 ${remainingPnl.toFixed(2)} USDT = 合计 ${(mirrorPnl+remainingPnl).toFixed(2)} USDT；除以开仓总金额 ${notional.toFixed(2)} USDT。`:'';
+ const amounts=mirrorPnl!=null && remainingPnl!=null?`镜像平衡减仓盈亏 ${mirrorPnl.toFixed(2)} USDT + 余仓${result.status==='open'?'估值':''}盈亏 ${remainingPnl.toFixed(2)} USDT = 合计 ${(mirrorPnl+remainingPnl).toFixed(2)} USDT；除以${result.marginUsdt ? '初始保证金' : '开仓总金额'} ${(result.marginUsdt ?? notional).toFixed(2)} USDT。`:'';
  const coins=result.entryPrice && result.entryPrice>0?`；每 100 USDT 初始持仓已卖 ${(100/result.entryPrice*filled.fraction).toPrecision(8)} 币`:'';
- return {state:'filled',label,value,text:value==null?`${label} · 开仓价缺失`:`${pct(value)} · ${label}`,detail:`显示的是开仓至镜像止盈成交时的实际涨幅 =（成交价 ÷ 开仓价 − 1）× 100%，不按卖出比例折算。${config}；${formatUTC8(filled.at)} 按 ${filled.price.toPrecision(9)} 成交${coins}。${amounts}${strategyReturn!=null?`整笔交易${result.status==='open'?'估值':''}回报率 ${pct(strategyReturn)}。`:''}总盈亏 = 镜像止盈已兑现盈亏 + 余仓盈亏；投资回报率 = 总盈亏 ÷ 开仓总金额。已全部卖出时为最终收益，仍持有的余仓按本次价格估值。按实际设置比例计算，每笔持仓仅触发一次。`};
+ return {state:'filled',label,value,text:value==null?`${label} · 开仓价缺失`:`${pct(value)} · ${label}`,detail:`显示的是开仓至镜像平衡减仓成交时的实际涨幅 =（成交价 ÷ 开仓价 − 1）× 100%，不按卖出比例折算。${config}；${formatUTC8(filled.at)} 按 ${filled.price.toPrecision(9)} 成交${coins}。${amounts}${strategyReturn!=null?`整笔交易${result.status==='open'?'估值':''}回报率 ${pct(strategyReturn)}。`:''}总盈亏 = 镜像平衡减仓已兑现盈亏 + 余仓盈亏；投资回报率 = 总盈亏 ÷ ${result.marginUsdt ? '初始保证金' : '开仓总金额'}。已全部卖出时为最终收益，仍持有的余仓按本次价格估值。按实际设置比例计算，每笔持仓仅触发一次。`};
 }
 export const qualityHalfMirror = (plan:QualityGroup,result?:QualityResult)=>halfMirrorSummary(plan.mirrorTakeProfit,result);
 
 export function campaignHalfMirror(campaign:Pick<TradeCampaign,'comparison'>):HalfMirrorSummary|undefined {
- const evidence=campaign.comparison?.sellEvidence,metrics=campaign.comparison?.holdingMetrics;
- return evidence?halfMirrorSummary(evidence.mirrorTakeProfit,metrics?{status:metrics.status,returnPct:metrics.returnPct??undefined,entryPrice:metrics.entryPrice,initialNotional:metrics.initialNotional,mirrorRealizedPnl:metrics.mirrorRealizedPnl,remainingPnl:metrics.remainingPnl,mirrorFill:evidence.mirrorFill}:undefined):undefined;
+ const evidence=campaign.comparison?.instant ?? campaign.comparison?.sellEvidence,metrics=campaign.comparison?.holdingMetrics;
+ return evidence?halfMirrorSummary(evidence.mirrorTakeProfit,metrics?{status:metrics.status,returnPct:metrics.returnPct??undefined,entryPrice:metrics.entryPrice,initialNotional:metrics.initialNotional,mirrorRealizedPnl:metrics.mirrorRealizedPnl,remainingPnl:metrics.remainingPnl,mirrorFill:evidence.mirrorFill,marginUsdt:campaign.comparison?.instant?.marginUsdt}:undefined):undefined;
 }
 
 /** Count only saved executions; absent/error evaluations never become measured zero. */

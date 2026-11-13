@@ -26,7 +26,7 @@ it('exports selected offscreen rows exactly once in display order with original 
  fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(capture.download).toHaveBeenCalledTimes(1));
  const sheet=capture.download.mock.calls[0][0] as XlsxSheet;expect(sheet.name).toBe('组合表');expect(sheet.rows).toHaveLength(2);expect(sheet.rows.map(row=>row[0])).toEqual([1,91]);expect(sheet.rows.map(row=>row[1])).toEqual([all[0].source.symbol,all[90].source.symbol]);
  expect(sheet.headerRows?.[0][0]).toEqual({text:'入场信息',span:5});expect(sheet.columns.slice(0,5).map(c=>c.header)).toEqual(['行号','标的','信号时间','市场','评分']);
- for(const label of ['加仓次数','几何仓位','相对涨幅','盈亏比','静态最大回撤','峰值涨幅','首仓涨幅','半仓镜像','持仓时间'])expect(sheet.columns.map(c=>c.header)).toContain(label);expect(sheet.columns.map(c=>c.header)).not.toContain('跳转');
+ for(const label of ['加仓次数','几何仓位','相对涨幅','盈亏比','静态最大回撤','峰值涨幅','首仓涨幅','镜像平衡减仓','持仓时间'])expect(sheet.columns.map(c=>c.header)).toContain(label);expect(sheet.columns.map(c=>c.header)).not.toContain('跳转');
  const rating=sheet.columns.findIndex(c=>c.header==='评分');expect(sheet.rows[0][rating]).toBe('★★★★☆');expect(capture.restore).not.toHaveBeenCalled();expect(screen.queryByTestId('quality-export-batch')).toBeNull();
 });
 it('uses bounded batches without changing the virtual table or exporting unchecked rows',async()=>{

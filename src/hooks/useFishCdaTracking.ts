@@ -3,7 +3,7 @@ import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishNotifyMissing } from '@/lib/fish/notify';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
-import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, validScreenedSale, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
+import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED_PRICE_EXIT_RULE, validScreenedSale, type ScreenedPriceProgress, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import { readFishPreferences, readFishPreferenceEntries, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { markPageInstantPosition, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
@@ -20,6 +20,7 @@ interface Checkpoint {
   after: number;
   alert?: ScreenedCdaTrigger;
   progress?: ScreenedCdaGuardProgress;
+  risk?: ScreenedPriceProgress;
   sent?: string[];
   delivered?: true;
   nextMailAt?: number;
@@ -35,6 +36,7 @@ export interface FishCdaTracking {
   hasSavedSales?: boolean;
   campaignIssue?: string;
   closePosition?: (input: InstantPositionInput) => Promise<void>;
+  mirrorFills?: ReadonlyMap<string, NonNullable<ScreenedPriceProgress['mirror']>>;
   error: string;
   saving: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -268,12 +270,16 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     const eligible = (entry: ScreenedFishAdmission, target: number) => {
       const checkpoint = read(entry.record);
       return !checkpoint?.alert && (retry.get(entry.record.id) ?? 0) <= Date.now()
-        && cursor(entry.record, checkpoint) < target;
+        && (autoPositions
+          ? cursor(entry.record, checkpoint) < Math.floor(target / SCREENED_CDA_STEP) * SCREENED_CDA_STEP
+            || (checkpoint?.risk?.through ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target
+          : cursor(entry.record, checkpoint) < target);
     };
     const tick = () => {
       send();
       if (scanning || lifetime.signal.aborted || navigator.onLine === false) return;
-      const target = Math.floor((Date.now() - CLOSE_GRACE_MS) / SCREENED_CDA_STEP) * SCREENED_CDA_STEP;
+      const step = autoPositions ? 60_000 : SCREENED_CDA_STEP;
+      const target = Math.floor((Date.now() - CLOSE_GRACE_MS) / step) * step;
       const due = current.current.entries.filter(entry => eligible(entry, target));
       if (!due.length) return;
       scanning = true;
@@ -293,7 +299,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
               }
             }
             return { id: record.id, source: record.sample.source, after: cursor(record, checkpoint),
-              ...(autoPositions ? { observeAfter: record.matchedAt!, progress: checkpoint?.progress } : {}) };
+              ...(autoPositions ? { observeAfter: record.matchedAt!, progress: checkpoint?.progress, risk: checkpoint?.risk } : {}) };
           } catch {
             retry.set(record.id, Date.now() + 5000);
             errors.set(record.id, record.sample.source.symbol + ' · 等待入选记录恢复');
@@ -315,14 +321,22 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
             setError(errors.values().next().value ?? '');
             return;
           }
-          retry.delete(id);
-          if (errors.delete(id)) setError(errors.values().next().value ?? '');
-          if (result.through > cursor(record, read(record))) {
-            await save(record, { after: result.through, alert: result.trigger, progress: result.progress });
+          if (result.pendingError) {
+            retry.set(id, Date.now() + 5000);
+            errors.set(id, record.sample.source.symbol + ' · ' + result.pendingError);
+            setError(errors.values().next().value ?? '');
+          } else {
+            retry.delete(id);
+            if (errors.delete(id)) setError(errors.values().next().value ?? '');
+          }
+          const previous = read(record);
+          const hasNewRisk = !!result.risk && result.risk.through > (previous?.risk?.through ?? 0);
+          if (result.trigger || hasNewRisk || result.through > cursor(record, previous)) {
+            await save(record, { after: result.through, alert: result.trigger, progress: result.progress, risk: result.risk });
             if (result.trigger) {
               changes.current?.postMessage('alert');
               send();
-            }
+            } else if (result.risk?.mirror && !previous?.risk?.mirror) changes.current?.postMessage('alert');
           }
         });
       }).catch(cause => {
@@ -335,12 +349,37 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     manual.current = async input => {
       const perform = async () => {
         const key = jobPrefix + encodeURIComponent(input.recordId);
-        const [saved] = await readFishPreferences<Checkpoint>([key]);
-        if (validScreenedSale(saved?.alert ?? checkpoints.current.get(key)?.alert ?? readLocal<Checkpoint>(key)?.alert)) throw Error('这笔仓位已经卖出');
+        const [stored] = await readFishPreferences<Checkpoint>([key]);
+        const saved = stored ?? checkpoints.current.get(key) ?? readLocal<Checkpoint>(key);
+        if (validScreenedSale(saved?.alert)) throw Error('这笔仓位已经卖出');
         const mark = await markPageInstantPosition(input, lifetime.signal);
         if (lifetime.signal.aborted) throw Error('平仓已取消');
+        let risk = saved?.risk;
+        const admission = current.current.entries.find(entry => entry.record.id === input.recordId);
+        if (autoPositions && admission) {
+          let after = cursor(admission.record, saved);
+          let progress = saved?.progress;
+          // A confirmed automatic exit in the already closed minutes has priority.
+          while (after < Math.floor(mark.at / SCREENED_CDA_STEP) * SCREENED_CDA_STEP || (risk?.through ?? input.buyAt) < mark.at) {
+            let result: import('@/lib/fish/screenedCda').ScreenedCdaRead | undefined;
+            await readPageScreenedCda([{ id: input.recordId, source: admission.record.sample.source,
+              observeAfter: input.buyAt, after, progress, risk }], settings.snapshot, mark.at, lifetime.signal, (_id, value) => { result = value; });
+            if (lifetime.signal.aborted) throw Error('平仓已取消');
+            if (result?.trigger) {
+              await save(admission.record, { after: result.through, alert: result.trigger, risk: result.risk, progress: result.progress });
+              changes.current?.postMessage('alert');
+              send();
+              return;
+            }
+            const advanced = result && (result.through > after || (result.risk?.through ?? 0) > (risk?.through ?? 0));
+            if (!result || !advanced) break;
+            after = result.through;
+            progress = result.progress;
+            risk = result.risk;
+          }
+        }
         const value = { after: mark.at, alert: { at: Math.max(mark.at, input.buyAt + 1, Date.now()), closePrice: mark.price,
-          evidence: { version: SCREENED_CDA_GUARD_RULE, reason: 'manual' as const, priceAt: mark.at } } };
+          mirror: risk?.mirror, evidence: { version: SCREENED_PRICE_EXIT_RULE, reason: 'manual' as const, priceAt: mark.at } } };
         await writeFishPreference(key, value);
         checkpoints.current.set(key, value);
         changes.current?.postMessage('alert');
@@ -393,5 +432,14 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     return result;
   }, [admitted, localSales, jobPrefix, revision]);
   const mailIssue = settings && counts.awaitingMail ? !notify.config.enabled ? '邮件提醒已关闭' : fishNotifyMissing(notify.config) : '';
-  return { enabled: !!activeSettings, closePosition, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
+  const mirrorFills = useMemo(() => {
+    const fills = new Map<string, NonNullable<ScreenedPriceProgress['mirror']>>();
+    for (const { record } of admitted) {
+      const saved = checkpoints.current.get(jobPrefix + encodeURIComponent(record.id));
+      const fill = saved?.alert?.mirror ?? saved?.risk?.mirror;
+      if (fill) fills.set(record.id, fill);
+    }
+    return fills;
+  }, [admitted, jobPrefix, revision]);
+  return { enabled: !!activeSettings, closePosition, mirrorFills, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
 }

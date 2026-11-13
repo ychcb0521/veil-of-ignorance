@@ -7,7 +7,8 @@ import {collectSignalTurnover,TURNOVER_BARS,TURNOVER_STEP,type SignalTurnoverOpt
 import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import {createQualityMarketRetry} from '@/lib/fish/qualityMarketRetry';
-import { readScreenedCda, type OnScreenedCdaRead, type ScreenedCdaTask } from '@/lib/fish/screenedCda';
+import type { OnScreenedCdaRead, ScreenedCdaTask } from '@/lib/fish/screenedCda';
+import { readScreenedPositionExit } from '@/lib/fish/screenedPriceExit';
 import { freezeInstantCampaign, freezeInstantPosition, readInstantMark, instantPricePlan, type InstantCampaignInput, type InstantPositionInput } from '@/lib/fish/instantCampaign';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
@@ -239,7 +240,7 @@ export class FishScanner {
       while (next < tasks.length && !signal.aborted) {
         const task = tasks[next++];
         try {
-          const result = await readScreenedCda(task.source, task.after, Math.min(now, target), snapshot, load, signal, task);
+          const result = await readScreenedPositionExit(task, Math.min(now, target), snapshot, load, signal);
           await onRead(task.id, result);
         } catch (cause) {
           if (!signal.aborted) await onRead(task.id, undefined, cause);

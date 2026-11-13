@@ -6,6 +6,7 @@ import { compileFishProgram, type FishSnapshot } from './algorithm';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { qualityMetricPlan } from './quality';
 import { makeQualityBuyFilter } from './qualityFilters';
+import type { QualityMirrorFill } from './qualityMirror';
 import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 
@@ -13,6 +14,9 @@ export const SCREENED_CDA_LIMIT = -10;
 export const SCREENED_CDA_STEP = 300_000;
 
 export const SCREENED_CDA_GUARD_RULE = 'screened-first-exit-v3' as const;
+export const SCREENED_PRICE_EXIT_RULE = 'screened-price-exit-v4' as const;
+export const SCREENED_STOP_PCT = 5;
+export const SCREENED_MIRROR = { enabled: true, gainPct: 2, sellPct: 71.5 } as const;
 export const SCREENED_CDA_GUARD_LABEL = '防守线-20261112';
 const GUARD_DEF = { ...DBL5_DEF, DBL5_config: dbl5Parameters({ guard_version: DBL5_RETEST_GUARD_VERSION }) };
 export interface ScreenedCdaGuardProgress {
@@ -20,14 +24,16 @@ export interface ScreenedCdaGuardProgress {
   guard?: Dbl5Checkpoint;
 }
 export interface ScreenedCdaGuardEvidence {
-  version: typeof SCREENED_CDA_GUARD_RULE;
-  reason: 'cda' | 'guard' | 'both' | 'manual';
+  version: typeof SCREENED_CDA_GUARD_RULE | typeof SCREENED_PRICE_EXIT_RULE;
+  reason: 'cda' | 'guard' | 'both' | 'manual' | 'static-stop';
+  stop?: { barOpenAt: number; atOpen: boolean; level: number; openPrice: number; threshold: number };
   guardVersion?: typeof DBL5_RETEST_GUARD_VERSION;
   priceAt?: number;
 }
-export interface ScreenedCdaTrigger { at: number; value?: number; closePrice?: number; evidence?: ScreenedCdaGuardEvidence }
+export interface ScreenedCdaTrigger { at: number; value?: number; closePrice?: number; evidence?: ScreenedCdaGuardEvidence; mirror?: QualityMirrorFill }
 export function screenedSellReason(sell: ScreenedCdaTrigger) {
   switch (sell.evidence?.reason) {
+    case 'static-stop': return `静态最大回撤达到 ${sell.evidence.stop?.threshold ?? 5}%`;
     case 'manual': return '手动卖出';
     case 'guard': return 'DBL-5 防守线断裂';
     case 'both': return 'CDA 低于 −10，且同根 DBL-5 防守线断裂';
@@ -39,15 +45,25 @@ export function validScreenedSale(sell?: ScreenedCdaTrigger): sell is ScreenedCd
   const e = sell.evidence;
   const cda = typeof sell.value === 'number' && Number.isFinite(sell.value) && sell.value < SCREENED_CDA_LIMIT;
   if (!e) return cda && sell.at % SCREENED_CDA_STEP === 0;
-  if (e.version !== SCREENED_CDA_GUARD_RULE || !sell.closePrice || !Number.isFinite(sell.closePrice) || sell.closePrice <= 0) return false;
+  if ((e.version !== SCREENED_CDA_GUARD_RULE && e.version !== SCREENED_PRICE_EXIT_RULE) || !sell.closePrice || !Number.isFinite(sell.closePrice) || sell.closePrice <= 0) return false;
+  if (sell.mirror && (!Number.isSafeInteger(sell.mirror.at) || sell.mirror.at <= 0 || sell.mirror.at > sell.at
+    || !Number.isFinite(sell.mirror.price) || sell.mirror.price <= 0 || sell.mirror.fraction <= 0 || sell.mirror.fraction >= 1
+    || !Number.isFinite(sell.mirror.fraction) || !Number.isFinite(sell.mirror.gainPct) || sell.mirror.gainPct <= 0)) return false;
+  if (e.reason === 'static-stop') {
+    const stop = e.stop;
+    return e.version === SCREENED_PRICE_EXIT_RULE && !!stop && Number.isSafeInteger(stop.barOpenAt)
+      && stop.barOpenAt % 60_000 === 0 && stop.barOpenAt <= sell.at && sell.at < stop.barOpenAt + 60_000
+      && [stop.level, stop.openPrice, stop.threshold].every(n => Number.isFinite(n) && n > 0);
+  }
   if (e.reason === 'manual') return Number.isSafeInteger(e.priceAt) && e.priceAt! > 0 && e.priceAt! <= sell.at;
   if (sell.at % SCREENED_CDA_STEP !== 0) return false;
   if (e.reason === 'cda') return cda;
   return (e.reason === 'guard' || (e.reason === 'both' && cda)) && e.guardVersion === DBL5_RETEST_GUARD_VERSION;
 }
-export interface ScreenedCdaTask { id: string; source: TradeSignal; after: number; observeAfter?: number; progress?: ScreenedCdaGuardProgress }
+export interface ScreenedCdaTask { id: string; source: TradeSignal; after: number; observeAfter?: number; progress?: ScreenedCdaGuardProgress; risk?: ScreenedPriceProgress; entryPrice?: number }
+export interface ScreenedPriceProgress { through: number; entryPrice?: number; mirror?: QualityMirrorFill }
 export type OnScreenedCdaRead = (id: string, result?: ScreenedCdaRead, error?: unknown) => void | Promise<void>;
-export interface ScreenedCdaRead { through: number; trigger?: ScreenedCdaTrigger; progress?: ScreenedCdaGuardProgress }
+export interface ScreenedCdaRead { through: number; trigger?: ScreenedCdaTrigger; progress?: ScreenedCdaGuardProgress; risk?: ScreenedPriceProgress; pendingError?: string }
 
 export function freezeScreenedCda(): FishSnapshot {
   const { snapshot } = makeQualityBuyFilter('cda:CDA', '<', SCREENED_CDA_LIMIT, true, [accountFeatureDef('cda') ?? CDA_DEF]);

@@ -14,7 +14,7 @@ export function qualityAlgorithmExit(plan:QualityGroup,result?:QualityResult,ski
  if(skipped)return label('unbought','未买入','本方案没有买入，不评估卖出误报。');
  if(result?.status==='error')return label('error','缺数据','本次运行缺数据，没有可用的最终卖出记录。');
  if(!result||result.status==='waiting')return label('pending','待卖出','尚无最终卖出，不能读取卖后反事实。');
- if(result.status!=='closed')return label('pending','持仓中','半仓镜像不作为本标签起点，须等待余仓最终卖出。');
+ if(result.status!=='closed')return label('pending','持仓中','镜像平衡减仓不作为本标签起点，须等待余仓最终卖出。');
  if(!Number.isFinite(result.entryTime)||!(result.entryTime!>0)||!Number.isFinite(result.entryPrice)||!(result.entryPrice!>0)||!Number.isFinite(result.endTime)||!(result.endTime!>=result.entryTime!)||!Number.isFinite(result.endPrice)||!(result.endPrice!>0))return label('error','缺数据','缺少有效的买入或最终卖出时间、价格。');
  const snapshot=result.exitSnapshot,cause=snapshot?.cause;
  if(cause)return label('other-exit','非算法触发',`实际离场由${cause.kind==='mirror-take-profit'?'镜像止盈':'一票否决'}「${cause.label}」触发，不归因于本卖出算法。`);

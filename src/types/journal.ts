@@ -404,6 +404,8 @@ export interface TradeCampaign {
       source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;
       cdaValue?: number;
       sellEvidence?: import('@/lib/fish/screenedCda').ScreenedCdaGuardEvidence;
+      mirrorTakeProfit?: import('@/lib/fish/qualityMirror').QualityMirrorTakeProfit;
+      mirrorFill?: import('@/lib/fish/qualityMirror').QualityMirrorFill;
       marginUsdt: number;
       drawdown: number | null;
       staticDrawdown: number | null;
