@@ -76,16 +76,16 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
     </button>
     <Popover open={dynamicOpen} onOpenChange={setDynamicOpen}>
       <PopoverTrigger asChild><button type="button" className={qualitySettingsAction} disabled={!state.ready || !state.preEntry?.ready || !automatic?.saveSettings}
-        title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'}><Settings2 className="h-3 w-3"/>动态监测设置</button></PopoverTrigger>
-      <FishPopoverContent align="start" collisionPadding={12} aria-label="动态监测设置" className="fish-condition-settings screening-settings-popover">
+        title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'}><Settings2 className="h-3 w-3"/>买前设置</button></PopoverTrigger>
+      <FishPopoverContent align="start" collisionPadding={12} aria-label="买前设置" className="fish-condition-settings screening-settings-popover">
         {automatic?.saveSettings && <FishPreEntrySettings state={state} selectedCount={0} done={() => setDynamicOpen(false)}
           automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>}
       </FishPopoverContent>
     </Popover>
     <Popover open={holdingOpen} onOpenChange={setHoldingOpen}>
       <PopoverTrigger asChild><button type="button" className={qualitySettingsAction} disabled={!state.ready || !state.instantMonitor}
-        title={state.instantMonitor?.settings?.name ?? '即时交易默认规则'}><Settings2 className="h-3 w-3"/>持仓监测设置</button></PopoverTrigger>
-      <FishPopoverContent align="start" collisionPadding={12} aria-label="持仓监测设置" className="w-80 max-w-[calc(100vw-24px)] p-0">
+        title={state.instantMonitor?.settings?.name ?? '即时交易默认规则'}><Settings2 className="h-3 w-3"/>买后设置</button></PopoverTrigger>
+      <FishPopoverContent align="start" collisionPadding={12} aria-label="买后设置" className="w-80 max-w-[calc(100vw-24px)] p-0">
         <HoldingTemplateSettings state={state} done={() => setHoldingOpen(false)}/>
       </FishPopoverContent>
     </Popover>
