@@ -1,3 +1,4 @@
+import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
 import { qualityProtectionOrders } from '@/lib/fish/qualityProtectionOrders';
@@ -2866,7 +2867,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             title="战役元数据"
             testId="campaign-metadata"
             items={buildCampaignMetadataItems(campaign, objectiveOperationTime, campaignMetadataMetrics)}
-            footer={campaign.comparison?.monitorPlan ? <QualityMonitorSettingsButton plan={campaign.comparison.monitorPlan} campaign={campaign}/> : undefined}
+            footer={campaign.comparison?.instant ? <InstantCampaignMetadataButtons campaign={campaign}/>
+              : campaign.comparison?.monitorPlan ? <QualityMonitorSettingsButton plan={campaign.comparison.monitorPlan} campaign={campaign}/> : undefined}
           />
 
           <CampaignPnlOverviewPanel

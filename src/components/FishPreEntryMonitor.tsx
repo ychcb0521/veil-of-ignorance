@@ -1,3 +1,4 @@
+import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import './FishConditionSettings.css';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
@@ -105,7 +106,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
   const [menuOpen, setMenuOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false), [resultsOpen,setResultsOpen]=useState(false);
   if (!monitor) return null;
   const rounds = [...monitor.library.rounds].sort((a, b) => a.startedAt - b.startedAt);
-  const latestRound = rounds.at(-1), manualRound = rounds.filter(round => !round.automatic).at(-1);
+  const latestRound = rounds.at(-1), manualRound = rounds.filter(round => !isAutomaticPreEntryRound(round)).at(-1);
   const automatic = state.automaticScreening;
   const missingCount = monitor.library.records.filter(r => r.roundId === manualRound?.id && r.status === 'error').length;
   const canResume = manualRound && (manualRound.state === 'paused' || missingCount > 0)

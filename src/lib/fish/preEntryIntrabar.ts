@@ -3,7 +3,7 @@ import { findQualityIntrabarExit } from './qualityIntrabar';
 import { withTuringInitialization } from './qualityInitialization';
 import { planVersionChanges } from './qualityPlanVersions';
 import type { FishReconstructionLoader } from './reconstruction';
-import { automaticPreEntryWindow, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
+import { automaticPreEntryWindow, isAutomaticPreEntryRound, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
 import { formatUTC8 } from '../timeFormat';
 import { PRE_ENTRY_CONDITIONS_VERSION, validatePreEntryConditions, hasPreEntryVetoes, preEntryVetoes } from './preEntryConditions';
 import { createPreEntryGate, preEntryGuardWarmBars } from './preEntryGate';
@@ -39,7 +39,7 @@ export async function collectPreEntryIntrabar(task: PreEntryRun, load: FishRecon
       const filters = preEntryPlanFilters(selected), plans = filters.map(f => qualityMetricPlan(f.snapshot, f.metric));
       const start = await bounds?.start?.(record.sample.source.symbol), availableEnd = await bounds?.end?.(record.sample.source.symbol) ?? now;
       const initialized = selected.initialization ? withTuringInitialization(load, record.sample.source.symbol, start ?? NaN) : load;
-      const liveWindow = task.round.automatic ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
+      const liveWindow = isAutomaticPreEntryRound(task.round) ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
       const end = liveWindow?.end ?? record.endTime ?? Math.floor(Math.min(now, availableEnd, task.round.hours ? record.startTime + task.round.hours * 3600000 : Infinity) / 60000) * 60000;
       const readyAt = start == null || selected.initialization ? record.startTime : Math.max(record.startTime,
         ...[...plans,...excluded].map(({plan}) => Math.ceil(start / plan.step) * plan.step + plan.warm * plan.step),

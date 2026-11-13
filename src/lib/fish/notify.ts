@@ -176,8 +176,8 @@ export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' |
     if (cda.value !== undefined) rows.push(['卖出时 CDA 原始值', String(cda.value)]);
     if (evidence.guardVersion) rows.push(['防守线', `${SCREENED_CDA_GUARD_LABEL} · 5 分钟收盘红叉确认`]);
   } else if (cda) rows.push(['CDA 低于 −10 的时间', formatUTC8(cda.at)]);
-  const rule = evidence?.reason === 'manual' ? '本次由你手动平仓，成交价取最近一根已收盘的 1 分钟 K 线收盘价。' : evidence?.reason === 'static-stop' ? '静态回撤以首次开仓价为基准，使用 1 分钟行情判定。' : evidence ? 'CDA 或防守线断裂在 5 分钟收盘确认后卖出余仓。' : '';
-  const subject = `${cda ? '⚠️ ' : ''}${source.symbol} · ${evidence?.reason === 'static-stop' ? '静态回撤止损提醒' : evidence?.reason === 'manual' ? '手动卖出提醒' : evidence?.reason === 'guard' ? 'DBL-5 卖出提醒' : evidence?.reason === 'both' ? 'CDA / DBL-5 卖出提醒' : cda ? 'CDA 卖出提醒' : '动态筛选已入选'}`;
+  const rule = evidence?.reason === 'template' ? '' : evidence?.reason === 'manual' ? '本次由你手动平仓，成交价取最近一根已收盘的 1 分钟 K 线收盘价。' : evidence?.reason === 'static-stop' ? '静态回撤以首次开仓价为基准，使用 1 分钟行情判定。' : evidence ? 'CDA 或防守线断裂在 5 分钟收盘确认后卖出余仓。' : '';
+  const subject = `${cda ? '⚠️ ' : ''}${source.symbol} · ${evidence?.reason === 'template' ? evidence.detail === '手动卖出' ? '手动卖出提醒' : '持仓监测卖出提醒' : evidence?.reason === 'static-stop' ? '静态回撤止损提醒' : evidence?.reason === 'manual' ? '手动卖出提醒' : evidence?.reason === 'guard' ? 'DBL-5 卖出提醒' : evidence?.reason === 'both' ? 'CDA / DBL-5 卖出提醒' : cda ? 'CDA 卖出提醒' : '动态筛选已入选'}`;
   const message = ['新鱼已通过动态筛选。', ...rows.map(([label, value]) => `${label}　${value}`), ...(alert ? [alert] : []), ...(rule ? [rule] : []), '时间为 UTC+8。'].join('\n');
   const message_html = '<div style="font:14px sans-serif;color:#111827"><p>新鱼已通过动态筛选。</p><table style="border-collapse:collapse">'
     + rows.map(([label,value]) => `<tr><th style="padding:6px 12px;text-align:left">${esc(label)}</th><td style="padding:6px 12px">${esc(value)}</td></tr>`).join('')

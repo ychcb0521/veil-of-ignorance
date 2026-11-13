@@ -9,10 +9,11 @@ const iso=(at:number)=>new Date(at).toISOString();
 export function withQualityAdditionCampaign(data:QualityCampaignData,run:QualityCampaignRun):QualityCampaignData {
  const {result:r,plan}=run,adds=qualityAdditionFills(r);
  const entry=r.entryTime!,closed=r.status==='closed',end=r.endTime!,id=data.campaign.id;
+ const { initial_main_size_usdt: notional, initial_leverage: leverage } = data.campaign;
  const reductions=adds.length?r.additionReductions??[]:[];
- const summary=additionPosition(100,r.entryPrice!,r.endPrice!,closed,adds,r.mirrorFill,reductions,entry);
- const ledger=adds.some(a=>a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION)?replayQualityHoldingLedger({notional:100,entryPrice:r.entryPrice!,entryAt:entry,additions:adds,mirror:r.mirrorFill,reductions,includeIntraminute:true}):undefined;
- const lots=[{at:entry,price:r.entryPrice!,notional:100,quantity:100/r.entryPrice!,role:'main_open' as const,id:data.legs[0].id},
+ const summary=additionPosition(notional,r.entryPrice!,r.endPrice!,closed,adds,r.mirrorFill,reductions,entry);
+ const ledger=adds.some(a=>a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION)?replayQualityHoldingLedger({notional,entryPrice:r.entryPrice!,entryAt:entry,additions:adds,mirror:r.mirrorFill,reductions,includeIntraminute:true}):undefined;
+ const lots=[{at:entry,price:r.entryPrice!,notional,quantity:notional/r.entryPrice!,role:'main_open' as const,id:data.legs[0].id},
    ...adds.map((add,i)=>({at:add.at,price:add.price,notional:add.notional,quantity:add.quantity,role:`main_add_${i+1}` as LegRole,id:id+'-add-'+(i+1)}))];
  const tradeRecords:TradeRecord[]=[],events:CampaignEvent[]=[],legs:TradeJournal[]=[];
  for(const [index,lot] of lots.entries()) {
@@ -33,7 +34,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
      const pnl=quantity*(price-lot.price),recordId=lot.id+'-'+kind+(kind==='reduce'?'-'+seq:'');realized+=pnl;
      const why=kind==='mirror'?'镜像止盈':kind==='reduce'?'支撑线下移减仓':r.reason??'卖出';
      tradeRecords.push({id:recordId,positionId,symbol:data.campaign.symbol,side:'LONG',type:kind==='mirror'?'LIMIT':'MARKET',action:'CLOSE',entryPrice:lot.price,exitPrice:price,
-       quantity,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl,fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,
+       quantity,leverage,settlementMode:'usdt',settlementAsset:'USDT',pnl,fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,
        openTime:lot.at,closeTime:at,openedRealAt:lot.at,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:why});
      events.push({...opening,id:recordId,timestamp:iso(at),trade_record_id:recordId,event_type:ledger?(fullEvent?'main_fully_closed':'main_partial_closed'):kind==='reduce'||kind==='mirror'&&fraction<1?'main_partial_closed':'main_fully_closed',
        price,size_usdt:quantity*lot.price,realized_pnl:pnl,close_time:iso(at),exit_price:price,notes:why,recorded_at:iso(r.evaluatedAt)});

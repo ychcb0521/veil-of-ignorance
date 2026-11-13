@@ -5,9 +5,11 @@ import { buildPageInstantCampaign, openPageInstantPosition } from './useFish';
 import type { FishCdaTracking } from './useFishCdaTracking';
 
 export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTracking, autoPositions = false) {
+  const executions = useRef(cda.monitorResults);
+  executions.current = cda.monitorResults;
   const inputs = useMemo<(InstantPositionInput | InstantCampaignInput)[]>(() => [...(cda.localSales ?? []), ...(cda.admitted ?? [])].flatMap(({ record, round }) => {
     const alert = cda.alerts.get(record.id);
-    const input = alert ? instantCampaignInput(record, round, alert) : autoPositions ? instantPositionInput(record, round) : undefined;
+    const input = alert ? instantCampaignInput(record, round, alert, executions.current?.get(record.id)) : autoPositions ? instantPositionInput(record, round) : undefined;
     return input ? [input] : [];
   }), [cda.admitted, cda.localSales, cda.alerts, autoPositions]);
   const latest = useRef(inputs);

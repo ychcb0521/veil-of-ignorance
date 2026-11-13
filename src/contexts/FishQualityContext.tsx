@@ -10,8 +10,10 @@ import { useFishCdaTracking } from '@/hooks/useFishCdaTracking';
 import { useInstantCampaigns } from '@/hooks/useInstantCampaigns';
 import { useFishScreeningAutomation } from '@/hooks/useFishScreeningAutomation';
 
+import { useInstantMonitorSettings } from '@/hooks/useInstantMonitorSettings';
+
 const EMPTY: readonly TradeSignal[] = [];
-const InstantPositionsContext = createContext<{ positions: ReturnType<typeof useInstantCampaigns>['positions']; mirrorFills?: ReturnType<typeof useFishCdaTracking>['mirrorFills']; close?: NonNullable<ReturnType<typeof useFishCdaTracking>['closePosition']> } | null>(null);
+const InstantPositionsContext = createContext<{ positions: ReturnType<typeof useInstantCampaigns>['positions']; monitorResults?: ReturnType<typeof useFishCdaTracking>['monitorResults']; mirrorFills?: ReturnType<typeof useFishCdaTracking>['mirrorFills']; close?: NonNullable<ReturnType<typeof useFishCdaTracking>['closePosition']> } | null>(null);
 export const useScreenedInstantPositions = () => useContext(InstantPositionsContext);
 const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[]) => void; activate: () => void; enqueue: (signal: TradeSignal) => void; notify: ReturnType<typeof useFishNotify> } | null>(null);
 
@@ -23,6 +25,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   useEffect(()=>{if (!requested) return;let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(miningRecordSignal));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner,requested]);
   const state = useFishQuality(owner, input.fish, run, input.library,mined, requested, input.turing, true);
   const notify = useFishNotify(owner, undefined, undefined, true);
+  const instantMonitor = useInstantMonitorSettings(owner);
   const automaticScreening = useFishScreeningAutomation(owner, !!state.preEntry?.ready, state.preEntry, notify);
   const cdaTracking = useFishCdaTracking(owner, state.preEntry?.library, !!state.preEntry?.ready, notify, true);
   const { issue: campaignIssue, positions } = useInstantCampaigns(owner, cdaTracking, true);
@@ -34,8 +37,8 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   }, []);
   const activate = useCallback(() => setRequested(true), []);
   const location = useLocation();
-  return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
-    <InstantPositionsContext.Provider value={{ positions, mirrorFills: cdaTracking.mirrorFills, close: cdaTracking.closePosition }}>{children}</InstantPositionsContext.Provider>
+  return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
+    <InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, close: cdaTracking.closePosition }}>{children}</InstantPositionsContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}
       {state.filterRunning && <div>过滤后台运行中 · {state.filterProgress?.done ?? 0}/{state.filterProgress?.total ?? 0}</div>}

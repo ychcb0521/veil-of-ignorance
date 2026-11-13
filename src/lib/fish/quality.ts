@@ -598,16 +598,16 @@ const pricePlan = () => compileFishProgram({ id: 'quality-price', short: '价格
 const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 /** Replay each selected seller only until the next actual addition boundary. */
-export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult):Promise<QualityResult>{
+export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=QUALITY_NOTIONAL):Promise<QualityResult>{
  sample=qualityMonitoringSample(sample);
  if(sample.monitorEntry?.error)return {key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:sample.monitorEntry.error};
  if(group.router){
   const key=qualityResultKey(sample,group,observeHours);
-  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id};}
+  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior,initialNotional),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id};}
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
- if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous);
+ if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous,{initialNotional});
  const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
  try{
   validateQualitySellStages(group);validateQualityVetoStages(group);validateQualityAdvantage(group);
@@ -620,13 +620,13 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
    if(group.advantage){const next=qualityAdditionFills(state??{}).length+1;if(next<=qualityAdditionRoundLimit(group.addition!)&&!boundaries.includes(next)){boundaries.push(next);boundaries.sort((a,b)=>a-b);}}
    const count=qualityAdditionFills(state??{}).length,selected=stages.filter(s=>s.afterAdditions<=count).at(-1),selectedVeto=vetoStages.filter(s=>s.afterAdditions<=count).at(-1),nextCount=boundaries.find(n=>n>count),phase={...qualityStagePlan(group,selected),holdingVetoes:stagedHoldingVetoes(group,count)};
    const prior=state?{...state,key:qualityResultKey(sample,phase,observeHours)}:undefined;
-   let replay=await evaluateQualityPhase(sample,phase,observeHours,now,load,signal,prior,{pauseAfterAdditionCount:nextCount,trackVetoPath});
+   let replay=await evaluateQualityPhase(sample,phase,observeHours,now,load,signal,prior,{initialNotional,pauseAfterAdditionCount:nextCount,trackVetoPath});
    // A discarded seller's later data cannot invalidate an earlier successful switch.
    if(replay.status==='error'&&nextCount!=null&&phase.addition?.enabled&&phase.addition.quantityMode==='calculator'){
     const probePlan={...phase,rule:undefined,combo:undefined,holdingVetoes:[]};
     const probePrior=state?{...state,key:qualityResultKey(sample,probePlan,observeHours),pendingExit:undefined,exitSnapshot:undefined}:undefined;
-    const probe=await evaluateQualityPhase(sample,probePlan,observeHours,now,load,signal,probePrior,{pauseAfterAdditionCount:nextCount,trackVetoPath});
-    if(probe.sellStageBoundary)replay=await evaluateQualityPhase(sample,phase,observeHours,Math.min(now,probe.endTime!+QUALITY_MINUTE),load,signal,prior,{pauseAfterAdditionCount:nextCount,ordinaryUntil:probe.endTime,conditionsUntil:probe.endTime,trackVetoPath});
+    const probe=await evaluateQualityPhase(sample,probePlan,observeHours,now,load,signal,probePrior,{initialNotional,pauseAfterAdditionCount:nextCount,trackVetoPath});
+    if(probe.sellStageBoundary)replay=await evaluateQualityPhase(sample,phase,observeHours,Math.min(now,probe.endTime!+QUALITY_MINUTE),load,signal,prior,{initialNotional,pauseAfterAdditionCount:nextCount,ordinaryUntil:probe.endTime,conditionsUntil:probe.endTime,trackVetoPath});
    }
    const {sellStageBoundary,...result}=replay;
    if(sellStageBoundary&&nextCount!=null){
@@ -643,8 +643,8 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
   throw Error('卖出算法阶段切换未完成');
  }catch(error){abort(signal);return {...base,status:'error',reason:error instanceof Error?error.message:'卖出阶段计算失败'};}
 }
-async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
-  const {pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath}=runtime;
+async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{initialNotional?:number;pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
+  const {initialNotional=QUALITY_NOTIONAL,pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath}=runtime;
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
   if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少有效买入时间，不能可靠还原买入时点' };
   if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
@@ -774,7 +774,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map((r,i)=>({...buildAdditionCandidates(r),...(config.alternativeRounds?.[i]?{alternative:buildAdditionCandidates(config.alternativeRounds[i])}:{})}));
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:QUALITY_NOTIONAL,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:initialNotional,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
             advantage:group.advantage,readAdvantage,ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           additionSkipsFrom=prior?(prior.additionSkipsFrom??since):entry;
@@ -785,7 +785,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
             trigger={at:stop.at,reading:stop.cause?(stop.price/stop.support-1)*100:stop.support,fillPrice:stop.price,fillPeak:exitBar!.open,barOpenTime:stop.at,atOpen:stop.atOpen,cause:stop.cause??(stop.confirmCloses?{id:'addition-guard',kind:'addition-support',label:'防守线 K',direction:'<',threshold:stop.support,confirmCloses:stop.confirmCloses}:{id:'addition-support',kind:'addition-support',label:'加仓支撑线 K',direction:'<=',threshold:stop.support})};
             if(mirrorFill&&(mirrorFill.at>stop.at||mirrorFill.at===stop.at&&(stop.atOpen||!mirrorFill.atOpen)))mirrorFill=undefined;
           }
-        }else{additionFill=await findQualityAddition({candidates,required,row,entry,end:additionEnd,...(config.minGainPct!=null?{priceGate:{referencePrice:entryPrice,thresholdPct:config.minGainPct,basis:'real-average'}}:{}),...(config.quantityMode?{after:mirrorFill!.at,quantity:config.quantityMode==='entry'?QUALITY_NOTIONAL/entryPrice*(1-mirrorFill!.fraction):config.quantity}:{notional:config.amountMode==='entry'?QUALITY_NOTIONAL:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
+        }else{additionFill=await findQualityAddition({candidates,required,row,entry,end:additionEnd,...(config.minGainPct!=null?{priceGate:{referencePrice:entryPrice,thresholdPct:config.minGainPct,basis:'real-average'}}:{}),...(config.quantityMode?{after:mirrorFill!.at,quantity:config.quantityMode==='entry'?initialNotional/entryPrice*(1-mirrorFill!.fraction):config.quantity}:{notional:config.amountMode==='entry'?initialNotional:config.amountUsdt}),load,signal});additionFills=additionFill?[additionFill]:[];}
       }
     }
     if(boxStopStateAt)boxStopStates=boxStopStateAt(finalTime);
@@ -798,9 +798,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
     const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
-    const breakdown = mirrorPnlBreakdown(QUALITY_NOTIONAL, entryPrice, finalPrice, mirrorFill);
+    const breakdown = mirrorPnlBreakdown(initialNotional, entryPrice, finalPrice, mirrorFill);
     const trackLedger=group.addition?.enabled&&group.addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION;
-    const position=additionFills.length||trackLedger?additionPosition(QUALITY_NOTIONAL,entryPrice,finalPrice,closed,additionFills,mirrorFill,additionReductions,entry):undefined;
+    const position=additionFills.length||trackLedger?additionPosition(initialNotional,entryPrice,finalPrice,closed,additionFills,mirrorFill,additionReductions,entry):undefined;
     const returnPct = position?.returnPct ?? breakdown.returnPct;
     let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
@@ -825,9 +825,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     if(trackVetoPath){vetoPath=prior?.vetoPath??{entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};for(const b of held)vetoPath=advanceQualityHolding(vetoPath,b);vetoPath=advanceQualityHolding({...vetoPath,peak:Math.max(vetoPath.peak,fillPeak)},{openTime:finalTime,open:finalPrice,high:finalPrice,low:finalPrice,close:finalPrice,volume:0,takerBuyVolume:0});}
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base,...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
-      ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
+      ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
       ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
-        initialNotional:QUALITY_NOTIONAL,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?position.remainingPnl+position.reductionPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
+        initialNotional,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?position.remainingPnl+position.reductionPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
       ...(additionNote?{additionNote}:{}),...(savedAdvantage?{advantageState:savedAdvantage}:{}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
@@ -847,15 +847,15 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
   }
 }
 export async function evaluateQualitySampleWithMarketRepair(sample: QualitySample, group: QualityGroup, hours: number, now: number,
-  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult): Promise<QualityResult> {
+  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, initialNotional=QUALITY_NOTIONAL): Promise<QualityResult> {
   const repair = qualityBoxMarketRepair(load, sample.source.symbol);
   if (previous?.boxMarketRepair && repair) {
-    const result = await evaluateQualitySample(sample, group, hours, now, repair, signal, previous);
+    const result = await evaluateQualitySample(sample, group, hours, now, repair, signal, previous, initialNotional);
     return { ...result, boxMarketRepair: BOX_MARKET_REPAIR_VERSION };
   }
-  const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous);
+  const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous, initialNotional);
   if (!repair || original.status !== 'error' || original.reason !== BOX_STOP_INVALID_DATA) return original;
-  const recovered = await evaluateQualitySample(sample, group, hours, now, repair, signal);
+  const recovered = await evaluateQualitySample(sample, group, hours, now, repair, signal, undefined, initialNotional);
   return recovered.status === 'open' || recovered.status === 'closed'
     ? { ...recovered, boxMarketRepair: BOX_MARKET_REPAIR_VERSION } : original;
 }

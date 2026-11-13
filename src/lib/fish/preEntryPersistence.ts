@@ -1,4 +1,4 @@
-import { emptyPreEntryLibrary, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from './preEntryMonitor';
+import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from './preEntryMonitor';
 import {restorePreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
 import { mergePreEntryTableClears, validPreEntryTableClears, withPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 
@@ -26,7 +26,7 @@ export async function readAutomaticPreEntryCheckpoint(owner: string, id: string)
       const meta = store.get(metaKey(owner));
       let value: PreEntryLibrary | undefined;
       meta.onsuccess = () => {
-        const round = validPreEntryLibrary(meta.result) ? meta.result.rounds.find(round => round.id === id && round.automatic) : undefined;
+        const round = validPreEntryLibrary(meta.result) ? meta.result.rounds.find(round => round.id === id && isAutomaticPreEntryRound(round)) : undefined;
         const plan = round?.plans?.[0];
         if (!round || !plan) return;
         const row = store.get(rowPrefix(owner) + `${id}:0:${plan.id}`);
@@ -47,14 +47,17 @@ export async function readAutomaticPreEntrySales(owner: string, recordIds: reado
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, 'readonly'), store = tx.objectStore(STORE);
       const result: {record: PreEntryRecord; round: PreEntryLibrary['rounds'][number]}[] = [];
-      const meta = store.get(metaKey(owner));
-      meta.onsuccess = () => {
-        if (!validPreEntryLibrary(meta.result)) return;
-        const rounds = new Map(meta.result.rounds.filter(round => round.automatic && round.state === 'complete').map(round => [round.id, round]));
+      const meta = store.get(metaKey(owner)), view = store.get(viewKey(owner));
+      view.onsuccess = () => {
+        const incremental = validPreEntryLibrary(meta.result) ? meta.result : undefined;
+        const indexed = validReadModel(view.result) && view.result.meta === JSON.stringify(meta.result ?? null) ? view.result.library : undefined;
+        const rounds = new Map([...(indexed?.rounds ?? []), ...(incremental?.rounds ?? [])]
+          .filter(round => isAutomaticPreEntryRound(round) && round.state === 'complete').map(round => [round.id, round]));
+        const indexedRecords = new Map(indexed?.records.filter(record => recordIds.includes(record.id)).map(record => [record.id, record]));
         for (const id of recordIds) {
           const row = store.get(rowPrefix(owner) + id);
           row.onsuccess = () => {
-            const record = row.result as PreEntryRecord | undefined;
+            const record = (row.result ?? indexedRecords.get(id)) as PreEntryRecord | undefined;
             const round = record?.id === id ? rounds.get(record.roundId) : undefined;
             if (record && round && record.status === 'matched') result.push({ record, round });
           };

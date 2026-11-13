@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { notifyPersistedStateHydrated, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { hydrateSimState, pushSimStateImmediately } from '@/lib/simStateSync';
+import { FISH_INSTANT_MONITOR_KEY } from '@/lib/fish/instantMonitorSettings';
 import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
 import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, readFishLookbackPreference, saveFishLookback } from '@/lib/fish/lookback';
@@ -73,7 +74,7 @@ export function useFishAccountSettings(refreshOnFocus = false) {
     const refresh = async () => {
       if (pending || document.hidden) return;
       pending = true;
-      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY]); }
+      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_INSTANT_MONITOR_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY]); }
       finally { pending = false; }
     };
     void refresh();

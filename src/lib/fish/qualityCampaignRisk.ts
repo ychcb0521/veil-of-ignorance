@@ -4,7 +4,7 @@ export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  if(!campaign?.comparison)return;
  const evidence=campaign.comparison.sellEvidence;
  const stops=(evidence?.holdingVetoes??[]).filter(v=>v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100);
- const percent=campaign.comparison.section==='instant'
+ const percent=campaign.comparison.section==='instant'&&!campaign.comparison.monitorPlan
   ? campaign.comparison.instant?.initialStaticStopPct
   : evidence&&Object.prototype.hasOwnProperty.call(evidence,'initialStaticStopPct')?evidence.initialStaticStopPct:stops.length?Math.min(...stops.map(v=>v.threshold)):undefined;
  if(!(percent!>0&&percent!<=100&&Number.isFinite(percent)))return;

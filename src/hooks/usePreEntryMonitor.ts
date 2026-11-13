@@ -1,7 +1,8 @@
+import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { emptyPreEntryLibrary, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
+import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, archivePreEntrySettings, preEntryRecordPending, type PreEntryLibrary, type PreEntryRound, type PreEntryRecord, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { loadPreEntryLibrary } from '@/lib/fish/preEntryMonitorStore';
 import { loadPreEntryLibraryV2 } from '@/lib/fish/preEntryMonitorV2Store';
 import { loadPreEntryLibraryV3 } from '@/lib/fish/preEntryMonitorV3Store';
@@ -94,14 +95,15 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
   }, [owner, enabled, reload, commit, persistence, workspaceMode]);
 
   const execute = useCallback(async (round: PreEntryRound, study: FishQualityStudy, onMatch?: (match: AutomaticScreeningMatch) => void) => {
-    const lane = round.automatic ? lanes.current.automatic : lanes.current.manual;
-    if (!readyRef.current || lane.controller || tableClearLock.current || !round.automatic && savingDraft.current) return;
+    const automatic = isAutomaticPreEntryRound(round);
+    const lane = automatic ? lanes.current.automatic : lanes.current.manual;
+    if (!readyRef.current || lane.controller || tableClearLock.current || !isAutomaticPreEntryRound(round) && savingDraft.current) return;
     const generation = epoch.current, aborter = new AbortController(); lane.controller = aborter;
     let finish!: () => void;
     const finished = new Promise<void>(resolve => { finish = resolve; }); lane.execution = finished;
     let lastRecordPaint = 0, lastProgressPaint = 0;
     const live = () => epoch.current === generation;
-    const saveSnapshot = (snapshot: PreEntryLibrary) => round.automatic
+    const saveSnapshot = (snapshot: PreEntryLibrary) => automatic
       ? savePreEntryLibrary(owner, { version: 1, rounds: snapshot.rounds.filter(r => r.id === round.id), records: snapshot.records.filter(r => r.roundId === round.id) })
       : persistence.save(snapshot);
     // Release completed histories after durability without making the email wait for archive projection.
@@ -121,7 +123,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         }) });
       }
     };
-    let matchCheckpoint: Promise<boolean> | undefined;
+    let matchCheckpoint: Promise<boolean> | undefined, admittedRound: PreEntryRound | undefined;
     const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound) =>
       savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [record] }).then(() => {
         if (live()) onMatch?.({ record, round: completed });
@@ -132,7 +134,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       try {
         const snapshot = current.current;
         await saveSnapshot(snapshot);
-        if (round.automatic) {
+        if (automatic) {
           void projectCompleted(snapshot.records.filter(record => record.roundId === round.id)).catch(() => undefined);
         } else await projectCompleted(snapshot.records);
       } catch (reason) {
@@ -156,7 +158,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     };
     const accept = (record: PreEntryRecord) => {
       if (!live()) return;
-      const previous = round.automatic ? current.current.records.find(r => r.id === record.id) : undefined;
+      const previous = automatic ? current.current.records.find(r => r.id === record.id) : undefined;
       if (previous && record.updatedAt <= previous.updatedAt) record = { ...record, updatedAt: previous.updatedAt + 1 };
       const next = { ...current.current, records: current.current.records.map(r => r.id === record.id ? record : r) };
       current.current = next;
@@ -164,13 +166,15 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (record.status !== 'scanning' || performance.now() - lastRecordPaint >= 150) {
         lastRecordPaint = performance.now(); setLibrary(next);
       }
-      if (round.automatic && record.status === 'matched' && !matchCheckpoint) {
+      if (automatic && record.status === 'matched' && !matchCheckpoint) {
         clearTimeout(lane.timer); lane.timer = undefined;
-        const completed = { ...round, state: 'complete' as const, updatedAt: record.updatedAt };
-        matchCheckpoint = checkpointMatch(record, completed);
+        const instantMonitor = round.instantMonitor ?? (round.instantTrading && owner ? readInstantMonitorSettings(owner) : undefined);
+        admittedRound = { ...round, ...(instantMonitor ? { instantMonitor: structuredClone(instantMonitor) } : {}),
+          state: 'complete', updatedAt: record.updatedAt };
+        matchCheckpoint = checkpointMatch(record, admittedRound);
       } else if (!matchCheckpoint) scheduleSave();
     };
-    if (round.automatic) setAutomaticRunning(true);
+    if (automatic) setAutomaticRunning(true);
     else { setRunning(true); setProgress(null); setError(''); }
     commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id ? { ...r, state: 'running', updatedAt: Date.now() } : r) });
     try {
@@ -179,7 +183,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (!live() || aborter.signal.aborted) return;
       await runner.current({ study, signal: aborter.signal, task: 'pre-entry',
         preEntry: { round, records: current.current.records.filter(r => r.roundId === round.id), onRecord: accept },
-        onProgress: p => { if (!round.automatic && live() && (p.done === p.total || performance.now() - lastProgressPaint >= 150)) {
+        onProgress: p => { if (!automatic && live() && (p.done === p.total || performance.now() - lastProgressPaint >= 150)) {
           lastProgressPaint = performance.now(); setProgress(p);
         } }, onResult: () => undefined });
     } catch (reason) { if (live() && !aborter.signal.aborted) setError(reason instanceof Error ? reason.message : '买前监测失败'); }
@@ -187,17 +191,17 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       if (live()) {
         clearTimeout(lane.timer); lane.timer = undefined;
         const records = current.current.records.filter(r => r.roundId === round.id);
-        const matched = round.automatic ? records.find(record => record.status === 'matched') : undefined;
+        const matched = automatic ? records.find(record => record.status === 'matched') : undefined;
         const pending = records.some(preEntryRecordPending);
-        const ended: PreEntryRound = { ...round, state: matched ? 'complete' : aborter.signal.aborted || pending ? 'paused' : 'complete',
+        const ended: PreEntryRound = admittedRound ?? { ...round, state: matched ? 'complete' : aborter.signal.aborted || pending ? 'paused' : 'complete',
           updatedAt: matched?.updatedAt ?? Date.now() };
         commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === round.id ? ended : r) });
-        if (!round.automatic) setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
+        if (!automatic) setProgress({ done: records.filter(r => !preEntryRecordPending(r)).length, total: records.length, current: '' });
         if (!(await matchCheckpoint)) {
           if (!matched || !await checkpointMatch(matched, ended)) await save();
         }
         if (live()) {
-          if (round.automatic) setAutomaticRunning(false);
+          if (automatic) setAutomaticRunning(false);
           else setRunning(false);
         }
       }
@@ -206,7 +210,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       finish();
     }
   }, [commit, persistence, owner]);
-  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings) => {
+  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings, instantTrading?: true) => {
     const settings = automaticSettings ?? current.current.settings;
     const lane = automaticId ? lanes.current.automatic : lanes.current.manual;
     if (!readyRef.current || lane.controller || tableClearLock.current || !automaticId && savingDraft.current) return;
@@ -249,7 +253,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     if (!plans.length || !threeStage&&!filters.length || !samples.length) { setError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { setError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = automaticId ?? `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? instantTrading ? { instantTrading } : { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => {
       const startTime = usesSignalTimeGate(round.engine) ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
       return { id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
@@ -340,8 +344,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     }
   },[commit,owner]);
   return { library, savedLibrary, saveWorkspaceScreening, savingWorkspaceDraft, ready, running, automaticRunning, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
-    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void, settings?: PreEntrySettings) =>
-      start(study, newPreEntryHours((settings ?? current.current.settings)?.hours), id, recover, onMatch, settings),
+    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void, settings?: PreEntrySettings, instantTrading?: true) =>
+      start(study, newPreEntryHours((settings ?? current.current.settings)?.hours), id, recover, onMatch, settings, instantTrading),
     pauseAutomatic: () => lanes.current.automatic.controller?.abort(),
     pause: () => lanes.current.manual.controller?.abort(), retry: () => setReload(n => n + 1) };
 }

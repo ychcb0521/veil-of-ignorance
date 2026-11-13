@@ -7,6 +7,9 @@ import { serializeArchiveWork } from '../serializeArchiveWork';
 import {QualityCampaignPacketDecoder,type QualityCampaignReply} from './qualityCampaignTransfer';
 import { campaignSectionLabel, isInstantCampaignId, qualityCampaignTrashKey } from '@/lib/campaignSections';
 import { loadQualityCampaignTrash, readQualityCampaignTrash } from './qualityCampaignTrash';
+import { instantCampaignMetadata } from './instantCampaignMetadata';
+import { readAutomaticPreEntrySales } from './preEntryPersistence';
+import { qualitySignalTime } from './qualityAdmissionTime';
 import { buildInstantCampaignData } from './instantCampaign';
 import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readLocalInstantCampaignSnapshots } from './instantCampaignStore';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
@@ -82,7 +85,16 @@ export async function loadQualityCampaignData(owner: string, id: string): Promis
       ? { ...data, campaign: { ...data.campaign, deleted_at: new Date(mark.at).toISOString() } }
       : data;
   };
-  if (instant) return applyTrash(buildInstantCampaignData(owner, await loadInstantCampaignSnapshot(owner, id)));
+  if (instant) {
+    const frozen = await loadInstantCampaignSnapshot(owner, id);
+    if (frozen.metadata) return applyTrash(buildInstantCampaignData(owner, frozen));
+    const saved = await readAutomaticPreEntrySales(owner, [frozen.recordId]).catch(() => []);
+    const original = saved.find(({ record }) => record.sample.source.symbol === frozen.source.symbol
+      && (record.sample.source.exchange ?? 'binance') === (frozen.source.exchange ?? 'binance')
+      && qualitySignalTime(record.sample.source) === frozen.source.timeMs && record.matchedAt === frozen.buyAt);
+    const metadata = original ? instantCampaignMetadata(original.record, original.round) : undefined;
+    return applyTrash(buildInstantCampaignData(owner, { ...frozen, metadata }));
+  }
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {

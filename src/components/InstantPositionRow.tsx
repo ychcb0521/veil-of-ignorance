@@ -1,3 +1,5 @@
+import { qualityAdditionFills } from '@/lib/fish/qualityAddition';
+import type { QualityResult } from '@/lib/fish/quality';
 import { useEffect, useState } from 'react';
 import { markPageInstantPosition } from '@/hooks/useFish';
 import type { QualityMirrorFill } from '@/lib/fish/qualityMirror';
@@ -5,8 +7,8 @@ import type { InstantPositionFill } from '@/lib/fish/instantCampaign';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { formatAmount, formatPrice, formatSignedUSDT } from '@/lib/formatters';
 
-export function InstantPositionRow({ position, mirror, close }: {
-  position: InstantPositionFill; mirror?: QualityMirrorFill; close: (position: InstantPositionFill) => Promise<void>;
+export function InstantPositionRow({ position, mirror: legacyMirror, monitor, close }: {
+  position: InstantPositionFill; monitor?: QualityResult; mirror?: QualityMirrorFill; close: (position: InstantPositionFill) => Promise<void>;
 }) {
   const [mark, setMark] = useState<{ at: number; price: number }>();
   const [busy, setBusy] = useState(false);
@@ -26,9 +28,13 @@ export function InstantPositionRow({ position, mirror, close }: {
     return () => { controller.abort(); window.clearInterval(timer); };
   }, [position.id, position.buyAt, position.source.symbol, position.source.exchange, position.source.market]);
   const notional = position.marginUsdt * position.leverage;
+  const mirror = monitor?.mirrorFill ?? legacyMirror;
   const fraction = mirror?.fraction ?? 0;
-  const quantity = notional / position.entryPrice * (1 - fraction);
-  const pnl = mark ? (mark.price - position.entryPrice) * quantity : null;
+  const quantity = monitor?.remainingQuantity ?? notional / position.entryPrice * (1 - fraction);
+  const average = monitor?.averageEntryPrice ?? position.entryPrice;
+  const pnl = mark ? (mark.price - average) * quantity : null;
+  const additions = monitor ? qualityAdditionFills(monitor).length : 0;
+  const reductions = monitor?.additionReductions?.filter(fill => fill.fraction > 0).length ?? 0;
   const sell = async () => {
     if (busy || !window.confirm('手动卖出 ' + position.source.symbol + ' 的全部即时交易模拟仓位？')) return;
     setBusy(true); setError('');
@@ -42,9 +48,12 @@ export function InstantPositionRow({ position, mirror, close }: {
       <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">即时交易 · 模拟多单</span>
       <span>开仓 {formatBeijingTime(position.buyAt)}</span>
       <span>剩余数量 {formatAmount(quantity)}</span>
+      {position.monitor && <span>持仓模板 {position.monitor.name}</span>}
+      {(additions > 0 || reductions > 0) && <span>加仓 {additions} 次 · 减仓 {reductions} 次 · 余仓均价 {formatPrice(average, position.source.symbol)}</span>}
       <span>开仓价 {formatPrice(position.entryPrice, position.source.symbol)}</span>
       <span>保证金 {position.marginUsdt} USDT · {position.leverage} 倍 · 名义 {notional} USDT</span>
       {mirror && <span className="text-primary">镜像平衡减仓已成交 {(fraction * 100).toFixed(1)}% · {formatPrice(mirror.price, position.source.symbol)} · 已实现 {formatSignedUSDT(notional * fraction * (mirror.price / position.entryPrice - 1))} USDT</span>}
+      {monitor && <span>已实现盈亏 {formatSignedUSDT(monitor.realizedPnl ?? 0)} USDT</span>}
       <span>最近收盘 {mark ? formatPrice(mark.price, position.source.symbol) : '—'}</span>
       <span>浮动盈亏 {pnl == null ? '—' : formatSignedUSDT(pnl) + ' USDT'}</span>
       <button type="button" disabled={busy} onClick={() => void sell()}

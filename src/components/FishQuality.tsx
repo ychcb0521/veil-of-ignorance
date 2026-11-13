@@ -1,3 +1,4 @@
+import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
 import {FishCombinationHelp} from './FishCombinationHelp';
@@ -12,6 +13,7 @@ import {FishQualitySourcePicker} from './FishQualitySourcePicker';
 import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
 import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
+import { FishInstantTrading } from './FishInstantTrading';
 import { FishScreened } from './FishScreened';
 import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
 import { isRaceRouter, raceAttackFromRound, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
@@ -619,7 +621,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   }, [samples, archiveView]);
   const screeningResults=useMemo(()=>qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library),[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView]);
   const screeningIndex=useMemo(()=>screeningResultIndex(screeningResults),[screeningResults]);
-  const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running'&&(!workspace||!r.automatic)).reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
+  const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running'&&(!workspace||!isAutomaticPreEntryRound(r))).reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
   const activeScreeningId=activeScreeningRound?.id,activeScreeningAt=activeScreeningRound?.updatedAt;
   useEffect(()=>{if(!archiveView&&activeScreeningId){sourceDefaulted.current=true;setScreeningRunId(activeScreeningId);}},[archiveView,activeScreeningId,activeScreeningAt]);
   const directoryIds=directoryChoice?sourceDirectoryIds(directoryChoice):[];
@@ -1039,8 +1041,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls"
-            subsection={<FishScreened key={state.account} state={state} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
-              jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>} trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
+            trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
             <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
@@ -1069,6 +1070,10 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             label={progress?.waitingUntil ? '等待续跑' : '监测进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
             waitingUntil={progress?.waitingUntil} detail={study.monitorTimeBasis && `监测起点：${qualityMonitorTimeLabels[study.monitorTimeBasis]}`}/>}
         </FishQualityModule>
+        {state.preEntry && <FishInstantTrading key={state.account} state={state}>
+          <FishScreened state={state} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
+            jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
+        </FishInstantTrading>}
       </div>}
       {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources">
         <FishWorkspaceSource name="信号库" snapshot={workspace.sources?.library} onImport={importWorkspace}/>

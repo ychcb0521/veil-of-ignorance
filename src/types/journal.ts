@@ -401,6 +401,7 @@ export interface TradeCampaign {
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     instant?: {
+      metadata?: import('@/lib/fish/instantCampaignMetadata').InstantCampaignMetadata;
       source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;
       cdaValue?: number;
       sellEvidence?: import('@/lib/fish/screenedCda').ScreenedCdaGuardEvidence;

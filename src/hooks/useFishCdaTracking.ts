@@ -1,13 +1,15 @@
+import { instantMonitorSale, manualInstantMonitorClose } from '@/lib/fish/instantMonitorExecution';
+import type { QualityResult } from '@/lib/fish/quality';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishNotifyMissing } from '@/lib/fish/notify';
-import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
+import { isAutomaticPreEntryRound, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED_PRICE_EXIT_RULE, validScreenedSale, type ScreenedPriceProgress, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import { readFishPreferences, readFishPreferenceEntries, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
-import { markPageInstantPosition, readPageScreenedCda } from './useFish';
+import { markPageInstantPosition, readPageInstantMonitor, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
-import type { InstantPositionInput } from '@/lib/fish/instantCampaign';
+import { instantCampaignInput, type InstantPositionInput } from '@/lib/fish/instantCampaign';
 import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
 import type { useFishNotify } from './useFishNotify';
 
@@ -18,6 +20,7 @@ type Settings = { enabledAt: number; snapshot: FishSnapshot };
 export interface ScreenedFishAdmission { record: PreEntryRecord; round: PreEntryRound }
 interface Checkpoint {
   after: number;
+  monitorResult?: QualityResult;
   alert?: ScreenedCdaTrigger;
   progress?: ScreenedCdaGuardProgress;
   risk?: ScreenedPriceProgress;
@@ -37,6 +40,7 @@ export interface FishCdaTracking {
   campaignIssue?: string;
   closePosition?: (input: InstantPositionInput) => Promise<void>;
   mirrorFills?: ReadonlyMap<string, NonNullable<ScreenedPriceProgress['mirror']>>;
+  monitorResults?: ReadonlyMap<string, QualityResult>;
   error: string;
   saving: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -47,8 +51,8 @@ function readLocal<T>(key: string): T | undefined {
   catch { return undefined; }
 }
 
-function initialCursor(record: PreEntryRecord, settings: Settings) {
-  const start = Math.max(record.matchedAt!, settings.enabledAt);
+function initialCursor(record: PreEntryRecord, enabledAt: number) {
+  const start = Math.max(record.matchedAt!, enabledAt);
   return Math.ceil(start / SCREENED_CDA_STEP) * SCREENED_CDA_STEP - SCREENED_CDA_STEP;
 }
 
@@ -90,7 +94,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   }, [configKey]);
   const admitted = useMemo(() => {
     if (!owner || !ready || !library) return [];
-    const rounds = new Map(library.rounds.filter(round => round.automatic && round.state === 'complete').map(round => [round.id, round]));
+    const rounds = new Map(library.rounds.filter(round => isAutomaticPreEntryRound(round) && round.state === 'complete').map(round => [round.id, round]));
     return library.records.flatMap(record => {
       const round = rounds.get(record.roundId);
       return round && record.status === 'matched' && Number.isFinite(record.matchedAt) && record.matchedAt! > 0
@@ -184,7 +188,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       keys.forEach((key, i) => {
         const saved = rows[i] ?? readLocal<Checkpoint>(key);
         const existing = checkpoints.current.get(key);
-        if (saved && (!existing || (saved.alert && !existing.alert))) checkpoints.current.set(key, saved);
+        if (saved && (!existing || !existing.alert && (!!saved.alert || saved.after > existing.after))) checkpoints.current.set(key, saved);
       });
       setRevision(value => value + 1);
       wake.current?.();
@@ -194,7 +198,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
 
   useEffect(() => {
     const settings = activeSettings;
-    if (!settings || !owner) return;
+    if (!owner || (!settings && !autoPositions)) return;
     const lifetime = new AbortController();
     let scanning = false, mailing = false;
     const retry = new Map<string, number>();
@@ -264,16 +268,33 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
 
     // Re-read open legacy watches from their original start to recover either
     // condition already reached. Confirmed sales and delivery receipts stay as saved.
-    const start = (record: PreEntryRecord) => initialCursor(record, autoPositions ? { ...settings, enabledAt: 0 } : settings);
+    const start = (record: PreEntryRecord) => initialCursor(record, autoPositions ? 0 : settings?.enabledAt ?? Infinity);
     const cursor = (record: PreEntryRecord, checkpoint?: Checkpoint) => !autoPositions || checkpoint?.progress?.version === SCREENED_CDA_GUARD_RULE
       ? checkpoint?.after ?? start(record) : start(record);
     const eligible = (entry: ScreenedFishAdmission, target: number) => {
       const checkpoint = read(entry.record);
-      return !checkpoint?.alert && (retry.get(entry.record.id) ?? 0) <= Date.now()
-        && (autoPositions
+      if (checkpoint?.alert || (retry.get(entry.record.id) ?? 0) > Date.now()) return false;
+      if (entry.round.instantMonitor) return (checkpoint?.after ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target;
+      return !!settings && (autoPositions
           ? cursor(entry.record, checkpoint) < Math.floor(target / SCREENED_CDA_STEP) * SCREENED_CDA_STEP
             || (checkpoint?.risk?.through ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target
           : cursor(entry.record, checkpoint) < target);
+    };
+    const checkTemplate = async ({ record, round }: ScreenedFishAdmission, target: number, checkpoint?: Checkpoint) => {
+      const result = await readPageInstantMonitor(record.sample, round.instantMonitor!, record.matchedAt!, target, lifetime.signal, checkpoint?.monitorResult);
+      if (lifetime.signal.aborted) throw Error('持仓监测已取消');
+      if (result.status === 'error') throw Error(result.reason || '持仓监测行情待重试');
+      return result;
+    };
+    const saveTemplate = async ({ record, round }: ScreenedFishAdmission, result: QualityResult, through: number) => {
+      const alert = result.status === 'closed' ? instantMonitorSale(result) : undefined;
+      await save(record, { after: through, monitorResult: result, alert });
+      changes.current?.postMessage('alert');
+      if (alert) {
+        const input = instantCampaignInput(record, round, alert, result);
+        if (input) await saveInstantCampaignInput(owner, input);
+        send();
+      }
     };
     const tick = () => {
       send();
@@ -286,20 +307,20 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       void lock(configKey + ':scan', async () => {
         // The admission record must be durable before its first CDA evaluation.
         await refresh(due.map(entry => entry.record));
-        const work = await Promise.all(due.filter(entry => eligible(entry, target)).map(async entry => {
+        const candidates = due.filter(entry => eligible(entry, target));
+        const work = await Promise.all(candidates.map(async entry => {
           const { record, round } = entry;
           const checkpoint = read(record);
           try {
             if (!checkpoint) {
               const durable = await readAutomaticPreEntryCheckpoint(owner, round.id);
               const match = durable?.records.find(saved => saved.id === record.id && saved.status === 'matched');
-              if (!match || (!autoPositions && match.updatedAt < settings.enabledAt)) {
+              if (!match || (!autoPositions && match.updatedAt < (settings?.enabledAt ?? Infinity))) {
                 retry.set(record.id, Date.now() + 5000);
                 return;
               }
             }
-            return { id: record.id, source: record.sample.source, after: cursor(record, checkpoint),
-              ...(autoPositions ? { observeAfter: record.matchedAt!, progress: checkpoint?.progress, risk: checkpoint?.risk } : {}) };
+            return entry;
           } catch {
             retry.set(record.id, Date.now() + 5000);
             errors.set(record.id, record.sample.source.symbol + ' · 等待入选记录恢复');
@@ -308,37 +329,64 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           }
         }));
         if (lifetime.signal.aborted) return;
-        const tasks = work.filter(task => task !== undefined);
-        if (!tasks.length) return;
-        const records = new Map(due.map(({ record }) => [record.id, record]));
-        await readPageScreenedCda(tasks, settings.snapshot, target, lifetime.signal, async (id, result, cause) => {
-          if (lifetime.signal.aborted) return;
-          const record = records.get(id);
-          if (!record) return;
-          if (!result) {
-            retry.set(id, Date.now() + 5000);
-            errors.set(id, record.sample.source.symbol + ' · ' + (cause instanceof Error ? cause.message : '等待 CDA 行情'));
-            setError(errors.values().next().value ?? '');
-            return;
-          }
-          if (result.pendingError) {
-            retry.set(id, Date.now() + 5000);
-            errors.set(id, record.sample.source.symbol + ' · ' + result.pendingError);
-            setError(errors.values().next().value ?? '');
-          } else {
-            retry.delete(id);
-            if (errors.delete(id)) setError(errors.values().next().value ?? '');
-          }
-          const previous = read(record);
-          const hasNewRisk = !!result.risk && result.risk.through > (previous?.risk?.through ?? 0);
-          if (result.trigger || hasNewRisk || result.through > cursor(record, previous)) {
-            await save(record, { after: result.through, alert: result.trigger, progress: result.progress, risk: result.risk });
-            if (result.trigger) {
-              changes.current?.postMessage('alert');
-              send();
-            } else if (result.risk?.mirror && !previous?.risk?.mirror) changes.current?.postMessage('alert');
-          }
-        });
+        const admitted = work.filter(entry => entry !== undefined);
+        const templates = admitted.filter(entry => entry.round.instantMonitor).sort((a, b) =>
+          (read(a.record)?.after ?? a.record.matchedAt!) - (read(b.record)?.after ?? b.record.matchedAt!)).slice(0, 3);
+        const legacy = admitted.filter(entry => !entry.round.instantMonitor);
+        await Promise.all([
+          ...templates.map(async entry => {
+            const { record } = entry;
+            try {
+              const result = await checkTemplate(entry, target, read(record));
+              if (result.status === 'waiting' || (result.status === 'open' && result.endTime! < target)) {
+                retry.set(record.id, Date.now() + 5000);
+              } else retry.delete(record.id);
+              if (result.status === 'open' || result.status === 'closed') await saveTemplate(entry, result, result.endTime!);
+              if (errors.delete(record.id)) setError(errors.values().next().value ?? '');
+            } catch (cause) {
+              if (lifetime.signal.aborted) return;
+              retry.set(record.id, Date.now() + 5000);
+              errors.set(record.id, record.sample.source.symbol + ' · ' + (cause instanceof Error ? cause.message : '持仓监测行情待重试'));
+              setError(errors.values().next().value ?? '');
+            }
+          }),
+          settings && legacy.length ? (async () => {
+              const tasks = legacy.map(({ record }) => {
+                const checkpoint = read(record);
+                return { id: record.id, source: record.sample.source, after: cursor(record, checkpoint),
+                    ...(autoPositions ? { observeAfter: record.matchedAt!, progress: checkpoint?.progress, risk: checkpoint?.risk } : {}) };
+              });
+              const records = new Map(legacy.map(({ record }) => [record.id, record]));
+              await readPageScreenedCda(tasks, settings.snapshot, target, lifetime.signal, async (id, result, cause) => {
+                if (lifetime.signal.aborted) return;
+                const record = records.get(id);
+                if (!record) return;
+                if (!result) {
+                  retry.set(id, Date.now() + 5000);
+                  errors.set(id, record.sample.source.symbol + ' · ' + (cause instanceof Error ? cause.message : '等待 CDA 行情'));
+                  setError(errors.values().next().value ?? '');
+                  return;
+                }
+                if (result.pendingError) {
+                  retry.set(id, Date.now() + 5000);
+                  errors.set(id, record.sample.source.symbol + ' · ' + result.pendingError);
+                  setError(errors.values().next().value ?? '');
+                } else {
+                  retry.delete(id);
+                  if (errors.delete(id)) setError(errors.values().next().value ?? '');
+                }
+                const previous = read(record);
+                const hasNewRisk = !!result.risk && result.risk.through > (previous?.risk?.through ?? 0);
+                if (result.trigger || hasNewRisk || result.through > cursor(record, previous)) {
+                  await save(record, { after: result.through, alert: result.trigger, progress: result.progress, risk: result.risk });
+                  if (result.trigger) {
+                    changes.current?.postMessage('alert');
+                    send();
+                  } else if (result.risk?.mirror && !previous?.risk?.mirror) changes.current?.postMessage('alert');
+                }
+              });
+          })() : undefined,
+        ]);
       }).catch(cause => {
         if (!lifetime.signal.aborted) {
           for (const {record} of due) retry.set(record.id, Date.now() + 5000);
@@ -356,7 +404,16 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         if (lifetime.signal.aborted) throw Error('平仓已取消');
         let risk = saved?.risk;
         const admission = current.current.entries.find(entry => entry.record.id === input.recordId);
-        if (autoPositions && admission) {
+        if (input.monitor) {
+          if (!admission?.round.instantMonitor) throw Error('正在恢复即时交易的持仓模板，请稍后再试');
+          const result = await checkTemplate(admission, mark.at, saved);
+          if (result.status !== 'open' && result.status !== 'closed') throw Error(result.reason || '持仓监测尚未完成本分钟核对');
+          if (result.status === 'open' && result.endTime !== mark.at) throw Error('持仓监测尚未完成本分钟核对');
+          const closed = result.status === 'closed' ? result : manualInstantMonitorClose(result, input.monitor, mark.at, mark.price);
+          await saveTemplate(admission, closed, mark.at);
+          return;
+        }
+        if (autoPositions && admission && settings) {
           let after = cursor(admission.record, saved);
           let progress = saved?.progress;
           // A confirmed automatic exit in the already closed minutes has priority.
@@ -384,7 +441,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         checkpoints.current.set(key, value);
         changes.current?.postMessage('alert');
         setRevision(revision => revision + 1);
-        await saveInstantCampaignInput(owner, { ...input, sell: value.alert }).catch(() => undefined);
+        const sale = admission ? instantCampaignInput(admission.record, admission.round, value.alert) : undefined;
+        await saveInstantCampaignInput(owner, sale ?? { ...input, sell: value.alert }).catch(() => undefined);
         send();
       };
       if (navigator.locks) await navigator.locks.request(configKey + ':scan', { signal: lifetime.signal }, perform);
@@ -441,5 +499,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     }
     return fills;
   }, [admitted, jobPrefix, revision]);
-  return { enabled: !!activeSettings, closePosition, mirrorFills, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
+  const monitorResults = useMemo(() => {
+    const results = new Map<string, QualityResult>();
+    for (const { record } of [...(localSales ?? []), ...admitted]) {
+      const value = checkpoints.current.get(jobPrefix + encodeURIComponent(record.id))?.monitorResult;
+      if (value) results.set(record.id, value);
+    }
+    return results;
+  }, [admitted, localSales, jobPrefix, revision]);
+  return { enabled: !!activeSettings, closePosition, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
 }

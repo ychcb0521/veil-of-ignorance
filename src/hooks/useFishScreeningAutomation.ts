@@ -4,7 +4,7 @@ import { fishNotifyMissing } from '@/lib/fish/notify';
 import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { FISH_AUTOMATIC_SCREENING_KEY, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
-import type { PreEntrySettings } from '@/lib/fish/preEntryMonitor';
+import { isAutomaticPreEntryRound, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { validatePreEntryThreeStage } from '@/lib/fish/preEntryThreeStage';
 import { freezeSavedPlans, planVersionChanges } from '@/lib/fish/qualityPlanVersions';
@@ -17,12 +17,14 @@ import type { useFishNotify } from './useFishNotify';
 const MINUTE = 60_000;
 const QUEUE_KEY = 'veil.fish-screening-queue.v1:';
 const queuePrefix = (owner: string) => `${QUEUE_KEY}${encodeURIComponent(owner)}:`;
+const isJobKey = (owner: string, key: string) => key.startsWith(queuePrefix(owner) + 'job:') || key.startsWith(queuePrefix(owner) + 'instant-job:');
 export const screenedFishMailLock = (owner: string) => queuePrefix(owner) + 'mail';
 interface Job {
   key: string;
   id: string;
   source: TradeSignal;
   settings?: PreEntrySettings;
+  instantTrading?: true;
   nextCheckAt: number;
   nextMailAt?: number;
   matched?: true;
@@ -41,7 +43,7 @@ function readJob(key: string): Job | undefined {
 
 function readQueue(owner: string): Job[] {
   try {
-    return Object.keys(localStorage).filter(key => key.startsWith(queuePrefix(owner) + 'job:'))
+    return Object.keys(localStorage).filter(key => isJobKey(owner, key))
       .map(readJob).filter((job): job is Job => !!job);
   } catch { return []; }
 }
@@ -88,23 +90,29 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
   if (!tab.current) tab.current = crypto.randomUUID();
 
   const save = useCallback((job: Job, done = false) => {
-    if (!writePersistedStateRaw(job.key, JSON.stringify(done ? { done: true } : job))) setStorageIssue(true);
+    const durable = writePersistedStateRaw(job.key, JSON.stringify(done ? { done: true } : job));
+    if (!durable) setStorageIssue(true);
     const previous = current.current.jobs;
     const next = done ? previous.filter(value => value.key !== job.key)
       : previous.some(value => value.key === job.key) ? previous.map(value => value.key === job.key ? job : value) : [...previous, job];
     current.current.jobs = next;
     setJobs(next);
+    return durable;
   }, []);
 
   const enqueue = useCallback((source: TradeSignal) => {
     if (!owner) return;
     const identity = encodeURIComponent(signalDedupKey(source));
-    const key = queuePrefix(owner) + 'job:' + identity;
-    if (readPersistedStateRaw(key) != null) return;
+    const legacyKey = queuePrefix(owner) + 'job:' + identity;
+    const instantKey = queuePrefix(owner) + 'instant-job:' + identity;
+    if (readPersistedStateRaw(legacyKey) != null || readPersistedStateRaw(instantKey) != null) return;
     const monitor = current.current.monitor;
     const settings = readAutomaticScreeningSettings(owner) ?? (monitor?.ready ? monitor.library.settings : undefined);
-    save({ key, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0,
-      settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined });
+    const job: Job = { key: instantKey, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0,
+      settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined, instantTrading: true };
+    // Earlier tabs only understand the legacy queue and its done receipts.
+    const durable = save(job);
+    if (durable && !writePersistedStateRaw(legacyKey, JSON.stringify({ done: true }))) setStorageIssue(true);
     wake.current?.();
   }, [owner, save]);
 
@@ -133,11 +141,11 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         setPaused(next);
         if (next) current.current.monitor?.pauseAutomatic?.();
       }
-      if (!event.key || event.key.startsWith(queuePrefix(owner) + 'job:')) {
+      if (!event.key || isJobKey(owner, event.key)) {
         current.current.jobs = readQueue(owner);
         setJobs(current.current.jobs);
       }
-      if (!event.key || event.key === pauseKey || event.key.startsWith(queuePrefix(owner) + 'job:')) wake.current?.();
+      if (!event.key || event.key === pauseKey || isJobKey(owner, event.key)) wake.current?.();
     };
     window.addEventListener('storage', refresh);
     const exclusive = async (kind: 'scan' | 'mail', run: () => Promise<boolean | void>) => {
@@ -163,7 +171,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         if (!job || (job.nextMailAt ?? 0) > Date.now() || lifetime.signal.aborted) return;
         const saved = match ? undefined : await readAutomaticPreEntryCheckpoint(owner, job.id);
         const round = match?.round ?? saved?.rounds[0], record = match?.record ?? saved?.records[0];
-        if (!round || round.id !== job.id || !round.automatic || record?.roundId !== job.id || record.status !== 'matched'
+        if (!round || round.id !== job.id || !isAutomaticPreEntryRound(round) || record?.roundId !== job.id || record.status !== 'matched'
           || !Number.isFinite(record.matchedAt) || record.matchedAt! <= 0 || lifetime.signal.aborted) return;
         const live = current.current.notify;
         if (!live.config.enabled) { save(job, true); return true; }
@@ -219,7 +227,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
           const matched = { ...latest, matched: true as const };
           save(matched);
           mail(matched, match);
-        }, settings);
+        }, settings, job.instantTrading);
         if (lifetime.signal.aborted) return;
         const saved = readJob(job.key);
         if (!saved) return;

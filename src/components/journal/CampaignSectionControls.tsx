@@ -47,7 +47,7 @@ export function CampaignSectionControls({ section, onSectionChange, monitoring }
           <Popover><PopoverTrigger asChild><button type="button" aria-label={label + '说明'} className="inline-flex h-7 items-center gap-1.5 rounded px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"><Info aria-hidden className="h-3.5 w-3.5" />使用说明</button></PopoverTrigger>
             <PopoverContent align="start" collisionPadding={12} aria-label={label + '说明'} className="w-80 max-w-[calc(100vw_-_24px)] max-h-[min(80vh,var(--radix-popover-content-available-height))] space-y-2 overflow-y-auto p-3 text-[11px] leading-relaxed">
               <p className="font-medium">{label}</p>
-              <p className="text-muted-foreground">{section === 'instant' ? '筛选鱼确认 CDA 卖出后自动生成。每场以 100 USDT 保证金、5 倍杠杆模拟，收益率按保证金计算。' : '按卖出方案、探测算法和信号类别筛选持仓监测战役；同一笔交易命中多个探测算法时只统计一次。条件与结果沿用保存时的记录。'}</p>
+              <p className="text-muted-foreground">{section === 'instant' ? '筛选鱼最终平仓后自动生成。每场战役保留实际使用的持仓设置和成交记录。' : '按卖出方案、探测算法和信号类别筛选持仓监测战役；同一笔交易命中多个探测算法时只统计一次。条件与结果沿用保存时的记录。'}</p>
               {monitoring.buyFilterLabel && <p className="text-muted-foreground" data-testid="comparison-buy-filter">买入过滤：{monitoring.buyFilterLabel}</p>}
               <p className="text-muted-foreground">未设价格保护线或未加仓的风险指标，沿用原战役口径显示「—」。完整算法条件可从战役标题旁的备注图标查看。</p>
             </PopoverContent>

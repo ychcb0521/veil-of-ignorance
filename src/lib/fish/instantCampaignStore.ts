@@ -2,9 +2,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { INSTANT_CAMPAIGN_HEADER } from '@/lib/authGateway';
 import { runAccountSyncRequest } from '@/lib/accountSyncTransport';
 import { isInstantCampaignId } from '@/lib/campaignSections';
+import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
 import { validScreenedSale } from './screenedCda';
 import { readFishPreferences, readFishPreferencesWithPrefix, updateFishPreference } from './fishPreferencesDb';
-import type { InstantCampaignInput, InstantCampaignSnapshot, InstantPositionFill, InstantPositionInput } from './instantCampaign';
+import { validInstantMonitorClose, type InstantCampaignInput, type InstantCampaignSnapshot, type InstantPositionFill, type InstantPositionInput } from './instantCampaign';
 
 export const INSTANT_CAMPAIGN_EVENT = 'veil-instant-campaign-saved';
 const KEY = 'idb:instant-campaign-v1/';
@@ -13,6 +14,9 @@ const KEY_START = KEY + 'fish-instant-';
 const KEY_END = KEY + 'fish-instanu';
 const CLOUD_READ_MS = 30_000;
 const localPrefix = (owner: string) => KEY + encodeURIComponent(owner) + '/';
+// Earlier tabs can read their own live jobs while the template position uses a separate local queue.
+const templatePrefix = (owner: string) => 'idb:instant-template-jobs-v1/' + encodeURIComponent(owner) + '/';
+const localJobKey = (owner: string, input: InstantPositionInput) => (input.monitor ? templatePrefix(owner) : localPrefix(owner)) + input.id;
 const table = () => supabase.from('user_sim_state' as never);
 type Saved = { input: InstantPositionInput | InstantCampaignInput; opened?: InstantPositionFill; snapshot?: InstantCampaignSnapshot; synced?: true };
 
@@ -40,17 +44,27 @@ export function subscribeInstantCampaigns(owner: string, refresh: () => void) {
 }
 
 export async function readInstantCampaignJobs(owner: string): Promise<Saved[]> {
-  return readFishPreferencesWithPrefix<Saved>(localPrefix(owner));
+  const [legacy, templates] = await Promise.all([
+    readFishPreferencesWithPrefix<Saved>(localPrefix(owner)), readFishPreferencesWithPrefix<Saved>(templatePrefix(owner)),
+  ]);
+  return [...legacy, ...templates];
 }
 
 export async function saveInstantCampaignInput(owner: string, input: InstantCampaignInput): Promise<Saved> {
-  const saved = await updateFishPreference<Saved>(localPrefix(owner) + input.id, previous => previous?.snapshot || previous && 'sell' in previous.input ? previous : { ...previous, input });
+  const saved = await updateFishPreference<Saved>(localJobKey(owner, input), previous => {
+    if (previous?.snapshot) return previous;
+    if (previous && 'sell' in previous.input) {
+      return previous.input.metadata || !input.metadata || previous.input.sell.at !== input.sell.at
+        ? previous : { ...previous, input: { ...previous.input, metadata: input.metadata } };
+    }
+    return { ...previous, input };
+  });
   publish(owner);
   return saved;
 }
 
 export async function saveInstantPosition(owner: string, input: InstantPositionInput, opened?: InstantPositionFill) {
-  const saved = await updateFishPreference<Saved>(localPrefix(owner) + input.id, previous => {
+  const saved = await updateFishPreference<Saved>(localJobKey(owner, input), previous => {
     if (previous?.snapshot || previous?.opened || (previous && !opened)) return previous;
     return { ...previous, input: previous?.input ?? input, ...(opened ? { opened } : {}) };
   });
@@ -59,7 +73,7 @@ export async function saveInstantPosition(owner: string, input: InstantPositionI
 }
 
 export async function saveInstantCampaignSnapshot(owner: string, snapshot: InstantCampaignSnapshot): Promise<InstantCampaignSnapshot> {
-  const saved = await updateFishPreference<Saved>(localPrefix(owner) + snapshot.id, previous =>
+  const saved = await updateFishPreference<Saved>(localJobKey(owner, snapshot), previous =>
     previous?.snapshot ? previous : { input: snapshot, snapshot });
   publish(owner);
   return saved.snapshot!;
@@ -86,7 +100,7 @@ export async function syncInstantCampaign(owner: string, snapshot: InstantCampai
 function decodeSnapshot(row: unknown): InstantCampaignSnapshot | undefined {
   const { key, value } = (row ?? {}) as { key?: string; value?: InstantCampaignSnapshot };
   if (!value || (value.version !== 1 && value.version !== 2) || key !== KEY + value.id || !isInstantCampaignId(value.id) || !value.source?.symbol
-    || !value.recordId || !Number.isSafeInteger(value.buyAt) || value.buyAt <= 0 || !Number.isSafeInteger(value.sell?.at) || value.sell.at <= value.buyAt
+    || !value.recordId || !Number.isSafeInteger(value.buyAt) || value.buyAt <= 0 || !Number.isSafeInteger(value.sell?.at) || (value.monitor ? !validInstantMonitorClose(value) : value.sell.evidence?.version === INSTANT_TEMPLATE_MONITOR || value.sell.at <= value.buyAt)
     || !validScreenedSale(value.sell) || !Array.isArray(value.detectors)
     || ![value.entryPrice, value.exitPrice, value.recordedAt].every(n => Number.isFinite(n) && n > 0)) return;
   if (value.version === 2 && ![value.marginUsdt, value.leverage, value.marginUsdt * value.leverage]
@@ -96,7 +110,7 @@ function decodeSnapshot(row: unknown): InstantCampaignSnapshot | undefined {
 
 async function cacheRemote(owner: string, snapshot: InstantCampaignSnapshot, notify = true) {
   let changed = false;
-  await updateFishPreference<Saved>(localPrefix(owner) + snapshot.id, previous => {
+  await updateFishPreference<Saved>(localJobKey(owner, snapshot), previous => {
     changed = JSON.stringify(previous?.snapshot) !== JSON.stringify(snapshot);
     return previous?.synced && !changed ? previous : { input: snapshot, snapshot, synced: true };
   });
@@ -150,7 +164,8 @@ export async function listInstantCampaignSnapshots(owner: string, signal?: Abort
 }
 
 export async function loadInstantCampaignSnapshot(owner: string, id: string) {
-  const [saved] = await readFishPreferences<Saved>([localPrefix(owner) + id]);
+  const [template, legacy] = await readFishPreferences<Saved>([templatePrefix(owner) + id, localPrefix(owner) + id]);
+  const saved = template ?? legacy;
   if (saved?.snapshot && saved.synced) return saved.snapshot;
   const { data, error } = await table().select('key,value').eq('user_id', owner).eq('key', KEY + id)
     .setHeader(INSTANT_CAMPAIGN_HEADER, '1').abortSignal(AbortSignal.timeout(CLOUD_READ_MS)).maybeSingle();

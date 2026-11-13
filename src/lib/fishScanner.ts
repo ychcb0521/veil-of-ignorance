@@ -9,6 +9,9 @@ import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import {createQualityMarketRetry} from '@/lib/fish/qualityMarketRetry';
 import type { OnScreenedCdaRead, ScreenedCdaTask } from '@/lib/fish/screenedCda';
 import { readScreenedPositionExit } from '@/lib/fish/screenedPriceExit';
+import { evaluateInstantMonitor, instantMonitorSample } from '@/lib/fish/instantMonitorExecution';
+import type { QualityResult, QualitySample } from '@/lib/fish/quality';
+import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { freezeInstantCampaign, freezeInstantPosition, readInstantMark, instantPricePlan, type InstantCampaignInput, type InstantPositionInput } from '@/lib/fish/instantCampaign';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
@@ -248,6 +251,15 @@ export class FishScanner {
       }
     };
     await Promise.all(Array.from({ length: Math.min(tasks.length, 3) }, read));
+  }
+
+  async trackInstantMonitor(sample: QualitySample, monitor: InstantMonitorSettings, buyAt: number,
+    target: number, signal: AbortSignal, previous?: QualityResult) {
+    const { symbol } = sample.source;
+    const { now, load, marketEnd, marketStart } = await this.qualityMarket([symbol], signal);
+    const end = Math.min(target, await marketEnd?.(symbol) ?? now);
+    const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
+    return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start);
   }
 
   async openInstantPosition(input: InstantPositionInput, signal: AbortSignal) {

@@ -10,6 +10,8 @@ import type { QualityMirrorFill } from './qualityMirror';
 import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 
+import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
+
 export const SCREENED_CDA_LIMIT = -10;
 export const SCREENED_CDA_STEP = 300_000;
 
@@ -24,8 +26,9 @@ export interface ScreenedCdaGuardProgress {
   guard?: Dbl5Checkpoint;
 }
 export interface ScreenedCdaGuardEvidence {
-  version: typeof SCREENED_CDA_GUARD_RULE | typeof SCREENED_PRICE_EXIT_RULE;
-  reason: 'cda' | 'guard' | 'both' | 'manual' | 'static-stop';
+  version: typeof SCREENED_CDA_GUARD_RULE | typeof SCREENED_PRICE_EXIT_RULE | typeof INSTANT_TEMPLATE_MONITOR;
+  reason: 'cda' | 'guard' | 'both' | 'manual' | 'static-stop' | 'template';
+  detail?: string;
   stop?: { barOpenAt: number; atOpen: boolean; level: number; openPrice: number; threshold: number };
   guardVersion?: typeof DBL5_RETEST_GUARD_VERSION;
   priceAt?: number;
@@ -33,6 +36,7 @@ export interface ScreenedCdaGuardEvidence {
 export interface ScreenedCdaTrigger { at: number; value?: number; closePrice?: number; evidence?: ScreenedCdaGuardEvidence; mirror?: QualityMirrorFill }
 export function screenedSellReason(sell: ScreenedCdaTrigger) {
   switch (sell.evidence?.reason) {
+    case 'template': return sell.evidence.detail || '持仓监测模板触发卖出';
     case 'static-stop': return `静态最大回撤达到 ${sell.evidence.stop?.threshold ?? 5}%`;
     case 'manual': return '手动卖出';
     case 'guard': return 'DBL-5 防守线断裂';
@@ -44,6 +48,8 @@ export function validScreenedSale(sell?: ScreenedCdaTrigger): sell is ScreenedCd
   if (!sell || !Number.isSafeInteger(sell.at) || sell.at <= 0) return false;
   const e = sell.evidence;
   const cda = typeof sell.value === 'number' && Number.isFinite(sell.value) && sell.value < SCREENED_CDA_LIMIT;
+  if (e?.version === INSTANT_TEMPLATE_MONITOR) return e.reason === 'template' && typeof e.detail === 'string'
+    && !!e.detail && Number.isFinite(sell.closePrice) && sell.closePrice! > 0;
   if (!e) return cda && sell.at % SCREENED_CDA_STEP === 0;
   if ((e.version !== SCREENED_CDA_GUARD_RULE && e.version !== SCREENED_PRICE_EXIT_RULE) || !sell.closePrice || !Number.isFinite(sell.closePrice) || sell.closePrice <= 0) return false;
   if (sell.mirror && (!Number.isSafeInteger(sell.mirror.at) || sell.mirror.at <= 0 || sell.mirror.at > sell.at

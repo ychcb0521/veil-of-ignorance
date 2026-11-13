@@ -42,9 +42,13 @@ export interface PreEntryRound {
   id: string; startedAt: number; updatedAt: number; filters: QualityBuyFilter[];
   hours: number; state: 'running' | 'paused' | 'complete';
   automatic?: boolean;
+  instantTrading?: true;
+  instantMonitor?: import('./instantMonitorSettings').InstantMonitorSettings;
   workspaceDraft?: true;
   workspaceSaved?: true;
 }
+export const isAutomaticPreEntryRound = (round: PreEntryRound) => !!(round.automatic || round.instantTrading || round.instantMonitor);
+
 /** A live catch can still have unopened minutes inside its frozen screening window. */
 export function automaticPreEntryWindow(round: PreEntryRound, record: PreEntryRecord, now: number, availableEnd: number) {
   const deadline = Math.floor((record.startTime + round.hours * 3600000) / 60000) * 60000;

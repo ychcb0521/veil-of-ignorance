@@ -32,7 +32,8 @@ const iso = (time: number) => new Date(time).toISOString();
 // 记录时间（recorded_at / created_at）仍是计算时刻。旧版把实际时间写成计算时刻，交易战役按实际时间排先后，
 // 加仓前的镜像卖出被排到加仓之后，几何仓位漏乘 (1 − αf)（2026-11-01 用户要求与组合表一致）。
 /** Adapt the frozen paper trade into the exact inputs of existing campaign charts/metrics/exports. */
-export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string): QualityCampaignData {
+export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string, size = { notional: QUALITY_NOTIONAL, marginUsdt: QUALITY_NOTIONAL, leverage: 1 }): QualityCampaignData {
+  const { notional, marginUsdt, leverage } = size;
   const { sample, plan: storedPlan, result: r } = run, plan=routedQualityPlan(storedPlan,r), id = campaignId ?? qualityCampaignId(r.key, section), closed = r.status === 'closed';
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
   const legId = `${id}-main`, recordId = r.mirrorFill?.fraction === 1 ? `${id}-mirror-close` : `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
@@ -40,33 +41,33 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   const effective=effectiveQualitySellPlan(plan,r),definition = qualityDefinition(effective.snapshot);
   const opening: CampaignEvent = {
     id: `${id}-entry`, timestamp: iso(entry), event_type: 'main_opened', leg_role: 'main_open', journal_id: legId,
-    trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, pending_order_id: null, price, size_usdt: QUALITY_NOTIONAL,
-    notes: `鱼质量模拟多单 · ${label}`, recorded_at: recorded, direction: 'long', leverage: 1, leg_sequence: 1, order_kind: 'main',
+    trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, pending_order_id: null, price, size_usdt: notional,
+    notes: `鱼质量模拟多单 · ${label}`, recorded_at: recorded, direction: 'long', leverage, leg_sequence: 1, order_kind: 'main',
     open_time: iso(entry), entry_price: price,
   };
   const mirror = r.mirrorFill, fraction=mirror?.fraction ?? 0;
-  const mirrorPnl=mirror ? QUALITY_NOTIONAL*fraction*(mirror.price/price-1) : 0;
+  const mirrorPnl=mirror ? notional*fraction*(mirror.price/price-1) : 0;
   const mirrorId=`${id}-mirror-close`;
   const remaining=1-fraction;
   const exits:CampaignEvent[] = [
     ...(mirror ? [{...opening,id:`${id}-mirror`,timestamp:iso(mirror.at),event_type:fraction===1?'main_fully_closed' as const:'main_partial_closed' as const,
-      price:mirror.price,size_usdt:QUALITY_NOTIONAL*fraction,realized_pnl:mirrorPnl,trade_record_id:mirrorId,close_time:iso(mirror.at),exit_price:mirror.price,
+      price:mirror.price,size_usdt:notional*fraction,realized_pnl:mirrorPnl,trade_record_id:mirrorId,close_time:iso(mirror.at),exit_price:mirror.price,
       notes:`镜像止盈：涨幅 ≥ ${mirror.gainPct}%，卖出初始币数 ${+(fraction*100).toPrecision(8)}%`,recorded_at:iso(r.evaluatedAt)}] : []),
-    ...(closed && remaining>0 ? [{...opening,id:`${id}-exit`,trade_record_id:recordId,timestamp:iso(end),event_type:'main_fully_closed' as const,price:r.endPrice!,size_usdt:QUALITY_NOTIONAL*remaining,
+    ...(closed && remaining>0 ? [{...opening,id:`${id}-exit`,trade_record_id:recordId,timestamp:iso(end),event_type:'main_fully_closed' as const,price:r.endPrice!,size_usdt:notional*remaining,
       realized_pnl:pnl!-mirrorPnl,close_time:iso(end),exit_price:r.endPrice!,recorded_at:iso(r.evaluatedAt)}] : [])
   ];
   const campaign: TradeCampaign = {
     id, user_id: owner, campaign_code: `${section === 'sell' ? 'QS' : 'QD'}-${r.key}`, symbol: sample.source.symbol,
     direction: 'main_long', status: closed ? pnl! > 1e-8 ? 'closed_profit' : pnl! < -1e-8 ? 'closed_loss' : 'closed_breakeven' : 'active',
     strategy_template: 'main_only', title: `${sample.source.symbol} · ${label}`, opened_at: iso(entry), closed_at: closed ? iso(end) : null,
-    initial_main_size_usdt: QUALITY_NOTIONAL, initial_leverage: 1, final_realized_pnl: pnl, final_r_multiple: null,
-    peak_unrealized_pnl: mirror || r.peakPct == null ? null : QUALITY_NOTIONAL * r.peakPct / 100, peak_drawdown: null,
-    importance_weight: 0, notes: `${qualitySourceLabel(sample)} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n100 USDT · 1 倍模拟多单；未扣手续费、资金费与滑点。`,
+    initial_main_size_usdt: notional, initial_leverage: leverage, final_realized_pnl: pnl, final_r_multiple: null,
+    peak_unrealized_pnl: mirror || r.peakPct == null ? null : notional * r.peakPct / 100, peak_drawdown: null,
+    importance_weight: 0, notes: `${qualitySourceLabel(sample)} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n${marginUsdt} USDT · ${leverage} 倍模拟多单；未扣手续费、资金费与滑点。`,
     actual_evolution: [opening, ...exits],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     // 【用户要求】2026-11-02 战役元数据底部「持仓监测」：完整显示这场战役运行时冻结的整套条件设置
     comparison: { section, planLabel:storedPlan.label, monitorPlan: structuredClone(storedPlan), runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
-      holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??QUALITY_NOTIONAL,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
+      holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??notional,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
       sellEvidence: { exitReason:closed?r.reason:undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
         ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: definition.formula, definitionKey: effective.snapshot.definitionKey!, featureId: effective.snapshot.featureId!,
         metric: effective.rule?.metric ?? effective.metric, version: qualityFormulaVersion(effective), interval: effective.snapshot.interval ?? '5m',
@@ -85,10 +86,10 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   };
   const leg: TradeJournal = {
     id: legId, user_id: owner, trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, campaign_id: id, leg_role: 'main_open', leg_sequence: 1,
-    source: 'retroactive_from_record', symbol: sample.source.symbol, direction: 'long', leverage: 1, position_mode: 'isolated', order_kind: 'main',
+    source: 'retroactive_from_record', symbol: sample.source.symbol, direction: 'long', leverage, position_mode: 'isolated', order_kind: 'main',
     pre_simulated_time: iso(entry), pre_real_time: iso(entry), pre_entry_price: price, pre_planned_stop_loss: null, pre_planned_take_profit: null,
     pre_entry_reason: campaign.notes, pre_falsification_signal: label, pre_mental_state: 3, pre_mental_trigger: null, pre_risk_awareness: null, pre_risk_management: null,
-    pre_checklist_items: null, pre_checklist_passed: null, pre_position_size: QUALITY_NOTIONAL, pre_account_equity_usdt: QUALITY_NOTIONAL, pre_max_loss_usdt: null,
+    pre_checklist_items: null, pre_checklist_passed: null, pre_position_size: notional, pre_account_equity_usdt: marginUsdt, pre_max_loss_usdt: null,
     pre_settlement_mode: 'usdt', pre_settlement_asset: 'USDT',
     post_outcome: pnl == null ? null : pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven', post_realized_pnl: pnl, post_r_multiple: null,
     post_reflection: null, post_correct_action: null, post_reviewed_at: null, reason_was_rewritten: false,
@@ -96,7 +97,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     post_exit_price_snapshot: closed ? r.endPrice : null, created_at: recorded, updated_at: iso(r.evaluatedAt),
   };
   const closeRecord=(record:string,at:number,exit:number,part:number,profit:number,reason:string):TradeRecord=>({id:record,symbol:sample.source.symbol,side:'LONG',type:reason==='镜像止盈'?'LIMIT':'MARKET',action:'CLOSE',
-    entryPrice:price,exitPrice:exit,...(mirror?{positionId:`${id}-position`}:{}),quantity:QUALITY_NOTIONAL/price*part,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl:profit,
+    entryPrice:price,exitPrice:exit,...(mirror?{positionId:`${id}-position`}:{}),quantity:notional/price*part,leverage,settlementMode:'usdt',settlementAsset:'USDT',pnl:profit,
     fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,openTime:entry,closeTime:at,openedRealAt:entry,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:reason});
   const tradeRecords:TradeRecord[]=[...(mirror?[closeRecord(mirrorId,mirror.at,mirror.price,fraction,mirrorPnl,'镜像止盈')]:[]),
     ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];

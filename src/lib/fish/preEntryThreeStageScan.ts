@@ -2,7 +2,7 @@ import {recordEntryEvidence,recordEntryStop,recordEntryRestart,type EntryProcess
 import {createEntryLongDrawdownReader} from './preEntryLongDrawdown';
 import {createVersionedEntryStallTurnReader} from './preEntryStallTurnRule';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
-import { automaticPreEntryWindow, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
+import { automaticPreEntryWindow, isAutomaticPreEntryRound, type PreEntryRun, type PreEntryRecord } from './preEntryMonitor';
 import type { FishReconstructionLoader } from './reconstruction';
 import { qualityMetricPlan, type QualityProgress, qualityGroupId, qualityMembers } from './quality';
 import { stricterAdditionThreshold } from './qualityAddition';
@@ -174,7 +174,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION||retry;
       const row={...record.sample.source,timeMs:now},start=await bounds?.start?.(row.symbol),availableEnd=await bounds?.end?.(row.symbol)??now;
       const initializedLoad=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN):baseLoad;
-      const liveWindow = task.round.automatic ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
+      const liveWindow = isAutomaticPreEntryRound(task.round) ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
       const end=liveWindow?.end??record.endTime??Math.floor(Math.min(now,availableEnd,task.round.hours?record.startTime+task.round.hours*3600000:Infinity)/M)*M;
       const hardVetoes=exclusionEnabled ? config.hardVetoes : [];
       const hardIndicators:EntryMarketCondition[]=hardVetoes.filter(v=>v.enabled&&v.kind==='indicator').map(v=>({id:'hard:'+v.id,label:v.label,metric:v.metric!,snapshot:v.snapshot!,enabled:true,direction:v.direction,threshold:v.threshold,timing:'intrabar'}));

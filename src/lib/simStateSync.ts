@@ -23,6 +23,7 @@ import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/
 import { mergeMiningStates, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
 import { FISH_ACCOUNT_SETTINGS_KEY } from '@/lib/fish/accountSettings';
+import { FISH_INSTANT_MONITOR_KEY } from '@/lib/fish/instantMonitorSettings';
 import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
 import { FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY } from '@/lib/fish/lookback';
 import { FISH_WICK_SETTINGS_KEY } from '@/lib/fish/downwardWick';
@@ -390,7 +391,7 @@ export async function hydrateSimState(userId: string, keys?: readonly string[], 
   for (const key of acknowledged.keys()) if (key.startsWith(`${userId}\u0000`)) acknowledged.delete(key);
   // Saved account preferences use the server row as authority, independent of device clock skew.
   const preferenceGenerations = new Map(
-    [FISH_ACCOUNT_SETTINGS_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY].map(key => [key, generation.get(genKey(userId, key)) ?? 0]),
+    [FISH_ACCOUNT_SETTINGS_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_INSTANT_MONITOR_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY].map(key => [key, generation.get(genKey(userId, key)) ?? 0]),
   );
   try {
     const query = supabase

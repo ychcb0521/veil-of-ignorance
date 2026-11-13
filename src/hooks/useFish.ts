@@ -59,6 +59,11 @@ export async function readPageScreenedCda(tasks: readonly ScreenedCdaTask[], sna
   await pageScanner.trackScreenedCda(tasks, snapshot, target, signal, onRead);
 }
 
+export async function readPageInstantMonitor(...args: Parameters<FishScanner['trackInstantMonitor']>) {
+  pageScanner ??= new FishScanner();
+  return pageScanner.trackInstantMonitor(...args);
+}
+
 export async function openPageInstantPosition(input: import('@/lib/fish/instantCampaign').InstantPositionInput, signal: AbortSignal) {
   pageScanner ??= new FishScanner();
   return pageScanner.openInstantPosition(input, signal);
