@@ -22,6 +22,7 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   /** 列表名：「新鱼」或「鱼舱」。 */
   title?: string;
   showScreeningTime?: boolean;
+  collapseSoldRows?: boolean;
   testId?: string;
   defaultOpen?: boolean;
   emptyText?: string;
@@ -93,6 +94,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const [saved] = useState(()=>readView(p.rememberViewKey));
   const scroll = useRef<SignalScrollPosition>(saved.scroll??{top:0});
   const [open, setOpen] = useState(saved.open??!!p.defaultOpen);
+  const [soldOpen, setSoldOpen] = useState(false);
   // 新一轮捕到鱼时自动展开（只在从无到有时，之后用户收起就不再抢）
   const hadRows = useRef(displaySignals.length > 0);
   useEffect(() => { if (p.defaultOpen && !hadRows.current && displaySignals.length > 0) setOpen(true); hadRows.current = displaySignals.length > 0; }, [p.defaultOpen, displaySignals.length]);
@@ -170,10 +172,32 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     }
     return sorted.map(s => actual.get(s.id)!).filter(s => (!algorithm || rowAlgorithmTypes(s).includes(algorithm)) && (!month || signalMonthKey(s.timeMs) === month) && (!q || s.symbol.toUpperCase().includes(q)));
   }, [displaySignals, rowAlgorithmTypes, frozen, resetKey, query, month, sortKey, sortDir, algorithm]);
+  const { currentRows, soldRows } = useMemo(() => {
+    if (!p.collapseSoldRows || !p.cdaAlerts?.size) return { currentRows: rows, soldRows: [] };
+    const currentRows: typeof rows = [], soldRows: typeof rows = [];
+    for (const row of rows) {
+      const sold = row.preEntryMonitor && p.cdaAlerts.has(row.preEntryMonitor.recordId);
+      (sold ? soldRows : currentRows).push(row);
+    }
+    return { currentRows, soldRows };
+  }, [rows, p.collapseSoldRows, p.cdaAlerts]);
   const toggleSort = (key: FishSortKey) => {
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir(key === 'symbol' || key === 'algorithm' ? 'asc' : 'desc'); }
   };
+  const renderTable = (tableRows: typeof rows, sold = false) => (
+    <div className="isolate min-w-0 overflow-x-auto rounded-lg border border-border/60">
+      <div data-testid={sold ? 'fish-library-sold-table' : 'fish-library-table'}
+        style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(${p.cdaAlerts ? 1018 : 834}px + var(--fish-algorithm-width))` } as CSSProperties}>
+        <SignalLibraryHeader selection={bulk?{checked:!!tableRows.length&&tableRows.every(r=>selected.has(selectedKey(r))),toggle:()=>setSelected(s=>{const n=new Set(s),all=tableRows.every(r=>n.has(selectedKey(r)));for(const r of tableRows)if(all)n.delete(selectedKey(r));else n.add(selectedKey(r));return n;})}:undefined}
+          sortKey={sortKey === 'algorithm' || sortKey === 'algorithmCount' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess showScreeningTime={p.showScreeningTime} showCda={!!p.cdaAlerts}
+          algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }}
+          algorithmCountSort={{ active: sortKey === 'algorithmCount', onClick: () => toggleSort('algorithmCount') }}
+          caughtAtSort={canSortCaughtAt ? { active: sortKey === 'caughtAt', onClick: () => toggleSort('caughtAt') } : undefined} />
+        <SignalLibraryList rows={tableRows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={sold ? undefined : scroll.current} onScrollPositionChange={sold ? undefined : onScrollPositionChange} onDelete={p.onDelete ? deleteRow : undefined} selectedIds={bulk?selectedIds:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={rowAlgorithmTypes} rowProcessSignals={rowProcessSignals} nested showProcess showScreeningTime={p.showScreeningTime} cdaAlerts={p.cdaAlerts} confirmDelete={!bulk} />
+      </div>
+    </div>
+  );
   return <div className={'min-w-0'} data-testid={testId}>
     <div className="flex items-center justify-between gap-2">
     <span className="flex items-center gap-0.5">
@@ -201,14 +225,23 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       <div ref={algorithmSizer} aria-hidden className="pointer-events-none invisible absolute h-0 overflow-hidden font-mono text-[10px] leading-4">
         {algorithmLabels.map(label => <span key={label} className="block w-max whitespace-nowrap">{label}</span>)}
       </div>
-      {rows.length ? <div className="isolate min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(${p.cdaAlerts ? 1018 : 834}px + var(--fish-algorithm-width))` } as CSSProperties}>
-        <SignalLibraryHeader selection={bulk?{checked:!!rows.length&&rows.every(r=>selected.has(selectedKey(r))),toggle:()=>setSelected(s=>{const n=new Set(s),all=rows.every(r=>n.has(selectedKey(r)));for(const r of rows)if(all)n.delete(selectedKey(r));else n.add(selectedKey(r));return n;})}:undefined}
-          sortKey={sortKey === 'algorithm' || sortKey === 'algorithmCount' || sortKey === 'caughtAt' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess showScreeningTime={p.showScreeningTime} showCda={!!p.cdaAlerts}
-          algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }}
-          algorithmCountSort={{ active: sortKey === 'algorithmCount', onClick: () => toggleSort('algorithmCount') }}
-          caughtAtSort={canSortCaughtAt ? { active: sortKey === 'caughtAt', onClick: () => toggleSort('caughtAt') } : undefined} />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={p.onDelete ? deleteRow : undefined} selectedIds={bulk?selectedIds:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={rowAlgorithmTypes} rowProcessSignals={rowProcessSignals} nested showProcess showScreeningTime={p.showScreeningTime} cdaAlerts={p.cdaAlerts} confirmDelete={!bulk} />
-      </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{displaySignals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
+      {currentRows.length > 0 ? renderTable(currentRows) : (
+        <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">
+          {soldRows.length > 0 ? (month || algorithm || query.trim() ? '没有匹配的未卖出筛选鱼。' : '暂无未卖出的筛选鱼。') : displaySignals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}
+        </div>
+      )}
+      {soldRows.length > 0 && <div className="mt-2 rounded-lg border border-border/60 bg-muted/20">
+        <button type="button" aria-expanded={soldOpen} aria-controls={`${testId}-sold`}
+          onClick={() => setSoldOpen(value => !value)}
+          className="flex h-7 w-full items-center gap-1.5 rounded-lg px-2.5 text-left text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring">
+          <span>已卖出</span>
+          <FishCount n={soldRows.length} compact/>
+          <ChevronDown aria-hidden className={`ml-auto h-3.5 w-3.5 transition-transform ${soldOpen ? 'rotate-180' : ''}`}/>
+        </button>
+        <div id={`${testId}-sold`} hidden={!soldOpen} className="px-1 pb-1">
+          {soldOpen && renderTable(soldRows, true)}
+        </div>
+      </div>}
     </div>}
   </div>;
 });

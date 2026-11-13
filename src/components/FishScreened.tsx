@@ -49,7 +49,7 @@ export function FishScreened({ state, library, ratings, onJump, canJump, onRate,
   }, [library.rounds, library.records, ratings]);
   const byId = useMemo(() => new Map(rows.map(row => [row.id, row])), [rows]);
   return <div className="ml-1 mt-1 border-l border-border/50 pl-2">
-    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime cdaAlerts={cda?.alerts} defaultOpen={false} headerAction={<>
+    <FishLibrary title="筛选鱼" level="nested" testId="fish-screened" signals={rows} showScreeningTime collapseSoldRows cdaAlerts={cda?.alerts} defaultOpen={false} headerAction={<>
         {(save || cda) && <Popover open={panel !== null} onOpenChange={open => setPanel(open ? 'menu' : null)}>
           <PopoverTrigger asChild><button type="button" aria-label="筛选鱼选项" title="筛选鱼选项"
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
