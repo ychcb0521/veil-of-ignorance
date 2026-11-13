@@ -31,7 +31,8 @@ import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
-import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID } from '@/components/SignalLibraryHeader';
+import type { ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
+import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID, SIGNAL_LIBRARY_SCREENED_GRID } from '@/components/SignalLibraryHeader';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { turingCupTicker } from '@/lib/turingCupSymbol';
@@ -208,6 +209,8 @@ interface RowProps {
   symbol: string;
   timeLabel: string;
   caughtAt?: number;
+  showCda: boolean;
+  cda?: ScreenedCdaTrigger;
   fallbackZone: string;
   turingReplaySample?: true;
   /** 已归一化的评分；undefined = 未评分。 */
@@ -236,7 +239,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, caughtAt, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
+  id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
@@ -251,7 +254,7 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      data-testid="signal-library-row" className={`relative group ${algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
+      data-testid="signal-library-row" className={`relative group ${showCda ? SIGNAL_LIBRARY_SCREENED_GRID : algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
@@ -259,7 +262,7 @@ function SignalLibraryRowImpl({
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
-        className={`${algorithmTypes ? 'col-span-6' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
+        className={`${showCda ? 'col-span-7' : algorithmTypes ? 'col-span-6' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
         title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -290,6 +293,10 @@ function SignalLibraryRowImpl({
         </span>
         {algorithmTypes && <span className="whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-caught-at">
           {caughtAt != null && caughtAt > 0 ? formatBeijingTime(new Date(caughtAt).getTime()) : '—'}
+        </span>}
+        {showCda && <span className="flex items-center gap-1.5 whitespace-nowrap text-[10px] text-muted-foreground" data-testid="fish-cda-sell">
+          {cda ? <><time className="font-mono tabular-nums" dateTime={new Date(cda.at).toISOString()}>{formatBeijingTime(cda.at)}</time>
+            <strong className="rounded bg-amber-500/15 px-1.5 font-semibold text-amber-800 dark:text-amber-300" title={`CDA ${cda.value} · 收盘触发卖出信号`}>已卖出</strong></> : '—'}
         </span>}
         {algorithmTypes && <span className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-algorithm-count">{algorithmTypes.length}</span>}
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
@@ -365,6 +372,7 @@ interface Props {
   /** 「渔」的鱼：每行加「捕捞过程」入口。 */
   showProcess?: boolean;
   showScreeningTime?: boolean;
+  cdaAlerts?: ReadonlyMap<string, ScreenedCdaTrigger>;
   /** 「渔」的鱼：兜底区这一列换成「算法类型」。 */
   rowAlgorithmTypes?: (signal: TradeSignal) => string[];
   rowProcessSignals?: (signal: TradeSignal) => readonly TradeSignal[] | undefined;
@@ -403,7 +411,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect,
-  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, showScreeningTime = false, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
+  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, showScreeningTime = false, cdaAlerts, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef(rows); rowsRef.current = rows;
@@ -606,6 +614,8 @@ function SignalLibraryListImpl({
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
         caughtAt={rowAlgorithmTypes ? (showScreeningTime ? sig.preEntryMonitor?.matchedAt : sig.caughtAt) : undefined}
+        showCda={!!cdaAlerts}
+        cda={sig.preEntryMonitor ? cdaAlerts?.get(sig.preEntryMonitor.recordId) : undefined}
         fallbackZone={sig.fallbackZone}
         turingReplaySample={sig.turingReplaySample}
         quality={normalizeSignalQuality(sig.quality)}

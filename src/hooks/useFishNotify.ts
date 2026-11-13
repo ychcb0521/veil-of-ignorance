@@ -9,6 +9,7 @@ import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { fishVisibleCatchKey } from '@/lib/fish/records';
 import { composeFishEmail, composeScreenedFishEmail, fishEmailMatches, fishEmailSourceLabel, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 import type { PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
+import type { ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 
 /** unchanged = 这一轮结束时新鱼和上一封一样，没发；skipped = 本轮有新鱼但没有一条共振，没发（count 为新鱼条数）。 */
 export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean; skipped?: boolean }
@@ -71,11 +72,11 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length) return Promise.resolve(false);
     return deliverContent(composeScreenedFishEmail(record, round), { ...configRef.current, emails: recipients }, false, delivery);
   }, [deliverContent]);
-  const sendCdaAlert = useCallback((record: PreEntryRecord, round: PreEntryRound, reading: number, recipients: string[], delivery: {
+  const sendCdaAlert = useCallback((record: PreEntryRecord, round: PreEntryRound, trigger: ScreenedCdaTrigger, recipients: string[], delivery: {
     onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal;
   }) => {
-    if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length || !Number.isFinite(reading)) return Promise.resolve(false);
-    return deliverContent(composeScreenedFishEmail(record, round, reading), { ...configRef.current, emails: recipients }, false, delivery);
+    if (record.status !== 'matched' || !record.matchedAt || !configRef.current.enabled || !recipients.length || !Number.isFinite(trigger.at) || !Number.isFinite(trigger.value)) return Promise.resolve(false);
+    return deliverContent(composeScreenedFishEmail(record, round, trigger), { ...configRef.current, emails: recipients }, false, delivery);
   }, [deliverContent]);
   const test = useCallback(async () => {
     const now = Date.now(), source = { id: 'test', symbol: 'TESTUSDT', timeMs: now, timeLabel: '', fallbackZone: '' };

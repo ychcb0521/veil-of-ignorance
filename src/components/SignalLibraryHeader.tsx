@@ -7,8 +7,10 @@ export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax
 /** Fish tables size the algorithm column from every row, including virtualized rows. */
 export const SIGNAL_LIBRARY_FISH_GRID = 'grid grid-cols-[148px_128px_128px_52px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
 
+export const SIGNAL_LIBRARY_SCREENED_GRID = 'grid grid-cols-[148px_128px_128px_176px_52px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
+
 /** Shared column widths and sort controls for the main library and 鱼. */
-export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, showScreeningTime = false, algorithmSort, algorithmCountSort, caughtAtSort, selection }: {
+export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, showScreeningTime = false, showCda = false, algorithmSort, algorithmCountSort, caughtAtSort, selection }: {
   selection?:{checked:boolean;toggle:()=>void};
   /** 「渔」的鱼：兜底区换成可排序的「算法类型」。 */
   algorithmSort?: { active: boolean; onClick: () => void };
@@ -16,11 +18,12 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
   caughtAtSort?: { active: boolean; onClick: () => void };
   showMatch?: boolean;
   showScreeningTime?: boolean;
+  showCda?: boolean;
   /** 「渔」的鱼：这一列标「捕捞过程」。 */
   showProcess?: boolean;
   sortKey: SignalSortKey | undefined; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
 }) {
-  return <div data-testid="signal-library-header" className={`${algorithmSort ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
+  return <div data-testid="signal-library-header" className={`${showCda ? SIGNAL_LIBRARY_SCREENED_GRID : algorithmSort ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
     <span className={`relative grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1 ${selection?'pl-4':''}`}>
       {selection&&<input type="checkbox" className="absolute left-0 h-3 w-3" aria-label="全选当前筛选的鱼" checked={selection.checked} onChange={selection.toggle}/>}
       <span aria-hidden/>
@@ -30,6 +33,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
     {algorithmSort && (caughtAtSort
       ? <SortHeader label="捕捞时间" active={caughtAtSort.active} dir={sortDir} onClick={caughtAtSort.onClick} />
       : <span title={showScreeningTime ? "动态筛选首次满足的时间（北京时间）" : "实际捕获这条鱼的时间（北京时间）"}>{showScreeningTime ? "首次满足时间" : "捕捞时间"}</span>)}
+    {showCda && <span title="CDA 原始值首次低于 −10 的 5 分钟收盘时间（北京时间）">CDA 卖出时间</span>}
     {algorithmSort && (algorithmCountSort
       ? <SortHeader label="算法数量" active={algorithmCountSort.active} dir={sortDir} onClick={algorithmCountSort.onClick} />
       : <span title="实际命中的不同算法类型数量">算法数量</span>)}

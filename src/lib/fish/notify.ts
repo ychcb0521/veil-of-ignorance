@@ -18,6 +18,7 @@ import { qualityMembers } from './quality';
 import { focusDetector, FOCUS_DETECTORS } from './qualityFocusSignals';
 import type { PreEntryRecord, PreEntryRound } from './preEntryMonitor';
 import { qualitySignalTime } from './qualityAdmissionTime';
+import type { ScreenedCdaTrigger } from './screenedCda';
 
 /**
  * 【用户要求】2026-10-27「推送的邮件内容只包括 avg_CBI2_2、avg_CBA_2 共振的信号，也就是两者捕捉到的信号的交集」。
@@ -146,7 +147,7 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   return { subject, message, message_html, count: rows.length };
 }
 
-export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' | 'matchedAt' | 'planId'>, round?: Pick<PreEntryRound, 'plans'>, cda?: number) {
+export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' | 'matchedAt' | 'planId'>, round?: Pick<PreEntryRound, 'plans'>, cda?: ScreenedCdaTrigger) {
   const source = record.sample.source;
   const algorithms = source.fish ? fishCaughtBy(source) : [];
   const template = round?.plans?.find(plan => plan.id === record.planId)?.label ?? '—';
@@ -159,8 +160,9 @@ export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' |
     ['首次满足时间', formatUTC8(record.matchedAt!)],
   ];
   const esc = (value: string) => value.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-  const alert = cda === undefined ? undefined : '卖出！（' + cda + '）';
-  const subject = (alert ? 'CDA 卖出提醒' : '动态筛选已入选') + ' · ' + source.symbol;
+  const alert = cda ? `卖出！（${cda.value}）` : undefined;
+  if (cda) rows.push(['CDA 低于 −10 的时间', formatUTC8(cda.at)]);
+  const subject = (cda ? '⚠️ CDA 卖出提醒' : '动态筛选已入选') + ' · ' + source.symbol;
   const message = ['新鱼已通过动态筛选。', ...rows.map(([label, value]) => `${label}　${value}`), ...(alert ? [alert] : []), '时间为 UTC+8。'].join('\n');
   const message_html = '<div style="font:14px sans-serif;color:#111827"><p>新鱼已通过动态筛选。</p><table style="border-collapse:collapse">'
     + rows.map(([label,value]) => `<tr><th style="padding:6px 12px;text-align:left">${esc(label)}</th><td style="padding:6px 12px">${esc(value)}</td></tr>`).join('')

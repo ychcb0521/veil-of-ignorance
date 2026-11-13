@@ -26,6 +26,7 @@ export interface FishCdaTracking {
   enabled: boolean;
   active: number;
   awaitingMail: number;
+  alerts: ReadonlyMap<string, ScreenedCdaTrigger>;
   error: string;
   saving: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -50,6 +51,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const [saving, setSaving] = useState(!!configKey);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  const [refreshVersion, refreshCheckpoints] = useState(0);
   const checkpoints = useRef(new Map<string, Checkpoint>());
   const changes = useRef<BroadcastChannel>();
   const setEnabled = useCallback(async (enabled: boolean) => {
@@ -70,15 +72,16 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         : cause instanceof Error ? cause.message : 'CDA 追踪设置保存失败');
     } finally { setSaving(false); }
   }, [configKey]);
-  const entries = useMemo(() => {
-    if (!settings || !ready || !library) return [];
+  const admitted = useMemo(() => {
+    if (!owner || !ready || !library) return [];
     const rounds = new Map(library.rounds.filter(round => round.automatic && round.state === 'complete').map(round => [round.id, round]));
     return library.records.flatMap(record => {
       const round = rounds.get(record.roundId);
       return round && record.status === 'matched' && Number.isFinite(record.matchedAt) && record.matchedAt! > 0
-        && record.updatedAt >= settings.enabledAt ? [{ record, round }] : [];
+        ? [{ record, round }] : [];
     });
-  }, [library?.records, library?.rounds, ready, settings]);
+  }, [library?.records, library?.rounds, owner, ready]);
+  const entries = useMemo(() => settings ? admitted.filter(({record}) => record.updatedAt >= settings.enabledAt) : [], [admitted, settings]);
   const current = useRef({ entries, notify });
   current.current = { entries, notify };
   const wake = useRef<() => void>();
@@ -96,10 +99,14 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const refreshLegacy = (event: StorageEvent) => {
       if (event.key === configKey || event.key === null) void refresh();
+      if (event.key?.startsWith(jobPrefix)) refreshCheckpoints(version => version + 1);
     };
     try {
       changes.current = new BroadcastChannel(configKey);
-      changes.current.onmessage = event => { if (event.data === 'settings') void refresh(); };
+      changes.current.onmessage = event => {
+        if (event.data === 'settings') void refresh();
+        if (event.data === 'alert') refreshCheckpoints(version => version + 1);
+      };
     } catch { /* The stored settings will also be read when the page opens. */ }
     window.addEventListener('storage', refreshLegacy);
     void refresh();
@@ -109,23 +116,24 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       changes.current?.close();
       changes.current = undefined;
     };
-  }, [configKey]);
+  }, [configKey, jobPrefix]);
 
   useEffect(() => {
-    if (!entries.length) return;
+    if (!admitted.length) return;
     let active = true;
-    const keys = entries.map(({record}) => jobPrefix + encodeURIComponent(record.id));
+    const keys = admitted.map(({record}) => jobPrefix + encodeURIComponent(record.id));
     void readFishPreferences<Checkpoint>(keys).then(rows => {
       if (!active) return;
       keys.forEach((key, i) => {
         const saved = rows[i] ?? readLocal<Checkpoint>(key);
-        if (saved && !checkpoints.current.has(key)) checkpoints.current.set(key, saved);
+        const existing = checkpoints.current.get(key);
+        if (saved && (!existing || (saved.alert && !existing.alert))) checkpoints.current.set(key, saved);
       });
       setRevision(value => value + 1);
       wake.current?.();
     }, () => { if (active) setError('CDA 追踪进度读取失败，请重试'); });
     return () => { active = false; };
-  }, [entries, jobPrefix]);
+  }, [admitted, jobPrefix, refreshVersion]);
 
   useEffect(() => {
     if (!settings || !owner) return;
@@ -184,7 +192,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         // Keep a recovery delay for a tab that closes after requesting an email.
         const inFlight = { ...checkpoint, nextMailAt: Date.now() + 60_000 };
         await save(record, inFlight);
-        const ok = await live.sendCdaAlert(record, round, checkpoint.alert.value, recipients, {
+        const ok = await live.sendCdaAlert(record, round, checkpoint.alert, recipients, {
           signal: lifetime.signal,
           onRecipient: async email => { sent.add(email); await save(record, { ...inFlight, sent: [...sent] }); },
         });
@@ -249,7 +257,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           if (errors.delete(id)) setError(errors.values().next().value ?? '');
           if (result.through > (read(record)?.after ?? initialCursor(record, settings))) {
             await save(record, { after: result.through, alert: result.trigger });
-            if (result.trigger) send();
+            if (result.trigger) {
+              changes.current?.postMessage('alert');
+              send();
+            }
           }
         });
       }).catch(cause => {
@@ -286,6 +297,15 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     }
     return { active, awaitingMail };
   }, [entries, jobPrefix, revision]);
+  const alerts = useMemo(() => {
+    const result = new Map<string, ScreenedCdaTrigger>();
+    for (const { record } of admitted) {
+      const key = jobPrefix + encodeURIComponent(record.id);
+      const alert = (checkpoints.current.get(key) ?? readLocal<Checkpoint>(key))?.alert;
+      if (alert && Number.isFinite(alert.at) && Number.isFinite(alert.value)) result.set(record.id, alert);
+    }
+    return result;
+  }, [admitted, jobPrefix, revision]);
   const mailIssue = settings && counts.awaitingMail ? !notify.config.enabled ? '邮件提醒已关闭' : fishNotifyMissing(notify.config) : '';
-  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, ...counts };
+  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, alerts, ...counts };
 }
