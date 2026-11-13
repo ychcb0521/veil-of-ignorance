@@ -21,7 +21,7 @@ export function FishPreEntryProgress({monitor,open:controlledOpen,onOpenChange}:
   const hitCount=count('matched');
   const scanning=records.find(r=>r.status==='scanning');
   const current=monitor.running?(monitor.progress?.current||scanning?.sample.source.symbol||'准备筛选…'):'';
-  const label=!monitor.ready?'正在读取筛选库…':monitor.running?(monitor.progress?.waitingUntil?'行情限流 · 等待自动续跑':'筛选中'):round?.state==='paused'?'已暂停':round?.state==='complete'?'已完成':round?'待继续':'尚未开始';
+  const label=!monitor.ready?'正在读取筛选库…':monitor.running?(monitor.progress?.waitingUntil?'等待续跑':'筛选进行中'):round?.state==='paused'?'已暂停':round?.state==='complete'?'已完成':round?'待继续':'尚未开始';
   return <>
     {monitor.running && <FishQualityProgress
       testId="pre-entry-progress" label={monitor.error ? '筛选异常' : label} progressLabel="动态筛选处理进度"

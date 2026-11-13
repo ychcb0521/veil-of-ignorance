@@ -776,7 +776,8 @@ it('keeps filtering and monitoring in workflow order with controls on the left',
   const group = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   expect(within(group).getByTestId('quality-mode')).toHaveTextContent('持仓监测');
   for (const name of ['暂停监测', '开始监测的其他方式', '持仓监测条件']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
-  expect(within(group).getByRole('status')).toHaveTextContent('监测中2333 / 2360');
+  expect(within(group).getByRole('status')).toHaveTextContent('监测进行中2333 / 236098.9%');
+  expect(within(group).getByRole('progressbar',{name:'持仓监测处理进度'})).toHaveAttribute('aria-valuenow','2333');
   expect(within(group).queryByRole('button', { name: '开始监测' })).toBeNull();
   expect(within(group).queryByRole('button', { name: '买入过滤条件' })).toBeNull();
   expect(within(filter).getByRole('button', { name: '买入过滤条件' })).toBeInTheDocument();
@@ -786,9 +787,10 @@ it('keeps filtering and monitoring in workflow order with controls on the left',
 });
 
 it('shows a holding market cooldown as automatic waiting while preserving progress and pause controls',()=>{
- const s=state();s.running=true;s.progress={done:33,total:89,current:'RETRYUSDT',waitingUntil:T+180000};
+ const s=state();s.running=true;s.progress={done:33,total:89,current:'RETRYUSDT',waitingUntil:T+180000};s.study.monitorTimeBasis='signal';
  render(<FishQuality state={s}/>);const group=screen.getByRole('region',{name:'持仓监测模块'});
- expect(within(group).getByRole('status')).toHaveTextContent('行情限流 · 等待自动续跑');expect(within(group).getByRole('status')).toHaveTextContent('33 / 89');expect(within(group).getByRole('status')).toHaveTextContent('UTC+8');
+ expect(within(group).getByRole('status')).toHaveTextContent('等待续跑');expect(within(group).getByRole('status')).toHaveTextContent('33 / 89');
+ expect(within(group).getByRole('progressbar')).toHaveAttribute('title',expect.stringMatching(/UTC\+8.*监测起点：信号时间/));
  fireEvent.click(within(group).getByRole('button',{name:'暂停监测'}));expect(s.cancel).toHaveBeenCalledOnce();
 });
 
@@ -810,8 +812,9 @@ it('starts and pauses filtering and monitoring independently while bulk mining i
   s.filterRunning = true; s.filterProgress = { done: 1, total: 2, current: '', matched: 1 }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
   const start = within(monitor()).getByRole('button', { name: '开始监测' }); expect(start).toBeEnabled(); fireEvent.click(start); fireEvent.click(screen.getByRole('button',{name:'基于筛选时间'})); expect(s.start).toHaveBeenCalledExactlyOnceWith(false,undefined,false,'screening');
   s.running = true; s.progress = { done: 0, total: 2, current: '' }; view.rerender(<FishQuality state={s} mining={mining as never}/>);
-  expect(within(filter()).getByRole('status')).toHaveTextContent(/过滤中\s*1\s*\/\s*2 · 50.0%\s*命中 1/);
-  expect(within(filter()).getByRole('progressbar',{name:'买前过滤处理进度'})).toHaveAttribute('aria-valuenow','1'); expect(within(monitor()).getByRole('status')).toHaveTextContent(/监测中\s*0\s*\/\s*2/);
+  expect(within(filter()).getByRole('status')).toHaveTextContent(/过滤进行中\s*1\s*\/\s*2\s*50\.0%/);
+  expect(within(filter()).getByText('命中 1')).toBeVisible();
+  expect(within(filter()).getByRole('progressbar',{name:'买前过滤处理进度'})).toHaveAttribute('aria-valuenow','1'); expect(within(monitor()).getByRole('status')).toHaveTextContent(/监测进行中\s*0\s*\/\s*2\s*0\.0%/);
   fireEvent.click(within(filter()).getByRole('button', { name: '暂停过滤' })); expect(s.cancelFilter).toHaveBeenCalledOnce(); expect(s.cancel).not.toHaveBeenCalled(); expect(mining.pause).not.toHaveBeenCalled();
   fireEvent.click(within(monitor()).getByRole('button', { name: '暂停监测' })); expect(s.cancel).toHaveBeenCalledOnce(); expect(mining.pause).not.toHaveBeenCalled();
 });

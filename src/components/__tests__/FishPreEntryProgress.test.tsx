@@ -12,11 +12,11 @@ function monitor():NonNullable<FishQualityState['preEntry']>{
 afterEach(cleanup);
 it('shows a cancellable cooldown as waiting for automatic continuation without changing outcomes',()=>{
  const state=monitor(),before=structuredClone(state.library);state.progress={...state.progress!,waitingUntil:T+180000};
- render(<FishPreEntryProgress monitor={state}/>);expect(screen.getByRole('status')).toHaveTextContent('行情限流 · 等待自动续跑');expect(screen.getByLabelText('查看本轮筛选结果')).toHaveAttribute('title',expect.stringContaining('后自动继续'));expect(state.library).toEqual(before);
+ render(<FishPreEntryProgress monitor={state}/>);expect(screen.getByRole('status')).toHaveTextContent('等待续跑');expect(screen.getByLabelText('查看本轮筛选结果')).toHaveAttribute('title',expect.stringContaining('后自动继续'));expect(state.library).toEqual(before);
 });
 it('keeps the module row to simple live progress and puts verbose details in the result dialog',()=>{
  const state=monitor(),view=render(<FishPreEntryProgress monitor={state}/>);
- const status=screen.getByRole('status');expect(status).toHaveTextContent('筛选中');expect(status).toHaveTextContent('4 / 7');expect(status).not.toHaveTextContent('入选');expect(screen.queryByText('TEST6USDT')).not.toBeInTheDocument();expect(screen.queryByText(/扫描到 2026/)).not.toBeInTheDocument();
+ const status=screen.getByRole('status');expect(status).toHaveTextContent('筛选进行中');expect(status).toHaveTextContent('4 / 7');expect(status).not.toHaveTextContent('入选');expect(screen.queryByText('TEST6USDT')).not.toBeInTheDocument();expect(screen.queryByText(/扫描到 2026/)).not.toBeInTheDocument();
  expect(screen.getByTestId('pre-entry-hit-count')).toHaveTextContent('命中 1');
  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','4');expect(screen.queryByText('本轮结果')).not.toBeInTheDocument();
  const next=structuredClone(state.library);next.records[6]={...next.records[6],status:'matched',cursor:T+120000,matchedAt:T+120000};view.rerender(<FishPreEntryProgress monitor={{...state,library:next}}/>);
