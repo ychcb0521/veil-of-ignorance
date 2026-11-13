@@ -8,7 +8,7 @@ import type { TradeCampaign, TradeJournal, CampaignEvent } from '@/types/journal
 import type { TradeRecord } from '@/types/trading';
 import type { getCampaignFullData } from '@/lib/journalApi';
 import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
-import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
+import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, isRetainedQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
 import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
@@ -177,12 +177,17 @@ export function qualityCampaignDetailFromStudy(owner: string, study: FishQuality
   if (!isQualityCampaignId(id)) throw new Error('比较战役链接无效');
   if (isMonitorCampaignId(id)) return qualityMonitorCampaignDataFromStudy(owner, study, id);
   const section = id.startsWith('fish-detect-') ? 'detect' : 'sell';
-  const runs = archiveQualityStudy(study).campaignRuns ?? [];
-  let run = runs.find(row => qualityCampaignId(row.result.key, section) === id);
+  // A single detail only needs its own frozen result and any correction successors.
+  const findRun = (matches: (key: string) => boolean) =>
+    study.campaignRuns?.find(row => matches(row.result.key) && isRetainedQualityRun(row))
+    ?? archiveQualityStudy({ ...study, campaignRuns: undefined, results: study.results.filter(row => matches(row.key)) }).campaignRuns?.[0];
+  let run = findRun(key => qualityCampaignId(key, section) === id);
   const visited = new Set<string>();
   while (run?.supersededBy) {
     if (visited.has(run.result.key)) throw new Error('纠错版本引用循环，请重新运行纠错');
-    visited.add(run.result.key); run = runs.find(row => row.result.key === run!.supersededBy);
+    visited.add(run.result.key);
+    const successor = run.supersededBy;
+    run = findRun(key => key === successor);
   }
   if (!run) throw new Error('本账号未找到这场比较战役，请在保存鱼质量结果的浏览器中打开');
   if (!hasQualityEntry(run.result)) throw new Error(`此战役纠错未通过：${run.repair?.error ?? '缺少可靠成交数据'}。原记录仍保留，可在比较列表重试纠错。`);

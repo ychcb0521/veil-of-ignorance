@@ -302,7 +302,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(within(board).getByTestId('mirror-actual-gain')).toHaveTextContent('+5.00%');
     expect(within(board).getByTestId('mirror-total-roi')).toHaveTextContent('+10.16%');
     const labels=replayAnnotationSnapshots.at(-1)!.markerLabels;
-    expect(labels).toContain('半仓止盈 · 卖出 50% · 涨幅 +5.00%');
+    expect(labels).toContain('镜像平衡减仓 · 卖出 50% · 涨幅 +5.00%');
     expect(labels.filter(label=>label==='余仓＋加仓 · 全部卖出')).toHaveLength(1);
     expect(labels).not.toContain('余仓 50% · 卖出');expect(labels).not.toContain('M 全平');
   });

@@ -3,6 +3,7 @@ import { STATE_DEF, CDA_DEF, BSS_DEF, definitionKey } from '@/lib/deepDig/featur
 import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, type QualityResult } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
+import { qualityCampaignDetailFromStudy } from '@/lib/fish/qualityCampaignProjection';
 import { qualityCampaignDataFromStudy } from '@/lib/fish/qualityCampaigns';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
@@ -23,6 +24,21 @@ function seed() {
   return { study, row, plan, result };
 }
 describe('fish-quality campaigns', () => {
+  it('opens a frozen or legacy result without cloning unrelated live results', () => {
+    const { study, result } = seed();
+    const frozen = archiveQualityStudy(study);
+    const [expected] = qualityCampaignDataFromStudy('owner', frozen, 'sell');
+    const unrelated = { ...result, key: 'other', get sampleId(): string { throw new Error('read unrelated result'); } };
+    expect(qualityCampaignDetailFromStudy('owner', { ...frozen, results: [unrelated] }, expected.campaign.id)).toEqual(expected);
+    expect(qualityCampaignDetailFromStudy('owner', { ...study, results: [unrelated, result] }, expected.campaign.id)).toEqual(expected);
+  });
+  it('keeps legacy replacement order and first evaluation time when adopting duplicate results', () => {
+    const { study, result } = seed();
+    const replacement = { ...result, evaluatedAt: result.evaluatedAt + 1, endPrice: 11, pnl: 10 };
+    const expected = archiveQualityResult(archiveQualityResult(study, result, true), replacement, true);
+    const adopted = archiveQualityStudy({ ...study, results: [result, replacement] });
+    expect(adopted.campaignRuns).toEqual(expected.campaignRuns);
+  });
   it('turns three detector display rows into one trade, using existing settlement and campaign metrics without fees', async () => {
     const { study } = seed(), archived = archiveQualityStudy(study);
     expect(archived.campaignRuns).toHaveLength(1);

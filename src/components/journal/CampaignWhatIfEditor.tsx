@@ -391,6 +391,7 @@ export function CampaignWhatIfEditor({
 
   const verticalLines = useMemo<AnalysisDraggableVerticalLine[]>(() => {
     return activeManualLegs.flatMap(leg => {
+      if (leg.leg_role === 'mirror_tp') return [];
       const color = leg.direction === 'long' ? SELECTED_LEG_LONG_LINE_COLOR : SELECTED_LEG_SHORT_LINE_COLOR;
       const openMs = validTimeMs(leg.open_time);
       const closeMs = validTimeMs(leg.close_time);

@@ -6,6 +6,7 @@ import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
 import { isInstantCampaignId, isPaperCampaignId } from '@/lib/campaignSections';
+import { resolveMirrorTpChartFill } from '@/lib/campaignMirrorTpOrderTiming';
 import { loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
@@ -495,7 +496,6 @@ function buildChartArtifacts(
   legExitPriceCorrections: LegExitPriceCorrections = {},
 ) {
   const events = buildCampaignEventStream(campaign, legs, tradeRecords);
-  const eventMap = new Map(events.map(event => [event.journal_id ?? event.id, event]));
   const tradeRecordLookup = buildTradeRecordLookup(tradeRecords);
   const markers: ChartMarker[] = [];
   const timeBoundPriceLines: TimeBoundPriceLine[] = [];
@@ -526,31 +526,36 @@ function buildChartArtifacts(
   const paperMirror=!!(campaign.comparison?.instant?.mirrorFill ?? campaign.comparison?.sellEvidence?.mirrorFill);
   let rollingIndex = 1;
   for (const leg of legs) {
-    if(paperMirror&&leg.leg_role==='mirror_tp')continue;
     const record = leg.trade_record_id ? tradeRecordLookup.get(leg.trade_record_id) ?? null : null;
+    if (leg.leg_role === 'mirror_tp') {
+      const fill = paperMirror ? null : resolveMirrorTpChartFill(leg, record, campaign.actual_evolution);
+      if (fill) {
+        const reductionPct = formatReductionPct(computeMirrorTpReductionPct(campaign, leg, legs, tradeRecords));
+        markers.push({ ...fill, shape: 'circle', color: '#0ECB81',
+          label: reductionPct == null ? 'M 减仓' : `M 减仓 ${reductionPct}%` });
+      }
+      continue;
+    }
     const resolved = resolveLegExecution(leg, record, legExitPriceCorrections);
     const openTime = resolved.openTime ?? new Date(campaign.opened_at).getTime();
     const closeTime = resolved.closeTime;
     const price = resolved.entryPrice ?? 0;
     const exitPrice = resolved.exitPrice ?? price;
-    const color = leg.leg_role === 'mirror_tp'
-      ? '#F0B90B'
-      : leg.leg_role === 'hedge_rolling'
-        ? '#5BA3FF'
-        : leg.leg_role === 'hedge_initial_a' || leg.leg_role === 'hedge_initial_b'
-          ? '#2B80FF'
-          : leg.leg_role === 'reentry_main' || leg.leg_role === 'reentry_hedge'
-            ? '#B080FF'
-            : leg.direction === 'short'
-              ? '#F6465D'
-              : '#0ECB81';
+    const color = leg.leg_role === 'hedge_rolling'
+      ? '#5BA3FF'
+      : leg.leg_role === 'hedge_initial_a' || leg.leg_role === 'hedge_initial_b'
+        ? '#2B80FF'
+        : leg.leg_role === 'reentry_main' || leg.leg_role === 'reentry_hedge'
+          ? '#B080FF'
+          : leg.direction === 'short'
+            ? '#F6465D'
+            : '#0ECB81';
 
     let label = 'M';
     let shape: ChartMarker['shape'] = leg.direction === 'short' ? 'triangle-down' : 'triangle-up';
     if (leg.leg_role === 'hedge_initial_a') { label = 'Ha'; shape = 'triangle-down'; }
     if (leg.leg_role === 'hedge_initial_b') { label = 'Hb'; shape = 'triangle-down'; }
     if (leg.leg_role === 'hedge_rolling') { label = `Hr${rollingIndex++}`; shape = 'triangle-down'; }
-    if (leg.leg_role === 'mirror_tp') { label = 'TP'; shape = 'square'; }
     if (leg.leg_role?.startsWith('main_add_')) { label = `A${leg.leg_role.slice('main_add_'.length)}`; }
     if (leg.leg_role === 'reentry_main') { label = '再入主力'; }
     if (leg.leg_role === 'reentry_hedge') { label = 'ReH'; shape = 'triangle-down'; }
@@ -587,11 +592,11 @@ function buildChartArtifacts(
     const cancelEvent = events.find(event => event.journal_id === leg.id && event.event_type === 'hedge_cancelled') ?? null;
     const startTime = openTime;
     const endTime = closeTime != null
-      ? (leg.leg_role === 'mirror_tp' ? closeTime : openTime)
+      ? openTime
       : cancelEvent
         ? new Date(cancelEvent.timestamp).getTime()
         : (campaign.closed_at ? new Date(campaign.closed_at).getTime() : Date.now());
-    if (leg.leg_role && (leg.leg_role.startsWith('hedge_') || leg.leg_role === 'mirror_tp')) {
+    if (leg.leg_role?.startsWith('hedge_')) {
       timeBoundPriceLines.push({
         price,
         color,
@@ -604,18 +609,6 @@ function buildChartArtifacts(
     }
 
     if (closeTime != null && !paperMirror) {
-      if (leg.leg_role === 'mirror_tp') {
-        const reductionPct = formatReductionPct(
-          computeMirrorTpReductionPct(campaign, leg, legs, tradeRecords),
-        );
-        markers.push({
-          time: closeTime,
-          price: exitPrice,
-          shape: 'circle',
-          color: '#0ECB81',
-          label: reductionPct == null ? 'M 减仓' : `M 减仓 ${reductionPct}%`,
-        });
-      }
       if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
         const mirrorFill = campaign.comparison?.instant?.mirrorFill ?? campaign.comparison?.sellEvidence?.mirrorFill;
         if (!mirrorFill || mirrorFill.fraction < 1) markers.push({
@@ -627,8 +620,6 @@ function buildChartArtifacts(
         });
       }
     }
-
-    eventMap.get(leg.id);
   }
 
   if(paperMirror){
@@ -637,7 +628,6 @@ function buildChartArtifacts(
   }
   const mirror = qualityMirrorChartArtifacts(campaign);
   markers.push(...mirror.markers);
-  timeBoundPriceLines.push(...mirror.timeBoundPriceLines);
   verticalLines.push(...mirror.verticalLines);
 
   return { markers, timeBoundPriceLines, verticalLines, events };
@@ -709,7 +699,7 @@ function buildCounterfactualChartArtifacts(
   }
 
   for (const leg of branch.result.legs_summary) {
-    if (!leg.leg_role.startsWith('hedge_') && leg.leg_role !== 'mirror_tp') continue;
+    if (!leg.leg_role.startsWith('hedge_')) continue;
     timeBoundPriceLines.push({
       price: leg.trigger_price,
       color,
@@ -734,6 +724,7 @@ async function loadBatchCampaignData(id: string, snapshot: CampaignBatchExportSn
   let pending = snapshot.campaignData.get(id);
   if (pending) return pending;
   pending = (async () => {
+    if (isPaperCampaignId(id)) return getCampaignFullData(id, { heal: false });
     const source = await getCampaignWithLegs(id);
     const owner = source.campaign.user_id;
     let local = snapshot.localSnapshots.get(owner);
@@ -789,8 +780,9 @@ async function loadAccountCampaignPerformance(
   viewerUserId: string,
   snapshot?: CampaignBatchExportSnapshot,
   comparison?: TradeCampaign['comparison'],
+  signal?: AbortSignal,
 ): Promise<AccountCampaignMetrics> {
-  if (comparison) return loadQualityCampaignPerformance(ownerUserId, comparison.section, comparison.sellKey);
+  if (comparison) return loadQualityCampaignPerformance(ownerUserId, comparison.section, comparison.sellKey, signal);
   const campaigns = ownerUserId === viewerUserId
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
@@ -969,6 +961,26 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const initialLocalReadRevisionRef = useRef(0);
   useLayoutEffect(() => { localRecoverySourceRef.current = { campaign, legs }; }, [campaign, legs]);
   const [localRecoveryRevision, setLocalRecoveryRevision] = useState(0);
+  const counterfactualSectionRef = useRef<HTMLElement>(null);
+  const [counterfactualVisibleId, setCounterfactualVisibleId] = useState<string>();
+  const counterfactualReady = campaign != null && counterfactualVisibleId === campaign.id;
+  useEffect(() => {
+    const section = counterfactualSectionRef.current;
+    if (!section || !campaign?.id || counterfactualReady) return;
+    const campaignId = campaign.id;
+    if (typeof IntersectionObserver === 'undefined') {
+      setCounterfactualVisibleId(campaignId);
+      return;
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        observer.disconnect();
+        setCounterfactualVisibleId(campaignId);
+      }
+    }, { rootMargin: '300px 0px' });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [campaign?.id, counterfactualReady]);
   const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
   const [legExitPriceCorrections, setLegExitPriceCorrections] = useState<LegExitPriceCorrections>({});
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
@@ -1105,6 +1117,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       setLoading(true);
       try {
@@ -1116,7 +1129,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         // 批量导出不需要反事实分支，直接给空列表。
         initialLocalReadRevisionRef.current = getPersistedStateHydrationRevision();
         const [full, branchesResult] = await Promise.all([
-          batchExport ? loadBatchCampaignData(id, batchExport.snapshot) : getCampaignFullData(id),
+          batchExport ? loadBatchCampaignData(id, batchExport.snapshot)
+            : paperCampaign ? getCampaignFullData(id, { signal: controller.signal }) : getCampaignFullData(id),
           batchExport
             ? Promise.resolve({ branches: [] as CampaignCounterfactual[], error: null as string | null })
             : listCounterfactuals(id).then(
@@ -1182,13 +1196,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
 
   useEffect(() => {
-    if (!id || !campaignOwnerId || !viewerUserId || batchExport) return;
+    if (!id || !campaignOwnerId || !viewerUserId || batchExport || paperCampaign) return;
     let cancelled = false;
     let generation = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1229,7 +1243,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       clearTimeout(timer);
       unsubscribe.forEach(stop => stop());
     };
-  }, [id, campaign?.id, campaignOwnerId, viewerUserId, batchExport, adoptUnfilledOrderIds]);
+  }, [id, campaign?.id, campaignOwnerId, viewerUserId, batchExport, paperCampaign, adoptUnfilledOrderIds]);
 
   useEffect(() => {
     if (!campaignOwnerId || !viewerUserId) return;
@@ -1239,6 +1253,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setCampaignPerformance(null);
     setCampaignAsymmetricRisk(null);
     setCampaignPerformanceError(null);
@@ -1246,7 +1261,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     const cacheKey = `${viewerUserId}:${campaignOwnerId}:${campaign?.comparison?.section ?? 'personal'}:${campaign?.comparison?.sellKey ?? ''}`;
     let shared = batchExport?.snapshot.accountMetrics.get(cacheKey);
     if (!shared) {
-      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot, campaign?.comparison);
+      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot, campaign?.comparison, batchExport ? undefined : controller.signal);
       batchExport?.snapshot.accountMetrics.set(cacheKey, shared);
       // 失败的那份不留在缓存里：重试时重新读，而不是反复拿到同一个被拒的 Promise。
       if (batchExport) void shared.catch(() => batchExport.snapshot.accountMetrics.delete(cacheKey));
@@ -1280,6 +1295,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision, campaign?.comparison]);
 
@@ -1513,9 +1529,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   // 盘面周期与计算周期相同、拉取窗口也相同（倍率视图）时只拉一次，直接用计算那一份；
   // 不同时（换了周期、绝对预设撑开了窗口）才另拉。两块盘面要的另一份相同时也只拉一次。
   // 【用户要求】自动周期（默认 5 分钟线）放不下整段 51 倍时，显示用 K 线只拉视窗附近的一段，不为预拉而放粗周期。
-  // 手动选的周期、批量下载里指定的周期照旧整段拉（它们本来就按拉取预算选过周期）。
-  const autoDisplayInterval = !intervalTouched && !(batchInterval && batchInterval !== 'auto');
-  const mainDisplayFetch = autoDisplayInterval
+  // 手动周期也只预拉当前视窗附近，避免长战役切到 1m 时读入数十万根；计算与批量导出仍用各自的窗口。
+  const mainDisplayFetch = !batchExport || !batchInterval || batchInterval === 'auto'
     ? trimCampaignDisplayFetchWindow(
       { fromTime: campaignKlineTimeWindow.fromTime, toTime: campaignKlineTimeWindow.toTime },
       { fromTime: campaignKlineVisibleRange.fromTime, toTime: campaignKlineVisibleRange.toTime },
@@ -1534,8 +1549,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       fetch: mainDisplayFetch,
     }
     : null;
-  // 反事实盘面只在详情页里画（批量导出没有它），拉取窗口是基准窗口（自动周期放不下时同样截在它自己的视窗附近）。
-  const counterfactualDisplayFetch = !intervalTouched
+  // 反事实盘面靠近可视区后才另拉行情，按自己的视窗保留上下文。
+  const counterfactualDisplayFetch = counterfactualReady
     ? trimCampaignDisplayFetchWindow(
       { fromTime: campaignKlineBaseWindow.fromTime, toTime: campaignKlineBaseWindow.toTime },
       { fromTime: counterfactualVisibleRange.fromTime, toTime: counterfactualVisibleRange.toTime },
@@ -1545,7 +1560,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const counterfactualSharesCompute = counterfactualDisplayInterval === computeInterval
     && counterfactualDisplayFetch.fromTime === campaignKlineBaseWindow.fromTime
     && counterfactualDisplayFetch.toTime === campaignKlineBaseWindow.toTime;
-  const counterfactualExtraKlineNeed: ExtraKlineNeed | null = !batchExport && !counterfactualSharesCompute
+  const counterfactualExtraKlineNeed: ExtraKlineNeed | null = counterfactualReady && !batchExport && !counterfactualSharesCompute
     ? {
       key: `${counterfactualDisplayInterval}|${counterfactualDisplayFetch.fromTime}|${counterfactualDisplayFetch.toTime}`,
       interval: counterfactualDisplayInterval,
@@ -3325,7 +3340,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           />
         </section>
 
-        <section className="bg-card border border-border rounded p-6 mb-6 space-y-4">
+        <section ref={counterfactualSectionRef} className="bg-card border border-border rounded p-6 mb-6 space-y-4">
           <div className="flex items-center gap-2 text-[13px] font-medium">
             <Sparkles className="w-4 h-4 text-[#B080FF]" />
             反事实战役
@@ -3347,7 +3362,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             klines={klines}
             klinesLoading={klinesLoading}
             chartKlines={counterfactualKlineSet.klines}
-            chartKlinesLoading={counterfactualKlineSet.loading}
+            chartKlinesLoading={!counterfactualReady || counterfactualKlineSet.loading}
             chartKlinesError={counterfactualKlineSet.error}
             onRetryChartKlines={counterfactualKlineSet.reload}
             interval={counterfactualDisplayInterval}

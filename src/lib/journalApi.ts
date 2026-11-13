@@ -1223,11 +1223,11 @@ async function getAuthenticatedUserId(label: string, expectedOwner?: string): Pr
   return userId;
 }
 
-async function readQualityCampaign(campaignId: string) {
+async function readQualityCampaign(campaignId: string, signal?: AbortSignal) {
   // Local paper results are keyed by the currently signed-in account, never by a URL-supplied owner.
   const { data } = await supabase.auth.getSession();
   if (!data.session?.user.id) throw new Error('加载比较战役失败：用户未登录');
-  return loadQualityCampaignData(data.session.user.id, campaignId);
+  return loadQualityCampaignData(data.session.user.id, campaignId, signal);
 }
 
 function buildLocalCampaignFromCreateInput(
@@ -3099,6 +3099,7 @@ function symbolTimelineActivityIndex(
  * 两件事对单场详情是对的，对列表是纯浪费。
  */
 export interface CampaignFullDataOptions {
+  signal?: AbortSignal;
   /** 已批量读取并水合的战役和腿；避免列表页再逐场请求同一份远端数据。 */
   source?: CampaignWithLegs;
   /** 共用的本地存储快照；不传则自行读取（单场路径的原行为）。 */
@@ -3142,7 +3143,7 @@ export async function getCampaignFullData(
   /** 本地增量核对的真实时刻界，见函数体内的说明；null = 无界。 */
   replayEndRealAt?: number | null;
 }> {
-  if (isPaperCampaignId(campaignId)) return readQualityCampaign(campaignId);
+  if (isPaperCampaignId(campaignId)) return readQualityCampaign(campaignId, options.signal);
   if (options.source && options.source.campaign.id !== campaignId) {
     throw new Error('加载战役失败：预加载数据的战役 ID 不匹配');
   }

@@ -31,6 +31,26 @@ it('cancels an obsolete read and releases the shared archive queue immediately',
  reply(workers[1],{kind:'list',data:{rows:[]}});await next;
  expect(store.load).not.toHaveBeenCalled();
 });
+it.each(['detail', 'performance'])('terminates the %s worker when the user leaves a campaign', async kind => {
+  const workers: { terminate: ReturnType<typeof vi.fn> }[] = [];
+  class Reader {
+    terminate = vi.fn();
+    constructor() { workers.push(this); }
+    postMessage() {}
+  }
+  vi.stubGlobal('Worker', Reader);
+  const controller = new AbortController();
+  const pending = kind === 'detail'
+    ? loadQualityCampaignData('owner', 'fish-sell-example', controller.signal)
+    : loadQualityCampaignPerformance('owner', 'quality', 'selected-key', controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  await vi.waitFor(() => expect(workers).toHaveLength(1));
+  controller.abort();
+  await rejected;
+  expect(workers[0].terminate).toHaveBeenCalledOnce();
+  expect(store.load).not.toHaveBeenCalled();
+});
+
 it('rejects a mid-transfer failure without publishing a partial list or rereading on the main thread',async()=>{
  class Reader{
   onmessage:any;onerror:any;terminate=vi.fn();

@@ -58,6 +58,19 @@ function pickMirrorEvent(
   ))[0] ?? null;
 }
 
+/** Only persisted execution evidence can mark a mirror fill on the chart. */
+export function resolveMirrorTpChartFill(leg: TradeJournal, record: TradeRecord | null, events: CampaignEvent[]) {
+  const fill = (time: number | null, price: number | null | undefined) => (
+    time != null && price != null && Number.isFinite(price) && price > 0 ? { time, price } : null
+  );
+  const recordFill = record?.action === 'CLOSE' ? fill(safeTimeMs(record.closeTime), record.exitPrice) : null;
+  if (recordFill) return recordFill;
+  const closeTime = journalSimulatedCloseTime(leg);
+  const event = pickMirrorEvent(events, 'mirror_tp_triggered', leg, closeTime);
+  return fill(safeTimeMs(event?.timestamp), event?.exit_price ?? event?.price)
+    ?? fill(closeTime, leg.post_exit_price_snapshot);
+}
+
 export function resolveMirrorTpOrderTiming(
   leg: TradeJournal,
   record: TradeRecord | null,

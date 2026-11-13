@@ -45,15 +45,15 @@ export const hasQualityEntry = (result: QualityResult) => ['closed', 'open', 'wa
   && (result.status !== 'closed' || Number.isFinite(result.endTime) && result.endTime! >= result.entryTime! && Number.isFinite(result.endPrice) && result.endPrice! > 0 && Number.isFinite(result.pnl));
 
 /** One archive per signal/sell-rule fingerprint. A later threshold cannot rewrite an earlier trial. */
-export function archiveQualityResult(study: FishQualityStudy, result: QualityResult, legacy = false): FishQualityStudy {
-  if (!hasQualityEntry(result)) return study;
+function buildArchivedQualityRun(study: FishQualityStudy, result: QualityResult, legacy: boolean, findPrior: () => QualityCampaignRun | undefined): QualityCampaignRun | undefined {
+  if (!hasQualityEntry(result)) return;
   let index = rowIndexes.get(study.samples);
   if (!index) { index = new Map(qualityComparisonRows(study).map(row => [row.id, row])); rowIndexes.set(study.samples, index); }
   const original = index.get(result.sampleId), sample = original && qualityMonitoringSample(original, qualityRowMonitorTimeBasis(study, original));
   const plan = (study.sellPlans ?? study.groups).find(group => group.id === result.groupId);
   // 未设置普通门槛、也没有启用否决的方案只是登记买入，不存成战役
-  if (!sample || !plan || !hasQualityExit(plan) || !hasQualityCampaign(result) || qualityResultKey(sample, plan, study.observeHours) !== result.key) return study;
-  const prior = study.campaignRuns?.find(run => run.result.key === result.key);
+  if (!sample || !plan || !hasQualityExit(plan) || !hasQualityCampaign(result) || qualityResultKey(sample, plan, study.observeHours) !== result.key) return;
+  const prior = findPrior();
   const selected = new Set(study.selectedRowIds ?? []);
   const selectedDetectors = legacy ? sample.groups : sample.groups.filter(id => selected.has(sample.id) || selected.has(`${sample.id}/detector/${id}`));
   const ids = new Set([...(prior?.detectors.map(d => d.id) ?? []), ...selectedDetectors]);
@@ -61,23 +61,35 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   // Keep the trade's display identity. The source fish and its large reconstruction snapshots already live in samples/groups.
   const { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying, preEntryMonitor } = sample.source;
   const frozenSample = prior?.sample ?? { ...sample, groups: [...sample.groups], readings: undefined, source: { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market, underlying, preEntryMonitor } };
-  const run: QualityCampaignRun = {
+  return {
     ...prior,
     sample: frozenSample, plan: freezePlan(plan), detectors: detectors.map(freezePlan), result: structuredClone(result),
     observeHours: study.observeHours, firstEvaluatedAt: prior?.firstEvaluatedAt ?? result.evaluatedAt,
     detectionAt: prior?.detectionAt ?? (study.selectedSellId === plan.id && detectors.length ? result.evaluatedAt : undefined),
   };
-  return { ...study, campaignRuns: [...(study.campaignRuns ?? []).filter(item => item.result.key !== result.key), run] };
 }
+
+export function archiveQualityResult(study: FishQualityStudy, result: QualityResult, legacy = false): FishQualityStudy {
+  const run = buildArchivedQualityRun(study, result, legacy, () => study.campaignRuns?.find(item => item.result.key === result.key));
+  return run ? { ...study, campaignRuns: [...(study.campaignRuns ?? []).filter(item => item.result.key !== result.key), run] } : study;
+}
+
+export const isRetainedQualityRun = (run: QualityCampaignRun) => !!run.repair || hasQualityExit(run.plan) && hasQualityCampaign(run.result);
 /** Adopt pre-existing evaluated results without rerunning market data. */
 export function archiveQualityStudy(study: FishQualityStudy): FishQualityStudy {
   // 清掉只登记买入的旧记录；仅启用否决也属于有效卖出试验
-  const kept = study.campaignRuns?.filter(run => run.repair || hasQualityExit(run.plan) && hasQualityCampaign(run.result));
-  if (kept && kept.length !== study.campaignRuns!.length) study = { ...study, campaignRuns: kept };
-  const keys = new Set(study.campaignRuns?.map(run => run.result.key));
-  let next = study;
-  for (const result of study.results) if (!keys.has(result.key)) next = archiveQualityResult(next, result, true);
-  return next;
+  const kept = study.campaignRuns?.filter(isRetainedQualityRun);
+  const keys = new Set(kept?.map(run => run.result.key));
+  const adopted = new Map<string, QualityCampaignRun>();
+  for (const result of study.results) {
+    if (keys.has(result.key)) continue;
+    const run = buildArchivedQualityRun(study, result, true, () => adopted.get(result.key));
+    if (!run) continue;
+    adopted.delete(result.key);
+    adopted.set(result.key, run);
+  }
+  if (!adopted.size && kept?.length === study.campaignRuns?.length) return study;
+  return { ...study, campaignRuns: [...(kept ?? []), ...adopted.values()] };
 }
 export function markQualityDetection(study: FishQualityStudy, planId: string): FishQualityStudy {
   const next = archiveQualityStudy(study), plan = next.sellPlans?.find(p => p.id === planId && hasQualityExit(p));

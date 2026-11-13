@@ -15,6 +15,10 @@ import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readLocalIns
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
+function throwIfReadAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('读取已取消', 'AbortError');
+}
+
 // Campaign navigation, saves and cloud encoders share the renderer's memory.
 // Their full IndexedDB snapshots must take turns across all of these features.
 function projectInWorker(request: QualityCampaignReadRequest,signal?:AbortSignal): Promise<QualityCampaignReadResult> {
@@ -68,15 +72,19 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
   const loaded = await loadQualityStudy(owner);
   return { ...listQualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning };
 }
-export async function loadQualityCampaignData(owner: string, id: string): Promise<QualityCampaignData> {
+export async function loadQualityCampaignData(owner: string, id: string, signal?: AbortSignal): Promise<QualityCampaignData> {
+  throwIfReadAborted(signal);
   const instant = isInstantCampaignId(id), section = instant ? 'instant' : 'quality';
   const missing = '这场' + campaignSectionLabel(section) + '战役已永久移除';
   const initialMarks = await loadQualityCampaignTrash(owner, section);
+  throwIfReadAborted(signal);
   if (initialMarks[qualityCampaignTrashKey(id)]?.state === 'purged') {
     throw new Error(missing);
   }
   const applyTrash = async (data: QualityCampaignData) => {
+    throwIfReadAborted(signal);
     const marks = await readQualityCampaignTrash(owner, section);
+    throwIfReadAborted(signal);
     const mark = marks[qualityCampaignTrashKey(data.campaign.id)];
     if (mark?.state === 'purged' || marks[qualityCampaignTrashKey(id)]?.state === 'purged') {
       throw new Error(missing);
@@ -87,8 +95,10 @@ export async function loadQualityCampaignData(owner: string, id: string): Promis
   };
   if (instant) {
     const frozen = await loadInstantCampaignSnapshot(owner, id);
+    throwIfReadAborted(signal);
     if (frozen.metadata) return applyTrash(buildInstantCampaignData(owner, frozen));
     const saved = await readAutomaticPreEntrySales(owner, [frozen.recordId]).catch(() => []);
+    throwIfReadAborted(signal);
     const original = saved.find(({ record }) => record.sample.source.symbol === frozen.source.symbol
       && (record.sample.source.exchange ?? 'binance') === (frozen.source.exchange ?? 'binance')
       && qualitySignalTime(record.sample.source) === frozen.source.timeMs && record.matchedAt === frozen.buyAt);
@@ -98,28 +108,39 @@ export async function loadQualityCampaignData(owner: string, id: string): Promis
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
-      const result = await projectInWorker({ owner, kind: 'detail', id, warning: prepared.warning });
+      const result = await projectInWorker({ owner, kind: 'detail', id, warning: prepared.warning }, signal);
       if (result.kind !== 'detail') throw new Error('持仓监测读取结果不匹配');
       return applyTrash(result.data);
     }
   }
-  return applyTrash(qualityCampaignDetailFromStudy(owner, (await loadQualityStudy(owner)).study, id));
+  throwIfReadAborted(signal);
+  const { study } = await loadQualityStudy(owner);
+  throwIfReadAborted(signal);
+  return applyTrash(qualityCampaignDetailFromStudy(owner, study, id));
 }
-export async function loadQualityCampaignPerformance(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant', sellKey: string) {
+export async function loadQualityCampaignPerformance(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant', sellKey: string, signal?: AbortSignal) {
+  throwIfReadAborted(signal);
   const trash = await loadQualityCampaignTrash(owner, section === 'instant' ? 'instant' : 'quality');
+  throwIfReadAborted(signal);
   const excluded = Object.keys(trash).filter(key => trash[key].state !== 'active');
   if (section === 'instant') {
-    const { rows, warning } = await listQualityCampaignData(owner, section);
-    if (warning && !rows.length) throw Error(warning);
-    return paperCampaignPerformance(rows, excluded);
+    const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);
+    throwIfReadAborted(signal);
+    if (warning && !snapshots.length) throw Error(warning);
+    return paperCampaignPerformance((function* () {
+      for (const snapshot of snapshots) yield buildInstantCampaignData(owner, snapshot);
+    })(), excluded);
   }
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
-      const result = await projectInWorker({ owner, kind: 'performance', section, sellKey, warning: prepared.warning, ...(excluded.length ? { excluded } : {}) });
+      const result = await projectInWorker({ owner, kind: 'performance', section, sellKey, warning: prepared.warning, ...(excluded.length ? { excluded } : {}) }, signal);
       if (result.kind !== 'performance') throw new Error('持仓监测统计结果不匹配');
       return result.data;
     }
   }
-  return qualityCampaignPerformanceFromStudy(owner, (await loadQualityStudy(owner)).study, section, sellKey, excluded);
+  throwIfReadAborted(signal);
+  const { study } = await loadQualityStudy(owner);
+  throwIfReadAborted(signal);
+  return qualityCampaignPerformanceFromStudy(owner, study, section, sellKey, excluded);
 }

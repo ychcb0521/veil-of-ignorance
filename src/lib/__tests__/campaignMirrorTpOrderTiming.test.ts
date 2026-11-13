@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
+import { resolveMirrorTpChartFill, resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -39,6 +39,16 @@ function event(
     ...overrides,
   };
 }
+
+it('draws only a confirmed mirror fill, using its execution price and time', () => {
+  const placed = event('placed', 'mirror_tp_placed', '2026-07-14T01:05:00.000Z', { price: 102 });
+  expect(resolveMirrorTpChartFill(leg, null, [placed])).toBeNull();
+  expect(resolveMirrorTpChartFill(leg, { ...record, action: 'OPEN', exitPrice: 102 }, [placed])).toBeNull();
+
+  const executed = event('filled', 'mirror_tp_triggered', '2026-07-14T01:55:00.000Z', { price: 103 });
+  expect(resolveMirrorTpChartFill(leg, null, [placed, executed])).toEqual({ time: Date.parse(executed.timestamp), price: 103 });
+  expect(resolveMirrorTpChartFill(leg, { ...record, action: 'CLOSE', exitPrice: 104 }, [placed, executed])).toEqual({ time: record.closeTime, price: 104 });
+});
 
 describe('resolveMirrorTpOrderTiming', () => {
   it('优先使用对应镜像止盈事件中的挂单时间与触发时间', () => {

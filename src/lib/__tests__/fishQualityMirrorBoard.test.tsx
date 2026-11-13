@@ -50,7 +50,10 @@ describe('mirror campaign board and consistent accounting', () => {
     const full=fixture({noFill:true});full.result.peakPct=30;
     const model=qualityMirrorBoard(full.campaign)!;
     expect(model.status).toBe('未触发');expect(model.gainPct).toBeNull();
-    expect(qualityMirrorChartArtifacts(full.campaign).markers).toEqual([]);
+    expect(qualityMirrorChartArtifacts(full.campaign)).toEqual({ markers: [], verticalLines: [] });
+    const view = render(<QualityMirrorBoard campaign={full.campaign}/>);
+    expect(screen.queryByTestId('quality-mirror-board')).not.toBeInTheDocument();
+    view.unmount();
     expect(halfMirrorSummary(rule,{...full.result,entryPrice:undefined,mirrorFill:{at:T,price:105,fraction:.5,gainPct:5,atOpen:false}}).value).toBeNull();
     expect(qualityMirrorBoard(fixture({noFill:true,disabled:true}).campaign)).toBeNull();
   });
@@ -88,7 +91,8 @@ describe('mirror campaign board and consistent accounting', () => {
     expect(full.tradeRecords.reduce((n,r)=>n+r.quantity,0)).toBeCloseTo(1);
     expect(computeCampaignRealizedPnl(full.campaign,full.legs,full.tradeRecords).total).toBeCloseTo(board.totalPnl!);
     expect(annotations.markers).toHaveLength(1);expect(annotations.markers[0]).toMatchObject({time:T+M,price:105,label:expect.stringContaining(`卖出 ${fraction*100}%`)});
-    expect(annotations.timeBoundPriceLines[0].endTime).toBe(T+M);
+    expect(annotations.verticalLines.map(line => line.time)).toEqual([T+M]);
+    expect(annotations).not.toHaveProperty('timeBoundPriceLines');
     expect(campaignPriceChange(full.campaign,full.legs,full.tradeRecords).pct).toBeCloseTo(fraction===1?5:-10);
   });
   it('includes the visible mirror strip in PNG capture instead of capturing only native candle canvases', () => {

@@ -24,7 +24,7 @@ export function buildSelectedLegVerticalLines(
   const verticalLines: VerticalLine[] = [];
 
   for (const leg of legs) {
-    if (!selected.has(leg.id)) continue;
+    if (!selected.has(leg.id) || leg.leg_role === 'mirror_tp') continue;
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const openTime = record?.openTime ?? new Date(leg.pre_simulated_time).getTime();
     if (!Number.isFinite(openTime)) continue;
