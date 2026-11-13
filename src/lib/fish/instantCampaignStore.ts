@@ -4,7 +4,7 @@ import { runAccountSyncRequest } from '@/lib/accountSyncTransport';
 import { isInstantCampaignId } from '@/lib/campaignSections';
 import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
 import { validScreenedSale } from './screenedCda';
-import { readFishPreferences, readFishPreferencesWithPrefix, updateFishPreference } from './fishPreferencesDb';
+import { readFishPreferences, readFishPreferenceEntries, updateFishPreference } from './fishPreferencesDb';
 import { validInstantMonitorClose, type InstantCampaignInput, type InstantCampaignSnapshot, type InstantPositionFill, type InstantPositionInput } from './instantCampaign';
 
 export const INSTANT_CAMPAIGN_EVENT = 'veil-instant-campaign-saved';
@@ -21,6 +21,7 @@ const table = () => supabase.from('user_sim_state' as never);
 type Saved = { input: InstantPositionInput | InstantCampaignInput; opened?: InstantPositionFill; snapshot?: InstantCampaignSnapshot; synced?: true };
 
 function publish(owner: string) {
+  openReads.delete(owner);
   window.dispatchEvent(new CustomEvent(INSTANT_CAMPAIGN_EVENT, { detail: { owner } }));
   try {
     const channel = new BroadcastChannel(INSTANT_CAMPAIGN_EVENT);
@@ -35,7 +36,7 @@ export function subscribeInstantCampaigns(owner: string, refresh: () => void) {
   let channel: BroadcastChannel | undefined;
   try {
     channel = new BroadcastChannel(INSTANT_CAMPAIGN_EVENT);
-    channel.onmessage = event => { if (event.data === owner) refresh(); };
+    channel.onmessage = event => { if (event.data === owner) { openReads.delete(owner); refresh(); } };
   } catch { /* Same-tab saves still notify the list. */ }
   return () => {
     window.removeEventListener(INSTANT_CAMPAIGN_EVENT, listener);
@@ -43,11 +44,26 @@ export function subscribeInstantCampaigns(owner: string, refresh: () => void) {
   };
 }
 
-export async function readInstantCampaignJobs(owner: string): Promise<Saved[]> {
-  const [legacy, templates] = await Promise.all([
-    readFishPreferencesWithPrefix<Saved>(localPrefix(owner)), readFishPreferencesWithPrefix<Saved>(templatePrefix(owner)),
-  ]);
-  return [...legacy, ...templates];
+async function readInstantJobs(owner: string, include: (job: Saved) => boolean): Promise<Saved[]> {
+  const legacy = await readFishPreferenceEntries(localPrefix(owner), include);
+  const templates = await readFishPreferenceEntries(templatePrefix(owner), include);
+  return [...legacy, ...templates].map(([, job]) => job);
+}
+
+const isOpenJob = (job: Saved) => !!job.opened && !job.snapshot && !('sell' in job.input);
+const openReads = new Map<string, Promise<InstantPositionFill[]>>();
+export function readOpenInstantPositions(owner: string): Promise<InstantPositionFill[]> {
+  const existing = openReads.get(owner);
+  if (existing) return existing;
+  const task = readInstantJobs(owner, isOpenJob).then(jobs => jobs.map(job => job.opened!));
+  openReads.set(owner, task);
+  const release = () => { if (openReads.get(owner) === task) openReads.delete(owner); };
+  void task.then(release, release);
+  return task;
+}
+
+export function readPendingInstantCampaignJobs(owner: string, autoPositions: boolean): Promise<Saved[]> {
+  return readInstantJobs(owner, job => !job.synced && ('sell' in job.input || autoPositions && !job.opened));
 }
 
 export async function saveInstantCampaignInput(owner: string, input: InstantCampaignInput): Promise<Saved> {
@@ -118,7 +134,7 @@ async function cacheRemote(owner: string, snapshot: InstantCampaignSnapshot, not
 }
 
 export async function readLocalInstantCampaignSnapshots(owner: string) {
-  return (await readInstantCampaignJobs(owner)).flatMap(job => job.snapshot ? [job.snapshot] : []);
+  return (await readInstantJobs(owner, job => !!job.snapshot)).map(job => job.snapshot!);
 }
 
 export async function listInstantCampaignSnapshots(owner: string, signal?: AbortSignal) {

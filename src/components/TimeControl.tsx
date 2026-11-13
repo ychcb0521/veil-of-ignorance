@@ -145,7 +145,7 @@ export function TimeControl({
     ) : EMPTY_TURING_SIGNALS;
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
-  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs);
+  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, fishOpen || signalLibOpen);
   const { deletedSources, resolvedLegacySources } = fishQuality.study;
   const turingSignals = useMemo(() => {
     const deleted = sourceDeletionMatcher(deletedSources, resolvedLegacySources);

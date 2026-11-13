@@ -3,13 +3,13 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FishQualityProvider, usePageFishQuality } from '@/contexts/FishQualityContext';
-import { newQualityStudy, qualityDisplayRows, qualityResultKey, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, newQualityStudy, qualityDisplayRows, qualityResultKey, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 
-const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
+const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), screening: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, saveQualityStudy: storage.save }));
-vi.mock('@/lib/fish/preEntryMonitorV6Store',()=>({loadPreEntryLibraryV6:async()=>({version:1,rounds:[],records:[]}),savePreEntryLibraryV6:async()=>{}}));
+vi.mock('@/lib/fish/preEntryMonitorV6Store',()=>({loadPreEntryLibraryV6:storage.screening, loadPreEntryWorkspaceDraft:async()=>undefined, savePreEntryLibraryV6:async()=>{}, savePreEntryWorkspaceDraft:async()=>{}}));
 vi.mock('@/lib/fish/preEntryMonitorV5Store',()=>({loadPreEntryLibraryV5:async()=>({version:1,rounds:[],records:[]})}));
 vi.mock('@/lib/fish/preEntryMonitorV4Store',()=>({loadPreEntryLibraryV4:async()=>({version:1,rounds:[],records:[]})}));
 vi.mock('@/lib/fish/preEntryMonitorV3Store',()=>({loadPreEntryLibraryV3:async()=>({version:1,rounds:[],records:[]})}));
@@ -22,7 +22,7 @@ function Controls() {
   return <><button disabled={!q.preEntry?.ready} onClick={()=>{const f=makeQualityBuyFilter('state:state','>',.8);q.setSelectedRows(qualityDisplayRows(q.study).map(r=>r.id));q.preEntry!.configure([{id:'frozen-entry',label:'状态S准入',metric:f.metric,snapshot:f.snapshot,rule:{metric:f.metric,direction:f.direction,threshold:f.threshold}}],12);void q.preEntry!.start(12);}}>开始动态筛选</button><span>{q.preEntry?.library.records[0]?.status}</span><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); void q.start(); }}>更新收益</button><button onClick={() => { q.setSelectedRows(qualityDisplayRows(q.study).map(r => r.id)); q.setFilters([makeQualityBuyFilter('state:state', '>', .7)]); void q.startFilter(); }}>开始过滤</button><button onClick={() => navigate('/other')}>其他页面</button><button onClick={q.cancel}>暂停监测</button><span>结果 {q.study.results.length}</span><span>{q.running ? '运行中' : '已结束'}</span></>;
 }
 function Other() { const navigate = useNavigate(); return <button onClick={() => navigate('/')}>返回</button>; }
-beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockResolvedValue({ study: newQualityStudy(T) }); storage.save.mockReset().mockResolvedValue(true); });
+beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockResolvedValue({ study: { ...importQualityFish(newQualityStudy(T), fish), workspaceUpdatedAt: T } }); storage.save.mockReset().mockResolvedValue(true); storage.screening.mockReset().mockResolvedValue({ version: 1, rounds: [], records: [] }); });
 afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); });
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 it('does not load or save the research archive during a campaign-only visit, then activates once on demand', async () => {
@@ -34,6 +34,26 @@ it('does not load or save the research archive during a campaign-only visit, the
   fireEvent.click(screen.getByRole('button', { name: '其他页面' })); await flush();
   fireEvent.click(screen.getByRole('button', { name: '返回' })); await flush();
   expect(storage.load).toHaveBeenCalledTimes(1);
+});
+it('defers research archives on a collapsed home page until the fish panel opens', async () => {
+  function Home() {
+    const [open, setOpen] = useState(false);
+    usePageFishQuality(fish, EMPTY, EMPTY, open);
+    return <button onClick={() => setOpen(value => !value)}>渔</button>;
+  }
+  render(<MemoryRouter><FishQualityProvider owner="a" run={vi.fn(async () => {})}><Home/></FishQualityProvider></MemoryRouter>);
+  await flush(20_000);
+  expect(storage.load).not.toHaveBeenCalled();
+  expect(storage.screening).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '渔' }));
+  await flush();
+  expect(storage.load).toHaveBeenCalledTimes(1);
+  expect(storage.screening).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '渔' }));
+  fireEvent.click(screen.getByRole('button', { name: '渔' }));
+  await flush();
+  expect(storage.load).toHaveBeenCalledTimes(1);
+  expect(storage.screening).toHaveBeenCalledTimes(1);
 });
 it('keeps evaluating and persisting through route unmounts and restores live progress on return', async () => {
   let task!: QualityRunOptions, finish!: () => void;
@@ -69,7 +89,7 @@ it('keeps both independent tasks alive across navigation and reports their separ
 });
 
 // 【用户要求】2026-11-01「点进战役后持仓监测停了」：离开页面不暂停；真正暂停时写下原因（监测库那一轮的 error）
-const lastRound = () => { const saved = storage.save.mock.calls.at(-1)![1] as { monitorLibrary?: { rounds: { state: string; error?: string; startedAt: number }[] } }; return [...(saved.monitorLibrary?.rounds ?? [])].sort((a, b) => a.startedAt - b.startedAt).at(-1); };
+const lastRound = () => { const saved = storage.save.mock.calls.at(-1)![1] as { workspaceMonitorDraft?: { rounds: { state: string; error?: string; startedAt: number }[] } }; return [...(saved.workspaceMonitorDraft?.rounds ?? [])].sort((a, b) => a.startedAt - b.startedAt).at(-1); };
 it('does not pause on leaving the page, and records why a round was paused', async () => {
   let task!: QualityRunOptions;
   const run = vi.fn(async (o: QualityRunOptions) => { task = o; await new Promise<void>((_, reject) => o.signal.addEventListener('abort', () => reject(new DOMException('已暂停', 'AbortError')))); });

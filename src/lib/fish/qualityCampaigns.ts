@@ -12,7 +12,7 @@ import { readAutomaticPreEntrySales } from './preEntryPersistence';
 import { qualitySignalTime } from './qualityAdmissionTime';
 import { readInstantPositionProgress } from './instantPositionProgress';
 import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, type InstantPositionFill } from './instantCampaign';
-import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readInstantCampaignJob, readInstantCampaignJobs } from './instantCampaignStore';
+import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readInstantCampaignJob, readLocalInstantCampaignSnapshots, readOpenInstantPositions } from './instantCampaignStore';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -61,18 +61,16 @@ async function buildLocalOpenInstantData(owner: string, positions: InstantPositi
 }
 
 export async function listLocalInstantCampaignData(owner: string) {
-  const jobs = await readInstantCampaignJobs(owner);
-  const closed = jobs.flatMap(job => job.snapshot ? [buildInstantCampaignData(owner, job.snapshot)] : []);
-  const open = jobs.flatMap(job => job.opened && !job.snapshot && !('sell' in job.input) ? [job.opened] : []);
-  return [...closed, ...await buildLocalOpenInstantData(owner, open)];
+  const snapshots = await readLocalInstantCampaignSnapshots(owner);
+  const open = await readOpenInstantPositions(owner);
+  return [...snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), ...await buildLocalOpenInstantData(owner, open)];
 }
 
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal) {
   if (section === 'instant') {
     const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);
     const closedIds = new Set(snapshots.map(snapshot => snapshot.id));
-    const jobs = await readInstantCampaignJobs(owner).catch(() => []);
-    const open = jobs.flatMap(job => job.opened && !job.snapshot && !('sell' in job.input) && !closedIds.has(job.opened.id) ? [job.opened] : []);
+    const open = (await readOpenInstantPositions(owner).catch(() => [])).filter(position => !closedIds.has(position.id));
     return { rows: [...snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), ...await buildLocalOpenInstantData(owner, open)], warning,
       selectedSellKey: undefined, buyFilterLabel: '', repair: undefined };
   }

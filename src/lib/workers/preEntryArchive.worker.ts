@@ -31,8 +31,13 @@ self.onmessage=async(event:MessageEvent<Request>)=>{
     else if(request.kind==='load'){
       const revision=await readPreEntryCacheRevision(request.owner);
       const cached=!request.rebuild&&await readPreEntryReadModel(request.owner);
-      const library=cached||await readPreEntrySnapshot(request.owner);
-      if(library){if(request.preview)self.postMessage({preview:{...library,records:library.records.map(record=>projectPreEntryRecord(record,request.owner,false).record)}});for(let i=0;i<library.records.length;i++){const next=projectPreEntryRecord(library.records[i],request.owner);await next.saved;library.records[i]=next.record;}const merged=await cachePreEntryReadModel(request.owner,library,true,false,revision);value=withPreEntryTableClears({...merged,records:await projectPreEntryRecords(merged.records,request.owner)},await readPreEntryTableClears(request.owner));}
+      const library=cached||await readPreEntrySnapshot(request.owner,true);
+      if (library) {
+        if (request.preview) self.postMessage({preview:{...library,records:library.records.map(record=>projectPreEntryRecord(record,request.owner,false).record)}});
+        if (cached) library.records = await projectPreEntryRecords(cached.records, request.owner);
+        const merged=await cachePreEntryReadModel(request.owner,library,true,false,revision);
+        value=withPreEntryTableClears({...merged,records:await projectPreEntryRecords(merged.records,request.owner)},await readPreEntryTableClears(request.owner));
+      }
     }else{
       let index=0;
       const bytes=request.kind==='import'?request.file.stream():request.enc==='gzip'?(()=>{const binary=atob(request.pieces.join('')),data=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)data[i]=binary.charCodeAt(i);return new Blob([data]).stream().pipeThrough(new DecompressionStream('gzip'));})():new ReadableStream<string>({pull(controller){if(index<request.pieces.length)controller.enqueue(request.pieces[index++]);else controller.close();}}).pipeThrough(new TextEncoderStream());

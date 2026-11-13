@@ -171,11 +171,11 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
   const key = keyOf(owner);
   // App studies use immutable updates. IndexedDB already clones on put; making
   // an eager deep copy for every queued save multiplies the entire archive.
-  let copy = compactQualityStudyForStorage(study);
+  let copy = study;
   const merge = (previous: unknown) => applySavedQualityPlans(compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner, options?.remote ? mergeRemoteQualityStudy(valid(previous)?previous:undefined,copy,options.remote.preferRemote) : options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy))),readSavedQualityPlans(owner));
   let leftInline = false;
   const task = (writes.get(key) ?? Promise.resolve(true)).then(()=>serializeArchiveWork(async () => {
-    copy=await restorePreEntryStudy(copy);
+    copy = await restorePreEntryStudy(compactQualityStudyForStorage(copy));
     let durablePrevious: FishQualityStudy | undefined;
     // 新归档的正文先写进归档库，总表只存目录。
     copy = await detachQualityArchiveBodies(owner, copy);

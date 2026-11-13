@@ -19,7 +19,7 @@ function request<T>(body:Request,fallback:()=>Promise<T>,preview?:(library:PreEn
     });
   });
 }
-export function readProjectedPreEntry(owner?:string,preview?:(library:PreEntryLibrary)=>void,rebuild=false):Promise<PreEntryLibrary|undefined>{return request({kind:'load',owner,preview:!!preview,rebuild},async()=>{const library=await readPreEntrySnapshot(owner);return library?{...library,records:await projectPreEntryRecords(library.records,owner)}:undefined;},preview);}
+export function readProjectedPreEntry(owner?:string,preview?:(library:PreEntryLibrary)=>void,rebuild=false):Promise<PreEntryLibrary|undefined>{return request({kind:'load',owner,preview:!!preview,rebuild},async()=>{return readPreEntrySnapshot(owner,true);},preview);}
 export function projectPreEntryBatch(owner:string|undefined,records:PreEntryRecord[]):Promise<PreEntryRecord[]>{return request({kind:'project',owner,records},()=>projectPreEntryRecords(records,owner));}
 export function decodeProjectedPreEntry(owner:string,enc:'gzip'|'json',pieces:readonly string[]):Promise<unknown>{return request({kind:'decode',owner,enc,pieces},async()=>{const {decodeAccountBlob}=await import('../accountBlobSync');const value=await decodeAccountBlob(enc,pieces) as PreEntryLibrary;return {...value,records:await projectPreEntryRecords(value.records,owner)};});}
 export function preparePreEntryDownload(owner:string|undefined,library:PreEntryLibrary):Promise<Blob>{return request({kind:'backup',owner,library},async()=>new Blob([JSON.stringify({format:'veil-pre-entry-library',version:1,exportedAt:Date.now(),library:await restorePreEntryLibrary(library)})],{type:'application/json'}));}

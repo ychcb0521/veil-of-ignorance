@@ -15,24 +15,25 @@ import { useInstantMonitorSettings } from '@/hooks/useInstantMonitorSettings';
 const EMPTY: readonly TradeSignal[] = [];
 const InstantPositionsContext = createContext<{ positions: ReturnType<typeof useInstantCampaigns>['positions']; monitorResults?: ReturnType<typeof useFishCdaTracking>['monitorResults']; mirrorFills?: ReturnType<typeof useFishCdaTracking>['mirrorFills']; close?: NonNullable<ReturnType<typeof useFishCdaTracking>['closePosition']> } | null>(null);
 export const useScreenedInstantPositions = () => useContext(InstantPositionsContext);
-const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[]) => void; activate: () => void; enqueue: (signal: TradeSignal) => void; notify: ReturnType<typeof useFishNotify> } | null>(null);
+const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean) => void; activate: () => void; enqueue: (signal: TradeSignal) => void; notify: ReturnType<typeof useFishNotify> } | null>(null);
 
 /** Owned by the authenticated app shell, outside the route boundary and collapsible panels. */
 export function FishQualityProvider({ owner, children, run = runPageFishQuality }: { owner?: string; children: ReactNode; run?: QualityRunner }) {
   const [input, setInput] = useState({ fish: EMPTY, library: EMPTY, turing: EMPTY });
   const [requested, setRequested] = useState(false);
+  const [screeningRequested, setScreeningRequested] = useState(false);
   const [mined,setMined]=useState<readonly TradeSignal[]>(EMPTY);
   useEffect(()=>{if (!requested) return;let active=true,revision=0;setMined(EMPTY);const reload=()=>{const token=++revision;void loadMiningLibrary(owner).then(l=>{if(active&&token===revision)setMined(l.records.map(miningRecordSignal));});};const saved=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(owner??null))reload();};reload();window.addEventListener(MINING_LIBRARY_EVENT,saved);return()=>{active=false;window.removeEventListener(MINING_LIBRARY_EVENT,saved);};},[owner,requested]);
-  const state = useFishQuality(owner, input.fish, run, input.library,mined, requested, input.turing, true);
+  const state = useFishQuality(owner, input.fish, run, input.library,mined, requested, input.turing, true, requested || screeningRequested);
   const notify = useFishNotify(owner, undefined, undefined, true);
   const instantMonitor = useInstantMonitorSettings(owner);
   const automaticScreening = useFishScreeningAutomation(owner, !!state.preEntry?.ready, state.preEntry, notify);
   const cdaTracking = useFishCdaTracking(owner, state.preEntry?.library, !!state.preEntry?.ready, notify, true);
   const { issue: campaignIssue, positions } = useInstantCampaigns(owner, cdaTracking, true);
   const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0 || cdaTracking.hasSavedSales || positions.length > 0;
-  useEffect(() => { if (hasAutomaticWork) setRequested(true); }, [hasAutomaticWork]);
-  const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[]) => {
-    setRequested(true);
+  useEffect(() => { if (hasAutomaticWork) setScreeningRequested(true); }, [hasAutomaticWork]);
+  const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean) => {
+    if (researchOpen) setRequested(true);
     setInput(prior => prior.fish === fish && prior.library === library && prior.turing === turing ? prior : { fish, library, turing });
   }, []);
   const activate = useCallback(() => setRequested(true), []);
@@ -54,11 +55,11 @@ export function useFishCaptureAutomation() {
   return { enqueue: context.enqueue, notify: context.notify };
 }
 
-export function usePageFishQuality(fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[] = EMPTY): FishQualityState {
+export function usePageFishQuality(fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[] = EMPTY, researchOpen = true): FishQualityState {
   const context = useContext(FishQualityContext);
   if (!context) throw new Error('FishQualityProvider is required');
   const { sources } = context;
-  useEffect(() => { sources(fish, library, turing); }, [sources, fish, library, turing]);
+  useEffect(() => { sources(fish, library, turing, researchOpen); }, [sources, fish, library, turing, researchOpen]);
   return context.state;
 }
 

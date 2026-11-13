@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { instantCampaignInput, instantPositionInput, type InstantPositionFill, type InstantPositionInput, type InstantCampaignInput } from '@/lib/fish/instantCampaign';
-import { readInstantCampaignJobs, saveInstantCampaignInput, saveInstantPosition, saveInstantCampaignSnapshot, subscribeInstantCampaigns, syncInstantCampaign } from '@/lib/fish/instantCampaignStore';
+import { readOpenInstantPositions, readPendingInstantCampaignJobs, saveInstantCampaignInput, saveInstantPosition, saveInstantCampaignSnapshot, subscribeInstantCampaigns, syncInstantCampaign } from '@/lib/fish/instantCampaignStore';
 import { buildPageInstantCampaign, openPageInstantPosition } from './useFish';
 import type { FishCdaTracking } from './useFishCdaTracking';
 
@@ -22,9 +22,8 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
     let alive = true, revision = 0;
     const read = async () => {
       const epoch = ++revision;
-      const jobs = await readInstantCampaignJobs(owner);
-      if (alive && epoch === revision) setOpen({ owner, rows: jobs.flatMap(job =>
-        job.opened && !job.snapshot && !('sell' in job.input) ? [job.opened] : []) });
+      const rows = await readOpenInstantPositions(owner);
+      if (alive && epoch === revision) setOpen({ owner, rows });
     };
     const refresh = () => void read().catch(() => undefined);
     const unsubscribe = subscribeInstantCampaigns(owner, refresh);
@@ -54,12 +53,12 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
       }
       if (navigator.onLine === false) return;
       const errors: string[] = [];
-      const jobs = await readInstantCampaignJobs(owner);
+      const jobs = await readPendingInstantCampaignJobs(owner, autoPositions);
       // Record new positions before attempting potentially slow cloud writes for earlier sales.
       jobs.sort((a, b) => Number('sell' in a.input) - Number('sell' in b.input));
       for (const job of jobs) {
         if (signal.aborted) return;
-        if (job.synced || (retryAt.get(job.input.id) ?? 0) > Date.now()) continue;
+        if ((retryAt.get(job.input.id) ?? 0) > Date.now()) continue;
         let snapshot = job.snapshot;
         try {
           if (!('sell' in job.input)) {

@@ -147,7 +147,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     if (!owner || typeof indexedDB === 'undefined') return;
     let active = true;
     void (async () => {
-      const stored = await readFishPreferenceEntries<Checkpoint>(jobPrefix);
+      const stored = await readFishPreferenceEntries<Checkpoint>(jobPrefix, saved => !!saved?.alert);
       const sales = new Map<string, Checkpoint>();
       for (const [key, saved] of stored) if (saved?.alert) sales.set(key, saved);
       // Existing browser checkpoints from before IndexedDB are read without rewriting.

@@ -71,9 +71,9 @@ function checkMonitorTimes(study: FishQualityStudy, timeBasis: QualityMonitorTim
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
 const NO_SIGNALS: readonly TradeSignal[] = [];
-export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true, turing: readonly TradeSignal[] = NO_SIGNALS, workspaceMode = false) {
+export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS,mined:readonly TradeSignal[]=NO_SIGNALS, enabled = true, turing: readonly TradeSignal[] = NO_SIGNALS, workspaceMode = false, screeningEnabled = enabled) {
   const definitions = useFeatureDefinitions();
-  const preEntry = usePreEntryMonitor(owner, enabled, run, workspaceMode);
+  const preEntry = usePreEntryMonitor(owner, screeningEnabled, run, workspaceMode);
   const workspaceSources = useMemo(() => {
     if (!workspaceMode || !enabled) return undefined;
     return {
@@ -702,8 +702,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change]);
   useEffect(() => {
     if (!ready || !warning) return;
-    const timer = setInterval(() => { void saveQualityStudy(owner, current.current).then(ok => { if (ok && account.current === owner) setWarning(''); }); }, 15_000);
-    return () => clearInterval(timer);
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const retry = async () => {
+      const saved = await saveQualityStudy(owner, current.current).catch(() => false);
+      if (!active || account.current !== owner) return;
+      if (saved) setWarning('');
+      else timer = setTimeout(retry, 15_000);
+    };
+    timer = setTimeout(retry, 15_000);
+    return () => { active = false; clearTimeout(timer); };
   }, [ready, warning, owner]);
   const setRule = useCallback((id: string, rule?: QualityExitRule) => {
     const plan=current.current.sellPlans?.find(p=>p.id===id)??current.current.groups.find(p=>p.id===id);

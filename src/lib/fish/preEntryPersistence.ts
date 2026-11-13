@@ -1,5 +1,5 @@
 import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from './preEntryMonitor';
-import {restorePreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
+import {restorePreEntryRecord,projectPreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
 import { mergePreEntryTableClears, validPreEntryTableClears, withPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 
 // Same database/version/store. Keep the legacy key intact, add independent
@@ -39,7 +39,12 @@ export async function readAutomaticPreEntryCheckpoint(owner: string, id: string)
     });
   } finally { db.close(); }
 }
-/** Restore only records with a saved CDA event; never read the whole historical library here. */
+function compactSaleRecord(record: PreEntryRecord): PreEntryRecord {
+  const { exclusionProcess: _process, processRef: _ref, ...display } = record;
+  return display;
+}
+
+/** Recover sale metadata without retaining the corresponding screening audit bodies. */
 export async function readAutomaticPreEntrySales(owner: string, recordIds: readonly string[]): Promise<{record: PreEntryRecord; round: PreEntryLibrary['rounds'][number]}[]> {
   if (!recordIds.length) return [];
   const db = await open();
@@ -53,15 +58,22 @@ export async function readAutomaticPreEntrySales(owner: string, recordIds: reado
         const indexed = validReadModel(view.result) && view.result.meta === JSON.stringify(meta.result ?? null) ? view.result.library : undefined;
         const rounds = new Map([...(indexed?.rounds ?? []), ...(incremental?.rounds ?? [])]
           .filter(round => isAutomaticPreEntryRound(round) && round.state === 'complete').map(round => [round.id, round]));
-        const indexedRecords = new Map(indexed?.records.filter(record => recordIds.includes(record.id)).map(record => [record.id, record]));
-        for (const id of recordIds) {
+        const ids = new Set(recordIds);
+        const indexedRecords = new Map(indexed?.records.filter(record => ids.has(record.id)).map(record => [record.id, record]));
+        const pending = ids.values();
+        const next = () => {
+          const item = pending.next();
+          if (item.done) return;
+          const id = item.value;
           const row = store.get(rowPrefix(owner) + id);
           row.onsuccess = () => {
             const record = (row.result ?? indexedRecords.get(id)) as PreEntryRecord | undefined;
             const round = record?.id === id ? rounds.get(record.roundId) : undefined;
-            if (record && round && record.status === 'matched') result.push({ record, round });
+            if (record && round && record.status === 'matched') result.push({ record: compactSaleRecord(record), round });
+            next();
           };
-        }
+        };
+        next();
       };
       tx.oncomplete = () => resolve(result);
       tx.onerror = tx.onabort = () => reject(tx.error ?? Error('读取筛选鱼卖出记录失败'));
@@ -100,13 +112,13 @@ function open(): Promise<IDBDatabase> {
     request.onerror = request.onblocked = () => { expired = true; clearTimeout(timer); reject(Error('入选库存储不可用')); };
   });
 }
-export async function readPreEntrySnapshot(owner?: string): Promise<PreEntryLibrary | undefined> {
+export async function readPreEntrySnapshot(owner?: string, projected = false): Promise<PreEntryLibrary | undefined> {
   const marks = await readPreEntryTableClears(owner);
   const db = await open();
   try { return await new Promise<PreEntryLibrary | undefined>((resolve,reject)=>{
     // Metadata and rows must come from the same atomic checkpoint revision.
     const tx=db.transaction(STORE,'readonly'),store=tx.objectStore(STORE);
-    let library:PreEntryLibrary|undefined,rows=new Map<string,PreEntryLibrary['records'][number]>(),failure:unknown;
+    let library:PreEntryLibrary|undefined,rows=new Map<string,PreEntryRecord>(),failure:unknown;
     const stop=(error:unknown)=>{failure=error;tx.abort();};
     const base=store.get(keyOf(owner));
     base.onsuccess=()=>{if(base.result!=null&&!validPreEntryLibrary(base.result)){stop(Error('入选库存档格式无效'));return;}library=base.result;};
@@ -117,14 +129,52 @@ export async function readPreEntrySnapshot(owner?: string): Promise<PreEntryLibr
       rows=new Map(library?.records.map(record=>[record.id,record]));
       if(library)library={...library,records:[]};
     };
+    // Keep the read snapshot across body writes. Wait for each body before
+    // advancing the cursor, so the accumulated rows contain only the directory.
+    const compact = (record: PreEntryRecord, next: (value: PreEntryRecord) => void) => {
+      if (!projected) { next(record); return; }
+      try {
+        const projection = projectPreEntryRecord(record, owner);
+        if (!projection.saved) { next(projection.record); return; }
+        let complete = false, failed = false, error: unknown;
+        void projection.saved.then(() => { complete = true; }, cause => { failed = true; error = cause; });
+        const keepAlive = () => {
+          try {
+            if (failed) { stop(error); return; }
+            if (complete) { next(projection.record); return; }
+            // Count an exact key without materializing any other record.
+            const pulse = store.count(metaKey(owner));
+            pulse.onsuccess = keepAlive;
+          } catch (cause) { stop(cause); }
+        };
+        keepAlive();
+      } catch (error) { stop(error); }
+    };
     const prefix=rowPrefix(owner),request=store.openCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));
     request.onsuccess=()=>{
-      const cursor=request.result;if(!cursor)return;
+      const cursor=request.result;
+      if (!cursor) {
+        // Older monolithic records have no cursor entries. Project those too.
+        if (projected) {
+          const entries = rows.entries();
+          const compactLegacy = () => {
+            for (let item = entries.next(); !item.done; item = entries.next()) {
+              const [id, record] = item.value;
+              if (record.processRef || (record.exclusionProcess?.entries.length ?? 0) <= 16) continue;
+              compact(record, value => { rows.set(id, value); compactLegacy(); });
+              return;
+            }
+          };
+          compactLegacy();
+        }
+        return;
+      }
       const record=cursor.value;
       if(!record||typeof record.id!=='string'||!Number.isFinite(record.updatedAt)){stop(Error('筛选增量记录格式无效'));return;}
       const previous=rows.get(record.id);
-      rows.set(record.id,previous?mergePreEntryLibraries({version:1,rounds:[],records:[previous]},{version:1,rounds:[],records:[record]}).records[0]:record);
-      cursor.continue();
+      const merged = previous ? mergePreEntryLibraries({version:1,rounds:[],records:[previous]},{version:1,rounds:[],records:[record]}).records[0] : record;
+      const id = record.id;
+      compact(merged, value => { rows.set(id, value); cursor.continue(); });
     };
     tx.oncomplete=()=>resolve(!library&&!rows.size&&!Object.keys(marks).length?undefined:withPreEntryTableClears({...library??emptyPreEntryLibrary(),records:[...rows.values()]},marks));
     tx.onerror=tx.onabort=()=>reject(failure??tx.error??Error('入选库读取失败'));

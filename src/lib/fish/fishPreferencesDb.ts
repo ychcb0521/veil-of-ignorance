@@ -49,14 +49,15 @@ export function readFishPreferencesWithPrefix<T>(prefix: string): Promise<T[]> {
   });
 }
 
-export function readFishPreferenceEntries<T>(prefix: string): Promise<[string, T][]> {
+export function readFishPreferenceEntries<T>(prefix: string, include?: (value: T) => boolean): Promise<[string, T][]> {
   return transact('readonly', (store, complete) => {
     const entries: [string, T][] = [];
     const request = store.openCursor(IDBKeyRange.bound(prefix, prefix + '\uffff'));
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) { complete(entries); return; }
-      entries.push([String(cursor.key).slice(prefix.length), cursor.value]);
+      const value = cursor.value as T;
+      if (!include || include(value)) entries.push([String(cursor.key).slice(prefix.length), value]);
       cursor.continue();
     };
   });
