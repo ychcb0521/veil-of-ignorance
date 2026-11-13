@@ -1,5 +1,5 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
-import {ADDITION_K_TOUCH_VERSION} from '@/lib/fish/qualityAddition';
+import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
@@ -36,7 +36,9 @@ interface ConditionDraft {choice:string;direction:'<'|'>';threshold:string}
 export interface SellSwitchDraft extends ConditionDraft {enabled:boolean}
 /** 加仓否决的编辑草稿：四条各自的开关与参数（字符串，保存时校验）。 */
 interface DetectorPreDraft {enabled:boolean;featureId:string;stricterPct:string}
-interface RoundDraft extends ConditionDraft {detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
+type IncreaseDraft = {choice: string; saved?: AdditionIncreaseMetric};
+const DEFAULT_INCREASE_METRIC = 'state:avg_state_2';
+interface RoundDraft extends ConditionDraft {increaseMetrics: IncreaseDraft[];detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
  /** 【用户要求】2026-11-04 恢复 S/T/K 位置：入场距离 T ≥ S＋n×ATR（空＝不检查）；涨幅门槛基准。 */
  entryDistanceAtr?:string;gainBasis?:'average'|'cost-line'}
 /** 【用户要求】2026-11-03 防守线要说明是哪条线、虚线算不算、断掉意味着什么等细节。 */
@@ -79,6 +81,7 @@ const sellSwitchDraft=(stage?:QualitySellStage):SellSwitchDraft=>stage?{enabled:
 const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=false):RoundDraft=>{
  const custom=rule.source==='custom',conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);
  const common={stricterPct:String(rule.stricterPct),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage),entryVetoes:vetoDraftOf(rule.entryVetoes),
+  increaseMetrics:(rule.indicatorIncrease?.metrics ?? []).map(saved => ({choice:saved.snapshot.featureId+':'+saved.metric,saved:structuredClone(saved)})),
   entryDistanceAtr:rule.entryDistanceAtr!=null?String(rule.entryDistanceAtr):'',gainBasis:rule.gainBasis==='average'?'average' as const:'cost-line' as const,
   // 旧的「原探测算法再次命中」轮次：打开时把它作为「方向」里的探测算法条件找回来（保存后才写入）
   detectorPre:rule.detectorPrerequisite?{enabled:rule.detectorPrerequisite.enabled,featureId:rule.detectorPrerequisite.featureId??'',stricterPct:String(rule.detectorPrerequisite.stricterPct)}:legacy&&rule.source==='detector'?{enabled:true,featureId:'',stricterPct:String(rule.stricterPct)}:{enabled:false,featureId:'',stricterPct:'10'}};
@@ -88,7 +91,7 @@ const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=f
  return {source:'structure',structure:structuredClone(rule.source==='structure'&&rule.structure?rule.structure:defaultStructureAddition()),structureBuffer:String(rule.source==='structure'?rule.structure?.buffer??0:0),
   ...conditionDraft(undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),...common};
 };
-const copyRound=(d:RoundDraft):RoundDraft=>({entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
+const copyRound=(d:RoundDraft):RoundDraft=>({entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
 export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellStages?:readonly QualitySellStage[]):AdditionDraft {
  rule??={...defaultQualityAddition(),positionVersion:HOLDING_LEDGER_ADDITION_VERSION};
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
@@ -103,6 +106,14 @@ function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef
   const conditions=build([d,...d.extraConditions]);
   rule.condition=conditions[0];if(conditions.length>1)rule.conditions=conditions;
  }else{const prerequisites=build(d.extraConditions);if(prerequisites.length)rule.prerequisites=prerequisites;}
+ if(d.increaseMetrics?.length){
+  const metrics=d.increaseMetrics.map(({choice,saved})=>{
+   if(saved)return saved;
+   const {label,metric,snapshot}=makeQualityBuyFilter(choice,'>',0,true,defs);
+   return {label,metric,snapshot};
+  });
+  rule.indicatorIncrease={version:ADDITION_INDICATOR_INCREASE_VERSION,metrics};
+ }
  if(d.gainEnabled)rule.minGainPct=d.minGainPct.trim()?Number(d.minGainPct):NaN;
  if(d.gainEnabled&&d.gainBasis==='average')rule.gainBasis='average';
  if(d.source==='custom'&&d.entryDistanceAtr?.trim())rule.entryDistanceAtr=Number(d.entryDistanceAtr);
@@ -175,6 +186,9 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   event.currentTarget.parentElement?.querySelectorAll('button')[next]?.focus({preventScroll:true});
  }
  const current=index?all.otherRounds[index-1]??all:all,d={...all,...current};
+ const growth=d.increaseMetrics??[];
+ const unusedChoices=choices.filter(choice=>!growth.some(row=>row.choice===choice.key));
+ const defaultGrowth=unusedChoices.find(choice=>choice.key===DEFAULT_INCREASE_METRIC)??unusedChoices[0];
  const patch=(p:Partial<AdditionDraft>)=>{if('enabled' in p){setDraft({...all,...p});return;}if(!index){setDraft({...all,...p});return;}const others=Array.from({length:Math.max(count-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));others[index-1]={...current,...p};setDraft({...all,otherRounds:others});};
  const setLimit=(value:string)=>{const limit=Math.min(100,Math.max(1,Math.floor(Number(value)||1)));const others=Array.from({length:Math.max(limit-1,all.otherRounds.length)},(_,i)=>all.otherRounds[i]??copyRound(all));setSelectedRound(Math.min(index,limit-1));setDraft({...all,maxRounds:value,repeat:limit>1,otherRounds:others});};
  /** 特征值 + 变量 + 方向 + 门槛，一行。 */
@@ -256,6 +270,21 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     <div className={`flex items-center gap-1.5 text-muted-foreground ${d.gainEnabled?'':'opacity-55'}`}>{/* 2026-11-04 涨幅门槛基准可选：相对成本线 S（11-01 起）或相对持仓均价（10-31 版） */}<select aria-label="涨幅门槛基准" disabled={!d.enabled||!d.gainEnabled} value={d.gainBasis??'cost-line'} onChange={e=>patch({gainBasis:e.target.value as 'average'|'cost-line'})} className={field+' h-7 px-1.5'}><option value="cost-line">相对最新成本线 S</option><option value="average">相对持仓均价</option></select>上涨 ≥<input aria-label="加仓涨幅门槛" type="number" min="0" step="any" disabled={!d.enabled||!d.gainEnabled} className={cell+' w-14'} value={d.minGainPct} onChange={e=>patch({minGainPct:e.target.value})}/>%</div>
     <span className="self-start pt-1.5 text-muted-foreground">指标条件</span>
     <div className="space-y-1.5">{d.extraConditions.map(prerequisiteRow)}<button type="button" disabled={!d.enabled} className="text-[11px] text-primary disabled:opacity-40" onClick={()=>patch({extraConditions:[...d.extraConditions,{choice:choices[0]?.key??'',direction:'>',threshold:'0'}]})}>＋ 添加方向条件</button></div>
+    <span className="self-start pt-1.5 text-muted-foreground">指标读数递增</span>
+    <div className="min-w-0 space-y-1.5">
+     <p className="text-muted-foreground">首次与首仓买入时比，之后与上一次实际加仓时比。所选算法的已收盘读数都须严格增大。</p>
+     {growth.map((row,i)=><div key={i} className="flex items-center gap-1.5">
+      <select aria-label={`递增加仓算法 ${i+1}`} className={field+' min-w-0 flex-1'} disabled={!d.enabled} value={row.choice}
+       onChange={e=>{const choice=e.target.value;patch({increaseMetrics:growth.map((item,j)=>j===i?{choice}:item)});}}>
+       {!choices.some(choice=>choice.key===row.choice)&&<option value={row.choice}>{row.saved?.label??row.choice}</option>}
+       {choices.map(choice=><option key={choice.key} value={choice.key} disabled={growth.some((item,j)=>j!==i&&item.choice===choice.key)}>{choice.key===DEFAULT_INCREASE_METRIC?'状态 S · avg₂':choice.label}</option>)}
+      </select>
+      <button type="button" disabled={!d.enabled} aria-label={`删除递增加仓算法 ${i+1}`} className="shrink-0 px-1 text-muted-foreground hover:text-destructive disabled:opacity-40"
+       onClick={()=>patch({increaseMetrics:growth.filter((_,j)=>j!==i)})}>删除</button>
+     </div>)}
+     <button type="button" disabled={!d.enabled||!defaultGrowth} className="text-primary disabled:opacity-40"
+      onClick={()=>{if(defaultGrowth)patch({increaseMetrics:[...growth,{choice:defaultGrowth.key}]});}}>＋ 添加递增条件</button>
+    </div>
    </div>
   </Part>
 

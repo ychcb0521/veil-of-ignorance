@@ -22,7 +22,7 @@ import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
-import { activeDetectorPrerequisite, additionIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
+import { activeDetectorPrerequisite, additionIdentity, additionIncreaseIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
 import { qualitySellStagesIdentity } from './qualitySellStages';
 import { boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
@@ -107,6 +107,19 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     // 加仓引擎本身（平衡公式、轮次、门槛、否决、减仓等），不含箱体——箱体按轮单列
     add('addition', '加仓规则', `最多 ${a.maxRounds ?? rounds.length} 次`, join([...versionTags(additionIdentity({ ...a, structure: undefined, rounds: a.rounds?.map(r => ({ ...r, structure: undefined })) })), ...versionTags(additionMirrorIdentity(a, plan.mirrorTakeProfit))]),
       a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'通用持仓账：Q×K−剩余成本＋已实现净盈亏＝新增币数×(T−K)；镜像可选，实际成交后才计入账本':'镜像止盈后按平衡公式 Q×(K−S)+P＝新增币数×(T−K) 定量，碰到 K 卖出');
+    const addIncreaseVersions = (rules: readonly import('./qualityAddition').QualityAdditionRoundRule[], alternative = false) => {
+      rules.forEach((round, index) => {
+        const growth = round.indicatorIncrease;
+        if (!growth) return;
+        add(`addition-increase-${alternative ? 'alternative-' : ''}${index+1}`,
+          `第 ${index+1} 次加仓 · ${alternative ? '进攻备选 · ' : ''}方向`,
+          growth.metrics.map(metric => metric.label).join('、'),
+          growth.version+' · 参数 #'+shortFishHash(JSON.stringify(additionIncreaseIdentity(growth))),
+          '所选指标的已收盘读数均须严格高于上一次实际加仓时的同算法读数。首次加仓以首仓买入时为基准。');
+      });
+    };
+    addIncreaseVersions(rounds);
+    if (a.alternativeRounds) addIncreaseVersions(a.alternativeRounds, true);
     rounds.forEach((r, i) => {
       if (r.source === 'structure' && r.structure) {
         const v = structureVersions(r.structure), box = boxAlgorithmVersion(v.box), guard = v.guard ? boxAlgorithmVersion(v.guard) : undefined;

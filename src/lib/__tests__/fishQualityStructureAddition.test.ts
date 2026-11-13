@@ -7,7 +7,7 @@ import {sbsComplete,SBS_T} from './fixtures/sbsBars';
 import {defaultStructureAddition,structureAdditionIdentity,structureAdditionLabel,structureAdditionSignal,structureAdditionK,withMinKDistance,validateStructureAddition,createStructureAdditionReader,type StructureAdditionRule,type StructureAdditionEvidence} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {holdingVetoLabel,validateHoldingVeto,validatePayoffStops} from '../fish/qualityVeto';
-import {additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
+import {ADDITION_INDICATOR_INCREASE_VERSION,additionIdentity,additionMirrorIdentity,defaultQualityAddition,validateQualityAddition,additionEvidenceHeaders,additionEvidenceValues} from '../fish/qualityAddition';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '../fish/quality';
 import {definitionKey} from '../deepDig/features';
 import {buildQualityCampaignData} from '../fish/qualityCampaigns';
@@ -465,4 +465,18 @@ describe('optional-mirror execution shares both primary and attack candidate pat
   const conservative=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure,alternative:{candidates:[price(1e9)],supportOffsetAtr:1.5}}]});expect(conservative.fills).toHaveLength(1);expect(conservative.fills[0].lane).toBe('structure');
   const attack=await findCalculatorAdditions({...o,structure,maxRounds:1,roundRules:[{candidates:[],structure,alternative:{candidates:[price(0)],supportOffsetAtr:1.5}}]});expect(attack.fills).toHaveLength(1);expect(attack.fills[0].lane).toBe('attack');expect(attack.fills[0].at).toBeLessThan(conservative.fills[0].at);
  });
+});
+
+it('requires an increase from the first purchase at structural candidates and reports missing baseline history',async()=>{
+ const o=context(sample()),base={...o,structure:{...rule(),kSource:'current' as const},maxRounds:1};
+ const growth=makeQualityBuyFilter('structure-reading:raw','>',0,true,[{
+  id:'structure-reading',name:'收盘价',short:'收盘价',definition:'',formula:'raw = C',scale:1,unit:'',positive:'1',control:'0',interval:'5m',
+ }]);
+ const configured={...base,indicatorIncrease:{version:ADDITION_INDICATOR_INCREASE_VERSION,metrics:[growth]}};
+ const pass=await findCalculatorAdditions(configured);
+ expect(pass.fills).toMatchObject([{at:T+14*STEP,indicatorIncrease:[{value:105,previousValue:90,previousAt:o.entry}]}]);
+ const miss:FishReconstructionLoader=async(...args)=>args[3].def.id==='structure-reading'&&args[2]===o.entry?[]:o.load(...args);
+ const waiting=await findCalculatorAdditions({...configured,load:miss});
+ expect(waiting.fills).toEqual([]);
+ expect(waiting.skipped).toMatchObject([{kind:'indicator-increase',reading:expect.stringContaining('缺少上次成交时')}]);
 });

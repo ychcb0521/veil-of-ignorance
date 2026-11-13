@@ -1,4 +1,5 @@
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
+import { createAdditionIncreaseReader } from './qualityAdditionIncrease';
 import { createVetoHistoryReader } from './qualityVetoHistory';
 import { qualityHistoryFrom } from './qualityInitialization';
 import {advanceChartAtr,type ChartAtrState} from '@/lib/atr';
@@ -16,7 +17,7 @@ import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
-type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'>&{entryVetoes?:QualityAdditionEntryVeto[]};
+type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
  positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
@@ -66,6 +67,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const independent=o.positionVersion===HOLDING_LEDGER_ADDITION_VERSION,halfMirror=o.mirror;if(!independent&&!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
+ const readIncrease=createAdditionIncreaseReader(o);
  const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
  const historyReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createVetoHistoryReader>>();
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
@@ -232,14 +234,34 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    }
    skip({at:x.at,round:roundNo,support:x.support,...(x.reason==='gain'?{kind:'gain',label:'涨幅门槛未达',reading:`收盘 ${p8(x.close!)} 比${basis==='real-average'?'持仓均价':'成本线 S'} ${p8(x.referencePrice!)} 只涨 ${((x.close!/x.referencePrice!-1)*100).toFixed(2)}%，要求 ≥ ${x.thresholdPct}%`}:x.reason==='no-guard'?{kind:'no-guard',label:'防守线断开',reading:'这一刻防守线刚被跌破、尚未重建，没有 K 基准'}:x.reason==='guard-range'?{kind:'guard-range',label:'防守线是虚线（震荡期）',reading:'只用实线时，震荡期不加仓'}:{kind:'no-old-c',label:'没有旧 C',reading:'上一根 5 分钟线上没有不同的有效箱体（首个箱体或中间支撑失效），K 没有旧 C 可用'})});
   };
+  const previousFillAt=fills.at(-1)?.at??o.entry;
+  const findRoundHit=async(rule:RoundScan|Options,end:number,gainBasis:typeof basis,reference:number)=>{
+   if(rule.unavailable||end<=after)return;
+   const gain=rule.minGainPct==null?undefined:{referencePrice:reference,thresholdPct:rule.minGainPct,basis:gainBasis};
+   const check=rule.indicatorIncrease ? async(at:number,support?:number)=>{
+    const {readings,reason}=await readIncrease(rule.indicatorIncrease!.metrics,at,previousFillAt);
+    if(!reason)return readings;
+    skip({at,round:roundNo,kind:'indicator-increase',label:'指标读数未较上次成交增大',reading:reason,...(support==null?{}:{support})});
+   }:undefined;
+   if(!rule.structure)return findQualityAdditionTrigger({...o,candidates:rule.candidates,required:rule.required,
+    after,end,priceAt,checkIncrease:check,...(gain?{priceGate:gain}:{})});
+   let cursor=after;
+   while(cursor<end){
+    const hit=await readStructure(rule.structure,cursor,end,fills,gain,onSkip);
+    if(!hit||!check)return hit;
+    const readings=await check(hit.at,hit.structureEvidence?.supportPrice);
+    if(readings)return {...hit,indicatorIncrease:readings};
+    cursor=hit.at;
+   }
+  };
   const skipMark=skipped.length;
-  let hit=round.unavailable?undefined:round.structure?await readStructure(round.structure,after,addEnd,fills,round.minGainPct!=null?{referencePrice,thresholdPct:round.minGainPct,basis}:undefined,onSkip):await findQualityAdditionTrigger({...o,candidates:round.candidates,required:round.required,after,end:addEnd,priceAt,...(round.minGainPct!=null?{priceGate:{referencePrice,thresholdPct:round.minGainPct,basis}}:{})});
+  let hit=await findRoundHit(round,addEnd,basis,referencePrice);
   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
   // 【用户要求】2026-11-05 每轮分流：这一轮的进攻备选同时等候，只在保守成交之前找；更早成交就走进攻，同一分钟先保守。
   // 进攻赢了时，保守那边在它之后记下的「未加仓理由」作废（下一轮会从成交之后重新扫到）。
   if(alternative&&!alternative.unavailable){
    const altBasis=alternative.gainBasis==='average'?'real-average' as const:'cost-line' as const,altReference=altBasis==='real-average'?realAverageBefore:support??o.entryPrice,altEnd=hit?hit.at:addEnd;
-   const alt=altEnd<=after?undefined:alternative.structure?await readStructure(alternative.structure,after,altEnd,fills,alternative.minGainPct!=null?{referencePrice:altReference,thresholdPct:alternative.minGainPct,basis:altBasis}:undefined,onSkip):await findQualityAdditionTrigger({...o,candidates:alternative.candidates,required:alternative.required,after,end:altEnd,priceAt,...(alternative.minGainPct!=null?{priceGate:{referencePrice:altReference,thresholdPct:alternative.minGainPct,basis:altBasis}}:{})});
+   const alt=await findRoundHit(alternative,altEnd,altBasis,altReference);
    if(alt?.structureEvidence){const price=priceAt.get(alt.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');alt.price=price!;}
    if(alt&&(!hit||alt.at<hit.at)){for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>alt.at)skipped.splice(i,1);hit=alt;round=alternative;hit.lane='attack';}
    else if(hit)hit.lane='structure';

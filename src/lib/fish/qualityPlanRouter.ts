@@ -36,7 +36,7 @@ export const raceAttackFromRound = (r: Pick<QualityPlanRouter, 'attackFromRound'
 export const routerVersionFor = (afterAdditions: 0 | 1 | 2, attackFromRound = 1): QualityRouterVersion => afterAdditions === 0 ? (attackFromRound > 1 ? QUALITY_ROUTER_RACE_FROM_VERSION : QUALITY_ROUTER_RACE_VERSION) : afterAdditions === 1 ? QUALITY_ROUTER_FIRST_VERSION : QUALITY_ROUTER_VERSION;
 export const isRaceRouter = (r: Pick<QualityPlanRouter, 'afterAdditions'>) => r.afterAdditions === 0;
 /** 逐轮条件的字段（编辑器把第一轮同时写在加仓顶层）；每轮分流时这些字段两条分支各自独立，其余加仓设置必须相同。 */
-export const RACE_ROUND_KEYS = ['source', 'structure', 'stricterPct', 'condition', 'conditions', 'prerequisites', 'minGainPct', 'entryBufferAtr', 'supportOffsetAtr', 'entryDistanceAtr', 'gainBasis', 'entryVetoes', 'detectorPrerequisite', 'rounds', 'maxRounds', 'alternativeRounds', 'attackFromRound'] as const;
+export const RACE_ROUND_KEYS = ['source', 'structure', 'stricterPct', 'condition', 'conditions', 'prerequisites', 'indicatorIncrease', 'minGainPct', 'entryBufferAtr', 'supportOffsetAtr', 'entryDistanceAtr', 'gainBasis', 'entryVetoes', 'detectorPrerequisite', 'rounds', 'maxRounds', 'alternativeRounds', 'attackFromRound'] as const;
 export function raceSharedAddition(a?: QualityAdditionRule): Partial<QualityAdditionRule> | undefined {
   if (!a) return a;
   const rest: Record<string, unknown> = { ...a };

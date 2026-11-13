@@ -8,7 +8,7 @@ import type {FishSnapshot} from './algorithm';
 import {evaluateFishProgram} from './algorithm';
 import {aggregateQualityMinute,minuteTransport} from './qualityIntrabar';
 import {activeHoldingVetoes} from './qualityVeto';
-import {validateFishBars} from './shared';
+import {FishError, validateFishBars} from './shared';
 import {researchReadsClosedOnly} from '@/lib/researchIndicators';
 import type {FishReconstructionLoader} from './reconstruction';
 export interface QualityEntryPart {id:'main'|'before'|'after';label:string;metric:string;snapshot:FishSnapshot}
@@ -33,7 +33,7 @@ export async function readQualityMetricAt(source: TradeSignal, snapshot: FishSna
   if (minute>Math.floor(now/60000)*60000) throw Error(`${label}时刻尚未到达，不能提前读取`);
   const cut = Math.floor(minute/plan.step)*plan.step;
   const from = qualityHistoryFrom(load,cut-(plan.warm+(closed?1:0))*plan.step,plan.step);
-  if (from<0) throw Error(`${label === '买入' ? '入场' : label}公式预热所需历史不足`);
+  if (from<0) throw new FishError(`${label === '买入' ? '入场' : label}公式预热所需历史不足`, 'history');
   const row={...source,timeMs:now},history=from<cut?[...await load(row,from,cut,plan,signal)]:[];
   if (signal.aborted) throw new DOMException('已取消','AbortError');
   if (from<cut) validateFishBars(history,cut,(cut-from)/plan.step,plan.step);
@@ -50,7 +50,7 @@ export async function readQualityMetricAt(source: TradeSignal, snapshot: FishSna
   const values=evaluateFishProgram(bars,plan).average,value=values.at(-1)!*scale;
   if(!Number.isFinite(value)){
     if(qualityInitializationPending(load,values,values.length-1))return {initializing:true as const};
-    throw Error(`${label}时刻的算法读数缺失`);
+    throw new FishError(`${label}时刻的算法读数缺失`, 'readings');
   }
   return {value,at,barOpenTime:bars.at(-1)?.openTime};
 }

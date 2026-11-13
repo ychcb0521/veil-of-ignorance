@@ -1,9 +1,23 @@
 export const ADDITION_K_TOUCH_VERSION='addition-k-touch-v1' as const;
+export const ADDITION_INDICATOR_INCREASE_VERSION='addition-indicator-increase-v1' as const;
 /** Conditional paper additions; disabled and legacy rules retain their frozen identities. */
 import { activeAdditionVetoes, additionVetoIdentity, validateAdditionVetoes } from './qualityAdditionVeto';
 import type { QualityBuyFilter } from './quality';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 import {validateStructureAddition,structureAdditionIdentity,structureAdditionLabel,type StructureAdditionRule,type StructureAdditionEvidence} from './qualityAdditionStructure';
+export type AdditionIncreaseMetric = Pick<QualityBuyFilter, 'label' | 'metric' | 'snapshot'>;
+export interface AdditionIndicatorIncrease {
+  version: typeof ADDITION_INDICATOR_INCREASE_VERSION;
+  metrics: AdditionIncreaseMetric[];
+}
+export interface AdditionIncreaseObservation {
+  label: string;
+  metric: string;
+  at: number;
+  value: number;
+  previousAt: number;
+  previousValue: number;
+}
 export interface QualityAdditionRule {
   positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
   /** Opt-in execution upgrade; missing keeps the original guard close confirmation. */
@@ -28,6 +42,7 @@ export interface QualityAdditionRule {
   conditions?: QualityBuyFilter[];
   /** 箱体或原探测时机的指标前提（必要不充分，时机那一刻须全部满足）。自选指标时机的前提仍是 conditions[1..]。 */
   prerequisites?: QualityBuyFilter[];
+  indicatorIncrease?: AdditionIndicatorIncrease;
   minGainPct?:number;
   /**
    * 【用户要求】2026-11-02 支撑线下移减仓（按减仓计算器）：加仓后箱体支撑下移到 K 的支撑基准下方 ≥ minDropAtr×ATR、价格仍高于 K 时，
@@ -92,7 +107,7 @@ export interface QualityReductionFill { at: number; price: number; fraction: num
   /** 开着保本底线时：挪到的防守线 K′（newK 是它下方的保本底线 F′）。 */
   newGuardK?: number }
 export interface QualityDetectorPrerequisite { enabled: boolean; stricterPct: number; featureId?: string }
-export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
+export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
 export const activeDetectorPrerequisite=(r?:Pick<QualityAdditionRoundRule,'detectorPrerequisite'|'source'>)=>r?.source!=='custom'&&r?.detectorPrerequisite?.enabled?r.detectorPrerequisite:undefined;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
 const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(rule).supportOffsetAtr;
@@ -111,6 +126,7 @@ export interface QualityAdditionFill {
   reading: number; threshold: number; direction: '<' | '>'; metric: string; label: string;
   featureId?: string; definitionKey?: string; barOpenTime: number;
   conditions?: QualityAdditionObservation[];
+  indicatorIncrease?: AdditionIncreaseObservation[];
   priceGate?: {basis:'real-average'|'cost-line';referencePrice:number;thresholdPct:number;observedPrice:number;gainPct:number;confirmedAt:number};
   sizing?: {support:number;previousSupport:number;atr:number;atrAt:number;coinsBefore:number;realAverageBefore:number;baseCoins:number;mirrorCoins:number;mirrorUsed:number;mirrorAvailableBefore?:number;costBufferAtr?:number;
     /** 保本底线：防守线 K（收盘确认的那条线）与 F 离它的 ATR 倍数；此时 support＝F（加仓量与盘中止损都按 F）。 */
@@ -130,9 +146,12 @@ const conditionIdentity=(f:QualityBuyFilter)=>[f.metric,f.direction,f.threshold,
  * 箱体与原探测时机下，前提单独存在 prerequisites（不复用 conditions：旧规则里可能残留未生效的 condition）。
  */
 export const qualityAdditionPrerequisites=(rule?:Pick<QualityAdditionRule,'source'|'conditions'|'condition'|'prerequisites'>)=>rule?.source==='custom'?qualityAdditionConditions(rule).slice(1):(rule?.prerequisites??[]).filter(f=>f.enabled!==false);
-/** 箱体或原探测时机附加的指标前提；没有前提时不改变既有结果的身份。 */
+export const additionIncreaseIdentity = (rule: AdditionIndicatorIncrease) =>
+  [rule.version, rule.metrics.map(f => [f.metric, f.snapshot.featureId, f.snapshot.definitionKey, f.snapshot.interval])];
+/** 没有新方向条件时，沿用原有结果身份。 */
 const prerequisiteIdentity=(rule:QualityAdditionRoundRule)=>[...(rule.source!=='custom'&&qualityAdditionPrerequisites(rule).length?[['timing-prerequisites-v1',qualityAdditionPrerequisites(rule).map(conditionIdentity)]]:[]),
-  ...(activeDetectorPrerequisite(rule)?[['detector-prerequisite-v1',activeDetectorPrerequisite(rule)!.stricterPct,activeDetectorPrerequisite(rule)!.featureId??'all']]:[])];
+  ...(activeDetectorPrerequisite(rule)?[['detector-prerequisite-v1',activeDetectorPrerequisite(rule)!.stricterPct,activeDetectorPrerequisite(rule)!.featureId??'all']]:[]),
+  ...(rule.indicatorIncrease ? [additionIncreaseIdentity(rule.indicatorIncrease)] : [])];
 const timingIdentity=(r:QualityAdditionRoundRule)=>{const base=r.source==='structure'?r.structure&&structureAdditionIdentity(r.structure):r.source==='detector'?r.stricterPct:qualityAdditionConditions(r).map(conditionIdentity);const extra=prerequisiteIdentity(r);return extra.length?[base,...extra]:base;};
 /**
  * 【用户要求】2026-11-02 加仓前提是镜像止盈已成交且留有余仓（0 < 卖出比例 < 100%），不再限定恰好 50%：
@@ -177,6 +196,16 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (rule.source === 'custom' && (!qualityAdditionConditions(rule).length || qualityAdditionConditions(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))) throw new Error('请选择加仓指标并填写有限数字门槛');
   if(rule.source!=='custom'&&qualityAdditionPrerequisites(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))throw new Error('加仓方向条件的指标须填写有限数字门槛');
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
+  if (rule.indicatorIncrease) {
+    const growth = rule.indicatorIncrease;
+    if (rule.quantityMode !== 'calculator' || growth.version !== ADDITION_INDICATOR_INCREASE_VERSION) {
+      throw Error('指标读数递增的执行版本不可用');
+    }
+    if (!Array.isArray(growth.metrics) || !growth.metrics.length || growth.metrics.some(f =>
+      !f?.metric || !f.snapshot?.definitionKey || !f.snapshot.featureId || !f.snapshot.interval)) {
+      throw Error('指标读数递增须选择至少一个有公式快照的算法');
+    }
+  }
   validateAdditionVetoes(rule.entryVetoes);
   for(const r of [rule,...(rule.rounds??[])]){const dp=activeDetectorPrerequisite(r);if(dp&&(!Number.isFinite(dp.stricterPct)||dp.stricterPct<0||dp.stricterPct>1000))throw new Error('方向 · 探测算法：门槛提高幅度须为 0–1000%');}
   if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}

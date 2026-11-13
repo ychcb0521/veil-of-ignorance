@@ -287,3 +287,20 @@ it('defaults new drafts to optional-mirror execution while explicitly preserving
  const old=defaultQualityAddition(),before=JSON.stringify(old);expect(additionDraft(old).positionVersion).toBeUndefined();expect(additionDraft().positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);
  render(<Editor/>);expect(screen.getByLabelText('加仓执行口径')).toHaveValue('legacy-mirror');fireEvent.change(screen.getByLabelText('加仓执行口径'),{target:{value:HOLDING_LEDGER_ADDITION_VERSION}});const saved=save();expect(saved.positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);expect(additionDraft(saved).positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);expect(JSON.stringify(old)).toBe(before);
 });
+
+it('defaults the first increase metric to State S avg2, saves multiple choices per round and reopens frozen selections',()=>{
+ render(<Editor/>);
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ expect(screen.queryByLabelText('递增加仓算法 1')).toBeNull();
+ const add=screen.getByRole('button',{name:/添加递增条件/});
+ fireEvent.click(add);
+ expect(screen.getByLabelText('递增加仓算法 1')).toHaveValue('state:avg_state_2');
+ fireEvent.click(add);
+ fireEvent.change(screen.getByLabelText('递增加仓算法 2'),{target:{value:'state:state'}});
+ tab(2);
+ expect(screen.queryByLabelText('递增加仓算法 1')).toBeNull();
+ const saved=save() as QualityAdditionRule;
+ expect(saved.rounds?.[0].indicatorIncrease?.metrics.map(m=>m.metric)).toEqual(['avg_state_2','state']);
+ expect(saved.rounds?.[1].indicatorIncrease).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+});

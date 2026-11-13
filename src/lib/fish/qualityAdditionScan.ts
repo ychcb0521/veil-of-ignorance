@@ -4,12 +4,12 @@ import { compileFishProgram, evaluateFishProgram, type FishProgram } from './alg
 import type { FishReconstructionLoader } from './reconstruction';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishDelay, validateFishBars } from './shared';
-import type { QualityAdditionFill,QualityAdditionObservation } from './qualityAddition';
+import type { AdditionIncreaseObservation, QualityAdditionFill,QualityAdditionObservation } from './qualityAddition';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 export interface AdditionCandidate { plan: FishProgram; scale: number; threshold: number; direction: '<' | '>'; metric: string; label: string; featureId?: string; definitionKey?: string }
 const MINUTE=60000;
 interface ScanOptions {
- candidates:AdditionCandidate[];required?:AdditionCandidate[];row:TradeSignal;entry:number;end:number;notional?:number;quantity?:number;after?:number;
+ candidates:AdditionCandidate[];required?:AdditionCandidate[];checkIncrease?:(at:number)=>Promise<AdditionIncreaseObservation[]|undefined>;row:TradeSignal;entry:number;end:number;notional?:number;quantity?:number;after?:number;
  priceAt?:ReadonlyMap<number,number>;priceGate?:{referencePrice:number;thresholdPct:number;basis:'real-average'|'cost-line'};
  load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -80,7 +80,9 @@ export async function findQualityAdditionTrigger(o:ScanOptions):Promise<Omit<Qua
      if(observedPrice+Number.EPSILON*8*Math.max(target,observedPrice)<target)continue;
      priceGate={basis,referencePrice,thresholdPct,observedPrice,gainPct:(observedPrice/referencePrice-1)*100,confirmedAt:at};
     }
-    best={...primary,scanFrom:o.entry,...(required.length?{conditions}:{}),...(priceGate?{priceGate}:{})};break;
+    const increase = o.checkIncrease ? await o.checkIncrease(at) : undefined;
+    if(o.checkIncrease && !increase)continue;
+    best={...primary,scanFrom:o.entry,...(required.length?{conditions}:{}),...(priceGate?{priceGate}:{}),...(increase?{indicatorIncrease:increase}:{})};break;
    }
    if(best&&best.at<=cut)break;
    cursor=cut;await fishDelay(0,o.signal);

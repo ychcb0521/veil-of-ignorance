@@ -6,11 +6,12 @@ import {evaluateCampaignAddSizing} from '@/lib/campaignAddSizingCheck';
 import {describe,it,expect} from 'vitest';
 import {evaluateQualitySample,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
 import {definitionKey} from '@/lib/deepDig/features';
-import {defaultQualityAddition} from '@/lib/fish/qualityAddition';
+import {ADDITION_INDICATOR_INCREASE_VERSION, defaultQualityAddition, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
 import {chartAtr} from '@/lib/atr';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 import type {FishReconstructionLoader} from '@/lib/fish/reconstruction';
+import {freezeQualityPlan, planVersionChanges} from '@/lib/fish/qualityPlanVersions';
 import {buildQualityCampaignData} from '@/lib/fish/qualityCampaigns';
 import {computeCampaignRealizedPnl} from '@/lib/campaignRealizedPnl';
 import {qualityMirrorBoard,qualityFinalSale} from '@/lib/fish/qualityMirrorBoard';
@@ -270,4 +271,50 @@ describe('general holding-ledger additions, mirror optional',()=>{
   g.addition!.entryVetoes[0].enabled=false;const restored=await run(g,load,3);expect(restored.additionFills).toHaveLength(2);
  });
 
+});
+
+it('compares every metric with the last executed purchase and retains the same baseline on resume', async () => {
+ const metric=(id:string,formula:string):AdditionIncreaseMetric=>{
+  const definition={...def,id,formula,interval:'5m' as const};
+  return {label:id,metric:'raw',snapshot:{...snapshot,featureId:id,interval:'5m',definitionKey:definitionKey(definition)}};
+ };
+ const metrics=[metric('收盘指标','raw = C'),metric('成交量指标','raw = B')];
+ const g=group();
+ g.addition={...g.addition!,positionVersion:HOLDING_LEDGER_ADDITION_VERSION,indicatorIncrease:{version:ADDITION_INDICATOR_INCREASE_VERSION,metrics}};
+ const load:FishReconstructionLoader=async (_row,from,to,plan)=>Array.from({length:(to-from)/plan.step},(_,i)=>{
+  const at=from+i*plan.step,minute=(at-T)/M;
+  if(plan.step===M)return bar(at,100+Math.max(0,minute)*2,1);
+  if(plan.def.id==='add-atr-prices')return bar(at);
+  const values=minute < 0 ? [1,1] : minute < 5 ? [2,1] : minute < 10 ? [3,2] : minute < 15 ? [2,3] : [4,4];
+  return bar(at,values[0],values[1],.5,5);
+ });
+ const result=await run(g,load,22);
+ expect(result.additionFills?.map(fill=>fill.at)).toEqual([T+10*M,T+20*M]);
+ expect(result.additionFills?.[0].indicatorIncrease).toEqual([
+  {label:'收盘指标',metric:'raw',value:3,at:T+10*M,previousAt:T,previousValue:1},
+  {label:'成交量指标',metric:'raw',value:2,at:T+10*M,previousAt:T,previousValue:1},
+ ]);
+ expect(result.additionFills?.[1].indicatorIncrease).toMatchObject([
+  {value:4,previousValue:3,previousAt:T+10*M},{value:4,previousValue:2,previousAt:T+10*M},
+ ]);
+ expect(result.additionSkips).toEqual(expect.arrayContaining([
+  expect.objectContaining({at:T+5*M,kind:'indicator-increase',reading:expect.stringContaining('成交量指标 1 ≤ 1')}),
+  expect.objectContaining({at:T+15*M,kind:'indicator-increase',reading:expect.stringContaining('收盘指标 2 ≤ 3')}),
+ ]));
+ const resumed=await run(g,load,22,await run(g,load,14));
+ expect(resumed.additionFills).toEqual(result.additionFills);
+ const frozen=freezeQualityPlan(g),restored=JSON.parse(JSON.stringify(frozen));
+ expect(planVersionChanges(restored)).toEqual([]);
+ expect((await run(restored,load,22)).additionFills).toEqual(result.additionFills);
+ restored.addition.indicatorIncrease.metrics[0].snapshot.definitionKey=definitionKey({...def,formula:'raw = C * 2',interval:'5m'});
+ expect(planVersionChanges(restored)).toEqual(expect.arrayContaining([expect.objectContaining({key:'addition-increase-1'})]));
+});
+
+it('lets the qualified alternate candidate win when the primary fails the increase check', async () => {
+ const g=group(),base=g.addition!,noGrowth={label:'平盘指标',metric:'raw',snapshot:{...snapshot,featureId:'flat',definitionKey:definitionKey({...def,formula:'raw = C - C + 1'})}};
+ const main={source:'custom' as const,stricterPct:10,condition:base.condition,indicatorIncrease:{version:ADDITION_INDICATOR_INCREASE_VERSION,metrics:[noGrowth]}};
+ const alternative={source:'custom' as const,stricterPct:10,condition:{...base.condition!,threshold:.25}};
+ g.addition={...base,...main,positionVersion:HOLDING_LEDGER_ADDITION_VERSION,maxRounds:1,rounds:[main],alternativeRounds:[alternative]};
+ const result=await run(g,loader(rising),4);
+ expect(result.additionFills).toMatchObject([{at:T+M,lane:'attack'}]);
 });
