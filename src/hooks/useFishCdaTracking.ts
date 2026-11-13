@@ -9,11 +9,11 @@ import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED
 import { readFishPreferences, readFishPreferenceEntries, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { markPageInstantPosition, readPageInstantMonitor, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
+import { SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
 import { instantCampaignInput, type InstantPositionInput } from '@/lib/fish/instantCampaign';
 import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
 import type { useFishNotify } from './useFishNotify';
 
-const CONFIG_KEY = 'veil.fish-cda-tracking.v1:';
 const POLL_MS = 2000;
 const CLOSE_GRACE_MS = 1000;
 type Settings = { enabledAt: number; snapshot: FishSnapshot };
@@ -59,7 +59,7 @@ function initialCursor(record: PreEntryRecord, enabledAt: number) {
 /** Opt-in watches are owned by the authenticated app, regardless of the open panel. */
 export function useFishCdaTracking(owner: string | undefined, library: PreEntryLibrary | undefined, ready: boolean,
   notify: ReturnType<typeof useFishNotify>, autoPositions = false): FishCdaTracking {
-  const configKey = owner ? CONFIG_KEY + encodeURIComponent(owner) : '';
+  const configKey = owner ? SCREENED_POSITION_KEY + encodeURIComponent(owner) : '';
   const jobPrefix = configKey + ':';
   const [settings, setSettings] = useState<Settings>();
   const activeSettings = useMemo(() => {

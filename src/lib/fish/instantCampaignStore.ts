@@ -163,12 +163,16 @@ export async function listInstantCampaignSnapshots(owner: string, signal?: Abort
   return { snapshots: [...snapshots.values()], warning };
 }
 
-export async function loadInstantCampaignSnapshot(owner: string, id: string) {
+export async function readInstantCampaignJob(owner: string, id: string) {
   const [template, legacy] = await readFishPreferences<Saved>([templatePrefix(owner) + id, localPrefix(owner) + id]);
-  const saved = template ?? legacy;
+  return template ?? legacy;
+}
+
+export async function loadInstantCampaignSnapshot(owner: string, id: string, signal?: AbortSignal, local?: Saved) {
+  const saved = local ?? await readInstantCampaignJob(owner, id);
   if (saved?.snapshot && saved.synced) return saved.snapshot;
   const { data, error } = await table().select('key,value').eq('user_id', owner).eq('key', KEY + id)
-    .setHeader(INSTANT_CAMPAIGN_HEADER, '1').abortSignal(AbortSignal.timeout(CLOUD_READ_MS)).maybeSingle();
+    .setHeader(INSTANT_CAMPAIGN_HEADER, '1').abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(CLOUD_READ_MS)]) : AbortSignal.timeout(CLOUD_READ_MS)).maybeSingle();
   const remote = decodeSnapshot(data);
   if (remote) { await cacheRemote(owner, remote); return remote; }
   if (saved?.snapshot?.id === id) return saved.snapshot;

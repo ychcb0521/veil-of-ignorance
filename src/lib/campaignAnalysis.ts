@@ -1652,7 +1652,7 @@ export function buildCampaignEventStream(
  */
 function campaignEndMs(campaign: TradeCampaign, tradeRecords: TradeRecord[]) {
   const latestRecord = tradeRecords.reduce((max, record) => Math.max(max, record.closeTime, record.openTime), 0);
-  const valuedAt = isQualityCampaignId(campaign.id) ? campaign.comparison?.valuedAt ?? 0 : 0;
+  const valuedAt = isQualityCampaignId(campaign.id) || campaign.comparison?.instant?.openPosition ? campaign.comparison?.valuedAt ?? 0 : 0;
   return campaign.closed_at ? toMs(campaign.closed_at) : Math.max(latestRecord, toMs(campaign.opened_at), valuedAt);
 }
 
@@ -2071,6 +2071,14 @@ function buildActiveLegsUntil(
       const slices = recordActiveLegs(leg, record, claimed, endMs, exitPriceCorrections);
       // A still-open mirror campaign has settlement records for only the sold
       // coins. Keep the unsold coins on the equity path until frozen valuation.
+      const instant = campaign.comparison?.instant?.openPosition;
+      if (instant && !campaign.closed_at && leg.leg_role?.startsWith('main_') && leg.pre_entry_price && leg.pre_position_size) {
+        const sold = claimed.reduce((total, trade) => total + (trade.action === 'CLOSE' ? trade.quantity : 0), 0);
+        const remaining = leg.pre_position_size / leg.pre_entry_price - sold;
+        if (remaining > 1e-9) slices.push({ id: `${leg.id}-remaining`, journalId: leg.id, role: leg.leg_role, side: 'LONG',
+          quantity: remaining, entryPrice: leg.pre_entry_price, startMs: toMs(leg.pre_simulated_time), endMs,
+          realizedPnl: null, settlementMode: 'usdt', contractSizeUsd: null, contracts: null, endIsCampaignEnd: true });
+      }
       const fill = campaign.comparison?.sellEvidence?.mirrorFill;
       if (isQualityCampaignId(campaign.id) && !campaign.closed_at && fill && fill.fraction < 1 && leg.leg_role === 'main_open'
         && leg.pre_entry_price != null && leg.pre_entry_price > 0 && leg.pre_position_size != null) {

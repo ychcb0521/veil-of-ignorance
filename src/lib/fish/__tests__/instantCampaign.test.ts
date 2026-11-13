@@ -3,7 +3,8 @@ import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCampaignPricePathTask } from '@/hooks/useCampaignPricePaths';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { sortCampaignRows } from '@/lib/campaignListSort';
-import { buildInstantCampaignData, freezeInstantCampaign, instantCampaignInput } from '../instantCampaign';
+import { buildInstantCampaignData, buildOpenInstantCampaignData, freezeInstantCampaign, instantCampaignInput, instantPositionInput, instantPositionValuation } from '../instantCampaign';
+import { readInstantPositionQuote } from '../instantPositionQuote';
 import { qualityCampaignSheets } from '../qualityCampaignExport';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -73,6 +74,44 @@ it('builds one frozen 5× simulated trade from the two saved times, prices and C
   const current = await freezeInstantCampaign({ ...input, sell: { ...alert, closePrice: 90 } }, load, signal);
   expect(load).toHaveBeenCalledTimes(3);
   expect(buildInstantCampaignData('account-a', current).campaign).toMatchObject({ status: 'closed_loss', final_realized_pnl: -20 });
+});
+
+it('uses the remaining quantity and cost, and keeps the same campaign through the final sale', () => {
+  const position = { ...instantPositionInput(record, round)!, entryPrice: 100, marginUsdt: 40, leverage: 5 };
+  const mirror = { at: buyAt + minute, price: 102, fraction: .715, gainPct: 2, atOpen: false };
+  const held = instantPositionValuation(position, undefined, mirror, 105);
+  expect(held.remainingQuantity).toBeCloseTo(.57);
+  expect(held.pnl).toBeCloseTo(2.85);
+  expect(held.roe).toBeCloseTo(25);
+  expect(held.realizedPnl).toBeCloseTo(2.86);
+  const open = buildOpenInstantCampaignData('account-a', position, undefined, mirror, buyAt + 2 * minute);
+  expect(open.campaign).toMatchObject({ id: position.id, status: 'active', closed_at: null, final_realized_pnl: null });
+  expect(open.legs.find(leg => leg.leg_role === 'main_open')).toMatchObject({ post_simulated_close_time: null, pre_position_size: 57 });
+  expect(open.tradeRecords).toHaveLength(1);
+  expect(open.tradeRecords[0]).toMatchObject({ exitPrice: 102, closeTime: mirror.at });
+  expect(open.campaign.actual_evolution.map(event => event.event_type)).not.toContain('main_fully_closed');
+  expect(open.campaign.comparison?.instant?.openPosition?.quantity).toBeCloseTo(.57);
+  const closed = buildInstantCampaignData('account-a', { ...position, version: 2, sell: { ...alert, mirror }, exitPrice: 105, recordedAt: sellAt,
+    peakPct: 5, drawdown: 0, staticDrawdown: 0 });
+  expect(closed.campaign.id).toBe(open.campaign.id);
+  expect(closed.campaign.final_realized_pnl).toBeCloseTo(5.71);
+  expect(closed.campaign.comparison?.instant?.openPosition).toBeUndefined();
+});
+
+it.each([
+  ['binance', 'fapi.binance.com', { symbol: 'TESTUSDT', markPrice: '102', time: at }],
+  ['okx', 'www.okx.com', { data: [{ instId: 'OTHER-USDT-SWAP', markPx: '1', ts: at }, { instId: 'TEST-USDT-SWAP', markPx: '102', ts: at }] }],
+  ['bitget', 'api.bitget.com', { data: [{ symbol: 'TESTUSDT', markPrice: '102', ts: at }] }],
+  ['gate', 'api.gateio.ws', [{ contract: 'TEST_USDT', mark_price: '102' }]],
+] as const)('uses the %s contract mark and its timestamp', async (exchange, host, body) => {
+  const request = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body)));
+  const now = vi.spyOn(Date, 'now').mockReturnValue(at + 1000);
+  try {
+    expect(await readInstantPositionQuote({ ...source, exchange }, signal, request)).toEqual({
+      price: 102, at: exchange === 'gate' ? at + 1000 : at, kind: 'mark',
+    });
+    expect(new URL(String(request.mock.calls[0][0])).hostname).toBe(host);
+  } finally { now.mockRestore(); }
 });
 
 it('does not turn a missing buy candle into a priced campaign', async () => {

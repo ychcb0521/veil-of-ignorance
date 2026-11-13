@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantPositionRow } from '@/components/InstantPositionRow';
+import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ArrowLeftRight, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast, recordNotificationHistory } from '@/lib/notificationCenter';
 import { LeverageModal } from '@/components/LeverageModal';
@@ -1009,10 +1010,7 @@ export function PositionPanel({
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
-              {instant?.close && instantPositions.length > 0 && <div className="space-y-2 px-3 pt-3">
-                {instantPositions.map(position => <InstantPositionRow key={position.id} position={position} monitor={instant.monitorResults?.get(position.recordId)} mirror={instant.mirrorFills?.get(position.recordId)} close={instant.close!} />)}
-              </div>}
-              {mergedPositions.length === 0 ? instantPositions.length ? null : (
+              {mergedPositions.length === 0 && instantPositions.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
                     <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -1023,6 +1021,9 @@ export function PositionPanel({
                 </div>
               ) : (
                 <div className="p-3 space-y-3">
+                  {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
+                    monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
+                    close={instant?.close} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
                   {mergedPositions.map((mg) => {
                     const price = priceMap[mg.symbol] || 0;
                     const firstChild = mg.children[0]?.position;
@@ -1068,7 +1069,6 @@ export function PositionPanel({
                     }
                     // ROE 分母统一固定为初始保证金。
                     const roe = initialMargin > 0 ? (totalPnl / initialMargin) * 100 : 0;
-                    const isProfit = totalPnl >= 0;
                     // 保证金比率（与币安一致）：维持保证金 / 保证金余额；余额含追加保证金，币本位按现价估值。
                     const markValuedMargin = isCoinGroup && totalMarginCoin > 0 && price > 0 ? totalMarginCoin * price : effectiveMargin;
                     const pooledMarginRatio = settlementMarginRatioPct(notional, markValuedMargin, totalPnl, maintenance);
@@ -1182,46 +1182,14 @@ export function PositionPanel({
                 return (
                   <div
                     key={`${mg.symbol}_${mg.side}`}
-                    className="rounded-lg border border-border bg-card shadow-sm overflow-hidden"
+                    className={positionCardClass}
                   >
-                    {/* Header */}
-                    <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
-                      <span className="text-sm font-bold text-foreground font-mono">{baseCoin}</span>
-                      <span className="text-xs text-muted-foreground">/&nbsp;{quoteUnitLabel} 永续</span>
-                      <span
-                        className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          mg.side === 'LONG'
-                            ? 'bg-trading-green/15 text-trading-green'
-                            : 'bg-trading-red/15 text-trading-red'
-                        }`}
-                      >
-                        {mg.side === 'LONG' ? '多' : '空'} {mg.leverage}x {mg.marginMode === 'cross' ? '全仓' : '逐仓'}
-                      </span>
-                      {mg.children.length > 1 && (
-                        <span className="text-[9px] text-muted-foreground ml-auto">
-                          {mg.children.length} 笔合并
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Hero Stats */}
-                    <div className="flex items-start justify-between px-3 py-2.5">
-                      <div>
-                        <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
-                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
-                          {formatSignedUSDT(totalPnl)}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[10px] text-muted-foreground mb-0.5">ROE</div>
-                        <div className={`text-lg font-bold font-mono tabular-nums ${isProfit ? 'text-trading-green' : 'text-trading-red'}`}>
-                          {isProfit ? '+' : ''}{roe.toFixed(2)}%
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Details Grid */}
-                    <div className="grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5">
+                    <PositionCardHeader asset={baseCoin} contract={quoteUnitLabel + ' 永续'} long={mg.side === 'LONG'}
+                      leverage={mg.leverage} mode={mg.marginMode === 'cross' ? '全仓' : '逐仓'}>
+                      {mg.children.length > 1 && <span className="text-[9px] text-muted-foreground ml-auto">{mg.children.length} 笔合并</span>}
+                    </PositionCardHeader>
+                    <PositionCardPnl pnl={totalPnl} roe={roe} />
+                    <div className={positionDetailsClass}>
                       <DetailCell label="持仓数量" value={positionQtyLabel} title={positionQtyTitle} />
                       <div className="min-w-0">
                         <div className="text-[10px] text-muted-foreground truncate">保证金</div>
@@ -1331,7 +1299,7 @@ export function PositionPanel({
                     })()}
 
                     {/* Action Buttons */}
-                    <div className="flex border-t border-border/50">
+                    <div className={positionActionsClass}>
                       <ActionBtn label="杠杆" onClick={(e) => {
                         e.stopPropagation();
                         setLeverageModal({ symbol: mg.symbol, settlement: limitSettlementOf(mg.children[0]?.position) });
@@ -2281,64 +2249,3 @@ export function PositionPanel({
  * 仓位卡上「保本线 / 开仓均价」共用的那一格：点一下在两者之间切换（见 entryCellMode）。
  * 标签后面那枚小箭头说明这一格能切；悬停说明里写清两个数各是什么。
  */
-function EntryPriceCell({ mode, onToggle, entryText, breakevenText, breakevenTitle }: {
-  mode: 'breakeven' | 'entry';
-  onToggle: () => void;
-  entryText: string;
-  breakevenText: string;
-  breakevenTitle: string;
-}) {
-  const breakeven = mode === 'breakeven';
-  const label = breakeven ? '保本线' : '开仓均价';
-  const other = breakeven ? '开仓均价' : '保本线';
-  const value = breakeven ? breakevenText : entryText;
-  return (
-    <button
-      type="button"
-      data-testid="position-entry-cell"
-      data-mode={mode}
-      onClick={event => { event.stopPropagation(); onToggle(); }}
-      aria-label={`${label} ${value}，点击切换为${other}`}
-      title={`${breakeven ? breakevenTitle : '开仓均价：各笔成交价按币量加权，不扣已落袋的利润。'}点一下切换为「${other}」。`}
-      className="group/entry min-w-0 text-left"
-    >
-      <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-        <span className="truncate">{label}</span>
-        <ArrowLeftRight aria-hidden="true" className="h-2.5 w-2.5 shrink-0 opacity-40 transition-opacity group-hover/entry:opacity-100" />
-      </div>
-      <div className="text-xs font-mono tabular-nums text-foreground">{value}</div>
-    </button>
-  );
-}
-
-function DetailCell({ label, value, valueClassName, title }: {
-  label: string; value: string; valueClassName?: string; title?: string;
-}) {
-  return (
-    <div className="min-w-0" title={title}>
-      <div className="text-[10px] text-muted-foreground truncate">{label}</div>
-      <div className={`text-xs font-mono tabular-nums text-foreground ${valueClassName || ''}`}>{value}</div>
-    </div>
-  );
-}
-
-function ActionBtn({ label, onClick, danger, disabled }: {
-  label: string;
-  onClick: (e: React.MouseEvent) => void;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex-1 py-2 text-xs font-medium transition-all active:scale-95 border-r border-border/50 last:border-r-0 ${
-        danger
-          ? 'text-trading-red hover:bg-trading-red/10'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-      } disabled:opacity-50`}
-    >
-      {label}
-    </button>
-  );
-}

@@ -19,6 +19,8 @@ import { INSTANT_TEMPLATE_MONITOR, type InstantMonitorSettings } from './instant
 import { instantMonitorSize, INSTANT_POSITION } from './instantMonitorExecution';
 import { qualityDrawdownPct, type QualityResult, type QualitySample } from './quality';
 import { buildQualityCampaignData } from './qualityCampaignProjection';
+import { additionPosition, qualityAdditionFills } from './qualityAddition';
+import type { QualityMirrorFill } from './qualityMirror';
 import { hasQualityCampaign } from './qualityCampaignArchive';
 
 export { INSTANT_POSITION };
@@ -67,6 +69,7 @@ export function instantPositionInput(record: PreEntryRecord, round: PreEntryRoun
     planLabel: round.plans?.find(plan => plan.id === record.planId)?.label,
     ...(round.instantMonitor ? { monitor: round.instantMonitor } : {}),
     detectors: record.sample.source.fish ? fishCaughtBy(record.sample.source) : [],
+    metadata: instantCampaignMetadata(record, round),
   };
 }
 
@@ -103,7 +106,7 @@ export async function freezeInstantPosition(input: InstantPositionInput, load: F
   return { ...input, ...instantMonitorSize(input.monitor), entryPrice };
 }
 
-export async function readInstantMark(input: InstantPositionInput, now: number, load: FishReconstructionLoader, signal: AbortSignal) {
+export async function readInstantMark(input: Pick<InstantPositionInput, 'source' | 'buyAt'>, now: number, load: FishReconstructionLoader, signal: AbortSignal) {
   const end = Math.floor(now / MINUTE) * MINUTE;
   if (end <= input.buyAt) throw Error('等待买入后首根 1 分钟 K 线收盘');
   const source: TradeSignal = { ...input.source, timeMs: end, timeLabel: '', fallbackZone: '' };
@@ -171,40 +174,107 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
   };
 }
 
+export function instantPositionValuation(position: InstantPositionFill, monitor?: QualityResult, legacyMirror?: QualityMirrorFill, mark?: number) {
+  const entryPrice = monitor?.entryPrice ?? position.entryPrice;
+  const notional = position.marginUsdt * position.leverage;
+  const mirror = monitor?.mirrorFill ?? legacyMirror;
+  const additions = qualityAdditionFills(monitor ?? {});
+  const reductions = monitor?.additionReductions ?? [];
+  const entryAt = monitor?.entryTime ?? position.buyAt;
+  const held = additionPosition(notional, entryPrice, mark ?? entryPrice, false, additions, mirror, reductions, entryAt);
+  const margin = held.remainingCost / position.leverage;
+  const pnl = mark == null ? null : held.remainingPnl;
+  const roe = pnl != null && margin > 0 ? pnl / margin * 100 : null;
+  return { ...held, entryPrice, mirror, additions, reductions, margin, pnl, roe };
+}
+
+export function buildSettlingInstantCampaignData(owner: string, position: InstantPositionFill, sale: InstantCampaignInput): QualityCampaignData | undefined {
+  const { sell, monitorResult } = sale;
+  let data: QualityCampaignData;
+  if (position.monitor && monitorResult && validInstantMonitorClose(sale)) {
+    data = buildTemplateInstantCampaignData(owner, position, monitorResult, { sell, recordedAt: monitorResult.evaluatedAt,
+      drawdown: qualityDrawdownPct(monitorResult, 'dynamic'), staticDrawdown: qualityDrawdownPct(monitorResult, 'static') });
+  } else if (!position.monitor && validScreenedSale(sell) && sell.closePrice != null && sell.at > position.buyAt) {
+    data = buildDefaultInstantCampaignData(owner, position, { sell, exitPrice: sell.closePrice, mirror: sell.mirror,
+      recordedAt: sell.at, valuedAt: sell.at, peakPct: null, drawdown: null, staticDrawdown: null });
+  } else return;
+  data.campaign.comparison!.instant!.settlementPending = true;
+  return data;
+}
+
+export function buildOpenInstantCampaignData(owner: string, position: InstantPositionFill, monitor?: QualityResult, mirror?: QualityMirrorFill, through?: number): QualityCampaignData {
+  const { recordId, buyAt } = position;
+  const valuation = instantPositionValuation(position, monitor, mirror);
+  const valuedAt = Math.max(buyAt, monitor?.endTime ?? through ?? buyAt, valuation.mirror?.at ?? 0);
+  const result: QualityResult = {
+    key: recordId, sampleId: recordId, groupId: position.monitor?.plan.id ?? PRICE_VERSION, evaluatedAt: valuedAt,
+    ...monitor,
+    status: 'open', entryTime: monitor?.entryTime ?? (position.monitor ? Math.floor(buyAt / MINUTE) * MINUTE : buyAt),
+    entryPrice: valuation.entryPrice, endTime: valuedAt, endPrice: monitor?.endPrice ?? valuation.entryPrice,
+    mirrorFill: valuation.mirror, realizedPnl: valuation.realizedPnl, mirrorRealizedPnl: valuation.mirrorPnl,
+    pnl: undefined, returnPct: undefined, remainingPnl: undefined,
+  };
+  const data = position.monitor
+    ? buildTemplateInstantCampaignData(owner, position, result, { recordedAt: buyAt,
+      drawdown: qualityDrawdownPct(monitor, 'dynamic'), staticDrawdown: qualityDrawdownPct(monitor, 'static') })
+    : buildDefaultInstantCampaignData(owner, position, { recordedAt: buyAt, valuedAt, mirror: valuation.mirror,
+      peakPct: null, drawdown: null, staticDrawdown: null });
+  data.campaign.comparison!.instant!.openPosition = {
+    buyAt, quantity: valuation.remainingQuantity, cost: valuation.remainingCost, realizedPnl: valuation.realizedPnl,
+  };
+  return data;
+}
+
 export function buildInstantCampaignData(owner: string, frozen: InstantCampaignSnapshot): QualityCampaignData {
-  const { id, buyAt, sell, source, entryPrice, exitPrice, recordedAt, detectors, planLabel } = frozen;
-  const { symbol } = source;
-  const { marginUsdt, leverage } = frozen.version === 1 ? LEGACY_POSITION : frozen;
+  const sizing = frozen.version === 1 ? LEGACY_POSITION : frozen;
+  const position = { ...frozen, marginUsdt: sizing.marginUsdt, leverage: sizing.leverage };
+  if (frozen.monitor && frozen.monitorResult) return buildTemplateInstantCampaignData(owner, position, frozen.monitorResult, frozen);
+  return buildDefaultInstantCampaignData(owner, position, { ...frozen, valuedAt: frozen.sell.at, mirror: frozen.sell.mirror });
+}
+
+function buildTemplateInstantCampaignData(owner: string, position: InstantPositionFill, result: QualityResult, evidence: {
+  recordedAt: number; drawdown: number | null; staticDrawdown: number | null; sell?: ScreenedCdaTrigger;
+}): QualityCampaignData {
+  const { id, source, buyAt, marginUsdt, leverage, monitor, recordId, detectors, metadata } = position;
   const notional = marginUsdt * leverage;
-  if (frozen.monitor && frozen.monitorResult) {
-    const sample: QualitySample = { id: frozen.recordId, source: { ...source, timeLabel: '', fallbackZone: '' },
-      groups: [], enteredAt: buyAt, basis: 'signal', importedAt: buyAt };
-    const data = buildQualityCampaignData(owner, { sample, plan: frozen.monitor.plan, result: frozen.monitorResult,
-      detectors: [], observeHours: 0, firstEvaluatedAt: recordedAt }, 'sell', id, { notional, marginUsdt, leverage });
-    const comparison = data.campaign.comparison!;
-    return { ...data, campaign: { ...data.campaign, campaign_code: 'IT-' + id.slice('fish-instant-'.length),
-      title: symbol + ' · ' + frozen.monitor.name,
-      comparison: { ...comparison, section: 'instant', planLabel: frozen.monitor.name,
-        ...(comparison.holdingMetrics ? { holdingMetrics: { ...comparison.holdingMetrics, returnPct: (frozen.monitorResult.pnl ?? 0) / marginUsdt * 100 } } : {}),
-        detectors: detectors.map(label => ({ id: label, label })),
-        instant: { source, marginUsdt, metadata: frozen.metadata, sellEvidence: sell.evidence, mirrorFill: frozen.monitorResult.mirrorFill,
-          drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown },
-      } } };
-  }
-  const opened = new Date(buyAt).toISOString(), closed = new Date(sell.at).toISOString(), recorded = new Date(recordedAt).toISOString();
+  const sample: QualitySample = { id: recordId, source: { ...source, timeLabel: '', fallbackZone: '' },
+    groups: [], enteredAt: buyAt, basis: 'signal', importedAt: buyAt };
+  const data = buildQualityCampaignData(owner, { sample, plan: monitor!.plan, result,
+    detectors: [], observeHours: 0, firstEvaluatedAt: evidence.recordedAt }, 'sell', id, { notional, marginUsdt, leverage });
+  const comparison = data.campaign.comparison!;
+  return { ...data, campaign: { ...data.campaign, campaign_code: 'IT-' + id.slice('fish-instant-'.length),
+    title: source.symbol + ' · ' + monitor!.name,
+    comparison: { ...comparison, section: 'instant', planLabel: monitor!.name,
+      ...(comparison.holdingMetrics ? { holdingMetrics: { ...comparison.holdingMetrics, returnPct: result.status === 'closed' ? (result.pnl ?? 0) / marginUsdt * 100 : null } } : {}),
+      detectors: detectors.map(label => ({ id: label, label })),
+      instant: { source, marginUsdt, metadata, sellEvidence: evidence.sell?.evidence, mirrorFill: result.mirrorFill,
+        drawdown: evidence.drawdown, staticDrawdown: evidence.staticDrawdown },
+    } } };
+}
+
+function buildDefaultInstantCampaignData(owner: string, position: InstantPositionFill, frozen: {
+  sell?: ScreenedCdaTrigger; exitPrice?: number; recordedAt: number; valuedAt: number; mirror?: QualityMirrorFill;
+  peakPct: number | null; drawdown: number | null; staticDrawdown: number | null;
+}): QualityCampaignData {
+  const { id, recordId: runKey, buyAt, source, entryPrice, detectors, planLabel, marginUsdt, leverage } = position;
+  const { sell, recordedAt, valuedAt, mirror } = frozen;
+  const { symbol } = source;
+  const notional = marginUsdt * leverage;
+  const exitPrice = frozen.exitPrice ?? entryPrice;
+  const opened = new Date(buyAt).toISOString(), closed = sell ? new Date(sell.at).toISOString() : null, recorded = new Date(recordedAt).toISOString();
   const legId = id + '-main', recordId = id + '-close', quantity = notional / entryPrice;
-  const mirror = sell.mirror, fraction = mirror?.fraction ?? 0;
+  const fraction = mirror?.fraction ?? 0;
   const remaining = 1 - fraction;
-  const withPriceRules = sell.evidence?.version === SCREENED_PRICE_EXIT_RULE;
+  const withPriceRules = !sell || sell.evidence?.version === SCREENED_PRICE_EXIT_RULE;
   const breakdown = mirrorPnlBreakdown(notional, entryPrice, exitPrice, mirror);
-  const pnl = mirror ? breakdown.totalPnl : quantity * (exitPrice - entryPrice);
-  const sellRule = withPriceRules ? FIRST_SELL_RULE + '，静态最大回撤 5% 止损，涨 2% 镜像平衡减仓 71.5%' : sell.evidence ? FIRST_SELL_RULE : SELL_RULE;
-  const reason = sell.evidence ? screenedSellReason(sell) : `CDA 原始值 ${sell.value} < -10，5 分钟收盘确认`;
+  const pnl = sell ? (mirror ? breakdown.totalPnl : quantity * (exitPrice - entryPrice)) : null;
+  const sellRule = withPriceRules ? FIRST_SELL_RULE + '，静态最大回撤 5% 止损，涨 2% 镜像平衡减仓 71.5%' : sell?.evidence ? FIRST_SELL_RULE : SELL_RULE;
+  const reason = !sell ? null : sell.evidence ? screenedSellReason(sell) : `CDA 原始值 ${sell.value} < -10，5 分钟收盘确认`;
   const notes = [
     `筛选鱼 · 信号 ${new Date(source.timeMs).toISOString()}`,
     ...(planLabel ? [`筛选方案 ${planLabel}`] : []),
     `模拟多单 · 保证金 ${marginUsdt} USDT · ${leverage} 倍杠杆 · 名义仓位 ${notional} USDT`,
-    sell.evidence ? '买入取首次满足时点所在分钟开盘，CDA 与防守线按 5 分钟收盘价卖出，静态回撤按止损价或跳空开盘价卖出，手动卖出取最近已收盘的 1 分钟价格。盈亏沿用持仓监测模拟成交口径，费用、滑点和强平未纳入。'
+    withPriceRules || sell?.evidence ? '买入取首次满足时点所在分钟开盘，CDA 与防守线按 5 分钟收盘价卖出，静态回撤按止损价或跳空开盘价卖出，手动卖出取最近已收盘的 1 分钟价格。盈亏沿用持仓监测模拟成交口径，费用、滑点和强平未纳入。'
       : '买入取首次满足时点所在分钟开盘，卖出取 CDA 触发收盘。盈亏沿用持仓监测模拟成交口径，费用、滑点和强平未纳入。',
   ].join('\n');
   const opening: CampaignEvent = {
@@ -214,33 +284,33 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
     order_kind: 'main', open_time: opened, entry_price: entryPrice,
   };
   const mirrorId = id + '-mirror-close';
-  const positionRef = mirror ? id + '-position' : recordId;
+  const positionRef = mirror ? id + '-position' : sell ? recordId : null;
   opening.trade_record_id = positionRef;
   const partial: CampaignEvent | undefined = mirror ? {
     ...opening, id: id + '-mirror', timestamp: new Date(mirror.at).toISOString(), event_type: 'main_partial_closed',
     price: mirror.price, size_usdt: notional * fraction, trade_record_id: mirrorId, realized_pnl: breakdown.mirrorPnl,
     close_time: new Date(mirror.at).toISOString(), exit_price: mirror.price, notes: '镜像平衡减仓',
   } : undefined;
-  const exit: CampaignEvent = {
+  const exit: CampaignEvent | undefined = closed ? {
     ...opening, id: id + '-exit', timestamp: closed, event_type: 'main_fully_closed',
     price: exitPrice, size_usdt: notional * remaining, trade_record_id: recordId,
-    realized_pnl: mirror ? breakdown.remainingPnl : pnl, close_time: closed, exit_price: exitPrice, notes: reason,
-  };
+    realized_pnl: mirror ? breakdown.remainingPnl : pnl ?? undefined, close_time: closed, exit_price: exitPrice, notes: reason,
+  } : undefined;
   const campaign: TradeCampaign = {
     id, user_id: owner, campaign_code: 'IT-' + id.slice('fish-instant-'.length), symbol,
-    direction: 'main_long', status: campaignStatusFromRealizedPnl({ settled: true, total: pnl }, closed),
+    direction: 'main_long', status: closed ? campaignStatusFromRealizedPnl({ settled: true, total: pnl }, closed) : 'active',
     strategy_template: 'main_only', title: `${symbol} · ${planLabel ?? 'CDA 即时交易'}`,
     opened_at: opened, closed_at: closed, initial_main_size_usdt: notional, initial_leverage: leverage,
-    final_realized_pnl: pnl, final_r_multiple: null, peak_unrealized_pnl: notional * frozen.peakPct / 100,
-    peak_drawdown: frozen.drawdown, importance_weight: 0, notes, actual_evolution: partial ? [opening, partial, exit] : [opening, exit],
+    final_realized_pnl: pnl, final_r_multiple: null, peak_unrealized_pnl: frozen.peakPct == null ? null : notional * frozen.peakPct / 100,
+    peak_drawdown: frozen.drawdown, importance_weight: 0, notes, actual_evolution: [opening, ...(partial ? [partial] : []), ...(exit ? [exit] : [])],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: recorded,
     comparison: {
-      section: 'instant', runKey: frozen.recordId, sellKey: sell.evidence?.version ?? PRICE_VERSION, planLabel: planLabel ?? 'CDA 即时交易',
+      section: 'instant', runKey, sellKey: sell?.evidence?.version ?? (sell ? PRICE_VERSION : SCREENED_PRICE_EXIT_RULE), planLabel: planLabel ?? 'CDA 即时交易',
       sellLabel: sellRule, detectors: detectors.map(label => ({ id: label, label })),
-      category: detectors.join(' + ') || undefined, valuedAt: sell.at,
-      holdingMetrics: { status: 'closed', entryPrice, initialNotional: notional, totalInvested: marginUsdt, returnPct: pnl / marginUsdt * 100, peakPct: frozen.peakPct,
-        ...(mirror ? { mirrorRealizedPnl: breakdown.mirrorPnl, remainingPnl: breakdown.remainingPnl } : {}) },
-      instant: { source, metadata: frozen.metadata, cdaValue: sell.value, sellEvidence: sell.evidence, marginUsdt,
+      category: detectors.join(' + ') || undefined, valuedAt,
+      holdingMetrics: { status: sell ? 'closed' : 'open', entryPrice, initialNotional: notional, totalInvested: marginUsdt, returnPct: pnl == null ? null : pnl / marginUsdt * 100, peakPct: frozen.peakPct,
+        ...(mirror ? { mirrorRealizedPnl: breakdown.mirrorPnl, remainingPnl: sell ? breakdown.remainingPnl : undefined } : {}) },
+      instant: { source, metadata: position.metadata, cdaValue: sell?.value, sellEvidence: sell?.evidence, marginUsdt,
         ...(withPriceRules ? { initialStaticStopPct: SCREENED_STOP_PCT, mirrorTakeProfit: SCREENED_MIRROR, mirrorFill: mirror } : {}),
         drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown },
     },
@@ -253,23 +323,25 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
     pre_risk_awareness: null, pre_risk_management: null, pre_checklist_items: null, pre_checklist_passed: null,
     pre_position_size: notional, pre_account_equity_usdt: marginUsdt, pre_max_loss_usdt: withPriceRules ? notional * SCREENED_STOP_PCT / 100 : null,
     pre_settlement_mode: 'usdt', pre_settlement_asset: 'USDT',
-    post_outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven', post_realized_pnl: pnl, post_r_multiple: null,
+    post_outcome: pnl == null ? null : pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven', post_realized_pnl: pnl, post_r_multiple: null,
     post_reflection: null, post_correct_action: null, post_reviewed_at: null, reason_was_rewritten: false,
-    post_simulated_close_time: closed, post_real_close_time: closed, post_exit_price_snapshot: exitPrice,
+    post_simulated_close_time: closed, post_real_close_time: closed, post_exit_price_snapshot: sell ? exitPrice : null,
     created_at: recorded, updated_at: recorded,
   };
-  const trade: TradeRecord = {
+  const trade: TradeRecord | undefined = sell && pnl != null ? {
     id: recordId, symbol, side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice, exitPrice,
     quantity: quantity * remaining, ...(mirror ? { positionId: positionRef } : {}), leverage, settlementMode: 'usdt', settlementAsset: 'USDT',
     pnl: mirror ? breakdown.remainingPnl : pnl, fee: 0, openFeeUsd: 0, openFeeRate: 0, closeFeeRate: 0, slippage: 0,
-    openTime: buyAt, closeTime: sell.at, openedRealAt: buyAt, closedRealAt: sell.at, operationAt: recordedAt, exit_reason_text: reason,
-  };
+    openTime: buyAt, closeTime: sell.at, openedRealAt: buyAt, closedRealAt: sell.at, operationAt: recordedAt, exit_reason_text: reason ?? undefined,
+  } : undefined;
   const mirrorRecord: TradeRecord | undefined = mirror ? {
-    ...trade, id: mirrorId, type: 'LIMIT', quantity: quantity * fraction, exitPrice: mirror.price,
+    id: mirrorId, symbol, side: 'LONG', type: 'LIMIT', action: 'CLOSE', entryPrice, positionId: positionRef ?? undefined,
+    leverage, settlementMode: 'usdt', settlementAsset: 'USDT', fee: 0, openFeeUsd: 0, openFeeRate: 0, closeFeeRate: 0, slippage: 0,
+    openTime: buyAt, openedRealAt: buyAt, operationAt: recordedAt, quantity: quantity * fraction, exitPrice: mirror.price,
     closeTime: mirror.at, closedRealAt: mirror.at, pnl: breakdown.mirrorPnl, exit_reason_text: '镜像止盈',
   } : undefined;
   return withQualityMirrorLegs({
-    campaign, legs: [leg], tradeRecords: mirrorRecord ? [mirrorRecord, trade] : [trade], pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
+    campaign, legs: [leg], tradeRecords: [...(mirrorRecord ? [mirrorRecord] : []), ...(trade ? [trade] : [])], pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
     legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] },
   });

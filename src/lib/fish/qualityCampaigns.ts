@@ -10,8 +10,9 @@ import { loadQualityCampaignTrash, readQualityCampaignTrash } from './qualityCam
 import { instantCampaignMetadata } from './instantCampaignMetadata';
 import { readAutomaticPreEntrySales } from './preEntryPersistence';
 import { qualitySignalTime } from './qualityAdmissionTime';
-import { buildInstantCampaignData } from './instantCampaign';
-import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readLocalInstantCampaignSnapshots } from './instantCampaignStore';
+import { readInstantPositionProgress } from './instantPositionProgress';
+import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, type InstantPositionFill } from './instantCampaign';
+import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readInstantCampaignJob, readInstantCampaignJobs } from './instantCampaignStore';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -49,14 +50,30 @@ function projectInWorker(request: QualityCampaignReadRequest,signal?:AbortSignal
     try { worker.postMessage(request); } catch (error) { fail(error); }
   }));
 }
+async function buildLocalOpenInstantData(owner: string, positions: InstantPositionFill[]) {
+  if (!positions.length) return [];
+  const progress = await readInstantPositionProgress(owner, positions.map(row => row.recordId));
+  return positions.flatMap((position, index) => {
+    const saved = progress[index];
+    if (saved?.alert || saved?.monitorResult?.status === 'closed') return [];
+    return [buildOpenInstantCampaignData(owner, position, saved?.monitorResult, saved?.risk?.mirror, saved?.risk?.through)];
+  });
+}
+
 export async function listLocalInstantCampaignData(owner: string) {
-  return (await readLocalInstantCampaignSnapshots(owner)).map(snapshot => buildInstantCampaignData(owner, snapshot));
+  const jobs = await readInstantCampaignJobs(owner);
+  const closed = jobs.flatMap(job => job.snapshot ? [buildInstantCampaignData(owner, job.snapshot)] : []);
+  const open = jobs.flatMap(job => job.opened && !job.snapshot && !('sell' in job.input) ? [job.opened] : []);
+  return [...closed, ...await buildLocalOpenInstantData(owner, open)];
 }
 
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal) {
   if (section === 'instant') {
     const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);
-    return { rows: snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), warning,
+    const closedIds = new Set(snapshots.map(snapshot => snapshot.id));
+    const jobs = await readInstantCampaignJobs(owner).catch(() => []);
+    const open = jobs.flatMap(job => job.opened && !job.snapshot && !('sell' in job.input) && !closedIds.has(job.opened.id) ? [job.opened] : []);
+    return { rows: [...snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), ...await buildLocalOpenInstantData(owner, open)], warning,
       selectedSellKey: undefined, buyFilterLabel: '', repair: undefined };
   }
   if(signal?.aborted)throw new DOMException('读取已取消','AbortError');
@@ -94,7 +111,26 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
       : data;
   };
   if (instant) {
-    const frozen = await loadInstantCampaignSnapshot(owner, id);
+    const job = await readInstantCampaignJob(owner, id);
+    throwIfReadAborted(signal);
+    if (!job?.snapshot && job?.opened) {
+      const [saved] = await readInstantPositionProgress(owner, [job.opened.recordId]);
+      const monitor = saved?.monitorResult?.status === 'open' ? saved.monitorResult : undefined;
+      const mirror = saved?.risk?.mirror;
+      const source = job.opened.source;
+      const original = job.opened.metadata ? undefined : (await readAutomaticPreEntrySales(owner, [job.opened.recordId]).catch(() => []))
+        .find(({ record }) => record.sample.source.symbol === source.symbol
+          && (record.sample.source.exchange ?? 'binance') === (source.exchange ?? 'binance')
+          && qualitySignalTime(record.sample.source) === source.timeMs && record.matchedAt === job.opened!.buyAt);
+      const position = original ? { ...job.opened, metadata: instantCampaignMetadata(original.record, original.round) } : job.opened;
+      const completed = await readInstantCampaignJob(owner, id);
+      if (completed?.snapshot) return applyTrash(buildInstantCampaignData(owner, completed.snapshot));
+      const sale = completed && 'sell' in completed.input ? completed.input
+        : saved?.alert ? { ...position, sell: saved.alert, monitorResult: saved.monitorResult } : undefined;
+      const settling = sale && buildSettlingInstantCampaignData(owner, position, sale);
+      return applyTrash(settling ?? buildOpenInstantCampaignData(owner, position, monitor, mirror, saved?.risk?.through));
+    }
+    const frozen = await loadInstantCampaignSnapshot(owner, id, signal, job);
     throwIfReadAborted(signal);
     if (frozen.metadata) return applyTrash(buildInstantCampaignData(owner, frozen));
     const saved = await readAutomaticPreEntrySales(owner, [frozen.recordId]).catch(() => []);

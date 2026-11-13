@@ -409,6 +409,8 @@ export interface TradeCampaign {
       mirrorFill?: import('@/lib/fish/qualityMirror').QualityMirrorFill;
       marginUsdt: number;
       initialStaticStopPct?: number;
+      openPosition?: { buyAt: number; quantity: number; cost: number; realizedPnl: number };
+      settlementPending?: true;
       drawdown: number | null;
       staticDrawdown: number | null;
     };

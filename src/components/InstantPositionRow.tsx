@@ -1,64 +1,73 @@
-import { qualityAdditionFills } from '@/lib/fish/qualityAddition';
+import { useState } from 'react';
+import { Link, useInRouterContext } from 'react-router-dom';
+import { useInstantPositionQuote } from '@/hooks/useInstantPositionQuote';
 import type { QualityResult } from '@/lib/fish/quality';
-import { useEffect, useState } from 'react';
-import { markPageInstantPosition } from '@/hooks/useFish';
 import type { QualityMirrorFill } from '@/lib/fish/qualityMirror';
-import type { InstantPositionFill } from '@/lib/fish/instantCampaign';
+import { instantPositionValuation, type InstantPositionFill } from '@/lib/fish/instantCampaign';
 import { formatBeijingTime } from '@/lib/timeFormat';
-import { formatAmount, formatPrice, formatSignedUSDT } from '@/lib/formatters';
+import { formatAmount, formatPrice, formatSignedUSDT, formatUSDT } from '@/lib/formatters';
+import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
+import { positionBreakevenPrice } from '@/lib/positionBreakeven';
+import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
 
-export function InstantPositionRow({ position, mirror: legacyMirror, monitor, close }: {
-  position: InstantPositionFill; monitor?: QualityResult; mirror?: QualityMirrorFill; close: (position: InstantPositionFill) => Promise<void>;
+const linkClass = 'flex flex-1 items-center justify-center border-r border-border/50 py-2 text-xs font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground';
+
+export function InstantPositionRow({ position, mirror, monitor, close, entryMode, onToggleEntry }: {
+  position: InstantPositionFill;
+  monitor?: QualityResult;
+  mirror?: QualityMirrorFill;
+  close?: (position: InstantPositionFill) => Promise<void>;
+  entryMode: 'entry' | 'breakeven';
+  onToggleEntry: () => void;
 }) {
-  const [mark, setMark] = useState<{ at: number; price: number }>();
+  const inRouter = useInRouterContext();
+  const { source, buyAt, leverage } = position;
+  const { symbol } = source;
+  const quoteState = useInstantPositionQuote(position);
+  const quote = quoteState?.value;
+  const held = instantPositionValuation(position, monitor, mirror, quote?.price);
+  const breakeven = positionBreakevenPrice({ side: 'LONG', inverse: false, coinsAtEntry: held.remainingQuantity,
+    avgEntry: held.averageEntryPrice, mirrorUsd: held.mirrorPnl, mirrorCoin: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => {
-    const controller = new AbortController();
-    let running = false;
-    const update = () => {
-      if (running || controller.signal.aborted || document.hidden || !navigator.onLine) return;
-      running = true;
-      void markPageInstantPosition(position, controller.signal).then(value => {
-        if (!controller.signal.aborted) setMark(value);
-      }, () => undefined).finally(() => { running = false; });
-    };
-    update();
-    const timer = window.setInterval(update, 60_000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [position.id, position.buyAt, position.source.symbol, position.source.exchange, position.source.market]);
-  const notional = position.marginUsdt * position.leverage;
-  const mirror = monitor?.mirrorFill ?? legacyMirror;
-  const fraction = mirror?.fraction ?? 0;
-  const quantity = monitor?.remainingQuantity ?? notional / position.entryPrice * (1 - fraction);
-  const average = monitor?.averageEntryPrice ?? position.entryPrice;
-  const pnl = mark ? (mark.price - average) * quantity : null;
-  const additions = monitor ? qualityAdditionFills(monitor).length : 0;
-  const reductions = monitor?.additionReductions?.filter(fill => fill.fraction > 0).length ?? 0;
   const sell = async () => {
-    if (busy || !window.confirm('手动卖出 ' + position.source.symbol + ' 的全部即时交易模拟仓位？')) return;
-    setBusy(true); setError('');
+    if (!close || busy || !window.confirm('手动卖出 ' + symbol + ' 的全部即时交易模拟仓位？')) return;
+    setBusy(true);
+    setError('');
     try { await close(position); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '卖出失败，请重试'); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '平仓失败，请重试'); }
     finally { setBusy(false); }
   };
-  return <div className="rounded-md border border-border bg-card px-3 py-2 text-xs" data-testid="instant-position">
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <span className="font-semibold">{position.source.symbol}</span>
-      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">即时交易 · 模拟多单</span>
-      <span>开仓 {formatBeijingTime(position.buyAt)}</span>
-      <span>剩余数量 {formatAmount(quantity)}</span>
-      {position.monitor && <span>持仓模板 {position.monitor.name}</span>}
-      {(additions > 0 || reductions > 0) && <span>加仓 {additions} 次 · 减仓 {reductions} 次 · 余仓均价 {formatPrice(average, position.source.symbol)}</span>}
-      <span>开仓价 {formatPrice(position.entryPrice, position.source.symbol)}</span>
-      <span>保证金 {position.marginUsdt} USDT · {position.leverage} 倍 · 名义 {notional} USDT</span>
-      {mirror && <span className="text-primary">镜像平衡减仓已成交 {(fraction * 100).toFixed(1)}% · {formatPrice(mirror.price, position.source.symbol)} · 已实现 {formatSignedUSDT(notional * fraction * (mirror.price / position.entryPrice - 1))} USDT</span>}
-      {monitor && <span>已实现盈亏 {formatSignedUSDT(monitor.realizedPnl ?? 0)} USDT</span>}
-      <span>最近收盘 {mark ? formatPrice(mark.price, position.source.symbol) : '—'}</span>
-      <span>浮动盈亏 {pnl == null ? '—' : formatSignedUSDT(pnl) + ' USDT'}</span>
-      <button type="button" disabled={busy} onClick={() => void sell()}
-        className="ml-auto rounded border border-border px-2 py-1 text-destructive hover:bg-destructive/10 disabled:opacity-60">{busy ? '卖出中…' : '手动卖出'}</button>
+  const campaignPath = '/journal/campaigns/' + encodeURIComponent(position.id) + '?section=instant';
+  const quoteLabel = quote?.kind === 'close' ? '最近收盘价' : quoteState?.delayed ? '最近标记价格' : '标记价格';
+  return <div className={positionCardClass} data-testid="instant-position">
+    <PositionCardHeader asset={symbol.replace(/USDT$/, '')} contract="USDT 永续" long leverage={leverage} mode="逐仓">
+      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">即时交易 · 模拟</span>
+      <span className="ml-auto text-[10px] text-muted-foreground">{EXCHANGE_NAMES[source.exchange ?? 'binance']} · 开仓 {formatBeijingTime(buyAt)}</span>
+    </PositionCardHeader>
+    <PositionCardPnl pnl={held.pnl} roe={held.roe}/>
+    <div className={positionDetailsClass}>
+      <DetailCell label="持仓数量" value={formatAmount(held.remainingQuantity)} />
+      <DetailCell label="保证金" value={formatUSDT(held.margin) + ' USDT'} />
+      <DetailCell label="保证金比率" value="—" title="即时交易的模拟方案按持仓监测条件退出。" />
+      <EntryPriceCell mode={entryMode} onToggle={onToggleEntry}
+        entryText={formatPrice(held.averageEntryPrice, symbol)} breakevenText={breakeven == null ? '—' : formatPrice(breakeven, symbol)}
+        breakevenTitle="保本线按余仓成本扣除已落袋的镜像盈利计算。" />
+      <DetailCell label={quoteLabel} value={quote ? formatPrice(quote.price, symbol) : '—'} />
+      <DetailCell label="强平价格" value="—" title="即时交易的模拟方案按持仓监测条件退出。" />
     </div>
-    {error && <p role="alert" className="mt-1 text-destructive">{error}</p>}
+    <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-2 text-[10px] text-muted-foreground">
+      <span>报价时间 {quote ? formatBeijingTime(quote.at) : '—'}</span>
+      <span>已实现盈亏 {formatSignedUSDT(held.realizedPnl)} USDT</span>
+      {position.monitor && <span>持仓模板 {position.monitor.name}</span>}
+      {held.mirror && <span>镜像平衡减仓已成交 {(held.mirror.fraction * 100).toFixed(1)}%</span>}
+      {held.additions.length > 0 && <span>加仓 {held.additions.length} 次</span>}
+      {held.reductions.some(fill => fill.fraction > 0) && <span>减仓 {held.reductions.filter(fill => fill.fraction > 0).length} 次</span>}
+    </div>
+    {error && <p role="alert" className="px-3 pb-2 text-xs text-destructive">{error}</p>}
+    <div className={positionActionsClass}>
+      {inRouter ? <Link to={campaignPath} state={{ fromInstantPosition: true }} className={linkClass}>交易战役</Link> : <a href={campaignPath} className={linkClass}>交易战役</a>}
+      <ActionBtn danger disabled={busy || !close} onClick={() => void sell()} label={busy ? '平仓中…' : '平仓'}/>
+    </div>
   </div>;
 }

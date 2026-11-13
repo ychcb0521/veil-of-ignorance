@@ -69,7 +69,7 @@ export async function openPageInstantPosition(input: import('@/lib/fish/instantC
   return pageScanner.openInstantPosition(input, signal);
 }
 
-export async function markPageInstantPosition(input: import('@/lib/fish/instantCampaign').InstantPositionInput, signal: AbortSignal) {
+export async function markPageInstantPosition(input: Pick<import('@/lib/fish/instantCampaign').InstantPositionInput, 'source' | 'buyAt'>, signal: AbortSignal) {
   pageScanner ??= new FishScanner();
   return pageScanner.markInstantPosition(input, signal);
 }

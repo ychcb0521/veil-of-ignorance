@@ -52,11 +52,13 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
     const showLocal = async () => {
       try {
         const rows = cards(await listLocalInstantCampaignData(owner));
-        if (!active || !rows.length) return;
+        if (!active) return;
         setSnapshot(previous => {
           const sameSection = previous.owner === owner && previous.section === section;
-          const byId = new Map(sameSection ? previous.rows.map(row => [row.campaign.id, row]) : []);
-          for (const row of rows) byId.set(row.campaign.id, row);
+          const byId = new Map(sameSection ? previous.rows.filter(row => row.campaign.status !== 'active').map(row => [row.campaign.id, row]) : []);
+          for (const row of rows) {
+            if (row.campaign.status !== 'active' || !byId.has(row.campaign.id)) byId.set(row.campaign.id, row);
+          }
           return { owner, section, rows: [...byId.values()], complete: sameSection && previous.complete,
             error: sameSection ? previous.error : null, selectedSellKey: undefined, buyFilterLabel: '' };
         });

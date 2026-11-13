@@ -279,7 +279,7 @@ export class FishScanner {
     return freezeInstantPosition(input, load, signal);
   }
 
-  async markInstantPosition(input: InstantPositionInput, signal: AbortSignal) {
+  async markInstantPosition(input: Pick<InstantPositionInput, 'source' | 'buyAt'>, signal: AbortSignal) {
     const { now, load } = await this.qualityMarket([input.source.symbol], signal);
     return readInstantMark(input, now, load, signal);
   }

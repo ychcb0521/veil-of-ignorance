@@ -1,3 +1,5 @@
+import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
+import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
 import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
@@ -296,6 +298,7 @@ type CampaignDetailNavigationState = {
   fromRules?: boolean;
   /** 【用户要求】从「鱼质量」点进来的：返回时回到交易页的鱼质量（原分页、原筛选、原滚动位置，见 lib/fish/qualityReturn）。 */
   fromFishQuality?: boolean;
+  fromInstantPosition?: boolean;
 };
 
 // 战役详情页统一用浏览器本地时区显示 K 线/模拟时间——与下方 Legs 列表（本地 getHours）
@@ -779,7 +782,7 @@ async function loadAccountCampaignPerformance(
   ownerUserId: string,
   viewerUserId: string,
   snapshot?: CampaignBatchExportSnapshot,
-  comparison?: TradeCampaign['comparison'],
+  comparison?: Pick<NonNullable<TradeCampaign['comparison']>, 'section' | 'sellKey'>,
   signal?: AbortSignal,
 ): Promise<AccountCampaignMetrics> {
   if (comparison) return loadQualityCampaignPerformance(ownerUserId, comparison.section, comparison.sellKey, signal);
@@ -1200,6 +1203,42 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
+  const instantOpen = campaign?.comparison?.instant?.openPosition;
+  const instantCampaignId = campaign?.comparison?.instant ? campaign.id : undefined;
+  const watchInstant = !!instantOpen || !!campaign?.comparison?.instant?.settlementPending;
+
+  useEffect(() => {
+    if (!id || id !== instantCampaignId || !campaignOwnerId || batchExport || !watchInstant) return;
+    const lifetime = new AbortController();
+    let running = false;
+    let queued = false;
+    let fingerprint = '';
+    const reconcile = (campaign: TradeCampaign) => JSON.stringify([campaign.closed_at, campaign.updated_at,
+      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.actual_evolution]);
+    const reload = async () => {
+      if (lifetime.signal.aborted) return;
+      if (running) { queued = true; return; }
+      running = true;
+      try {
+        const full = await getCampaignFullData(id, { signal: lifetime.signal });
+        if (lifetime.signal.aborted) return;
+        const version = reconcile(full.campaign);
+        if (version === fingerprint) return;
+        fingerprint = version;
+        setCampaign(full.campaign);
+        setLegs(full.legs);
+        setTradeRecords(full.tradeRecords);
+      } catch { /* Retain the last confirmed campaign while a local or cloud read is pending. */ }
+      finally {
+        running = false;
+        if (queued) { queued = false; void reload(); }
+      }
+    };
+    const refresh = () => void reload();
+    const unsubscribe = subscribeInstantCampaigns(campaignOwnerId, refresh);
+    const interval = window.setInterval(refresh, 30_000);
+    return () => { lifetime.abort(); unsubscribe(); window.clearInterval(interval); };
+  }, [id, instantCampaignId, campaignOwnerId, batchExport, watchInstant]);
 
   useEffect(() => {
     if (!id || !campaignOwnerId || !viewerUserId || batchExport || paperCampaign) return;
@@ -1245,6 +1284,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     };
   }, [id, campaign?.id, campaignOwnerId, viewerUserId, batchExport, paperCampaign, adoptUnfilledOrderIds]);
 
+  const performanceSection = campaign?.comparison?.section;
+  const performanceSellKey = campaign?.comparison?.sellKey;
+  const performanceClosedAt = campaign?.closed_at;
   useEffect(() => {
     if (!campaignOwnerId || !viewerUserId) return;
     if (batchExport?.options.sections.overview === false) {
@@ -1258,10 +1300,11 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     setCampaignAsymmetricRisk(null);
     setCampaignPerformanceError(null);
     setCampaignPerformanceLoading(true);
-    const cacheKey = `${viewerUserId}:${campaignOwnerId}:${campaign?.comparison?.section ?? 'personal'}:${campaign?.comparison?.sellKey ?? ''}`;
+    const comparison = performanceSection && performanceSellKey != null ? { section: performanceSection, sellKey: performanceSellKey } : undefined;
+    const cacheKey = `${viewerUserId}:${campaignOwnerId}:${performanceSection ?? 'personal'}:${performanceSellKey ?? ''}`;
     let shared = batchExport?.snapshot.accountMetrics.get(cacheKey);
     if (!shared) {
-      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot, campaign?.comparison, batchExport ? undefined : controller.signal);
+      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot, comparison, batchExport ? undefined : controller.signal);
       batchExport?.snapshot.accountMetrics.set(cacheKey, shared);
       // 失败的那份不留在缓存里：重试时重新读，而不是反复拿到同一个被拒的 Promise。
       if (batchExport) void shared.catch(() => batchExport.snapshot.accountMetrics.delete(cacheKey));
@@ -1271,7 +1314,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 这时只为本场重新读一次样本（不进缓存，其余场次仍共用原来那一份、各自注明缺场）。
     const request = batchExport
       ? shared.then(result => (result.missingSampleIds?.includes(batchExport.campaignId)
-        ? loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport.snapshot, campaign?.comparison)
+        ? loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport.snapshot, comparison)
         : result))
       : shared;
     request
@@ -1297,12 +1340,14 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       cancelled = true;
       controller.abort();
     };
-  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision, campaign?.comparison]);
+  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision, performanceSection, performanceSellKey, performanceClosedAt]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
     if (campaign.closed_at) return campaign.closed_at;
-    if (campaign.comparison) return new Date(campaign.comparison.valuedAt).toISOString();
+    if (campaign.comparison) return new Date(campaign.comparison.instant?.openPosition
+      ? Math.max(campaign.comparison.valuedAt, Math.floor(Date.now() / 60_000) * 60_000)
+      : campaign.comparison.valuedAt).toISOString();
     if (batchExport) {
       // 复盘模式下的「当前时刻」不是墙上时钟：每个标的在一批里只取一次，
       // 进行中的战役不会因为导出途中回放在走而前后几张图的截止时间不一致。
@@ -2696,7 +2741,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const handleBackToCampaigns = () => {
     const navigationState = location.state as CampaignDetailNavigationState | null;
     // 从战役列表、规则页或鱼质量进来的，退回上一条 history 记录：回到原来那一页的原样（排序、筛选、滚动位置）
-    if (navigationState?.fromCampaignList || navigationState?.fromRules || navigationState?.fromFishQuality) {
+    if (navigationState?.fromCampaignList || navigationState?.fromRules || navigationState?.fromFishQuality || navigationState?.fromInstantPosition) {
       nav(-1);
       return;
     }
@@ -2783,7 +2828,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             <button
               type="button"
               onClick={handleBackToCampaigns}
-              aria-label={(location.state as CampaignDetailNavigationState | null)?.fromRules ? '返回规则' : (location.state as CampaignDetailNavigationState | null)?.fromFishQuality ? '返回鱼质量' : '返回进入前的交易战役列表'}
+              aria-label={(location.state as CampaignDetailNavigationState | null)?.fromRules ? '返回规则' : (location.state as CampaignDetailNavigationState | null)?.fromFishQuality ? '返回鱼质量' : (location.state as CampaignDetailNavigationState | null)?.fromInstantPosition ? '返回仓位' : '返回进入前的交易战役列表'}
               title={(location.state as CampaignDetailNavigationState | null)?.fromFishQuality ? '返回鱼质量（原来的位置）' : '返回进入前的列表状态'}
               className="h-8 w-8 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card"
             >
@@ -2838,11 +2883,12 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
         {campaign.comparison?.instant && <div data-testid="instant-campaign-execution" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border/70 bg-card px-3 py-2 text-[11px]">
-          <span className="font-medium">{campaign.comparison.sellLabel ?? 'CDA 卖出'}</span>
+          <span className="font-medium">{instantOpen ? '持仓中' : campaign.comparison.sellLabel ?? 'CDA 卖出'}</span>
           {campaign.comparison.instant.sellEvidence && <span>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</span>}
           {campaign.comparison.instant.cdaValue != null && <span>CDA 收盘读数 {campaign.comparison.instant.cdaValue}</span>}
           <span>保证金 {campaign.comparison.instant.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</span>
-          <span className="ml-auto font-mono text-muted-foreground">{formatBeijingTime(campaign.comparison.valuedAt)}</span>
+          {instantOpen ? <InstantOpenCampaignQuote key={campaign.id} source={campaign.comparison.instant.source} position={instantOpen}/>
+            : <span className="ml-auto font-mono text-muted-foreground">{formatBeijingTime(campaign.comparison.valuedAt)}</span>}
         </div>}
         {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} repair={campaign.comparison.repair} />}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
