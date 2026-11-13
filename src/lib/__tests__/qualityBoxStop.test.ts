@@ -1,9 +1,12 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as features from '@/lib/deepDig/features';
-import { createBoxStopReader, defaultBoxStop, boxStopIdentity, validateBoxStop, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
+import { BOX_STOP_GUARD_REGIME_VERSION, createBoxStopReader, defaultBoxStop, boxStopIdentity, selectBoxStopGuardRegime, validateBoxStop, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
 import { evaluateQualitySample, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
 import { freezeQualityPlan, planVersionChanges, qualityPlanVersions } from '@/lib/fish/qualityPlanVersions';
 import { holdingVetoDraft, parseHoldingVetoDraft } from '@/lib/fish/qualityFilters';
+import { createPreEntryGate } from '@/lib/fish/preEntryGate';
+import { emptyPreEntryConditions } from '@/lib/fish/preEntryConditions';
+import { stagedHoldingVetoes } from '@/lib/fish/qualityVetoStages';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishReconstructionLoader } from '@/lib/fish/reconstruction';
 import type { QualityHoldingVeto } from '@/lib/fish/qualityVeto';
@@ -11,12 +14,13 @@ const M=60000,T=Date.UTC(2026,9,20),signal=new AbortController().signal;
 const row={id:'a',symbol:'RAVEUSDT',timeMs:T,timeLabel:'',fallbackZone:''};
 const sample:QualitySample={id:'a',enteredAt:T,basis:'signal',importedAt:T,groups:[],source:row};
 const bar=(at:number,open=100,low=open,close=open):ResearchBar=>({openTime:at,open,high:Math.max(open,close),low,close,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50});
-let support:(at:number)=>number|null,invalid=false;
+let support:(at:number)=>number|null,regime:(at:number)=>'trend'|'range',invalid=false;
 beforeEach(()=>{
- support=()=>90;invalid=false;
- vi.spyOn(features,'evaluateOnBars').mockImplementation(bars=>({vars:new Map(),DBL5_details:bars.map(b=>{const n=support(b.openTime+5*M);return {at:b.openTime+5*M,data_valid:!invalid,darvas_5m_available:n!=null,active:n==null?null:{box_id:String(n),D:n},darvas_5m_guard:n==null?null:n-1};})} as unknown as ReturnType<typeof features.evaluateOnBars>));
+ support=()=>90;regime=()=> 'range';invalid=false;
+ vi.spyOn(features,'evaluateOnBars').mockImplementation(bars=>({vars:new Map(),DBL5_details:bars.map(b=>{const n=support(b.openTime+5*M);return {at:b.openTime+5*M,data_valid:!invalid,darvas_5m_available:n!=null,active:n==null?null:{box_id:String(n),D:n},darvas_5m_guard:n==null?null:n-1,darvas_5m_guard_regime:regime(b.openTime+5*M)};})} as unknown as ReturnType<typeof features.evaluateOnBars>));
 });
 afterEach(()=>vi.restoreAllMocks());
+const guardStop = ():BoxStopRule => { const rule=defaultBoxStop(); return {...rule,update:'follow',structure:{...rule.structure,kSource:'guard'}}; };
 const veto=(rule=defaultBoxStop()):QualityHoldingVeto=>({id:'box',label:'箱体终止',kind:'box-stop',direction:'<=',threshold:0,enabled:true,boxStop:rule});
 const load=(minute:(t:number)=>ResearchBar=bar):FishReconstructionLoader=>async(_row,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>p.step===M?minute(a+i*M):bar(a+i*p.step));
 const reader=(rule=defaultBoxStop(),previous?:Parameters<typeof createBoxStopReader>[0]['previous'],since=T)=>createBoxStopReader({vetoes:[veto(rule)],row,entry:T,since,load:load(),signal,previous});
@@ -73,4 +77,46 @@ it('freezes rules in plans and roundtrips drafts; changing parameters creates a 
  const saved=parseHoldingVetoDraft(holdingVetoDraft(original.holdingVetoes));expect(saved[0].boxStop).toEqual(original.holdingVetoes![0].boxStop);
  const changed={...defaultBoxStop(),closes:3};expect(boxStopIdentity(changed)).not.toEqual(boxStopIdentity(defaultBoxStop()));
  expect(()=>validateBoxStop({...changed,closes:0})).toThrow();
+});
+
+it('establishes K from the chosen closed regime and keeps it through a change of regime and resume',async()=>{
+ regime=at=>at>=T+5*M?'trend':'range';
+ support=at=>at>=T+5*M?98:90;
+ const solid=selectBoxStopGuardRegime(guardStop(),'trend'),dashed=selectBoxStopGuardRegime(guardStop(),'range');
+ const sr=reader(solid),dr=reader(dashed);
+ expect(await sr.read(bar(T+4*M,100,1,100))).toBeUndefined();
+ expect(sr.states().box.line).toBeUndefined();
+ expect(await dr.read(bar(T,100,88,99))).toMatchObject({fillPrice:89,cause:{boxStopEvidence:{guardRegime:'range'}}});
+ expect(await sr.read(bar(T+5*M,100,95,100))).toMatchObject({fillPrice:97,cause:{boxStopEvidence:{guardRegime:'trend',confirmedAt:T+5*M,version:BOX_STOP_GUARD_REGIME_VERSION}}});
+ const resumed=reader(dashed,dr.states(),T+5*M);
+ expect(await resumed.read(bar(T+5*M,100,95,100))).toBeUndefined();
+ expect(resumed.states().box.line).toBe(89);
+ expect(await resumed.read(bar(T+6*M,100,88,100))).toMatchObject({fillPrice:89,cause:{boxStopEvidence:{guardRegime:'range',confirmedAt:T}}});
+ expect(await reader(guardStop()).read(bar(T+5*M,100,95,100))).toMatchObject({fillPrice:97,cause:{boxStopEvidence:{version:'holding-box-stop-v1'}}});
+});
+
+it('applies the same eligible-line selection to dynamic screening and an after-addition veto',async()=>{
+ const dashed=selectBoxStopGuardRegime(guardStop(),'range'),solid=selectBoxStopGuardRegime(guardStop(),'trend');
+ const loader=load(t=>bar(t,100,88,100));
+ const gate=(rule:BoxStopRule)=>createPreEntryGate({conditions:{...emptyPreEntryConditions(),hardVetoes:[veto(rule)]},start:T,row,load:loader,signal});
+ expect(await gate(dashed)(T+M)).toMatchObject({blocked:expect.stringContaining('只用虚线')});
+ expect(await gate(solid)(T+M)).toMatchObject({pending:expect.stringContaining('等待有效箱体 K')});
+ const phase={...plan(solid),vetoStages:[{afterAdditions:1,conditions:[veto(dashed)]}]};
+ const result=await evaluateQualitySample(sample,{...phase,vetoStages:undefined,holdingVetoes:stagedHoldingVetoes(phase,1)},0,T+3*M,loader,signal);
+ expect(result).toMatchObject({status:'closed',endPrice:89,exitSnapshot:{cause:{boxStopEvidence:{guardRegime:'range'}}}});
+});
+
+it('freezes the selected regime and preserves the original rule when selecting both again',()=>{
+ const base=guardStop(),rule=selectBoxStopGuardRegime(base,'trend');
+ const original=freezeQualityPlan(plan(base));
+ const frozen=freezeQualityPlan(plan(rule));
+ const loaded=JSON.parse(JSON.stringify(frozen,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).reverse()):v));
+ expect(planVersionChanges(loaded)).toEqual([]);
+ expect(qualityPlanVersions(frozen).find(v=>v.key==='hard-stop-box-0')).toMatchObject({name:expect.stringContaining('只用实线'),version:expect.stringContaining(BOX_STOP_GUARD_REGIME_VERSION)});
+ loaded.holdingVetoes[0].boxStop.guardRegime='range';
+ expect(planVersionChanges(loaded).map(change=>change.key)).toContain('hard-stop-box-0');
+ expect(selectBoxStopGuardRegime(rule,'both')).toEqual(base);
+ expect(planVersionChanges(original)).toEqual([]);
+ expect(()=>validateBoxStop({...base,guardRegime:'range'})).toThrow('执行版本不符');
+ expect(()=>validateBoxStop({...rule,structure:defaultBoxStop().structure})).toThrow('单一线型');
 });

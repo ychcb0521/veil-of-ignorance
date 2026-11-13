@@ -47,6 +47,26 @@ it.each([400,401,429])('returns authoritative rejection %s once without another 
  expect(fetcher).toHaveBeenCalledOnce();
 });
 
+it('reports the Supabase database timeout without submitting the same password again', async () => {
+ const fetcher = vi.fn<typeof fetch>(async () => reply(504, '{"error_code":"request_timeout","msg":"Request timeout"}'));
+ const client = createClient(AUTH_BACKEND_ORIGIN, 'fixture-anon', {
+   global: { fetch: createAuthFetch(fetcher, 30000, site) },
+   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+ });
+ const result = await client.auth.signInWithPassword({ email: 'fixture@example.invalid', password: 'test-only' });
+ expect(result.error?.message).toContain('等待数据库响应超时（HTTP 504）');
+ expect(result.data.session).toBeNull();
+ expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('falls back from an infrastructure 504 that carries no Auth error code', async () => {
+ const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(reply(504)).mockResolvedValueOnce(reply(400));
+ const result = await createAuthFetch(fetcher, 30000, site)(token, { method: 'POST' });
+ expect(result.status).toBe(400);
+ expect(fetcher).toHaveBeenCalledTimes(2);
+ expect(fetcher.mock.calls[1][0]).toBe(token);
+});
+
 it('falls back once for a broken gateway and can resend a Request body without consuming the original',async()=>{
  const bodies:string[]=[],fetcher=vi.fn<typeof fetch>(async input=>{bodies.push(await (input as Request).text());if(bodies.length===1)throw new TypeError('network');return reply(400,'{"msg":"Invalid login credentials"}');});
  const request=new Request(token,{method:'POST',headers:{apikey:'fixture'},body:'{"email":"fixture@example.invalid","password":"test-only"}'});

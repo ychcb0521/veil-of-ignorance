@@ -191,13 +191,15 @@ function validHead(value: unknown): value is Head {
   return !!h && h.v === 1 && typeof h.rev === 'string' && Number.isInteger(h.parts) && h.parts >= 0
     && Number.isFinite(h.savedAt) && (h.enc === 'gzip' || h.enc === 'json');
 }
-async function fetchHead(name: string, owner: string): Promise<Head | null> {
-  const { data, error } = await (table().select('value') as any).eq('user_id', owner).eq('key', headKey(name)).maybeSingle();
+async function fetchHead(name: string, owner: string, signal?: AbortSignal): Promise<Head | null> {
+  if (signal?.aborted) throw signal.reason;
+  const query = (table().select('value') as any).eq('user_id', owner).eq('key', headKey(name));
+  const { data, error } = await (signal ? query.abortSignal(signal) : query).maybeSingle();
   if (error) throw new Error(error.message);
   const value = (data as { value?: unknown } | null)?.value;
   return validHead(value) ? value : null;
 }
-async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote']): Promise<{ ok: true; value: unknown } | { ok: false }> {
+async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote'],signal?:AbortSignal): Promise<{ ok: true; value: unknown } | { ok: false }> {
   if (head.deleted) return { ok: true, value: undefined };
   const keys = Array.from({ length: head.parts }, (_, i) => chunkKey(name, i));
   const parts: string[] = [];
@@ -206,8 +208,10 @@ async function fetchValue(name: string, owner: string, head: Head,decode?:Accoun
   // Bound each request; all batches must still match the original frozen head.
   const READ_PARTS_PER_REQUEST = 4;
   for (let offset = 0; offset < keys.length; offset += READ_PARTS_PER_REQUEST) {
+    if (signal?.aborted) throw signal.reason;
     const batch = keys.slice(offset, offset + READ_PARTS_PER_REQUEST);
-    const { data, error } = await (table().select('key, value') as any).eq('user_id', owner).in('key', batch);
+    const query = (table().select('key, value') as any).eq('user_id', owner).in('key', batch);
+    const { data, error } = await (signal ? query.abortSignal(signal) : query);
     if (error) throw new Error(error.message);
     const byKey = new Map(((data ?? []) as { key: string; value: { rev?: string; data?: string } }[]).map(row => [row.key, row.value]));
     for (const key of batch) {
@@ -216,6 +220,7 @@ async function fetchValue(name: string, owner: string, head: Head,decode?:Accoun
       parts.push(part.data);
     }
   }
+  if (signal?.aborted) throw signal.reason;
   return { ok: true, value: await (decode?decode(owner,head.enc,parts):decodeAccountBlob(head.enc, parts)) };
 }
 async function upsertRow(owner: string, key: string, value: unknown): Promise<void> {
@@ -357,17 +362,19 @@ async function adopt(adapter: AccountBlobAdapter<any>, owner: string, head: Head
  * 打开时对一次账：按文件头注释的规则决定取云端、上传本机还是不动。
  * `begin()` 返回 false 表示页面已经等不及、先用本机那份了——此时绝不再改本机数据。
  */
-async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin: () => boolean): Promise<AccountBlobSyncStatus> {
+async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin: () => boolean, signal: AbortSignal): Promise<AccountBlobSyncStatus> {
   if (!(await signedInAs(owner))) return 'skipped';
   // An unchanged head needs metadata only. Reading the whole 400+ MB research
   // archive here would duplicate the campaign worker's read on every page load.
-  const [meta, head] = await Promise.all([readMeta(adapter.name, owner), fetchHead(adapter.name, owner)]);
+  const [meta, head] = await Promise.all([readMeta(adapter.name, owner), fetchHead(adapter.name, owner, signal)]);
+  if (signal.aborted) throw signal.reason;
   const dirty = !!meta?.rev && meta.savedAt > meta.syncedAt;
   if (head && meta?.rev && head.rev === meta.rev) {
     if (dirty) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
     return 'unchanged';
   }
   const local = await adapter.read(owner);
+  if (signal.aborted) throw signal.reason;
   const localWeight = adapter.weight(local);
   if (!head) {
     if (localWeight > 0 || (meta?.rev && meta.savedAt > meta.syncedAt)) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
@@ -378,12 +385,12 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
   if (meta?.rev) takeCloud = !dirty || head.savedAt >= meta.savedAt;
   else if (localWeight === 0) takeCloud = true;
   else {
-    cloud = await fetchValue(adapter.name, owner, head,adapter.decodeRemote);
+    cloud = await fetchValue(adapter.name, owner, head,adapter.decodeRemote,signal);
     if (!cloud.ok) return 'failed';
     takeCloud = adapter.weight(cloud.value) > localWeight;
   }
   if(adapter.mergeRemote){
-    cloud??=await fetchValue(adapter.name,owner,head,adapter.decodeRemote);
+    cloud??=await fetchValue(adapter.name,owner,head,adapter.decodeRemote,signal);
     if(!cloud.ok)return 'failed';
     if(!begin())return 'skipped';
     await adapter.mergeRemote(owner,cloud.value,{preferRemote:takeCloud});
@@ -394,15 +401,16 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
     schedulePush(adapter,owner,0,true);
     return 'adopted';
   }
+  if (signal.aborted) throw signal.reason;
   if (!takeCloud) { schedulePush(adapter, owner, 0, true); return 'pushed'; }
-  cloud ??= await fetchValue(adapter.name, owner, head,adapter.decodeRemote);
+  cloud ??= await fetchValue(adapter.name, owner, head,adapter.decodeRemote,signal);
   if (!cloud.ok) return 'failed';
   if (!begin()) return 'skipped';
   await adopt(adapter, owner, head, cloud.value, local);
   return 'adopted';
 }
 
-const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { state: 'open' | 'adopting' | 'closed' }; settled: boolean }>();
+const loads = new Map<string, { task: Promise<AccountBlobSyncStatus>; gate: { state: 'open' | 'adopting' | 'closed' }; controller: AbortController; waiting: number; settled: boolean }>();
 /**
  * 本机存储读取前调用：每页每个账号对一次账，最多等 6 秒；
  * 超时就先用本机那份（之后的对账不再改本机数据，下次打开再来）。
@@ -415,21 +423,41 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
   if (refresh && entry?.settled) { loads.delete(id); entry = undefined; }
   if (!entry) {
     const gate: { state: 'open' | 'adopting' | 'closed' } = { state: 'open' };
-    const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; return true; }))
-      .catch((error): AccountBlobSyncStatus => { console.warn('[账号研究] 恢复未完成', adapter.name, error instanceof Error ? error.message : '读取失败'); return 'failed'; });
-    const created = { task, gate, settled: false };
+    const controller = new AbortController();
+    const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; return true; }, controller.signal))
+      .catch((error): AccountBlobSyncStatus => {
+        if (controller.signal.aborted) return 'timed_out';
+        console.warn('[账号研究] 恢复未完成', adapter.name, error instanceof Error ? error.message : '读取失败');
+        return 'failed';
+      });
+    const created = { task, gate, controller, waiting: 0, settled: false };
     loads.set(id, created);
     entry = created;
     // 失败或没赶上：下次打开再对账。
     void task.then(status => {
       created.settled = true;
-      if ((status === 'failed' || status === 'skipped') && loads.get(id) === created) loads.delete(id);
+      if ((status === 'failed' || status === 'skipped' || status === 'timed_out') && loads.get(id) === created) loads.delete(id);
     });
   }
-  const { task, gate } = entry;
-  // 正在把云端那份写进本机时不能放行（否则页面读到旧的、之后又拿旧的盖回去）；其余情况超时即先用本机。
-  const timer = new Promise<AccountBlobSyncStatus>(resolve => setTimeout(() => { if (gate.state !== 'adopting') { gate.state = 'closed'; resolve('timed_out'); } }, timeoutMs));
-  return Promise.race([task, timer]);
+  const load = entry;
+  const { task, gate, controller } = load;
+  load.waiting += 1;
+  // 正在写本机时等它结束；其余情况超时后取消读取，避免继续向数据库拉取余下分片。
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<AccountBlobSyncStatus>(resolve => {
+    timer = setTimeout(() => {
+      if (gate.state === 'adopting') return;
+      resolve('timed_out');
+    }, timeoutMs);
+  });
+  return Promise.race([task, timeout]).finally(() => {
+    clearTimeout(timer);
+    load.waiting -= 1;
+    if (load.settled || load.waiting || gate.state !== 'open') return;
+    gate.state = 'closed';
+    if (loads.get(id) === load) loads.delete(id);
+    controller.abort();
+  });
 }
 
 /** 本机存储每次保存成功后调用：记下「改过未上传」，几秒后上传（连续保存只传最后一版）。 */

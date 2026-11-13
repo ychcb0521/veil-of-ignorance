@@ -4,13 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const cloud = vi.hoisted(() => {
   type Row = { user_id: string; key: string; value: unknown; updated_at: string };
   const rows = new Map<string, Row>();
-  const state = { rows, delayMs: 0, failNext: false, signedOut: false, upserts: [] as string[], maxReadKeys: Infinity };
+  const state = { rows, delayMs: 0, failNext: false, signedOut: false, upserts: [] as string[], maxReadKeys: Infinity, readSignals: [] as AbortSignal[] };
   const id = (user: string, key: string) => `${user}\u0000${key}`;
   const wait = () => new Promise(resolve => setTimeout(resolve, state.delayMs));
   const query = () => {
     const filters: ((row: Row) => boolean)[] = [];
-    const run = async () => { await wait(); return [...rows.values()].filter(row => filters.every(f => f(row))); };
+    let signal: AbortSignal | undefined;
+    const run = async () => { await wait(); if (signal?.aborted) throw signal.reason; return [...rows.values()].filter(row => filters.every(f => f(row))); };
     const builder: any = {
+      abortSignal(value: AbortSignal) { signal = value; state.readSignals.push(value); return builder; },
       eq(col: keyof Row, value: string) { filters.push(row => row[col] === value); return builder; },
       in(col: keyof Row, values: string[]) { if(values.length>state.maxReadKeys)throw Error('canceling statement due to statement timeout'); filters.push(row => values.includes(row[col] as string)); return builder; },
       not(col: keyof Row, _op: 'like', pattern: string) { const prefix = pattern.replace(/%$/, ''); filters.push(row => !(row[col] as string).startsWith(prefix)); return builder; },
@@ -83,7 +85,7 @@ it('backs up directly encoded durable snapshots without reading the full object 
  const b=await device();await b.reopen();expect(b.local.value).toEqual({items:[1,2,3]});
 });
 
-beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.state.failNext = false; cloud.state.signedOut = false; cloud.state.upserts = []; cloud.state.maxReadKeys = Infinity; });
+beforeEach(() => { cloud.state.rows.clear(); cloud.state.delayMs = 0; cloud.state.failNext = false; cloud.state.signedOut = false; cloud.state.upserts = []; cloud.state.maxReadKeys = Infinity; cloud.state.readSignals = []; });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('accountBlobSync', () => {
@@ -216,8 +218,25 @@ describe('accountBlobSync', () => {
     cloud.state.delayMs = 80;
     expect(await b.mod.syncAccountBlobOnLoad(b.adapter, 'u1', 20)).toBe('timed_out');
     expect(b.local.value).toBeUndefined();
-    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(cloud.state.readSignals.at(-1)?.aborted).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
     expect(b.local.value).toBeUndefined();
+    cloud.state.delayMs = 0;
+    expect(await b.mod.syncAccountBlobOnLoad(b.adapter, 'u1')).toBe('adopted');
+    expect(b.local.value?.items).toEqual([1, 2]);
+  });
+
+  it('keeps a shared restore alive while another caller is still waiting', async () => {
+    const writer = await device({ items: [42] });
+    await writer.reopen();
+    const reader = await device();
+    cloud.state.delayMs = 40;
+    const short = reader.mod.syncAccountBlobOnLoad(reader.adapter, 'u1', 15);
+    const long = reader.mod.syncAccountBlobOnLoad(reader.adapter, 'u1', 1_000);
+    expect(await short).toBe('timed_out');
+    expect(await long).toBe('adopted');
+    expect(cloud.state.readSignals.every(signal => !signal.aborted)).toBe(true);
+    expect(reader.local.value?.items).toEqual([42]);
   });
 
   it('does nothing in the cloud when that account is not signed in, and catches up after sign-in', async () => {

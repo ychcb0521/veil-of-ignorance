@@ -4,7 +4,7 @@ import {afterEach,it,expect} from 'vitest';
 import {FishQualityHoldingVetoEditor} from '../FishQualityHoldingVetoEditor';
 import {holdingVetoDraft,parseHoldingVetoDraft,planHoldingVetoDraft} from '@/lib/fish/qualityFilters';
 import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION } from '@/lib/dbl5m';
-import {defaultBoxBreak} from '@/lib/fish/qualityBoxStop';
+import {BOX_STOP_GUARD_REGIME_VERSION,defaultBoxBreak,defaultBoxStop} from '@/lib/fish/qualityBoxStop';
 import {holdingVetoIdentity,type QualityHoldingVeto} from '@/lib/fish/qualityVeto';
 afterEach(cleanup);
 function Editor({plan=false,entry=false,saved=[]}:{plan?:boolean;entry?:boolean;saved?:QualityHoldingVeto[]}={}){const [draft,setDraft]=useState(plan?planHoldingVetoDraft(saved):holdingVetoDraft(saved));return <><FishQualityHoldingVetoEditor entry={entry} draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存</button><output/></>}
@@ -14,6 +14,7 @@ it('adds an independent opt-in red-cross rule with frozen DBL-5 details and no p
  expect(screen.getByLabelText('持仓否决 3 指标')).toHaveValue('box-support-break');
  expect(screen.queryByLabelText('箱体止损 3 更新方式')).toBeNull();
  expect(screen.queryByLabelText('箱体止损 3 额外冗余')).toBeNull();
+ expect(screen.queryByLabelText('箱体止损 3 防守线类型')).toBeNull();
  expect(screen.getByLabelText('箱体止损 3 防守线版本')).toHaveValue(DBL5_RETEST_GUARD_VERSION);
  fireEvent.click(screen.getByLabelText('启用持仓否决 3'));
  fireEvent.change(screen.getByLabelText('箱体止损 3 防守线震荡断线根数'),{target:{value:'3'}});
@@ -52,6 +53,24 @@ it('adds an opt-in box hard stop with independent algorithm, parameters and exec
  const saved=JSON.parse(document.querySelector('output')!.textContent!);
  expect(saved[0]).toMatchObject({kind:'box-stop',enabled:true,boxStop:{version:'holding-box-stop-v1',confirmation:'close-5m',closes:3,update:'fixed',structure:{algorithm:'sbs5m',kBasis:'invalidation',buffer:1.25,versions:{box:'sbs-5m-v1'}}}});
  expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);
+});
+it.each([false,true])('persists DBL-5 hard-stop line choices in the shared editor (screening=%s)',entry=>{
+ const original=defaultBoxStop();
+ original.structure.kSource='guard';
+ const saved=parseHoldingVetoDraft([{choice:'box-stop',direction:'<=',threshold:'0',enabled:true,boxStop:original}]);
+ render(<Editor entry={entry} saved={saved}/>);
+ const select=screen.getByLabelText('箱体止损 1 防守线类型');
+ expect(select).toHaveValue('both');
+ fireEvent.change(select,{target:{value:'range'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));
+ const ranged=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(ranged[0].boxStop).toMatchObject({version:BOX_STOP_GUARD_REGIME_VERSION,guardRegime:'range'});
+ expect(parseHoldingVetoDraft(holdingVetoDraft(ranged))).toEqual(ranged);
+ fireEvent.change(screen.getByLabelText('箱体止损 1 K基准'),{target:{value:'support'}});
+ expect(screen.queryByLabelText('箱体止损 1 防守线类型')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));
+ expect(JSON.parse(document.querySelector('output')!.textContent!)[0].boxStop).toMatchObject({version:'holding-box-stop-v1',structure:{kSource:'current'}});
+ expect(saved[0].boxStop?.guardRegime).toBeUndefined();
 });
 it('offers joint addition profit rules with editable 100× / 5% defaults, and independently persists multiple rules',()=>{
  render(<Editor/>);fireEvent.click(screen.getByRole('button',{name:'添加加仓止盈约束'}));expect(screen.getByLabelText('持仓否决 3 几何仓位倍数')).toHaveValue(100);expect(screen.getByLabelText('持仓否决 3 均衡价涨幅')).toHaveValue(5);expect(screen.getByLabelText('启用持仓否决 3')).not.toBeChecked();

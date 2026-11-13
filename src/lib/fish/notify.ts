@@ -162,7 +162,7 @@ export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' |
   const esc = (value: string) => value.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   const alert = cda ? `卖出！（${cda.value}）` : undefined;
   if (cda) rows.push(['CDA 低于 −10 的时间', formatUTC8(cda.at)]);
-  const subject = (cda ? '⚠️ CDA 卖出提醒' : '动态筛选已入选') + ' · ' + source.symbol;
+  const subject = `${cda ? '⚠️ ' : ''}${source.symbol} · ${cda ? 'CDA 卖出提醒' : '动态筛选已入选'}`;
   const message = ['新鱼已通过动态筛选。', ...rows.map(([label, value]) => `${label}　${value}`), ...(alert ? [alert] : []), '时间为 UTC+8。'].join('\n');
   const message_html = '<div style="font:14px sans-serif;color:#111827"><p>新鱼已通过动态筛选。</p><table style="border-collapse:collapse">'
     + rows.map(([label,value]) => `<tr><th style="padding:6px 12px;text-align:left">${esc(label)}</th><td style="padding:6px 12px">${esc(value)}</td></tr>`).join('')

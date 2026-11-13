@@ -14,7 +14,7 @@ export function QualityPriceExitAudit({campaign,klines=[],intervalMs=300000}:{ca
  return <details data-testid="quality-price-exit-audit" className="border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
   <summary className="flex cursor-pointer list-none flex-wrap gap-x-3 gap-y-1">
    <b className="font-medium text-foreground">{box?'箱体止损价核对':'滚动跌幅核对'}</b>
-   {box?<span className="font-mono">执行 K {price(box.line)}</span>:<span className="font-mono">{c.kind==='drop-5m'?'滚动 5 分钟':'滚动 1 分钟'}跌幅 {e.reading?.toFixed(8)??'—'}% {c.direction} {c.threshold}%</span>}
+   {box?<span className="font-mono">执行 K {price(box.line)}{box.guardRegime && ` · ${box.guardRegime === 'trend' ? '上涨期实线' : '震荡期虚线'}`}</span>:<span className="font-mono">{c.kind==='drop-5m'?'滚动 5 分钟':'滚动 1 分钟'}跌幅 {e.reading?.toFixed(8)??'—'}% {c.direction} {c.threshold}%</span>}
    <span>{formatUTC8(e.confirmedAt)} {touch?'触价分钟':'收盘确认'}</span>
    {candle&&<span className="font-mono">本图 {intervalMs/60000}m K 线{box?`最低价 ${price(candle.low)}`:`实体跌幅 ${((candle.open-candle.close)/candle.open*100).toFixed(2)}%`}</span>}
    <span className="ml-auto">核对说明 ▾</span>

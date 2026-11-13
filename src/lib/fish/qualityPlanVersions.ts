@@ -1,6 +1,6 @@
 import { ADDITION_INDICATOR_TIME_VERSION, hasAdditionMetricTime } from './qualityAdditionMetric';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
-import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel} from './qualityBoxStop';
+import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
 import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
@@ -26,7 +26,7 @@ import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
 import { activeDetectorPrerequisite, additionIdentity, additionIncreaseIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
 import { qualitySellStagesIdentity } from './qualitySellStages';
-import { boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
+import { BOX_K_EXECUTION_VERSIONS, boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
 import { structureKSourceLabel } from './qualityAdditionStructure';
 import type { FishSnapshot } from './algorithm';
 import { hasPreBoxAdditionShape, isLegacyQualityPlan, legacyPlanVersions, withLegacyEngine } from './qualityLegacyEngine';
@@ -98,7 +98,13 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (vetoes.length) add('hard-stop', '硬性终止', vetoes.map(v => holdingVetoLabel(v)).join(' 或 '),
     join([qualityVetoVersion(plan), ...vetoes.filter(v => v.snapshot?.definitionKey).map(v => formulaFingerprint(v.snapshot!))]),
     plan.vetoFill === 'stop' ? '回撤止损盘中触及按止损价成交' : '回撤否决下一分钟开盘成交');
-  vetoes.filter(v=>v.kind===BOX_STOP_KIND).forEach((v,i)=>{const r=v.boxStop!,versions=structureVersions(r.structure);add(`hard-stop-box-${i}`, '硬性终止',boxStopLabel(r),[r.version,versions.box,versions.guard].filter(Boolean).join(' · '),isBoxBreak(r)?'仅在原生 DBL-5 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂':'独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');});
+  vetoes.filter(v => v.kind === BOX_STOP_KIND).forEach((v, i) => {
+    const r = v.boxStop!, versions = structureVersions(r.structure);
+    const version = join([r.version, versions.box, versions.guard, r.guardRegime && '参数 #' + shortFishHash(JSON.stringify(boxStopIdentity(r)))]);
+    const summary = BOX_K_EXECUTION_VERSIONS.find(item => item.id === r.version)?.summary
+      ?? (isBoxBreak(r) ? '仅在原生 DBL-5 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂' : '独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');
+    add(`hard-stop-box-${i}`, '硬性终止', boxStopLabel(r), version, summary);
+  });
   const a = plan.addition;
   if (a?.enabled) {
     const doubleDrops=[a,...(a.rounds??[]),...(a.alternativeRounds??[])].map(r=>(r.entryVetoes??[]).filter(v=>v.enabled&&v.kind==='double-drop')).filter(r=>r.length);

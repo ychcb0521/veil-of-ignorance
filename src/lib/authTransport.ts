@@ -6,11 +6,14 @@ import {authServiceFailure} from './authErrorText';
  * headers and body, so retry/session handling retains its original semantics. */
 class DescribedAuthResponse extends Response {
   readonly message:string;
+  readonly authCode: string | undefined;
   constructor(body:ArrayBuffer,source:Response){
     super(body.byteLength?body:null,{status:source.status,statusText:source.statusText,headers:source.headers});
     let data:{code?:unknown;error_code?:unknown;message?:unknown;msg?:unknown}|undefined;
     try{data=JSON.parse(new TextDecoder().decode(body));}catch{/* Non-JSON upstream failures still have an HTTP status. */}
-    this.message=authServiceFailure(source.status,data?.error_code??data?.code,data?.message??data?.msg);
+    const code = data?.error_code ?? data?.code;
+    this.authCode = typeof code === 'string' ? code : undefined;
+    this.message=authServiceFailure(source.status,this.authCode,data?.message??data?.msg);
   }
 }
 // A measured slow connection returned a normal credential response after 17s.
@@ -55,8 +58,10 @@ export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,i
         let response:Response;
         try{response=await read(gateway,true);}
         catch(error){if(!repeatable||controller.signal.aborted)throw error;return read(input,false);}
-        // Credential/OTP rejection and rate limits remain authoritative. Only a broken
-        // gateway gets one alternate route, within the SAME overall deadline.
+        // An Auth error from Supabase already reached the same backend used by
+        // the direct route. Replaying it adds load and can mask the original failure.
+        if (response instanceof DescribedAuthResponse && response.authCode) return response;
+        // A broken gateway gets one alternate route within the same deadline.
         const broken=[404,405,502,503,504].includes(response.status)||response.headers.get('Content-Type')?.includes('text/html');
         if(broken&&repeatable&&!controller.signal.aborted)return read(input,false);
         if(response.headers.get('Content-Type')?.includes('text/html'))throw Error('登录通道暂不可用，请稍后重试。');

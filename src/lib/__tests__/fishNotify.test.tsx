@@ -231,7 +231,7 @@ it('入选邮件用原信号的实际命中类型及本轮筛选模板，纯文�
    {id: 'screening-plan', label: '<本轮模板>', snapshot: capture, metric: 'raw'},
  ]};
  const content = composeScreenedFishEmail(record, round);
- expect(content.subject).toBe('动态筛选已入选 · AAAUSDT');
+ expect(content.subject).toBe('AAAUSDT · 动态筛选已入选');
  expect(content.message.split('\n').slice(1, -1)).toEqual([
    '标的名称　AAAUSDT', '算法数量　2', '算法类型　CBI-2·avg₂ · CBA·avg₂',
    '信号时间　2026-10-21 09:00:00', '筛选模板　<本轮模板>', '首次满足时间　2026-10-21 09:02:00',
@@ -244,7 +244,7 @@ it('入选邮件用原信号的实际命中类型及本轮筛选模板，纯文�
  ]);
  expect(content.message_html).toContain('&lt;本轮模板&gt;');
  const alert=composeScreenedFishEmail(record,round,{at:source.timeMs+600_000,value:-11.75});
- expect(alert.subject).toBe('⚠️ CDA 卖出提醒 · AAAUSDT');
+ expect(alert.subject).toBe('⚠️ AAAUSDT · CDA 卖出提醒');
  expect(alert.message).toContain('CDA 低于 −10 的时间　2026-10-21 09:10:00\n卖出！（-11.75）');
  expect(alert.message.replace('CDA 低于 −10 的时间　2026-10-21 09:10:00\n卖出！（-11.75）\n','')).toBe(content.message);
  container.innerHTML = alert.message_html;
