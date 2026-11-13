@@ -2,11 +2,13 @@ import { accountFeatureDefs } from '@/lib/featureSource';
 import { loadQualityStudy, prepareQualityCampaignRead } from './qualityStore';
 import { listQualityCampaignDataFromStudy, qualityCampaignDetailFromStudy, type QualityCampaignData } from './qualityCampaignProjection';
 import type { QualityCampaignReadRequest, QualityCampaignReadResult } from './qualityCampaignReader';
-import { qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
+import { paperCampaignPerformance, qualityCampaignPerformanceFromStudy } from './qualityCampaignPerformance';
 import { serializeArchiveWork } from '../serializeArchiveWork';
 import {QualityCampaignPacketDecoder,type QualityCampaignReply} from './qualityCampaignTransfer';
-import { qualityCampaignTrashKey } from '@/lib/campaignSections';
+import { campaignSectionLabel, isInstantCampaignId, qualityCampaignTrashKey } from '@/lib/campaignSections';
 import { loadQualityCampaignTrash, readQualityCampaignTrash } from './qualityCampaignTrash';
+import { buildInstantCampaignData } from './instantCampaign';
+import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot } from './instantCampaignStore';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -40,7 +42,12 @@ function projectInWorker(request: QualityCampaignReadRequest,signal?:AbortSignal
     try { worker.postMessage(request); } catch (error) { fail(error); }
   }));
 }
-export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' = 'quality',signal?:AbortSignal) {
+export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal) {
+  if (section === 'instant') {
+    const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);
+    return { rows: snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), warning,
+      selectedSellKey: undefined, buyFilterLabel: '', repair: undefined };
+  }
   if(signal?.aborted)throw new DOMException('读取已取消','AbortError');
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
@@ -55,20 +62,23 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
   return { ...listQualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning };
 }
 export async function loadQualityCampaignData(owner: string, id: string): Promise<QualityCampaignData> {
-  const initialMarks = await loadQualityCampaignTrash(owner);
+  const instant = isInstantCampaignId(id), section = instant ? 'instant' : 'quality';
+  const missing = '这场' + campaignSectionLabel(section) + '战役已永久移除';
+  const initialMarks = await loadQualityCampaignTrash(owner, section);
   if (initialMarks[qualityCampaignTrashKey(id)]?.state === 'purged') {
-    throw new Error('这场持仓监测战役已永久移除');
+    throw new Error(missing);
   }
   const applyTrash = async (data: QualityCampaignData) => {
-    const marks = await readQualityCampaignTrash(owner);
+    const marks = await readQualityCampaignTrash(owner, section);
     const mark = marks[qualityCampaignTrashKey(data.campaign.id)];
     if (mark?.state === 'purged' || marks[qualityCampaignTrashKey(id)]?.state === 'purged') {
-      throw new Error('这场持仓监测战役已永久移除');
+      throw new Error(missing);
     }
     return mark?.state === 'deleted'
       ? { ...data, campaign: { ...data.campaign, deleted_at: new Date(mark.at).toISOString() } }
       : data;
   };
+  if (instant) return applyTrash(buildInstantCampaignData(owner, await loadInstantCampaignSnapshot(owner, id)));
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {
@@ -79,9 +89,14 @@ export async function loadQualityCampaignData(owner: string, id: string): Promis
   }
   return applyTrash(qualityCampaignDetailFromStudy(owner, (await loadQualityStudy(owner)).study, id));
 }
-export async function loadQualityCampaignPerformance(owner: string, section: 'sell' | 'detect' | 'quality', sellKey: string) {
-  const trash = await loadQualityCampaignTrash(owner);
+export async function loadQualityCampaignPerformance(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant', sellKey: string) {
+  const trash = await loadQualityCampaignTrash(owner, section === 'instant' ? 'instant' : 'quality');
   const excluded = Object.keys(trash).filter(key => trash[key].state !== 'active');
+  if (section === 'instant') {
+    const { rows, warning } = await listQualityCampaignData(owner, section);
+    if (warning && !rows.length) throw Error(warning);
+    return paperCampaignPerformance(rows, excluded);
+  }
   if (typeof Worker === 'function') {
     const prepared = await prepareQualityCampaignRead(owner);
     if (prepared.durable) {

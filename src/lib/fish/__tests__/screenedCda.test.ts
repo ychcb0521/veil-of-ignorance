@@ -22,6 +22,6 @@ it('reads only closed 5m CDA raw values, skips exactly -10 and freezes the first
   expect(load).not.toHaveBeenCalled();
   expect(await readScreenedCda(source,start,start+2*STEP-1,snapshot,load,signal)).toEqual({through:start+STEP});
   expect(await readScreenedCda(source,start,start+3*STEP,snapshot,load,signal)).toEqual({
-    through:start+2*STEP,trigger:{at:start+2*STEP,value:-10.5},
+    through:start+2*STEP,trigger:{at:start+2*STEP,value:-10.5,closePrice:89.5},
   });
 });

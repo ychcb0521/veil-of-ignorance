@@ -115,9 +115,10 @@ describe('comparison campaign review fixes', () => {
 describe('merged 卖出与探测 board', () => {
   it('maps old section links to the merged board and keeps both campaign id prefixes openable', async () => {
     const { campaignSection, CAMPAIGN_SECTIONS, qualityCampaignPath } = await import('@/lib/campaignSections');
-    expect(CAMPAIGN_SECTIONS.map(s => s.label)).toEqual(['亲自交易', '持仓监测']);
+    expect(CAMPAIGN_SECTIONS.map(s => s.label)).toEqual(['亲自交易', '持仓监测', '即时交易']);
     for (const v of ['?section=sell', '?section=detect', '?section=quality']) expect(campaignSection(v)).toBe('quality');
     expect(campaignSection('')).toBe('personal');
+    expect(campaignSection('?section=instant')).toBe('instant');
     expect(qualityCampaignPath('k')).toBe('/journal/campaigns/fish-sell-k?section=quality');
   });
   it('lists bought sell trades and fixed-plan detection trades together, each trade once', () => {

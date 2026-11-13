@@ -314,6 +314,7 @@ export function useReplayKlines(
   fromTime: number,
   toTime: number,
   interval: string = '1m',
+  source?: import('@/lib/fish/instantCampaign').InstantCampaignInput['source'],
 ): UseReplayKlinesResult {
   const [klines, setKlines] = useState<KlineData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -324,7 +325,7 @@ export function useReplayKlines(
    * 旧写法会把上一组参数的 K 线（别的周期、别的窗口）当成这一组交出去——
    * 盘面按新周期的 intervalMs 画旧周期的蜡烛闪一帧。按参数认账：对不上就一律算「加载中」。
    */
-  const requestKey = `${symbol}|${interval}|${fromTime}|${toTime}|${reloadKey}`;
+  const requestKey = `${symbol}|${interval}|${fromTime}|${toTime}|${reloadKey}|${source?.exchange ?? ''}|${source?.market ?? ''}`;
   const [settledKey, setSettledKey] = useState<string | null>(null);
   /**
    * 最后一次成功拉到手的是哪组参数。调用方停用这份（symbol 置空）后原样回来——
@@ -345,7 +346,19 @@ export function useReplayKlines(
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchReplayKlineRange(symbol, interval, fromTime, toTime, controller.signal)
+    const read = async () => {
+      if (!source || ((!source.exchange || source.exchange === 'binance') && source.market !== 'us_stock')) {
+        return fetchReplayKlineRange(symbol, interval, fromTime, toTime, controller.signal);
+      }
+      const { RESEARCH_INTERVALS } = await import('@/lib/deepRsa/marketData');
+      const native = RESEARCH_INTERVALS.find(item => item === interval);
+      if (!native) throw Error('此市场的即时交易盘面暂不支持该周期');
+      const { readPageInstantCampaignCandles } = await import('./useFish');
+      const bars = await readPageInstantCampaignCandles(source, native, fromTime, toTime, controller.signal);
+      return bars.map(bar => ({ time: bar.openTime, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume,
+        quoteVolume: bar.quoteVolume ?? undefined, takerBuyQuoteVolume: bar.takerBuyQuoteVolume ?? undefined }));
+    };
+    void read()
       .then(data => {
         if (cancelled) return;
         setKlines(data);
@@ -364,7 +377,7 @@ export function useReplayKlines(
       cancelled = true;
       controller.abort();
     };
-  }, [symbol, interval, fromTime, toTime, reloadKey, requestKey]);
+  }, [symbol, interval, fromTime, toTime, reloadKey, requestKey, source]);
 
   const settled = settledKey === requestKey;
   return {

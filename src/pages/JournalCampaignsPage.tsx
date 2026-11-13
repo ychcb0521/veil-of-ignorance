@@ -52,7 +52,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useQualityCampaignList } from '@/hooks/useQualityCampaignList';
 import { DetectCategoryStats } from '@/components/DetectCategoryStats';
-import { campaignSection } from '@/lib/campaignSections';
+import { campaignSection, campaignSectionLabel } from '@/lib/campaignSections';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
 import { chartBoxHeightToFitViewport } from '@/lib/chartViewportFit';
@@ -2375,7 +2375,8 @@ export default function JournalCampaignsPage() {
   const [comparisonStatsOpen, setComparisonStatsOpen] = useState(false);
   useEffect(() => setComparisonStatsOpen(false), [section]);
   const binView = parseCampaignBinParam(location.search);
-  const binTitle = comparing ? '持仓监测回收站' : '亲自交易回收站';
+  const sectionLabel = campaignSectionLabel(section);
+  const binTitle = sectionLabel + '回收站';
   const { user, profile } = useAuth();
   // 只认 id：auth 每次刷新 token 都会换一个 user 对象，不能让它牵动取数与回调。
   const userId = user?.id;
@@ -2711,7 +2712,8 @@ export default function JournalCampaignsPage() {
     && (isAllRange(operationRange) || isWithinOperationRange(campaignOperationTime(row.legs, row.tradeRecords), operationRange))),
   [baseRows, selectedCampaignIds, operationRange]);
   const comparisonReturns = useMemo(() => {
-    const closed = statisticsRows.filter(row => isResolvedCampaign(row.campaign)), values = closed.map(row => row.campaign.final_realized_pnl!);
+    const closed = statisticsRows.filter(row => isResolvedCampaign(row.campaign));
+    const values = closed.map(row => row.campaign.comparison?.instant ? row.campaign.comparison.holdingMetrics?.returnPct ?? 0 : row.campaign.final_realized_pnl!);
     return { closed: closed.length, total: statisticsRows.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
       mean: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, worst: values.length ? Math.min(...values) : null };
   }, [statisticsRows]);
@@ -3912,7 +3914,7 @@ export default function JournalCampaignsPage() {
     if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
     const confirmed = window.confirm(
       comparing
-        ? `永久移除持仓监测战役「${campaign.title}」？\n\n这场战役将无法恢复，监测库中的原始结果仍保留。`
+        ? `永久移除${sectionLabel}战役「${campaign.title}」？\n\n这场战役将无法恢复，${section === 'instant' ? '筛选鱼中的卖出记录' : '监测库中的原始结果'}仍保留。`
         : `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
     );
     if (!confirmed) return;
@@ -3931,7 +3933,7 @@ export default function JournalCampaignsPage() {
       setBusyCampaignId(null);
       finishMutation();
     }
-  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId, comparing]);
+  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId, comparing, section, sectionLabel]);
 
   const handleCampaignDetailsToggle = useCallback((
     event: MouseEvent<HTMLButtonElement>,
@@ -3980,7 +3982,7 @@ export default function JournalCampaignsPage() {
     if (!user || campaign.user_id !== user.id || deletedBusyId) return;
     const confirmed = window.confirm(
       comparing
-        ? `永久移除持仓监测战役「${campaign.title}」？\n\n这场战役将无法恢复，监测库中的原始结果仍保留。`
+        ? `永久移除${sectionLabel}战役「${campaign.title}」？\n\n这场战役将无法恢复，${section === 'instant' ? '筛选鱼中的卖出记录' : '监测库中的原始结果'}仍保留。`
         : `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
     );
     if (!confirmed) return;
@@ -4512,7 +4514,7 @@ export default function JournalCampaignsPage() {
                 </span>
               )}
             </h1>
-            <p className="text-[11px] text-muted-foreground">{binView ? '可恢复或彻底移除' : comparing ? '持仓监测结果' : '复盘的高层单位'}</p>
+            <p className="text-[11px] text-muted-foreground">{binView ? '可恢复或彻底移除' : comparing ? sectionLabel + '结果' : '复盘的高层单位'}</p>
           </div>
           <div className="flex-1" />
           {/* 回收站视图下没有「归类历史交易」（新战役不会归类进回收站），换成「返回战役」 */}
@@ -6022,7 +6024,7 @@ export default function JournalCampaignsPage() {
         ) : null}
 
         {loading ? (
-          <div className="border border-border rounded p-10 text-center text-[12px] text-muted-foreground">{comparing ? '正在恢复账号中的持仓监测记录…' : '加载中…'}</div>
+          <div className="border border-border rounded p-10 text-center text-[12px] text-muted-foreground">{comparing ? `正在恢复账号中的${sectionLabel}记录…` : '加载中…'}</div>
         ) : sortedRows.length === 0 ? (
           <div className="border border-border rounded p-10 text-center space-y-2">
             <div className="mx-auto w-10 h-10 rounded-full bg-accent flex items-center justify-center">
@@ -6031,7 +6033,7 @@ export default function JournalCampaignsPage() {
             {/* 空列表有三种原因，不能都说成「尚无战役」：时间段筛空了、当前排序口径筛空了、真的一场都没有。 */}
             {campaignLoadError ? (
               <>
-                <div className="text-[13px] font-medium">{comparing ? '持仓监测记录尚未恢复' : '战役记录尚未读取'}</div>
+                <div className="text-[13px] font-medium">{comparing ? sectionLabel + '记录尚未恢复' : '战役记录尚未读取'}</div>
                 <div className="text-[12px] text-muted-foreground">原数据仍保留，请使用上方的重试入口重新读取。</div>
               </>
             ) : !isAllRange(operationRange) && scopedRows.length === 0 ? (
@@ -6068,7 +6070,7 @@ export default function JournalCampaignsPage() {
             ) : (
               <>
                 <div className="text-[13px] font-medium">尚无战役</div>
-                <div className="text-[12px] text-muted-foreground">{comparing ? '在鱼质量中勾选信号并运行，交易会出现在这里' : '你下次开主力单时会自动创建第一个战役'}</div>
+                <div className="text-[12px] text-muted-foreground">{section === 'instant' ? '筛选鱼确认 CDA 卖出后，战役会自动出现在这里' : comparing ? '在鱼质量中勾选信号并运行，交易会出现在这里' : '你下次开主力单时会自动创建第一个战役'}</div>
               </>
             )}
           </div>
@@ -6198,7 +6200,7 @@ export default function JournalCampaignsPage() {
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto px-5 py-2">
             {deletedLoading ? (
-              <div className="py-12 text-center text-[12px] text-muted-foreground">{comparing ? '正在恢复账号中的持仓监测记录…' : '加载中…'}</div>
+              <div className="py-12 text-center text-[12px] text-muted-foreground">{comparing ? `正在恢复账号中的${sectionLabel}记录…` : '加载中…'}</div>
             ) : comparing && campaignLoadError && deletedCampaigns.length === 0 ? (
               <div role="alert" className="py-8 text-center text-[12px] text-muted-foreground">
                 <p>{campaignLoadError}</p>

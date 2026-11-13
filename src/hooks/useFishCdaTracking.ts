@@ -4,7 +4,7 @@ import { fishNotifyMissing } from '@/lib/fish/notify';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
-import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
+import { readFishPreferences, readFishPreferencesWithPrefix, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
 import type { useFishNotify } from './useFishNotify';
@@ -13,7 +13,7 @@ const CONFIG_KEY = 'veil.fish-cda-tracking.v1:';
 const POLL_MS = 2000;
 const CLOSE_GRACE_MS = 1000;
 type Settings = { enabledAt: number; snapshot: FishSnapshot };
-interface Candidate { record: PreEntryRecord; round: PreEntryRound }
+export interface ScreenedFishAdmission { record: PreEntryRecord; round: PreEntryRound }
 interface Checkpoint {
   after: number;
   alert?: ScreenedCdaTrigger;
@@ -27,6 +27,9 @@ export interface FishCdaTracking {
   active: number;
   awaitingMail: number;
   alerts: ReadonlyMap<string, ScreenedCdaTrigger>;
+  admitted?: readonly ScreenedFishAdmission[];
+  hasSavedSales?: boolean;
+  campaignIssue?: string;
   error: string;
   saving: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -50,6 +53,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const [settings, setSettings] = useState<Settings>();
   const [saving, setSaving] = useState(!!configKey);
   const [error, setError] = useState('');
+  const [savedSalesOwner, setSavedSalesOwner] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [refreshVersion, refreshCheckpoints] = useState(0);
   const checkpoints = useRef(new Map<string, Checkpoint>());
@@ -110,13 +114,18 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     } catch { /* The stored settings will also be read when the page opens. */ }
     window.addEventListener('storage', refreshLegacy);
     void refresh();
+    if (typeof indexedDB !== 'undefined' && typeof readFishPreferencesWithPrefix === 'function') {
+      void readFishPreferencesWithPrefix<Checkpoint>(jobPrefix).then(rows => {
+        if (alive && rows.some(row => row?.alert)) setSavedSalesOwner(owner);
+      }).catch(() => undefined);
+    }
     return () => {
       alive = false;
       window.removeEventListener('storage', refreshLegacy);
       changes.current?.close();
       changes.current = undefined;
     };
-  }, [configKey, jobPrefix]);
+  }, [configKey, jobPrefix, owner]);
 
   useEffect(() => {
     if (!admitted.length) return;
@@ -204,7 +213,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         .finally(() => { mailing = false; });
     };
 
-    const eligible = (entry: Candidate, target: number) => {
+    const eligible = (entry: ScreenedFishAdmission, target: number) => {
       const checkpoint = read(entry.record);
       return !checkpoint?.alert && (retry.get(entry.record.id) ?? 0) <= Date.now()
         && (checkpoint?.after ?? initialCursor(entry.record, settings)) < target;
@@ -307,5 +316,5 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     return result;
   }, [admitted, jobPrefix, revision]);
   const mailIssue = settings && counts.awaitingMail ? !notify.config.enabled ? '邮件提醒已关闭' : fishNotifyMissing(notify.config) : '';
-  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, alerts, ...counts };
+  return { enabled: !!settings, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, hasSavedSales: !!owner && savedSalesOwner === owner, ...counts };
 }

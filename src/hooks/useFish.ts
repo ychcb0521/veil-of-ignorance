@@ -59,6 +59,17 @@ export async function readPageScreenedCda(tasks: readonly ScreenedCdaTask[], sna
   await pageScanner.trackScreenedCda(tasks, snapshot, target, signal, onRead);
 }
 
+export async function buildPageInstantCampaign(input: import('@/lib/fish/instantCampaign').InstantCampaignInput, signal: AbortSignal) {
+  pageScanner ??= new FishScanner();
+  return pageScanner.buildInstantCampaign(input, signal);
+}
+
+export async function readPageInstantCampaignCandles(source: import('@/lib/fish/instantCampaign').InstantCampaignInput['source'],
+  interval: import('@/lib/deepRsa/marketData').ResearchInterval, from: number, to: number, signal: AbortSignal) {
+  pageScanner ??= new FishScanner();
+  return pageScanner.readInstantCampaignCandles(source, interval, from, to, signal);
+}
+
 export function useFish(userId: string | undefined, options: { onNewFish?: (fish: TradeSignal) => void } = {}) {
   const onNewFish = useRef(options.onNewFish); onNewFish.current = options.onNewFish;
   const [signals, setSignals] = useState(loadFishSignals);

@@ -8,6 +8,7 @@ import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fi
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import {createQualityMarketRetry} from '@/lib/fish/qualityMarketRetry';
 import { readScreenedCda, type OnScreenedCdaRead, type ScreenedCdaTask } from '@/lib/fish/screenedCda';
+import { freezeInstantCampaign, instantPricePlan, type InstantCampaignInput } from '@/lib/fish/instantCampaign';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -246,6 +247,24 @@ export class FishScanner {
       }
     };
     await Promise.all(Array.from({ length: Math.min(tasks.length, 3) }, read));
+  }
+
+  async buildInstantCampaign(input: InstantCampaignInput, signal: AbortSignal) {
+    const { load } = await this.qualityMarket([input.source.symbol], signal);
+    return freezeInstantCampaign(input, load, signal);
+  }
+
+  async readInstantCampaignCandles(source: InstantCampaignInput['source'], interval: import('@/lib/deepRsa/marketData').ResearchInterval,
+    from: number, to: number, signal: AbortSignal) {
+    const { now, load } = await this.qualityMarket([source.symbol], signal);
+    const plan = instantPricePlan(interval), first = Math.floor(from / plan.step) * plan.step;
+    const cut = Math.floor(Math.min(now, to) / plan.step) * plan.step;
+    const bars: ResearchBar[] = [];
+    for (let cursor = first; cursor < cut; cursor += 720 * plan.step) {
+      const end = Math.min(cut, cursor + 720 * plan.step);
+      bars.push(...await load({ ...source, timeMs: end, timeLabel: '', fallbackZone: '' }, cursor, end, plan, signal));
+    }
+    return bars;
   }
 
   private async qualityMarket(symbols: readonly string[], signal: AbortSignal, onWaiting?: (until?:number)=>void) {

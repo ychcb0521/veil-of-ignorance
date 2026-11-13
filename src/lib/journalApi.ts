@@ -4,7 +4,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { isQualityCampaignId } from '@/lib/campaignSections';
+import { isPaperCampaignId } from '@/lib/campaignSections';
 import { loadQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { updateQualityCampaignTrash } from '@/lib/fish/qualityCampaignTrash';
 import type { KlineData } from '@/hooks/useBinanceData';
@@ -2186,7 +2186,7 @@ async function campaignForDeletionFallback(userId: string, id: string): Promise<
 
 export async function deleteCampaign(id: string, expectedOwner?: string): Promise<void> {
   const userId = await getAuthenticatedUserId('删除战役', expectedOwner);
-  if (isQualityCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'deleted');
+  if (isPaperCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'deleted');
   const fallbackCampaign = await campaignForDeletionFallback(userId, id);
   const deletedAt = new Date().toISOString();
   const { error } = await supabase
@@ -2215,7 +2215,7 @@ export async function deleteCampaign(id: string, expectedOwner?: string): Promis
 
 export async function restoreCampaign(id: string, expectedOwner?: string): Promise<void> {
   const userId = await getAuthenticatedUserId('恢复战役', expectedOwner);
-  if (isQualityCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'active');
+  if (isPaperCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'active');
   const local = findLocalCampaign(userId, id);
   const restoredAt = new Date().toISOString();
   const { error } = await supabase
@@ -2237,7 +2237,7 @@ export async function restoreCampaign(id: string, expectedOwner?: string): Promi
 
 export async function permanentlyDeleteCampaign(id: string, expectedOwner?: string): Promise<void> {
   const userId = await getAuthenticatedUserId('永久删除战役', expectedOwner);
-  if (isQualityCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'purged');
+  if (isPaperCampaignId(id)) return updateQualityCampaignTrash(userId, id, 'purged');
   const { error } = await supabase
     .from('trade_campaigns' as never)
     .delete()
@@ -2617,7 +2617,7 @@ export function createUserLocalSnapshotReader(userId: string): UserLocalSnapshot
 export async function getCampaignWithLegs(
   campaignId: string,
 ): Promise<{ campaign: TradeCampaign; legs: TradeJournal[] }> {
-  if (isQualityCampaignId(campaignId)) return readQualityCampaign(campaignId);
+  if (isPaperCampaignId(campaignId)) return readQualityCampaign(campaignId);
   const { data: campaign, error: cErr } = await supabase
     .from('trade_campaigns' as never)
     .select('*')
@@ -3142,7 +3142,7 @@ export async function getCampaignFullData(
   /** 本地增量核对的真实时刻界，见函数体内的说明；null = 无界。 */
   replayEndRealAt?: number | null;
 }> {
-  if (isQualityCampaignId(campaignId)) return readQualityCampaign(campaignId);
+  if (isPaperCampaignId(campaignId)) return readQualityCampaign(campaignId);
   if (options.source && options.source.campaign.id !== campaignId) {
     throw new Error('加载战役失败：预加载数据的战役 ID 不匹配');
   }
@@ -4885,7 +4885,7 @@ export async function createCounterfactual(
 }
 
 export async function listCounterfactuals(campaignId: string): Promise<CampaignCounterfactual[]> {
-  if (isQualityCampaignId(campaignId)) return [];
+  if (isPaperCampaignId(campaignId)) return [];
   const userId = await getAuthenticatedUserId('加载反事实战役分支');
   const local = readLocalCounterfactuals(userId, campaignId);
   const { data, error } = await supabase

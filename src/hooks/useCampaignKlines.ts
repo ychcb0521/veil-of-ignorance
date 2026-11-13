@@ -305,6 +305,7 @@ export function useCampaignKlines(
   selection: CampaignChartRangeSelection | null = null,
   // 只给显示用 K 线：整段放不下时只拉这一段（见 trimCampaignDisplayFetchWindow）；null = 整段。
   fetchWindow: { fromTime: number; toTime: number } | null = null,
+  source?: import('@/lib/fish/instantCampaign').InstantCampaignInput['source'],
 ) {
   const openedAtMs = useMemo(() => new Date(openedAt).getTime(), [openedAt]);
   const closedAtMs = useMemo(() => new Date(closedAt ?? Date.now()).getTime(), [closedAt]);
@@ -322,7 +323,7 @@ export function useCampaignKlines(
   const fetchFrom = fetchWindow?.fromTime ?? window.fromTime;
   const fetchTo = fetchWindow?.toTime ?? window.toTime;
   return {
-    ...useReplayKlines(symbol, fetchFrom, fetchTo, interval),
+    ...useReplayKlines(symbol, fetchFrom, fetchTo, interval, source),
     openedAtMs,
     closedAtMs,
     ...window,

@@ -10,7 +10,7 @@ import { validateFishBars } from './shared';
 export const SCREENED_CDA_LIMIT = -10;
 export const SCREENED_CDA_STEP = 300_000;
 
-export interface ScreenedCdaTrigger { at: number; value: number }
+export interface ScreenedCdaTrigger { at: number; value: number; closePrice?: number }
 export interface ScreenedCdaTask { id: string; source: TradeSignal; after: number }
 export type OnScreenedCdaRead = (id: string, result?: ScreenedCdaRead, error?: unknown) => void | Promise<void>;
 export interface ScreenedCdaRead { through: number; trigger?: ScreenedCdaTrigger }
@@ -37,7 +37,7 @@ export async function readScreenedCda(source: TradeSignal, after: number, end: n
     const value = typeof values === 'number' ? values : values?.[i];
     if (value !== undefined && Number.isFinite(value) && value < SCREENED_CDA_LIMIT) {
       const at = bars[i].openTime + plan.step;
-      return { through: at, trigger: { at, value } };
+      return { through: at, trigger: { at, value, closePrice: bars[i].close } };
     }
   }
   return { through };

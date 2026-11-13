@@ -28,6 +28,7 @@ export type CampaignPricePathTask = {
   barMs: number;
   historical: boolean;
   unavailableReason?: string;
+  frozen?: Pick<Result, 'peak' | 'drawdown' | 'staticDrawdown'>;
 };
 /** staticDrawdown：静态最大回撤（2026-10-26 新增；旧缓存没有它，按需重算一次）。 */
 type Result = { fingerprint: string; peak: number | null; drawdown: number | null; staticDrawdown?: number | null; reason?: string; savedAt?: number };
@@ -71,7 +72,9 @@ export function buildCampaignPricePathTask(row: CampaignCardData): CampaignPrice
       ? '持仓时间不完整'
       : undefined;
   const params = { symbol: campaign.symbol, side: change.side, entryPrice: change.entryPrice, startMs, endMs, drawdownStartMs, drawdownEndMs, interval, barMs: intervalToMs(interval), historical, unavailableReason };
-  return { id: campaign.id, fingerprint: JSON.stringify(params), ...params };
+  const instant = campaign.comparison?.instant;
+  const frozen = instant ? { peak: campaign.comparison?.holdingMetrics?.peakPct ?? null, drawdown: instant.drawdown, staticDrawdown: instant.staticDrawdown } : undefined;
+  return { id: campaign.id, fingerprint: JSON.stringify(frozen ? [params, frozen] : params), ...params, ...(frozen ? { frozen } : {}) };
 }
 
 function isReusableResult(task: CampaignPricePathTask, result: Result | undefined | null): result is Result {
@@ -132,6 +135,7 @@ function saveCache(owner: string, task: CampaignPricePathTask, result: Result) {
 function restoreResults(owner: string, tasks: readonly CampaignPricePathTask[], previous?: Snapshot) {
   const results = new Map<string, Result>();
   for (const task of tasks) {
+    if (task.frozen) { results.set(task.id, { fingerprint: task.fingerprint, ...task.frozen }); continue; }
     const before = previous?.owner === owner ? previous.results.get(task.id) : undefined;
     // A value this hook instance already shows stays as long as its inputs are unchanged; the 60 s lifetime of
     // an ongoing campaign only governs reuse across mounts (readCache). Closing and reopening the chart must
@@ -154,6 +158,7 @@ function restoreResults(owner: string, tasks: readonly CampaignPricePathTask[], 
 export function readCachedCampaignPricePath(row: CampaignCardData, owner: string): { peak: number | null; drawdown: number | null; staticDrawdown: number | null } | null {
   try {
     const task = buildCampaignPricePathTask(row);
+    if (task.frozen) return { ...task.frozen, staticDrawdown: task.frozen.staticDrawdown ?? null };
     if (task.unavailableReason) return null;
     const cached = readCache(owner, task);
     return cached && !cached.reason ? { peak: cached.peak, drawdown: cached.drawdown, staticDrawdown: cached.staticDrawdown ?? null } : null;

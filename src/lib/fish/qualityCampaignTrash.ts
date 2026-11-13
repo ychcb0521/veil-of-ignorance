@@ -1,11 +1,12 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
-import { isQualityCampaignId, qualityCampaignTrashKey } from '@/lib/campaignSections';
+import { campaignSectionLabel, isInstantCampaignId, isPaperCampaignId, isQualityCampaignId, qualityCampaignTrashKey } from '@/lib/campaignSections';
 
 type CampaignTrashState = 'active' | 'deleted' | 'purged';
 interface CampaignTrashMark {
   state: CampaignTrashState;
   at: number;
 }
+type PaperSection = 'quality' | 'instant';
 export type QualityCampaignTrash = Record<string, CampaignTrashMark>;
 
 const DATABASE = 'veil-quality-campaign-trash-v1';
@@ -25,17 +26,18 @@ function openTrash(): Promise<IDBDatabase> {
   });
 }
 
-function validateMarks(value: unknown): asserts value is QualityCampaignTrash {
+function validateMarks(value: unknown, section: PaperSection): asserts value is QualityCampaignTrash {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-      || !Object.entries(value).every(([id, mark]) => isQualityCampaignId(id)
+      || !Object.entries(value).every(([id, mark]) => (section === 'instant' ? isInstantCampaignId(id) : isQualityCampaignId(id))
         && mark && ['active', 'deleted', 'purged'].includes(mark.state)
         && Number.isSafeInteger(mark.at) && mark.at > 0)) {
-    throw new Error('持仓监测回收站记录格式异常');
+    throw new Error(campaignSectionLabel(section) + '回收站记录格式异常');
   }
 }
 
 async function transactTrash(
   owner: string,
+  section: PaperSection,
   update?: (current: QualityCampaignTrash) => QualityCampaignTrash,
 ): Promise<QualityCampaignTrash | undefined> {
   if (typeof indexedDB === 'undefined' && !update) return undefined;
@@ -44,18 +46,19 @@ async function transactTrash(
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE, update ? 'readwrite' : 'readonly');
       const store = transaction.objectStore(STORE);
-      const request = store.get(owner);
+      const key = section === 'instant' ? 'instant:' + owner : owner;
+      const request = store.get(key);
       let result: QualityCampaignTrash | undefined;
       let failure: unknown;
       request.onsuccess = () => {
         try {
           const current: unknown = request.result;
-          if (current !== undefined) validateMarks(current);
+          if (current !== undefined) validateMarks(current, section);
           result = current as QualityCampaignTrash | undefined;
           if (update) {
             const before = result ?? {};
             result = update(before);
-            if (result !== before) store.put(result, owner);
+            if (result !== before) store.put(result, key);
           }
         } catch (error) {
           failure = error;
@@ -110,43 +113,51 @@ export function subscribeQualityCampaignTrash(owner: string, refresh: () => void
   };
 }
 
-export const qualityCampaignTrashAccountBlob: AccountBlobAdapter<QualityCampaignTrash> = {
-  name: 'quality-campaign-trash-v1',
-  read: owner => transactTrash(owner),
-  async write(owner, remote) {
-    if (remote === undefined) return;
-    validateMarks(remote);
-    await transactTrash(owner, local => mergeQualityCampaignTrash(local, remote));
-    notifyTrash(owner);
-  },
-  async mergeRemote(owner, remote) { await qualityCampaignTrashAccountBlob.write(owner, remote); },
-  weight: value => Object.keys(value ?? {}).length,
-};
+function trashBlob(section: PaperSection, name: string): AccountBlobAdapter<QualityCampaignTrash> {
+  const adapter: AccountBlobAdapter<QualityCampaignTrash> = {
+    name,
+    read: owner => transactTrash(owner, section),
+    async write(owner, remote) {
+      if (remote === undefined) return;
+      validateMarks(remote, section);
+      await transactTrash(owner, section, local => mergeQualityCampaignTrash(local, remote));
+      notifyTrash(owner);
+    },
+    async mergeRemote(owner, remote) { await adapter.write(owner, remote); },
+    weight: value => Object.keys(value ?? {}).length,
+  };
+  return adapter;
+}
+export const qualityCampaignTrashAccountBlob = trashBlob('quality', 'quality-campaign-trash-v1');
+const instantCampaignTrashAccountBlob = trashBlob('instant', 'instant-campaign-trash-v1');
+const trashAdapter = (section: PaperSection) => section === 'instant' ? instantCampaignTrashAccountBlob : qualityCampaignTrashAccountBlob;
 
-export async function readQualityCampaignTrash(owner: string): Promise<QualityCampaignTrash> {
-  return await transactTrash(owner) ?? {};
+export async function readQualityCampaignTrash(owner: string, section: PaperSection = 'quality'): Promise<QualityCampaignTrash> {
+  return await transactTrash(owner, section) ?? {};
 }
 
-export async function loadQualityCampaignTrash(owner: string): Promise<QualityCampaignTrash> {
-  if (typeof indexedDB !== 'undefined') await syncAccountBlobOnLoad(qualityCampaignTrashAccountBlob, owner);
-  return readQualityCampaignTrash(owner);
+export async function loadQualityCampaignTrash(owner: string, section: PaperSection = 'quality'): Promise<QualityCampaignTrash> {
+  if (typeof indexedDB !== 'undefined') await syncAccountBlobOnLoad(trashAdapter(section), owner);
+  return readQualityCampaignTrash(owner, section);
 }
 
 /** Store only the disposition of the derived campaign. The monitoring source remains in its library. */
 export async function updateQualityCampaignTrash(owner: string, id: string, state: CampaignTrashState): Promise<void> {
-  if (!owner || !isQualityCampaignId(id)) throw new Error('持仓监测战役无效');
-  if (typeof indexedDB === 'undefined') throw new Error('持仓监测回收站存储不可用，请重试');
+  if (!owner || !isPaperCampaignId(id)) throw new Error('战役无效');
+  const section = isInstantCampaignId(id) ? 'instant' : 'quality';
+  const label = campaignSectionLabel(section);
+  if (typeof indexedDB === 'undefined') throw new Error(label + '回收站存储不可用，请重试');
   const key = qualityCampaignTrashKey(id);
-  await transactTrash(owner, current => {
+  await transactTrash(owner, section, current => {
     const previous = current[key];
     if (previous?.state === state) return current;
-    if (previous?.state === 'purged') throw new Error('这场持仓监测战役已永久移除');
+    if (previous?.state === 'purged') throw new Error('这场' + label + '战役已永久移除');
     if (state !== 'deleted' && previous?.state !== 'deleted') {
       if (state === 'active') return current;
-      throw new Error('请先将这场战役移入持仓监测回收站');
+      throw new Error('请先将这场战役移入' + label + '回收站');
     }
     return { ...current, [key]: { state, at: Math.max(Date.now(), (previous?.at ?? 0) + 1) } };
   });
   notifyTrash(owner);
-  void noteAccountBlobSaved(qualityCampaignTrashAccountBlob, owner).catch(() => undefined);
+  void noteAccountBlobSaved(trashAdapter(section), owner).catch(() => undefined);
 }

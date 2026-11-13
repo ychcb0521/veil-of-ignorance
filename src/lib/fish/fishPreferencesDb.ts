@@ -35,14 +35,26 @@ export function readFishPreferences<T>(keys: readonly string[]): Promise<(T | un
   });
 }
 
+export function readFishPreferencesWithPrefix<T>(prefix: string): Promise<T[]> {
+  return transact('readonly', (store, complete) => {
+    const request = store.getAll(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+    request.onsuccess = () => complete(request.result);
+  });
+}
+
 export function writeFishPreference<T>(key: string, value: T): Promise<void> {
   return transact('readwrite', store => { store.put(value, key); });
 }
 
 /** Merge a durable preference within the same transaction that writes it. */
-export function updateFishPreference<T>(key: string, merge: (previous?: T) => T): Promise<void> {
-  return transact('readwrite', store => {
+export function updateFishPreference<T>(key: string, merge: (previous?: T) => T): Promise<T> {
+  return transact('readwrite', (store, complete) => {
     const request = store.get(key);
-    request.onsuccess = () => { store.put(merge(request.result), key); };
+    request.onsuccess = () => {
+      const previous: T | undefined = request.result;
+      const value = merge(previous);
+      if (value !== previous) store.put(value, key);
+      complete(value);
+    };
   });
 }

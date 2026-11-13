@@ -4,7 +4,7 @@ import { qualityProtectionOrders } from '@/lib/fish/qualityProtectionOrders';
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
-import { isQualityCampaignId } from '@/lib/campaignSections';
+import { isInstantCampaignId, isPaperCampaignId } from '@/lib/campaignSections';
 import { loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
@@ -936,13 +936,14 @@ function CampaignBatchBoardRenderer({
 export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
-  const paperCampaign = isQualityCampaignId(id);
+  const paperCampaign = isPaperCampaignId(id);
   // 计算用 K 线（峰值浮盈、决策准确度、反事实）：详情页始终要；批量导出只在图里画盈亏概览时要。
   const computeKlinesNeeded = !batchExport || batchExport.options.sections.overview !== false;
   // 显示用 K 线（盘面）：详情页始终要；批量导出只在图里画 K 线盘面时要。
   const displayKlinesNeeded = !batchExport || batchExport.options.sections.chart !== false;
   const nav = useNavigate();
   const location = useLocation();
+  const detailSearch = location.search || (isInstantCampaignId(id) ? '?section=instant' : '');
   const { user, profile } = useAuth();
   const viewerUserId = user?.id ?? null;
   const campaignAccountName = useMemo(
@@ -1128,7 +1129,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         const mutual = ownCampaign ? true : await hasMutualFollow(viewerUserId, full.campaign.user_id);
         if (!mutual) {
           if (batchExport) throw new Error('你已无权查看这场战役，无法导出');
-          nav(`/journal/campaigns${location.search}`);
+          nav(`/journal/campaigns${detailSearch}`);
           return;
         }
         // 只读导出不走自愈读取：在把数据交给页面之前，先显式等到本场平仓价校正拉完（见 loadBatchExitCorrections）。
@@ -1174,14 +1175,14 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             return;
           }
           toast.error(error instanceof Error ? error.message : String(error));
-          nav(`/journal/campaigns${location.search}`);
+          nav(`/journal/campaigns${detailSearch}`);
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [id, viewerUserId, nav, location.search, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
+  }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
 
@@ -1494,6 +1495,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, [intervalTouched]);
 
   const klineSymbol = campaign?.symbol ?? '';
+  const klineSource = campaign?.comparison?.instant?.source;
   const klineOpenedAt = campaign?.opened_at ?? new Date().toISOString();
   // 计算用 K 线：拉取窗口 = 基准窗口（selection 传 null），与改动前默认打开时同一份请求。
   const computeKlineSet = useCampaignKlines(
@@ -1504,6 +1506,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     campaignKlineSpanStartMs,
     campaignKlineSpanEndMs,
     null,
+    null,
+    klineSource,
   );
   // 盘面周期与计算周期相同、拉取窗口也相同（倍率视图）时只拉一次，直接用计算那一份；
   // 不同时（换了周期、绝对预设撑开了窗口）才另拉。两块盘面要的另一份相同时也只拉一次。
@@ -1567,6 +1571,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     campaignKlineSpanEndMs,
     extraKlineSlots[0]?.selection ?? null,
     extraKlineSlots[0]?.fetch ?? null,
+    klineSource,
   );
   const extraKlineSetB = useCampaignKlines(
     extraKlineSlots[1] ? klineSymbol : '',
@@ -1577,6 +1582,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     campaignKlineSpanEndMs,
     extraKlineSlots[1]?.selection ?? null,
     extraKlineSlots[1]?.fetch ?? null,
+    klineSource,
   );
   const extraKlineSetFor = (need: ExtraKlineNeed) => (extraKlineSlotKeyA === need.key ? extraKlineSetA : extraKlineSetB);
   const displayKlineSet = mainExtraKlineNeed ? extraKlineSetFor(mainExtraKlineNeed) : computeKlineSet;
@@ -1761,6 +1767,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryLegId, actualPriceChange.entryPrice, actualPriceChange.mainCloseTime, actualPriceChange.side, campaign, computeInterval, effectiveClosedAt, klines]);
   const dynamicMaxDrawdownPct = useMemo(() => {
+    if (campaign?.comparison?.instant) return campaign.comparison.instant.drawdown;
     if (!campaign || klines.length === 0) return null;
     const startMs = actualPriceChange.entryOpenTime ?? new Date(campaign.opened_at).getTime();
     const endMs = resolveHoldingDynamicDrawdownEndMs(
@@ -1777,6 +1784,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
   /** 静态最大回撤：与动态最大回撤同一个窗口、同一批 K 线；买入价同首仓涨跌幅的开仓价。 */
   const staticMaxDrawdownPct = useMemo(() => {
+    if (campaign?.comparison?.instant) return campaign.comparison.instant.staticDrawdown;
     if (!campaign || klines.length === 0) return null;
     const startMs = actualPriceChange.entryOpenTime ?? new Date(campaign.opened_at).getTime();
     const endMs = resolveHoldingDynamicDrawdownEndMs(
@@ -1800,7 +1808,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         : null,
       mainLeverage: resolveCampaignMainLeverage(campaign, legs, tradeRecords),
       initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
-      peakUnrealizedPnl: accuracy.campaign_max_profit_real,
+      peakUnrealizedPnl: campaign.comparison?.instant ? campaign.peak_unrealized_pnl : accuracy.campaign_max_profit_real,
       peakPriceChangePct,
       halfMirror:campaignHalfMirror(campaign),
       dynamicMaxDrawdownPct,
@@ -1837,7 +1845,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 峰值涨幅和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
     // 盘面与计算各拉一份时盘面可能先画好，兜底值摆在旁边就像最终读数——这时显示加载态。
     if (!klinesLoading) return items;
-    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' && !campaign.comparison?.holdingMetrics || item.key === 'dynamicMaxDrawdownPct' || item.key === 'staticMaxDrawdownPct'
+    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' && !campaign.comparison?.holdingMetrics || !campaign.comparison?.instant && (item.key === 'dynamicMaxDrawdownPct' || item.key === 'staticMaxDrawdownPct')
       ? { ...item, value: '加载中…', color: '#848E9C', valueClassName: 'text-muted-foreground' }
       : item));
   }, [
@@ -2676,7 +2684,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       nav(-1);
       return;
     }
-    nav(`/journal/campaigns${location.search}`);
+    nav(`/journal/campaigns${detailSearch}`);
   };
 
   /**
@@ -2774,7 +2782,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                 >
                   {campaignDisplayCode}
                 </span>
-                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="comparison-campaign-badge">持仓监测</span>}
+                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="comparison-campaign-badge">{campaign.comparison.section === 'instant' ? '即时交易' : '持仓监测'}</span>}
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>
@@ -2813,6 +2821,12 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
+        {campaign.comparison?.instant && <div data-testid="instant-campaign-execution" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border/70 bg-card px-3 py-2 text-[11px]">
+          <span className="font-medium">CDA 卖出</span>
+          <span>收盘读数 {campaign.comparison.instant.cdaValue}</span>
+          <span>保证金 {campaign.comparison.instant.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</span>
+          <span className="ml-auto font-mono text-muted-foreground">{formatBeijingTime(campaign.comparison.valuedAt)}</span>
+        </div>}
         {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} repair={campaign.comparison.repair} />}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
         {campaign.deleted_at && (

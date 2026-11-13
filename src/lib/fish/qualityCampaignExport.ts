@@ -66,11 +66,12 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
     ['标的', campaign.symbol, ''], ['方案', plan?.label ?? c?.planLabel ?? '', ''], ['战役编号', campaign.campaign_code, ''],
     ['信号', signalLine, '来源 · 信号时间（UTC）'], ['探测算法', (c?.detectors ?? []).map(d => d.label).join('；'), ''], ['信号类别', c?.category ?? '', ''],
     ['买入时间', time(entryAt), 'UTC+8'], ['买入价', p8(entryPrice), ''], ['首仓 USDT', campaign.initial_main_size_usdt, ''],
+    ...(c?.instant ? [['保证金 USDT', c.instant.marginUsdt, ''], ['杠杆倍数', campaign.initial_leverage, ''], ['CDA 卖出读数', c.instant.cdaValue, '5 分钟收盘']] as XlsxCell[][] : []),
     ['镜像止盈', mirror ? `${time(mirror.at)} @ ${p8(mirror.price)} · 卖出 ${r(mirror.fraction * 100)}% · 涨 ${r(mirror.gainPct)}%` : '未成交', ''],
     ['加仓次数', fills.length, ''], ['累计投入 USDT', r(ev?.totalInvested ?? m?.totalInvested, 4), ''], ['持仓均价', p8(ev?.averageEntryPrice), ''],
-    ['卖出时间', time(endAt), 'UTC+8'], ['卖出价', p8(exitPrice), ''], ['卖出原因', ev?.exitReason ?? '', ''],
+    ['卖出时间', time(endAt), 'UTC+8'], ['卖出价', p8(exitPrice), ''], ['卖出原因', c?.instant ? exit?.notes ?? '' : ev?.exitReason ?? '', ''],
     ['触发条件', ev?.triggerCause ? `${ev.triggerCause.label ?? ''}${ev.triggerCause.direction ? ` ${ev.triggerCause.direction} ${ev.triggerCause.threshold}` : ''}` : '', ''],
-    ['已实现盈亏 USDT', r(campaign.final_realized_pnl, 4), ''], ['收益率 %', r(m?.returnPct, 4), '总盈亏 ÷ 累计投入'],
+    ['已实现盈亏 USDT', r(campaign.final_realized_pnl, 4), ''], ['收益率 %', r(m?.returnPct, 4), c?.instant ? '总盈亏 ÷ 保证金' : '总盈亏 ÷ 累计投入'],
     ['卖出价相对买入价 %', pct(exitPrice, entryPrice), '跨币种可比'], ['峰值涨幅 %', r(m?.peakPct, 4), '持仓期间最高价相对买入价'],
     ['持仓时长 小时', hours(entryAt, endAt), ''], ['首次加仓时 ATR 占价格 %', firstAtr && fills[0] ? r(firstAtr / fills[0].price * 100, 4) : null, '5 分钟 ATR(14)，衡量这个币的波动；跨币种比较距离时先除以它'],
     ['导出时间', time(Date.now()), 'UTC+8'],
@@ -93,7 +94,7 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
 
 export function qualityCampaignExportName(campaign: TradeCampaign, at = Date.now()) {
   const label = (campaign.comparison?.monitorPlan?.label ?? campaign.comparison?.planLabel ?? '持仓监测').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40);
-  return `持仓监测-${campaign.symbol}-${label}-${time(ms(campaign.opened_at)).replace(/\D/g, '').slice(0, 12)}-导出${time(at).replace(/\D/g, '').slice(0, 12)}.xlsx`;
+  return `${campaign.comparison?.instant ? '即时交易' : '持仓监测'}-${campaign.symbol}-${label}-${time(ms(campaign.opened_at)).replace(/\D/g, '').slice(0, 12)}-导出${time(at).replace(/\D/g, '').slice(0, 12)}.xlsx`;
 }
 export function downloadQualityCampaignDetail(campaign: TradeCampaign, at = Date.now()): string {
   const filename = qualityCampaignExportName(campaign, at);

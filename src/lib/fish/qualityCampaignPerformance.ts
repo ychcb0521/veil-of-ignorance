@@ -12,9 +12,13 @@ import { qualityCampaignTrashKey } from '@/lib/campaignSections';
  * Only the scalar samples remain alive between campaigns; no plans/legs cross to the UI.
  */
 export function qualityCampaignPerformanceFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect' | 'quality', sellKey: string, excluded: readonly string[] = []) {
+  return paperCampaignPerformance(iterateQualityCampaignData(owner, study, section, sellKey), excluded);
+}
+
+export function paperCampaignPerformance(rows: Iterable<import('./qualityCampaignProjection').QualityCampaignData>, excluded: readonly string[] = []) {
   const samples: CampaignPerformanceSample[] = [];
   const excludedKeys = new Set(excluded);
-  for (const details of iterateQualityCampaignData(owner, study, section, sellKey)) {
+  for (const details of rows) {
     if (excludedKeys.has(qualityCampaignTrashKey(details.campaign.id))) continue;
     try {
       const settlement = computeCampaignRealizedPnl(details.campaign, details.legs, details.tradeRecords, {});

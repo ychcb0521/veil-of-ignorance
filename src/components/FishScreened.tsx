@@ -70,13 +70,14 @@ export function FishScreened({ state, library, ratings, onJump, canJump, onRate,
               </button>}
               {cda && <div className={save ? 'space-y-1.5 border-t px-2 pb-1 pt-2' : 'space-y-1.5 px-2 py-1'}>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={cda.enabled} disabled={cda.saving} onChange={event => void cda.setEnabled(event.target.checked)}/>启用 CDA 追踪</label>
-                <p className="text-muted-foreground">启用后新入选的鱼，每根 5 分钟 K 线收盘确认。CDA 原始值首次低于 -10 时发邮件。</p>
+                <p className="text-muted-foreground">启用后新入选的鱼，每根 5 分钟 K 线收盘确认。CDA 原始值首次低于 -10 时生成即时交易战役，并按邮件设置发送提醒。</p>
                 {cda.enabled && <p role="status">追踪中 {cda.active} 条{cda.awaitingMail > 0 && ' · 待发邮件 ' + cda.awaitingMail + ' 条'}</p>}
                 {cda.error && <p role="alert" className="text-destructive">{cda.error}</p>}
               </div>}
             </>}
           </PopoverContent>
         </Popover>}
+        {cda?.campaignIssue && <span role="status" className="text-[10px] text-destructive">{cda.campaignIssue}</span>}
         {(automatic || screening) && <span className="ml-1 inline-flex items-center gap-1.5 whitespace-nowrap text-[10px] text-muted-foreground">
           <span role="status">{screeningStatus}</span>
           {screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}

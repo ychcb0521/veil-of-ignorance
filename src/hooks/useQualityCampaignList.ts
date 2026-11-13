@@ -4,6 +4,8 @@ import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { qualityCampaignTrashKey, type CampaignSection } from '@/lib/campaignSections';
 import { loadQualityCampaignTrash, readQualityCampaignTrash, subscribeQualityCampaignTrash, type QualityCampaignTrash } from '@/lib/fish/qualityCampaignTrash';
 
+import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
+
 export function useQualityCampaignList(owner: string | undefined, section: CampaignSection, binView = false) {
   const [snapshot, setSnapshot] = useState({ owner, section, rows: [] as CampaignCardData[], complete: false, error: null as string | null, selectedSellKey: undefined as string | undefined, buyFilterLabel: '' });
   const [trash, setTrash] = useState<{ owner?: string; marks?: QualityCampaignTrash; error?: string }>({});
@@ -16,7 +18,7 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
     const refresh = (synchronize = false) => {
       const current = ++revision;
       const read = synchronize ? loadQualityCampaignTrash : readQualityCampaignTrash;
-      void read(owner).then(
+      void read(owner, section).then(
         marks => { if (active && current === revision) setTrash({ owner, marks }); },
         error => {
           if (active && current === revision) {
@@ -46,9 +48,9 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
       if (inFlight) { queued = true; return; }
       inFlight = true;
       try {
-        const data = await listQualityCampaignData(owner, 'quality',controller.signal);
+        const data = await listQualityCampaignData(owner, section,controller.signal);
         if (active && epoch === generation) observedRepair = data.repair;
-        if (active && epoch === generation) setSnapshot({ owner, section, rows: data.rows.map(row => ({ ...buildCampaignCardData(row), peakPriceChangePct: row.campaign.peak_unrealized_pnl })), complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel });
+        if (active && epoch === generation) setSnapshot({ owner, section, rows: data.rows.map(row => ({ ...buildCampaignCardData(row), peakPriceChangePct: row.campaign.comparison?.instant ? row.campaign.comparison.holdingMetrics?.peakPct : row.campaign.peak_unrealized_pnl })), complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel });
       } catch (error) { if (active && epoch === generation) setSnapshot(previous => ({ ...(previous.owner === owner && previous.section === section ? previous : { owner, section, rows: [], selectedSellKey: undefined, buyFilterLabel: '' }), complete: true, error: error instanceof Error ? error.message : String(error) })); }
       finally {
         inFlight = false;
@@ -65,8 +67,11 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
       if (detail.repair) observedRepair = detail.repair;
       void load();
     };
-    void load(); window.addEventListener('fish-quality-saved', saved); window.addEventListener('focus', load);
-    return () => { active = false;controller.abort();window.removeEventListener('fish-quality-saved', saved); window.removeEventListener('focus', load); };
+    const unsubscribe = section === 'instant' ? subscribeInstantCampaigns(owner, load) : undefined;
+    if (section === 'quality') window.addEventListener('fish-quality-saved', saved);
+    void load();
+    window.addEventListener('focus', load);
+    return () => { active = false; controller.abort(); unsubscribe?.(); window.removeEventListener('fish-quality-saved', saved); window.removeEventListener('focus', load); };
   }, [owner, section, revision]);
   const visible = snapshot.owner === owner && snapshot.section === section;
   const marks = trash.owner === owner ? trash.marks : undefined;

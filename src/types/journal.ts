@@ -393,13 +393,20 @@ export interface CampaignDeviationNote {
 export interface TradeCampaign {
   /** Local paper-comparison metadata; never written to personal campaign tables. */
   comparison?: {
-    section: 'sell' | 'detect'; runKey: string; sellKey: string; planLabel?:string; sellLabel: string;
+    section: 'sell' | 'detect' | 'instant'; runKey: string; sellKey: string; planLabel?:string; sellLabel: string;
     detectors: { id: string; label: string }[]; valuedAt: number;
     repair?: { batchId: string; status: 'pending' | 'verified' | 'failed'; checkedAt?: number; error?: string; beforeReturnPct?: number; beforeEndTime?: number };
     /** 探测信号类别：命中的探测算法组合（如「CBI-2·avg₂ + CBA·avg₂」），用于分类观察与统计。 */
     category?: string;
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
+    instant?: {
+      source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;
+      cdaValue: number;
+      marginUsdt: number;
+      drawdown: number | null;
+      staticDrawdown: number | null;
+    };
     /** 持仓监测：这场战役运行时冻结的整套方案（组合算法、半仓镜像、加仓细节、硬性终止等），只读展示用。 */
     monitorPlan?: import('@/lib/fish/quality').QualityGroup;
     sellEvidence?: {
