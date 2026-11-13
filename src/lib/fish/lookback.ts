@@ -32,7 +32,13 @@ function readLegacyFishLookback(prefix: string): number {
   return validateFishLookback(readPersistedStateRaw(key));
  }catch{return FISH_DEFAULT_LOOKBACK_HOURS;}
 }
-export function saveFishLookback(value:unknown):number {const hours=validateFishLookback(value);writePersistedStateRaw(fishLookbackKey(),String(hours));writePersistedStateRaw(defaultVersionKey(),'1');return hours;}
+export function saveFishLookback(value: unknown, requireLocal = false): number {
+ const hours = validateFishLookback(value);
+ const saved = writePersistedStateRaw(fishLookbackKey(), String(hours));
+ writePersistedStateRaw(defaultVersionKey(), '1');
+ if (!saved && requireLocal) throw new Error('浏览器暂时无法保存扫描覆盖时间，请保留页面并重试');
+ return hours;
+}
 export function readFishLookbackPreference(prefix = getUserPrefix()): FishLookbackPreference {
  const saved = readFishAccountSettings(prefix + FISH_ACCOUNT_SETTINGS_KEY);
  const hours = saved?.lookbackHours ?? readLegacyFishLookback(prefix);

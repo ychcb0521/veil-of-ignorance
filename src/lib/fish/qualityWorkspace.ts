@@ -1,5 +1,7 @@
 import { qualityDisplayRows, qualityEntryIdentity, type FishQualityStudy } from './quality';
 import { qualityOrigins } from './qualitySources';
+import { libraryRoundRecordIds } from './libraryRounds';
+import { preserveQualityFilterLibrary, type QualityFilterLibrary } from './qualityFilterLibrary';
 import { preserveQualityMonitorLibrary, qualityMonitorRoundRecordIds, type QualityMonitorLibrary } from './qualityMonitorLibrary';
 
 /** Resolve the selected detector rows back to their independent underlying samples. */
@@ -59,7 +61,42 @@ export function saveWorkspaceMonitorRounds(study: FishQualityStudy): FishQuality
   if (!saved.length) return study;
   const idsFor = (rounds: QualityMonitorLibrary['rounds']) => new Set(rounds.flatMap(round => qualityMonitorRoundRecordIds(draft!,round)));
   const savedIds = idsFor(saved), remaining = draft.rounds.filter(round => round.state !== 'complete'), remainingIds = idsFor(remaining);
-  const bundle = {...draft,rounds:saved,records:draft.records.filter(record => savedIds.has(record.id))};
+  const rebase = (round: QualityMonitorLibrary['rounds'][number]) => {
+    const { base: _base, added: _added, removed: _removed, ...metadata } = round;
+    return {...metadata,recordIds:qualityMonitorRoundRecordIds(draft,round)};
+  };
+  const bundle = {...draft,rounds:saved.map(rebase),records:draft.records.filter(record => savedIds.has(record.id))};
   const monitorLibrary = preserveQualityMonitorLibrary(study,{...study,monitorLibrary:bundle}).monitorLibrary;
-  return {...study,monitorLibrary,workspaceMonitorDraft:remaining.length ? {...draft,rounds:remaining,records:draft.records.filter(record=>remainingIds.has(record.id))} : undefined};
+  return {...study,monitorLibrary,workspaceMonitorDraft:remaining.length ? {...draft,rounds:remaining.map(rebase),records:draft.records.filter(record=>remainingIds.has(record.id))} : undefined};
+}
+
+export function editWorkspaceFilter(study: FishQualityStudy, apply: (draft: FishQualityStudy) => FishQualityStudy): FishQualityStudy {
+  if (!study.workspaceUpdatedAt) return apply(study);
+  const draft = apply({...study,filterLibrary:study.workspaceFilterDraft});
+  return draft.filterLibrary === study.workspaceFilterDraft ? study : {...study,workspaceFilterDraft:draft.filterLibrary};
+}
+
+export function saveWorkspaceFilterRounds(study: FishQualityStudy): FishQualityStudy {
+  const draft = study.workspaceFilterDraft;
+  if (!draft) return study;
+  const saved = draft.rounds.filter(round => round.state === 'complete');
+  if (!saved.length) return study;
+  const cache = new Map<string, string[]>();
+  const bundle = (rounds: QualityFilterLibrary['rounds']): QualityFilterLibrary => {
+    const records = new Map<string, QualityFilterLibrary['records'][number]>();
+    for (const round of rounds) for (const record of round.filterSnapshot?.records ?? []) {
+      const prior = records.get(record.id);
+      if (!prior || prior.updatedAt <= record.updatedAt) records.set(record.id, prior
+        ? {...record,firstSavedAt:Math.min(record.firstSavedAt,prior.firstSavedAt)}
+        : record);
+    }
+    const settings = [...new Map(rounds.flatMap(round => round.filterSnapshot?.settings ?? []).map(setting => [setting.id, setting])).values()];
+    return {...draft, settings, records:[...records.values()], rounds: rounds.map(round => {
+      const { base: _base, added: _added, removed: _removed, ...metadata } = round;
+      return {...metadata,recordIds:libraryRoundRecordIds(draft.rounds,round,cache)};
+    })};
+  };
+  const remaining = draft.rounds.filter(round => round.state !== 'complete');
+  const filterLibrary = preserveQualityFilterLibrary(study,{...study,filterLibrary:bundle(saved)}).filterLibrary;
+  return {...study,filterLibrary,workspaceFilterDraft:remaining.length ? bundle(remaining) : undefined};
 }

@@ -20,7 +20,7 @@ export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,onR
  return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" items={items} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
   description={`${library?.records.length??0} 条记录 · ${rounds.length} 轮过滤`} dataActions={<FishLibraryDataActions scope="filter"/>} download={()=>downloadDirectoryTables('过滤库',items.map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
   info={<><p>与监测库共用时间目录。展开后展示该轮组合表，条件、读数和判断取自保存记录，不重新计算。</p><p>新轮次单独保存组合表输入和过滤结果；早期轮次只有记录引用，会明确标注。目录可编辑名称、删除和恢复，复制前先完整归档当前组合表。</p></>}
-  empty="暂无过滤记录。设置买入条件并开始过滤后，每轮会自动保存。"/>;
+  empty="暂无过滤记录。运行完成后可在组合表保存到过滤库。"/>;
 }
 function FilterEvidence({settings:catalog,records}:{settings:QualityFilterSetting[];records:QualityFilterRecord[]}){
  const [query,setQuery]=useState(''),settings=new Map(catalog.map(s=>[s.id,s]));

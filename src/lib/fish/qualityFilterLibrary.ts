@@ -12,6 +12,7 @@ import { shortFishHash } from './algorithm';
 import {qualityMonitoringSample} from './qualityAdmissionTime';
 import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
 import { finishLibraryRound, librarySignalIdentity, mergeLibraryRecords, mergeLibraryRounds, newLibraryRound, recoverLibraryRounds, type LibraryRecordBase, type LibraryRound } from './libraryRounds';
+import { signalReadingKey, type QualitySignalMetric } from './qualitySignalReadings';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 export interface QualityFilterSetting { id: string; signature: string; filters: QualityBuyFilter[]; plans: string[] }
@@ -24,29 +25,35 @@ export interface QualityFilterRecord extends LibraryRecordBase {
   /** 与条件组的 filters 一一对应；还没读数的为 null。 */
   readings: (QualityFilterReading | null)[]; status: QualityFilterStatus;
 }
-export interface QualityFilterRoundSnapshot { at:number; settings:QualityFilterSetting[]; records:QualityFilterRecord[] }
+export interface QualityFilterRoundSnapshot {
+  at: number; settings: QualityFilterSetting[]; records: QualityFilterRecord[];
+  signalMetrics?: QualitySignalMetric[]; signalReadings?: QualityFilterReading[];
+}
 export interface QualityFilterRound extends LibraryRound { filterSnapshot?:QualityFilterRoundSnapshot }
 export interface QualityFilterLibrary { version: 1; settings: QualityFilterSetting[]; records: QualityFilterRecord[]; rounds: QualityFilterRound[] }
 interface FilterTask { id: string; setting: QualityFilterSetting; sample: QualitySample }
-export interface QualityFilterCapture { roundId: string; tasks: FilterTask[]; readings: Map<string, QualityFilterReading> }
+export interface QualityFilterCapture {
+  roundId: string; tasks: FilterTask[]; readings: Map<string, QualityFilterReading>;
+  signalValues?: Pick<QualityFilterRoundSnapshot, 'signalMetrics' | 'signalReadings'>;
+}
 
 const empty = (): QualityFilterLibrary => ({ version: 1, settings: [], records: [], rounds: [] });
 const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold];
 export const qualityFilterSettingSignature = (filters: readonly QualityBuyFilter[]) =>
   JSON.stringify(filters.map(conditionKey).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 
-function tasksFor(study: FishQualityStudy, catalog: Map<string, QualityFilterSetting>): FilterTask[] {
+function tasksFor(study: FishQualityStudy, catalog: Map<string, QualityFilterSetting>, includeSignalValues: boolean): FilterTask[] {
   const tasks = new Map<string, FilterTask>();
-  const sources = study.independentFilters ? [{label:'',filters:activeStandaloneBuyFilters(study)}] : (study.sellPlans ?? []).map(plan=>({label:plan.label,filters:activeBuyFilters(study,plan)}));
+  const sources = study.independentFilters || includeSignalValues ? [{label:'',filters:activeStandaloneBuyFilters(study)}] : (study.sellPlans ?? []).map(plan=>({label:plan.label,filters:activeBuyFilters(study,plan)}));
   for (const plan of sources) {
     const filters = plan.filters;
-    if (!filters.length) continue;
-    const signature = study.independentFilters ? JSON.stringify(['independent',qualityFilterSettingSignature(filters)]) : qualityFilterSettingSignature(filters);
+    if (!filters.length && !includeSignalValues) continue;
+    const signature = study.independentFilters || includeSignalValues ? JSON.stringify(['independent',qualityFilterSettingSignature(filters)]) : qualityFilterSettingSignature(filters);
     let setting = catalog.get(signature);
     if (!setting) { setting = { id: `filter-${shortFishHash(signature)}`, signature, filters: structuredClone(filters), plans: [] }; catalog.set(signature, setting); }
     if (plan.label && !setting.plans.includes(plan.label)) { setting = { ...setting, plans: [...setting.plans, plan.label] }; catalog.set(signature, setting); }
     for (const original of qualityRunSamples(study)) {
-      const sample=study.independentFilters?{...original,monitorEntry:undefined}:qualityMonitoringSample(original);
+      const sample=study.independentFilters||includeSignalValues?{...original,monitorEntry:undefined}:qualityMonitoringSample(original);
       const id = JSON.stringify([setting.id, ...librarySignalIdentity(sample.source), sample.enteredAt]);
       tasks.set(id, { id, setting: catalog.get(signature)!, sample });
     }
@@ -73,24 +80,27 @@ function filterRoundSnapshot(tasks:readonly FilterTask[],readings:ReadonlyMap<st
   return {at,settings:structuredClone([...new Map(tasks.map(t=>[t.setting.id,t.setting])).values()]),records:tasks.map(t=>recordFor(t,readings,at))};
 }
 let sequence = 0;
-/** 开始一轮：冻结当前独立过滤条件（旧版保留绑定信息），先用已有读数写一遍（读数齐全的这一轮就已有结果）。没有任何启用条件时不记轮次。 */
-export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number): { study: FishQualityStudy; capture: QualityFilterCapture } | null {
+/** 冻结本轮组合表、启用的条件与可选信号读数。旧版轮次保留原有绑定信息。 */
+export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number, includeSignalValues = false): { study: FishQualityStudy; capture: QualityFilterCapture } | null {
   const library = study.filterLibrary ?? empty(), catalog = new Map(library.settings.map(s => [s.signature, s]));
-  const tasks = tasksFor(frozen, catalog);
+  const metrics = includeSignalValues ? frozen.signalMetrics ?? [] : [];
+  const tasks = tasksFor(frozen, catalog, metrics.length > 0);
   if (!tasks.length) return null;
   const readings = new Map((frozen.filterReadings ?? []).filter(r => !r.error && Number.isFinite(r.value)).map(r => [r.key, r]));
   const roundId = `filter-${at}-${++sequence}-${Math.random().toString(36).slice(2, 8)}`;
   const round = newLibraryRound(library.rounds, roundId, at, tasks.map(t => t.id));
+  const keys = new Set(tasks.flatMap(({ sample }) => metrics.map(metric => signalReadingKey(sample, metric))));
+  const signalValues = metrics.length ? structuredClone({ signalMetrics: metrics, signalReadings: frozen.signalReadings?.filter(r => keys.has(r.key)) ?? [] }) : undefined;
   return {
-    study: { ...study, filterLibrary: { ...library, version: 1, settings: [...catalog.values()], records: withRecords(library, tasks, readings, at), rounds: [...library.rounds, {...round,filterSnapshot:filterRoundSnapshot(tasks,readings,at)}] } },
-    capture: { roundId, tasks, readings },
+    study: { ...study, filterLibrary: { ...library, version: 1, settings: [...catalog.values()], records: withRecords(library, tasks, readings, at), rounds: [...library.rounds, {...round,filterSnapshot:{...filterRoundSnapshot(tasks,readings,at),...signalValues}}] } },
+    capture: { roundId, tasks, readings, signalValues },
   };
 }
 /** 结束（完成 / 暂停 / 失败）：用这一轮拿到的读数刷新本轮全部记录。 */
 export function finishQualityFilterRound(study: FishQualityStudy, capture: QualityFilterCapture, state: 'complete' | 'paused' | 'failed', at: number, error?: string): FishQualityStudy {
   const library = study.filterLibrary;
   if (!library?.rounds.some(r => r.id === capture.roundId)) return study;
-  return { ...study, filterLibrary: { ...library, records: withRecords(library, capture.tasks, capture.readings, at), rounds: finishLibraryRound(library.rounds, capture.roundId, state, at, error).map(r=>r.id===capture.roundId?{...r,filterSnapshot:filterRoundSnapshot(capture.tasks,capture.readings,at)}:r) } };
+  return { ...study, filterLibrary: { ...library, records: withRecords(library, capture.tasks, capture.readings, at), rounds: finishLibraryRound(library.rounds, capture.roundId, state, at, error).map(r=>r.id===capture.roundId?{...r,filterSnapshot:{...filterRoundSnapshot(capture.tasks,capture.readings,at),...capture.signalValues}}:r) } };
 }
 export function recoverQualityFilterRounds(study: FishQualityStudy, at = Date.now()): FishQualityStudy {
   const library = study.filterLibrary;

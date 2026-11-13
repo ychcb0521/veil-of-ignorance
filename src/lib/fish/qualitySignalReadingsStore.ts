@@ -11,6 +11,16 @@ export function preserveQualityWorkspace(saved: WorkspaceData | undefined, incom
     ? { ...incoming, ...qualityWorkspaceData(saved) } : incoming;
 }
 
+// A separate sibling record survives writes by tabs that predate manual filter saves.
+type FilterDraftData = Pick<FishQualityStudy, 'workspaceFilterDraft' | 'workspaceFilterDraftUpdatedAt'>;
+export const filterDraftStorageKey = (studyKey: string) => studyKey + ':workspace-filter';
+
+export function preserveQualityFilterDraft(saved: FilterDraftData | undefined, incoming: FishQualityStudy): FishQualityStudy {
+  return saved?.workspaceFilterDraftUpdatedAt && saved.workspaceFilterDraftUpdatedAt >= (incoming.workspaceFilterDraftUpdatedAt ?? 0)
+    ? {...incoming, workspaceFilterDraft:saved.workspaceFilterDraft, workspaceFilterDraftUpdatedAt:saved.workspaceFilterDraftUpdatedAt}
+    : incoming;
+}
+
 type SavedSignalReadings = Pick<FishQualityStudy, 'signalMetrics' | 'signalMetricsUpdatedAt' | 'signalReadings'>;
 
 export const signalReadingsStorageKey = (studyKey: string) => studyKey + ':signal-readings';
@@ -33,7 +43,11 @@ export function readStoredQualityWithSignalReadings(store: IDBObjectStore, key: 
     main.onerror = () => reject(main.error);
     readings.onerror = () => reject(readings.error);
     workspace.onerror = () => reject(workspace.error);
-    workspace.onsuccess = () => resolve(main.result && typeof main.result === 'object' ? preserveQualityWorkspace(workspace.result,preserveQualitySignalReadings(readings.result,main.result)) : main.result);
+    const filterDraft = store.get(filterDraftStorageKey(key));
+    filterDraft.onerror = () => reject(filterDraft.error);
+    filterDraft.onsuccess = () => resolve(main.result && typeof main.result === 'object'
+      ? preserveQualityFilterDraft(filterDraft.result, preserveQualityWorkspace(workspace.result,preserveQualitySignalReadings(readings.result,main.result)))
+      : main.result);
   });
 }
 
@@ -42,5 +56,9 @@ export function writeStoredQualityWithSignalReadings(store: IDBObjectStore, key:
   // Older tabs can still write the study row. This sibling record keeps the new readings recoverable.
   if (signalMetricsUpdatedAt || signalReadings?.length) store.put({signalMetrics,signalMetricsUpdatedAt,signalReadings},signalReadingsStorageKey(key));
   if (study.workspaceUpdatedAt) store.put(qualityWorkspaceData(study),key + ':workspace');
+  if (study.workspaceFilterDraftUpdatedAt) {
+    const {workspaceFilterDraft,workspaceFilterDraftUpdatedAt}=study;
+    store.put({workspaceFilterDraft,workspaceFilterDraftUpdatedAt},filterDraftStorageKey(key));
+  }
   store.put(study,key);
 }

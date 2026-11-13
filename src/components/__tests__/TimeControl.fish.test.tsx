@@ -34,19 +34,22 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {
-  it('算法设置与每次打开恢复自动1h一起生效，临时间隔不影响保存的阈值',()=>{
+  it('捕捞频率和模式改动在重新打开后仍生效',()=>{
     saveFishAuto({mode:'manual',hours:64,lastRunAt:Date.now()});render(control());
     const toggle=screen.getByRole('button',{name:/^渔/});fireEvent.click(toggle);
     fireEvent.click(screen.getByRole('button',{name:'捕捞设置'}));
     expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
     expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('1');
     fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'0.123'}});
-    fireEvent.change(screen.getByLabelText('自动捕捞间隔'),{target:{value:'8'}});
-    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('8');
+    fireEvent.change(screen.getByLabelText('自动捕捞间隔'),{target:{value:String(5/60)}});
+    expect(screen.getByLabelText('扫描覆盖时间（分钟）')).toHaveValue(5);
+    fireEvent.click(toggle);fireEvent.click(toggle);
+    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue(String(5/60));
     fireEvent.click(screen.getByRole('radio',{name:'手动'}));
     fireEvent.click(toggle);fireEvent.click(toggle);
-    expect(screen.getByRole('radio',{name:'自动'})).toHaveAttribute('aria-checked','true');
-    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue('1');
+    expect(screen.getByRole('radio',{name:'手动'})).toHaveAttribute('aria-checked','true');
+    fireEvent.click(screen.getByRole('radio',{name:'自动'}));
+    expect(screen.getByLabelText('自动捕捞间隔')).toHaveValue(String(5/60));
     expect(screen.getByLabelText('捕捞阈值')).toHaveValue(.123);
   },90000);
   it('插针过滤详情打开历史盘面，不把被过滤标的加入鱼或信号库', async () => {

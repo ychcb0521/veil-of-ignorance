@@ -169,7 +169,8 @@ export function finishQualityMonitorRound(study: FishQualityStudy, capture: Qual
 }
 /** Adopt only original frozen history. Unknown old buy conditions remain explicitly unknown. */
 export function adoptQualityMonitorHistory(study: FishQualityStudy): FishQualityStudy {
-  if (study.monitorLibrary?.importedLegacy) return study;
+  // Workspace monitoring persists its campaigns independently of library publication.
+  if (study.workspaceUpdatedAt || study.monitorLibrary?.importedLegacy) return study;
   const library = study.monitorLibrary ?? empty(), catalog = new Map(library.settings.map(s => [s.signature, s])), records = new Map(library.records.map(r => [r.id, r]));
   const ids = new Set<string>(); let earliest = Infinity, latest = 0;
   const add = (sample: QualitySample, plan: QualityGroup, detectors: QualityGroup[], result: QualityResult, hours: number, known: boolean, detectorsKnown = true) => {

@@ -17,6 +17,11 @@ export function filterDirectoryData(library:QualityFilterLibrary,round?:QualityF
 /** Only saved inputs/readings are projected; this viewer never executes a formula. */
 export function filterDirectoryStudy(library:QualityFilterLibrary,round?:QualityFilterRound):FishQualityStudy{
   const data=filterDirectoryData(library,round),out:FishQualityStudy={...newQualityStudy(round?.startedAt??0),independentFilters:true,buyFilters:[],filterReadings:[],sellPlans:[]};
+  const snapshot = round?.filterSnapshot;
+  if (snapshot?.signalMetrics?.length) {
+    out.signalMetrics = structuredClone(snapshot.signalMetrics);
+    out.signalReadings = structuredClone(snapshot.signalReadings ?? []);
+  }
   const settings=new Map(data.settings.map(s=>[s.id,s]));
   for(const r of data.records){
     if(!settings.has(r.settingId))continue;

@@ -152,6 +152,22 @@ it('reads the latest saved wick and turnover settings on the next automatic scan
  expect(start.mock.calls[1][0]).toMatchObject({downwardWick:rule,lookbackHours:1,turnoverFloors:turnover.floors});
 });
 
+it('retains an explicitly saved five-minute interval after a late account restore', async () => {
+  const {view}=hook();
+  await flush();
+  act(()=>view.result.current.setSchedule({mode:'auto',hours:5/60}));
+  const profile={version:1,cards:[{id:'first',featureId:'cbi2',enabled:true,pref:{statistic:'结果',direction:'>',threshold:'0.04',constraints:[]}}],
+    combination:'and',lookbackHours:1,lookbackFollowsInterval:true,downwardWick:{enabled:false,hours:12,atrMultiple:2},selection,auto:{mode:'auto',hours:1}};
+  const key=getUserPrefix()+FISH_ACCOUNT_SETTINGS_KEY;
+  act(()=>{writePersistedStateRaw(key,JSON.stringify(profile),{source:'remote'});notifyPersistedStateHydrated(key);});
+  await flush();
+  expect(view.result.current.hours).toBe(5/60);
+  view.unmount();
+  const reopened=hook();
+  await flush(5*60_000);
+  expect(reopened.start.mock.calls[0][0]).toMatchObject({lookbackHours:5/60});
+});
+
 it.each([5,15] as const)('uses the chosen %s minute interval after reopening and keeps a legacy hours fallback', async minutes => {
   const schedule = {mode:'auto' as const,hours:minutes/60};
   expect(fishAutoAccountSchedule(schedule,{mode:'auto',hours:1})).toEqual({mode:'auto',hours:1,intervalMinutes:minutes});

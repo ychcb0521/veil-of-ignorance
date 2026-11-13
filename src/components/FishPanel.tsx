@@ -133,9 +133,10 @@ export function FishPanel(p: FishPanelProps) {
   const {settings: savedAccountSettings, save: saveAccountSettings, lookback, saveLookback, downwardWick, saveDownwardWick, turnover, saveTurnover}=useFishAccountSettings();
   const [savingParameters,setSavingParameters]=useState(false);
   const [lookbackDraft, setLookbackDraft] = useState<{ value: string; units: number } | null>(null);
-  useEffect(() => setLookbackDraft(null), [owner]);
+  const [preferredUnits, setPreferredUnits] = useState<number>();
+  useEffect(() => { setLookbackDraft(null); setPreferredUnits(undefined); }, [owner]);
   const lookbackHours = resolveFishCaptureLookback(lookback, p.auto);
-  const units = lookbackDraft?.units ?? coverageUnits(lookbackHours);
+  const units = lookbackDraft?.units ?? preferredUnits ?? coverageUnits(lookbackHours);
   const draftHours = () => lookbackDraft ? validateFishLookback(Number(lookbackDraft.value) / lookbackDraft.units) : lookbackHours;
   const updateLookback = async (hours: number, followsInterval = false) => {
     setLookbackDraft(null);
@@ -306,6 +307,9 @@ export function FishPanel(p: FishPanelProps) {
   });
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
   const x = p.progress, auto = p.auto;
+  const saveSchedule = (mode: NonNullable<FishPanelProps['auto']>['mode'], hours: number) => {
+    setError(auto?.setSchedule({ mode, hours }) ? '' : '捕捞频率未写入浏览器，请保留页面并重试');
+  };
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
   const [captureCopyRevision, setCaptureCopyRevision] = useState(0);
   const [captureCopy, setCaptureCopy] = useState<{ owner: string; settings: FishHitRateSettings } | null>(null);
@@ -407,14 +411,17 @@ export function FishPanel(p: FishPanelProps) {
           <input aria-label="捕捞时间（UTC+8）" autoComplete="off" spellCheck={false} placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
           <span className="shrink-0 text-[9px] text-muted-foreground/60">UTC+8</span>
         </label>
-        <label className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。自动捕捞默认随频率；手动修改后按回车或离开输入框保存。">扫描过去
+        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。自动捕捞默认随频率；手动修改后按回车或离开输入框保存。">扫描过去
           <input aria-label={units === 60 ? '扫描覆盖时间（分钟）' : '扫描覆盖时间（小时）'} type="number" min="0" max={8784 * units} step="any"
             disabled={running} value={lookbackDraft?.value ?? String(lookbackHours * units)}
             onChange={event => setLookbackDraft({ value: event.target.value, units })}
             onBlur={applyLookback} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}
             className="h-6 w-12 rounded bg-transparent px-1 text-center font-mono tabular-nums text-foreground outline-none focus:bg-background disabled:opacity-40"/>
-          {units === 60 ? '分钟' : '小时'}
-        </label>
+          <select aria-label="扫描覆盖时间单位" className="rounded bg-transparent text-muted-foreground hover:text-foreground" value={units} disabled={running}
+            onChange={event => setPreferredUnits(Number(event.target.value))}>
+            <option value={60}>分钟</option><option value={1}>小时</option>
+          </select>
+        </div>
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||hitRateRunning||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
@@ -490,13 +497,13 @@ export function FishPanel(p: FishPanelProps) {
           <div className="flex flex-wrap items-center gap-2">
             <div role="radiogroup" aria-label="捕捞模式" className="inline-flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5">
               {(['manual', 'auto'] as const).map(mode => <button key={mode} type="button" role="radio" aria-checked={auto.mode === mode}
-                onClick={() => auto.setMode(mode)}
+                onClick={() => saveSchedule(mode, auto.hours)}
                 className={`h-6 rounded px-2.5 transition-colors ${auto.mode === mode ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 {mode === 'manual' ? '手动' : '自动'}
               </button>)}
             </div>
             {auto.mode === 'auto' && <span className="relative shrink-0">
-              <select aria-label="自动捕捞间隔" value={auto.hours} onChange={event => auto.setHours(Number(event.target.value))}
+              <select aria-label="自动捕捞间隔" value={auto.hours} onChange={event => saveSchedule(auto.mode, Number(event.target.value))}
                 className="h-7 appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 tabular-nums outline-none hover:bg-muted focus-visible:border-ring/60">
                 {FISH_AUTO_INTERVALS.map(hours => <option key={hours} value={hours}>{fishAutoIntervalLabel(hours)}</option>)}
               </select>

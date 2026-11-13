@@ -24,7 +24,7 @@ export function fishAutoAccountSchedule(schedule: FishAutoSchedule, previous?: F
 }
 const HOUR = 3_600_000;
 export const fishAutoKey = () => `${getUserPrefix()}fish-auto.v1`;
-const scheduleKey = () => `${getUserPrefix()}fish-auto-schedule.v1`;
+export const fishAutoScheduleKey = () => `${getUserPrefix()}fish-auto-schedule.v1`;
 const leaseKey = () => `${getUserPrefix()}fish-auto-lease.v1`;
 export const DEFAULT_FISH_AUTO: FishAutoState = { mode: 'auto', hours: 1, lastRunAt: null };
 
@@ -43,16 +43,16 @@ function scheduleSignature(schedule?: FishAccountAutoSchedule): string {
   return schedule ? `${schedule.mode}:${schedule.hours}${schedule.intervalMinutes ? ':' + schedule.intervalMinutes : ''}` : '';
 }
 
-export function saveFishAutoSchedule(schedule: FishAutoSchedule): void {
+export function saveFishAutoSchedule(schedule: FishAutoSchedule): boolean {
   const account = scheduleSignature(readFishAccountSettings()?.auto);
-  writePersistedStateRaw(scheduleKey(), JSON.stringify({ ...schedule, account }));
+  return writePersistedStateRaw(fishAutoScheduleKey(), JSON.stringify({ ...schedule, account }));
 }
 
 function readFishAutoSchedule(account?: FishAccountAutoSchedule): FishAutoSchedule | undefined {
   try {
-    const value = JSON.parse(readPersistedStateRaw(scheduleKey()) ?? 'null');
-    if (value?.account === scheduleSignature(account)
-      && (value.mode === 'manual' || value.mode === 'auto')
+    const value = JSON.parse(readPersistedStateRaw(fishAutoScheduleKey()) ?? 'null');
+    // A late account hydration must not replace an explicit choice in this browser.
+    if ((value?.mode === 'manual' || value?.mode === 'auto')
       && (FISH_AUTO_INTERVALS as readonly number[]).includes(value.hours)) {
       return { mode: value.mode, hours: value.hours };
     }

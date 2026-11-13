@@ -5,7 +5,7 @@ import {loadDurableQualityPlans} from './qualitySavedPlansStore';
 import {preserveSourceDeletions,applySourceDeletions} from './libraryDeletion';
 import { preserveQualityPostExit } from './qualityPostExit';
 import { preserveQualityEntry } from './qualityEntry';
-import { preserveQualityWorkspace, preserveQualitySignalReadings, readStoredQualityWithSignalReadings, signalReadingsStorageKey, writeStoredQualityWithSignalReadings } from './qualitySignalReadingsStore';
+import { filterDraftStorageKey, preserveQualityFilterDraft, preserveQualityWorkspace, preserveQualitySignalReadings, readStoredQualityWithSignalReadings, signalReadingsStorageKey, writeStoredQualityWithSignalReadings } from './qualitySignalReadingsStore';
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
@@ -22,7 +22,7 @@ const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
 // 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
 const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualitySourceRatings(saved,preserveSourceDeletions(saved,preserveQualityEntry(saved,preserveQualityPostExit(saved,preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming))))));
 const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => {
-  const next = preserveQualitySignalReadings(saved,preserveLibraries(saved,preserveQualityRepairs(saved,preserveQualityWorkspace(saved,incoming))));
+  const next = preserveQualitySignalReadings(saved,preserveLibraries(saved,preserveQualityRepairs(saved,preserveQualityFilterDraft(saved,preserveQualityWorkspace(saved,incoming)))));
   // 旧标签页或后台监测写回总表时，保留新存模板和删除墓碑。
   const priorBases = saved?.monitorTimeBasisByRow;
   return {
@@ -111,6 +111,8 @@ export function mergeRemoteQualityStudy(local: FishQualityStudy | undefined, rem
   return preserveStudy(other,{...other,...base,
     groups:byId(other.groups,base.groups,g=>g.id),samples:base.workspaceUpdatedAt ? base.samples : byId(other.samples,base.samples,r=>r.id),
     workspaceUpdatedAt:base.workspaceUpdatedAt,
+    workspaceFilterDraft:base.workspaceFilterDraft,
+    workspaceFilterDraftUpdatedAt:base.workspaceFilterDraftUpdatedAt,
     ...(base.workspaceUpdatedAt ? {workspaceMonitorDraft:base.workspaceMonitorDraft,selectedRowIds:base.selectedRowIds} : {}),
     sellPlans:byId(other.sellPlans??[],base.sellPlans??[],g=>g.id),
     planTemplates:mergeQualityPlanTemplates(other.planTemplates,base.planTemplates),
@@ -284,13 +286,15 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
           if (incoming && valid(incoming)) {
             void readStoredQualityWithSignalReadings(store,key).then(previous => {
-              const next = preserveQualityWorkspace(valid(previous) ? previous : undefined,preserveQualitySignalReadings(valid(previous) ? previous : undefined,incoming));
+              const prior = valid(previous) ? previous : undefined;
+              const next = preserveQualityFilterDraft(prior,preserveQualityWorkspace(prior,preserveQualitySignalReadings(prior,incoming)));
               writeStoredQualityWithSignalReadings(store,key,compactQualityStudyForStorage(stripStoredQualityArchiveBodies(owner,preserveLibraries(valid(previous) ? previous : undefined,next))));
             }).catch(error => { tx.abort(); reject(error); });
           } else {
             store.delete(key);
             store.delete(signalReadingsStorageKey(key));
             store.delete(key + ':workspace');
+            store.delete(filterDraftStorageKey(key));
           }
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });

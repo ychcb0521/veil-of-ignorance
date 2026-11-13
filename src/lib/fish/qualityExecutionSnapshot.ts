@@ -6,6 +6,7 @@ import type {FishQualityStudy} from './quality';
 export function qualityExecutionSnapshot(study:FishQualityStudy):FishQualityStudy {
   const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRuns:_runs,
     planTemplates:_templates,campaignRepair:_repair,entryReadings:_entry,
+    workspaceMonitorDraft:_monitorDraft,workspaceFilterDraft:_filterDraft,
     postExitReadings:_post,screeningResults:_screening,screeningRounds:_rounds,...inputs}=study;
   return structuredClone(inputs);
 }

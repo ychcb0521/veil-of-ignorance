@@ -14,7 +14,7 @@ import { useFishFeatures } from './useFishFeatures';
 import { loadFishCardsForScan, readFishCombination } from '@/lib/fish/cards';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
-import { fishAutoNextAt, readFishAuto, resetFishAuto, releaseFishAutoLease, saveFishAuto, saveFishAutoSchedule, takeFishAutoLease, type FishAutoMode, type FishAutoSchedule, type FishAutoState } from '@/lib/fish/autoScan';
+import { fishAutoNextAt, fishAutoScheduleKey, readFishAuto, resetFishAuto, releaseFishAutoLease, saveFishAuto, saveFishAutoSchedule, takeFishAutoLease, type FishAutoMode, type FishAutoSchedule, type FishAutoState } from '@/lib/fish/autoScan';
 import type { FishScanSettings } from '@/lib/fishScanner';
 
 const TICK_MS = 30_000, RETRY_MS = 5 * 60_000;
@@ -22,7 +22,7 @@ const online = () => typeof navigator === 'undefined' || navigator.onLine !== fa
 export interface FishAutoScan {
   mode: FishAutoMode; hours: number; nextAt: number | null; lastRunAt: number | null; error: string; online: boolean; waiting: boolean;
   setMode: (mode: FishAutoMode) => void; setHours: (hours: number) => void; noteManualRun: () => void; resetDefaults: () => void;
-  setSchedule: (schedule: FishAutoSchedule) => void;
+  setSchedule: (schedule: FishAutoSchedule) => boolean;
 }
 export function useFishAutoScan(o: { account?: string; selection: FishScanSelection; start: (settings: FishScanSettings) => Promise<unknown> | void; busy: () => boolean }): FishAutoScan {
   const defs = useFishFeatures();
@@ -40,6 +40,11 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   const resetDefaults = useCallback(() => { const s = resetFishAuto(); stateRef.current = s; setStateRaw(s); setError(''); setWaiting(false); retryAt.current = 0; }, []);
   const savedAutoKey = JSON.stringify(accountSettings?.auto);
   useEffect(resetDefaults, [o.account, resetDefaults, savedAutoKey]);
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => { if (event.key === fishAutoScheduleKey()) resetDefaults(); };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [resetDefaults]);
 
   const tick = useCallback(async () => {
     const s = stateRef.current, now = Date.now();
@@ -81,11 +86,12 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   const setMode = useCallback((mode: FishAutoMode) => { retryAt.current = 0; setError(''); setState({ ...stateRef.current, mode, ...(mode === 'auto' && stateRef.current.mode !== 'auto' ? { lastRunAt: null } : {}) }); }, [setState]);
   const setHours = useCallback((hours: number) => setState({ ...stateRef.current, hours }), [setState]);
   const setSchedule = useCallback((schedule: FishAutoSchedule) => {
-    saveFishAutoSchedule(schedule);
+    const saved = saveFishAutoSchedule(schedule);
     retryAt.current = 0;
     setError('');
     const current = stateRef.current;
     setState({ ...current, ...schedule, lastRunAt: schedule.mode === 'auto' && current.mode !== 'auto' ? null : current.lastRunAt });
+    return saved;
   }, [setState]);
   const noteManualRun = useCallback(() => { if (stateRef.current.mode === 'auto') setState({ ...stateRef.current, lastRunAt: Date.now() }); }, [setState]);
   return { mode: state.mode, hours: state.hours, nextAt: fishAutoNextAt(state), lastRunAt: state.lastRunAt, error, online: isOnline, waiting, setMode, setHours, setSchedule, noteManualRun, resetDefaults };

@@ -828,6 +828,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     </details>
   </div> : <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>;
   const completeScreening = state.preEntry?.library.rounds.filter(round=>round.workspaceDraft&&round.state==='complete').length ?? 0;
+  const completeFiltering = study.workspaceFilterDraft?.rounds.some(round=>round.state==='complete');
   const completeMonitoring = study.workspaceMonitorDraft?.rounds.filter(round=>round.state==='complete').length ?? 0;
   const [confirmRemove,setConfirmRemove] = useState(false);
   const expandDetectors = (expanded: boolean) => { setDetectorExpanded(expanded); selectAnchor.current = null; resetScroll(); };
@@ -957,7 +958,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       <p>动态筛选运行时显示完成条数与实际扫描进度；暂停或完成后收起进度提示。运行时点击进度、停止后从开始按钮右侧的 ▾ 选择「本轮筛选结果」，可查看全部状态、原因和首次满足时间。组合表随新轮开始更新，手动保存后可在筛选库的时间目录查看。静态过滤与动态筛选的显示和擦除各自独立。</p>
       <p>暂停继续沿用本轮冻结条件；要使用新条件和时限，选「从头重新筛选」。旧的无限时暂停轮次保留，主按钮另开有限时新轮次。保存方案只保存设置；「保存并开始三阶筛选」按新设置从头运行。</p>
       <p>持仓监测按各条记录自己的入场时间、当前方案及各条件的生效范围运行。已完成且条件未变的结果可沿用；要全部重算，从监测按钮右侧的 ▾ 选「从头重新计算」。</p>
-      <p>在「来源」打开各库，勾选记录并导入组合表。表内删除只移除本表记录。手动筛选、监测完成后，可在组合表表头保存到对应库。</p>
+      <p>在「来源」打开各库，勾选记录并导入组合表。表内删除只移除本表记录。静态过滤、手动筛选和持仓监测完成后，可在组合表保存到对应库。</p>
       <p>信号库与图灵杯按信号时间入场，历史鱼按首次能发现的捕捞时刻入场，实时新鱼按实际发现时点入场；动态入选记录改用首次满足时间。图灵杯使用独立离线行情。收益未扣手续费、资金费和滑点；缺数据不计为零收益，重叠探测分组的盈亏不直接相加。</p>
     </></FishQualityManual>
     {open && <div id={contentId} className="mt-2 space-y-2">
@@ -1074,7 +1075,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         </DetectorPicker>}
         <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-1 text-[10.5px] text-muted-foreground" data-testid="quality-selection-scope"><span className="tabular-nums" data-testid="quality-run-scope">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · </>}</span>{outsideHint}<FishQualityInfo label="处理范围说明"><p>开始筛选、开始监测只处理当前表内经月份、探测算法和标的筛选后已勾选的信号，筛选外勾着的这一轮不处理。</p><p className="text-muted-foreground">已勾选 {selectedEntryCount} 次入场。开始时冻结勾选清单，之后调整勾选用于下一轮。</p></FishQualityInfo></div>
       </div>}
-      {state.archiving&&<p role="status" className="text-[11px] text-primary" data-testid="quality-archive-saving">{workspace?'正在处理监测结果…':'正在归档全部运行结果到监测库…保存完成后开始重算。'}</p>}
+      {state.archiving&&<p role="status" className="text-[11px] text-primary" data-testid="quality-archive-saving">{workspace?'正在保存结果…':'正在归档全部运行结果到监测库…保存完成后开始重算。'}</p>}
       {state.entry&&(state.entry.running||state.entry.error)&&<div className="flex items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-entry-progress"><span>入场读数 {state.entry.progress?.done??0}/{state.entry.progress?.total??0}</span>{state.entry.running?<button type="button" className="text-primary hover:underline" onClick={state.entry.cancel}>暂停入场补算</button>:<button type="button" className="text-primary hover:underline" onClick={()=>state.entry?.request(plans.map(p=>p.id),visible.flatMap(qualityTableMembers).map(r=>r.signalId??r.id),true)}>重试入场读数</button>}{state.entry.error&&<span className="text-destructive">{state.entry.error}</span>}</div>}
       {!archiveView&&postExitPlanIds.length>0&&<div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground" data-testid="quality-post-exit-progress"><span>卖后反事实 · 以实际最终卖出价为基准 · 0.5 / 1 / 2 / 4 / 6h</span>{state.postExit?.running?<><span role="status">补算 {state.postExit.progress?.done??0}/{state.postExit.progress?.total??0}</span><button type="button" className="text-primary hover:underline" onClick={state.postExit.cancel}>暂停反事实</button></>:<button type="button" className="text-primary hover:underline" onClick={()=>requestObservations(true)}>补算 / 重试反事实</button>}{state.postExit?.error&&<span className="text-destructive">{state.postExit.error}</span>}</div>}
       {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
@@ -1091,6 +1092,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             title="固定当前筛选内已勾选的记录，单独查看和处理这一批" onClick={lockSelection}>
             <Lock aria-hidden className="h-3 w-3"/>锁定所选
           </button>}
+          {workspace && completeFiltering && <button type="button" className={button} disabled={staticRunning||!!state.archiving} onClick={()=>void workspace.saveFiltering().then(ok=>{if(ok)toast.success('过滤结果已保存到过滤库');})}><Save aria-hidden className="h-3 w-3"/>保存到过滤库</button>}
           {workspace && completeScreening > 0 && <button type="button" className={button} disabled={!!state.preEntry?.savingWorkspaceDraft} onClick={()=>void state.preEntry?.saveWorkspaceScreening?.().then(ok=>{if(ok)toast.success('筛选结果已保存到筛选库');})}><Save aria-hidden className="h-3 w-3"/>保存到筛选库</button>}
           {workspace && completeMonitoring > 0 && <button type="button" className={button} disabled={running||!!state.archiving} onClick={()=>void workspace.saveMonitoring().then(ok=>{if(ok)toast.success('监测结果已保存到监测库');})}><Save aria-hidden className="h-3 w-3"/>保存到监测库</button>}
           {workspace && <Popover open={confirmRemove} onOpenChange={setConfirmRemove}><PopoverTrigger asChild>

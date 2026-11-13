@@ -16,6 +16,20 @@ it('defaults to 1 hour, sends the custom hours to manual capture and restores th
  expect(readFishLookback()).toBe(10);fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(props.onStart).toHaveBeenCalled());
  expect(props.onStart.mock.calls[0][0]).toMatchObject({lookbackHours:10});h.unmount();render(<FishPanel {...props}/>);expect(screen.getByLabelText('扫描覆盖时间（小时）')).toHaveValue(10);
 });
+it('persists a fixed five-minute coverage entered with the unit picker', async () => {
+ const view=render(<FishPanel {...props}/>);
+ fireEvent.change(screen.getByRole('combobox',{name:'扫描覆盖时间单位'}),{target:{value:'60'}});
+ const coverage=screen.getByRole('spinbutton',{name:'扫描覆盖时间（分钟）'});
+ expect(coverage).toHaveValue(60);
+ fireEvent.change(coverage,{target:{value:'5'}});
+ fireEvent.blur(coverage);
+ expect(readFishLookback()).toBe(5/60);
+ view.unmount();
+ render(<FishPanel {...props}/>);
+ expect(screen.getByRole('spinbutton',{name:'扫描覆盖时间（分钟）'})).toHaveValue(5);
+ fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+ await waitFor(()=>expect(props.onStart).toHaveBeenCalledWith(expect.objectContaining({lookbackHours:5/60})));
+});
 it('shows the frozen range of the previous round and prevents invalid or mid-run edits',()=>{
  const progress={...initialFishProgress(),lookbackHours:12,status:'complete' as const};const h=render(<FishPanel {...props} progress={progress}/>);
  fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'2'}});fireEvent.blur(screen.getByLabelText('扫描覆盖时间（小时）'));

@@ -11,7 +11,7 @@ import { FISH_CAPTURE_TURNOVER_KEY, readCaptureTurnoverSettings, validateFishTur
 
 export async function persistFishAccountPreference(userId: string, key: string, value: unknown) {
   const storageKey = getUserPrefix(userId) + key;
-  writePersistedStateRaw(storageKey, JSON.stringify(value));
+  const savedLocally = writePersistedStateRaw(storageKey, JSON.stringify(value));
   notifyPersistedStateHydrated(storageKey);
   let timer: ReturnType<typeof setTimeout>;
   const confirmed = await Promise.race([
@@ -19,7 +19,7 @@ export async function persistFishAccountPreference(userId: string, key: string, 
     new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 15_000); }),
   ]).finally(() => clearTimeout(timer));
   if (!confirmed) {
-    throw new Error('参数已暂存本机，云端尚未确认；请联网后再次保存，确认后再换设备');
+    throw new Error(savedLocally ? '参数已暂存本机，云端尚未确认；请联网后再次保存，确认后再换设备' : '参数暂存在此页面，本机和云端都未确认保存，请保留页面并重试');
   }
 }
 
@@ -94,11 +94,12 @@ export function useFishAccountSettings(refreshOnFocus = false) {
   }, [userId]);
   const save = useCallback((value: FishAccountSettings) => persist(FISH_ACCOUNT_SETTINGS_KEY, value), [persist]);
   const saveLookback = useCallback(async (value: unknown, followsInterval = false) => {
-    const hours = saveFishLookback(value);
+    const hours = saveFishLookback(value, !userId);
     const policy = { hours, followsInterval };
     if (!userId) {
-      writePersistedStateRaw(policyKey, JSON.stringify(policy));
+      const saved = writePersistedStateRaw(policyKey, JSON.stringify(policy));
       notifyPersistedStateHydrated(policyKey);
+      if (!saved) throw new Error('浏览器暂时无法保存扫描覆盖时间，请保留页面并重试');
     } else {
       const latest = readFishAccountSettings(fullKey);
       if (latest) await save({ ...latest, lookbackHours: hours, lookbackFollowsInterval: followsInterval });

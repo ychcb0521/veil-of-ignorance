@@ -21,6 +21,45 @@ const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   act(() => { void h.result.current.start(); });
 };
+it('keeps generated readings in the workspace until explicitly saving a frozen filtering round', async () => {
+  const { signalReadingKey } = await import('@/lib/fish/qualitySignalReadings');
+  const { filterDirectoryStudy } = await import('@/lib/fish/qualityLibraryDirectory');
+  const initial = importQualityLibrary(newQualityStudy(T), [signal], T);
+  initial.selectedRowIds = qualityDisplayRows(initial).map(row => row.id);
+  initial.workspaceUpdatedAt = T;
+  storage.load.mockResolvedValue({study:initial});
+  const run = vi.fn(async (options:QualityRunOptions) => {
+    for (const {metric, rows} of options.signalReadingBatches ?? []) for (const row of rows) {
+      options.onSignalReading?.({key:signalReadingKey(row,metric),value:2.75,at:T});
+    }
+  });
+  const view = renderHook(() => useFishQuality('workspace-filtering',[],run,[],[],true,[],true));
+  await flush();
+  const metric = {id:'guard-distance',label:'距 DBL-5 防守线',metric:'结果',snapshot:signal.fish!};
+  await act(async () => { await view.result.current.saveStaticSettings([metric],[]); });
+  await act(async () => { await view.result.current.runStaticSettings(); });
+  await flush(600);
+  const draft = view.result.current.study.workspaceFilterDraft!;
+  expect(draft.rounds).toHaveLength(1);
+  expect(draft.rounds[0]).toMatchObject({state:'complete',filterSnapshot:{signalReadings:[expect.objectContaining({value:2.75})]}});
+  expect(view.result.current.study.filterLibrary).toBeUndefined();
+  expect(storage.save.mock.calls.every(([,saved]) => !saved.filterLibrary?.rounds.length)).toBe(true);
+  expect(storage.save.mock.calls.at(-1)![1].workspaceFilterDraft.rounds[0].id).toBe(draft.rounds[0].id);
+  storage.load.mockResolvedValue({study:storage.save.mock.calls.at(-1)![1]});
+  view.unmount();
+
+  const reopened = renderHook(() => useFishQuality('workspace-filtering',[],run,[],[],true,[],true));
+  await flush();
+  expect(reopened.result.current.study.filterLibrary).toBeUndefined();
+  expect(reopened.result.current.study.workspaceFilterDraft?.rounds[0].id).toBe(draft.rounds[0].id);
+  await act(async () => { expect(await reopened.result.current.workspace!.saveFiltering()).toBe(true); });
+  const saved = reopened.result.current.study.filterLibrary!;
+  expect(saved.rounds.map(round=>round.id)).toEqual([draft.rounds[0].id]);
+  expect(filterDirectoryStudy(saved,saved.rounds[0]).signalReadings?.[0].value).toBe(2.75);
+  expect(reopened.result.current.study.workspaceFilterDraft).toBeUndefined();
+  await act(async () => { expect(await reopened.result.current.workspace!.saveFiltering()).toBe(false); });
+});
+
 it('keeps one slow autosave in flight and saves the latest edit after it finishes', async () => {
   let release!: (ok: boolean) => void;
   storage.save.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
