@@ -3,6 +3,7 @@ import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import { afterEach,expect,it } from 'vitest';
 import { useState } from 'react';
 import { additionDraft,parseAdditionDraft,parseAdditionSellStages,FishQualityAdditionEditor,GuardLineNotes,BreakevenFloorNotes } from '../FishQualityAdditionEditor';
+import { additionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
@@ -286,6 +287,26 @@ it('restores the S/T/K position: indicator trigger, entry distance T ≥ S + n A
 it('defaults new drafts to optional-mirror execution while explicitly preserving legacy drafts and templates',()=>{
  const old=defaultQualityAddition(),before=JSON.stringify(old);expect(additionDraft(old).positionVersion).toBeUndefined();expect(additionDraft().positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);
  render(<Editor/>);expect(screen.getByLabelText('加仓执行口径')).toHaveValue('legacy-mirror');fireEvent.change(screen.getByLabelText('加仓执行口径'),{target:{value:HOLDING_LEDGER_ADDITION_VERSION}});const saved=save();expect(saved.positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);expect(additionDraft(saved).positionVersion).toBe(HOLDING_LEDGER_ADDITION_VERSION);expect(JSON.stringify(old)).toBe(before);
+});
+
+it('saves separate hourly windows for the same indicator and every addition round',()=>{
+ render(<Editor/>);
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ const add=screen.getByRole('button',{name:/添加递增条件/});
+ fireEvent.click(add);fireEvent.click(add);
+ fireEvent.change(screen.getByLabelText('递增加仓算法 2'),{target:{value:'state:avg_state_2'}});
+ const hours=(i:number)=>screen.getByRole('spinbutton',{name:`递增加仓算法 ${i} 均值窗口（小时）`});
+ fireEvent.change(hours(1),{target:{value:'1'}});
+ fireEvent.change(hours(2),{target:{value:'24'}});
+ tab(2);
+ fireEvent.click(add);
+ fireEvent.change(hours(1),{target:{value:'12'}});
+ const saved=save() as QualityAdditionRule;
+ expect(saved.rounds?.map(r=>r.indicatorIncrease?.metrics.map(m=>additionMetricTime(m.snapshot).window))).toEqual([['1','24'],['12'],undefined]);
+ expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+ tab(1);
+ expect(hours(1)).toHaveValue(1);
+ expect(hours(2)).toHaveValue(24);
 });
 
 it('defaults the first increase metric to State S avg2, saves multiple choices per round and reopens frozen selections',()=>{

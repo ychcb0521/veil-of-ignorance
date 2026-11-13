@@ -5,7 +5,7 @@ import { compileFeatureFormula, BUILTIN_FEATURES } from '@/lib/deepDig/features'
 import type { FishSnapshot } from './algorithm';
 import type { QualityBuyFilter } from './quality';
 import type { QualityHoldingVeto } from './qualityVeto';
-/** Two-stage comparisons use one entry per fish and a common set of sell experiments. */
+import { hasAdditionMetricTime } from './qualityAdditionMetric';
 import { STATE_DEF, CDA_DEF, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { activeBuyFilters, anyBuyFilters, hasQualityExit, qualityComparisonRows, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
@@ -95,6 +95,7 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
 export function syncQualityThresholdDefinitions(study: FishQualityStudy, definitions: readonly DeepDigFeatureDef[]): FishQualityStudy {
   let changed = false;
   const snapshot = (old: FishSnapshot, metric: string, averages = false): FishSnapshot => {
+    if (hasAdditionMetricTime(old)) return old;
     const def = definitions.find(d => d.id === old.featureId) ?? BUILTIN_FEATURES.find(d => d.id === old.featureId);
     if (!def) return old;
     const key = definitionKey({ ...executableThresholdDef(def, metric, averages), interval: '5m' });

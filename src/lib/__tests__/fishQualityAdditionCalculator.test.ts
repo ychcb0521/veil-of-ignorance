@@ -1,10 +1,13 @@
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from '@/lib/fish/qualityHoldingLedger';
 import {findCalculatorAdditions} from '@/lib/fish/qualityAdditionCalculator';
 import {positionGeometricMultiple} from '@/lib/campaignGeometricMetrics';
+import {additionMetricBaseDefinition, additionMetricTimeFields, withAdditionMetricTime} from '@/lib/fish/qualityAdditionMetric';
+import {syncQualityThresholdDefinitions} from '@/lib/fish/qualityComparison';
+import {displayAverage} from '@/lib/avgHighlight';
 import {makeQualityHoldingVeto} from '@/lib/fish/qualityFilters';
 import {evaluateCampaignAddSizing} from '@/lib/campaignAddSizingCheck';
 import {describe,it,expect} from 'vitest';
-import {evaluateQualitySample,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
+import {evaluateQualitySample,newQualityStudy,qualityDefinition,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
 import {definitionKey} from '@/lib/deepDig/features';
 import {ADDITION_INDICATOR_INCREASE_VERSION, defaultQualityAddition, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
@@ -308,6 +311,55 @@ it('compares every metric with the last executed purchase and retains the same b
  expect((await run(restored,load,22)).additionFills).toEqual(result.additionFills);
  restored.addition.indicatorIncrease.metrics[0].snapshot.definitionKey=definitionKey({...def,formula:'raw = C * 2',interval:'5m'});
  expect(planVersionChanges(restored)).toEqual(expect.arrayContaining([expect.objectContaining({key:'addition-increase-1'})]));
+});
+
+it('uses the selected weighted window in actual addition checks and independently in the backup branch', async () => {
+ const indicator={...def,id:'state',formula:'state = C\navg_state_2 = avg(state, 24)',interval:'5m' as const};
+ const base={id:'growth',label:'状态 S avg₂',metric:'avg_state_2',direction:'>' as const,threshold:0,enabled:true,
+   snapshot:{...snapshot,featureId:'state',interval:'5m',definitionKey:definitionKey(indicator)}};
+ const short=withAdditionMetricTime(base,{window:'1'}),long=withAdditionMetricTime(base,{window:'24'});
+ const g=group();
+ const round=(metric:AdditionIncreaseMetric)=>({source:'custom' as const,stricterPct:10,condition:g.addition!.condition,
+  indicatorIncrease:{version:ADDITION_INDICATOR_INCREASE_VERSION,metrics:[metric]}});
+ const configure=(metric:AdditionIncreaseMetric,backup?:AdditionIncreaseMetric)=>freezeQualityPlan({...g,addition:{
+  ...g.addition!,...round(metric),positionVersion:HOLDING_LEDGER_ADDITION_VERSION,maxRounds:1,rounds:[round(metric)],
+  ...(backup?{alternativeRounds:[round(backup)]}:{}),
+ }});
+ const priceAt=(at:number)=>at===T-60*M?1000:at===T?15:10;
+ const load:FishReconstructionLoader=async (_row,from,to,plan)=>Array.from({length:(to-from)/plan.step},(_,i)=>{
+  const at=from+i*plan.step,minute=(at-T)/M;
+  if(plan.step===M)return bar(at,100+Math.max(0,minute)*2,1);
+  if(plan.def.id==='add-atr-prices')return bar(at);
+  return bar(at,priceAt(at),1);
+ });
+ const fast=configure(short),slow=configure(long),branched=configure(short,long);
+ expect(fast.frozenVersions).toEqual(expect.arrayContaining([expect.objectContaining({key:'addition-indicator-time',version:expect.stringContaining('addition-indicator-time-v1')})]));
+ expect(planVersionChanges(JSON.parse(JSON.stringify(fast)))).toEqual([]);
+ const configured={...fast, sellStages:[{afterAdditions:1,label:short.label,metric:short.metric,snapshot:short.snapshot,rule:{metric:short.metric,direction:'<' as const,threshold:2}}]};
+ expect(syncQualityThresholdDefinitions({...newQualityStudy(),sellPlans:[configured]},[indicator]).sellPlans?.[0].sellStages).toEqual(configured.sellStages);
+ const shortRun=await run(fast,load,8),longRun=await run(slow,load,8),branchRun=await run(branched,load,8);
+ expect(shortRun.additionFills??[]).toHaveLength(0);
+ expect(longRun.additionFills).toHaveLength(1);
+ expect(branchRun.additionFills).toMatchObject([{at:T+5*M,lane:'attack'}]);
+ const values=Array.from({length:290},(_,i)=>priceAt(T+(i-288)*5*M));
+ const expected=displayAverage(values,24,'avg2');
+ expect(longRun.additionFills?.[0].indicatorIncrease?.[0].previousValue).toBeCloseTo(expected[287],10);
+ expect(longRun.additionFills?.[0].indicatorIncrease?.[0].value).toBeCloseTo(expected[288],10);
+ expect(branchRun.additionFills?.[0].indicatorIncrease).toEqual(longRun.additionFills?.[0].indicatorIncrease);
+ const changed=structuredClone(branched);
+ changed.addition!.alternativeRounds![0].indicatorIncrease!.metrics[0]=short;
+ expect(planVersionChanges(changed)).toEqual(expect.arrayContaining([expect.objectContaining({key:'addition-indicator-time'})]));
+});
+
+it('preserves the account formula and supports clearing custom lookback and half-life', () => {
+ const indicator={...def,formula:'raw = retain(avg(C, avgh), C, prev(C), hl, 48)',avgHours:12,halfLifeHours:6,interval:'5m' as const};
+ const base={id:'growth',label:'读数',metric:'raw',direction:'>' as const,threshold:0,enabled:true,
+   snapshot:{...snapshot,interval:'5m' as const,definitionKey:definitionKey(indicator)}};
+ expect(additionMetricTimeFields(indicator.formula,'raw')).toEqual(['avgh','hl']);
+ const timed=withAdditionMetricTime(base,{avgh:'1',hl:'24'});
+ expect(qualityDefinition(timed.snapshot)).toMatchObject({formula:indicator.formula,avgHours:1,halfLifeHours:24});
+ expect(additionMetricBaseDefinition(timed.snapshot)).toMatchObject({formula:indicator.formula,avgHours:12,halfLifeHours:6});
+ expect(withAdditionMetricTime(timed,{})).toMatchObject({label:base.label,snapshot:base.snapshot});
 });
 
 it('lets the qualified alternate candidate win when the primary fails the increase check', async () => {

@@ -1,3 +1,4 @@
+import { ADDITION_INDICATOR_TIME_VERSION, hasAdditionMetricTime } from './qualityAdditionMetric';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
@@ -104,6 +105,16 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     if(doubleDrops.length)add('addition-support-quality','加仓否决','二次急跌未收复前高',DOUBLE_DROP_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(doubleDrops)), '首次急跌前高与 ATR 固定；连续下跌只计一次，反弹脱离急跌区后再跌计第二次；5 分钟收盘收复前高才恢复。原箱体和防守线输出不变。');
     if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
     const rounds = a.rounds?.length ? a.rounds : [a];
+    const timed = [
+      ...[...rounds, ...(a.alternativeRounds ?? [])].flatMap(round => [
+        ...(round.source === 'custom' ? qualityAdditionConditions(round) : qualityAdditionPrerequisites(round)),
+        ...(round.indicatorIncrease?.metrics ?? []),
+      ]),
+      ...(plan.sellStages ?? []),
+    ].filter(metric => hasAdditionMetricTime(metric.snapshot));
+    if (timed.length) add('addition-indicator-time', '加仓指标时间', [...new Set(timed.map(metric => metric.label))].join('、'),
+      ADDITION_INDICATOR_TIME_VERSION + ' · 参数 #' + shortFishHash(JSON.stringify(timed.map(metric => [metric.metric, metric.snapshot.definitionKey]))),
+      '在单条条件中冻结公式时间参数。avg₂ 使用近到远 4∶3∶2∶1 四段加权，递增比较的两个时点使用同一份公式。');
     // 加仓引擎本身（平衡公式、轮次、门槛、否决、减仓等），不含箱体——箱体按轮单列
     add('addition', '加仓规则', `最多 ${a.maxRounds ?? rounds.length} 次`, join([...versionTags(additionIdentity({ ...a, structure: undefined, rounds: a.rounds?.map(r => ({ ...r, structure: undefined })) })), ...versionTags(additionMirrorIdentity(a, plan.mirrorTakeProfit))]),
       a.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'通用持仓账：Q×K−剩余成本＋已实现净盈亏＝新增币数×(T−K)；镜像可选，实际成交后才计入账本':'镜像止盈后按平衡公式 Q×(K−S)+P＝新增币数×(T−K) 定量，碰到 K 卖出');

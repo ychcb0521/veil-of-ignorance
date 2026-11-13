@@ -260,12 +260,12 @@ function parseRouterMonitorDraft(plan: QualityGroup, draft: MonitorDraft, defini
   if (same(draft.addition, original.addition)) { parsed.addition = plan.addition; parsed.sellStages = plan.sellStages; return parsed; }
   if (plan.addition && parsed.addition) {
     const restoreAdditionField=<K extends keyof NonNullable<QualityGroup['addition']>>(key:K)=>{parsed.addition![key]=plan.addition![key];};
-    const roundKeys = Object.keys(original.addition.otherRounds[0]).filter(k => k !== 'sellSwitch');
+    const roundKeys = Object.keys({ ...additionDraft().otherRounds[0], time: undefined, savedCondition: undefined }).filter(k => k !== 'sellSwitch');
     const roundDraftAt = (d: MonitorDraft, i: number) => { const value = i ? d.addition.otherRounds[i - 1] : d.addition; return value ? Object.fromEntries(roundKeys.map(k => [k, value[k]])) : undefined; };
     const oldFirst = plan.addition.rounds?.[0];
     if (oldFirst && same(roundDraftAt(draft, 0), roundDraftAt(original, 0))) {
       // Preserve the first-round fields duplicated on the root addition rule as well.
-      for (const key of ['source','structure','stricterPct','condition','conditions','prerequisites','minGainPct','entryBufferAtr','supportOffsetAtr','entryDistanceAtr','gainBasis','entryVetoes','detectorPrerequisite'] as const) {
+      for (const key of ['source','structure','stricterPct','condition','conditions','prerequisites','indicatorIncrease','minGainPct','entryBufferAtr','supportOffsetAtr','entryDistanceAtr','gainBasis','entryVetoes','detectorPrerequisite'] as const) {
         if (plan.addition[key] === undefined) delete parsed.addition[key]; else restoreAdditionField(key);
       }
     }
