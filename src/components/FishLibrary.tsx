@@ -57,6 +57,16 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const isCabin = title === '鱼舱' && isSection;
   const cabin = useMemo(() => isCabin ? groupFishCabin(p.signals) : undefined, [isCabin, p.signals]);
   const displaySignals = useMemo(() => cabin?.map(row => row.signal) ?? p.signals, [cabin, p.signals]);
+  const soldSignalIds = useMemo(() => {
+    const ids = new Set<string>();
+    const alerts = p.cdaAlerts;
+    if (p.collapseSoldRows && alerts?.size) {
+      for (const row of displaySignals) {
+        if (row.preEntryMonitor && alerts.has(row.preEntryMonitor.recordId)) ids.add(row.id);
+      }
+    }
+    return ids;
+  }, [displaySignals, p.collapseSoldRows, p.cdaAlerts]);
   const cabinRows = useMemo(() => new Map(cabin?.map(row => [row.signal.id, row])), [cabin]);
   const selectedKey = useCallback((signal: (typeof p.signals)[number]) => isCabin ? signalDedupKey(signal) : signal.id, [isCabin]);
   const selectedRows = useMemo(() => displaySignals.filter(signal => selected.has(selectedKey(signal))), [displaySignals, selected, selectedKey]);
@@ -173,14 +183,13 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     return sorted.map(s => actual.get(s.id)!).filter(s => (!algorithm || rowAlgorithmTypes(s).includes(algorithm)) && (!month || signalMonthKey(s.timeMs) === month) && (!q || s.symbol.toUpperCase().includes(q)));
   }, [displaySignals, rowAlgorithmTypes, frozen, resetKey, query, month, sortKey, sortDir, algorithm]);
   const { currentRows, soldRows } = useMemo(() => {
-    if (!p.collapseSoldRows || !p.cdaAlerts?.size) return { currentRows: rows, soldRows: [] };
+    if (!soldSignalIds.size) return { currentRows: rows, soldRows: [] };
     const currentRows: typeof rows = [], soldRows: typeof rows = [];
     for (const row of rows) {
-      const sold = row.preEntryMonitor && p.cdaAlerts.has(row.preEntryMonitor.recordId);
-      (sold ? soldRows : currentRows).push(row);
+      (soldSignalIds.has(row.id) ? soldRows : currentRows).push(row);
     }
     return { currentRows, soldRows };
-  }, [rows, p.collapseSoldRows, p.cdaAlerts]);
+  }, [rows, soldSignalIds]);
   const toggleSort = (key: FishSortKey) => {
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir(key === 'symbol' || key === 'algorithm' ? 'asc' : 'desc'); }
@@ -203,7 +212,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     <span className="flex items-center gap-0.5">
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={isSection ? fishSectionHeading : p.level === 'nested' ? fishNestedHeading : fishSubHeading}>
       {p.title === '新鱼' || p.showScreeningTime ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
-      {title !== '鱼舱' && <FishCount n={displaySignals.length} compact={p.level === 'nested'}/>}
+      {title !== '鱼舱' && <FishCount n={displaySignals.length - soldSignalIds.size} compact={p.level === 'nested'}/>}
       <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}
