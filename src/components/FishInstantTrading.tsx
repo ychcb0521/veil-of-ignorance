@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
-import { Pause, Play, Settings2, Zap } from 'lucide-react';
+import { Ellipsis, Pause, Play, Settings2, Zap } from 'lucide-react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { instantMonitorTemplateIssue } from '@/lib/fish/instantMonitorSettings';
 import { activeQualityPlanTemplates } from '@/lib/fish/qualityPlanTemplates';
 import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
 import { FishPopoverContent } from './FishPopoverContent';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
-import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySettingsAction } from './FishQualityModule';
+import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from './FishQualityModule';
 import { Popover, PopoverTrigger } from './ui/popover';
 
 function HoldingTemplateSettings({ state, done }: { state: FishQualityState; done: () => void }) {
@@ -53,10 +53,14 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
   </div>;
 }
 
+const settingsItem = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] outline-none hover:bg-muted focus-visible:bg-muted disabled:opacity-40';
+const focusSettings = (panel: HTMLDivElement | null) => panel?.focus({ preventScroll: true });
+
 export function FishInstantTrading({ state, children }: { state: FishQualityState; children: ReactNode }) {
-  const [dynamicOpen, setDynamicOpen] = useState(false);
-  const [holdingOpen, setHoldingOpen] = useState(false);
+  const [settingsView, setSettingsView] = useState<'menu' | 'before' | 'after' | null>(null);
   const automatic = state.automaticScreening, cda = state.cdaTracking;
+  const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : '即时交易设置';
+  const closeSettings = () => setSettingsView(null);
   const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
   const pending = automatic?.pending ?? 0;
   const screeningStatus = screening ? '筛选中' : automatic?.paused ? '已暂停' : pending ? `待筛选 ${pending} 条` : '空闲';
@@ -74,19 +78,33 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
       onClick={() => automatic?.setAutoPaused(!automatic.paused)}>
       {automatic?.paused ? <><Play className="h-3 w-3"/>继续筛选</> : <><Pause className="h-3 w-3"/>暂停筛选</>}
     </button>
-    <Popover open={dynamicOpen} onOpenChange={setDynamicOpen}>
-      <PopoverTrigger asChild><button type="button" className={qualitySettingsAction} disabled={!state.ready || !state.preEntry?.ready || !automatic?.saveSettings}
-        title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'}><Settings2 className="h-3 w-3"/>买前设置</button></PopoverTrigger>
-      <FishPopoverContent align="start" collisionPadding={12} aria-label="买前设置" className="fish-condition-settings screening-settings-popover">
-        {automatic?.saveSettings && <FishPreEntrySettings state={state} selectedCount={0} done={() => setDynamicOpen(false)}
-          automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>}
-      </FishPopoverContent>
-    </Popover>
-    <Popover open={holdingOpen} onOpenChange={setHoldingOpen}>
-      <PopoverTrigger asChild><button type="button" className={qualitySettingsAction} disabled={!state.ready || !state.instantMonitor}
-        title={state.instantMonitor?.settings?.name ?? '即时交易默认规则'}><Settings2 className="h-3 w-3"/>买后设置</button></PopoverTrigger>
-      <FishPopoverContent align="start" collisionPadding={12} aria-label="买后设置" className="w-80 max-w-[calc(100vw-24px)] p-0">
-        <HoldingTemplateSettings state={state} done={() => setHoldingOpen(false)}/>
+    <Popover open={settingsView !== null} onOpenChange={open => setSettingsView(open ? 'menu' : null)}>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label="即时交易设置" title="即时交易设置"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring">
+          <Ellipsis aria-hidden className="h-4 w-4"/>
+        </button>
+      </PopoverTrigger>
+      <FishPopoverContent align="start" collisionPadding={12} aria-label={settingsLabel}
+        className={settingsView === 'before' ? 'fish-condition-settings screening-settings-popover'
+          : settingsView === 'after' ? 'w-80 max-w-[calc(100vw-24px)] p-0' : 'w-32 p-1'}>
+        {settingsView === 'menu' && <>
+          <button type="button" className={settingsItem} disabled={!state.ready || !state.preEntry?.ready || !automatic?.saveSettings}
+            title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'} onClick={() => setSettingsView('before')}>
+            <Settings2 aria-hidden className="h-3 w-3"/>买前设置
+          </button>
+          <button type="button" className={settingsItem} disabled={!state.ready || !state.instantMonitor}
+            title={state.instantMonitor?.settings?.name ?? '即时交易默认规则'} onClick={() => setSettingsView('after')}>
+            <Settings2 aria-hidden className="h-3 w-3"/>买后设置
+          </button>
+        </>}
+        {settingsView === 'before' && automatic?.saveSettings && <div ref={focusSettings} tabIndex={-1} className="outline-none">
+          <FishPreEntrySettings state={state} selectedCount={0} done={closeSettings}
+            automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>
+        </div>}
+        {settingsView === 'after' && <div ref={focusSettings} tabIndex={-1} className="outline-none">
+          <HoldingTemplateSettings state={state} done={closeSettings}/>
+        </div>}
       </FishPopoverContent>
     </Popover>
   </FishQualityModule>;
