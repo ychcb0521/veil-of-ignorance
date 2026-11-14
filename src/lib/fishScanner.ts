@@ -285,8 +285,11 @@ export class FishScanner {
   }
 
   async buildInstantCampaign(input: InstantCampaignInput, signal: AbortSignal) {
-    const { load } = await this.qualityMarket([input.source.symbol], signal);
-    return freezeInstantCampaign(input, load, signal);
+    let market: ReturnType<FishScanner['qualityMarket']> | undefined;
+    return freezeInstantCampaign(input, async (...args) => {
+      market ??= this.qualityMarket([input.source.symbol], signal);
+      return (await market).load(...args);
+    }, signal);
   }
 
   async readInstantCampaignCandles(source: InstantCampaignInput['source'], interval: import('@/lib/deepRsa/marketData').ResearchInterval,

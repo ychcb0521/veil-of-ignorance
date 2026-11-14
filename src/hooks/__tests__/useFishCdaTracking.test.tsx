@@ -66,11 +66,11 @@ it('watches newly admitted automatic fish after enabling, survives reload and re
   expect(readPageScreenedCda).not.toHaveBeenCalled();
   await act(()=>vi.advanceTimersByTimeAsync(2001));
   expect(vi.mocked(readPageScreenedCda).mock.calls[0][0].map(task=>task.id)).toEqual(['NEW']);
-  expect(sendCdaAlert.mock.calls[0].slice(2,4)).toEqual([{at:T+5*M,value:-11.75},['a@example.test','b@example.test']]);
-  expect(view.result.current.alerts.get('NEW')).toEqual({at:T+5*M,value:-11.75});
+  expect(sendCdaAlert.mock.calls[0].slice(2,4)).toEqual([expect.objectContaining({at:T+5*M,value:-11.75}),['a@example.test','b@example.test']]);
+  expect(view.result.current.alerts.get('NEW')).toEqual({at:T+5*M,value:-11.75,observedAt:T+5*M+2000});
   view.unmount();view=mount();
   await act(()=>vi.advanceTimersByTimeAsync(9000));
-  expect(sendCdaAlert.mock.calls[1].slice(2,4)).toEqual([{at:T+5*M,value:-11.75},['b@example.test']]);
+  expect(sendCdaAlert.mock.calls[1].slice(2,4)).toEqual([expect.objectContaining({at:T+5*M,value:-11.75}),['b@example.test']]);
   expect(view.result.current.awaitingMail).toBe(0);
   await act(()=>vi.advanceTimersByTimeAsync(12*M));
   expect(readPageScreenedCda).toHaveBeenCalledOnce();
@@ -79,7 +79,7 @@ it('watches newly admitted automatic fish after enabling, survives reload and re
   view.unmount();view=mount();
   await act(async () => {});
   expect(view.result.current.enabled).toBe(false);
-  expect(view.result.current.alerts.get('NEW')).toEqual({at:T+5*M,value:-11.75});
+  expect(view.result.current.alerts.get('NEW')).toEqual({at:T+5*M,value:-11.75,observedAt:T+5*M+2000});
   expect(view.result.current.alerts.size).toBe(1);
 });
 

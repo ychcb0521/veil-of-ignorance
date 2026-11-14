@@ -57,6 +57,7 @@ import {
 import { CampaignPnlOverviewPanel, type OverviewPanelItem } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { QuietInfo } from '@/components/journal/QuietInfo';
+import { formatInstantCampaignDelay } from '@/lib/fish/instantCampaign';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
 import {
@@ -335,17 +336,19 @@ const OPERATION_TIME_VALUE_CLASS = '-mr-1.5 rounded-[3px] bg-[#F0B90B]/10 px-1.5
  * 七行正好与盈亏概览每栏的七行逐行齐平。
  */
 function buildCampaignMetadataItems(
-  campaign: Pick<TradeCampaign, 'opened_at' | 'closed_at'>,
+  campaign: Pick<TradeCampaign, 'opened_at' | 'closed_at' | 'comparison'>,
   objectiveOperationTime: number | null,
   metrics: readonly OverviewPanelItem[],
 ): OverviewPanelItem[] {
   return [
     {
       key: 'operationTime', label: '操作时间', testId: 'campaign-meta-operation-time',
-      value: objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, 16),
+      value: objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, campaign.comparison?.instant ? 19 : 16),
       valueClassName: OPERATION_TIME_VALUE_CLASS,
       help: (
-        <><p>这场战役真实操作发生的时刻（北京时间），与列表卡片、排序用的是同一个数。</p><p>它是客观的操作时间，不是时光机里 K 线走到的模拟时间；读不出时写「—」。</p></>
+        campaign.comparison?.instant
+          ? <p>新战役按程序确认模拟平仓的时刻记录（北京时间）。历史战役沿用原记录的操作时间。模拟成交和归档时间见上方 ⓘ。</p>
+          : <><p>这场战役真实操作发生的时刻（北京时间），与列表卡片、排序用的是同一个数。</p><p>它是客观的操作时间，不是时光机里 K 线走到的模拟时间；读不出时写「—」。</p></>
       ),
     },
     { key: 'openedAt', label: '开始', value: fmtMdHm(campaign.opened_at), help: <p>战役开始的 K 线（模拟）时间。</p> },
@@ -946,7 +949,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const displayKlinesNeeded = !batchExport || batchExport.options.sections.chart !== false;
   const nav = useNavigate();
   const location = useLocation();
-  const detailSearch = location.search || (isInstantCampaignId(id) ? '?section=instant' : '');
+  const detailParams = new URLSearchParams(location.search);
+  if (!detailParams.has('section')) detailParams.set('section', isInstantCampaignId(id) ? 'instant' : paperCampaign ? 'quality' : 'personal');
+  const detailSearch = '?' + detailParams.toString();
   const { user, profile } = useAuth();
   const viewerUserId = user?.id ?? null;
   const campaignAccountName = useMemo(
@@ -1221,7 +1226,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     let queued = false;
     let fingerprint = '';
     const reconcile = (campaign: TradeCampaign) => JSON.stringify([campaign.closed_at, campaign.updated_at,
-      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.manual, campaign.actual_evolution]);
+      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.timing, campaign.comparison?.instant?.manual, campaign.actual_evolution]);
     const reload = async () => {
       if (lifetime.signal.aborted) return;
       if (running) { queued = true; return; }
@@ -2893,12 +2898,24 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
         {campaign.comparison?.instant && <div data-testid="instant-campaign-execution" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border/70 bg-card px-3 py-2 text-[11px]">
-          <span className="font-medium">{instantOpen ? '持仓中' : campaign.comparison.sellLabel ?? 'CDA 卖出'}</span>
-          {campaign.comparison.instant.sellEvidence && <span>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</span>}
+          <span className="font-medium">{campaign.comparison.instant.settlementPending ? '已平仓 · 待归档' : instantOpen ? '持仓中' : '已平仓'}</span>
+          {!campaign.comparison.sellEvidence && campaign.comparison.instant.sellEvidence &&
+            <span>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</span>}
           {campaign.comparison.instant.cdaValue != null && <span>CDA 收盘读数 {campaign.comparison.instant.cdaValue}</span>}
           <span>保证金 {campaign.comparison.instant.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</span>
           {instantOpen ? <InstantOpenCampaignQuote key={campaign.id} source={campaign.comparison.instant.source} position={instantOpen}/>
-            : <span className="ml-auto font-mono text-muted-foreground">{formatBeijingTime(campaign.comparison.valuedAt)}</span>}
+            : <span className="ml-auto flex items-center gap-1 font-mono text-muted-foreground">
+              模拟成交 {formatBeijingTime(campaign.closed_at)}
+              <QuietInfo label="成交与归档时间">
+                {campaign.comparison.instant.timing?.observedAt != null
+                  ? <p>操作时间 {formatBeijingTime(campaign.comparison.instant.timing.observedAt)} · {formatInstantCampaignDelay(campaign.closed_at, campaign.comparison.instant.timing.observedAt, '成交后')}</p>
+                  : <p>这笔旧战役未记录程序确认平仓的实际时刻。</p>}
+                {campaign.comparison.instant.timing?.marketThrough != null &&
+                  <p>监测行情截止 {formatBeijingTime(campaign.comparison.instant.timing.marketThrough)}（K 线时刻）</p>}
+                {campaign.comparison.instant.timing?.archivedAt != null &&
+                  <p>本机归档 {formatBeijingTime(campaign.comparison.instant.timing.archivedAt)} · {formatInstantCampaignDelay(campaign.closed_at, campaign.comparison.instant.timing.archivedAt, '成交后')}</p>}
+              </QuietInfo>
+            </span>}
         </div>}
         {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} repair={campaign.comparison.repair} />}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}

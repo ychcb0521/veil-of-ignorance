@@ -2086,6 +2086,7 @@ const CampaignCard = memo(function CampaignCard({
               </button>
             </>
           ) : null}
+          {campaign.comparison?.instant?.settlementPending && <span className="text-[10px] text-muted-foreground">待归档</span>}
           {/* 【用户要求】「盈利结束」「亏损结束」不再写出来：左侧色条与圆点的颜色已经表明（绿 / 红，进行中是黄）。
               打平结束、已放弃、计划中三种都是灰色，颜色分不出，仍写字。 */}
           {!STATUS_SHOWN_BY_COLOR.has(campaign.status) && (
@@ -4574,7 +4575,7 @@ export default function JournalCampaignsPage() {
           onSectionChange={next => {
             const params = new URLSearchParams(location.search);
             params.delete('sell'); params.delete('detector'); params.delete('category');
-            if (next === 'personal') params.delete('section'); else params.set('section', next);
+            params.set('section', next);
             nav({ pathname: '/journal/campaigns', search: params.toString() });
           }}
           monitoring={{ sellFilter, detectorFilter, categoryFilter, plans: comparisonPlans, detectors: comparisonDetectors,

@@ -60,7 +60,8 @@ const MIRROR_ONLY = ['BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓',
 const MIRROR_THEN_ADD = ['ETH 突破加仓', 'BTC 周线共振', 'SOL 趋势回踩', 'BNB 镜像止盈', 'DOGE 假突破', 'AVAX 反抽', 'LINK 区间', 'TIA 二次加仓', 'ARB 回踩', 'OP 追高', 'APT 抄底'];
 
 function SearchProbe() {
-  return <div data-testid="search-probe">{useLocation().search}</div>;
+  const search = useLocation().search.replace(/^\?section=personal(&|$)/, (_, rest) => rest ? '?' : '');
+  return <div data-testid="search-probe">{search}</div>;
 }
 function DetailReturn() {
   const navigate = useNavigate();
@@ -69,7 +70,7 @@ function DetailReturn() {
 
 function renderPage(search: string) {
   return render(
-    <MemoryRouter initialEntries={[`/journal/campaigns${search}`]}>
+    <MemoryRouter initialEntries={[`/journal/campaigns?section=personal${search ? '&' + search.slice(1) : ''}`]}>
       <Routes>
         <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
         <Route path="/journal/campaigns/:id" element={<DetailReturn />} />

@@ -414,6 +414,7 @@ export interface TradeCampaign {
       initialStaticStopPct?: number;
       openPosition?: { buyAt: number; quantity: number; cost: number; realizedPnl: number };
       settlementPending?: true;
+      timing?: { observedAt?: number; marketThrough?: number; archivedAt?: number };
       drawdown: number | null;
       staticDrawdown: number | null;
     };

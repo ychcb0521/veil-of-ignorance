@@ -319,7 +319,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const saveTemplate = async ({ record, round }: ScreenedFishAdmission, result: QualityResult, through: number) => {
       if (hasManualIntent(record.id)) return;
-      const alert = result.status === 'closed' ? instantMonitorSale(result) : undefined;
+      const alert = result.status === 'closed' ? { ...instantMonitorSale(result), observedAt: Date.now() } : undefined;
       await save(record, { after: through, monitorResult: result, alert });
       changes.current?.postMessage('alert');
       if (alert) {
@@ -332,7 +332,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       const key = jobPrefix + encodeURIComponent(input.recordId);
       const last = state.fills.at(-1);
       const alert: ScreenedCdaTrigger | undefined = last?.fraction === 1 ? {
-        at: last.at, closePrice: last.price, mirror: saved?.risk?.mirror, manual: state,
+        at: last.at, observedAt: Date.now(), closePrice: last.price, mirror: saved?.risk?.mirror, manual: state,
         evidence: { version: INSTANT_MANUAL_EXECUTION, reason: last.reason, priceAt: last.priceAt },
       } : undefined;
       const checkpoint = { ...saved, after: saved?.after ?? state.through, manual: state, alert };
@@ -486,7 +486,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
                 const previous = read(record);
                 const hasNewRisk = !!result.risk && result.risk.through > (previous?.risk?.through ?? 0);
                 if (result.trigger || hasNewRisk || result.through > cursor(record, previous)) {
-                  await save(record, { after: result.through, alert: result.trigger, progress: result.progress, risk: result.risk });
+                  const alert = result.trigger && { ...result.trigger, observedAt: Date.now() };
+                  await save(record, { after: result.through, alert, progress: result.progress, risk: result.risk });
                   if (result.trigger) {
                     changes.current?.postMessage('alert');
                     send();

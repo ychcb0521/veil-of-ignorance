@@ -133,6 +133,10 @@ async function cacheRemote(owner: string, snapshot: InstantCampaignSnapshot, not
   if (changed && notify) publish(owner);
 }
 
+export function readLocalInstantCampaignJobs(owner: string) {
+  return readInstantJobs(owner, job => !!job.snapshot || !!job.opened || 'sell' in job.input);
+}
+
 export async function readLocalInstantCampaignSnapshots(owner: string) {
   return (await readInstantJobs(owner, job => !!job.snapshot)).map(job => job.snapshot!);
 }

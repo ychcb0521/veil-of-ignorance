@@ -216,6 +216,25 @@ export function instantPositionDisplay(position: InstantPositionInput & { levera
   };
 }
 
+/** Compare an actual wall-clock reading with the simulated fill without changing either clock. */
+export function formatInstantCampaignDelay(closedAt: string | null, at: number, label: string) {
+  const elapsed = closedAt ? at - Date.parse(closedAt) : NaN;
+  if (!Number.isFinite(elapsed) || elapsed < 0) return '时间差不可用';
+  const seconds = Math.round(elapsed / 1000);
+  return label + (seconds >= 60 ? Math.floor(seconds / 60) + ' 分 ' + seconds % 60 : seconds) + ' 秒';
+}
+
+function withInstantCampaignTiming(data: QualityCampaignData, sale: InstantCampaignInput, archivedAt?: number) {
+  const observedAt = sale.sell.observedAt ?? (sale.sell.evidence?.reason === 'manual' ? sale.sell.at : undefined);
+  data.campaign.comparison!.instant!.timing = { observedAt, marketThrough: sale.monitorResult?.evaluatedAt, archivedAt };
+  if (observedAt != null) {
+    for (const record of data.tradeRecords) {
+      if (record.closeTime === sale.sell.at) record.operationAt = observedAt;
+    }
+  }
+  return data;
+}
+
 export function buildSettlingInstantCampaignData(owner: string, position: InstantPositionFill, sale: InstantCampaignInput): QualityCampaignData | undefined {
   const { sell, monitorResult } = sale;
   let data: QualityCampaignData;
@@ -230,7 +249,7 @@ export function buildSettlingInstantCampaignData(owner: string, position: Instan
       recordedAt: sell.at, valuedAt: sell.at, peakPct: null, drawdown: null, staticDrawdown: null });
   } else return;
   data.campaign.comparison!.instant!.settlementPending = true;
-  return data;
+  return withInstantCampaignTiming(data, sale);
 }
 
 export function buildOpenInstantCampaignData(owner: string, position: InstantPositionFill, monitor?: QualityResult, mirror?: QualityMirrorFill, through?: number, manual?: InstantManualExecution): QualityCampaignData {
@@ -266,10 +285,12 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
     Object.assign(comparison.instant!, { sellEvidence: frozen.sell.evidence, drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown });
     comparison.holdingMetrics!.peakPct = frozen.peakPct;
     data.campaign.peak_drawdown = frozen.drawdown;
-    return data;
+    return withInstantCampaignTiming(data, frozen, frozen.recordedAt);
   }
-  if (frozen.monitor && frozen.monitorResult) return buildTemplateInstantCampaignData(owner, position, frozen.monitorResult, frozen);
-  return buildDefaultInstantCampaignData(owner, position, { ...frozen, valuedAt: frozen.sell.at, mirror: frozen.sell.mirror });
+  const data = frozen.monitor && frozen.monitorResult
+    ? buildTemplateInstantCampaignData(owner, position, frozen.monitorResult, frozen)
+    : buildDefaultInstantCampaignData(owner, position, { ...frozen, valuedAt: frozen.sell.at, mirror: frozen.sell.mirror });
+  return withInstantCampaignTiming(data, frozen, frozen.recordedAt);
 }
 
 function buildTemplateInstantCampaignData(owner: string, position: InstantPositionFill, result: QualityResult, evidence: {

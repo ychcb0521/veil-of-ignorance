@@ -6,8 +6,8 @@ export const CAMPAIGN_SECTIONS = [{ id: 'personal', label: '亲自交易' }, { i
 export type CampaignSection = typeof CAMPAIGN_SECTIONS[number]['id'];
 export function campaignSection(search: string): CampaignSection {
   const value = new URLSearchParams(search).get('section');
-  if (value === 'instant') return 'instant';
-  return value === 'quality' || value === 'sell' || value === 'detect' ? 'quality' : 'personal';
+  if (value === 'personal') return 'personal';
+  return value === 'quality' || value === 'sell' || value === 'detect' ? 'quality' : 'instant';
 }
 /** 战役编号仍按来源区分（固定卖出方案做探测的那场为 detect，其余为 sell），两种都能打开同一场。 */
 export function qualityCampaignId(key: string, section: 'sell' | 'detect' = 'sell') { return `fish-${section}-${key}`; }

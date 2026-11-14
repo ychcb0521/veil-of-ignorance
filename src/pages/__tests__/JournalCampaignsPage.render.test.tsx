@@ -194,7 +194,7 @@ function makeLeg(overrides: Partial<TradeJournal>): TradeJournal {
   } as unknown as TradeJournal;
 }
 
-const CHART_URL = '/journal/campaigns?chart=geometricExpectancyDistribution';
+const CHART_URL = '/journal/campaigns?section=personal&chart=geometricExpectancyDistribution';
 const SUMMARY_ID = 'campaign-metric-summary-geometricExpectancyDistribution';
 
 function renderPage(url = CHART_URL) {
@@ -369,7 +369,7 @@ describe('JournalCampaignsPage · 自评（五点评分）', () => {
     const titles = ['High Importance', 'Newest Operation', 'Best PnL'];
     const order = () => screen.getAllByTestId('campaign-card')
       .map(card => titles.find(title => card.textContent?.includes(title)));
-    const view = renderPage('/journal/campaigns?sort=importance&direction=desc');
+    const view = renderPage('/journal/campaigns?section=personal&sort=importance&direction=desc');
     // 5 → 1 → 0
     await waitFor(() => expect(order()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']));
 
@@ -383,7 +383,7 @@ describe('JournalCampaignsPage · 自评（五点评分）', () => {
 
     // 进详情再返回（页面重新挂载、排序链没变）：仍是原来的顺序，回到原处找得到它
     view.unmount();
-    renderPage('/journal/campaigns?sort=importance&direction=desc');
+    renderPage('/journal/campaigns?section=personal&sort=importance&direction=desc');
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
     expect(order()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);

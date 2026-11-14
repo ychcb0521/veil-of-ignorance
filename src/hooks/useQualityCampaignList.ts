@@ -6,6 +6,18 @@ import { loadQualityCampaignTrash, readQualityCampaignTrash, subscribeQualityCam
 
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 
+function mergeInstantCampaignCards(current: CampaignCardData[], incoming: CampaignCardData[]) {
+  const byId = new Map(current.filter(row => row.campaign.closed_at).map(row => [row.campaign.id, row]));
+  for (const row of incoming) {
+    const previous = byId.get(row.campaign.id);
+    if (previous && (!row.campaign.closed_at || (
+      row.campaign.comparison?.instant?.settlementPending && !previous.campaign.comparison?.instant?.settlementPending
+    ))) continue;
+    byId.set(row.campaign.id, row);
+  }
+  return [...byId.values()];
+}
+
 export function useQualityCampaignList(owner: string | undefined, section: CampaignSection, binView = false) {
   const [snapshot, setSnapshot] = useState({ owner, section, rows: [] as CampaignCardData[], complete: false, error: null as string | null, selectedSellKey: undefined as string | undefined, buyFilterLabel: '' });
   const [trash, setTrash] = useState<{ owner?: string; section?: CampaignSection; marks?: QualityCampaignTrash; error?: string }>({});
@@ -44,22 +56,19 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
   }, [owner, section, revision]);
   useEffect(() => {
     if (!owner || section === 'personal') return;
-    let active = true, generation = 0, inFlight = false, queued = false;
+    let active = true, generation = 0, localGeneration = 0, inFlight = false, queued = false;
     const controller=new AbortController();
     let observedRepair: { id: string; state: string } | undefined;
     const cards = (rows: Awaited<ReturnType<typeof listLocalInstantCampaignData>>) =>
       rows.map(row => ({ ...buildCampaignCardData(row), peakPriceChangePct: row.campaign.comparison?.instant ? row.campaign.comparison.holdingMetrics?.peakPct : row.campaign.peak_unrealized_pnl }));
     const showLocal = async () => {
+      const epoch = ++localGeneration;
       try {
         const rows = cards(await listLocalInstantCampaignData(owner));
-        if (!active) return;
+        if (!active || epoch !== localGeneration) return;
         setSnapshot(previous => {
           const sameSection = previous.owner === owner && previous.section === section;
-          const byId = new Map(sameSection ? previous.rows.filter(row => row.campaign.status !== 'active').map(row => [row.campaign.id, row]) : []);
-          for (const row of rows) {
-            if (row.campaign.status !== 'active' || !byId.has(row.campaign.id)) byId.set(row.campaign.id, row);
-          }
-          return { owner, section, rows: [...byId.values()], complete: sameSection && previous.complete,
+          return { owner, section, rows: mergeInstantCampaignCards(sameSection ? previous.rows : [], rows), complete: sameSection && previous.complete,
             error: sameSection ? previous.error : null, selectedSellKey: undefined, buyFilterLabel: '' };
         });
       } catch { /* The cloud read can still succeed when browser storage is unavailable. */ }
@@ -72,7 +81,15 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
       try {
         const data = await listQualityCampaignData(owner, section,controller.signal);
         if (active && epoch === generation) observedRepair = data.repair;
-        if (active && epoch === generation) setSnapshot({ owner, section, rows: cards(data.rows), complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel });
+        if (active && epoch === generation) {
+          const rows = cards(data.rows);
+          setSnapshot(previous => ({
+            owner, section,
+            rows: section === 'instant' && previous.owner === owner && previous.section === section
+              ? mergeInstantCampaignCards(previous.rows, rows) : rows,
+            complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel,
+          }));
+        }
       } catch (error) { if (active && epoch === generation) setSnapshot(previous => ({ ...(previous.owner === owner && previous.section === section ? previous : { owner, section, rows: [], selectedSellKey: undefined, buyFilterLabel: '' }), complete: true, error: error instanceof Error ? error.message : String(error) })); }
       finally {
         inFlight = false;

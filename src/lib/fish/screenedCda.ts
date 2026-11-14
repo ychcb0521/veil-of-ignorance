@@ -36,6 +36,8 @@ export interface ScreenedCdaGuardEvidence {
 }
 export interface ScreenedCdaTrigger {
   at: number;
+  /** Wall clock when the application confirmed the simulated fill. */
+  observedAt?: number;
   value?: number;
   closePrice?: number;
   evidence?: ScreenedCdaGuardEvidence;

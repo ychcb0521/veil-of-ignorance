@@ -166,7 +166,7 @@ function withWrittenPatch(campaign: TradeCampaign): TradeCampaign {
 }
 
 async function openBulkCloseDialog() {
-  render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+  render(<MemoryRouter initialEntries={['/journal/campaigns?section=personal']}><JournalCampaignsPage /></MemoryRouter>);
   await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
   fireEvent.click(screen.getByTestId('active-campaigns-banner'));
   return screen.getByTestId('bulk-close-dialog');

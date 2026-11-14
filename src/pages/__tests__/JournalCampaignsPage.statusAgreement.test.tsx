@@ -83,7 +83,7 @@ vi.mock('@/lib/journalApi', async () => {
 
 describe('战役列表 · 卡片状态与详情页同源', () => {
   it('后台拉齐平仓价校正后，卡片显示「亏损结束」，与详情页推出的状态一致', async () => {
-    render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/journal/campaigns?section=personal']}><JournalCampaignsPage /></MemoryRouter>);
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
     const card = screen.getAllByTestId('campaign-card')[0];

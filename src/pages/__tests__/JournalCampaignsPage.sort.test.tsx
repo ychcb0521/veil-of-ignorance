@@ -431,15 +431,15 @@ function LocationProbe() {
   const state = location.state as { fromCampaignList?: boolean } | null;
   return (
     <div data-testid="location-probe">
-      {location.pathname}{location.search}|{state?.fromCampaignList ? 'from-list' : 'direct'}
+      {location.pathname}{location.search.replace(/^\?section=personal(&|$)/, (_, rest) => rest ? '?' : '')}|{state?.fromCampaignList ? 'from-list' : 'direct'}
     </div>
   );
 }
 
 /** 挂在列表路由旁边、只读 search 的探针：切换视图后不离开列表也能断言 URL。 */
 function SearchProbe() {
-  const location = useLocation();
-  return <div data-testid="location-probe-search">{location.search}</div>;
+  const search = useLocation().search.replace(/^\?section=personal(&|$)/, (_, rest) => rest ? '?' : '');
+  return <div data-testid="location-probe-search">{search}</div>;
 }
 
 function DetailReturn() {
@@ -449,7 +449,7 @@ function DetailReturn() {
 
 describe('JournalCampaignsPage sorting', () => {
   it('keeps sort labels, secondary actions and unchanged statistics together in the campaign toolbar', async () => {
-    render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/journal/campaigns?section=personal']}><JournalCampaignsPage /></MemoryRouter>);
     await waitFor(()=>expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     const toolbar=screen.getByTestId('campaign-list-toolbar'),sort=screen.getByTestId('campaign-sort-controls');
     const actions=screen.getByTestId('campaign-list-toolbar-actions'),toggle=screen.getByTestId('campaign-minor-metrics-toggle');
@@ -464,7 +464,7 @@ describe('JournalCampaignsPage sorting', () => {
   });
 
   it('三列概览对应排序顺序：操作时间在最前且默认选中，新增金额指标可排序和查看散点图', async () => {
-    render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/journal/campaigns?section=personal']}><JournalCampaignsPage /></MemoryRouter>);
     await screen.findAllByTestId('campaign-card');
     // 【用户要求】排序行只放封面上有的指标（再加操作时间、杠杆倍数与自评、字母），次序沿用原表
     const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy',
@@ -481,7 +481,7 @@ describe('JournalCampaignsPage sorting', () => {
     const snapshot = () => [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]')]
       .map(point => [point.dataset.campaignId, point.dataset.metricValue, point.style.left, point.style.top]);
     let view = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=unrealizedPriceChangePctDistribution']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -500,7 +500,7 @@ describe('JournalCampaignsPage sorting', () => {
         .forEach(key => localStorage.removeItem(key));
       const refreshRequests = deferredPricePathRequests();
       view = render(
-        <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mainPriceChangeDistribution']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -554,7 +554,7 @@ describe('JournalCampaignsPage sorting', () => {
       return rectOf(0, 0);
     });
     const view = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mainPriceChangeDistribution']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -591,7 +591,7 @@ describe('JournalCampaignsPage sorting', () => {
     const restore = preparePricePathFixtures();
     const requests = deferredPricePathRequests();
     const view = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mainPriceChangeDistribution']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -630,7 +630,7 @@ describe('JournalCampaignsPage sorting', () => {
     const pointValues = () => [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]')]
       .map(point => [point.dataset.campaignId, point.dataset.metricValue]).sort();
     const view = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=unrealizedPriceChangePctDistribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<DetailReturn />} />
@@ -667,7 +667,7 @@ describe('JournalCampaignsPage sorting', () => {
     seedUnrealizedChartSnapshot(42);
     const onLine = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false);
     const view = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=unrealizedPriceChangePctDistribution']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -700,7 +700,7 @@ describe('JournalCampaignsPage sorting', () => {
       return bars;
     });
     const view = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=unrealizedPriceChangePctDistribution']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -743,7 +743,7 @@ describe('JournalCampaignsPage sorting', () => {
         .map(point => [point.dataset.campaignId, point.dataset.metricValue, point.style.left, point.style.top]);
       try {
         render(
-          <MemoryRouter initialEntries={[`/journal/campaigns${search}`]}>
+          <MemoryRouter initialEntries={[`/journal/campaigns?section=personal${search ? '&' + search.slice(1) : ''}`]}>
             <SearchProbe />
             <Routes>
               <Route path="/journal/campaigns" element={<StrictMode><JournalCampaignsPage /></StrictMode>} />
@@ -791,7 +791,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('详情返回立即复用散点图；后台核对期间不显示加载屏，且不重复计算未变的战役', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=geometricExpectancyDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=geometricExpectancyDistribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<DetailReturn />} />
@@ -821,7 +821,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】按杠杆倍数排序：默认从大到小，再点一次切到从小到大，没记杠杆的战役不进入这一档', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -846,7 +846,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】不常用指标折在角落：排序行与封面默认不显示（仍在页面里），排序行末尾很淡的「›」展开 / 收起；正在按它排序时排序行照常显示那一项，封面列宽不变', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
         </Routes>
@@ -913,7 +913,7 @@ describe('JournalCampaignsPage sorting', () => {
     legsByCampaign['high-importance'][1].post_realized_pnl = 0;
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -991,7 +991,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】排序行左对齐依次排开（两条分隔线分出三组）；封面指标行左对齐、按读数定宽、顺序与排序行一致，当前排序项高亮', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -1094,7 +1094,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】封面单排靠左且各卡片列宽对齐：切换排序（哪怕筛掉战役）列宽不变，换时间段格子类名与次序不变；数值字号一致、不按长度缩小', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -1144,7 +1144,7 @@ describe('JournalCampaignsPage sorting', () => {
     tradeHistory[recordIndex] = { ...lateRecord, pnl: -0.05 };
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -1167,7 +1167,7 @@ describe('JournalCampaignsPage sorting', () => {
   it('canonical geometric b controls cards and sorting without a realized-PnL fallback', async () => {
     geometricBOverrides['high-importance'] = 7;
     geometricBOverrides['best-pnl'] = null;
-    render(<MemoryRouter initialEntries={['/journal/campaigns?sort=magicB&direction=desc']}><JournalCampaignsPage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=magicB&direction=desc']}><JournalCampaignsPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(2));
     const cards = screen.getAllByTestId('campaign-card');
     expect(cards[0]).toHaveTextContent('High Importance');
@@ -1191,7 +1191,7 @@ describe('JournalCampaignsPage sorting', () => {
     legsByCampaign['high-importance'][1].post_realized_pnl = 0;
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <Routes>
             <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           </Routes>
@@ -1385,7 +1385,7 @@ describe('JournalCampaignsPage sorting', () => {
     } as TradeJournal];
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <Routes>
             <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           </Routes>
@@ -1487,7 +1487,7 @@ describe('JournalCampaignsPage sorting', () => {
     tradeHistory.push({ ...tradeHistory[0], id: 'growth-add-record', entryPrice: 120, quantity: 1.5,
       openTime: addTime, openedRealAt: addTime, addSizingSnapshot: { s1: 110 } as TradeRecord['addSizingSnapshot'] });
     try {
-      render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /><SearchProbe /></MemoryRouter>);
+      render(<MemoryRouter initialEntries={['/journal/campaigns?section=personal']}><JournalCampaignsPage /><SearchProbe /></MemoryRouter>);
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
       const card = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
       const growth = within(card).getByTestId('campaign-position-geometric-multiple');
@@ -1529,14 +1529,14 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('?chart=mainPriceEfficiency / ?chart=mainPriceChange 从 URL 恢复新增的散点图', async () => {
     const { unmount } = render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceEfficiency']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mainPriceEfficiency']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
     expect(await screen.findByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'mainPriceEfficiency');
     unmount();
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=mainPriceChange&direction=asc&chart=mainPriceChange']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=mainPriceChange&direction=asc&chart=mainPriceChange']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -1561,7 +1561,7 @@ describe('JournalCampaignsPage sorting', () => {
     try {
       for (const family of families) {
         const { unmount } = render(
-          <MemoryRouter initialEntries={[`/journal/campaigns?chart=${family}Distribution`]}>
+          <MemoryRouter initialEntries={[`/journal/campaigns?section=personal&chart=${family}Distribution`]}>
             <Routes>
               <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
             </Routes>
@@ -1600,7 +1600,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('算术期望默认看分布：0 是模型零点，摘要报正期望占比，不标成净结算收益', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=captureRate&direction=desc&chart=magicBDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=captureRate&direction=desc&chart=magicBDistribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
         </Routes>
@@ -1675,7 +1675,7 @@ describe('JournalCampaignsPage sorting', () => {
     campaign.status = 'closed_breakeven';
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -1692,7 +1692,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】战役封面显示杠杆倍数；没有记录杠杆的战役不显示这枚标签', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -1713,7 +1713,7 @@ describe('JournalCampaignsPage sorting', () => {
     legsByCampaign['high-importance'] = [{ ...hiLegs[0], pre_account_equity_usdt: 1 }, ...hiLegs.slice(1)];
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -1754,7 +1754,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('removes the legacy mutual scope while preserving sort parameters and detail navigation', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?scope=mutual&sort=importance&direction=asc']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&scope=mutual&sort=importance&direction=asc']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -1984,7 +1984,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('从 URL 的 chart 参数恢复散点图，使详情页返回后仍停在图上', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=expectedDrawdownPct']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=importance&direction=asc&chart=expectedDrawdownPct']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2000,7 +2000,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】镜像止盈多一种「柱状」看法：同一档的战役堆成一根柱，空档保留，切换写回 URL', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=mirrorTp']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mirrorTp']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2121,7 +2121,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】操作时间段：默认全选，框定范围后统计与卡片一起收窄', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2162,7 +2162,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】?from/?to 进来就按该范围渲染；范围内一场都没有时说清是时间段筛空的', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?from=2020-01-01&to=2020-12-31']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&from=2020-01-01&to=2020-12-31']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2180,7 +2180,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】几何期望多一种「分布」看法并设为默认：看形状偏不偏，且不套神奇的 b的止损墙', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=geometricExpectancy&direction=desc']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=geometricExpectancy&direction=desc']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2238,7 +2238,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】镜像止盈默认就开柱状视图，不必再手动切', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=mirrorTp&direction=desc']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=mirrorTp&direction=desc']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2257,7 +2257,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】自评默认看六档柱状散点图，可切回时序', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=desc']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=importance&direction=desc']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2291,7 +2291,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('散点图模式下点击排序项会跳到对应指标图，并保留排序切换', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=captureRate&direction=desc&chart=magicBDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=captureRate&direction=desc&chart=magicBDistribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2323,7 +2323,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('?chart=magicBDistribution 恢复分布图，「时序 | 分布」互切并写回 URL，排序行按钮把它当作神奇的 b图收起', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=magicBDistribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=importance&direction=asc&chart=magicBDistribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2382,7 +2382,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('分布图打开时排序行按钮读作「收起散点图」并能直接收起', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=asc&chart=magicB']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=importance&direction=asc&chart=magicB']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2407,7 +2407,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('【用户要求】排序栏删掉「DSI 贡献」「USI 贡献」：旧链接（sort / then / chart 里的）退回默认、不报错；统计概览的不对称风险仍在', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=dsiContribution&direction=asc&then=usiContribution.desc&chart=dsiContribution']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=dsiContribution&direction=asc&then=usiContribution.desc&chart=dsiContribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2427,7 +2427,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('关闭散点图会移除 chart 参数', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?chart=expectedDrawdownPct']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=expectedDrawdownPct']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -2443,7 +2443,7 @@ describe('JournalCampaignsPage sorting', () => {
 
   it('defaults to operation time and toggles sort direction for each field', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -2767,7 +2767,7 @@ describe('JournalCampaignsPage sorting', () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
 
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -2790,7 +2790,7 @@ describe('JournalCampaignsPage sorting', () => {
     const pending = deferredPricePathRequests();
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mainPriceChangeDistribution']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -2830,7 +2830,7 @@ describe('JournalCampaignsPage sorting', () => {
     const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal&chart=mainPriceChangeDistribution']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -2886,7 +2886,7 @@ describe('JournalCampaignsPage sorting', () => {
     });
     if (retained) seedUnrealizedChartSnapshot(99);
     // 普通列表（不按涨幅未兑现排、也没开它的图）：单靠点「导出」就要把行情队列叫起来
-    const view = render(<MemoryRouter initialEntries={[`/journal/campaigns${retained ? '?chart=unrealizedPriceChangePctDistribution' : ''}`]}><JournalCampaignsPage /></MemoryRouter>);
+    const view = render(<MemoryRouter initialEntries={[`/journal/campaigns?section=personal${retained ? '&chart=unrealizedPriceChangePctDistribution' : ''}`]}><JournalCampaignsPage /></MemoryRouter>);
     try {
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
       if (retained) {
@@ -2947,7 +2947,7 @@ describe('JournalCampaignsPage sorting', () => {
     });
     try {
       render(
-        <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <MemoryRouter initialEntries={['/journal/campaigns?section=personal']}>
           <JournalCampaignsPage />
         </MemoryRouter>,
       );
@@ -2975,7 +2975,7 @@ describe('【用户要求】回收站平行世界', () => {
   it('已删除战役弹窗顶部「进入回收站」：同一个页面只显示回收站里的战役，写进地址栏；「返回战役」回到正常列表', async () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=desc']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&sort=importance&direction=desc']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
         </Routes>
@@ -3010,7 +3010,7 @@ describe('【用户要求】回收站平行世界', () => {
   it('?bin=1 直接进回收站；卡片上「恢复」后这一场从回收站消失，回到正常列表能看到', async () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?bin=1']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&bin=1']}>
         <Routes>
           <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
         </Routes>
@@ -3029,7 +3029,7 @@ describe('【用户要求】回收站平行世界', () => {
     mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?bin=1']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&bin=1']}>
         <JournalCampaignsPage />
       </MemoryRouter>,
     );
@@ -3046,7 +3046,7 @@ describe('【用户要求】回收站平行世界', () => {
 
   it('从回收站点进战役详情，URL 带着 bin=1，返回时仍回到回收站', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns?bin=1']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?section=personal&bin=1']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />

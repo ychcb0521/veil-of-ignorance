@@ -3,7 +3,7 @@ import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCampaignPricePathTask } from '@/hooks/useCampaignPricePaths';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { sortCampaignRows } from '@/lib/campaignListSort';
-import { buildInstantCampaignData, buildOpenInstantCampaignData, freezeInstantCampaign, instantCampaignInput, instantPositionInput, instantPositionValuation } from '../instantCampaign';
+import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, freezeInstantCampaign, instantCampaignInput, instantPositionInput, instantPositionValuation } from '../instantCampaign';
 import { readInstantPositionQuote } from '../instantPositionQuote';
 import { INSTANT_MANUAL_EXECUTION, applyInstantManualFill, instantManualTrigger, validateInstantManualLevels, type InstantManualExecution } from '../instantManualExecution';
 import { validScreenedSale } from '../screenedCda';
@@ -138,6 +138,23 @@ it('uses the remaining quantity and cost, and keeps the same campaign through th
   expect(closed.campaign.id).toBe(open.campaign.id);
   expect(closed.campaign.final_realized_pnl).toBeCloseTo(5.71);
   expect(closed.campaign.comparison?.instant?.openPosition).toBeUndefined();
+});
+
+it('keeps simulated fill, confirmation and archive times distinct in both campaign projections', () => {
+  const opened = { ...instantPositionInput(record, round)!, entryPrice: 100, marginUsdt: 40, leverage: 5 };
+  const observedAt = sellAt + 62_500;
+  const archivedAt = observedAt + 5700;
+  const sale = { ...opened, sell: { ...alert, closePrice: 103, observedAt } };
+  const pending = buildSettlingInstantCampaignData('account-a', opened, sale)!;
+  const final = buildInstantCampaignData('account-a', { ...sale, version: 2, exitPrice: 103, recordedAt: archivedAt,
+    peakPct: 4, drawdown: 1, staticDrawdown: 1 });
+  expect(pending.campaign.comparison?.instant).toMatchObject({ settlementPending: true, timing: { observedAt } });
+  expect(final.campaign.comparison?.instant).toMatchObject({ timing: { observedAt, archivedAt } });
+  expect(final.campaign.comparison?.instant?.settlementPending).toBeUndefined();
+  for (const data of [pending, final]) {
+    expect(data.campaign.closed_at).toBe(new Date(sellAt).toISOString());
+    expect(data.tradeRecords.at(-1)).toMatchObject({ closeTime: sellAt, operationAt: observedAt });
+  }
 });
 
 it.each([

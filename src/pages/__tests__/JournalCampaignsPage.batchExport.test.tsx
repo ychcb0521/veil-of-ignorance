@@ -104,7 +104,7 @@ function LocationProbe() {
   return <div data-testid="location-probe">{location.pathname}{location.search}</div>;
 }
 function pageTree(search: string) {
-  return <MemoryRouter initialEntries={[`/journal/campaigns${search}`]}><Routes>
+  return <MemoryRouter initialEntries={[`/journal/campaigns?section=personal${search ? '&' + search.slice(1) : ''}`]}><Routes>
     <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><LocationProbe /></>} />
     <Route path="/journal/campaigns/:id" element={<ReturnFromDetail />} />
   </Routes></MemoryRouter>;
@@ -179,7 +179,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('2');
     fireEvent.click(scatter('alpha'));
     expect(check('Alpha')).not.toBeChecked();
-    expect(screen.getByTestId('location-probe')).toHaveTextContent('/journal/campaigns?');
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/journal/campaigns?section=personal&');
     const preview = await openPreview();
     expect(queueIds()).toEqual(['bravo']);
     expect(preview).toHaveAttribute('data-user-id', 'user-batch');
@@ -353,7 +353,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     fireEvent.click(card());
     expect(check('Bravo')).toBeChecked();
     expect(card()).toHaveAttribute('data-selected', 'true');
-    expect(screen.getByTestId('location-probe')).toHaveTextContent('/journal/campaigns?');
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/journal/campaigns?section=personal&');
     selectMode();
     expect(card()).not.toHaveAttribute('data-selected');
     fireEvent.click(card());
@@ -559,7 +559,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     fireEvent.click(point);
     expect(point).toHaveAttribute('aria-pressed', 'true');
     expect(check(title)).toBeChecked();
-    expect(screen.getByTestId('location-probe')).toHaveTextContent('/journal/campaigns?');
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/journal/campaigns?section=personal&');
     fireEvent.click(screen.getByRole('button', { name: new RegExp(`^全选当前图（${points.length}）$`) }));
     expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent(String(points.length));
   }, 15_000);
