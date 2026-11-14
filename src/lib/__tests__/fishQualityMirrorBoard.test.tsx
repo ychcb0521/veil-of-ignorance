@@ -15,6 +15,9 @@ import { drawMirrorBoard } from '@/lib/campaignLegsPngExport';
 import { resolveLegExecution } from '@/lib/campaignLegExecution';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
+import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
+import { STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
+import { campaignFrozenPricePath } from '@/lib/fish/qualityCampaignRisk';
 
 const T = Date.UTC(2026, 9, 28), M = 60_000;
 const rule = { enabled: true, gainPct: 5, sellPct: 50 };
@@ -31,6 +34,19 @@ function fixture(options: {open?: boolean; fraction?: number; fillPrice?: number
 }
 
 describe('mirror campaign board and consistent accounting', () => {
+  it('shows the configured line and the frozen gap exit even without a mirror fill', () => {
+    const { campaign } = fixture({ noFill: true, exitPrice: 95 });
+    const comparison = campaign.comparison!;
+    comparison.monitorPlan = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, []);
+    comparison.holdingDrawdowns = { staticDrawdown: 5, drawdown: 6 };
+    Object.assign(comparison.sellEvidence!, { triggerAtOpen: true,
+      triggerCause: { id: STATIC_DRAWDOWN_SELL_VERSION, kind: 'sell-static-drawdown', threshold: 3, direction: '>=' } });
+    render(<QualityMirrorBoard campaign={campaign}/>);
+    expect(screen.getByTestId('quality-chart-static-stop')).toHaveTextContent('3% @ 97');
+    expect(screen.getByTestId('quality-chart-static-stop')).toHaveTextContent('跳空按开盘价成交');
+    expect(campaignFrozenPricePath(campaign)).toMatchObject({ staticDrawdown: 5, drawdown: 6 });
+    cleanup();
+  });
   it('displays actual execution gain rather than final ROI, configured threshold or proportion-weighted gain', () => {
     const full = fixture({fillPrice:108, fraction:.25});
     const summary = halfMirrorSummary(full.plan.mirrorTakeProfit, full.result);

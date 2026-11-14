@@ -74,11 +74,13 @@ export function withLimitedPayoffRisk(plan: QualityGroup): QualityGroup {
   return version ? { ...base, payoffRiskVersion: version } : base;
 }
 
-export function qualityLimitedDrawdownText(plan: LimitedDrawdownPlan) {
+export function qualityLimitedDrawdownText(plan: LimitedDrawdownPlan, entryPrice?: number) {
   const initial = plan.router?.structure ?? plan;
   const before = initialLimitedDrawdownPct(initial);
-  if (!initial.combo) return before == null ? '—' : `${before}%`;
+  const format = (pct?: number) => pct == null ? '—' : entryPrice != null && entryPrice > 0 && Number.isFinite(entryPrice)
+    ? `${pct}% @ ${+(entryPrice * (1 - pct / 100)).toPrecision(10)}` : `${pct}%`;
+  if (!initial.combo) return format(before);
   const after = limitedDrawdownPct(initial.combo.after.rule);
   if (before == null && after == null) return '—';
-  return `前段 ${before == null ? '—' : before + '%'} / 后段 ${after == null ? '—' : after + '%'}`;
+  return `前段 ${format(before)} / 后段 ${format(after)}`;
 }

@@ -11,7 +11,7 @@ import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
 import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, isRetainedQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
-import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
+import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, qualityDrawdownPct, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { isStaticDrawdownSell, qualityStaticDrawdownReason, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
 import { syncQualitySellDefinitions } from './qualityComparison';
@@ -71,6 +71,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     // 【用户要求】2026-11-02 战役元数据底部「持仓监测」：完整显示这场战役运行时冻结的整套条件设置
     comparison: { section, planLabel:storedPlan.label, monitorPlan: structuredClone(storedPlan), runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
+      holdingDrawdowns: { staticDrawdown: qualityDrawdownPct(r, 'static'), drawdown: qualityDrawdownPct(r, 'dynamic') },
       holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??notional,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
       sellEvidence: { exitReason:closed?qualityStaticDrawdownReason(r):undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
         ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: staticSell ? '静态最大回撤 =（首仓买入价 − 持仓最低价）÷ 首仓买入价 × 100%' : definition.formula,

@@ -398,6 +398,8 @@ export interface TradeCampaign {
     repair?: { batchId: string; status: 'pending' | 'verified' | 'failed'; checkedAt?: number; error?: string; beforeReturnPct?: number; beforeEndTime?: number };
     /** 探测信号类别：命中的探测算法组合（如「CBI-2·avg₂ + CBA·avg₂」），用于分类观察与统计。 */
     category?: string;
+    /** Price path as measured by the frozen paper run. */
+    holdingDrawdowns?: { staticDrawdown: number | null; drawdown: number | null };
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     instant?: {
@@ -405,6 +407,7 @@ export interface TradeCampaign {
       source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;
       cdaValue?: number;
       sellEvidence?: import('@/lib/fish/screenedCda').ScreenedCdaGuardEvidence;
+      manual?: import('@/lib/fish/instantManualExecution').InstantManualExecution;
       mirrorTakeProfit?: import('@/lib/fish/qualityMirror').QualityMirrorTakeProfit;
       mirrorFill?: import('@/lib/fish/qualityMirror').QualityMirrorFill;
       marginUsdt: number;

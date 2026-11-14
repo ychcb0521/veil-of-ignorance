@@ -5,11 +5,12 @@ import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSet
 import { QualityCampaignCardTitle } from '@/components/journal/QualityCampaignCardTitle';
 import { qualityProtectionOrders } from '@/lib/fish/qualityProtectionOrders';
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
+import { instantManualReason } from '@/lib/fish/instantManualExecution';
 import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualityMirrorBoard';
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
 import { isInstantCampaignId, isPaperCampaignId } from '@/lib/campaignSections';
 import { resolveMirrorTpChartFill } from '@/lib/campaignMirrorTpOrderTiming';
-import { campaignLimitedDrawdownText } from '@/lib/fish/qualityCampaignRisk';
+import { campaignFrozenPricePath, campaignLimitedDrawdownText } from '@/lib/fish/qualityCampaignRisk';
 import { loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
@@ -630,6 +631,11 @@ function buildChartArtifacts(
     if(!legs.some(leg=>leg.leg_role==='main_open')){const price=campaign.comparison?.holdingMetrics?.entryPrice;if(price)markers.push({time:Date.parse(campaign.opened_at),price,shape:'triangle-up',color:'#0ECB81',label:'主力开始'});}
     const sale=qualityFinalSale(campaign,tradeRecords);if(sale){markers.push({time:sale.at,price:sale.price,shape:'square',color:'#2B80FF',label:sale.label});verticalLines.push({time:sale.at,color:LEG_LONG_LINE_COLOR,width:LEG_VERTICAL_LINE_WIDTH,z:3,dashed:true,label:'全部卖出',labelColor:LEG_LONG_LABEL_COLOR});}
   }
+  for (const fill of campaign.comparison?.instant?.manual?.fills ?? []) {
+    if (fill.fraction === 1) continue;
+    markers.push({ time: fill.at, price: fill.price, shape: 'square', color: '#2B80FF',
+      label: `${instantManualReason(fill.reason)} · ${+(100 * fill.fraction).toPrecision(8)}%` });
+  }
   const mirror = qualityMirrorChartArtifacts(campaign);
   markers.push(...mirror.markers);
   verticalLines.push(...mirror.verticalLines);
@@ -1215,7 +1221,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     let queued = false;
     let fingerprint = '';
     const reconcile = (campaign: TradeCampaign) => JSON.stringify([campaign.closed_at, campaign.updated_at,
-      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.actual_evolution]);
+      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.manual, campaign.actual_evolution]);
     const reload = async () => {
       if (lifetime.signal.aborted) return;
       if (running) { queued = true; return; }
@@ -1829,7 +1835,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryLegId, actualPriceChange.entryPrice, actualPriceChange.mainCloseTime, actualPriceChange.side, campaign, computeInterval, effectiveClosedAt, klines]);
   const dynamicMaxDrawdownPct = useMemo(() => {
-    if (campaign?.comparison?.instant) return campaign.comparison.instant.drawdown;
+    const frozen = campaignFrozenPricePath(campaign);
+    if (frozen) return frozen.drawdown;
     if (!campaign || klines.length === 0) return null;
     const startMs = actualPriceChange.entryOpenTime ?? new Date(campaign.opened_at).getTime();
     const endMs = resolveHoldingDynamicDrawdownEndMs(
@@ -1846,7 +1853,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
   /** 静态最大回撤：与动态最大回撤同一个窗口、同一批 K 线；买入价同首仓涨跌幅的开仓价。 */
   const staticMaxDrawdownPct = useMemo(() => {
-    if (campaign?.comparison?.instant) return campaign.comparison.instant.staticDrawdown;
+    const frozen = campaignFrozenPricePath(campaign);
+    if (frozen) return frozen.staticDrawdown;
     if (!campaign || klines.length === 0) return null;
     const startMs = actualPriceChange.entryOpenTime ?? new Date(campaign.opened_at).getTime();
     const endMs = resolveHoldingDynamicDrawdownEndMs(

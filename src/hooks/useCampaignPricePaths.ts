@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CampaignCardData } from '@/lib/campaignListCache';
+import { campaignFrozenPricePath } from '@/lib/fish/qualityCampaignRisk';
 import { computeCampaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computeHoldingStaticMaxDrawdownPct, computePeakPriceChangePct, resolveHoldingDynamicDrawdownEndMs } from '@/lib/campaignMainPriceChange';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import { pickCampaignComputeInterval } from '@/lib/campaignChartContentSpan';
@@ -72,8 +73,7 @@ export function buildCampaignPricePathTask(row: CampaignCardData): CampaignPrice
       ? '持仓时间不完整'
       : undefined;
   const params = { symbol: campaign.symbol, side: change.side, entryPrice: change.entryPrice, startMs, endMs, drawdownStartMs, drawdownEndMs, interval, barMs: intervalToMs(interval), historical, unavailableReason };
-  const instant = campaign.comparison?.instant;
-  const frozen = instant ? { peak: campaign.comparison?.holdingMetrics?.peakPct ?? null, drawdown: instant.drawdown, staticDrawdown: instant.staticDrawdown } : undefined;
+  const frozen = campaignFrozenPricePath(campaign);
   return { id: campaign.id, fingerprint: JSON.stringify(frozen ? [params, frozen] : params), ...params, ...(frozen ? { frozen } : {}) };
 }
 

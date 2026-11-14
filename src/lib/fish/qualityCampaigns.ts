@@ -56,7 +56,7 @@ async function buildLocalOpenInstantData(owner: string, positions: InstantPositi
   return positions.flatMap((position, index) => {
     const saved = progress[index];
     if (saved?.alert || saved?.monitorResult?.status === 'closed') return [];
-    return [buildOpenInstantCampaignData(owner, position, saved?.monitorResult, saved?.risk?.mirror, saved?.risk?.through)];
+    return [buildOpenInstantCampaignData(owner, position, saved?.monitorResult, saved?.risk?.mirror, saved?.risk?.through, saved?.manual)];
   });
 }
 
@@ -126,7 +126,7 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
       const sale = completed && 'sell' in completed.input ? completed.input
         : saved?.alert ? { ...position, sell: saved.alert, monitorResult: saved.monitorResult } : undefined;
       const settling = sale && buildSettlingInstantCampaignData(owner, position, sale);
-      return applyTrash(settling ?? buildOpenInstantCampaignData(owner, position, monitor, mirror, saved?.risk?.through));
+      return applyTrash(settling ?? buildOpenInstantCampaignData(owner, position, monitor, mirror, saved?.risk?.through, saved?.manual));
     }
     const frozen = await loadInstantCampaignSnapshot(owner, id, signal, job);
     throwIfReadAborted(signal);

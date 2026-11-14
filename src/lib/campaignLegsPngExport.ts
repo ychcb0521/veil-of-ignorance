@@ -1,5 +1,6 @@
 import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb, additionStopReductionText } from '@/lib/fish/qualityAdditionStopOrder';
-import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
+import {campaignLegDeltaLabel,campaignLimitedDrawdownText,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
+import {STATIC_DRAWDOWN_SELL_LABEL} from '@/lib/fish/qualityStaticDrawdownSell';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
@@ -796,9 +797,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: `${order.status === 'triggered' ? '平' : '撤'} ${order.cancelledAt ? fmtClock(order.cancelledAt) : '—'}`, color: '#5F6B7A' },
       ];
     });
-    const reverseLines: CampaignLegsExportCellLine[] = mirrorTpLines.length === 0 && additionStopLines.length === 0 && reverseOrderLines.length === 0
-      ? [{ text: '—', color: '#848E9C' }]
-      : [...mirrorTpLines, ...additionStopLines, ...reverseOrderLines];
+    const limitedDrawdown = leg.leg_role === 'main_open' ? campaignLimitedDrawdownText(input.campaign, true) : '—';
+    const reverseLines: CampaignLegsExportCellLine[] = [...mirrorTpLines, ...additionStopLines, ...reverseOrderLines];
+    if (limitedDrawdown !== '—') reverseLines.unshift({ text: STATIC_DRAWDOWN_SELL_LABEL, color: '#1E2329', bold: true },
+      { text: limitedDrawdown, color: '#5F6B7A' });
+    if (!reverseLines.length) reverseLines.push({ text: '—', color: '#848E9C' });
 
     /**
      * 强平记录不换显示价：格子里就是记录上的强平价（与这一行的盈亏同一对价），

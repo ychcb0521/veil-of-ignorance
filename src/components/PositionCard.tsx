@@ -1,13 +1,14 @@
 import { ArrowLeftRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { formatSignedUSDT } from '@/lib/formatters';
+import { formatBeijingTime } from '@/lib/timeFormat';
 
 export const positionCardClass = 'rounded-lg border border-border bg-card shadow-sm overflow-hidden';
 export const positionDetailsClass = 'grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5';
 export const positionActionsClass = 'flex border-t border-border/50';
 
-export function PositionCardHeader({ asset, contract, long, leverage, mode, children }: {
-  asset: string; contract: string; long: boolean; leverage: number; mode: string; children?: ReactNode;
+export function PositionCardHeader({ asset, contract, long, leverage, mode, openedAt, children }: {
+  asset: string; contract: string; long: boolean; leverage: number; mode: string; openedAt?: number; children?: ReactNode;
 }) {
   return <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border/50">
     <span className="text-sm font-bold text-foreground font-mono">{asset}</span>
@@ -16,6 +17,9 @@ export function PositionCardHeader({ asset, contract, long, leverage, mode, chil
       {long ? '多' : '空'} {leverage}x {mode}
     </span>
     {children}
+    <span className="ml-auto text-[10px] text-muted-foreground tabular-nums" data-testid="position-open-time">
+      开仓时间 {formatBeijingTime(openedAt)}
+    </span>
   </div>;
 }
 

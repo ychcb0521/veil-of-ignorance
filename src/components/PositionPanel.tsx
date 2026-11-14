@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantPositionRow } from '@/components/InstantPositionRow';
+import { instantPositionDisplay, instantPositionValuation, type InstantPositionFill } from '@/lib/fish/instantCampaign';
+import { buildTpSlOrders } from '@/lib/tpSlOrders';
 import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
@@ -537,6 +539,7 @@ export function PositionPanel({
     leverage: number;
     marginMode: Position['marginMode'];
     children: { position: Position; index: number }[];
+    openedAt?: number;
   }
 
   const mergedPositions = useMemo(() => {
@@ -582,6 +585,9 @@ export function PositionPanel({
       }
       // Use highest leverage in the group
       if (pos.leverage > g.leverage) g.leverage = pos.leverage;
+      const openedAt = [pos.openTime, ...(pos.fills ?? []).map(fill => fill.openTime)]
+        .filter((time): time is number => time != null && Number.isFinite(time) && time > 0);
+      if (openedAt.length) g.openedAt = Math.min(g.openedAt ?? Infinity, ...openedAt);
       g.children.push({ position: pos, index });
     }
     return Array.from(groups.values());
@@ -611,6 +617,23 @@ export function PositionPanel({
   const allOrders: { symbol: string; order: PendingOrder }[] = [];
   for (const [sym, orders] of Object.entries(ordersMap)) {
     for (const o of orders) allOrders.push({ symbol: sym, order: o });
+  }
+  const instantOrderOwners = new Map<string, InstantPositionFill>();
+  for (const position of instant?.positions ?? []) {
+    const manual = instant?.manualPositions?.get(position.recordId);
+    if (!manual?.orders) continue;
+    const held = instantPositionValuation(position, instant?.monitorResults?.get(position.recordId),
+      instant?.mirrorFills?.get(position.recordId), undefined, manual);
+    const symbol = position.source.symbol;
+    const orders = buildTpSlOrders({
+      symbol, position: instantPositionDisplay(position, held), levels: manual.orders, now: manual.ordersAt ?? manual.startedAt,
+      newId: () => position.id,
+    });
+    for (const order of orders) {
+      const id = position.id + '-' + order.reduceKind;
+      instantOrderOwners.set(id, position);
+      allOrders.push({ symbol, order: { ...order, id } });
+    }
   }
 
   const fundingRecords = tradeHistory.filter(t => t.action === 'FUNDING');
@@ -784,11 +807,20 @@ export function PositionPanel({
     for (const { index } of live) onClosePosition(symbol, index, percentage);
   };
 
-  const handleCloseAll = () => {
+  const [closingAllInstant, setClosingAllInstant] = useState(false);
+  const handleCloseAll = async () => {
+    if (closingAllInstant) return;
+    setClosingAllInstant(true);
     if (onCloseAllPositions && displayedPositions.length > 0) {
       onCloseAllPositions(displayedPositions.map(p => ({ symbol: p.symbol, index: p.index })));
-      setCloseAllConfirmOpen(false);
       toast.success(`已市价平仓 ${displayedPositions.length} 个仓位`);
+    }
+    try {
+      await Promise.all(instantPositions.map(position => instant?.manage?.(position, { kind: 'close', fraction: 1, all: true })
+        .catch(cause => toast.error(position.source.symbol + ' · ' + (cause instanceof Error ? cause.message : '平仓失败，请重试')))));
+    } finally {
+      setClosingAllInstant(false);
+      setCloseAllConfirmOpen(false);
     }
   };
 
@@ -844,7 +876,7 @@ export function PositionPanel({
                 />
                 <span className="text-xs text-gray-500 dark:text-[#848e9c] whitespace-nowrap">隐藏其他合约</span>
               </label>
-              {allPositions.length > 0 && (
+              {(allPositions.length > 0 || instantPositions.length > 0) && (
                 <button
                   onClick={() => setCloseAllConfirmOpen(true)}
                   className="px-2 py-0.5 rounded text-[10px] font-medium border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10 transition-colors active:scale-95"
@@ -1023,7 +1055,7 @@ export function PositionPanel({
                 <div className="p-3 space-y-3">
                   {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
                     monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
-                    close={instant?.close} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
+                    manual={instant?.manualPositions?.get(position.recordId)} manage={instant?.manage} limitMode={limitMode} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
                   {mergedPositions.map((mg) => {
                     const price = priceMap[mg.symbol] || 0;
                     const firstChild = mg.children[0]?.position;
@@ -1185,8 +1217,8 @@ export function PositionPanel({
                     className={positionCardClass}
                   >
                     <PositionCardHeader asset={baseCoin} contract={quoteUnitLabel + ' 永续'} long={mg.side === 'LONG'}
-                      leverage={mg.leverage} mode={mg.marginMode === 'cross' ? '全仓' : '逐仓'}>
-                      {mg.children.length > 1 && <span className="text-[9px] text-muted-foreground ml-auto">{mg.children.length} 笔合并</span>}
+                      leverage={mg.leverage} mode={mg.marginMode === 'cross' ? '全仓' : '逐仓'} openedAt={mg.openedAt}>
+                      {mg.children.length > 1 && <span className="text-[9px] text-muted-foreground">{mg.children.length} 笔合并</span>}
                     </PositionCardHeader>
                     <PositionCardPnl pnl={totalPnl} roe={roe} />
                     <div className={positionDetailsClass}>
@@ -1346,6 +1378,7 @@ export function PositionPanel({
                 </thead>
                 <tbody>
                   {allOrders.map(({ symbol, order }) => {
+                    const instantOwner = instantOrderOwners.get(order.id);
                     // 折算价 = 引擎真正会成交的那个价，不是「渲染这一帧的市价」。
                     // 条件单成交在触发价上：0.010344 的触发价配 0.011199 的市价，
                     // 按市价折出来的 892.960966 NOM 是一个永不发生的数。
@@ -1399,6 +1432,7 @@ export function PositionPanel({
                                 只减仓
                               </span>
                             )}
+                            {instantOwner && <span className="text-[9px] text-muted-foreground">即时交易 · 模拟</span>}
                             {triggerDoom && (
                               <span
                                 data-testid="order-trigger-limit-risk"
@@ -1492,7 +1526,12 @@ export function PositionPanel({
                         </td>
                         <td className="px-3 py-2">
                           <button
-                            onClick={() => onCancelOrder(symbol, order.id)}
+                            onClick={() => {
+                              if (instantOwner) {
+                                void instant?.manage?.(instantOwner, { kind: 'cancel', side: order.reduceKind === 'TP' ? 'tp' : 'sl' })
+                                  .catch(cause => toast.error(cause instanceof Error ? cause.message : '撤销失败，请重试'));
+                              } else onCancelOrder(symbol, order.id);
+                            }}
                             className="p-0.5 rounded hover:bg-[#f6465d]/20 text-gray-500 dark:text-[#848e9c] hover:text-[#f6465d] transition-colors"
                           >
                             <X className="w-3.5 h-3.5" />
@@ -2034,19 +2073,19 @@ export function PositionPanel({
         );
       })()}
 
-      <Dialog open={closeAllConfirmOpen} onOpenChange={setCloseAllConfirmOpen}>
+      <Dialog open={closeAllConfirmOpen} onOpenChange={open => { if (!closingAllInstant) setCloseAllConfirmOpen(open); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>确认全平</DialogTitle>
             <DialogDescription>
-              将以市价强制平仓当前列表中的所有 <span className="font-bold text-foreground">{displayedPositions.length}</span> 个仓位，请确认。
+              将以市价强制平仓当前列表中的所有 <span className="font-bold text-foreground">{displayedPositions.length + instantPositions.length}</span> 个仓位，请确认。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCloseAllConfirmOpen(false)}>
+            <Button variant="outline" size="sm" disabled={closingAllInstant} onClick={() => setCloseAllConfirmOpen(false)}>
               取消
             </Button>
-            <Button variant="destructive" size="sm" onClick={handleCloseAll}>
+            <Button variant="destructive" size="sm" disabled={closingAllInstant} onClick={() => void handleCloseAll()}>
               确认全平
             </Button>
           </DialogFooter>

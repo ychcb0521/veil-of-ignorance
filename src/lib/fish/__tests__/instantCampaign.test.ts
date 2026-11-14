@@ -5,6 +5,8 @@ import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { sortCampaignRows } from '@/lib/campaignListSort';
 import { buildInstantCampaignData, buildOpenInstantCampaignData, freezeInstantCampaign, instantCampaignInput, instantPositionInput, instantPositionValuation } from '../instantCampaign';
 import { readInstantPositionQuote } from '../instantPositionQuote';
+import { INSTANT_MANUAL_EXECUTION, applyInstantManualFill, instantManualTrigger, validateInstantManualLevels, type InstantManualExecution } from '../instantManualExecution';
+import { validScreenedSale } from '../screenedCda';
 import { qualityCampaignSheets } from '../qualityCampaignExport';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import type { FishReconstructionLoader } from '../reconstruction';
@@ -19,6 +21,46 @@ const record: PreEntryRecord = {
 const round: PreEntryRound = { id: record.roundId, startedAt: at, updatedAt: buyAt, filters: [], hours: 1, state: 'complete', automatic: true };
 const alert = { at: sellAt, value: -10.5 };
 const signal = new AbortController().signal;
+
+it('settles manual partial and full closes against the remaining coins after the actual mirror fill', async () => {
+  const position = { ...instantPositionInput(record, round)!, entryPrice: 100, marginUsdt: 40, leverage: 5 };
+  const mirror = { at: buyAt + minute, price: 102, fraction: .715, gainPct: 2, atOpen: false };
+  const first = { at: buyAt + 2 * minute, priceAt: buyAt + 2 * minute, price: 95, fraction: .5, reason: 'manual' as const };
+  const manual: InstantManualExecution = { version: INSTANT_MANUAL_EXECUTION, entryPrice: 100, startedAt: first.at, through: first.at, fills: [first] };
+  const current = instantPositionValuation(position, undefined, mirror, 105, manual);
+  expect(current.remainingQuantity).toBeCloseTo(.285);
+  expect(current.remainingCost).toBeCloseTo(28.5);
+  expect(current.realizedPnl).toBeCloseTo(1.435);
+  const open = buildOpenInstantCampaignData('account-a', position, undefined, mirror, first.at, manual);
+  expect(open.tradeRecords.map(fill => fill.exit_reason_text)).toEqual(['镜像止盈', '手动卖出']);
+  expect(open.campaign.comparison?.instant?.openPosition?.realizedPnl).toBeCloseTo(1.435);
+  const final = { at: sellAt, priceAt: sellAt, price: 110, fraction: 1, reason: 'take-profit' as const };
+  const sell = { at: sellAt, closePrice: 110, mirror, manual: applyInstantManualFill(manual, final),
+    evidence: { version: INSTANT_MANUAL_EXECUTION, reason: final.reason, priceAt: sellAt } };
+  expect(validScreenedSale(sell)).toBe(true);
+  const input = instantCampaignInput(record, round, sell)!;
+  const load: FishReconstructionLoader = async (_row, from, cut, plan) =>
+    Array.from({ length: (cut - from) / plan.step }, (_, i) => ({
+      openTime: from + i * plan.step, open: 100, high: 102, low: 96, close: 99, volume: 1, takerBuyVolume: null,
+    }));
+  const closed = buildInstantCampaignData('account-a', await freezeInstantCampaign({ ...input, opened: position }, load, signal));
+  expect(closed.campaign.id).toBe(open.campaign.id);
+  expect(closed.campaign.final_realized_pnl).toBeCloseTo(4.285);
+  expect(closed.campaign.comparison?.instant?.staticDrawdown).toBeCloseTo(5);
+  expect(closed.tradeRecords.map(fill => fill.exit_reason_text)).toEqual(['镜像止盈', '手动卖出', '手动止盈触发']);
+  expect(closed.tradeRecords.reduce((sum, fill) => sum + fill.quantity, 0)).toBeCloseTo(2);
+  expect(computeCampaignRealizedPnl(closed.campaign, closed.legs, closed.tradeRecords, {}).total).toBeCloseTo(4.285);
+});
+
+it('uses only eligible prices after arming and settles gap and same-minute triggers deterministically', () => {
+  const orders = { tp: 110, sl: 95, percentage: 50 };
+  const bar = { openTime: buyAt, open: 100, high: 120, low: 90, close: 101, takerBuyVolume: null, volume: 1 };
+  expect(instantManualTrigger(orders, bar, buyAt + 1)).toBeUndefined();
+  expect(instantManualTrigger(orders, bar, buyAt)).toMatchObject({ reason: 'stop-loss', price: 95, fraction: .5 });
+  expect(instantManualTrigger(orders, { ...bar, open: 90 }, buyAt)).toMatchObject({ at: buyAt, price: 90 });
+  expect(instantManualTrigger(orders, { ...bar, close: 112 }, buyAt + 1)).toMatchObject({ reason: 'take-profit', price: 112 });
+  expect(() => validateInstantManualLevels({ ...orders, tp: 90 }, 100)).toThrow('多单止盈价必须高于开仓价');
+});
 
 it('builds one frozen 5× simulated trade from the two saved times, prices and CDA evidence', async () => {
   const input = instantCampaignInput(record, round, alert)!;

@@ -1,4 +1,5 @@
-import {isQualityCampaignId} from '@/lib/campaignSections';
+import {isPaperCampaignId} from '@/lib/campaignSections';
+import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 /**
  * Legs 表「加仓校验」列：每一笔加仓的仓位大小是否合规。
  *
@@ -410,7 +411,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     }
     const x2Coins = add.pre_position_size / s2;
     // 反向委托列表目前只收空单，主空战役读不到 K，自然落到 no_stop_line
-    const paper=isQualityCampaignId(add.campaign_id??undefined),fill=paper?add.quality_addition_fill:undefined;
+    const paper=isPaperCampaignId(add.campaign_id??undefined),fill=paper?add.quality_addition_fill:undefined;
     const support=fill?.sizing?.support;
     const frozenSupport=fill&&fill.at===t&&fill.price===s2&&positive(support)?support:null;
     const s1 = frozenSupport ?? resolveStopLine(orders, d > 0 ? 'SHORT' : 'LONG', t, s2, d);
@@ -517,6 +518,18 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
           hedgeBanked += cut.usd;
         }
       }
+    }
+
+    const frozen = fill?.positionVersion === HOLDING_LEDGER_ADDITION_VERSION && fill.at === t && fill.price === s2 ? fill.ledger : undefined;
+    const frozenCoins = fill?.sizing?.coinsBefore;
+    if (frozen && positive(frozenCoins) && Number.isFinite(frozen.costBefore) && frozen.costBefore >= 0 && Number.isFinite(frozen.realizedBefore)) {
+      x1Coins = frozenCoins;
+      costBasis = frozen.costBefore;
+      cushion = (x1Coins * s1 - costBasis) * d;
+      banked = frozen.realizedBefore;
+      hedgeBanked = 0;
+      consumedByHeld = Math.max(0, -cushion);
+      incomplete = false;
     }
 
     const riskPerCoin = Math.max(0, (s2 - s1) * d);

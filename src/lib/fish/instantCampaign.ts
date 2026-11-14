@@ -1,6 +1,6 @@
 import { campaignStatusFromRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { TradeCampaign, TradeJournal, CampaignEvent } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+import type { Position, TradeRecord } from '@/types/trading';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { compileFishProgram, shortFishHash } from './algorithm';
 import { fishCaughtBy } from './records';
@@ -22,6 +22,8 @@ import { buildQualityCampaignData } from './qualityCampaignProjection';
 import { additionPosition, qualityAdditionFills } from './qualityAddition';
 import type { QualityMirrorFill } from './qualityMirror';
 import { hasQualityCampaign } from './qualityCampaignArchive';
+import { INSTANT_MANUAL_EXECUTION, type InstantManualExecution } from './instantManualExecution';
+import { projectInstantManualFills, valueInstantManualFills } from './instantManualCampaign';
 
 export { INSTANT_POSITION };
 const LEGACY_POSITION = { marginUsdt: 100, leverage: 5 } as const;
@@ -76,7 +78,7 @@ export function instantPositionInput(record: PreEntryRecord, round: PreEntryRoun
 export function instantCampaignInput(record: PreEntryRecord, round: PreEntryRound, sell: ScreenedCdaTrigger, monitorResult?: QualityResult): InstantCampaignInput | undefined {
   const input = instantPositionInput(record, round);
   if (!input || !validScreenedSale(sell)) return;
-  if (input.monitor && monitorResult && validInstantMonitorClose({ ...input, sell, monitorResult })) {
+  if (input.monitor && validInstantMonitorClose({ ...input, sell, monitorResult })) {
     return { ...input, sell, monitorResult, metadata: instantCampaignMetadata(record, round) };
   }
   if (!input.monitor && sell.evidence?.version !== INSTANT_TEMPLATE_MONITOR && sell.at > input.buyAt) return { ...input, sell, metadata: instantCampaignMetadata(record, round) };
@@ -84,6 +86,13 @@ export function instantCampaignInput(record: PreEntryRecord, round: PreEntryRoun
 
 export function validInstantMonitorClose(input: InstantCampaignInput) {
   const result = input.monitorResult;
+  if (input.sell.evidence?.version === INSTANT_MANUAL_EXECUTION) {
+    return input.monitor?.version === INSTANT_TEMPLATE_MONITOR && validScreenedSale(input.sell)
+      && input.sell.manual!.startedAt >= input.buyAt && input.sell.at > input.buyAt
+      && (!result || result.status === 'open' && hasQualityCampaign(result)
+        && result.entryTime === Math.floor(input.buyAt / MINUTE) * MINUTE
+        && (result.endTime ?? result.entryTime) <= input.sell.manual!.fills[0].at);
+  }
   return input.monitor?.version === INSTANT_TEMPLATE_MONITOR && !!input.monitor.plan?.frozenVersions?.length
     && Number.isSafeInteger(input.buyAt) && input.buyAt > 0
     && !!result && result.status === 'closed' && hasQualityCampaign(result)
@@ -120,7 +129,9 @@ export async function readInstantMark(input: Pick<InstantPositionInput, 'source'
 /** Use the same venue as the screened signal. The sale is priced at the confirming close. */
 export async function freezeInstantCampaign(input: InstantCampaignInput, load: FishReconstructionLoader, signal: AbortSignal): Promise<SizedInstantCampaignSnapshot> {
   const { buyAt, sell } = input;
-  if (input.monitor) {
+  if (sell.evidence?.version === INSTANT_MANUAL_EXECUTION && (!validScreenedSale(sell) || sell.manual!.startedAt < buyAt || sell.at <= buyAt
+    || input.monitor && !validInstantMonitorClose(input))) throw Error('即时交易缺少手动成交快照');
+  if (input.monitor && !sell.manual) {
     if (!validScreenedSale(input.sell) || !validInstantMonitorClose(input)) throw Error('即时交易缺少持仓监测成交快照');
     const result = input.monitorResult!;
     return { ...input, version: 2, ...instantMonitorSize(input.monitor), entryPrice: result.entryPrice!, exitPrice: result.endPrice!,
@@ -128,7 +139,9 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
       staticDrawdown: qualityDrawdownPct(result, 'static'), recordedAt: Date.now() };
   }
   const from = Math.floor(buyAt / MINUTE) * MINUTE;
-  const cut = sell.evidence?.stop?.barOpenAt ?? (sell.evidence?.reason === 'manual' ? sell.evidence.priceAt! : Math.floor(sell.at / MINUTE) * MINUTE);
+  const manualPriceAt = sell.manual?.fills.at(-1)?.priceAt;
+  const cut = manualPriceAt != null ? Math.floor(manualPriceAt / MINUTE) * MINUTE
+    : sell.evidence?.stop?.barOpenAt ?? (sell.evidence?.reason === 'manual' ? sell.evidence.priceAt! : Math.floor(sell.at / MINUTE) * MINUTE);
   const source: TradeSignal = { ...input.source, timeMs: cut, timeLabel: '', fallbackZone: '' };
   const plan = instantPricePlan('1m');
   const read = async (start: number, end: number) => {
@@ -138,7 +151,7 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
     return bars;
   };
   const first = cut > from ? await read(from, Math.min(cut, from + PRICE_WINDOW_MINUTES * MINUTE)) : [];
-  const entryPrice = input.opened?.entryPrice ?? first[0]?.open ??
+  const entryPrice = input.monitorResult?.entryPrice ?? sell.manual?.entryPrice ?? input.opened?.entryPrice ?? first[0]?.open ??
     (await freezeInstantPosition(input, load, signal)).entryPrice;
   if (!(entryPrice > 0 && Number.isFinite(entryPrice))) throw Error('即时交易缺少有效买入价');
   let lowest = entryPrice, dynamic = 0, peakPrice = entryPrice;
@@ -164,9 +177,15 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
     exitPrice = bars[0].close;
   }
   if (!(exitPrice > 0 && Number.isFinite(exitPrice))) throw Error('即时交易缺少有效 CDA 卖出价');
+  const sizing = input.opened ?? instantMonitorSize(input.monitor);
+  // Keep the simulation's observed execution prices even when a quote, and
+  // not the minute's close, was used for a manual fill.
+  for (const fill of sell.manual?.fills ?? []) {
+    lowest = Math.min(lowest, fill.price);
+    peakPrice = Math.max(peakPrice, fill.price);
+  }
   return {
-    ...input, version: 2, marginUsdt: input.opened?.marginUsdt ?? INSTANT_POSITION.marginUsdt,
-    leverage: input.opened?.leverage ?? INSTANT_POSITION.leverage, entryPrice, exitPrice,
+    ...input, version: 2, marginUsdt: sizing.marginUsdt, leverage: sizing.leverage, entryPrice, exitPrice,
     peakPct: 100 * (Math.max(peakPrice, exitPrice) / entryPrice - 1),
     drawdown: Math.max(dynamic, 100 * (1 - exitPrice / peakPrice)),
     staticDrawdown: 100 * (1 - Math.min(lowest, exitPrice) / entryPrice),
@@ -174,24 +193,36 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
   };
 }
 
-export function instantPositionValuation(position: InstantPositionFill, monitor?: QualityResult, legacyMirror?: QualityMirrorFill, mark?: number) {
+export function instantPositionValuation(position: InstantPositionFill, monitor?: QualityResult, legacyMirror?: QualityMirrorFill, mark?: number, manual?: InstantManualExecution) {
   const entryPrice = monitor?.entryPrice ?? position.entryPrice;
   const notional = position.marginUsdt * position.leverage;
   const mirror = monitor?.mirrorFill ?? legacyMirror;
   const additions = qualityAdditionFills(monitor ?? {});
   const reductions = monitor?.additionReductions ?? [];
   const entryAt = monitor?.entryTime ?? position.buyAt;
-  const held = additionPosition(notional, entryPrice, mark ?? entryPrice, false, additions, mirror, reductions, entryAt);
+  const base = additionPosition(notional, entryPrice, mark ?? entryPrice, false, additions, mirror, reductions, entryAt);
+  const held = valueInstantManualFills(base, mark ?? entryPrice, manual?.fills);
   const margin = held.remainingCost / position.leverage;
   const pnl = mark == null ? null : held.remainingPnl;
   const roe = pnl != null && margin > 0 ? pnl / margin * 100 : null;
   return { ...held, entryPrice, mirror, additions, reductions, margin, pnl, roe };
 }
 
+export function instantPositionDisplay(position: InstantPositionInput & { leverage: number }, held: Pick<ReturnType<typeof instantPositionValuation>, 'averageEntryPrice' | 'remainingQuantity' | 'margin'>): Position {
+  return {
+    id: position.id, side: 'LONG', entryPrice: held.averageEntryPrice, quantity: held.remainingQuantity,
+    leverage: position.leverage, marginMode: 'isolated', settlementMode: 'usdt', settlementAsset: 'USDT',
+    margin: held.margin, isolatedMargin: held.margin, openTime: position.buyAt,
+  };
+}
+
 export function buildSettlingInstantCampaignData(owner: string, position: InstantPositionFill, sale: InstantCampaignInput): QualityCampaignData | undefined {
   const { sell, monitorResult } = sale;
   let data: QualityCampaignData;
-  if (position.monitor && monitorResult && validInstantMonitorClose(sale)) {
+  if (sell.manual && validScreenedSale(sell)) {
+    data = buildOpenInstantCampaignData(owner, position, monitorResult, sell.mirror, sell.at, sell.manual);
+    data.campaign.comparison!.instant!.sellEvidence = sell.evidence;
+  } else if (position.monitor && monitorResult && validInstantMonitorClose(sale)) {
     data = buildTemplateInstantCampaignData(owner, position, monitorResult, { sell, recordedAt: monitorResult.evaluatedAt,
       drawdown: qualityDrawdownPct(monitorResult, 'dynamic'), staticDrawdown: qualityDrawdownPct(monitorResult, 'static') });
   } else if (!position.monitor && validScreenedSale(sell) && sell.closePrice != null && sell.at > position.buyAt) {
@@ -202,10 +233,10 @@ export function buildSettlingInstantCampaignData(owner: string, position: Instan
   return data;
 }
 
-export function buildOpenInstantCampaignData(owner: string, position: InstantPositionFill, monitor?: QualityResult, mirror?: QualityMirrorFill, through?: number): QualityCampaignData {
+export function buildOpenInstantCampaignData(owner: string, position: InstantPositionFill, monitor?: QualityResult, mirror?: QualityMirrorFill, through?: number, manual?: InstantManualExecution): QualityCampaignData {
   const { recordId, buyAt } = position;
   const valuation = instantPositionValuation(position, monitor, mirror);
-  const valuedAt = Math.max(buyAt, monitor?.endTime ?? through ?? buyAt, valuation.mirror?.at ?? 0);
+  const valuedAt = Math.max(buyAt, monitor?.endTime ?? 0, through ?? 0, valuation.mirror?.at ?? 0, manual?.fills.at(-1)?.at ?? 0);
   const result: QualityResult = {
     key: recordId, sampleId: recordId, groupId: position.monitor?.plan.id ?? PRICE_VERSION, evaluatedAt: valuedAt,
     ...monitor,
@@ -219,6 +250,7 @@ export function buildOpenInstantCampaignData(owner: string, position: InstantPos
       drawdown: qualityDrawdownPct(monitor, 'dynamic'), staticDrawdown: qualityDrawdownPct(monitor, 'static') })
     : buildDefaultInstantCampaignData(owner, position, { recordedAt: buyAt, valuedAt, mirror: valuation.mirror,
       peakPct: null, drawdown: null, staticDrawdown: null });
+  if (manual) return projectInstantManualFills(data, manual, valuation, valuedAt, buyAt);
   data.campaign.comparison!.instant!.openPosition = {
     buyAt, quantity: valuation.remainingQuantity, cost: valuation.remainingCost, realizedPnl: valuation.realizedPnl,
   };
@@ -228,6 +260,14 @@ export function buildOpenInstantCampaignData(owner: string, position: InstantPos
 export function buildInstantCampaignData(owner: string, frozen: InstantCampaignSnapshot): QualityCampaignData {
   const sizing = frozen.version === 1 ? LEGACY_POSITION : frozen;
   const position = { ...frozen, marginUsdt: sizing.marginUsdt, leverage: sizing.leverage };
+  if (frozen.sell.manual) {
+    const data = buildOpenInstantCampaignData(owner, position, frozen.monitorResult, frozen.sell.mirror, frozen.sell.at, frozen.sell.manual);
+    const comparison = data.campaign.comparison!;
+    Object.assign(comparison.instant!, { sellEvidence: frozen.sell.evidence, drawdown: frozen.drawdown, staticDrawdown: frozen.staticDrawdown });
+    comparison.holdingMetrics!.peakPct = frozen.peakPct;
+    data.campaign.peak_drawdown = frozen.drawdown;
+    return data;
+  }
   if (frozen.monitor && frozen.monitorResult) return buildTemplateInstantCampaignData(owner, position, frozen.monitorResult, frozen);
   return buildDefaultInstantCampaignData(owner, position, { ...frozen, valuedAt: frozen.sell.at, mirror: frozen.sell.mirror });
 }

@@ -1,4 +1,5 @@
-import { instantMonitorSale, manualInstantMonitorClose } from '@/lib/fish/instantMonitorExecution';
+import { toast } from 'sonner';
+import { instantMonitorSale } from '@/lib/fish/instantMonitorExecution';
 import type { QualityResult } from '@/lib/fish/quality';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
@@ -6,12 +7,21 @@ import { fishNotifyMissing } from '@/lib/fish/notify';
 import { isAutomaticPreEntryRound, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED_PRICE_EXIT_RULE, validScreenedSale, type ScreenedPriceProgress, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
-import { readFishPreferences, readFishPreferenceEntries, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
-import { markPageInstantPosition, readPageInstantMonitor, readPageScreenedCda } from './useFish';
+import { readFishPreferences, readFishPreferenceEntries, writeFishPreference, writeFishPreferences } from '@/lib/fish/fishPreferencesDb';
+import { markPageInstantPosition, readPageInstantCampaignCandles, readPageInstantMonitor, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
-import { SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
-import { instantCampaignInput, type InstantPositionInput } from '@/lib/fish/instantCampaign';
+import { instantManualCheckpointKey, SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
+import { instantCampaignInput, instantPositionDisplay, instantPositionInput, instantPositionValuation, type InstantPositionFill, type InstantPositionInput } from '@/lib/fish/instantCampaign';
+import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
 import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
+import { INSTANT_MANUAL_EXECUTION, INSTANT_MANUAL_MINUTE, applyInstantManualFill, cancelInstantProtection, instantManualTrigger, validateInstantManualLevels, type InstantManualAction, type InstantManualExecution } from '@/lib/fish/instantManualExecution';
+import { readInstantPositionQuote } from '@/lib/fish/instantPositionQuote';
+import { validateFishBars } from '@/lib/fish/shared';
+import { formatPrice, formatSignedUSDT } from '@/lib/formatters';
+import { cardCloseLotSize } from '@/lib/marketLotSize';
+import { normalizePositionLimitMode } from '@/lib/positionLimitMode';
+import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
 import type { useFishNotify } from './useFishNotify';
 
 const POLL_MS = 2000;
@@ -24,6 +34,7 @@ interface Checkpoint {
   alert?: ScreenedCdaTrigger;
   progress?: ScreenedCdaGuardProgress;
   risk?: ScreenedPriceProgress;
+  manual?: InstantManualExecution;
   sent?: string[];
   delivered?: true;
   nextMailAt?: number;
@@ -38,7 +49,8 @@ export interface FishCdaTracking {
   localSales?: readonly ScreenedFishAdmission[];
   hasSavedSales?: boolean;
   campaignIssue?: string;
-  closePosition?: (input: InstantPositionInput) => Promise<void>;
+  managePosition?: (input: InstantPositionFill, action: InstantManualAction) => Promise<void>;
+  manualPositions?: ReadonlyMap<string, InstantManualExecution>;
   mirrorFills?: ReadonlyMap<string, NonNullable<ScreenedPriceProgress['mirror']>>;
   monitorResults?: ReadonlyMap<string, QualityResult>;
   error: string;
@@ -73,6 +85,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const [revision, setRevision] = useState(0);
   const [refreshVersion, refreshCheckpoints] = useState(0);
   const checkpoints = useRef(new Map<string, Checkpoint>());
+  const readCheckpoints = useCallback(async (keys: string[]) => {
+    const rows = await readFishPreferences<Checkpoint>([...keys, ...keys.map(instantManualCheckpointKey)]);
+    return keys.map((key, index) => rows[keys.length + index] ?? rows[index] ?? readLocal<Checkpoint>(key));
+  }, []);
   const changes = useRef<BroadcastChannel>();
   const setEnabled = useCallback(async (enabled: boolean) => {
     if (!configKey) return;
@@ -105,10 +121,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const current = useRef({ entries, notify });
   current.current = { entries, notify };
   const wake = useRef<() => void>();
-  const manual = useRef<(input: InstantPositionInput) => Promise<void>>();
-  const closePosition = useCallback(async (input: InstantPositionInput) => {
+  const manual = useRef<(input: InstantPositionFill, action: InstantManualAction) => Promise<void>>();
+  const managePosition = useCallback(async (input: InstantPositionFill, action: InstantManualAction) => {
     if (!manual.current) throw Error('即时交易正在初始化，请稍后再试');
-    await manual.current(input);
+    await manual.current(input, action);
   }, []);
 
   useEffect(() => {
@@ -147,9 +163,15 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     if (!owner || typeof indexedDB === 'undefined') return;
     let active = true;
     void (async () => {
-      const stored = await readFishPreferenceEntries<Checkpoint>(jobPrefix, saved => !!saved?.alert);
-      const sales = new Map<string, Checkpoint>();
-      for (const [key, saved] of stored) if (saved?.alert) sales.set(key, saved);
+      const [stored, overridden] = await Promise.all([
+        readFishPreferenceEntries<Checkpoint>(jobPrefix, saved => !!saved?.alert),
+        readFishPreferenceEntries<Checkpoint>(instantManualCheckpointKey(jobPrefix)),
+      ]);
+      const sales = new Map(stored);
+      for (const [suffix, saved] of overridden) {
+        if (saved.alert) sales.set(suffix, saved);
+        else sales.delete(suffix);
+      }
       // Existing browser checkpoints from before IndexedDB are read without rewriting.
       try {
         for (let i = 0; i < localStorage.length; i++) {
@@ -183,18 +205,18 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     if (!admitted.length) return;
     let active = true;
     const keys = admitted.map(({record}) => jobPrefix + encodeURIComponent(record.id));
-    void readFishPreferences<Checkpoint>(keys).then(rows => {
+    void readCheckpoints(keys).then(rows => {
       if (!active) return;
       keys.forEach((key, i) => {
-        const saved = rows[i] ?? readLocal<Checkpoint>(key);
+        const saved = rows[i];
         const existing = checkpoints.current.get(key);
-        if (saved && (!existing || !existing.alert && (!!saved.alert || saved.after > existing.after))) checkpoints.current.set(key, saved);
+        if (saved && (!existing || !existing.alert && (!!saved.alert || !!saved.manual || saved.after > existing.after))) checkpoints.current.set(key, saved);
       });
       setRevision(value => value + 1);
       wake.current?.();
     }, () => { if (active) setError('CDA 追踪进度读取失败，请重试'); });
     return () => { active = false; };
-  }, [admitted, jobPrefix, refreshVersion]);
+  }, [admitted, jobPrefix, refreshVersion, readCheckpoints]);
 
   useEffect(() => {
     const settings = activeSettings;
@@ -203,13 +225,21 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     let scanning = false, mailing = false;
     const retry = new Map<string, number>();
     const errors = new Map<string, string>();
+    const limitMode = () => {
+      const raw = readPersistedStateRaw(getUserPrefix(owner) + 'position_limit_mode');
+      try { return normalizePositionLimitMode(JSON.parse(raw ?? 'null')); }
+      catch { return normalizePositionLimitMode(null); }
+    };
+    const manualPending = new Set<string>();
+    const intentKey = (id: string) => instantManualCheckpointKey(jobPrefix) + 'intent:' + encodeURIComponent(id);
+    const hasManualIntent = (id: string) => manualPending.has(id) || (readLocal<{ until: number }>(intentKey(id))?.until ?? 0) > Date.now();
     const keyOf = (record: PreEntryRecord) => jobPrefix + encodeURIComponent(record.id);
     const read = (record: PreEntryRecord) => checkpoints.current.get(keyOf(record)) ?? readLocal<Checkpoint>(keyOf(record));
     const refresh = async (records: readonly PreEntryRecord[]) => {
-      const keys = records.map(keyOf), values = await readFishPreferences<Checkpoint>(keys);
+      const keys = records.map(keyOf), values = await readCheckpoints(keys);
       let changed = false;
       keys.forEach((key, i) => {
-        const value = values[i] ?? readLocal<Checkpoint>(key);
+        const value = values[i];
         if (value && JSON.stringify(checkpoints.current.get(key)) !== JSON.stringify(value)) {
           checkpoints.current.set(key, value);
           changed = true;
@@ -219,10 +249,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const save = async (record: PreEntryRecord, value: Checkpoint) => {
       const key = keyOf(record);
-      await writeFishPreference(key, value);
+      await writeFishPreference(value.manual ? instantManualCheckpointKey(key) : key, value);
       checkpoints.current.set(key, value);
       // Keep receipts visible to a concurrently open 630 page using a legacy watch.
-      if (readLocal<Settings>(configKey)) {
+      if (!value.manual && readLocal<Settings>(configKey)) {
         try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* IndexedDB is the durable source. */ }
       }
       setRevision(revision => revision + 1);
@@ -273,7 +303,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       ? checkpoint?.after ?? start(record) : start(record);
     const eligible = (entry: ScreenedFishAdmission, target: number) => {
       const checkpoint = read(entry.record);
-      if (checkpoint?.alert || (retry.get(entry.record.id) ?? 0) > Date.now()) return false;
+      if (checkpoint?.alert || hasManualIntent(entry.record.id) || (retry.get(entry.record.id) ?? 0) > Date.now()) return false;
+      if (checkpoint?.manual) return !!checkpoint.manual.orders && checkpoint.manual.through < target;
       if (entry.round.instantMonitor) return (checkpoint?.after ?? Math.floor(entry.record.matchedAt! / 60_000) * 60_000) < target;
       return !!settings && (autoPositions
           ? cursor(entry.record, checkpoint) < Math.floor(target / SCREENED_CDA_STEP) * SCREENED_CDA_STEP
@@ -287,6 +318,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       return result;
     };
     const saveTemplate = async ({ record, round }: ScreenedFishAdmission, result: QualityResult, through: number) => {
+      if (hasManualIntent(record.id)) return;
       const alert = result.status === 'closed' ? instantMonitorSale(result) : undefined;
       await save(record, { after: through, monitorResult: result, alert });
       changes.current?.postMessage('alert');
@@ -295,6 +327,68 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         if (input) await saveInstantCampaignInput(owner, input);
         send();
       }
+    };
+    const saveManual = async (input: InstantPositionInput, saved: Checkpoint | undefined, state: InstantManualExecution) => {
+      const key = jobPrefix + encodeURIComponent(input.recordId);
+      const last = state.fills.at(-1);
+      const alert: ScreenedCdaTrigger | undefined = last?.fraction === 1 ? {
+        at: last.at, closePrice: last.price, mirror: saved?.risk?.mirror, manual: state,
+        evidence: { version: INSTANT_MANUAL_EXECUTION, reason: last.reason, priceAt: last.priceAt },
+      } : undefined;
+      const checkpoint = { ...saved, after: saved?.after ?? state.through, manual: state, alert };
+      if (saved?.manual) {
+        await writeFishPreference(instantManualCheckpointKey(key), checkpoint);
+      } else {
+        // Older tabs stop scanning upon seeing an alert. Deliberately omit the
+        // sale evidence so they do not issue an email or create a false exit.
+        const pausedForOldTabs: Checkpoint = { ...saved, after: checkpoint.after, alert: { at: state.startedAt }, delivered: true };
+        await writeFishPreferences([[key, pausedForOldTabs], [instantManualCheckpointKey(key), checkpoint]]);
+      }
+      checkpoints.current.set(key, checkpoint);
+      setRevision(revision => revision + 1);
+      changes.current?.postMessage('alert');
+      if (alert) {
+        // The normal campaign pass also retries from this durable checkpoint.
+        await saveInstantCampaignInput(owner, { ...input, sell: alert, monitorResult: checkpoint.monitorResult }).catch(() => undefined);
+        send();
+      }
+    };
+    const scanManual = async (entry: ScreenedFishAdmission, target: number) => {
+      const { record, round } = entry;
+      const input = instantPositionInput(record, round);
+      const saved = read(record), state = saved?.manual;
+      if (!input || !saved || !state?.orders || state.through >= target) return;
+      const through = Math.min(state.through + 120 * INSTANT_MANUAL_MINUTE, target);
+      const bars = await readPageInstantCampaignCandles(input.source, '1m', state.through, through, lifetime.signal);
+      validateFishBars(bars, through, (through - state.through) / INSTANT_MANUAL_MINUTE, INSTANT_MANUAL_MINUTE);
+      if (lifetime.signal.aborted || hasManualIntent(record.id)) return;
+      let next = state;
+      let lastConsumed = state.through;
+      const notices: (() => void)[] = [];
+      const size = { ...input, ...instantMonitorSize(input.monitor), entryPrice: state.entryPrice };
+      const mode = limitMode();
+      for (const bar of bars) {
+        if (!next.orders) break;
+        lastConsumed = bar.openTime + INSTANT_MANUAL_MINUTE;
+        const fill = instantManualTrigger(next.orders, bar, next.ordersAt ?? next.startedAt);
+        if (!fill) continue;
+        const label = fill.reason === 'take-profit' ? '止盈' : '止损';
+        const held = instantPositionValuation(size, saved.monitorResult, saved.risk?.mirror, fill.price, next);
+        const lot = cardCloseLotSize(input.source.symbol, [instantPositionDisplay(size, held)], fill.fraction, fill.price, 'tpsl', mode).refusal;
+        if (lot) {
+          next = cancelInstantProtection(next, fill.reason === 'take-profit' ? 'tp' : 'sl');
+          notices.push(() => toast.error(`${label}触发时超过单笔市价上限，委托已撤销`, {
+            description: `${input.source.symbol}：${lot.title}（${lot.source}）`,
+          }));
+          continue;
+        }
+        next = applyInstantManualFill(next, fill);
+        notices.push(() => toast.success(`${label}已触发：${input.source.symbol} @ ${formatPrice(fill.price, input.source.symbol)}`, {
+          description: `${formatSignedUSDT((held.pnl ?? 0) * fill.fraction)} USDT`,
+        }));
+      }
+      await saveManual(input, saved, { ...next, through: lastConsumed });
+      for (const notice of notices) notice();
     };
     const tick = () => {
       send();
@@ -330,10 +424,24 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         }));
         if (lifetime.signal.aborted) return;
         const admitted = work.filter(entry => entry !== undefined);
-        const templates = admitted.filter(entry => entry.round.instantMonitor).sort((a, b) =>
+        const manualEntries = admitted.filter(entry => !!read(entry.record)?.manual).sort((a, b) =>
+          read(a.record)!.manual!.through - read(b.record)!.manual!.through).slice(0, 3);
+        const templates = admitted.filter(entry => entry.round.instantMonitor && !read(entry.record)?.manual).sort((a, b) =>
           (read(a.record)?.after ?? a.record.matchedAt!) - (read(b.record)?.after ?? b.record.matchedAt!)).slice(0, 3);
-        const legacy = admitted.filter(entry => !entry.round.instantMonitor);
+        const legacy = admitted.filter(entry => !entry.round.instantMonitor && !read(entry.record)?.manual);
         await Promise.all([
+          ...manualEntries.map(async entry => {
+            try {
+              await scanManual(entry, target);
+              retry.delete(entry.record.id);
+              if (errors.delete(entry.record.id)) setError(errors.values().next().value ?? '');
+            } catch (cause) {
+              if (lifetime.signal.aborted) return;
+              retry.set(entry.record.id, Date.now() + 5000);
+              errors.set(entry.record.id, entry.record.sample.source.symbol + ' · ' + (cause instanceof Error ? cause.message : '止盈止损行情待重试'));
+              setError(errors.values().next().value ?? '');
+            }
+          }),
           ...templates.map(async entry => {
             const { record } = entry;
             try {
@@ -360,7 +468,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
               await readPageScreenedCda(tasks, settings.snapshot, target, lifetime.signal, async (id, result, cause) => {
                 if (lifetime.signal.aborted) return;
                 const record = records.get(id);
-                if (!record) return;
+                if (!record || hasManualIntent(id)) return;
                 if (!result) {
                   retry.set(id, Date.now() + 5000);
                   errors.set(id, record.sample.source.symbol + ' · ' + (cause instanceof Error ? cause.message : '等待 CDA 行情'));
@@ -394,62 +502,78 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         }
       }).finally(() => { scanning = false; });
     };
-    manual.current = async input => {
+    manual.current = async (input, action) => {
+      if (manualPending.has(input.recordId)) throw Error('这笔仓位正在处理，请稍后再试');
+      manualPending.add(input.recordId);
+      const keyForIntent = intentKey(input.recordId);
+      const intent = { token: crypto.randomUUID(), until: Date.now() + 60_000 };
+      try { localStorage.setItem(keyForIntent, JSON.stringify(intent)); } catch { /* Same-tab intent is already visible. */ }
       const perform = async () => {
         const key = jobPrefix + encodeURIComponent(input.recordId);
-        const [stored] = await readFishPreferences<Checkpoint>([key]);
+        const [stored] = await readCheckpoints([key]);
         const saved = stored ?? checkpoints.current.get(key) ?? readLocal<Checkpoint>(key);
         if (validScreenedSale(saved?.alert)) throw Error('这笔仓位已经卖出');
-        const mark = await markPageInstantPosition(input, lifetime.signal);
-        if (lifetime.signal.aborted) throw Error('平仓已取消');
-        let risk = saved?.risk;
-        const admission = current.current.entries.find(entry => entry.record.id === input.recordId);
-        if (input.monitor) {
-          if (!admission?.round.instantMonitor) throw Error('正在恢复即时交易的持仓模板，请稍后再试');
-          const result = await checkTemplate(admission, mark.at, saved);
-          if (result.status !== 'open' && result.status !== 'closed') throw Error(result.reason || '持仓监测尚未完成本分钟核对');
-          if (result.status === 'open' && result.endTime !== mark.at) throw Error('持仓监测尚未完成本分钟核对');
-          const closed = result.status === 'closed' ? result : manualInstantMonitorClose(result, input.monitor, mark.at, mark.price);
-          await saveTemplate(admission, closed, mark.at);
+        if (action.kind === 'cancel') {
+          if (!saved?.manual?.orders) return;
+          await saveManual(input, saved, cancelInstantProtection(saved.manual, action.side));
+          toast.success('止盈/止损委托已撤销');
           return;
         }
-        if (autoPositions && admission && settings) {
-          let after = cursor(admission.record, saved);
-          let progress = saved?.progress;
-          // A confirmed automatic exit in the already closed minutes has priority.
-          while (after < Math.floor(mark.at / SCREENED_CDA_STEP) * SCREENED_CDA_STEP || (risk?.through ?? input.buyAt) < mark.at) {
-            let result: import('@/lib/fish/screenedCda').ScreenedCdaRead | undefined;
-            await readPageScreenedCda([{ id: input.recordId, source: admission.record.sample.source,
-              observeAfter: input.buyAt, after, progress, risk }], settings.snapshot, mark.at, lifetime.signal, (_id, value) => { result = value; });
-            if (lifetime.signal.aborted) throw Error('平仓已取消');
-            if (result?.trigger) {
-              await save(admission.record, { after: result.through, alert: result.trigger, risk: result.risk, progress: result.progress });
-              changes.current?.postMessage('alert');
-              send();
-              return;
-            }
-            const advanced = result && (result.through > after || (result.risk?.through ?? 0) > (risk?.through ?? 0));
-            if (!result || !advanced) break;
-            after = result.through;
-            progress = result.progress;
-            risk = result.risk;
-          }
+        let mark: { at: number; price: number };
+        try {
+          mark = await readInstantPositionQuote(input.source, AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)]));
+          if (mark.at < input.buyAt || Date.now() - mark.at > 20_000) throw Error('标记价格已延迟');
+        } catch {
+          mark = await markPageInstantPosition(input, lifetime.signal);
+          if (Date.now() - mark.at > 120_000) throw Error('行情已延迟，请稍后重试');
         }
-        const value = { after: mark.at, alert: { at: Math.max(mark.at, input.buyAt + 1, Date.now()), closePrice: mark.price,
-          mirror: risk?.mirror, evidence: { version: SCREENED_PRICE_EXIT_RULE, reason: 'manual' as const, priceAt: mark.at } } };
-        await writeFishPreference(key, value);
-        checkpoints.current.set(key, value);
-        changes.current?.postMessage('alert');
-        setRevision(revision => revision + 1);
-        const sale = admission ? instantCampaignInput(admission.record, admission.round, value.alert) : undefined;
-        await saveInstantCampaignInput(owner, sale ?? { ...input, sell: value.alert }).catch(() => undefined);
-        send();
+        if (lifetime.signal.aborted) throw Error('操作已取消');
+        const at = Math.max(Date.now(), mark.at, input.buyAt + 1, saved?.manual?.fills.at(-1)?.at ?? 0);
+        const through = Math.floor(at / INSTANT_MANUAL_MINUTE) * INSTANT_MANUAL_MINUTE;
+        const state: InstantManualExecution = saved?.manual ?? {
+          version: INSTANT_MANUAL_EXECUTION, startedAt: at, entryPrice: input.entryPrice, through, fills: [],
+        };
+        const held = instantPositionValuation(input, saved?.monitorResult, saved?.risk?.mirror, mark.price, state);
+        if (!(held.remainingQuantity > 0)) throw Error('这笔仓位已经卖出');
+        const display = instantPositionDisplay(input, held);
+        if (action.kind === 'protect') {
+          validateInstantManualLevels(action.levels, mark.price);
+          const { tp, sl, percentage } = action.levels;
+          for (const [label, price] of [['止盈', tp], ['止损', sl]] as const) {
+            if (price == null) continue;
+            const lot = cardCloseLotSize(input.source.symbol, [display], percentage / 100, price, 'tpsl', limitMode()).refusal;
+            if (lot) throw Error(`${label}（${percentage}% 仓位）：${lot.title}`);
+          }
+          await saveManual(input, saved, { ...state, orders: action.levels, ordersAt: at, through });
+          toast.success('止盈/止损委托已下达', {
+            description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${percentage}% 仓位`,
+          });
+          return;
+        }
+        const { fraction } = action;
+        if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) throw Error('平仓数量无效');
+        const lot = action.all ? null : cardCloseLotSize(input.source.symbol, [display], fraction, mark.price, 'market-close', limitMode()).refusal;
+        if (lot) throw Error(`市价平仓：${lot.title}。请分次市价平仓，或设 100% 止盈止损。`);
+        const next = applyInstantManualFill({ ...state, through, ordersAt: at }, { at, priceAt: mark.at, price: mark.price, fraction, reason: 'manual' });
+        await saveManual(input, saved, next);
+        toast.success(`市价平仓成功，已结算盈亏：${formatSignedUSDT((held.pnl ?? 0) * fraction)} USDT`, {
+          description: `${input.source.symbol} · 即时交易模拟 · ${+(fraction * 100).toPrecision(8)}% 仓位`,
+        });
       };
-      if (navigator.locks) await navigator.locks.request(configKey + ':scan', { signal: lifetime.signal }, perform);
-      else {
-        if (scanning) throw Error('正在核对自动卖出，请稍后重试');
-        scanning = true;
-        try { await perform(); } finally { scanning = false; }
+      try {
+        if (navigator.locks) await navigator.locks.request(configKey + ':scan', { signal: lifetime.signal }, perform);
+        else {
+          if (scanning) throw Error('正在核对自动卖出，请稍后重试');
+          scanning = true;
+          try { await perform(); } finally { scanning = false; }
+        }
+      } finally {
+        try {
+          if (readLocal<typeof intent>(keyForIntent)?.token === intent.token) localStorage.removeItem(keyForIntent);
+        } catch { /* An abandoned intent expires automatically. */ }
+        manualPending.delete(input.recordId);
+        retry.delete(input.recordId);
+        wake.current?.();
       }
     };
     wake.current = tick;
@@ -467,7 +591,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       window.removeEventListener('focus', tick);
       document.removeEventListener('visibilitychange', tick);
     };
-  }, [configKey, jobPrefix, owner, activeSettings, autoPositions]);
+  }, [configKey, jobPrefix, owner, activeSettings, autoPositions, readCheckpoints]);
 
   useEffect(() => { wake.current?.(); }, [entries, notify.config]);
   const counts = useMemo(() => {
@@ -507,5 +631,13 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     }
     return results;
   }, [admitted, localSales, jobPrefix, revision]);
-  return { enabled: !!activeSettings, closePosition, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
+  const manualPositions = useMemo(() => {
+    const results = new Map<string, InstantManualExecution>();
+    for (const { record } of admitted) {
+      const value = checkpoints.current.get(jobPrefix + encodeURIComponent(record.id))?.manual;
+      if (value) results.set(record.id, value);
+    }
+    return results;
+  }, [admitted, jobPrefix, revision]);
+  return { enabled: !!activeSettings, managePosition, manualPositions, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
 }

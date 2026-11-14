@@ -11,6 +11,7 @@ import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 
 import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
+import { INSTANT_MANUAL_EXECUTION, instantManualReason, validInstantManualSale, type InstantManualExecution } from './instantManualExecution';
 
 export const SCREENED_CDA_LIMIT = -10;
 export const SCREENED_CDA_STEP = 300_000;
@@ -26,19 +27,28 @@ export interface ScreenedCdaGuardProgress {
   guard?: Dbl5Checkpoint;
 }
 export interface ScreenedCdaGuardEvidence {
-  version: typeof SCREENED_CDA_GUARD_RULE | typeof SCREENED_PRICE_EXIT_RULE | typeof INSTANT_TEMPLATE_MONITOR;
-  reason: 'cda' | 'guard' | 'both' | 'manual' | 'static-stop' | 'template';
+  version: typeof SCREENED_CDA_GUARD_RULE | typeof SCREENED_PRICE_EXIT_RULE | typeof INSTANT_TEMPLATE_MONITOR | typeof INSTANT_MANUAL_EXECUTION;
+  reason: 'cda' | 'guard' | 'both' | 'manual' | 'static-stop' | 'template' | 'take-profit' | 'stop-loss';
   detail?: string;
   stop?: { barOpenAt: number; atOpen: boolean; level: number; openPrice: number; threshold: number };
   guardVersion?: typeof DBL5_RETEST_GUARD_VERSION;
   priceAt?: number;
 }
-export interface ScreenedCdaTrigger { at: number; value?: number; closePrice?: number; evidence?: ScreenedCdaGuardEvidence; mirror?: QualityMirrorFill }
+export interface ScreenedCdaTrigger {
+  at: number;
+  value?: number;
+  closePrice?: number;
+  evidence?: ScreenedCdaGuardEvidence;
+  mirror?: QualityMirrorFill;
+  manual?: InstantManualExecution;
+}
 export function screenedSellReason(sell: ScreenedCdaTrigger) {
   switch (sell.evidence?.reason) {
     case 'template': return sell.evidence.detail || '持仓监测模板触发卖出';
     case 'static-stop': return `静态最大回撤达到 ${sell.evidence.stop?.threshold ?? 5}%`;
     case 'manual': return '手动卖出';
+    case 'take-profit': return instantManualReason('take-profit');
+    case 'stop-loss': return instantManualReason('stop-loss');
     case 'guard': return 'DBL-5 防守线断裂';
     case 'both': return 'CDA 低于 −10，且同根 DBL-5 防守线断裂';
     default: return 'CDA 原始值低于 −10';
@@ -51,10 +61,12 @@ export function validScreenedSale(sell?: ScreenedCdaTrigger): sell is ScreenedCd
   if (e?.version === INSTANT_TEMPLATE_MONITOR) return e.reason === 'template' && typeof e.detail === 'string'
     && !!e.detail && Number.isFinite(sell.closePrice) && sell.closePrice! > 0;
   if (!e) return cda && sell.at % SCREENED_CDA_STEP === 0;
-  if ((e.version !== SCREENED_CDA_GUARD_RULE && e.version !== SCREENED_PRICE_EXIT_RULE) || !sell.closePrice || !Number.isFinite(sell.closePrice) || sell.closePrice <= 0) return false;
+  if (!sell.closePrice || !Number.isFinite(sell.closePrice) || sell.closePrice <= 0) return false;
   if (sell.mirror && (!Number.isSafeInteger(sell.mirror.at) || sell.mirror.at <= 0 || sell.mirror.at > sell.at
     || !Number.isFinite(sell.mirror.price) || sell.mirror.price <= 0 || sell.mirror.fraction <= 0 || sell.mirror.fraction >= 1
     || !Number.isFinite(sell.mirror.fraction) || !Number.isFinite(sell.mirror.gainPct) || sell.mirror.gainPct <= 0)) return false;
+  if (e.version === INSTANT_MANUAL_EXECUTION) return validInstantManualSale(sell.manual, sell.at, sell.closePrice, e.reason);
+  if (e.version !== SCREENED_CDA_GUARD_RULE && e.version !== SCREENED_PRICE_EXIT_RULE) return false;
   if (e.reason === 'static-stop') {
     const stop = e.stop;
     return e.version === SCREENED_PRICE_EXIT_RULE && !!stop && Number.isSafeInteger(stop.barOpenAt)

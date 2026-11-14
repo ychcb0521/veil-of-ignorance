@@ -31,7 +31,9 @@ interface Props {
   /** 这张卡上有几笔仓位；> 1 时提示成数会摊到每一笔。 */
   legCount?: number;
   /** 确认平仓：只回成数（0–1）。按 id 重新解析各笔、下发给引擎都在调用方那一侧。 */
-  onConfirm: (percentage: number) => void;
+  onConfirm: (percentage: number) => void | Promise<void>;
+  busy?: boolean;
+  notice?: string;
   /**
    * 按成数（0–1）判这次市价平仓会不会超过币安单笔市价上限（lib/marketLotSize.cardCloseLotSize）。
    * 超过时按钮置灰并说明，给一个「按上限平」把数量改到上限——不替用户拆单，也不悄悄只平一部分。
@@ -49,7 +51,7 @@ function roundQty(v: number) {
   return Math.round(v * f) / f;
 }
 
-export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm, lotSizeCheck }: Props) {
+export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm, lotSizeCheck, busy, notice }: Props) {
   const baseCoin = getSettlementAsset(symbol);
   const isCoinMargined = isCoinSettled(position);
   const totalUnits = getPositionUnits(position);
@@ -159,13 +161,13 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
   };
 
   const handleConfirm = () => {
-    if (percentInvalid) return;
+    if (percentInvalid || busy) return;
     const parsed = parseFloat(amountInput);
     const finalAmount = clampAmount(isNaN(parsed) ? closeAmount : parsed);
     if (finalAmount < minQty || totalUnits <= 0) return;
-    const finalRatio = Math.min(1, finalAmount / totalUnits);
-    onConfirm(finalRatio);
-    onClose();
+    const finalRatio = finalAmount === normalizeAmount(totalUnits) ? 1 : Math.min(1, finalAmount / totalUnits);
+    const pending = onConfirm(finalRatio);
+    if (pending === undefined) onClose();
   };
 
   const handleOpenChange = (v: boolean) => {
@@ -384,13 +386,14 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
           </div>
         )}
 
+        {notice && <p className="text-xs text-muted-foreground">{notice}</p>}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1">
             取消
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={submitDisabled || percentInvalid}
+            disabled={busy || submitDisabled || percentInvalid}
             className={`flex-1 ${
               position.side === 'LONG'
                 ? 'bg-trading-red hover:bg-trading-red/90 text-white'

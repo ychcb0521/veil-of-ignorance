@@ -10,6 +10,7 @@ import { buildInstantCampaignData, freezeInstantCampaign, instantCampaignInput }
 import { qualityCampaignStaticRisk } from '../qualityCampaignRisk';
 import { makeQualitySellPlan } from '../qualitySellPlans';
 import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
+import { INSTANT_MANUAL_EXECUTION } from '../instantManualExecution';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import type { FishReconstructionLoader } from '../reconstruction';
 
@@ -96,4 +97,17 @@ it('uses the same remaining quantity on manual close and keeps the actual adds a
   expect(data.tradeRecords.filter(row => row.exitPrice === 105)).toHaveLength(2);
   expect(data.tradeRecords.reduce((pnl, row) => pnl + row.pnl, 0)).toBeCloseTo(24.5);
   expect(data.campaign.comparison?.sellEvidence?.exitReason).toBe('手动卖出');
+  const manual = { at: entry + 2*m, priceAt: entry + 2*m, price: 110, fraction: .5, reason: 'manual' as const };
+  const final = { at: entry + 3*m, priceAt: entry + 3*m, price: 98, fraction: 1, reason: 'stop-loss' as const };
+  const handSale = instantCampaignInput(record, round, { at: final.at, closePrice: final.price,
+    evidence: { version: INSTANT_MANUAL_EXECUTION, reason: final.reason, priceAt: final.priceAt },
+    manual: { version: INSTANT_MANUAL_EXECUTION, entryPrice: 100, startedAt: manual.at, through: final.at, fills: [manual, final] },
+  }, state)!;
+  const handCampaign = buildInstantCampaignData('account', await freezeInstantCampaign(handSale, load, signal));
+  expect(handCampaign.campaign.comparison?.monitorPlan).toEqual(monitor.plan);
+  expect(handCampaign.campaign.comparison?.sellEvidence?.exitReason).toBe('手动止损触发');
+  expect(handCampaign.tradeRecords.filter(row => row.exitPrice === 105)).toHaveLength(2);
+  expect(handCampaign.tradeRecords.filter(row => row.exitPrice === 98)).toHaveLength(2);
+  expect(handCampaign.tradeRecords.reduce((pnl, row) => pnl + row.pnl, 0)).toBeCloseTo(15.5);
+  expect(handCampaign.campaign.final_realized_pnl).toBeCloseTo(15.5);
 });

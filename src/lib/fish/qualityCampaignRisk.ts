@@ -15,9 +15,16 @@ export function qualityCampaignStaticRisk(campaign?:TradeCampaign){
  if(!(notional>0)||!Number.isFinite(notional))return;
  return {percent,notional,loss:notional*percent/100,entry:entry!>0&&Number.isFinite(entry)?entry:undefined,stop:entry!>0&&Number.isFinite(entry)?entry!*(1-percent/100):undefined};
 }
-export function campaignLimitedDrawdownText(campaign?: TradeCampaign) {
+export function campaignLimitedDrawdownText(campaign?: TradeCampaign, withStopPrice = false) {
  const plan = campaign?.comparison?.monitorPlan;
- return plan ? qualityLimitedDrawdownText(plan) : '—';
+ return plan ? qualityLimitedDrawdownText(plan, withStopPrice ? campaign?.comparison?.holdingMetrics?.entryPrice : undefined) : '—';
+}
+
+export function campaignFrozenPricePath(campaign?: TradeCampaign | null) {
+ const comparison = campaign?.comparison;
+ const path = comparison?.instant ?? comparison?.holdingDrawdowns;
+ if (!path) return;
+ return { peak: comparison?.holdingMetrics?.peakPct ?? null, drawdown: path.drawdown, staticDrawdown: path.staticDrawdown };
 }
 
 export const campaignLegDeltaLabel=(campaign?:Pick<TradeCampaign,'comparison'>)=>campaign?.comparison?'Δb':'ΔR';

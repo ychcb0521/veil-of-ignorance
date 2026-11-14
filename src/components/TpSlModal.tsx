@@ -14,6 +14,8 @@ interface Props {
   onClose: () => void;
   onConfirm: (tp: number | null, sl: number | null, pct: number) => void;
   settlementMode?: SettlementMode;
+  busy?: boolean;
+  notice?: string;
   /**
    * 这一次覆盖几笔仓位（持仓卡上的「N 笔合并」）。大于 1 时在弹窗里写明：
    * 每一笔各挂一张、同价同成数，「100%」盖住的是整张卡——用户看的开仓价是加权价、
@@ -37,6 +39,8 @@ export function TpSlModal({
   settlementMode = 'usdt',
   legCount = 1,
   lotSizeCheck,
+  busy,
+  notice,
 }: Props) {
   const [tpPrice, setTpPrice] = useState('');
   const [slPrice, setSlPrice] = useState('');
@@ -200,10 +204,12 @@ export function TpSlModal({
             </div>
           )}
 
+          {notice && <p className="text-xs text-muted-foreground">{notice}</p>}
+
           {/* Confirm */}
           <button
             onClick={handleConfirm}
-            disabled={(!tpPrice && !slPrice) || !validPct || pct <= 0 || lotRefusal != null}
+            disabled={busy || (!tpPrice && !slPrice) || !validPct || pct <= 0 || lotRefusal != null}
             className="w-full py-2.5 rounded-lg bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             确认

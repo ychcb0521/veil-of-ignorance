@@ -67,6 +67,12 @@ export function writeFishPreference<T>(key: string, value: T): Promise<void> {
   return transact('readwrite', store => { store.put(value, key); });
 }
 
+export function writeFishPreferences(entries: readonly (readonly [key: string, value: unknown])[]): Promise<void> {
+  return transact('readwrite', store => {
+    for (const [key, value] of entries) store.put(value, key);
+  });
+}
+
 /** Merge a durable preference within the same transaction that writes it. */
 export function updateFishPreference<T>(key: string, merge: (previous?: T) => T): Promise<T> {
   return transact('readwrite', (store, complete) => {

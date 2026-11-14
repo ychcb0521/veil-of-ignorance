@@ -1,5 +1,6 @@
 import { qualityAdditionStopOrders, additionStopStatusText, additionStopEndVerb, additionStopReductionText } from '@/lib/fish/qualityAdditionStopOrder';
-import {campaignLegDeltaLabel,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
+import {campaignLegDeltaLabel,campaignLimitedDrawdownText,qualityCampaignStaticRisk} from '@/lib/fish/qualityCampaignRisk';
+import {STATIC_DRAWDOWN_SELL_LABEL} from '@/lib/fish/qualityStaticDrawdownSell';
 import { LegExecutionWearDialog } from '@/components/journal/LegExecutionWearDialog';
 import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear, type LegExecutionWear } from '@/lib/campaignExecutionWear';
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
@@ -681,6 +682,7 @@ export function CampaignLegsList({
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
   const initialExpectedMaxLoss=qualityCampaignStaticRisk(campaign)?.loss??providedInitialExpectedMaxLoss;
+  const limitedDrawdown = campaignLimitedDrawdownText(campaign, true);
   const deltaLabel=campaignLegDeltaLabel(campaign),deltaHint=campaign?.comparison?'本腿实际净盈亏 ÷ 初始预期最大亏损 L₀；各腿 Δb 之和等于整场盈亏比 b。静态止损百分比按初始本金计算，后续加仓不扩大分母。':'本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分';
   const [wearDetailLegId, setWearDetailLegId] = useState<string | null>(null);
   /** L_磨损换算成 R 的分母：计算时用的 L₀，缺失时退回表头 ΔR 用的那个。 */
@@ -1264,6 +1266,10 @@ export function CampaignLegsList({
                   {/* 委托列：多条卡片会把行撑得很高。限高 + 内部滚动，
                       让各行高度趋于一致，同时一条委托都不丢。 */}
                   <div data-testid={`leg-orders-${leg.id}`} className="max-h-[152px] max-w-[300px] space-y-1 overflow-y-auto pr-1 font-sans">
+                    {leg.leg_role === 'main_open' && limitedDrawdown !== '—' && <div data-testid="leg-limited-drawdown" className="rounded border border-border/50 px-2 py-1 text-[10px] leading-tight">
+                      <span className="font-medium">{STATIC_DRAWDOWN_SELL_LABEL}</span>
+                      <div className="font-mono tabular-nums text-muted-foreground">{limitedDrawdown}</div>
+                    </div>}
                     {mirrorTpTiming && (
                       <div
                         className="rounded border border-[#F0B90B]/25 bg-[#F0B90B]/5 px-2 py-1 leading-tight"
@@ -1293,7 +1299,7 @@ export function CampaignLegsList({
                         {additionStop.reduction && <div className="text-[10px] tabular-nums text-foreground/80" data-testid="leg-addition-stop-reduction">{additionStopReductionText(additionStop.reduction)}</div>}
                       </div>
                     ))}
-                    {reverseOrdersForLeg.length === 0 && !mirrorTpTiming && additionStops.length === 0 ? (
+                    {reverseOrdersForLeg.length === 0 && !mirrorTpTiming && additionStops.length === 0 && (leg.leg_role !== 'main_open' || limitedDrawdown === '—') ? (
                       <span className="font-mono text-muted-foreground">—</span>
                     ) : (
                       reverseOrdersForLeg.map(order => (

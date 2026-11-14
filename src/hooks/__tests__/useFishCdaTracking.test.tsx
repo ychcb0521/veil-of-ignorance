@@ -1,18 +1,28 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useFishCdaTracking } from '../useFishCdaTracking';
-import { readPageScreenedCda } from '../useFish';
+import { readPageScreenedCda, readPageInstantCampaignCandles, markPageInstantPosition } from '../useFish';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import type { ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
+import { instantPositionInput } from '@/lib/fish/instantCampaign';
+import { readInstantPositionQuote } from '@/lib/fish/instantPositionQuote';
+import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
 
 const preferences = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('@/lib/fish/fishPreferencesDb', () => ({
   readFishPreferences: async (keys: string[]) => keys.map(key => preferences.get(key)),
+  readFishPreferenceEntries: async (prefix: string, filter = (_: unknown) => true) =>
+    [...preferences].filter(([key, value]) => key.startsWith(prefix) && filter(value)).map(([key, value]) => [key.slice(prefix.length), value]),
   writeFishPreference: async (key: string, value: unknown) => { preferences.set(key, structuredClone(value)); },
+  writeFishPreferences: async (entries: [string, unknown][]) => {
+    for (const [key, value] of entries) preferences.set(key, structuredClone(value));
+  },
 }));
-vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn() }));
-vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn() }));
+vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn(), readPageInstantCampaignCandles: vi.fn(), markPageInstantPosition: vi.fn() }));
+vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn(), readAutomaticPreEntrySales: async () => [] }));
+vi.mock('@/lib/fish/instantPositionQuote', () => ({ readInstantPositionQuote: vi.fn() }));
+vi.mock('@/lib/fish/instantCampaignStore', () => ({ saveInstantCampaignInput: vi.fn(async () => undefined) }));
 afterEach(() => { localStorage.clear(); preferences.clear(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 it('watches newly admitted automatic fish after enabling, survives reload and retries only unsent mail', async () => {
@@ -71,4 +81,75 @@ it('watches newly admitted automatic fish after enabling, survives reload and re
   expect(view.result.current.enabled).toBe(false);
   expect(view.result.current.alerts.get('NEW')).toEqual({at:T+5*M,value:-11.75});
   expect(view.result.current.alerts.size).toBe(1);
+});
+
+it('gives a confirmed manual action priority over an unpublished automatic exit and recovers protective orders', async () => {
+  const minute = 60_000, buyAt = Date.UTC(2026, 10, 14, 1, 30);
+  vi.useFakeTimers({ now: buyAt + minute + 1000 });
+  const source = { id: 'TEST', symbol: 'TESTUSDT', timeMs: buyAt, timeLabel: '', fallbackZone: '' };
+  const record: PreEntryRecord = { id: 'fish', roundId: 'round', matchedAt: buyAt, updatedAt: buyAt, status: 'matched',
+    startTime: buyAt, cursor: buyAt, readings: [], sample: { id: 's', source, basis: 'signal', groups: [], enteredAt: buyAt, importedAt: buyAt } };
+  const round: PreEntryRound = { id: record.roundId, startedAt: buyAt, updatedAt: buyAt, hours: 1, state: 'complete', automatic: true, filters: [] };
+  const library: PreEntryLibrary = { version: 1, records: [record], rounds: [round] };
+  const position = { ...instantPositionInput(record, round)!, entryPrice: 100, marginUsdt: 40, leverage: 5 };
+  const notify = { config: { enabled: false, emails: [] } } as never;
+  let finishAuto: (() => void) | undefined;
+  vi.mocked(readAutomaticPreEntryCheckpoint).mockResolvedValue(library);
+  vi.mocked(readPageScreenedCda).mockImplementation(async (_tasks, _snapshot, through, _signal, onResult) => {
+    await new Promise<void>(resolve => { finishAuto = resolve; });
+    await onResult(record.id, { through, trigger: { at: buyAt + 5 * minute, value: -11.75 } });
+  });
+  const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  let held = false;
+  let previous = Promise.resolve();
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+    request: async (
+      _name: string,
+      options: { ifAvailable?: boolean },
+      callback: (lock: object | null) => Promise<void>,
+    ) => {
+      if (options.ifAvailable && held) return callback(null);
+      held = true;
+      const work = previous.then(() => callback({}));
+      previous = work.catch(() => undefined);
+      try { await work; } finally { held = false; }
+    },
+  } });
+  try {
+    const mount = () => renderHook(() => useFishCdaTracking('manual-fixture', library, true, notify, true));
+    let view = mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(finishAuto).toBeTypeOf('function');
+    vi.mocked(readInstantPositionQuote).mockImplementation(async () => ({ at: Date.now(), price: 100, kind: 'mark' }));
+    vi.mocked(markPageInstantPosition).mockImplementation(async () => ({ at: Date.now(), price: 100 }));
+    await act(async () => {
+      const user = view.result.current.managePosition!(position, { kind: 'protect', levels: { tp: 110, sl: 95, percentage: 50 } });
+      finishAuto!();
+      await user;
+    });
+    expect(view.result.current.alerts.size).toBe(0);
+    expect(saveInstantCampaignInput).not.toHaveBeenCalled();
+    expect(view.result.current.manualPositions?.get(record.id)?.orders).toEqual({ tp: 110, sl: 95, percentage: 50 });
+    view.unmount();
+    view = mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(view.result.current.manualPositions?.get(record.id)?.orders).toEqual({ tp: 110, sl: 95, percentage: 50 });
+    vi.mocked(readPageInstantCampaignCandles).mockImplementation(async (_source, _interval, from, through) =>
+      Array.from({ length: (through - from) / minute }, (_, index) => ({
+        openTime: from + index * minute, open: 100, high: 111, low: 98, close: 111, volume: 1, takerBuyVolume: null,
+      })));
+    await act(() => vi.advanceTimersByTimeAsync(minute + 2000));
+    const partial = view.result.current.manualPositions?.get(record.id);
+    expect(partial?.orders).toEqual({ tp: null, sl: 95, percentage: 50 });
+    expect(partial?.fills).toHaveLength(1);
+    expect(partial?.fills[0]).toMatchObject({ reason: 'take-profit', fraction: .5, price: 111 });
+    await act(() => view.result.current.managePosition!(position, { kind: 'close', fraction: 1 }));
+    expect(view.result.current.alerts.get(record.id)?.manual?.fills.map(fill => fill.reason)).toEqual(['take-profit', 'manual']);
+    expect(readPageScreenedCda).toHaveBeenCalledTimes(1);
+    expect(saveInstantCampaignInput).toHaveBeenCalledTimes(1);
+    view.unmount();
+  } finally {
+    if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
+    else Reflect.deleteProperty(navigator, 'locks');
+  }
 });
