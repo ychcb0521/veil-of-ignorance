@@ -37,6 +37,7 @@ import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishPr
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
+import { FishCabinTransfer } from './FishCabinTransfer';
 import { FishHitRateTest } from '@/components/FishHitRateTest';
 import { FishHitRateSettingsForm } from '@/components/FishHitRateSettingsForm';
 import { DEFAULT_FISH_HIT_RATE_WINDOW, validateFishHitRateWindow, type FishHitRateOptions } from '@/lib/fish/hitRate';
@@ -78,6 +79,7 @@ export interface FishPanelProps {
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
   onStart: (settings: FishScanSettings) => void; onCancel: () => void;
+  onImportCabin?: React.ComponentProps<typeof FishCabinTransfer>['onImport'];
   onJumpQuality?: (source: TradeSignal) => void;
   onRateQuality?: (source:TradeSignal,value:number)=>void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
@@ -602,7 +604,7 @@ export function FishPanel(p: FishPanelProps) {
       </div>
     </section>
     <section className="min-w-0 border-t border-border/50 px-4 py-3" aria-label="鱼舱模块" data-testid="fish-cabin">
-    <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} info={<><p><a href="/guide#fish-cabin" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">阅读完整说明 · 3.3.3 鱼舱</a></p><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${groupFishCabin(old.filter(signal => !signal.freshCatch)).length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
+    <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen={open.cabin} headerAction={p.onImportCabin && <FishCabinTransfer key={owner} records={old} onImport={p.onImportCabin}/>} info={<><p><a href="/guide#fish-cabin" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">阅读完整说明 · 3.3.3 鱼舱</a></p><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">「导出数据」导出全部鱼舱记录（列表信息、具体指标和捕获阈值），不受当前筛选影响。「完整下载 JSON」保留可重新导入的原始记录。</p></>} onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${groupFishCabin(old.filter(signal => !signal.freshCatch)).length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
     {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality} jumpingSignalId={p.qualityJumpPending ? p.jumpingSignalId : null}/></ModuleErrorBoundary>}

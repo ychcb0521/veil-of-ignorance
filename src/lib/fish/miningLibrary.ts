@@ -27,17 +27,17 @@ export interface FishMiningAnchor {
   found: number; added: number; recordIds: string[];
   error?: string; attempts: number;
 }
-export interface FishMiningRecord extends LibraryRecordBase { runId: string; anchorMs: number; catchKey: string; signal: TradeSignal }
+export interface FishMiningRecord extends LibraryRecordBase { runId: string; anchorMs: number; catchKey: string; signal: TradeSignal; importedAt?: number }
 export const miningRecordSignal = (record: FishMiningRecord): TradeSignal => ({
-  ...record.signal, mined: { ...record.signal.mined, anchorMs: record.anchorMs },
+  ...record.signal, mined: { ...record.signal.mined, anchorMs: record.anchorMs, ...(record.importedAt ? { importedAt: record.importedAt } : {}) },
 });
-export interface FishMiningLibrary { deletedRecords?:Record<string,number>; version: 1; runs: FishMiningRun[]; anchors: FishMiningAnchor[]; records: FishMiningRecord[]; adoptedHold?: boolean }
+export interface FishMiningLibrary { deletedRecords?:Record<string,number>; clearedAt?: number; version: 1; runs: FishMiningRun[]; anchors: FishMiningAnchor[]; records: FishMiningRecord[]; adoptedHold?: boolean }
 
 export const emptyMiningLibrary = (): FishMiningLibrary => ({ version: 1, runs: [], anchors: [], records: [] });
 export function normalizeMiningLibrary(x: unknown): FishMiningLibrary {
   const v = x as Partial<FishMiningLibrary> | null;
   if (!v || v.version !== 1 || !Array.isArray(v.runs) || !Array.isArray(v.anchors) || !Array.isArray(v.records)) return emptyMiningLibrary();
-  return pruneMiningDeletions({ version: 1, runs: v.runs, anchors: v.anchors, records: v.records, deletedRecords:v.deletedRecords, ...(v.adoptedHold ? { adoptedHold: true } : {}) });
+  return pruneMiningDeletions({ version: 1, runs: v.runs, anchors: v.anchors, records: v.records, deletedRecords:v.deletedRecords, clearedAt:v.clearedAt, ...(v.adoptedHold ? { adoptedHold: true } : {}) });
 }
 
 /** 去掉逐点曲线（trace）与「新鱼」标记：库里只留判断所需的读数快照。 */
@@ -75,7 +75,11 @@ export function recordMinedAnchor(input: FishMiningLibrary, state: FishMiningSta
   const { library, run } = withRun(input, state, at, combination);
   const records = added.map(signal => {
     const catchKey = fishCatchKey(signal);
-    return { id: recordId(run.id, catchKey), runId: run.id, anchorMs, catchKey, signal: compactMinedSignal(signal), firstSavedAt: at, updatedAt: at } satisfies FishMiningRecord;
+    const key = recordId(run.id, catchKey);
+    const deletedAt = library.deletedRecords?.[key];
+    const capturedAt = signal.caughtAt ?? at;
+    const id = deletedAt && capturedAt > deletedAt ? `${key}|caught:${capturedAt}` : key;
+    return { id, runId: run.id, anchorMs, catchKey, signal: compactMinedSignal(signal), firstSavedAt: at, updatedAt: at } satisfies FishMiningRecord;
   });
   const id = anchorId(run.id, anchorMs), prior = library.anchors.find(a => a.id === id);
   const anchor: FishMiningAnchor = { id, runId: run.id, anchorMs, scannedAt: at, updatedAt: at, found, added: added.length,
@@ -95,7 +99,7 @@ export function recordMiningError(input: FishMiningLibrary, state: FishMiningSta
  * 没有冻结规则（从没开始过）就不补。
  */
 export function adoptMinedFish(library: FishMiningLibrary, state: FishMiningState, signals: readonly TradeSignal[], at: number): FishMiningLibrary {
-  if (library.adoptedHold || !state.rules.length) return library;
+  if (library.adoptedHold || library.clearedAt || !state.rules.length) return library;
   const mined = signals.filter(s => s.mined && !s.mined.roundId && Number.isFinite(s.mined.anchorMs));
   let next: FishMiningLibrary = { ...library, adoptedHold: true };
   if (!mined.length) return next;
@@ -119,6 +123,10 @@ export function adoptMinedFish(library: FishMiningLibrary, state: FishMiningStat
 }
 /** 两份合并（两个标签页、两台设备、本机与云端）：只增不减。 */
 export function mergeMiningLibraries(a: FishMiningLibrary, b: FishMiningLibrary): FishMiningLibrary {
+  const clearedAt = Math.max(a.clearedAt ?? 0, b.clearedAt ?? 0) || undefined;
+  const deletedRecords = mergeSourceDeletions(a.deletedRecords, b.deletedRecords);
+  a = pruneMiningDeletions({ ...a, clearedAt, deletedRecords });
+  b = pruneMiningDeletions({ ...b, clearedAt, deletedRecords });
   const runs = new Map(a.runs.map(r => [r.id, r]));
   for (const r of b.runs) { const old = runs.get(r.id); runs.set(r.id, old ? { ...r, firstAt: Math.min(old.firstAt, r.firstAt), updatedAt: Math.max(old.updatedAt, r.updatedAt) } : r); }
   const anchors = new Map(a.anchors.map(x => [x.id, x]));
@@ -130,5 +138,35 @@ export function mergeMiningLibraries(a: FishMiningLibrary, b: FishMiningLibrary)
     const picked = !old.error && x.error ? old : !x.error && old.error ? x : newer;
     anchors.set(x.id, { ...picked, recordIds: [...new Set([...old.recordIds, ...x.recordIds])], attempts: Math.max(old.attempts, x.attempts) });
   }
-  return pruneMiningDeletions({ version: 1, runs: [...runs.values()], anchors: [...anchors.values()], records: mergeLibraryRecords(a.records, b.records),deletedRecords:mergeSourceDeletions(a.deletedRecords,b.deletedRecords), ...(a.adoptedHold || b.adoptedHold ? { adoptedHold: true } : {}) });
+  return { version: 1, runs: [...runs.values()], anchors: [...anchors.values()], records: mergeLibraryRecords(a.records, b.records), deletedRecords, clearedAt, ...(a.adoptedHold || b.adoptedHold ? { adoptedHold: true } : {}) };
+}
+
+/** An explicit import is a new occurrence of a deleted record. Keep the saved capture and run intact. */
+export function restoreMiningImport(library: FishMiningLibrary, imported: FishMiningLibrary, at = Date.now()): FishMiningLibrary {
+  const source = normalizeMiningLibrary(imported);
+  const afterClear = Math.max(at, (library.clearedAt ?? 0) + 1);
+  const existing = new Set(library.records.map(record => record.id));
+  const restorations = new Map<string, string>();
+  for (const record of library.records) {
+    if (!record.importedAt) continue;
+    const originalId = record.id.replace(/\|import:\d+$/, '');
+    restorations.set(originalId, record.id);
+  }
+  const ids = new Map<string, string>();
+  const records = source.records.flatMap(record => {
+    const active = existing.has(record.id) ? record.id : restorations.get(record.id);
+    if (active) {
+      ids.set(record.id, active);
+      return [];
+    }
+    const deletedAt = library.deletedRecords?.[record.id];
+    const importedAt = Math.max(afterClear, (deletedAt ?? 0) + 1);
+    const id = deletedAt ? `${record.id}|import:${importedAt}` : record.id;
+    ids.set(record.id, id);
+    return [{ ...record, id, importedAt }];
+  });
+  if (!records.length) return library;
+  const anchors = source.anchors.filter(anchor => anchor.recordIds.some(id => ids.has(id))).map(anchor =>
+    ({ ...anchor, recordIds: anchor.recordIds.flatMap(id => ids.has(id) ? [ids.get(id)!] : []) }));
+  return mergeMiningLibraries(library, { ...source, records, anchors, clearedAt: undefined, deletedRecords: undefined });
 }

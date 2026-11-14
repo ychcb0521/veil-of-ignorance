@@ -33,3 +33,7 @@ export function fishCaptureTime(signal: TradeSignal): number | null {
 export function miningCaptureTime(signal: TradeSignal): number | null {
   return signal.mined ? fishCaptureTime(signal) : null;
 }
+
+export function miningPresenceTime(signal: TradeSignal): number {
+  return Math.max(miningCaptureTime(signal) ?? 0, signal.mined?.importedAt ?? 0);
+}

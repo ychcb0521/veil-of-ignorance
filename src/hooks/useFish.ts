@@ -12,6 +12,7 @@ import { backupFishSignals, restoreFishSignals, loadFishSignals, loadFishTombsto
 import { loadFishLibraryBackup } from '@/lib/fish/libraryStore';
 import { applyFishTombstones } from '@/lib/fish/tombstones';
 import {mergeFishLists} from '@/lib/fish/tombstones';
+import { mergeCabinImport } from '@/lib/fish/cabinTransfer';
 import {fishSignalInRoundWindow,reconcileFreshFish,type FishRoundWindow} from '@/lib/fish/roundWindow';
 import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
@@ -108,7 +109,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
   const captureWindow=useRef<FishRoundWindow|null>(null);
   const reconcile=useCallback((list:TradeSignal[])=>reconcileFreshFish(list,captureWindow.current?new Set([...writesRef.current.added,...writesRef.current.refreshed.keys()]):null,captureWindow.current??undefined),[]);
   const persist=useCallback(()=>{const r=roundRef.current,owner=ownerRef.current,version=generation.current;if(r)void saveFishSession(owner,{...r,added:[...writesRef.current.added],refreshed:[...writesRef.current.refreshed],edits:[...edits.current],progress:progressRef.current}).catch(()=>{if(owner===ownerRef.current&&version===generation.current)setProgress(p=>p?{...p,notice:'本机结果保存失败，刷新后需要重新捕捞'}:p);});},[]);
-  const commit = useCallback((input: TradeSignal[]) => {
+  const commit = useCallback((input: TradeSignal[], onBackup?: (result: Promise<boolean>) => void) => {
     // 整行显示相同的（同一信号、不同算法键）只留一条
     const next = collapseVisibleFish(reconcile(input));
     if(roundRef.current&&!controller.current){
@@ -119,8 +120,9 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
         else if(before.get(key)!==after.get(key)&&after.has(key))edits.current.set(key,{signal:after.get(key)});
       }
     }
-    signalsRef.current = next; setSignals(next); saveFishSignals(next, ownerRef.current ?? null);
+    signalsRef.current = next; setSignals(next); const saved = saveFishSignals(next, ownerRef.current ?? null, onBackup);
     persist();
+    return saved;
   }, [persist,reconcile]);
   useEffect(() => {
     let cancelled = false;
@@ -344,5 +346,11 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     commit(signalsRef.current.filter(s => s.id !== id));
   }, [commit]);
   const removeMany=useCallback((ids:readonly string[])=>{const selected=new Set(ids),gone=signalsRef.current.filter(s=>selected.has(s.id));if(!gone.length)return;recordFishDeletion(gone,ownerRef.current??null);commit(signalsRef.current.filter(s=>!selected.has(s.id)));},[commit]);
-  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, startWithProgress, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
+  const importCabin = useCallback(async (records: readonly TradeSignal[]) => {
+    const result = mergeCabinImport(signalsRef.current, records, loadFishTombstones());
+    let backup: Promise<boolean> | undefined;
+    const saved = !result.added || commit(result.signals, value => { backup = value; });
+    return { added: result.added, skipped: result.skipped, durable: saved || !!(await backup) };
+  }, [commit]);
+  return { switchLive, unionFish, signals, signalsRef, commit, importCabin, progress, start, startWithProgress, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
 }

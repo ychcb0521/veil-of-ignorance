@@ -5,7 +5,8 @@ import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { beginQualityFilterRound, finishQualityFilterRound, preserveQualityFilterLibrary, recoverQualityFilterRounds } from '@/lib/fish/qualityFilterLibrary';
 import { libraryRoundRecordIds } from '@/lib/fish/libraryRounds';
-import { adoptMinedFish, compactMinedSignal, emptyMiningLibrary, mergeMiningLibraries, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
+import { adoptMinedFish, compactMinedSignal, emptyMiningLibrary, mergeMiningLibraries, normalizeMiningLibrary, recordMinedAnchor, recordMiningError, restoreMiningImport } from '@/lib/fish/miningLibrary';
+import { clearMiningLibrary, deleteMiningRecords } from '@/lib/fish/libraryDeletion';
 import { newMiningState } from '@/lib/fish/miningState';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -134,4 +135,26 @@ it('mining library: restarting identical settings preserves the previous results
   expect(next.anchors).toContain(library.anchors[0]);
   expect(next.records).toHaveLength(2);
   expect(next.records).toContain(library.records[0]);
+});
+
+it('clears mining records, including unseen stale copies, and accepts new scans and explicit imports', () => {
+  const old = recordMinedAnchor(emptyMiningLibrary(), state, T, 1, [mined(1, T)], T + 61_000);
+  const stale = recordMinedAnchor(old, state, T + 1, 1, [mined(2, T + 1)], T + 62_000);
+  const cleared = clearMiningLibrary(old, T + 65_000);
+  expect(mergeMiningLibraries(stale, cleared)).toMatchObject({ records: [], anchors: [], runs: [], adoptedHold: true });
+  expect(adoptMinedFish(cleared, state, stale.records.map(row => row.signal), T + 66_000)).toBe(cleared);
+
+  const late = recordMinedAnchor(cleared, state, T, 1, [mined(1, T)], T + 67_000);
+  expect(normalizeMiningLibrary(late).records).toHaveLength(0);
+  const fresh = { ...mined(1, T), caughtAt: T + 68_000 };
+  const recaught = recordMinedAnchor(cleared, state, T, 1, [fresh], T + 68_000);
+  expect(mergeMiningLibraries(recaught, stale).records.map(row => row.signal.caughtAt)).toEqual([fresh.caughtAt]);
+
+  const restored = restoreMiningImport(cleared, stale, T + 69_000);
+  expect(restored.records).toHaveLength(2);
+  expect(restored.records[0]).toMatchObject({ firstSavedAt: old.records[0].firstSavedAt, signal: old.records[0].signal });
+  expect(restoreMiningImport(restored, stale, T + 70_000)).toBe(restored);
+  const deleted = deleteMiningRecords(restored, restored.records.map(row => row.id), T + 71_000);
+  expect(mergeMiningLibraries(deleted, restored).records).toHaveLength(0);
+  expect(restoreMiningImport(deleted, old, T + 72_000).records).toHaveLength(1);
 });

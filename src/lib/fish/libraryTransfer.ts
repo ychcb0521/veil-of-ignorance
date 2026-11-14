@@ -35,9 +35,9 @@ function rounds(values:any[],records:Set<string>){
 export function validateLibraryPayload(input:unknown):asserts input is LibraryPayload {
  if(!object(input))fail('缺少库内容');const v=input as LibraryPayload;if(!v.mining&&!v.filter&&!v.monitor)fail('没有三个库中的任何一个');
  if(v.resolvedLegacySources){if(!object(v.resolvedLegacySources))fail('旧来源兼容记录无效');for(const origins of Object.values(v.resolvedLegacySources))if(!Array.isArray(origins)||origins.some(o=>!Object.prototype.hasOwnProperty.call(QUALITY_SOURCE_NAMES,o)))fail('旧来源兼容记录无效');}
- if(v.mining){const l=v.mining;if(l.version!==1)fail('捕捞库版本不支持');const runs=list(l.runs,'挖掘方案'),anchors=list(l.anchors,'挖掘档位'),records=list(l.records,'挖掘记录');const runIds=ids(runs,'挖掘方案'),recordIds=ids(records,'挖掘记录');ids(anchors,'挖掘档位');
+ if(v.mining){const l=v.mining;if(l.version!==1)fail('捕捞库版本不支持');if(l.clearedAt!==undefined&&(!finite(l.clearedAt)||l.clearedAt<=0))fail('捕捞库清空时间无效');const runs=list(l.runs,'挖掘方案'),anchors=list(l.anchors,'挖掘档位'),records=list(l.records,'挖掘记录');const runIds=ids(runs,'挖掘方案'),recordIds=ids(records,'挖掘记录');ids(anchors,'挖掘档位');
   for(const r of runs)if(typeof r.signature!=='string'||!Array.isArray(r.rules))fail('挖掘方案缺少参数');
-  for(const r of records){if(!runIds.has(r.runId)||!finite(r.anchorMs)||!finite(r.updatedAt))fail('挖掘记录引用或时间无效');source(r.signal);}
+  for(const r of records){if(!runIds.has(r.runId)||!finite(r.anchorMs)||!finite(r.updatedAt)||r.importedAt!==undefined&&!finite(r.importedAt))fail('挖掘记录引用或时间无效');source(r.signal);}
   for(const a of anchors){if(!runIds.has(a.runId)||!finite(a.anchorMs))fail('挖掘档位引用无效');for(const id of list(a.recordIds,'档位记录'))if(!recordIds.has(id))fail('档位缺少关联记录');}
  }
  if(v.filter){const l=v.filter;if(l.version!==1)fail('过滤库版本不支持');const settings=list(l.settings,'过滤方案'),records=list(l.records,'过滤记录'),settingIds=ids(settings,'过滤方案'),recordIds=ids(records,'过滤记录');
@@ -54,7 +54,7 @@ export function validateLibraryPayload(input:unknown):asserts input is LibraryPa
  if(v.observations)for(const key of ['entryReadings','postExitReadings'] as const)if(v.observations[key]!==undefined)for(const r of list(v.observations[key],key))if(!object(r)||typeof r.key!=='string'||!finite(r.evaluatedAt))fail('关联读数无效');
 }
 export const stringifyLibraryFile=(value:unknown)=>JSON.stringify(value,(_key,v)=>typeof v==='number'&&!Number.isFinite(v)?{__veilLibraryNumber:String(v)}:v);
-function parseFile(text:string){return JSON.parse(text,(key,v)=>{if(['__proto__','prototype','constructor'].includes(key))fail('包含非法对象字段');if(object(v)&&Object.keys(v).length===1&&typeof v.__veilLibraryNumber==='string'&&['NaN','Infinity','-Infinity'].includes(v.__veilLibraryNumber))return Number(v.__veilLibraryNumber);return v;});}
+export function parseLibraryJson(text:string){return JSON.parse(text,(key,v)=>{if(['__proto__','prototype','constructor'].includes(key))fail('包含非法对象字段');if(object(v)&&Object.keys(v).length===1&&typeof v.__veilLibraryNumber==='string'&&['NaN','Infinity','-Infinity'].includes(v.__veilLibraryNumber))return Number(v.__veilLibraryNumber);return v;});}
 export async function packageId(p:Pick<LibraryPackage,'source'|'scope'|'libraries'>){const bytes=new TextEncoder().encode(stringifyLibraryFile([p.source.account,p.scope,p.libraries]));return 'sha256:'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');}
 export async function makeLibraryPackage(account:string,label:string,libraries:LibraryPayload,scope:LibraryScope='all',at=Date.now()):Promise<LibraryPackage>{
  libraries=pruneTransferPayload(libraries);
@@ -64,13 +64,13 @@ export async function makeLibraryPackage(account:string,label:string,libraries:L
 }
 export async function parseLibraryPackage(text:string):Promise<LibraryPackage>{
  if(new TextEncoder().encode(text).length>LIBRARY_FILE_LIMIT)throw Error('文件超过128MB，请分库下载后导入');
- const value=parseFile(text);
+ const value=parseLibraryJson(text);
  if(!object(value)||value.format!=='veil-fish-quality-libraries'||value.version!==1||!Object.prototype.hasOwnProperty.call(LIBRARY_NAMES,value.scope)||!object(value.source)||typeof value.source.account!=='string'||typeof value.source.label!=='string'||!finite(value.exportedAt))fail('文件类型或版本不支持，请上传三库的JSON完整数据包');
  validateLibraryPayload(value.libraries);if(value.id!==await packageId(value as any))fail('内容校验失败，文件可能不完整或已修改');return value as LibraryPackage;
 }
 export async function parseLibraryFile(text:string):Promise<LibraryPackage[]>{
  if(new TextEncoder().encode(text).length>LIBRARY_FILE_LIMIT)throw Error('文件超过128MB，请分库下载后导入');
- const data=parseFile(text);
+ const data=parseLibraryJson(text);
  if(data?.format!=='veil-fish-quality-library-collection')return [await parseLibraryPackage(text)];
  if(data.version!==1)fail('汇总包版本不支持');const packages=list(data.packages,'数据包');if(packages.length>1000)fail('汇总包数量过多');
  const out:LibraryPackage[]=[];for(const p of packages)out.push(await parseLibraryPackage(stringifyLibraryFile(p)));return mergeLibraryCollections(EMPTY_COLLECTION(),{version:1,packages:out}).packages;

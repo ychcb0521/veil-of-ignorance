@@ -474,12 +474,16 @@ export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: st
 }
 
 /** 对账，并等它排下的上传也做完。供要逐个处理的大存档用：一次只编码一份，内存峰值不叠加。 */
-export async function syncAccountBlobFully(adapter: AccountBlobAdapter<any>, owner: string): Promise<AccountBlobSyncStatus> {
-  const status = await syncAccountBlobOnLoad(adapter, owner, 600_000);
+export async function syncAccountBlobFully(adapter: AccountBlobAdapter<any>, owner: string, timeoutMs = 600_000, refresh = false): Promise<AccountBlobSyncStatus> {
+  const status = await syncAccountBlobOnLoad(adapter, owner, timeoutMs, refresh);
   const id = idOf(adapter.name, owner);
+  const active = pushing.get(id);
   await queues.get(id);
   const pending = pushTimers.get(id);
-  if (!pending) return status;
+  if (!pending) {
+    if (!active) return status;
+    return await active ? 'pushed' : 'failed';
+  }
   clearTimeout(pending.timer);
   pushTimers.delete(id);
   return await runPush(pending.adapter, pending.owner, pending.settled) ? 'pushed' : 'failed';

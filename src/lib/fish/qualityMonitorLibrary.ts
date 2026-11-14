@@ -133,10 +133,10 @@ function taskFor(study: FishQualityStudy, sample: QualitySample, plan: QualityGr
 }
 function recordFor(task: MonitorTask, readings: Map<string, QualityFilterReading>, result: QualityResult | undefined, at: number, prior?: QualityMonitorRecord): QualityMonitorRecord {
   const { id, setting, sample, plan } = task;
-  const { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, preEntryMonitor } = sample.source;
+  const { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, preEntryMonitor, caughtAt, cabinImportedAt, mined } = sample.source;
   const frozenStudy = { buyFilters: plan.buyFilters, sellPlans: [setting.plan] } as FishQualityStudy;
   const picked = (setting.plan.buyFilters ?? []).flatMap(f => { const reading = readings.get(qualityFilterReadingKey(sample, f)); return reading ? [structuredClone(reading)] : []; });
-  return { id, settingId: setting.id, source: { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, ...(preEntryMonitor?{preEntryMonitor}: {}) }, enteredAt: sample.enteredAt, basis: sample.basis,origin:sample.origin,origins:sample.origins,
+  return { id, settingId: setting.id, source: { id: sourceId, symbol, timeMs, timeLabel, fallbackZone, exchange, market, underlying, binanceSymbol, ...(preEntryMonitor?{preEntryMonitor}: {}), ...(caughtAt?{caughtAt}:{}), ...(cabinImportedAt?{cabinImportedAt}:{}), ...(mined?{mined}: {}) }, enteredAt: sample.enteredAt, basis: sample.basis,origin:sample.origin,origins:sample.origins,
     filterStatus: qualityFilterStatus(frozenStudy, sample, setting.plan, readings), readings: picked,
     result: result ? structuredClone(result) : prior?.result, firstSavedAt: prior?.firstSavedAt ?? at, updatedAt: at };
 }

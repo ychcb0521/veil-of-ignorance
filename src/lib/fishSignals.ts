@@ -1,5 +1,5 @@
 import { archiveFishForNextRound, collapseVisibleFish, demoteSupersededFreshFish, mergeFishSignals, fishCatchKey, fishDedupKey, fishVisibleKey } from '@/lib/fish/records';
-import { applyFishTombstones, mergeFishTombstones, normalizeFishTombstones, type FishTombstones } from '@/lib/fish/tombstones';
+import { applyFishTombstones, fishPresenceTime, mergeFishTombstones, normalizeFishTombstones, type FishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { queueSimStatePush } from '@/lib/simStateSync';
@@ -25,7 +25,7 @@ export function loadFishTombstones(): FishTombstones {
 /** 记下这几条鱼被用户删除了（只有手动删除才记；切换交集 / 并集、调严阈值撤掉的不算删除）。 */
 export function recordFishDeletion(signals: readonly TradeSignal[], userId: string | null, now = Date.now()): void {
   if (!signals.length) return;
-  const next = mergeFishTombstones(loadFishTombstones(), Object.fromEntries(signals.flatMap(s => { const t = Math.max(now, (s.caughtAt ?? 0) + 1); return [[fishDedupKey(s), t], [`v|${fishVisibleKey(s)}`, t]]; })));
+  const next = mergeFishTombstones(loadFishTombstones(), Object.fromEntries(signals.flatMap(s => { const t = Math.max(now, fishPresenceTime(s) + 1); return [[fishDedupKey(s), t], [`v|${fishVisibleKey(s)}`, t]]; })));
   writePersistedStateRaw(FISH_DELETED_KEY, JSON.stringify(next));
   void saveFishLibraryBackup(userId, { signals: loadFishSignals(), tombstones: next, updatedAt: nextFishRevision(userId) });
   if (userId) queueSimStatePush(userId, 'fish_deleted_v1', next);
@@ -42,12 +42,13 @@ export function loadFishSignals(): TradeSignal[] {
     return migrated;
   } catch { return []; }
 }
-export function saveFishSignals(signals: TradeSignal[], userId: string | null): boolean {
+export function saveFishSignals(signals: TradeSignal[], userId: string | null, onBackup?: (result: Promise<boolean>) => void): boolean {
   const updatedAt = nextFishRevision(userId);
   const saved = writePersistedStateRaw(FISH_STORAGE_KEY, JSON.stringify(signals));
   // A failed large-array write must never give its older on-disk cache a newer revision.
   if (saved) writePersistedStateRaw(cacheRevisionKey(userId), String(updatedAt));
-  void saveFishLibraryBackup(userId, { signals, tombstones: loadFishTombstones(), updatedAt });
+  const backup = saveFishLibraryBackup(userId, { signals, tombstones: loadFishTombstones(), updatedAt });
+  onBackup?.(backup);
   if (userId) queueSimStatePush(userId, 'fish_signals_v1', signals);
   return saved;
 }

@@ -1,6 +1,6 @@
 /** Full catch history lives independently of the small localStorage cache and derived scan sessions. */
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { mergeFishLists, mergeFishTombstones, type FishTombstones } from './tombstones';
+import { fishPresenceTime, mergeFishLists, mergeFishTombstones, type FishTombstones } from './tombstones';
 import { fishDedupKey } from './records';
 
 export interface FishLibraryBackup { signals: TradeSignal[]; tombstones: FishTombstones; updatedAt?: number }
@@ -15,7 +15,7 @@ export const mergeFishLibraryBackups = (latest: FishLibraryBackup, previous?: Fi
   const signals = mergeFishLists(latest.signals, previous?.signals, tombstones).map(s => {
     const now = current.get(fishDedupKey(s));
     // Preserve explicit local edits without reviving a fresh flag rejected by archive evidence.
-    return now && (now.caughtAt ?? 0) === (s.caughtAt ?? 0)
+    return now && fishPresenceTime(now) === fishPresenceTime(s)
       ? { ...s, freshCatch: s.freshCatch && now.freshCatch, quality: now.quality }
       : s;
   });

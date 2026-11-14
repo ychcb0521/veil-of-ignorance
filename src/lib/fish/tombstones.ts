@@ -28,6 +28,8 @@ export function mergeFishTombstones(a: unknown, b: unknown): FishTombstones {
   for (const [k, t] of Object.entries(y)) out[k] = Math.max(out[k] ?? 0, t);
   return normalizeFishTombstones(out);
 }
+export const fishPresenceTime = (signal: TradeSignal) => Math.max(signal.caughtAt ?? 0, signal.cabinImportedAt ?? 0);
+
 /** 去掉被删除记号压住的鱼（删除时刻不早于这条鱼的捕获时刻）。没有捕获时刻的老记录视为很早以前捕到的。 */
 export function applyFishTombstones(list: readonly TradeSignal[], tombstones: FishTombstones): TradeSignal[] {
   if (!Object.keys(tombstones).length) return [...list];
@@ -38,7 +40,7 @@ export function applyFishTombstones(list: readonly TradeSignal[], tombstones: Fi
       tombstones[`v|${fishVisibleCatchKey(s)}${s.fishArchive ? `|archive:${s.fishArchive.id}` : ''}`] ?? 0,
       tombstones[`v|${legacy}${s.freshCatch ? '' : '|archive'}`] ?? 0,
       tombstones[`v|${legacy}${s.fishArchive ? `|archive:${s.fishArchive.id}` : ''}`] ?? 0);
-    return !t || t < (s.caughtAt ?? 0);
+    return !t || t < fishPresenceTime(s);
   });
 }
 const asList = (v: unknown): TradeSignal[] => Array.isArray(v) ? v.filter((s): s is TradeSignal => !!s && typeof s.id === 'string' && typeof s.symbol === 'string' && Number.isFinite(s.timeMs) && typeof s.timeLabel === 'string' && typeof s.fallbackZone === 'string') : [];
@@ -46,9 +48,9 @@ const asList = (v: unknown): TradeSignal[] => Array.isArray(v) ? v.filter((s): s
 export function mergeFishLists(local: unknown, remote: unknown, tombstones: FishTombstones = {}): TradeSignal[] {
   let l = asList(local).map(migrateFishSignal), r = asList(remote).map(migrateFishSignal);
   const retained = new Set(withoutArchivedFreshCopies([...l, ...r]));
-  l = l.filter(s => retained.has(s)); r = r.filter(s => retained.has(s));
+  l = applyFishTombstones(l.filter(s => retained.has(s)), tombstones); r = applyFishTombstones(r.filter(s => retained.has(s)), tombstones);
   const newer = new Map<string, TradeSignal>();
-  for (const s of [...l, ...r]) { const k = fishDedupKey(s), prev = newer.get(k); if (!prev || (s.caughtAt ?? 0) > (prev.caughtAt ?? 0)) newer.set(k, s); }
+  for (const s of [...l, ...r]) { const k = fishDedupKey(s), prev = newer.get(k); if (!prev || fishPresenceTime(s) > fishPresenceTime(prev)) newer.set(k, s); }
   const merged = mergeFishSignals(l, r).map(s => {
     const best = newer.get(fishDedupKey(s));
     return best && best !== s ? { ...s, ...best, quality: s.quality ?? best.quality, freshCatch: s.freshCatch || best.freshCatch || undefined } : s;
