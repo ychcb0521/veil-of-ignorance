@@ -16,12 +16,15 @@ const now = () => performance.now();
 
 export function runAccountSyncRequest<T extends SyncResponse>(
   request: () => SyncRequest<T>,
-  options: { bytes?: number; current?: () => boolean } = {},
+  options: { bytes?: number; preference?: boolean; current?: () => boolean } = {},
 ): Promise<T | undefined> {
   const bulk = (options.bytes ?? 0) > 16 * 1024;
+  // An explicit settings save can use the shared lane during archive pacing.
+  // It still advances the bulk budget and honors the shared outage cooldown.
+  const waitsForBulkBudget = bulk && !options.preference;
   const attempt = (): Promise<T | undefined> => {
     const task = tail.then(async (): Promise<{wait: number} | {response: T | undefined}> => {
-      const delay = Math.max(nextStart, bulk ? nextBulkStart : 0) - now();
+      const delay = Math.max(nextStart, waitsForBulkBudget ? nextBulkStart : 0) - now();
       // A throttled archive releases the lane while waiting, so a small explicit
       // settings/trade save can proceed without waiting behind megabytes of data.
       if (delay > 0) return {wait: delay};
@@ -48,7 +51,7 @@ export function runAccountSyncRequest<T extends SyncResponse>(
           // Pace large JSONB payloads as well as limiting connection concurrency.
           // Small preferences/trades do not pay the cost of a large archive upload.
           const pause = Math.ceil((options.bytes ?? 0) / BYTES_PER_SECOND * 1_000);
-          if (bulk) nextBulkStart = now() + pause;
+          if (bulk) nextBulkStart = Math.max(nextBulkStart, now()) + pause;
           nextStart = now() + (bulk ? 0 : pause);
         }
         return {response};

@@ -232,7 +232,12 @@ export function logicalKeyOf(fullKey: string, userId: string): string | null {
 /** 单键负载超过这个大小就告警：成交历史累积到一定量后可能触到请求体上限。 */
 const LARGE_PAYLOAD_WARN_BYTES = 4 * 1024 * 1024;
 
-async function pushNow(userId: string, key: string, value: unknown, gen: number, retry = true): Promise<void> {
+async function pushNow(userId: string, key: string, value: unknown, gen: number, retry = true, options: ImmediatePushOptions = {}): Promise<void> {
+  const retryOnce = () => new Promise<void>(resolve => {
+    setTimeout(() => {
+      void pushNow(userId, key, value, gen, false, options).then(resolve);
+    }, 3_000);
+  });
   if (tableMissing) return;
   // 已经被更新的版本取代 → 这一笔（含它的重试）整个作废，绝不把旧值写上云。
   if ((generation.get(genKey(userId, key)) ?? 0) !== gen) return;
@@ -271,7 +276,11 @@ async function pushNow(userId: string, key: string, value: unknown, gen: number,
         } as never,
         { onConflict: 'user_id,key' },
       );
-    }, { bytes: approxBytes * 3, current: () => !tableMissing && generation.get(gk) === gen });
+    }, {
+      bytes: approxBytes * 3,
+      preference: options.preference,
+      current: () => !tableMissing && generation.get(gk) === gen,
+    });
     if (!result) return;
     const { error } = result;
     if (!error) {
@@ -292,14 +301,14 @@ async function pushNow(userId: string, key: string, value: unknown, gen: number,
       } else if (retry) {
         // 瞬时网络抖动不该让这一笔永远上不了云：隔 3 秒重试一次
         console.warn('[simStateSync] 推送失败，3 秒后重试：', error.message);
-        setTimeout(() => { void pushNow(userId, key, value, gen, false); }, 3_000);
+        if (options.waitForRetry) await retryOnce(); else void retryOnce();
       } else {
         console.warn('[simStateSync] 推送重试仍失败：', error.message);
       }
     }
   } catch (e) {
     if (retry) {
-      setTimeout(() => { void pushNow(userId, key, value, gen, false); }, 3_000);
+      if (options.waitForRetry) await retryOnce(); else void retryOnce();
     } else {
       console.warn('[simStateSync] 推送异常：', e);
     }
@@ -499,15 +508,18 @@ export async function hydrateSimState(userId: string, keys?: readonly string[], 
   }
 }
 
+type ImmediatePushOptions = { waitForRetry?: boolean; preference?: boolean };
+
 /** Explicit Save waits for the server acknowledgement; failed values remain queued for retry. */
-export async function pushSimStateImmediately(userId: string, key: string, value: unknown): Promise<boolean> {
+export async function pushSimStateImmediately(userId: string, key: string, value: unknown, options: ImmediatePushOptions = {}): Promise<boolean> {
   queueSimStatePush(userId, key, value);
   const entry = pending.get(key);
   if (!entry) return false;
   clearTimeout(entry.timer);
   pending.delete(key);
-  await pushNow(userId, key, entry.value, entry.gen);
-  return !unsyncedGeneration.has(genKey(userId, key));
+  await pushNow(userId, key, entry.value, entry.gen, true, options);
+  const gk = genKey(userId, key);
+  return generation.get(gk) === entry.gen && !unsyncedGeneration.has(gk);
 }
 
 function backfillLocalOnlyKeys(userId: string, remoteKeys: Set<string>): void {

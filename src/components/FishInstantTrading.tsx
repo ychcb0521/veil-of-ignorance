@@ -32,6 +32,7 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [localOnly, setLocalOnly] = useState(false);
   const templates = activeQualityPlanTemplates(state.study)
     .filter(template => template.entryHours == null && !template.plan.preEntryThreeStage && !template.plan.preEntryConditions);
   const template = templates.find(value => value.id === id);
@@ -42,22 +43,28 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
   const save = async (plan?: QualityGroup) => {
     if (!monitor || id && !choice || issue) return;
     setError('');
+    setLocalOnly(false);
     setSaving(true);
     try {
-      await monitor.save(plan && choice ? { ...choice, plan, name: plan.label } : choice);
-      done();
+      const outcome = await monitor.save(plan && choice ? { ...choice, plan, name: plan.label } : choice);
+      if (outcome === 'local') setLocalOnly(true);
+      else done();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '持仓监测设置保存失败');
     } finally {
       setSaving(false);
     }
   };
+  const saveNotice = saving ? '正在等待云端确认保存…' : localOnly
+    ? monitor?.pendingCloud ? '设置已保存到本机，云端暂未确认。可再次保存重试。' : '云端已确认保存'
+    : '';
   if (editing && choice) return <>
     <button className="px-4 pt-3 text-xs text-primary" type="button" disabled={saving}
       onClick={() => { setEditing(false); onEdit(false); }}>返回模板选择</button>
     <fieldset disabled={saving}>
       <InstantHoldingPlanEditor state={state} plan={choice.plan} save={save}/>
     </fieldset>
+    {saveNotice && <p role="status" className="p-3 text-xs text-muted-foreground">{saveNotice}</p>}
     {error && <p role="alert" className="p-3 text-xs text-destructive">{error}</p>}
   </>;
   const size = instantMonitorSize(choice && { version: INSTANT_TEMPLATE_MONITOR, templateId: choice.id, name: choice.name, plan: choice.plan });
@@ -75,6 +82,7 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
       ? '按模板执行加仓、减仓和卖出。筛选鱼入选开仓时保存当时所选的模板快照。'
       : '40 USDT 保证金、5 倍。CDA 原始值低于 −10 或 DBL-5 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。'}</p>
     {choice && <p className="text-muted-foreground">首仓名义仓位 {+(size.marginUsdt * size.leverage).toPrecision(12)} USDT · {size.leverage} 倍 · 保证金 {+size.marginUsdt.toPrecision(12)} USDT</p>}
+    {saveNotice && <p role="status" className="text-muted-foreground">{saveNotice}</p>}
     {(error || issue) && <p role="alert" className="text-destructive">{error || issue}</p>}
     <div className="flex flex-wrap justify-end gap-2">
       {choice && !issue && !isLegacyQualityPlan(choice.plan) && <button type="button" className="rounded-md border px-3 py-1.5"

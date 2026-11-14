@@ -58,3 +58,23 @@ it('aborts stalled requests, retains the shared cooldown, and allows later recov
   expect(signal?.aborted).toBe(true); expect(recovered).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(3_000); await next; expect(recovered).toHaveBeenCalledTimes(1);
 });
+
+
+it('lets an explicit template upload use the shared lane while an archive is paced', async () => {
+  const archive = vi.fn(async () => ({ error: null }));
+  const template = vi.fn(async () => ({ error: null }));
+  const first = runAccountSyncRequest(archive, { bytes: 256 * 1024 });
+  const second = runAccountSyncRequest(archive, { bytes: 256 * 1024 });
+  await vi.advanceTimersByTimeAsync(0);
+  await first;
+  const explicit = runAccountSyncRequest(template, { bytes: 128 * 1024, preference: true });
+  await vi.advanceTimersByTimeAsync(0);
+  await explicit;
+  expect(template).toHaveBeenCalledOnce();
+  expect(archive).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(2_999);
+  expect(archive).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
+  await second;
+  expect(archive).toHaveBeenCalledTimes(2);
+});
