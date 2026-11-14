@@ -4,6 +4,7 @@ import { useFishFeatures } from './useFishFeatures';
 import { compileFishProgram } from '@/lib/fish/algorithm';
 import { readFishPreference } from '@/lib/fish/preferences';
 import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
+import { captureCardDefinition } from '@/lib/fish/captureDefinition';
 import { readPersistedStateRaw, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -34,7 +35,7 @@ export function useFishReconstruction(account: string | undefined, signals: read
   const config = useMemo(() => {
     try {
       const plans = cards.map((c, i) => {
-        const def = defs.find(d => d.id === c.featureId);
+        const def = captureCardDefinition(c, defs.find(d => d.id === c.featureId));
         if (!def) throw Error(`算法 ${i + 1} 的定义已不存在`);
         if (!c.pref.threshold.trim() || !Number.isFinite(Number(c.pref.threshold))) throw Error(`请先填写算法 ${i + 1} 的当前阈值`);
         const plan = compileFishProgram(def, { statistic: '结果', direction: reconstructionDirection(def.id), threshold: Number(c.pref.threshold), constraints: [] });

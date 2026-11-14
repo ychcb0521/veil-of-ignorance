@@ -9,15 +9,17 @@ import { shortFishHash } from './algorithm';
 import type { FishReconstructionResult } from './reconstruction';
 import type { FishPreference } from './preferences';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import type { FishCaptureDefinition } from './captureDefinition';
 
-export interface ReconstructionCard { id: string; featureId: string; enabled: boolean; pref: FishPreference }
+export interface ReconstructionCard { id: string; featureId: string; enabled: boolean; pref: FishPreference; frozen?: FishCaptureDefinition }
 export interface ReconstructionCache { version: 1; key: string; result: FishReconstructionResult }
 export const reconstructionStorageKey = (account: string | undefined, turing = false) => `veil:fish-reconstruction:v1:${encodeURIComponent(account ?? 'anonymous')}${turing ? ':turing-cup' : ''}`;
 export function reconstructionCacheKey(account: string | undefined, cards: readonly ReconstructionCard[], defs: readonly DeepDigFeatureDef[], signals: readonly TradeSignal[]): string {
   const algorithms = cards.map(c => {
-    const d = defs.find(d => d.id === c.featureId);
+    const d = c.frozen?.definition ?? defs.find(d => d.id === c.featureId);
     return [c.featureId, c.enabled, c.pref.statistic ?? '结果', c.pref.direction, c.pref.threshold,
-      d ? definitionKey(d) : null, d?.scale, d?.unit, '结果', isSellerFeature(c.featureId)?'<':'>'];
+      d ? definitionKey(d) : null, d?.scale, d?.unit, '结果', isSellerFeature(c.featureId)?'<':'>',
+      ...(c.frozen ? [c.frozen.version, c.frozen.fingerprint] : [])];
   });
   // Include identity/source fields used by adapters, not ratings or UI-only notes.
   const samples = signals.map(s => [s.id, s.exchange ?? 'binance', s.market ?? 'crypto', s.symbol, s.underlying ?? '', s.timeMs])

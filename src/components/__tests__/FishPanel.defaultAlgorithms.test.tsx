@@ -4,7 +4,8 @@ import { FISH_WICK_SETTINGS_KEY } from '@/lib/fish/downwardWick';
 import { FISH_CAPTURE_TURNOVER_KEY } from '@/lib/fish/turnoverSettings';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { useState } from 'react';
-import { FISH_ACCOUNT_SETTINGS_KEY, readFishAccountSettings } from '@/lib/fish/accountSettings';
+import { FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY, readFishAccountSettings } from '@/lib/fish/accountSettings';
+import { buildFishScanSettings } from '@/lib/fish/scanPlan';
 import {beforeEach,it,expect,vi} from 'vitest';
 import {fireEvent,render,screen,cleanup,waitFor,within} from '@testing-library/react';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
@@ -16,6 +17,41 @@ const start=vi.fn();
 const panel=(extra:object={})=><FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()} {...extra}/>;
 const features=()=>[1,2,3,4,5,6].flatMap(i=>{const el=screen.queryByLabelText(i===1?'捕捞算法':`算法 ${i} 特征值`,{selector:'select'});return el?[(el as HTMLSelectElement).selectedOptions[0]?.dataset.featureId]:[];});
 beforeEach(()=>{localStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));start.mockClear();defs.list=fishFeatureDefinitions([CBI2_DEF,CBI_DEF,CBA_DEF,DRIFT_SPEED_Z_DEF,CDA_DEF,BSS_DEF,STATE_DEF]);});
+it('saves and reloads capture templates and runs the original formula after the catalog changes', async () => {
+  const push = vi.spyOn(sync, 'pushSimStateImmediately').mockResolvedValue(true);
+  try {
+  localStorage.setItem('sb-fixture-auth-token', JSON.stringify({user:{id:'capture-template-test'}}));
+  const formula = defs.list.find(def => def.id === 'cbi2')!.formula;
+  const view = render(panel());
+  fireEvent.change(screen.getByLabelText('捕捞阈值'), {target:{value:'0.12345678'}});
+  fireEvent.click(screen.getByRole('radio', {name:'并集'}));
+  fireEvent.click(screen.getByRole('button', {name:'捕捞模板'}));
+  fireEvent.click(screen.getByRole('button', {name:'保存当前设置为模板'}));
+  fireEvent.change(screen.getByRole('textbox', {name:'模板名称'}), {target:{value:'原公式'}});
+  fireEvent.click(screen.getByRole('button', {name:'保存模板'}));
+  const storageKey = getUserPrefix() + FISH_CAPTURE_TEMPLATES_KEY;
+  await waitFor(() => expect(screen.getByRole('button', {name:'载入模板 原公式'})).toBeEnabled());
+  const serialized = localStorage.getItem(storageKey)!;
+  expect(JSON.parse(serialized)[0].settings.cards[0].frozen.definition.formula).toBe(formula);
+
+  view.unmount();
+  defs.list = defs.list.map(def => def.id === 'cbi2' ? {...def, formula:'avg_CBI2 = C\navg_CBI2_2 = C'} : def);
+  render(panel());
+  fireEvent.click(screen.getByRole('button', {name:'捕捞模板'}));
+  fireEvent.click(screen.getByRole('button', {name:'载入模板 原公式'}));
+  await waitFor(() => expect(screen.queryByRole('dialog', {name:'捕捞模板'})).toBeNull());
+  expect(screen.getByLabelText('捕捞阈值')).toHaveValue(0.12345678);
+  expect(screen.getByRole('radio',{name:'并集'})).toBeChecked();
+  fireEvent.click(screen.getByRole('button', {name:'开始捕捞'}));
+  await waitFor(() => expect(start).toHaveBeenCalled());
+  expect(start.mock.calls[0][0].algorithms[0].feature.formula).toBe(formula);
+  const profile = readFishAccountSettings()!;
+  const automatic = buildFishScanSettings({cards:profile.cards, defs:defs.list, combination:profile.combination,
+    selection:profile.selection,time:'',lookbackHours:profile.lookbackHours});
+  expect(automatic.settings?.algorithms[0].feature.formula).toBe(formula);
+  expect(localStorage.getItem(storageKey)).toBe(serialized);
+  } finally { push.mockRestore(); }
+}, 30000);
 it('默认四条规则全部勾选，开始捕捞使用截图的阈值、序列和交集',async()=>{
  render(panel());
  expect(FISH_DEFAULT_ALGORITHMS).toEqual(['cbi2','cba','cbi2','cba']);

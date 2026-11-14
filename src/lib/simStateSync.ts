@@ -22,7 +22,7 @@ import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIME
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
 import { mergeMiningStates, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY } from '@/lib/fish/miningState';
 import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
-import { FISH_ACCOUNT_SETTINGS_KEY } from '@/lib/fish/accountSettings';
+import { FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY } from '@/lib/fish/accountSettings';
 import { FISH_INSTANT_MONITOR_KEY } from '@/lib/fish/instantMonitorSettings';
 import { FISH_AUTOMATIC_SCREENING_KEY } from '@/lib/fish/preEntryActivePlan';
 import { FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY } from '@/lib/fish/lookback';
@@ -59,6 +59,7 @@ const EXCLUDED_KEYS = new Set(['price_map', 'symbol_settlement_mode', 'fish-mini
 const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unknown> = {
   quality_plan_templates_v1: mergeQualityPlanCatalogValues,
   quality_sell_plans_v1: mergeQualityPlanCatalogValues,
+  [FISH_CAPTURE_TEMPLATES_KEY]: mergeQualityPlanCatalogValues,
   // 并集之后再修剪：本机修掉的老节点不能借远端的副本一次次长回来。
   [REPLAY_TIMELINES_STORAGE_KEY]: (local, remote) =>
     pruneReplayTimelineRegistry(mergeReplayTimelineRegistries(local, remote), { now: Date.now() }),

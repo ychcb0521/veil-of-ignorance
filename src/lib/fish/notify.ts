@@ -8,17 +8,18 @@
  */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
-import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
+import { readPersistedStateRaw, removePersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
 import { fishCaughtBy, fishVisibleCatchKey, fishMetricLabel, fishSourceLabel } from './records';
-import type { FishSnapshot } from './algorithm';
+import { shortFishHash, type FishSnapshot } from './algorithm';
 import { qualityMembers } from './quality';
 import { focusDetector, FOCUS_DETECTORS } from './qualityFocusSignals';
 import type { PreEntryRecord, PreEntryRound } from './preEntryMonitor';
 import { qualitySignalTime } from './qualityAdmissionTime';
 import { SCREENED_CDA_GUARD_LABEL, screenedSellReason, type ScreenedCdaTrigger } from './screenedCda';
+import { withFishRequestDeadline } from './shared';
 
 /**
  * 【用户要求】2026-10-27「推送的邮件内容只包括 avg_CBI2_2、avg_CBA_2 共振的信号，也就是两者捕捉到的信号的交集」。
@@ -193,13 +194,24 @@ export function composeScreenedFishEmail(record: Pick<PreEntryRecord, 'sample' |
 const contactUsParams = (recipient: string, subject: string) => ({ name: '信号通知', title: subject, time: formatUTC8(Date.now()).slice(0, 16), email: recipient });
 /** EmailJS permits one request per second. Serialize sends, including manual tests and automatic sends. */
 export const FISH_EMAIL_SEND_INTERVAL_MS = 1100;
+const QUOTA_RECHECK_MS = 60 * 60_000;
+export class FishEmailQuotaError extends Error {
+  constructor(readonly retryAt: number) {
+    super('EmailJS 月度发送额度已用完');
+  }
+}
+const quotaKey = (config: FishNotifyConfig, prefix: string) =>
+  'veil:fish-email-quota.v1:' + prefix + shortFishHash(config.publicKey.trim());
+export function fishEmailQuotaRetryAt(config: FishNotifyConfig, prefix = getUserPrefix()) {
+  const until = Number(readPersistedStateRaw(quotaKey(config, prefix)));
+  return Number.isFinite(until) && until > Date.now() ? until : 0;
+}
 let deliveryQueue: Promise<void> = Promise.resolve();
 let nextDeliveryAt = 0;
 async function privateDelivery(task: () => Promise<void>): Promise<void> {
   const run = deliveryQueue.then(async () => {
     const delay = nextDeliveryAt - Date.now();
     if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
-    nextDeliveryAt = Date.now() + FISH_EMAIL_SEND_INTERVAL_MS;
     await task();
   });
   deliveryQueue = run.catch(() => {});
@@ -207,28 +219,41 @@ async function privateDelivery(task: () => Promise<void>): Promise<void> {
 }
 /** Each request contains one recipient; the private template parameter also blocks legacy group-send pages. */
 export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch,
-  delivery?: { onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal }): Promise<void> {
+  delivery?: { onRecipient: (recipient: string) => void | Promise<void>; signal: AbortSignal }, retryQuota = false): Promise<void> {
   // Normalize again at the network boundary: a manually altered saved string cannot inject a recipient list.
   const normalized = normalizeFishNotify(config), missing = fishNotifyMissing(normalized);
   if (missing) throw new Error(missing);
+  const prefix = getUserPrefix(), key = quotaKey(normalized, prefix);
   const failures: string[] = [];
   for (const [index, recipient] of normalized.emails.entries()) {
     try {
       await privateDelivery(async () => {
-        delivery?.signal.throwIfAborted();
-        const response = await request(EMAILJS_ENDPOINT, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          ...(delivery ? { signal: AbortSignal.any([delivery.signal, AbortSignal.timeout(20000)]) } : {}),
-          body: JSON.stringify({ service_id: normalized.serviceId, template_id: normalized.templateId, user_id: normalized.publicKey,
-            template_params: { ...content, count: String(content.count), ...contactUsParams(recipient, content.subject), to_email: recipient, private_to_email: recipient } }),
-        });
-        if (!response.ok) {
-          const detail = (await response.text().catch(() => '')).slice(0, 200);
-          throw new Error(`EmailJS 拒绝发送（${response.status}）${detail ? `：${detail}` : ''}`);
+        if (delivery?.signal.aborted) throw new DOMException('已取消', 'AbortError');
+        const quota = fishEmailQuotaRetryAt(normalized, prefix);
+        if (quota && !retryQuota) throw new FishEmailQuotaError(quota);
+        nextDeliveryAt = Date.now() + FISH_EMAIL_SEND_INTERVAL_MS;
+        const { ok, status, detail } = await withFishRequestDeadline(async signal => {
+          const response = await request(EMAILJS_ENDPOINT, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            signal,
+            body: JSON.stringify({ service_id: normalized.serviceId, template_id: normalized.templateId, user_id: normalized.publicKey,
+              template_params: { ...content, count: String(content.count), ...contactUsParams(recipient, content.subject), to_email: recipient, private_to_email: recipient } }),
+          });
+          return { ok: response.ok, status: response.status, detail: response.ok ? '' : (await response.text().catch(() => '')).slice(0, 200) };
+        }, delivery?.signal ?? new AbortController().signal, 20_000);
+        if (!ok) {
+          if (status === 426 && /monthly\s+(?:request\s+)?quota/i.test(detail)) {
+            const retryAt = Date.now() + QUOTA_RECHECK_MS;
+            writePersistedStateRaw(key, String(retryAt));
+            throw new FishEmailQuotaError(retryAt);
+          }
+          throw new Error(`EmailJS 拒绝发送（${status}）${detail ? `：${detail}` : ''}`);
         }
+        if (readPersistedStateRaw(key) !== null) removePersistedStateRaw(key);
         await delivery?.onRecipient(recipient);
       });
     } catch (error) {
+      if (error instanceof FishEmailQuotaError || delivery?.signal.aborted) throw error;
       failures.push(`第 ${index + 1} 个邮箱：${error instanceof Error ? error.message : String(error)}`);
     }
   }

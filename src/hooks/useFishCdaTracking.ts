@@ -3,7 +3,7 @@ import { instantMonitorSale } from '@/lib/fish/instantMonitorExecution';
 import type { QualityResult } from '@/lib/fish/quality';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
-import { fishNotifyMissing } from '@/lib/fish/notify';
+import { fishEmailQuotaRetryAt, fishNotifyMissing } from '@/lib/fish/notify';
 import { isAutomaticPreEntryRound, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { readAutomaticPreEntryCheckpoint, readAutomaticPreEntrySales } from '@/lib/fish/preEntryPersistence';
 import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED_PRICE_EXIT_RULE, validScreenedSale, type ScreenedPriceProgress, type ScreenedCdaGuardProgress, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
@@ -264,7 +264,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     const send = () => {
       if (mailing || lifetime.signal.aborted) return;
       const { config } = current.current.notify;
-      if (!config.enabled || fishNotifyMissing(config)) return;
+      if (!config.enabled || fishNotifyMissing(config) || fishEmailQuotaRetryAt(config, getUserPrefix(owner))) return;
       const next = current.current.entries.find(({record}) => {
         const checkpoint = read(record);
         return checkpoint?.alert && !checkpoint.delivered && (checkpoint.nextMailAt ?? 0) <= Date.now();
@@ -277,7 +277,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         const checkpoint = read(record);
         if (lifetime.signal.aborted || !checkpoint?.alert || checkpoint.delivered || (checkpoint.nextMailAt ?? 0) > Date.now()) return;
         const live = current.current.notify;
-        if (!live.config.enabled || fishNotifyMissing(live.config)) return;
+        if (!live.config.enabled || fishNotifyMissing(live.config) || fishEmailQuotaRetryAt(live.config, getUserPrefix(owner))) return;
         const sent = new Set(checkpoint.sent);
         const recipients = live.config.emails.filter(email => !sent.has(email));
         if (!recipients.length) { await save(record, { ...checkpoint, delivered: true }); return; }

@@ -5,6 +5,7 @@ import type { FishAccountAutoSchedule } from './autoScan';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
 
+export const FISH_CAPTURE_TEMPLATES_KEY = 'fish-capture-templates.v1';
 // One atomic account value: an old page writing legacy local keys cannot erase it.
 export const FISH_ACCOUNT_SETTINGS_KEY = 'fish-account-settings.v1';
 export interface FishAccountSettings {
@@ -16,6 +17,8 @@ export interface FishAccountSettings {
   downwardWick: FishDownwardWick;
   selection: FishScanSelection;
   auto?: FishAccountAutoSchedule;
+  /** Per-application revision lets tabs ignore older per-device schedule overrides. */
+  captureScheduleRevision?: string;
 }
 export function readFishAccountSettings(fullKey = getUserPrefix() + FISH_ACCOUNT_SETTINGS_KEY): FishAccountSettings | null {
   try {

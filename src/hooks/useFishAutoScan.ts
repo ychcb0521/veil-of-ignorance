@@ -39,7 +39,7 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   const runningRef = useRef(false), retryAt = useRef(0);
   const setState = useCallback((next: FishAutoState) => { stateRef.current = next; setStateRaw(next); saveFishAuto(next); }, []);
   const resetDefaults = useCallback(() => { const s = resetFishAuto(); stateRef.current = s; setStateRaw(s); setError(''); setWaiting(false); retryAt.current = 0; }, []);
-  const savedAutoKey = JSON.stringify(accountSettings?.auto);
+  const savedAutoKey = JSON.stringify([accountSettings?.auto, accountSettings?.captureScheduleRevision]);
   useEffect(resetDefaults, [o.account, resetDefaults, savedAutoKey]);
   useEffect(() => {
     const onStorage = (event: StorageEvent) => { if (event.key === fishAutoScheduleKey()) resetDefaults(); };

@@ -7,12 +7,12 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { fishVisibleCatchKey } from '@/lib/fish/records';
-import { composeFishEmail, composeScreenedFishEmail, fishEmailMatches, fishEmailSourceLabel, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
+import { composeFishEmail, composeScreenedFishEmail, FishEmailQuotaError, fishEmailMatches, fishEmailSourceLabel, fishEmailQuotaRetryAt, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 import type { PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { validScreenedSale, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 
 /** unchanged = 这一轮结束时新鱼和上一封一样，没发；skipped = 本轮有新鱼但没有一条共振，没发（count 为新鱼条数）。 */
-export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean; skipped?: boolean }
+export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean; skipped?: boolean; quotaRetryAt?: number; recipientCount?: number }
 export interface FishNotify {
   config: FishNotifyConfig; status: FishNotifyStatus | null; sending: boolean;
   screening?: boolean;
@@ -29,7 +29,9 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   const configRef = useRef(config); configRef.current = config;
   useEffect(() => {
     const refresh = () => { const next = readFishNotify(); configRef.current = next; setConfig(next); };
-    refresh(); setStatus(null);
+    refresh();
+    const retryAt = fishEmailQuotaRetryAt(configRef.current);
+    setStatus(retryAt ? { at: Date.now(), ok: false, count: 0, quotaRetryAt: retryAt } : null);
     return subscribePersistedStateHydration(`${getUserPrefix()}fish_notify_v1`, refresh);
   }, [account]);
   const update = useCallback((next: FishNotifyConfig) => { saveFishNotify(next); const saved = readFishNotify(); configRef.current = saved; setConfig(saved); }, []);
@@ -39,11 +41,14 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     deliveries.current++;
     setSending(true);
     try {
-      await sendFishEmail(c, content, request, delivery);
-      if (!delivery?.signal.aborted) setStatus({ at: Date.now(), ok: true, count: content.count, test });
+      const retryQuota = test && !!fishEmailQuotaRetryAt(c);
+      const config = retryQuota ? { ...c, emails: c.emails.slice(0, 1) } : c;
+      await sendFishEmail(config, content, request, delivery, test);
+      if (!delivery?.signal.aborted) setStatus({ at: Date.now(), ok: true, count: content.count, test, recipientCount: c.emails.length === config.emails.length ? undefined : config.emails.length });
       return true;
     } catch (e) {
-      if (!delivery?.signal.aborted) setStatus({ at: Date.now(), ok: false, count: content.count, test, error: e instanceof TypeError ? '网络不通或被浏览器拦截' : e instanceof Error ? e.message : String(e) });
+      if (!delivery?.signal.aborted) setStatus({ at: Date.now(), ok: false, count: content.count, test, error: e instanceof TypeError ? '网络不通或被浏览器拦截' : e instanceof Error ? e.message : String(e),
+        ...(e instanceof FishEmailQuotaError && { quotaRetryAt: e.retryAt }) });
       return false;
     } finally {
       if (--deliveries.current === 0) setSending(false);

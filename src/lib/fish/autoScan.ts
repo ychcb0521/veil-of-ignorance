@@ -47,21 +47,17 @@ export function readFishAuto(): FishAutoState {
 export function saveFishAuto(state: FishAutoState): void {
   try { writePersistedStateRaw(fishAutoKey(), JSON.stringify({ ...state, defaultsVersion: 1 })); } catch { /* 记不住只是下次要重新设 */ }
 }
-function scheduleSignature(schedule?: FishAccountAutoSchedule): string {
-  return schedule ? `${schedule.mode}:${schedule.hours}${schedule.intervalMinutes ? ':' + schedule.intervalMinutes : ''}` : '';
-}
-
 export function saveFishAutoSchedule(schedule: FishAutoSchedule): boolean {
-  const account = scheduleSignature(readFishAccountSettings()?.auto);
-  return writePersistedStateRaw(fishAutoScheduleKey(), JSON.stringify({ ...schedule, account }));
+  const revision = readFishAccountSettings()?.captureScheduleRevision;
+  return writePersistedStateRaw(fishAutoScheduleKey(), JSON.stringify({ ...schedule, revision }));
 }
 
-function readFishAutoSchedule(account?: FishAccountAutoSchedule): FishAutoSchedule | undefined {
+function readFishAutoSchedule(account?: FishAccountAutoSchedule, revision?: string): FishAutoSchedule | undefined {
   try {
     const value = JSON.parse(readPersistedStateRaw(fishAutoScheduleKey()) ?? 'null');
     // A late account hydration must not replace an explicit choice in this browser.
     if ((value?.mode === 'manual' || value?.mode === 'auto')
-      && (FISH_AUTO_INTERVALS as readonly number[]).includes(value.hours)) {
+      && (FISH_AUTO_INTERVALS as readonly number[]).includes(value.hours) && (!revision || value.revision === revision)) {
       return { mode: value.mode, hours: value.hours };
     }
   } catch { /* Fall back to the saved account schedule. */ }
@@ -73,7 +69,8 @@ function readFishAutoSchedule(account?: FishAccountAutoSchedule): FishAutoSchedu
 /** Restore an explicit local schedule or the latest account schedule when reopening. */
 export function resetFishAuto(): FishAutoState {
   const { lastRunAt, retry } = readFishAuto();
-  const state = { ...DEFAULT_FISH_AUTO, ...readFishAutoSchedule(readFishAccountSettings()?.auto), lastRunAt, retry };
+  const account = readFishAccountSettings();
+  const state = { ...DEFAULT_FISH_AUTO, ...readFishAutoSchedule(account?.auto, account?.captureScheduleRevision), lastRunAt, retry };
   saveFishAuto(state);
   return state;
 }

@@ -41,16 +41,12 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   expect(screen.getByRole('button', { name: /^信号库/ })).toHaveTextContent('2');
   fireEvent.click(screen.getByRole('button', { name: /^渔/ }));
   expect(mocks.reconstruct).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button', { name: '复原' }));
-  await waitFor(() => expect(mocks.reconstruct).toHaveBeenCalledTimes(1));
-  const options = mocks.reconstruct.mock.calls[0][0] as FishReconstructionOptions;
-  expect(options.signals).toEqual(library);
-  expect(options.signals.map(s => s.symbol)).not.toContain('OLDUSDT');
-  expect(options.signals.map(s => s.symbol)).not.toContain('NEWUSDT');
-  await waitFor(() => expect(screen.getByTestId('fish-reconstruction-results')).toBeVisible());
-  expect(mocks.scan).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
+  const fish = within(screen.getByTestId('fish-panel'));
+  fireEvent.click(fish.getByRole('button', { name: '捕捞设置' }));
+  expect(fish.queryByRole('button', { name: '复原' })).toBeNull();
+  expect(fish.queryByTestId('fish-reconstruction-results')).toBeNull();
 
-  const cabinToggle = screen.getByRole('button', { name: /^鱼舱/ });
+  const cabinToggle = screen.getByTestId('fish-cabin').querySelector<HTMLButtonElement>('button[aria-controls="fish-old-panel"]')!;
   if (cabinToggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(cabinToggle);
   for (const id of ['fish-new-panel', 'fish-old-panel']) {
     const panel = screen.getByTestId(id);
@@ -60,10 +56,15 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   expect(within(screen.getByTestId('fish-new-panel')).getByText('NEWUSDT')).toBeVisible();
   expect(within(screen.getByTestId('fish-old-panel')).getByText('OLDUSDT')).toBeVisible();
 
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^信号库/ })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^信号库\s*2$/ })); });
   const main = screen.getByTestId('signal-library-panel');
+  fireEvent.click(within(main).getByTestId('library-reconstruction-start'));
+  await waitFor(() => expect(mocks.reconstruct).toHaveBeenCalledTimes(1));
+  const options = mocks.reconstruct.mock.calls[0][0] as FishReconstructionOptions;
+  expect(options.signals).toEqual(library);
+  expect(mocks.scan).not.toHaveBeenCalled();
   expect(within(main).getByText('匹配', { selector: 'span' })).toBeVisible();
-  const matches = within(main).getAllByTestId('signal-reconstruction-match');
+  const matches = await within(main).findAllByTestId('signal-reconstruction-match');
   expect(matches).toHaveLength(library.length);
   for (const match of matches) expect(match).toHaveTextContent('LIBRARY > 0.023');
   expect(within(main).queryByText('OLDUSDT')).toBeNull(); expect(within(main).queryByText('NEWUSDT')).toBeNull();

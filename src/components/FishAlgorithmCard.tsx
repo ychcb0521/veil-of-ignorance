@@ -10,6 +10,7 @@ import { Check, ChevronDown, CircleHelp, Ellipsis, RotateCw, X } from 'lucide-re
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { compileFishPreference } from '@/lib/fish/scanPlan';
+import { captureCardDefinition, type FishCaptureDefinition } from '@/lib/fish/captureDefinition';
 // 用户于 2026-10-19 指定保留的截图区间；固定参考备注，不随新计算覆盖。
 export const RECORDED_RANGES:Record<string,{statistic:string;low:string;high:string;samples:number}>={
  bss:{statistic:'avg_BSS',low:'-0.0227936',high:'0.0827297',samples:745},
@@ -21,7 +22,7 @@ export const RECORDED_RANGES:Record<string,{statistic:string;low:string;high:str
 export function FishCheck({className='',...props}:InputHTMLAttributes<HTMLInputElement>){
  return <span className={`relative inline-flex h-3.5 w-3.5 shrink-0 ${className}`}><input {...props} type="checkbox" className="peer h-3.5 w-3.5 cursor-pointer appearance-none rounded-[4px] border border-muted-foreground/40 bg-background transition-colors checked:border-primary checked:bg-primary hover:border-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"/><Check aria-hidden strokeWidth={3} className="pointer-events-none absolute inset-0.5 hidden h-2.5 w-2.5 text-primary-foreground peer-checked:block"/></span>;
 }
-export interface FishCard {id:string;featureId:string;enabled:boolean;pref:FishPreference}
+export interface FishCard {id:string;featureId:string;enabled:boolean;pref:FishPreference;frozen?:FishCaptureDefinition}
 interface FishAlgorithmOption {
   value: string;
   def: DeepDigFeatureDef;
@@ -59,11 +60,13 @@ function fishAlgorithmOptions(defs: DeepDigFeatureDef[]): FishAlgorithmOption[] 
 }
 
 export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canDelete=true,suggestion=null,computing='',queued=false,librarySize=0,footer,onRecalculate,recalculateDisabled=false,recalculating=false,initialPreference=readFishPreference}:{card:FishCard;defs:DeepDigFeatureDef[];locked:boolean;index:number;onChange:(card:FishCard)=>void;onDelete:()=>void;canDelete?:boolean;suggestion?:FishSuggestion|null;computing?:string;queued?:boolean;librarySize?:number;footer?:ReactNode;onRecalculate?:()=>void;recalculateDisabled?:boolean;recalculating?:boolean;initialPreference?:(featureId:string)=>FishPreference}) {
- const def=defs.find(d=>d.id===card.featureId),p=card.pref,recorded=RECORDED_RANGES[card.featureId];
+ const p=card.pref,recorded=RECORDED_RANGES[card.featureId];
+ const currentDef=defs.find(d=>d.id===card.featureId);
+ let def=card.frozen?.definition??currentDef;
  const update=(patch:Partial<FishPreference>)=>onChange({...card,pref:{...p,...patch,constraints:[]}});
  // A card added before a shared suggestion finishes must also consume that cached result.
  useEffect(()=>{if(locked||!card.enabled||!suggestion||!mayFillFishThreshold(p.threshold,p.lastSuggestion))return;const value=suggestedFishThreshold(suggestion,p.direction);if(value!==null&&String(value)!==p.threshold)update({threshold:String(value),lastSuggestion:String(value)});},[suggestion,p.threshold,p.lastSuggestion,p.direction,locked,card.enabled,onChange]);
- let stats:ReturnType<typeof fishStatistics>=[],error='';try{if(!def)throw Error('特征值已不存在');stats=fishStatistics(def);if(card.enabled){const plan=compileFishPreference(def,p);error=plan.unavailable??'';}}catch(e){error=e instanceof Error?e.message:String(e);}
+ let stats:ReturnType<typeof fishStatistics>=[],error='';try{def=captureCardDefinition(card,currentDef);if(!def)throw Error('特征值已不存在');stats=fishStatistics(def);if(card.enabled){const plan=compileFishPreference(def,p);error=plan.unavailable??'';}}catch(e){error=e instanceof Error?e.message:String(e);}
  const menuStats=def?algorithmMetricMenu(def,stats):[];
  // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
  // 每行只保留操作字段；条件、单位、区间和计算状态统一收进淡色说明入口。
@@ -74,11 +77,11 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const selectAlgorithm = (value: string) => {
    const option = options.find(choice => choice.value === value);
    if (!option || option.reason) return;
-   const prior = option.statistic != null && option.def.id === card.featureId ? p : initialPreference(option.def.id);
+   const prior = !card.frozen && option.statistic != null && option.def.id === card.featureId ? p : initialPreference(option.def.id);
    const pref = option.statistic != null && option.statistic !== prior.statistic
      ? { ...prior, statistic: option.statistic, threshold: '', lastSuggestion: undefined, time:undefined }
      : prior;
-   onChange({ ...card, featureId: option.def.id, pref: { ...pref, constraints: [] } });
+   onChange({ ...card, featureId: option.def.id, pref: { ...pref, constraints: [] }, frozen: undefined });
  };
  const label=(field:string)=>index===1?`捕捞${field==='特征值'?'算法':field}`:`算法 ${index} ${field}`;
  const refresh=onRecalculate?<button type="button" aria-label={index===1?'计算建议':`重新计算算法 ${index} 的区间`} title="重新计算区间（点击后才取数）" disabled={recalculateDisabled} className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded align-middle text-muted-foreground/35 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30" onClick={onRecalculate}><RotateCw className={`h-2.5 w-2.5 ${recalculating?'animate-spin':''}`}/></button>:null;
@@ -94,7 +97,8 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
  <label className="flex w-8 shrink-0 items-center gap-1.5 pl-0.5" title={`算法 ${index}`}><FishCheck aria-label={`启用算法 ${index}`} checked={card.enabled} onChange={e=>onChange({...card,enabled:e.target.checked})}/><span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{index}</span></label>
  <span className={`relative w-24 shrink-0 ${dim}`}>
-   <select aria-label={label('特征值')} title={def?.name} className={`${cls} font-medium`} value={selectedOption?.value ?? card.featureId} onChange={e => selectAlgorithm(e.target.value)}>
+   <select aria-label={label('特征值')} title={def?.name} className={`${cls} font-medium`} value={card.frozen ? 'frozen' : selectedOption?.value ?? card.featureId} onChange={e => selectAlgorithm(e.target.value)}>
+     {card.frozen && <option value="frozen" data-feature-id={card.featureId} label={`${selectedName ?? card.featureId} · 模板`}>{selectedName ?? card.featureId} · 模板公式</option>}
      {def && isBtcFreeOption(def) && <option hidden disabled value={def.id} label={selectedName} data-feature-id={def.id}>{selectedName}</option>}
      {options.map(option => {
        const {def: item, value, label: optionLabel, statistic, reason} = option;

@@ -44,7 +44,7 @@ function initializeFishDefaults(available: readonly string[]): void {
 export function fishDefaultCards(ids:readonly string[],available:readonly string[]):FishCard[]{
   if (ids.length === FISH_DEFAULT_ALGORITHMS.length && ids.every((id,i)=>id===FISH_DEFAULT_ALGORITHMS[i])) {
     initializeFishDefaults(available);
-    return readFishCards().filter(card=>available.includes(card.featureId));
+    return readFishCards().filter(card=>card.frozen||available.includes(card.featureId));
   }
   const saved=readFishCards();
   return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
@@ -56,6 +56,7 @@ export function readFishCards(): FishCard[] {
     const x = JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? '[]');
     if (!Array.isArray(x)) return [];
     return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, FISH_MAX_ALGORITHMS).map(c => {
+      if (c.frozen) return c;
       // A different formula requires a newly calibrated threshold. Never carry DSP·b's −15 into bc.
       if (c.featureId === 'drift-speed-down-z') return { ...c, featureId: 'seller-control', pref: { statistic: '结果', direction: '<', threshold: '', constraints: [], sellerSignVersion: 1 } };
       return { ...c, pref: withFishDefaultThreshold(c.featureId, { ...c.pref, constraints: [] }, false) };

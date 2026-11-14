@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
-import { fishNotifyMissing } from '@/lib/fish/notify';
+import { fishEmailQuotaRetryAt, fishNotifyMissing } from '@/lib/fish/notify';
 import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { FISH_AUTOMATIC_SCREENING_KEY, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
@@ -230,7 +230,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     };
     const mail = (entry: Job, match?: AutomaticScreeningMatch) => {
       const config = current.current.notify.config;
-      if (config.enabled && fishNotifyMissing(config)) return;
+      if (config.enabled && (fishNotifyMissing(config) || fishEmailQuotaRetryAt(config, getUserPrefix(owner)))) return;
       void exclusive('mail', async () => {
         const job = await readJob(entry.key);
         if (!job || (job.nextMailAt ?? 0) > Date.now() || lifetime.signal.aborted) return;
@@ -240,7 +240,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
           || !Number.isFinite(record.matchedAt) || record.matchedAt! <= 0 || lifetime.signal.aborted) return;
         const live = current.current.notify;
         if (!live.config.enabled) { await save(job, true); setAttemptIssues(issues => issues.mail ? { ...issues, mail: '' } : issues); return true; }
-        if (fishNotifyMissing(live.config)) return;
+        if (fishNotifyMissing(live.config) || fishEmailQuotaRetryAt(live.config, getUserPrefix(owner))) return;
         const sent = new Set(job.sent);
         const recipients = live.config.emails.filter(recipient => !sent.has(recipient));
         if (!recipients.length) { await save(job, true); return true; }

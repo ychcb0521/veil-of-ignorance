@@ -61,6 +61,25 @@ it('没勾选不发；勾选后发并记下结果；测试邮件照常可发',as
  act(()=>{result.current.update({...result.current.config,enabled:true});});
  await act(async()=>{await result.current.send([res('AAAUSDT',1),res('BBBUSDT',2)]);});expect(request).toHaveBeenCalledTimes(2);expect(result.current.status).toMatchObject({ok:true,count:2});
 });
+it('月额度耗尽时停止当前批次和自动重试，额度恢复测试后只补发未成功的收件人', async () => {
+ const request = vi.fn<typeof fetch>()
+   .mockResolvedValueOnce(new Response('OK'))
+   .mockResolvedValueOnce(new Response('Monthly request quota exceeded', { status: 426 }))
+   .mockImplementation(async () => new Response('OK'));
+ const config = {...ready,emails:['a@qq.com','b@163.com','c@example.test']};
+ const content=composeFishEmail([fish('A',1)]);
+ const sent: string[] = [];
+ const delivery = {signal:new AbortController().signal,onRecipient:(recipient:string)=>{sent.push(recipient);}};
+ await expect(sendFishEmail(config,content,request,delivery)).rejects.toThrow('EmailJS 月度发送额度已用完');
+ expect(request).toHaveBeenCalledTimes(2);
+ expect(sent).toEqual(['a@qq.com']);
+ await expect(sendFishEmail(config,content,request,delivery)).rejects.toThrow('EmailJS 月度发送额度已用完');
+ expect(request).toHaveBeenCalledTimes(2);
+ await sendFishEmail({...config, emails:['a@qq.com']},content,request,undefined,true);
+ await sendFishEmail({...config, emails:config.emails.filter(email=>!sent.includes(email))},content,request,delivery);
+ expect(sent).toEqual(config.emails);
+ expect(request).toHaveBeenCalledTimes(5);
+}, 12000);
 it('设置面板：添加多个邮箱（回车或逗号分隔）、格式不对提示、删除；没填好 EmailJS 时测试按钮不可点',()=>{
  const notify:any={config:{enabled:false,emails:[],serviceId:'',templateId:'',publicKey:''},status:null,sending:false,update:vi.fn((c:any)=>{notify.config=c;}),send:vi.fn(),test:vi.fn()};
  const view=render(<FishNotifySettings notify={notify}/>);

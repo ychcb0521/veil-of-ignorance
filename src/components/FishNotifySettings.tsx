@@ -65,9 +65,13 @@ export function FishNotifySettings({ notify, algorithms = [] }: { notify: FishNo
       </div>
     </details>
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" onClick={() => void notify.test()} disabled={!!missing || sending} className="h-7 rounded-md border border-border/70 bg-background px-2.5 hover:bg-muted disabled:opacity-40">{sending ? '发送中…' : '发测试邮件'}</button>
+      <button type="button" onClick={() => void notify.test()} disabled={!!missing || sending} className="h-7 rounded-md border border-border/70 bg-background px-2.5 hover:bg-muted disabled:opacity-40">{sending ? '发送中…' : status?.quotaRetryAt ? '验证额度是否恢复' : '发测试邮件'}</button>
       {missing ? <span className={`text-[10.5px] ${fishNotifyFieldProblem(config) ? 'text-destructive/80' : 'text-muted-foreground'}`} data-testid="fish-notify-missing">{missing}</span>
-        : status ? <span className={`text-[10.5px] ${status.ok ? 'text-muted-foreground' : 'text-destructive/80'}`} data-testid="fish-notify-status">{new Date(status.at).toLocaleTimeString('zh-CN', { hour12: false })} {status.skipped ? `本轮新鱼 ${status.count} 条，没有命中所选来源的，未发` : status.unchanged ? `本轮来源信号 ${status.count} 条，和上一封一样，未重复发` : <>{status.test ? '测试邮件' : `${notify.screening ? '已入选' : '新鱼'} ${status.count} 条`}{status.ok ? ` 已发到 ${config.emails.length} 个邮箱` : ` 发送失败：${status.error}`}</>}</span>
+        : status?.quotaRetryAt ? <p role="status" className="text-[10.5px] text-muted-foreground" data-testid="fish-notify-status">
+          EmailJS 月度额度已用完。{notify.screening ? '待发通知已保留。' : ''}自动发送暂停，1 小时后可自动重试。额度恢复后也可先手动验证。
+          {' '}<a className="text-primary underline underline-offset-2" href="https://dashboard.emailjs.com/" target="_blank" rel="noreferrer">查看 EmailJS 额度</a>
+        </p>
+        : status ? <span className={`text-[10.5px] ${status.ok ? 'text-muted-foreground' : 'text-destructive/80'}`} data-testid="fish-notify-status">{new Date(status.at).toLocaleTimeString('zh-CN', { hour12: false })} {status.skipped ? `本轮新鱼 ${status.count} 条，没有命中所选来源的，未发` : status.unchanged ? `本轮来源信号 ${status.count} 条，和上一封一样，未重复发` : <>{status.test ? '测试邮件' : `${notify.screening ? '已入选' : '新鱼'} ${status.count} 条`}{status.ok ? ` 已发到 ${status.recipientCount ?? config.emails.length} 个邮箱` : ` 发送失败：${status.error}`}</>}</span>
         : !config.enabled && <span className="text-[10.5px] text-muted-foreground">勾选「{notify.screening ? '已入选发到邮箱' : '新鱼发到邮箱'}」后开始提醒</span>}
     </div>
   </div>;

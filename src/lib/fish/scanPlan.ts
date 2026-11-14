@@ -11,6 +11,7 @@ import { FISH_TURNOVER_FLOORS, type FishTurnoverFloor } from './shared';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings } from '@/lib/fishScanner';
 import { withFishDefinitionTime } from './qualityAdditionMetric';
 import type { FishPreference } from './preferences';
+import { captureCardDefinition } from './captureDefinition';
 
 export interface FishScanSelection { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }
 export const compileFishPreference = (def: DeepDigFeatureDef, pref: FishPreference, threshold = pref.threshold.trim() ? Number(pref.threshold) : NaN) =>
@@ -19,7 +20,8 @@ export const compileFishPreference = (def: DeepDigFeatureDef, pref: FishPreferen
 /** 勾选的卡（参与显示的组合）与全部能用的卡（都扫，扫完可任意切换组合）。 */
 export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDigFeatureDef[]): { plans: FishProgram[]; pool: FishProgram[]; error: string } {
   const plans: FishProgram[] = []; let error = '';
-  const defOf = (c: FishCard, i: number) => isRetiredFeature(c.featureId) ? undefined : defs.find(d => d.id === c.featureId) ?? (i === 0 ? defs.find(d => d.id === 'cbi2') ?? defs[0] : undefined);
+  const defOf = (c: FishCard, i: number) => captureCardDefinition(c, isRetiredFeature(c.featureId) ? undefined :
+    defs.find(d => d.id === c.featureId) ?? (i === 0 ? defs.find(d => d.id === 'cbi2') ?? defs[0] : undefined));
   for (const [i, c] of cards.entries()) if (c.enabled) try {
     const d = defOf(c, i); if (!d) throw Error(i === 0 ? 'Deep dig 里没有可用特征值' : '特征值已不存在');
     const plan = compileFishPreference(d, c.pref); if (plan.unavailable) throw Error(plan.unavailable); plans.push(plan);

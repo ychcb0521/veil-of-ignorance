@@ -12,11 +12,9 @@ import { settlementMarginRatioPct } from '@/lib/tradingSettlement';
 import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
 import { calcLiquidationPrice } from '@/types/trading';
 import type { InstantManualAction, InstantManualExecution } from '@/lib/fish/instantManualExecution';
-import { qualityLimitedDrawdownText, STATIC_DRAWDOWN_SELL_LABEL } from '@/lib/fish/qualityStaticDrawdownSell';
 import { routedQualityPlan } from '@/lib/fish/qualityPlanRouter';
 import { effectiveQualitySellPlan } from '@/lib/fish/qualitySellStages';
-import { SCREENED_MIRROR, SCREENED_STOP_PCT } from '@/lib/fish/screenedCda';
-import { activeHoldingVetoes, FREE_STATIC_DRAWDOWN_LABEL } from '@/lib/fish/qualityVeto';
+import { SCREENED_MIRROR } from '@/lib/fish/screenedCda';
 import { cardCloseLotSize } from '@/lib/marketLotSize';
 import { isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimitMode';
 import { ClosePositionModal } from './ClosePositionModal';
@@ -70,10 +68,8 @@ export function InstantPositionRow({ position, mirror, monitor, manual, manage, 
   const dismiss = () => { if (!submitting.current) setModal(undefined); };
   const plan = position.monitor?.plan;
   const effective = plan && monitor ? effectiveQualitySellPlan(routedQualityPlan(plan, monitor), monitor) : plan;
-  const limited = effective && qualityLimitedDrawdownText(effective, held.entryPrice);
   const target = effective ? effective.mirrorTakeProfit : SCREENED_MIRROR;
   const automaticTp = held.mirror || !target?.enabled ? undefined : held.entryPrice * (1 + target.gainPct / 100);
-  const freeStops = activeHoldingVetoes(effective?.holdingVetoes).filter(veto => veto.kind === 'static-drawdown');
   const orders = manual?.orders;
   const riskTitle = '模拟风险参考。持仓按止盈止损或持仓监测条件退出。';
   const campaignPath = '/journal/campaigns/' + encodeURIComponent(position.id) + '?section=instant';
@@ -103,7 +99,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, manage, 
       {held.additions.length > 0 && <span>加仓 {held.additions.length} 次</span>}
       {held.reductions.some(fill => fill.fraction > 0) && <span>减仓 {held.reductions.filter(fill => fill.fraction > 0).length} 次</span>}
     </div>
-    <div className="flex flex-wrap items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
+    {(manual || automaticTp != null) && <div className="flex flex-wrap items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
       {manual ? <>
         {orders?.tp != null && <span className="text-trading-green">止盈 {formatPrice(orders.tp, symbol)}</span>}
         {orders?.sl != null && <span className="text-trading-red">止损 {formatPrice(orders.sl, symbol)}</span>}
@@ -111,13 +107,8 @@ export function InstantPositionRow({ position, mirror, monitor, manual, manage, 
           <span className="text-muted-foreground">{orders.percentage}% 仓位</span>
           <button type="button" disabled={busy || !manage} onClick={() => void act({ kind: 'cancel' })} className="text-muted-foreground hover:text-foreground">撤销止盈止损</button>
         </> : <span className="text-muted-foreground">暂无止盈止损委托</span>}
-      </> : <>
-        {automaticTp != null && <span className="text-trading-green">镜像止盈 {formatPrice(automaticTp, symbol)} · {target?.sellPct}%</span>}
-        {limited && limited !== '—' && <span className="text-trading-red">{STATIC_DRAWDOWN_SELL_LABEL} {limited}</span>}
-        {freeStops.map(veto => <span key={veto.id} className="text-trading-red">{FREE_STATIC_DRAWDOWN_LABEL} {veto.threshold}% @ {formatPrice(held.entryPrice * (1 - veto.threshold / 100), symbol)}</span>)}
-        {!effective && <span className="text-trading-red">止损 {formatPrice(held.entryPrice * (1 - SCREENED_STOP_PCT / 100), symbol)}</span>}
-      </>}
-    </div>
+      </> : <span className="text-trading-green">镜像止盈 {formatPrice(automaticTp!, symbol)} · {target?.sellPct}%</span>}
+    </div>}
     <div className={positionActionsClass}>
       {inRouter ? <Link to={campaignPath} state={{ fromInstantPosition: true }} className={linkClass}>交易战役</Link> : <a href={campaignPath} className={linkClass}>交易战役</a>}
       <ActionBtn disabled={busy || !manage} onClick={() => setModal('protect')} label="止盈/止损"/>
