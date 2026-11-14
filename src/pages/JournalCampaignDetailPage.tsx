@@ -347,7 +347,7 @@ function buildCampaignMetadataItems(
       valueClassName: OPERATION_TIME_VALUE_CLASS,
       help: (
         campaign.comparison?.instant
-          ? <p>新战役按程序确认模拟平仓的时刻记录（北京时间）。历史战役沿用原记录的操作时间。模拟成交和归档时间见上方 ⓘ。</p>
+          ? <p>新战役按程序确认模拟平仓的时刻记录（北京时间）。历史战役沿用原记录的操作时间。模拟成交和归档时间可点标题旁的图标查看。</p>
           : <><p>这场战役真实操作发生的时刻（北京时间），与列表卡片、排序用的是同一个数。</p><p>它是客观的操作时间，不是时光机里 K 线走到的模拟时间；读不出时写「—」。</p></>
       ),
     },
@@ -1215,7 +1215,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, [id, viewerUserId, nav, detailSearch, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
-  const instantOpen = campaign?.comparison?.instant?.openPosition;
+  const instantSummary = campaign?.comparison?.instant;
+  const instantOpen = instantSummary?.openPosition;
   const instantCampaignId = campaign?.comparison?.instant ? campaign.id : undefined;
   const watchInstant = !!instantOpen || !!campaign?.comparison?.instant?.settlementPending;
 
@@ -2850,7 +2851,29 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="min-w-0">
-              <QualityCampaignCardTitle campaign={campaign} as="h1" className="text-[14px] font-medium leading-5" />
+              <QualityCampaignCardTitle campaign={campaign} as="h1" className="text-[14px] font-medium leading-5">
+                {instantSummary && <div data-testid="instant-campaign-execution" className="space-y-1.5 border-t border-border/60 pt-2">
+                  <p className="font-medium text-foreground">{instantSummary.settlementPending ? '已平仓 · 待归档' : instantOpen ? '持仓中' : '已平仓'}</p>
+                  {!campaign.comparison?.sellEvidence && instantSummary.sellEvidence &&
+                    <p>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</p>}
+                  {instantSummary.cdaValue != null && <p>CDA 收盘读数 {instantSummary.cdaValue}</p>}
+                  <p>保证金 {instantSummary.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</p>
+                  {instantOpen ? (
+                    <InstantOpenCampaignQuote key={campaign.id} source={instantSummary.source} position={instantOpen}/>
+                  ) : (
+                    <div className="space-y-1 font-mono">
+                      <p>模拟成交 {formatBeijingTime(campaign.closed_at)}</p>
+                      {instantSummary.timing?.observedAt != null
+                        ? <p>操作时间 {formatBeijingTime(instantSummary.timing.observedAt)} · {formatInstantCampaignDelay(campaign.closed_at, instantSummary.timing.observedAt, '成交后')}</p>
+                        : <p>这笔旧战役未记录程序确认平仓的实际时刻。</p>}
+                      {instantSummary.timing?.marketThrough != null &&
+                        <p>监测行情截止 {formatBeijingTime(instantSummary.timing.marketThrough)}（K 线时刻）</p>}
+                      {instantSummary.timing?.archivedAt != null &&
+                        <p>本机归档 {formatBeijingTime(instantSummary.timing.archivedAt)} · {formatInstantCampaignDelay(campaign.closed_at, instantSummary.timing.archivedAt, '成交后')}</p>}
+                    </div>
+                  )}
+                </div>}
+              </QualityCampaignCardTitle>
               <div className="font-mono text-[11px] text-muted-foreground flex flex-wrap items-center gap-2">
                 <span
                   className="rounded border border-border bg-card px-1.5 py-0.5 text-[10px]"
@@ -2897,26 +2920,6 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
-        {campaign.comparison?.instant && <div data-testid="instant-campaign-execution" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border/70 bg-card px-3 py-2 text-[11px]">
-          <span className="font-medium">{campaign.comparison.instant.settlementPending ? '已平仓 · 待归档' : instantOpen ? '持仓中' : '已平仓'}</span>
-          {!campaign.comparison.sellEvidence && campaign.comparison.instant.sellEvidence &&
-            <span>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</span>}
-          {campaign.comparison.instant.cdaValue != null && <span>CDA 收盘读数 {campaign.comparison.instant.cdaValue}</span>}
-          <span>保证金 {campaign.comparison.instant.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</span>
-          {instantOpen ? <InstantOpenCampaignQuote key={campaign.id} source={campaign.comparison.instant.source} position={instantOpen}/>
-            : <span className="ml-auto flex items-center gap-1 font-mono text-muted-foreground">
-              模拟成交 {formatBeijingTime(campaign.closed_at)}
-              <QuietInfo label="成交与归档时间">
-                {campaign.comparison.instant.timing?.observedAt != null
-                  ? <p>操作时间 {formatBeijingTime(campaign.comparison.instant.timing.observedAt)} · {formatInstantCampaignDelay(campaign.closed_at, campaign.comparison.instant.timing.observedAt, '成交后')}</p>
-                  : <p>这笔旧战役未记录程序确认平仓的实际时刻。</p>}
-                {campaign.comparison.instant.timing?.marketThrough != null &&
-                  <p>监测行情截止 {formatBeijingTime(campaign.comparison.instant.timing.marketThrough)}（K 线时刻）</p>}
-                {campaign.comparison.instant.timing?.archivedAt != null &&
-                  <p>本机归档 {formatBeijingTime(campaign.comparison.instant.timing.archivedAt)} · {formatInstantCampaignDelay(campaign.closed_at, campaign.comparison.instant.timing.archivedAt, '成交后')}</p>}
-              </QuietInfo>
-            </span>}
-        </div>}
         {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} repair={campaign.comparison.repair} />}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
         {campaign.deleted_at && (
