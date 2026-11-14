@@ -35,7 +35,7 @@ import { qualityExitAlgorithmLabel, qualityStaticDrawdownReason } from '@/lib/fi
 import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
 import { qualityCampaignPath } from '@/lib/campaignSections';
 import { hasQualityCampaign } from '@/lib/fish/qualityCampaignArchive';
-import { Activity, ArrowRightCircle, ChevronDown, CircleHelp, Download, Eraser, Eye, EyeOff, Filter, Gauge, Lock, Pause, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
+import { Activity, ArrowRightCircle, ChevronDown, CircleHelp, Download, Eraser, Eye, EyeOff, Filter, Gauge, Lock, Maximize, Minimize, Pause, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
@@ -85,7 +85,7 @@ const hasSource = (row: QualitySample,source:QualityOrigin) => qualityOrigins(ro
 // 【用户反馈】2026-10-26「表头显示 793，但表中完全没这么多」：原来每页 50 条、框只有约 9 行高，要翻 16 页。
 // 只渲染可见窗口；数据行统一高度，遇到多行内容时只增高，不用新窗口首行反向缩小估计。
 // 否则启动监测 / 结果更新后，33px 与 40px 的首行可能交替出现，形成布局更新死循环。
-const ROW_PX = 33, TABLE_PX = 448, OVERSCAN = 12;
+const ROW_PX = 33, OVERSCAN = 12;
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」：空值（未评估、无评分等）不论升降都排在最后
 type SortKey = `signal-value:${string}` | `addition:${string}` | `entry:${string}` | `price-change:${string}` | `label:${string}` | PostExitSortKey | ScreeningSortKey | 'time' | 'mined-at' | 'symbol' | 'market' | 'quality' | 'process' | 'detector' | 'detector-value' | `filter:${string}` | `sell:${string}` | `static:${string}` | `peak:${string}` | `mirror:${string}` | `held:${string}` | `relative:${string}` | `payoff:${string}` | `geometric:${string}`;
 const TEXT_KEYS = new Set(['symbol', 'market', 'detector']);
@@ -367,6 +367,9 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const toggleHidden = (kind: 'filter' | 'screening' | 'monitor') => (kind === 'filter' ? setHideFilter : kind==='screening'?setHideScreening:setHideMonitor)(hidden => { writeHidden(kind, !hidden); return !hidden; });
   const [sort, setSort] = useState<SortKey>((ui?.sort==='run'||ui?.sort?.startsWith('sell-error:')||workspace&&(ui?.sort==='detector'||ui?.sort==='detector-value')?'time':ui?.sort?.replace(/^dynamic:/,'peak:')) as SortKey ?? 'time'), [ascending, setAscending] = useState(ui?.ascending ?? false), [scrollTop, setScrollTop] = useState(ui?.tableTop ?? 0);
   const rootRef = useRef<HTMLElement>(null);
+  const tableRegionRef = useRef<HTMLDivElement>(null);
+  const [compactTableHeight, setCompactTableHeight] = useState<number>();
+  const tableMaximized = compactTableHeight !== undefined;
   // 【用户要求】2026-11-01 查「点进战役后持仓监测停了」：没在跑、上一轮是暂停结束时，直接写出暂停原因
   const lastRound = (workspace ? study.workspaceMonitorDraft : study.monitorLibrary)?.rounds.reduce<NonNullable<FishQualityStudy['monitorLibrary']>['rounds'][number] | undefined>((a, r) => !a || r.startedAt > a.startedAt ? r : a, undefined);
   const lastPause = lastRound?.state === 'paused' && lastRound.error ? { reason: lastRound.error, at: lastRound.finishedAt ?? lastRound.updatedAt } : null;
@@ -590,7 +593,26 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
     28,
   ];
   const rowLayoutKey=JSON.stringify([entryExpanded,labelExpanded,postExitExpanded,detectorExpanded,plans.map(p=>p.id)]),priorRowLayout=useRef(rowLayoutKey),pendingTableScroll=useRef<{top:number;left:number}>();
-  const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ui?.rowPx ?? ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
+  const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ui?.rowPx ?? ROW_PX), [viewPx, setViewPx] = useState(0);
+  const toggleTableHeight = () => {
+    if (tableMaximized) {
+      setCompactTableHeight(undefined);
+    } else if (tableRegionRef.current) {
+      // Keep the surrounding panel at its current scroll position while the table is fixed.
+      setCompactTableHeight(tableRegionRef.current.offsetHeight);
+    }
+  };
+  useEffect(() => {
+    if (!tableMaximized) return;
+    const restore = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.target !== document.body && !tableRegionRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      setCompactTableHeight(undefined);
+    };
+    window.addEventListener('keydown', restore);
+    return () => window.removeEventListener('keydown', restore);
+  }, [tableMaximized]);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
   const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
   const chooseDirectory=async(kind:QualitySourceDirectory['kind'],id:string,snapshot:FishQualityStudy,ids?:string[])=>{
@@ -665,8 +687,21 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
       const nextTop=top<=header?top:header+(top-header)/rowPx*measured;
       pendingTableScroll.current={top:nextTop,left};setRowPx(measured);setScrollTop(nextTop);
     }else if(changed){el.scrollTop=top;el.scrollLeft=left;}
-    if(el.clientHeight>0&&el.clientHeight!==viewPx)setViewPx(el.clientHeight);
   },[open,rows,rowPx,viewPx,Math.floor(scrollTop/rowPx),rowLayoutKey,study.results,study.entryReadings]);
+  const hasTableRows = rows.length > 0;
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const measure = () => {
+      setViewPx(table.clientHeight);
+      setScrollTop(table.scrollTop);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, [open, hasTableRows, tableMaximized]);
   const first = Math.max(0, Math.min(rows.length - 1, Math.floor(scrollTop / rowPx) - OVERSCAN));
   const last = Math.min(rows.length, Math.max(first + 1, Math.ceil((scrollTop + viewPx) / rowPx) + OVERSCAN));
   // Keep the live table virtualized. Export only frozen selected rows in small
@@ -854,6 +889,10 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
         <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
       </FishQualityModule>}
+      <div style={{height:compactTableHeight}}>
+      <div ref={tableRegionRef}
+        className={tableMaximized ? 'fixed inset-x-0 top-0 z-40 flex h-[100dvh] min-h-0 flex-col space-y-2 overflow-hidden bg-background p-3' : 'space-y-2'}
+        role={tableMaximized ? 'region' : undefined} aria-label={tableMaximized ? '纵向最大化的组合表' : undefined}>
       {!lockedBatch && <div className="flex flex-wrap items-center gap-1.5">
         {!workspace && <FishQualitySourcePicker value={origin} onSelect={selectSource} options={[
           {value:'',label:'全部来源',count:countSignals(batch)},
@@ -884,7 +923,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             已锁定 {selectedCount} 条信号{batch.length < lockedBatch.rowIds.length ? ` · ${lockedBatch.rowIds.length - batch.length} 行已不可用` : ''}
           </span>}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {lockedBatch && <button type="button" className="px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-40" disabled={!!state.archiving} onClick={unlockSelection}>解除锁定</button>}
           {!workspace && !archiveView && !lockedBatch && state.setLockedBatch && <button type="button" className={button} disabled={!ready || !selectedCount || !!state.archiving}
             title="固定当前筛选内已勾选的记录，单独查看和处理这一批" onClick={lockSelection}>
@@ -903,10 +942,15 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             }}>确认删除所选行</button>
           </PopoverContent></Popover>}
           <button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.nodes.length:'导出数据'}</button>
+          {!archiveView && <button type="button" className={button} onClick={toggleTableHeight}
+            aria-pressed={tableMaximized} title={tableMaximized ? '还原组合表（Esc）' : '纵向最大化组合表'}>
+            {tableMaximized ? <Minimize aria-hidden className="h-3 w-3"/> : <Maximize aria-hidden className="h-3 w-3"/>}
+            {tableMaximized ? '还原' : '纵向最大化'}
+          </button>}
         </div>
       </div>
       {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.nodes.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH)}</tbody></table></div>}
-      {rows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className="max-h-[28rem] w-fit max-w-full overflow-auto overscroll-x-contain overscroll-y-auto rounded-lg border border-border/60 [overflow-anchor:none]" aria-label="组合表" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0)}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
+      {rows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className={`w-fit max-w-full overflow-auto overscroll-x-contain rounded-lg border border-border/60 [overflow-anchor:none] ${tableMaximized ? 'min-h-0 flex-1 overscroll-y-contain' : archiveView ? 'max-h-[28rem]' : 'max-h-[max(16rem,calc(100dvh_-_20rem))]'}`} aria-label="组合表" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0)}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground">
           <tr className="bg-muted/35" data-testid="quality-algorithm-categories">
               <th colSpan={showCaptureTime?5:4} className="px-2 py-1.5 text-[9px] font-normal text-muted-foreground/70">入场信息</th>
@@ -943,6 +987,8 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
           <th className={`${cell} font-medium`} aria-label="跳转"/>
         </tr></thead><tbody>{padTop > 0 && <tr aria-hidden style={{ height: padTop }}/>}{visible.map((row,vi)=>renderRow(row,first+vi))}{padBottom > 0 && <tr aria-hidden style={{ height: padBottom }}/>}</tbody></table></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{lockedBatch ? '本批记录已不可用。解除锁定后可重新选择。' : allRows.length ? <>没有匹配的标的。{emptyByDetector && <span className="ml-1" data-testid="quality-empty-detector-filter">探测算法筛选{chosenChoices.length ? `（${chosenChoices.map(choiceText).join('、')}）` : ''}把它们全滤掉了{isSignalLibraryOrigin(origin) ? '：' + QUALITY_SOURCE_NAMES[origin] + '自己的信号没有探测算法' : ''}。<button type="button" className="ml-1 text-primary hover:underline" onClick={() => setAlgorithms([])}>清除探测算法筛选</button></span>}</> : workspace ? '组合表为空。请打开「来源」，勾选记录后导入。' : '暂无可评估的信号。'}</div>}
       {rows.length > 0 && <p className="text-right text-[10px] tabular-nums text-muted-foreground" data-testid="quality-row-count">{selectedRowCount > 0 && <span className="font-medium text-primary" data-testid="quality-selected-row-count">已选 {selectedRowCount} 行 · </span>}共 {rows.length} 行 · {countSignals(rows)} 条信号{mergeCabinSignals ? ' · 同一信号已合并' : !detectorExpanded ? ' · 已合并探测明细' : ''}{sortedRows.length < batch.length ? `（筛选自 ${countSignals(batch)} 条信号）` : ''}</p>}
+      </div>
+      </div>
     </div>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} close={() => setDetailId('')}/>
   </section>;
