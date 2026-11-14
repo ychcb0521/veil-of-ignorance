@@ -16,7 +16,7 @@ import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersi
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
-import { STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
+import { DEFAULT_STATIC_DRAWDOWN_SELL_PCT, STATIC_DRAWDOWN_SELL_CHOICE, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 import { qualityFilterDefinitions, qualityFilterMenuChoices } from '@/lib/fish/qualityFilters';
 import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
@@ -282,7 +282,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     return <>
       <div className={`fish-plan-condition grid gap-1.5 ${priceStop ? 'grid-cols-[minmax(0,1fr)_3rem_minmax(9rem,max-content)]' : 'grid-cols-[minmax(0,1fr)_3rem_5rem]'}`}>
         {select(choice, fieldLabel('指标'), next => set(next, next === STATIC_DRAWDOWN_SELL_CHOICE ? '>=' : priceStop ? '<' : direction,
-          (next === STATIC_DRAWDOWN_SELL_CHOICE) !== priceStop ? '' : threshold))}
+          next === STATIC_DRAWDOWN_SELL_CHOICE && !priceStop ? String(DEFAULT_STATIC_DRAWDOWN_SELL_PCT) : priceStop && next !== STATIC_DRAWDOWN_SELL_CHOICE ? '' : threshold))}
         <select aria-label={fieldLabel('方向')} className={field} disabled={priceStop} value={direction}
           onChange={event => set(choice, event.target.value as Draft['direction'], threshold, time)}>
           {priceStop ? <option value=">=">≥</option> : <><option value="<">&lt;</option><option value=">">&gt;</option></>}

@@ -9,6 +9,7 @@ import { qualityMirrorChartArtifacts, qualityFinalSale } from '@/lib/fish/qualit
 import { QualityCampaignChartFrame } from '@/components/journal/QualityCampaignChartFrame';
 import { isInstantCampaignId, isPaperCampaignId } from '@/lib/campaignSections';
 import { resolveMirrorTpChartFill } from '@/lib/campaignMirrorTpOrderTiming';
+import { campaignLimitedDrawdownText } from '@/lib/fish/qualityCampaignRisk';
 import { loadQualityCampaignPerformance } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
@@ -1874,6 +1875,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       halfMirror:campaignHalfMirror(campaign),
       dynamicMaxDrawdownPct,
       staticMaxDrawdownPct,
+      limitedStaticDrawdown: campaignLimitedDrawdownText(campaign),
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
       mainSideNotional,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,

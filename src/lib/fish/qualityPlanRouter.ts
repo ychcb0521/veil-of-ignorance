@@ -89,13 +89,13 @@ export function validateQualityRouter(r: QualityPlanRouter) {
     for (const p of [r.structure, r.attack]) if (!p.addition?.enabled || p.addition.quantityMode !== 'calculator' || !p.addition.rounds?.length || p.addition.alternativeRounds?.length || p.addition.attackFromRound != null) throw Error('每轮分流的两条分支都须启用逐轮独立条件、按平衡公式定量的加仓');
     if (r.attack.addition!.rounds!.length > r.structure.addition!.rounds!.length) throw Error('进攻分支的加仓轮数不能多于结构分支');
     if (from > r.attack.addition!.rounds!.length) throw Error(`进攻分支只有 ${r.attack.addition!.rounds!.length} 次加仓，不能从第 ${from} 次起参与`);
-    const shared = (p: QualityGroup) => canonicalRouterJson([p.rule,p.snapshot,p.combo,p.execution,p.vetoFill,p.holdingVetoes,p.mirrorTakeProfit,p.vetoStages,p.vetoStageMode,p.vetoPeakBasis,p.sellStages,raceSharedAddition(p.addition)]);
+    const shared = (p: QualityGroup) => canonicalRouterJson([p.rule,p.snapshot,p.combo,p.execution,p.vetoFill,p.holdingVetoes,p.payoffRiskVersion,p.mirrorTakeProfit,p.vetoStages,p.vetoStageMode,p.vetoPeakBasis,p.sellStages,raceSharedAddition(p.addition)]);
     if (shared(r.structure) !== shared(r.attack)) throw Error('每轮分流的两个分支除各轮加仓条件外，初始持仓、退出条件、加仓通用设置与加仓后切换必须完全相同');
     r.attack.addition!.rounds!.forEach((round, i) => { const t = round.source === 'custom' ? qualityAdditionConditions(round)[0] : undefined; if (t?.metric === 'state' && (t.direction !== '>' || t.threshold < r.threshold)) throw Error(`进攻分支第 ${i + 1} 次加仓的状态 S 门槛须不低于分支门槛 ${r.threshold}`); });
     return;
   }
   for(const p of [r.structure,r.attack])if(!p.addition?.rounds||p.addition.rounds.length<n||p.addition.rounds.slice(0,n).some(a=>a.source!=='structure'))throw Error(`条件分支的${routerPrefixText(r)}必须使用结构加仓`);
-  const prefix = (p: QualityGroup) => canonicalRouterJson([p.rule,p.snapshot,p.combo,p.execution,p.vetoFill,p.holdingVetoes,p.mirrorTakeProfit,p.addition?.rounds?.slice(0,n),p.vetoStages?.filter(s=>s.afterAdditions<=n),p.vetoStageMode,p.vetoPeakBasis]);
+  const prefix = (p: QualityGroup) => canonicalRouterJson([p.rule,p.snapshot,p.combo,p.execution,p.vetoFill,p.holdingVetoes,p.payoffRiskVersion,p.mirrorTakeProfit,p.addition?.rounds?.slice(0,n),p.vetoStages?.filter(s=>s.afterAdditions<=n),p.vetoStageMode,p.vetoPeakBasis]);
   if (prefix(r.structure) !== prefix(r.attack)) throw Error(`两个分支的${routerPrefixText(r)}加仓、初始持仓与退出条件必须完全相同`);
 }
 /** The existing causal replay evaluates each branch; only a closed-bar observation selects it.

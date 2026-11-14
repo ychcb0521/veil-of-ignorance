@@ -4,6 +4,8 @@
  * 每一列与卡片 / 详情页「盈亏概览」读同一个函数，导出的数与页面上的字一致（只差显示精度）。
  */
 import { EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE } from '@/lib/campaignExecutionWear';
+import { campaignLimitedDrawdownText } from './fish/qualityCampaignRisk';
+import { STATIC_DRAWDOWN_SELL_LABEL } from './fish/qualityStaticDrawdownSell';
 import { ENTRY_EFFECTIVE_RISE_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_RULE, POSITION_PROFIT_FORMULA, UNIT_METRICS_MISSING_RULE, UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE } from '@/lib/campaignUnitProfit';
 import {
   rowExecutionWear,
@@ -138,6 +140,12 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
 /** 两张工作表：「战役汇总」（一场一行）与「说明」（逐列口径）。 */
 export function buildCampaignSummarySheets(rows: readonly CampaignSortRow[], options: CampaignSummaryExportOptions): XlsxSheet[] {
   const columns = campaignSummaryColumns(options);
+  if (rows.some(row => campaignLimitedDrawdownText(row.campaign) !== '—')) {
+    const index = columns.findIndex(column => column.header === '静态最大回撤（%）');
+    columns.splice(index + 1, 0, { header: STATIC_DRAWDOWN_SELL_LABEL, width: 25,
+      note: '从该场交易冻结的组合算法读取设置。分段组合分别显示前段和后段。',
+      value: row => campaignLimitedDrawdownText(row.campaign) });
+  }
   return [
     {
       name: '战役汇总',

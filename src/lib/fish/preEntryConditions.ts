@@ -40,4 +40,4 @@ export function preEntryConditionsVersion(plan: QualityGroup): string {
   return PRE_ENTRY_CONDITIONS_VERSION + ' · 参数 #' + shortFishHash(JSON.stringify([value, plan.buyFilters, boxes]));
 }
 
-export const preEntryConditionText = (text:string) => text.replace(/持仓/g,'筛选').replace(/不再加仓/g,'不入选').replace(/下一分钟开盘全仓卖出|触碰 K 立即卖出/g,'本分钟不入选');
+export const preEntryConditionText = (text:string) => text.replace(/自由静态最大回撤/g,'筛选过程静态最大回撤').replace(/持仓/g,'筛选').replace(/不再加仓/g,'不入选').replace(/下一分钟开盘全仓卖出|触碰 K 立即卖出/g,'本分钟不入选');

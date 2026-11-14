@@ -105,6 +105,7 @@ export type CampaignPnlOverviewItemKey =
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
   | 'staticMaxDrawdownPct'
+  | 'limitedStaticDrawdown'
   | 'executionWear'
   | 'positionAmplification'
   | 'positionGeometricMultiple'
@@ -178,6 +179,7 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'dynamicMaxDrawdownPct',
   // 【用户要求】2026-10-26 静态最大回撤紧跟动态最大回撤
   'staticMaxDrawdownPct',
+  'limitedStaticDrawdown',
 ];
 
 /**
@@ -211,6 +213,7 @@ export interface CampaignPnlOverviewMetrics {
   dynamicMaxDrawdownPct?: number | null;
   /** 持仓期间最不利价格离买入价的跌幅 ÷ 买入价（主多看最低价、主空看最高价）。 */
   staticMaxDrawdownPct?: number | null;
+  limitedStaticDrawdown?: string;
   initialExpectedMaxLoss: number;
   /**
    * 【用户要求】主方向那一侧（主多战役是多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算；
@@ -917,6 +920,11 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <p>{POSITION_PROFIT_RULE}</p>
         <p>{UNIT_METRICS_MISSING_RULE}</p></>,
     });
+  }
+  if (metrics.limitedStaticDrawdown && metrics.limitedStaticDrawdown !== '—') {
+    built.push({ key: 'limitedStaticDrawdown', label: '限制静态最大回撤', value: metrics.limitedStaticDrawdown,
+      color: '#181A20', valueClassName: 'text-foreground',
+      help: <p>取自该场战役冻结的组合算法。起始阶段的阈值用于计算初始最大预期亏损和首仓初始止损价。</p> });
   }
   if(metrics.halfMirror) {
     const mirror=metrics.halfMirror;

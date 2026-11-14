@@ -1,4 +1,4 @@
-import {holdingVetoIdentity,validateHoldingVeto,type QualityHoldingVeto,type QualityHoldingPath} from './qualityVeto';
+import {holdingVetoIdentity,holdingVetoName,validateHoldingVeto,type QualityHoldingVeto,type QualityHoldingPath} from './qualityVeto';
 import {isBoxBreak} from './qualityBoxStop';
 import type {QualityGroup,QualityResult} from './quality';
 export interface QualityVetoStage {afterAdditions:number;conditions:QualityHoldingVeto[]}
@@ -24,4 +24,4 @@ export function beginVetoStagePath(g:QualityGroup,r:QualityResult):QualityHoldin
  return {entry,peak,minimum:price,dynamic:0};
 }
 
-export const qualityVetoStagesLabel=(g:Pick<QualityGroup,'vetoStages'>)=>orderedVetoStages(g).map(s=>`第 ${s.afterAdditions} 次加仓后：${s.conditions.map(v=>`${v.label} ${v.direction} ${v.threshold}${['indicator','box-stop'].includes(v.kind)?'':'%'}${v.enabled?'':'（停用）'}`).join(' 或 ')}`).join('；');
+export const qualityVetoStagesLabel=(g:Pick<QualityGroup,'vetoStages'>)=>orderedVetoStages(g).map(s=>`第 ${s.afterAdditions} 次加仓后：${s.conditions.map(v=>`${holdingVetoName(v)} ${v.direction} ${v.threshold}${['indicator','box-stop'].includes(v.kind)?'':'%'}${v.enabled?'':'（停用）'}`).join(' 或 ')}`).join('；');

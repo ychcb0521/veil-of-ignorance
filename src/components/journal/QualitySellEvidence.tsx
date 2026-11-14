@@ -1,10 +1,10 @@
-import {holdingVetoLabel} from '@/lib/fish/qualityVeto';
+import {holdingVetoLabel, holdingVetoName} from '@/lib/fish/qualityVeto';
 import {qualityAdditionFills,qualityAdditionRoundLimit} from '@/lib/fish/qualityAddition';
 import type { TradeCampaign } from '@/types/journal';
 import { chartFeatureDef } from '@/lib/featureSource';
 import { definitionKey } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
+import { ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 
 type SellEvidence = NonNullable<TradeCampaign['comparison']>['sellEvidence'];
 export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
@@ -12,7 +12,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
   if (evidence.triggerCause?.kind === 'sell-static-drawdown') {
     const cause = evidence.triggerCause;
     return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing">
-      <b className="font-medium">卖出算法 · {cause.label}</b>
+      <b className="font-medium">卖出算法 · {STATIC_DRAWDOWN_SELL_LABEL}</b>
       <p className="font-mono">{evidence.reading.toPrecision(9)}% ≥ {cause.threshold}% · {formatUTC8(evidence.executedAt ?? evidence.confirmedAt)}</p>
       <p>{evidence.triggerAtOpen ? '开盘跳空越过止损线，按开盘价模拟成交。' : '分钟内触及首仓止损线，按止损价模拟成交。'}</p>
     </aside>;
@@ -35,7 +35,7 @@ export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
   const step = Number(period[1]) * (period[2] === 'm' ? 60_000 : period[2] === 'h' ? 3_600_000 : 86_400_000);
   if (evidence.execution === 'intrabar-1m') return <aside className="mx-2 mb-2 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] space-y-1" data-testid="quality-sell-timing">
     <div className="flex flex-wrap gap-x-4 gap-y-1">
-      <b className="font-medium">卖出方式：{evidence.triggerCause ? `一票否决 · ${evidence.triggerCause.label}` : '盘中达标即卖'} · 1 分钟复原</b>
+      <b className="font-medium">卖出方式：{evidence.triggerCause ? `一票否决 · ${holdingVetoName(evidence.triggerCause)}` : '盘中达标即卖'} · 1 分钟复原</b>
       <span>{evidence.triggerCause?.kind.endsWith('drawdown') ? '触发价格分钟起点' : `原指标周期：${evidence.interval} · K 线起点`} {formatUTC8(evidence.barOpenAt ?? Math.floor((evidence.confirmedAt - 1) / step) * step)}</span>
       {evidence.previousAt != null && evidence.previousReading != null && <span className="font-mono">前次：{formatUTC8(evidence.previousAt)} · {evidence.previousReading.toPrecision(9)}</span>}
       <span className="font-mono">首次达标：{formatUTC8(evidence.confirmedAt)} · {evidence.reading.toPrecision(9)} {evidence.triggerCause?.direction ?? evidence.direction} {evidence.triggerCause?.threshold ?? evidence.threshold}{evidence.triggerCause && !['indicator','box-stop'].includes(evidence.triggerCause.kind)?'%':''}</span>
@@ -64,13 +64,13 @@ function SellEvidenceBody({ evidence, repair }: { evidence: NonNullable<TradeCam
       {repair?.status === 'verified' && <span>已核验纠错 · {repair.checkedAt ? formatUTC8(repair.checkedAt) : ''}</span>}
       <span>{priceSeller ? '首仓价格路径' : evidence.source === 'account' ? '运行时账号公式' : '历史公式快照'} · {evidence.version}</span>
       {priceSeller ? <span>1 分钟行情模拟触价成交</span> : <span>{evidence.interval} 指标 · {evidence.execution === 'intrabar-1m' ? '盘中达标 / 1m复原' : '收盘确认'} · hl {evidence.halfLifeHours}h · avgh {evidence.avgHours}h</span>}
-      <span className="font-mono">{evidence.metric} {priceSeller ? '≥' : evidence.direction} {evidence.threshold}{priceSeller ? '%' : ''}</span>
-      {evidence.triggerCause && <b className="font-medium text-destructive">实际触发：{['mirror-take-profit','addition-support','sell-static-drawdown'].includes(evidence.triggerCause.kind)?'':'一票否决 · '}{evidence.triggerCause.label} {evidence.triggerCause.direction} {evidence.triggerCause.threshold}{['indicator','addition-support'].includes(evidence.triggerCause.kind)?'':'%'}</b>}
+      <span className="font-mono">{priceSeller ? STATIC_DRAWDOWN_SELL_LABEL : evidence.metric} {priceSeller ? '≥' : evidence.direction} {evidence.threshold}{priceSeller ? '%' : ''}</span>
+      {evidence.triggerCause && <b className="font-medium text-destructive">实际触发：{['mirror-take-profit','addition-support','sell-static-drawdown'].includes(evidence.triggerCause.kind)?'':'一票否决 · '}{evidence.triggerCause.kind === 'sell-static-drawdown' ? STATIC_DRAWDOWN_SELL_LABEL : holdingVetoName(evidence.triggerCause)} {evidence.triggerCause.direction} {evidence.triggerCause.threshold}{['indicator','addition-support'].includes(evidence.triggerCause.kind)?'':'%'}</b>}
       {evidence.reading != null && <span className="font-mono">触发读数 {evidence.reading.toPrecision(9)}</span>}
       {evidence.confirmedAt != null && <span>达标确认时刻 {formatUTC8(evidence.confirmedAt)}</span>}
       {evidence.executedAt != null && <span>成交时刻 {formatUTC8(evidence.executedAt)}</span>}
     </div>
-    <p className="text-muted-foreground">{evidence.triggerCause?.kind === 'sell-static-drawdown' ? evidence.exitReason : evidence.triggerCause?.kind === 'addition-support' ? '本次按加仓支撑线 K 止损，触线按支撑价卖出剩余币数，跳空越线按开盘价成交。' : evidence.triggerCause?.kind === 'mirror-take-profit' ? '本次按镜像止盈全部卖出，按止盈限价模拟成交；高开超过门槛时按开盘价成交。' : evidence.triggerCause?.kind === 'drop-1m' || evidence.triggerCause?.kind === 'drop-5m' ? '本次按滚动短时跌幅触发：窗口起点开盘价至最新分钟收盘价，买入后逐分钟检查；达到阈值后按下一分钟开盘价模拟成交。普通指标副图不用于核对这一跌幅读数。' : evidence.triggerCause?.kind.endsWith('drawdown') ? (evidence.triggerAtOpen ? '本次开盘跳空已越过持仓回撤阈值，按该分钟开盘价触发并成交，未等待这一分钟收盘。' : '本次按持仓回撤一票否决卖出，以已完成分钟确认，按下一分钟开盘价成交；跳空可能使实际回撤超过阈值。') : evidence.execution === 'intrabar-1m' ? `按 1 分钟逐步复原 ${evidence.interval} 指标，首次达标后取紧接的分钟开盘价。下方副图显示原周期最终收盘读数，不能据此倒推盘中首次达标时间。` : `按 ${evidence.interval} K 线收盘确认卖出，成交价取确认时刻起的 1 分钟 K 线开盘价。图上指标点按 K 线开盘位置绘制，最终读数到收盘才确定。`}</p>
+    <p className="text-muted-foreground">{evidence.triggerCause?.kind === 'sell-static-drawdown' ? evidence.exitReason?.replace(ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_LABEL) : evidence.triggerCause?.kind === 'addition-support' ? '本次按加仓支撑线 K 止损，触线按支撑价卖出剩余币数，跳空越线按开盘价成交。' : evidence.triggerCause?.kind === 'mirror-take-profit' ? '本次按镜像止盈全部卖出，按止盈限价模拟成交；高开超过门槛时按开盘价成交。' : evidence.triggerCause?.kind === 'drop-1m' || evidence.triggerCause?.kind === 'drop-5m' ? '本次按滚动短时跌幅触发：窗口起点开盘价至最新分钟收盘价，买入后逐分钟检查；达到阈值后按下一分钟开盘价模拟成交。普通指标副图不用于核对这一跌幅读数。' : evidence.triggerCause?.kind.endsWith('drawdown') ? (evidence.triggerAtOpen ? '本次开盘跳空已越过持仓回撤阈值，按该分钟开盘价触发并成交，未等待这一分钟收盘。' : '本次按持仓回撤一票否决卖出，以已完成分钟确认，按下一分钟开盘价成交；跳空可能使实际回撤超过阈值。') : evidence.execution === 'intrabar-1m' ? `按 1 分钟逐步复原 ${evidence.interval} 指标，首次达标后取紧接的分钟开盘价。下方副图显示原周期最终收盘读数，不能据此倒推盘中首次达标时间。` : `按 ${evidence.interval} K 线收盘确认卖出，成交价取确认时刻起的 1 分钟 K 线开盘价。图上指标点按 K 线开盘位置绘制，最终读数到收盘才确定。`}</p>
     {repair?.status === 'verified' && repair.beforeReturnPct != null && <p className="text-muted-foreground">纠错前收益 {repair.beforeReturnPct.toFixed(2)}%{repair.beforeEndTime ? ` · 原卖出 / 估值时间 ${formatUTC8(repair.beforeEndTime)}` : ''}。原值已保留在纠错记录中。</p>}
     {repair && repair.status !== 'verified' && <p role="alert" className="text-destructive">{repair.status === 'pending' ? '此战役正在等待纠错，原结果暂不计入比较统计。' : `此战役纠错未通过：${repair.error}。原记录保留，暂不计入比较统计。`}</p>}
     {differs && <p role="status" className="text-amber-700 dark:text-amber-400">本战役公式与当前账号公式不同。下方通用指标图使用当前账号设置，不能用其读数核对这份历史结果；请回鱼质量重新运行，生成当前公式的比较结果。</p>}

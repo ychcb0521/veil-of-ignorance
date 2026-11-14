@@ -3,6 +3,7 @@ import { canonicalRouterJson, isRaceRouter, RACE_ROUND_KEYS, raceAttackFromRound
 import { freezeQualityPlan } from './qualityPlanVersions';
 import { qualityAdditionPrerequisites, validateQualityAddition } from './qualityAddition';
 import { validateQualityMirror } from './qualityMirror';
+import { initialLimitedDrawdownPct, withLimitedPayoffRisk } from './qualityStaticDrawdownSell';
 import { validatePayoffStops } from './qualityVeto';
 
 const sharedKeys = ['snapshot', 'metric', 'rule', 'combo', 'definitionSource', 'execution', 'vetoFill', 'holdingVetoes', 'mirrorTakeProfit', 'vetoStageMode', 'vetoPeakBasis'] as const;
@@ -49,8 +50,13 @@ export function prepareQualityRouterDraft(original: QualityPlanRouter, structure
       (branch as any)[key] = stages.length ? stages : undefined;
     }
   }
-  for (const branch of branches) {
-    validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes);
+  for (let i = 0; i < branches.length; i++) {
+    const old = i === 0 ? original.structure : original.attack;
+    const branch = branches[i];
+    if (!same([branch.rule, branch.holdingVetoes, branch.vetoStages, !!branch.addition?.enabled], [old.rule, old.holdingVetoes, old.vetoStages, !!old.addition?.enabled])) {
+      branches[i] = withLimitedPayoffRisk(branch);
+    }
+    validateQualityAddition(branch.addition); validateQualityMirror(branch.mirrorTakeProfit); validatePayoffStops(branch.holdingVetoes, branches[i].payoffRiskVersion ? initialLimitedDrawdownPct(branch) : undefined);
     if (race) { if (!branch.addition?.enabled || !branch.addition.rounds?.length) throw Error('每轮分流的两条分支都须有逐轮加仓条件'); continue; }
     if (!branch.addition?.enabled || (branch.addition.maxRounds ?? branch.addition.rounds?.length ?? 0) < n) throw Error(n === 1 ? '条件分支需要至少一次结构加仓，才能在第一次成交时选择分支' : '条件分支需要至少两次结构加仓，才能在第二次成交时选择分支');
     if (!qualityAdditionPrerequisites(branch.addition.rounds![n - 1]).some(c => c.metric === 'state')) throw Error(`第${routerOrdinal(original)}次结构加仓须保留状态 S 方向条件，以取得分支选择时的已收盘读数`);

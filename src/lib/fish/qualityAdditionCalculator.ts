@@ -39,6 +39,7 @@ interface Options extends AtrSettings {
  attackFromRound?:number;maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
  prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
+ initialPayoffRiskPct?: number;
 }
 /** Causal five-minute ATR values; a resumed run uses the same seed anchor as the original run. */
 function atrReader(o:Options){
@@ -124,7 +125,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  };
  const profitRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===ADDITION_PROFIT_KIND).sort((a,b)=>a.id.localeCompare(b.id));
  // 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏 ÷ L₀ ≥ N 时卖出全部持仓；L₀＝初始仓位 × 静态回撤%
- const payoffRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===PAYOFF_STOP_KIND),payoffL0Pct=payoffStopL0Pct(o.vetoes),payoffL0=payoffL0Pct!=null?o.notional*payoffL0Pct/100:undefined;
+ const payoffRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===PAYOFF_STOP_KIND),payoffL0Pct=o.initialPayoffRiskPct??payoffStopL0Pct(o.vetoes),payoffL0=payoffL0Pct!=null?o.notional*payoffL0Pct/100:undefined;
  /** 盈亏比止盈：当前持仓不变的这段里，价格涨到 (N×L₀＋持仓成本−已落袋)÷持仓币数 即全部卖出；跳空高开按开盘价。 */
  const findPayoff=(from:number):SupportStop|undefined=>{
   if(!payoffRules.length||!(payoffL0!>0))return;

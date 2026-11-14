@@ -3,7 +3,11 @@ import { newQualityStudy, importQualityLibrary, qualityComparisonRows, type Qual
 import { enableQualityComparison } from '../qualityComparison';
 import { defaultQualityAddition } from '../qualityAddition';
 import { buildQualityCampaignData } from '../qualityCampaigns';
-import { qualityRelativeGain, qualityRelativeGainText } from '../qualityPresentation';
+import { qualityPayoffRatio, qualityRelativeGain, qualityRelativeGainText } from '../qualityPresentation';
+import { makeQualitySellPlan, replaceQualitySellPlans } from '../qualitySellPlans';
+import { STATIC_DRAWDOWN_SELL_CHOICE, qualityLimitedDrawdownText } from '../qualityStaticDrawdownSell';
+import { campaignLimitedDrawdownText, qualityCampaignStaticRisk } from '../qualityCampaignRisk';
+import { freezeQualityPlan, planVersionChanges } from '../qualityPlanVersions';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 
 const T = Date.UTC(2026, 9, 29), M = 60000;
@@ -18,6 +22,42 @@ function trade(holdingVetoes: QualityGroup['holdingVetoes'], fills = true) {
 }
 const stop = (threshold: number, enabled = true) => ({ id: 's' + threshold, kind: 'static-drawdown' as const, label: '静态回撤', direction: '>=' as const, threshold, enabled });
 
+it('shares the frozen entry threshold between payoff, relative gain and the campaign after a phase switch', () => {
+  const { plan, result, data } = trade([stop(5)]);
+  const limited = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, [], plan);
+  const after = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 7, []);
+  limited.combo = { beforeLabel: limited.label, switchPct: 5.1, after: { ...after, rule: after.rule! } };
+  const campaign = data.campaign;
+  campaign.comparison!.monitorPlan = structuredClone(limited);
+  const evaluated = { ...result, exitSnapshot: { barOpenTime: T, observedAt: T, stage: 'after' as const } };
+  expect(qualityLimitedDrawdownText(limited)).toBe('前段 3% / 后段 7%');
+  expect(campaignLimitedDrawdownText(campaign)).toBe('前段 3% / 后段 7%');
+  expect(qualityCampaignStaticRisk(campaign)).toMatchObject({ percent: 3, loss: 3, stop: 97 });
+  expect(qualityPayoffRatio(limited, evaluated).value).toBeCloseTo(32.5 / 3);
+  expect(qualityRelativeGain(limited, evaluated).value).toBeCloseTo((120 - 107) / (100 - 97) * 100);
+  expect(computeCampaignGeometricMetrics(campaign, data.legs, data.tradeRecords).effectivePriceChangePct).toBeCloseTo(1300 / 3);
+  limited.rule!.threshold = 4;
+  expect(qualityPayoffRatio(limited, evaluated).value).toBeCloseTo(32.5 / 4);
+  expect(qualityCampaignStaticRisk(campaign)?.percent).toBe(3);
+});
+
+it('versions a deliberate payoff-stop edit and preserves previously frozen execution', () => {
+  const { plan } = trade([
+    stop(5),
+    { id: 'payoff', label: '盈亏比止盈', kind: 'payoff-ratio', direction: '>=', threshold: 10, enabled: true },
+  ]);
+  const original = freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 4, [], plan));
+  const before = structuredClone(original);
+  const study = { ...newQualityStudy(T), sellPlans: [original] };
+  const [unchanged] = replaceQualitySellPlans(study, [original]).sellPlans!;
+  expect(unchanged).toEqual(before);
+  expect(unchanged.payoffRiskVersion).toBeUndefined();
+  const [edited] = replaceQualitySellPlans(study, [{ ...original, rule: { ...original.rule!, threshold: 3 } }]).sellPlans!;
+  expect(edited.payoffRiskVersion).toBe('payoff-stop-limited-initial-risk-v2');
+  expect(planVersionChanges(edited)).toEqual([]);
+  expect(original).toEqual(before);
+});
+
 it('matches the trade campaign\'s 相对涨幅 for the same paper trade', () => {
   const { plan, result, data } = trade([stop(10), stop(20)]);
   const own = qualityRelativeGain(plan, result).value!, campaign = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords).effectivePriceChangePct!;
@@ -27,7 +67,7 @@ it('matches the trade campaign\'s 相对涨幅 for the same paper trade', () => 
 });
 it('is empty, with a reason, when the campaign would have none', () => {
   expect(qualityRelativeGain(trade([stop(10)], false).plan, trade([stop(10)], false).result)).toMatchObject({ value: null, reason: expect.stringContaining('没有实际加仓') });
-  const none = trade([stop(10, false)]);expect(qualityRelativeGain(none.plan, none.result)).toMatchObject({ value: null, reason: expect.stringContaining('静态回撤') });
+  const none = trade([stop(10, false)]);expect(qualityRelativeGain(none.plan, none.result)).toMatchObject({ value: null, reason: expect.stringContaining('限制静态最大回撤') });
   expect(qualityRelativeGain(none.plan, { ...none.result, status: 'open' }).value).toBeNull();
   expect(qualityRelativeGainText(null)).toBe('—');
 });

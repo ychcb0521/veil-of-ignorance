@@ -6,6 +6,8 @@ import type { QualityGroup, QualityResult } from './quality';
 import type { QualityMirrorFill, QualityMirrorTakeProfit } from './qualityMirror';
 import { mirrorFillGainPct } from './qualityMirror';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { initialLimitedDrawdownPct } from './qualityStaticDrawdownSell';
+import { payoffStopL0Pct } from './qualityVeto';
 export const qualityPeakPct = (result?: QualityResult): number | null => result && ['open','closed'].includes(result.status) && result.peakPct != null && Number.isFinite(result.peakPct) ? Math.max(0,result.peakPct) : null;
 /** Original buy price to actual final sale price; independent of partial sales/addition sizing. */
 export const qualitySalePriceChangePct=(result?:QualityResult):number|null=>{
@@ -15,15 +17,21 @@ export const qualitySalePriceChangePct=(result?:QualityResult):number|null=>{
 /**
  * 相对涨幅 G（与交易战役同口径）＝ (F − Kₘ) ÷ (E − K初)，以首仓风险距离为单位，返回 ×100 的数值（2.5 倍记作 250）。
  * F 最终卖出价；Kₘ 最后一次加仓的止损线 K；E 首次买入价；K初 ＝ E × (1 − 静态回撤阈值%)——
- * 与鱼质量战役的初始风险相同（硬性终止里启用的静态回撤，多条取最小值）。
+ * 首仓风险优先取组合算法的限制静态最大回撤；未配置时沿用原初始硬性终止口径。
  * 只算有实际加仓且已卖出的持仓（交易战役同样只算有加仓的）；缺任一项返回 null 并说明原因。
  */
-export function qualityRelativeGain(plan:Pick<QualityGroup,'holdingVetoes'>,result?:QualityResult):{value:number|null;reason:string}{
+type QualityRiskPlan = Pick<QualityGroup, 'holdingVetoes' | 'rule' | 'combo' | 'router'>;
+
+function qualityReportedInitialRiskPct(plan: QualityRiskPlan) {
+ return initialLimitedDrawdownPct(plan) ?? payoffStopL0Pct((plan.router?.structure ?? plan).holdingVetoes);
+}
+
+export function qualityRelativeGain(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有相对涨幅':'尚无卖出结果'};
  const fills=qualityAdditionFills(result);if(!fills.length)return {value:null,reason:'没有实际加仓：相对涨幅只算有加仓的持仓（与交易战役一致）'};
- const stops=(plan.holdingVetoes??[]).filter(v=>v.enabled&&v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100).map(v=>v.threshold);
- if(!stops.length)return {value:null,reason:'缺少初始止损 K初：请在硬性终止里启用静态回撤'};
- const E=result.entryPrice,F=result.endPrice,K=fills.at(-1)?.sizing?.support,K0=E!=null?E*(1-Math.min(...stops)/100):undefined;
+ const stopPct=qualityReportedInitialRiskPct(plan);
+ if(stopPct==null)return {value:null,reason:'缺少初始止损 K初：请在组合算法起始阶段设置限制静态最大回撤'};
+ const E=result.entryPrice,F=result.endPrice,K=fills.at(-1)?.sizing?.support,K0=E!=null?E*(1-stopPct/100):undefined;
  if(![E,F,K,K0].every(v=>v!=null&&Number.isFinite(v)&&v>0)||!(E!>K0!))return {value:null,reason:'缺少买入价、卖出价或加仓止损线'};
  const value=(F!-K!)/(E!-K0!)*100;
  return Number.isFinite(value)?{value,reason:`G＝(F ${F} − Kₘ ${K}) ÷ (E ${E} − K初 ${+K0!.toPrecision(10)})`}:{value:null,reason:'相对涨幅超出可计算范围'};
@@ -50,16 +58,16 @@ export function qualityGeometricPosition(result?:QualityResult):number|null{
 export const qualityGeometricPositionText=(value:number|null)=>value==null?'—':`${value.toFixed(2)}x`;
 /**
  * 【用户要求】2026-11-02 组合表「相对涨幅」后加「盈亏比」，与交易战役同口径（campaignB.PAYOFF_RATIO_FORMULA）：
- * 盈亏比 b ＝ 已实现净盈亏 ÷ 初始最大预期亏损 L₀；持仓监测的 L₀ ＝ 初始仓位 × 硬性终止静态回撤%（qualityCampaignStaticRisk 同一来源）。只算已卖出的持仓。
+ * 盈亏比 b ＝ 已实现净盈亏 ÷ 初始最大预期亏损 L₀。L₀ 优先用组合算法的首仓静态回撤阈值。
  */
-export function qualityPayoffRatio(plan:Pick<QualityGroup,'holdingVetoes'>,result?:QualityResult):{value:number|null;reason:string}{
+export function qualityPayoffRatio(plan:QualityRiskPlan,result?:QualityResult):{value:number|null;reason:string}{
  if(result?.status!=='closed')return {value:null,reason:result?.status==='open'?'持有中，卖出后才有盈亏比':'尚无卖出结果'};
- const stops=(plan.holdingVetoes??[]).filter(v=>v.enabled&&v.kind==='static-drawdown'&&(v.direction==='>='||v.direction==='>')&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<=100).map(v=>v.threshold);
- if(!stops.length)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在硬性终止里启用静态回撤'};
- const notional=result.initialNotional??100,L0=notional*Math.min(...stops)/100,pnl=result.pnl;
+ const stopPct=qualityReportedInitialRiskPct(plan);
+ if(stopPct==null)return {value:null,reason:'缺少初始最大预期亏损 L₀：请在组合算法起始阶段设置限制静态最大回撤'};
+ const notional=result.initialNotional??100,L0=notional*stopPct/100,pnl=result.pnl;
  if(pnl==null||!Number.isFinite(pnl)||!(L0>0))return {value:null,reason:'缺少已实现盈亏'};
  const value=pnl/L0;
- return Number.isFinite(value)?{value,reason:`盈亏比＝已实现净盈亏 ${pnl.toFixed(2)} ÷ L₀ ${+L0.toPrecision(8)}（${notional} × ${Math.min(...stops)}%）`}:{value:null,reason:'盈亏比超出可计算范围'};
+ return Number.isFinite(value)?{value,reason:`盈亏比＝已实现净盈亏 ${pnl.toFixed(2)} ÷ L₀ ${+L0.toPrecision(8)}（${notional} × ${stopPct}%）`}:{value:null,reason:'盈亏比超出可计算范围'};
 }
 export const qualityPayoffRatioText=(value:number|null)=>value==null?'—':`${value>0?'+':''}${value.toFixed(2)}R`;
 export const qualityRelativeGainText=(value:number|null)=>value==null?'—':`${(value/100).toFixed(2)}×`;

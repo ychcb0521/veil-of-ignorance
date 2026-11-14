@@ -2,6 +2,8 @@ import { CampaignListPagination } from '@/components/journal/CampaignListPaginat
 import { useCampaignPagination } from '@/hooks/useCampaignPagination';
 import { CampaignSectionControls } from '@/components/journal/CampaignSectionControls';
 import {QualityCampaignCardTitle} from '@/components/journal/QualityCampaignCardTitle';
+import { STATIC_DRAWDOWN_SELL_LABEL } from '@/lib/fish/qualityStaticDrawdownSell';
+import { campaignLimitedDrawdownText } from '@/lib/fish/qualityCampaignRisk';
 import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -1855,6 +1857,7 @@ const CampaignCard = memo(function CampaignCard({
   );
   /** 封面八项的读数：与列表容器上的列宽估算同一份（cardMetricReadings）。 */
   const readings = cardMetricReadings(row);
+  const limitedDrawdown = campaignLimitedDrawdownText(row.campaign);
   const hedgeWear = payoffRatioHedgeWear(rowMagicB(row), rowWearR(row));
   const theoreticalB = rowTheoreticalMagicB(row);
   const payoffReading = rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100);
@@ -2293,6 +2296,10 @@ const CampaignCard = memo(function CampaignCard({
               <span className={`${CARD_METRIC_VALUE} ${drawdownTone(row.staticMaxDrawdownPct)}`}>{readings.staticMaxDrawdownPct}</span>
             </dd>
           </div>
+          {limitedDrawdown !== '—' && <div data-testid="campaign-limited-drawdown" className="min-w-0" title={limitedDrawdown}>
+            <dt className={`${CARD_METRIC_NAME} text-foreground/75`}>{STATIC_DRAWDOWN_SELL_LABEL}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span className={CARD_METRIC_VALUE}>{limitedDrawdown}</span></dd>
+          </div>}
           <div className={letteredCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
             <dt className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>

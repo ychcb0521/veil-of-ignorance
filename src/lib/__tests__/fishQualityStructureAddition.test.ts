@@ -101,7 +101,11 @@ describe('native box decisions for holding additions',()=>{
   expect(paid.stop?.cause).toMatchObject({kind:'payoff-ratio',threshold:2,payoffBasis:{l0:5,l0Pct:5}});
   const basis=paid.stop!.cause!.payoffBasis!;expect(basis.pnl).toBeGreaterThanOrEqual(10-1e-9);if(!paid.stop!.atOpen)expect(basis.pnl).toBeCloseTo(10,6);
   expect(paid.stop!.at).toBeLessThanOrEqual(plain.stop?.at??Infinity);
-  expect(()=>validatePayoffStops([stop('p','payoff-ratio',5000)])).toThrow('静态回撤');expect(()=>validatePayoffStops([stop('s','static-drawdown',5),stop('p','payoff-ratio',5000)])).not.toThrow();
+  const limited=await findCalculatorAdditions({...o,structure:{...rule(),kSource:'current'},maxRounds:1,
+    initialPayoffRiskPct:3,vetoes:[stop('s','static-drawdown',5),stop('p','payoff-ratio',2)]});
+  expect(limited.stop?.cause).toMatchObject({kind:'payoff-ratio',threshold:2,payoffBasis:{l0:3,l0Pct:3}});
+  expect(limited.stop!.at).toBeLessThanOrEqual(paid.stop!.at);
+  expect(()=>validatePayoffStops([stop('p','payoff-ratio',5000)])).toThrow('自由静态最大回撤');expect(()=>validatePayoffStops([stop('s','static-drawdown',5),stop('p','payoff-ratio',5000)])).not.toThrow();
   expect(holdingVetoLabel(stop('p','payoff-ratio',5000))).toBe('盈亏比 ≥ 5000R');
   expect(()=>validateHoldingVeto(stop('p','payoff-ratio',0))).toThrow('盈亏比');
  });

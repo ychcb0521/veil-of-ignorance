@@ -15,7 +15,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
 import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror';
-import { STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
+import { ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
@@ -123,7 +123,7 @@ export async function findQualityIntrabarExit(o: {
     return { at: minute.openTime, barOpenTime: minute.openTime, atOpen, reading: atOpen ? Math.max(rule.threshold, (holding.entry - price) / holding.entry * 100) : rule.threshold,
       fillPrice: price, fillPeak: Math.max(holding.peak, minute.open), previous: staticPrevious,
       ...(o.switchPct != null ? { stage: after ? 'after' : 'before' } : {}),
-      cause: { id: STATIC_DRAWDOWN_SELL_VERSION, label: STATIC_DRAWDOWN_SELL_LABEL, kind: 'sell-static-drawdown', direction: '>=', threshold: rule.threshold } };
+      cause: { id: STATIC_DRAWDOWN_SELL_VERSION, label: ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, kind: 'sell-static-drawdown', direction: '>=', threshold: rule.threshold } };
   };
   const enabled = activeHoldingVetoes(o.vetoes);
   const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates});

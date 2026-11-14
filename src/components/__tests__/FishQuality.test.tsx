@@ -7,7 +7,22 @@ import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, CBA_DEF, CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { RouteLoadBoundary } from '@/components/RouteLoadBoundary';
+import { STATIC_DRAWDOWN_SELL_VERSION } from '@/lib/fish/qualityStaticDrawdownSell';
 const T = Date.UTC(2026, 9, 20);
+
+it('defaults the combination sell algorithm to 3% even when the independent stop stays empty', () => {
+  const s = state();
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByLabelText('持仓监测条件'));
+  fireEvent.change(screen.getByLabelText('卖出算法 1 指标 特征值'), { target: { value: STATIC_DRAWDOWN_SELL_VERSION } });
+  expect(screen.getByLabelText('卖出算法 1 门槛')).toHaveValue(3);
+  const hardStop = within(screen.getByTestId('quality-hard-stop'));
+  expect(within(hardStop.getByLabelText('持仓否决 1 指标')).getByRole('option', { name: '自由静态最大回撤' })).toBeInTheDocument();
+  expect(hardStop.getByLabelText('持仓否决 1 阈值')).toHaveValue(null);
+  fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'), { target: { value: '2.75' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
+  expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].rule).toMatchObject({ version: STATIC_DRAWDOWN_SELL_VERSION, threshold: 2.75 });
+});
 function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
@@ -576,10 +591,10 @@ it('shows the effective decimal threshold for duplicate static vetoes without si
  const s=state();s.study.sellPlans![0].holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',7.7),makeQualityHoldingVeto('static-drawdown','>=',30)];
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'持仓监测条件'}));
  const summary=screen.getByTestId('quality-veto-risk-summary');
- expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%（同类条件中较小阈值先触发）；动态回撤否决未启用');
+ expect(summary).toHaveTextContent('自由静态最大回撤 ≥ 7.7%（同类条件中较小阈值先触发）；动态回撤否决未启用');
  expect(s.setHoldingVetoes).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();
  fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'dynamic-drawdown'}});
- expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%；动态回撤 ≥ 30%');
+ expect(summary).toHaveTextContent('自由静态最大回撤 ≥ 7.7%；动态回撤 ≥ 30%');
  fireEvent.click(screen.getByRole('button',{name:'保存到「状态 S 原始值」'}));
  expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})],mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50}})]));
 });
@@ -833,7 +848,8 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('keeps grouping and removes combination-table statistics and sell settings', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '14');
+  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '16');
+  expect(screen.getAllByRole('columnheader', { name: '限制静态最大回撤' })).toHaveLength(2);
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');

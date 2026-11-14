@@ -29,8 +29,8 @@ import { fishDelay, validateFishBars } from './shared';
 import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
-import { isStaticDrawdownSell, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
-import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
+import { initialLimitedDrawdownPct, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
+import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
@@ -51,6 +51,7 @@ export interface QualityGroup {
   definitionSource?: 'account';
   router?: import('./qualityPlanRouter').QualityPlanRouter;
   holdingVetoes?: QualityHoldingVeto[];
+  payoffRiskVersion?: typeof LIMITED_PAYOFF_RISK_VERSION;
   mirrorTakeProfit?: QualityMirrorTakeProfit;
   addition?: QualityAdditionRule;
   /** 回撤否决的成交方式版本：'stop' = 盘中触及止损价即按止损价成交（2026-10-26 起）；缺省 = 旧版（下一分钟开盘价）。 */
@@ -77,7 +78,7 @@ export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo 
   g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold, ...(g.combo.after.rule.version ? [g.combo.after.rule.version] : [])] : null;
 /** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
 export function qualityRuleText(g: QualityGroup): string {
-  const base = g.combo && g.rule ? `${g.combo.beforeLabel} ${qualityExitThresholdText(g.rule)} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${qualityExitThresholdText(g.combo.after.rule)}` : g.rule ? qualityExitThresholdText(g.rule) : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
+  const base = g.combo && g.rule ? `${qualityExitAlgorithmLabel(g.rule,g.combo.beforeLabel)} ${qualityExitThresholdText(g.rule)} → 涨 ${g.combo.switchPct}% 后 ${qualityExitAlgorithmLabel(g.combo.after.rule,g.combo.after.label)} ${qualityExitThresholdText(g.combo.after.rule)}` : g.rule ? qualityExitThresholdText(g.rule) : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : activeHoldingVetoes(g.holdingVetoes).length ? '仅一票否决' : '加仓与持仓估值' : '设置门槛';
   const stages=qualitySellStagesLabel(g);return stages?`${base} · ${stages}`:base;
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
@@ -431,6 +432,7 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
   const combo = qualityComboIdentity(g); if (combo) identity.push(combo);
   // v3：回撤止损改为盘中触及按止损价成交（2026-10-26），旧结果需要重算
   const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
+  if (g.payoffRiskVersion) identity.push(g.payoffRiskVersion);
   if (mirrorIdentity(g.mirrorTakeProfit).length) identity.push(mirrorIdentity(g.mirrorTakeProfit));
   if (mirrorExecutionIdentity(g).length) identity.push(mirrorExecutionIdentity(g));
   if (additionIdentity(g.addition).length) {
@@ -608,7 +610,8 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
- if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous,{initialNotional});
+ const initialPayoffRiskPct = group.payoffRiskVersion === LIMITED_PAYOFF_RISK_VERSION ? initialLimitedDrawdownPct(group) : undefined;
+ if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous,{initialNotional,initialPayoffRiskPct});
  const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
  try{
   validateQualitySellStages(group);validateQualityVetoStages(group);validateQualityAdvantage(group);
@@ -621,13 +624,13 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
    if(group.advantage){const next=qualityAdditionFills(state??{}).length+1;if(next<=qualityAdditionRoundLimit(group.addition!)&&!boundaries.includes(next)){boundaries.push(next);boundaries.sort((a,b)=>a-b);}}
    const count=qualityAdditionFills(state??{}).length,selected=stages.filter(s=>s.afterAdditions<=count).at(-1),selectedVeto=vetoStages.filter(s=>s.afterAdditions<=count).at(-1),nextCount=boundaries.find(n=>n>count),phase={...qualityStagePlan(group,selected),holdingVetoes:stagedHoldingVetoes(group,count)};
    const prior=state?{...state,key:qualityResultKey(sample,phase,observeHours)}:undefined;
-   let replay=await evaluateQualityPhase(sample,phase,observeHours,now,load,signal,prior,{initialNotional,pauseAfterAdditionCount:nextCount,trackVetoPath});
+   let replay=await evaluateQualityPhase(sample,phase,observeHours,now,load,signal,prior,{initialNotional,initialPayoffRiskPct,pauseAfterAdditionCount:nextCount,trackVetoPath});
    // A discarded seller's later data cannot invalidate an earlier successful switch.
    if(replay.status==='error'&&nextCount!=null&&phase.addition?.enabled&&phase.addition.quantityMode==='calculator'){
     const probePlan={...phase,rule:undefined,combo:undefined,holdingVetoes:[]};
     const probePrior=state?{...state,key:qualityResultKey(sample,probePlan,observeHours),pendingExit:undefined,exitSnapshot:undefined}:undefined;
     const probe=await evaluateQualityPhase(sample,probePlan,observeHours,now,load,signal,probePrior,{initialNotional,pauseAfterAdditionCount:nextCount,trackVetoPath});
-    if(probe.sellStageBoundary)replay=await evaluateQualityPhase(sample,phase,observeHours,Math.min(now,probe.endTime!+QUALITY_MINUTE),load,signal,prior,{initialNotional,pauseAfterAdditionCount:nextCount,ordinaryUntil:probe.endTime,conditionsUntil:probe.endTime,trackVetoPath});
+    if(probe.sellStageBoundary)replay=await evaluateQualityPhase(sample,phase,observeHours,Math.min(now,probe.endTime!+QUALITY_MINUTE),load,signal,prior,{initialNotional,initialPayoffRiskPct,pauseAfterAdditionCount:nextCount,ordinaryUntil:probe.endTime,conditionsUntil:probe.endTime,trackVetoPath});
    }
    const {sellStageBoundary,...result}=replay;
    if(sellStageBoundary&&nextCount!=null){
@@ -644,8 +647,8 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
   throw Error('卖出算法阶段切换未完成');
  }catch(error){abort(signal);return {...base,status:'error',reason:error instanceof Error?error.message:'卖出阶段计算失败'};}
 }
-async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{initialNotional?:number;pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
-  const {initialNotional=QUALITY_NOTIONAL,pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath}=runtime;
+async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{initialNotional?:number;pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean;initialPayoffRiskPct?:number}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
+  const {initialNotional=QUALITY_NOTIONAL,pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath,initialPayoffRiskPct}=runtime;
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
   if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少有效买入时间，不能可靠还原买入时点' };
   if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
@@ -781,7 +784,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map((r,i)=>({...buildAdditionCandidates(r),...(config.alternativeRounds?.[i]?{alternative:buildAdditionCandidates(config.alternativeRounds[i])}:{})}));
         const additionEnd=closed&&trigger?.fillPrice!=null&&!trigger.atOpen?finalTime+QUALITY_MINUTE:finalTime;
         if(config.quantityMode==='calculator'){
-          const calculated=await findCalculatorAdditions({positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:initialNotional,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,pauseAfterAdditionCount,load,signal,
+          const calculated=await findCalculatorAdditions({positionVersion:config.positionVersion,candidates,required,unavailable,structure:config.source==='structure'?config.structure:undefined,roundRules,attackFromRound:config.attackFromRound,maxRounds:qualityAdditionRoundLimit(config),minGainPct:config.minGainPct,entryVetoes:config.entryVetoes,indicatorIncrease:config.indicatorIncrease,entryBufferAtr:config.entryBufferAtr,entryDistanceAtr:config.entryDistanceAtr,gainBasis:config.gainBasis,supportOffsetAtr:config.supportOffsetAtr,row,entry,entryPrice,notional:initialNotional,end:additionEnd,since,prices,previous:additionFills,previousReductions:prior?.additionReductions,previousVetoes:prior?.additionVetoes,geometricLock:config.geometricLock,kStopVersion:config.kStopVersion,breakevenFloor:config.breakevenFloor,supportReduction:config.supportReduction,mirror:mirrorFill,repeat:config.repeat!==false,vetoes:group.holdingVetoes,initialPayoffRiskPct,pauseAfterAdditionCount,load,signal,
             advantage:group.advantage,readAdvantage,ordinaryExit:closed?{at:finalTime,price:finalPrice,atOpen:trigger?.fillPrice==null||!!trigger.atOpen,mirror:trigger?.cause?.kind==='mirror-take-profit'}:undefined});
           additionFills=calculated.fills;additionFill=additionFills[0];if(!additionFills.length&&unavailable)additionNote=unavailable;additionReductions=calculated.reductions;
           additionSkipsFrom=prior?(prior.additionSkipsFrom??since):entry;

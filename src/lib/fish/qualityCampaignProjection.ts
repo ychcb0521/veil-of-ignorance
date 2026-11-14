@@ -13,7 +13,7 @@ import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
 import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
-import { isStaticDrawdownSell, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
+import { isStaticDrawdownSell, qualityStaticDrawdownReason, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
 import { syncQualitySellDefinitions } from './qualityComparison';
 import { isMonitorCampaignId, monitorCampaignRecordId, qualityMonitorCampaignId, qualityMonitorCampaignRun } from './qualityMonitorCampaign';
 import type { QualityMonitorRecord, QualityMonitorSetting } from './qualityMonitorLibrary';
@@ -72,7 +72,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     // 【用户要求】2026-11-02 战役元数据底部「持仓监测」：完整显示这场战役运行时冻结的整套条件设置
     comparison: { section, planLabel:storedPlan.label, monitorPlan: structuredClone(storedPlan), runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
       holdingMetrics:{status:r.status,peakPct:qualityPeakPct(r),returnPct:Number.isFinite(r.returnPct)?r.returnPct!:null,entryPrice:r.entryPrice,initialNotional:r.initialNotional??notional,mirrorRealizedPnl:r.mirrorRealizedPnl,remainingPnl:r.remainingPnl},
-      sellEvidence: { exitReason:closed?r.reason:undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
+      sellEvidence: { exitReason:closed?qualityStaticDrawdownReason(r):undefined,activeSellStage:r.activeSellStage,sellStageSwitches:r.sellStageSwitches,activeVetoStage:r.activeVetoStage,vetoStageSwitches:r.vetoStageSwitches,
         ...(plan.vetoStages?.length?{initialStaticStopPct:activeHoldingVetoes(plan.holdingVetoes).filter(v=>v.kind==='static-drawdown').reduce<number|null>((n,v)=>n==null?v.threshold:Math.min(n,v.threshold),null)}:{}), formula: staticSell ? '静态最大回撤 =（首仓买入价 − 持仓最低价）÷ 首仓买入价 × 100%' : definition.formula,
         definitionKey: active.snapshot.definitionKey!, featureId: active.snapshot.featureId!,
         metric: staticSell ? STATIC_DRAWDOWN_SELL_LABEL : active.rule?.metric ?? active.metric,
@@ -106,7 +106,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     entryPrice:price,exitPrice:exit,...(mirror?{positionId:`${id}-position`}:{}),quantity:notional/price*part,leverage,settlementMode:'usdt',settlementAsset:'USDT',pnl:profit,
     fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,openTime:entry,closeTime:at,openedRealAt:entry,closedRealAt:at,operationAt:r.evaluatedAt,exit_reason_text:reason});
   const tradeRecords:TradeRecord[]=[...(mirror?[closeRecord(mirrorId,mirror.at,mirror.price,fraction,mirrorPnl,'镜像止盈')]:[]),
-    ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];
+    ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?qualityStaticDrawdownReason(r)??label:label)]:[])];
   const data: QualityCampaignData = { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
   return withQualityMirrorLegs(r.additionFill ? withQualityAdditionCampaign(data, {...run,plan}) : data);
