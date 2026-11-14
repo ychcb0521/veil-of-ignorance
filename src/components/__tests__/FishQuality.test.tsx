@@ -846,10 +846,19 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 });
 
 
-it('keeps grouping and removes combination-table statistics and sell settings', () => {
+it('keeps the actual drawdown and removes the threshold column from the combination table and export', async () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '16');
-  expect(screen.getAllByRole('columnheader', { name: '限制静态最大回撤' })).toHaveLength(2);
+  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', '14');
+  expect(screen.queryByRole('columnheader', { name: '限制静态最大回撤' })).not.toBeInTheDocument();
+  expect(screen.queryByTestId('quality-limited-drawdown')).not.toBeInTheDocument();
+  const table = screen.getByTestId('quality-fish-table').querySelector('table')!;
+  expect(table.querySelectorAll('colgroup col')).toHaveLength(table.tHead!.rows[2].cells.length);
+  const { readQualityTableSheet } = await import('@/lib/fish/qualityTableExport');
+  const sheet = readQualityTableSheet(table, { selectedOnly: false });
+  expect(sheet.columns.map(column => column.header)).toContain('静态最大回撤');
+  expect(sheet.columns.map(column => column.header)).not.toContain('限制静态最大回撤');
+  expect(sheet.rows.length).toBeGreaterThan(0);
+  expect(sheet.rows.every(row => row.length === sheet.columns.length)).toBe(true);
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(2);
   // BSS 不是默认探测算法：下拉里不列，表头不报数
   expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
