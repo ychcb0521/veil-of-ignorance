@@ -1,15 +1,18 @@
 import { useRef, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+import { DropdownMenuItem } from './ui/dropdown-menu';
+import { FishLibraryDataMenu } from './FishLibraryDataMenu';
 import { downloadCabinFile, parseCabinFile } from '@/lib/fish/cabinTransfer';
 import { LIBRARY_FILE_LIMIT } from '@/lib/fish/libraryTransfer';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 const action = 'inline-flex h-7 items-center gap-1 rounded px-2 text-[10.5px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
 
-export function FishCabinTransfer({ records, onImport }: {
+export function FishCabinTransfer({ records, onExport, onImport }: {
   records: readonly TradeSignal[];
-  onImport: (records: readonly TradeSignal[]) => Promise<{ added: number; skipped: number; durable: boolean }>;
+  onExport: () => void;
+  onImport?: (records: readonly TradeSignal[]) => Promise<{ added: number; skipped: number; durable: boolean }>;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<TradeSignal[]>();
@@ -32,7 +35,7 @@ export function FishCabinTransfer({ records, onImport }: {
   };
 
   const confirm = async () => {
-    if (!pending) return;
+    if (!pending || !onImport) return;
     setBusy(true);
     try {
       const result = await onImport(pending);
@@ -42,22 +45,27 @@ export function FishCabinTransfer({ records, onImport }: {
     finally { setBusy(false); }
   };
 
-  return <div className="flex flex-wrap items-center gap-1">
-    <button type="button" className={action} disabled={!records.length || busy} onClick={() => {
-      setError('');
-      try { downloadCabinFile(records); }
-      catch (cause) { setError((cause as Error).message); }
-    }}><Download aria-hidden className="h-3 w-3"/>完整下载 JSON</button>
-    <button type="button" className={action} disabled={busy} onClick={() => input.current?.click()}>
-      <Upload aria-hidden className="h-3 w-3"/>导入鱼舱
-    </button>
+  return <div className="flex items-center justify-end gap-1">
+    {message && <span role="status" className="text-xs">{message}</span>}
+    {error && !pending && <span role="alert" className="text-xs text-destructive">{error}</span>}
+    <FishLibraryDataMenu name="鱼舱" disabled={busy}>
+      <DropdownMenuItem disabled={!records.length} onSelect={onExport}>
+        <Download aria-hidden className="mr-2 h-3.5 w-3.5"/>导出 Excel
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={!records.length} onSelect={() => {
+        setError('');
+        try { downloadCabinFile(records); }
+        catch (cause) { setError((cause as Error).message); }
+      }}><Download aria-hidden className="mr-2 h-3.5 w-3.5"/>完整下载 JSON</DropdownMenuItem>
+      {onImport && <DropdownMenuItem onSelect={() => input.current?.click()}>
+        <Upload aria-hidden className="mr-2 h-3.5 w-3.5"/>导入鱼舱
+      </DropdownMenuItem>}
+    </FishLibraryDataMenu>
     <input ref={input} type="file" hidden aria-label="上传鱼舱 JSON" accept=".json,application/json" onChange={event => {
       const file = event.currentTarget.files?.[0];
       event.currentTarget.value = '';
       if (file) void read(file);
     }}/>
-    {message && <span role="status" className="text-xs">{message}</span>}
-    {error && !pending && <span role="alert" className="text-xs text-destructive">{error}</span>}
     <Dialog open={!!pending} onOpenChange={open => { if (!open && !busy) setPending(undefined); }}>
       <DialogContent>
         <DialogHeader>

@@ -4,7 +4,7 @@ import type {SignalScrollPosition} from './SignalLibraryList';
 import {fishCaughtBy} from '@/lib/fish/records';
 import {groupFishCabin} from '@/lib/fish/cabinRows';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
-import { ChevronDown, Database, Download, Search, Sparkles } from 'lucide-react';
+import { ChevronDown, Database, Search, Sparkles } from 'lucide-react';
 import { fishSectionHeading, fishSubHeading, FishCount } from './FishSection';
 import { FishQualityInfo } from './FishQualityModule';
 // 筛选行与「渔」的输入同一套：浅底无框、圆角、统一 28px 高
@@ -17,8 +17,6 @@ type SignalLibraryListProps = ComponentProps<typeof SignalLibraryList>;
 interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaignDayIndex' | 'jumpingSignalId' | 'onJump' | 'onDelete' | 'onRate' | 'cdaAlerts'> {
   signals: SignalLibraryListProps['rows'];
   rememberViewKey?: string;
-  /** 导出整张鱼舱，筛选只影响查看。 */
-  onExport?: () => void;
   /** 列表名：「新鱼」或「鱼舱」。 */
   title?: string;
   showScreeningTime?: boolean;
@@ -208,7 +206,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     </div>
   );
   return <div className={'min-w-0'} data-testid={testId}>
-    <div className="flex items-center justify-between gap-2">
+    <div className="group/library-header flex items-center justify-between gap-2">
     <span className="flex items-center gap-0.5">
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={isSection ? fishSectionHeading : fishSubHeading}>
       {p.title === '新鱼' || p.showScreeningTime ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
@@ -216,9 +214,8 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}
-    {p.headerAction}
     </span>
-    {open && p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel：列表信息、具体指标和捕获阈值，不受当前筛选影响" disabled={!displaySignals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
+    {p.headerAction}
     </div>
     {open && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">

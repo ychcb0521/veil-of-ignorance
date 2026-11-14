@@ -1,13 +1,19 @@
 import { useRef, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+import { DropdownMenuItem } from './ui/dropdown-menu';
+import { FishLibraryDataMenu } from './FishLibraryDataMenu';
 import { libraryDirectoryAction } from './FishLibraryTimeDirectory';
 import { LIBRARY_FILE_LIMIT, makeLibraryPackage, parseLibraryFile, stringifyLibraryFile } from '@/lib/fish/libraryTransfer';
 import { importMiningLibraries, loadMiningLibraryForTransfer } from '@/lib/fish/miningLibraryStore';
 import type { FishMiningLibrary } from '@/lib/fish/miningLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 
-export function FishMiningTransfer({ account }: { account?: string }) {
+export function FishMiningTransfer({ account, onExport, canExport }: {
+  account?: string;
+  onExport: () => void;
+  canExport: boolean;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const owner = useRef(account);
   owner.current = account;
@@ -62,20 +68,25 @@ export function FishMiningTransfer({ account }: { account?: string }) {
     finally { setBusy(false); }
   }
 
-  return <>
-    <button type="button" className={libraryDirectoryAction} disabled={busy} onClick={() => void download()}>
-      <Download aria-hidden className="h-3 w-3"/>完整下载捕捞库
-    </button>
-    <button type="button" className={libraryDirectoryAction} disabled={busy} onClick={() => input.current?.click()}>
-      <Upload aria-hidden className="h-3 w-3"/>导入捕捞库
-    </button>
+  return <div className="flex items-center justify-end gap-1">
+    {message && <span role="status" className="text-xs">{message}</span>}
+    {error && !pending && <span role="alert" className="text-xs text-destructive">{error}</span>}
+    <FishLibraryDataMenu name="捕捞库" disabled={busy}>
+      <DropdownMenuItem disabled={!canExport} onSelect={onExport}>
+        <Download aria-hidden className="mr-2 h-3.5 w-3.5"/>导出 Excel
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => void download()}>
+        <Download aria-hidden className="mr-2 h-3.5 w-3.5"/>完整下载捕捞库
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => input.current?.click()}>
+        <Upload aria-hidden className="mr-2 h-3.5 w-3.5"/>导入捕捞库
+      </DropdownMenuItem>
+    </FishLibraryDataMenu>
     <input ref={input} type="file" hidden aria-label="上传捕捞库 JSON" accept=".json,application/json" onChange={event => {
       const file = event.currentTarget.files?.[0];
       event.currentTarget.value = '';
       if (file) void read(file);
     }}/>
-    {message && <span role="status" className="text-xs">{message}</span>}
-    {error && !pending && <span role="alert" className="text-xs text-destructive">{error}</span>}
     <Dialog open={!!pending} onOpenChange={open => { if (!open && !busy) setPending(undefined); }}>
       <DialogContent>
         <DialogHeader>
@@ -89,5 +100,5 @@ export function FishMiningTransfer({ account }: { account?: string }) {
         </div>
       </DialogContent>
     </Dialog>
-  </>;
+  </div>;
 }

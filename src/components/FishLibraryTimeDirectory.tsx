@@ -20,8 +20,8 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction='inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,items,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onDeleteRecords,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
-  loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string;info:ReactNode;dataActions?:ReactNode;items:FishDirectoryItem[];
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onDeleteRecords,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
+  loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string;info:ReactNode;dataActions?:ReactNode;transferMenu?:(handleExport:()=>void,canExport:boolean)=>ReactNode;items:FishDirectoryItem[];
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
@@ -80,11 +80,17 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     catch(e){setError(e instanceof Error?e.message:'复制失败');}finally{setBusy('');}
   };
   const changeOpen=(value:boolean)=>{selectionEpoch.current++;setOpen(value);onOpenChange?.(value);};
+  const canExport=!!recordCount&&!busy&&!loading&&!loadError;
+  const handleExport=()=>{try{download();setError('');}catch(e){setError(e instanceof Error?e.message:'导出失败');}};
   return <Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
-        <div className="flex flex-wrap items-center gap-1.5 pr-6"><DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo><button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!recordCount||!!busy||loading||!!loadError} onClick={()=>{try{download();setError('');}catch(e){setError(e instanceof Error?e.message:'导出失败');}}}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{recordCount}</span></button></div>
+        <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
+          <DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
+          {transferMenu ? <div className="ml-auto">{transferMenu(handleExport,canExport)}</div> :
+            <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{recordCount}</span></button>}
+        </div>
         <DialogDescription className="text-[11px]">{description}</DialogDescription>
       </DialogHeader>
       <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':'时间目录'}</h3>

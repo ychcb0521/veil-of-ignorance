@@ -9,22 +9,28 @@ vi.mock('@/lib/fish/export',()=>({downloadFishCabin:vi.fn()}));
 const a:TradeSignal={id:'a',symbol:'AAAUSDT',timeMs:1,timeLabel:'',fallbackZone:''},b={...a,id:'b',symbol:'BBBUSDT'},fresh={...a,id:'fresh',symbol:'NEWUSDT',freshCatch:true};
 const panel=(signals:TradeSignal[]) => <FishPanel signals={signals} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={()=>{}} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;
 beforeEach(()=>{vi.clearAllMocks();sessionStorage.clear();localStorage.clear();});
-it('one export entry belongs to the cabin, exports all stored fish despite filters, and hides its export while the cabin is collapsed',()=>{
+it('opens a single cabin data menu and exports all stored fish despite filters',()=>{
  const view=render(panel([a,b,fresh]));
  const cabin=screen.getByTestId('fish-cabin');
  fireEvent.change(within(cabin).getByLabelText('筛选鱼舱信号'),{target:{value:'AAA'}});
  expect(within(cabin).queryByText('BBBUSDT')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'捕捞'}));
- fireEvent.click(within(cabin).getByRole('button',{name:'导出鱼舱数据'}));
+ const menu=within(cabin).getByRole('button',{name:'鱼舱导入导出'});
+ const openMenu=()=>fireEvent.keyDown(menu,{key:'Enter'});
+ expect(screen.queryByRole('menuitem',{name:'导出 Excel'})).toBeNull();
+ openMenu();
+ fireEvent.click(screen.getByRole('menuitem',{name:'导出 Excel'}));
  expect(downloadFishCabin).toHaveBeenLastCalledWith([a,b]);
- fireEvent.click(within(cabin).getByRole('button',{name:/^鱼舱/}));
- expect(within(cabin).queryByRole('button',{name:'导出鱼舱数据'})).toBeNull();expect(downloadFishCabin).toHaveBeenCalledTimes(1);
- fireEvent.click(within(cabin).getByRole('button',{name:/^鱼舱/}));
- fireEvent.click(within(cabin).getByRole('button',{name:'导出鱼舱数据'}));
+ fireEvent.click(within(cabin).getByRole('button',{name:'鱼舱',exact:true}));
+ expect(within(cabin).queryByLabelText('筛选鱼舱信号')).toBeNull();
+ expect(downloadFishCabin).toHaveBeenCalledTimes(1);
+ openMenu();
+ fireEvent.click(screen.getByRole('menuitem',{name:'导出 Excel'}));
  expect(downloadFishCabin).toHaveBeenCalledTimes(2);
- expect(screen.getAllByRole('button',{name:'导出鱼舱数据'})).toHaveLength(1);
+ expect(screen.getAllByRole('button',{name:'鱼舱导入导出'})).toHaveLength(1);
  view.rerender(panel([fresh]));
- expect(within(cabin).getByRole('button',{name:'导出鱼舱数据'})).toBeDisabled();
+ openMenu();
+ expect(screen.getByRole('menuitem',{name:'导出 Excel'})).toHaveAttribute('aria-disabled','true');
 });
 
 it('鱼舱按实际捕捞时间双向排序，旧记录始终排在末尾', () => {

@@ -46,7 +46,10 @@ export function FishMiningLibrary(props:MiningDirectoryProps){
  };
  const items:FishDirectoryItem[]=directories.map(d=>({id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><details className="m-4 text-[11px]"><summary className="cursor-pointer text-muted-foreground">挖掘记录详情</summary><FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} allRecords={library.records} onClose={close}/></details>}));
  return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} renderStudy={renderStudy} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
-  description={`${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`} dataActions={<><FishMiningTransfer key={account} account={account}/>{bulk&&<button type="button" className={libraryDirectoryAction+" text-destructive"} disabled={!!loadError||(!library.records.length&&!library.anchors.length)} onClick={()=>requestDelete(library.records,true)}>清空捕捞库</button>}</>} download={()=>downloadDirectoryTables('捕捞库',directories.map(d=>({id:d.id,study:miningDirectoryStudy(d.records,d.family)})))}
+  description={`${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`}
+  transferMenu={(onExport,canExport)=><FishMiningTransfer key={account} account={account} onExport={onExport} canExport={canExport}/>}
+  dataActions={bulk&&<button type="button" className={libraryDirectoryAction+" text-destructive"} disabled={!!loadError||(!library.records.length&&!library.anchors.length)} onClick={()=>requestDelete(library.records,true)}>清空捕捞库</button>}
+  download={()=>downloadDirectoryTables('捕捞库',directories.map(d=>({id:d.id,study:miningDirectoryStudy(d.records,d.family)})))}
   info={<><p>与监测库共用目录布局和操作，按实际命中的算法大类归档。CDA、BSS、CBI-2 等同系列的门槛、周期和版本放在同一个目录，原始条件和读数分别保留。</p><p>一个记录命中多个系列时，可在对应目录分别查看；原始信号不复制入库。展开后展示组合表，可复制至主组合表，复制前先完整归档当前表。</p>{loadError&&<p role="alert">{loadError}</p>}</>}
   empty={loadError||'暂无挖掘记录。开始批量捕捞后，每一档会自动保存。'}/>;
 }
