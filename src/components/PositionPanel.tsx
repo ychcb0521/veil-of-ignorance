@@ -1055,7 +1055,7 @@ export function PositionPanel({
                 <div className="p-3 space-y-3">
                   {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
                     monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
-                    manual={instant?.manualPositions?.get(position.recordId)} manage={instant?.manage} limitMode={limitMode} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
+                    manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status => status.id === position.id)} manage={instant?.manage} limitMode={limitMode} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
                   {mergedPositions.map((mg) => {
                     const price = priceMap[mg.symbol] || 0;
                     const firstChild = mg.children[0]?.position;

@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Ellipsis, Pause, Play, Settings2, Zap } from 'lucide-react';
+import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue, type InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
 import { activeQualityPlanTemplates } from '@/lib/fish/qualityPlanTemplates';
@@ -96,10 +97,13 @@ const settingsItem = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text
 const focusSettings = (panel: HTMLDivElement | null) => panel?.focus({ preventScroll: true });
 
 export function FishInstantTrading({ state, children }: { state: FishQualityState; children: ReactNode }) {
-  const [settingsView, setSettingsView] = useState<'menu' | 'before' | 'after' | null>(null);
+  const [settingsView, setSettingsView] = useState<'menu' | 'before' | 'after' | 'live' | null>(null);
   const [editingAfter, setEditingAfter] = useState(false);
+  const follow = useScreenedInstantPositions()?.usdtFollow;
+  const [pairCode, setPairCode] = useState('');
+  const [pairIssue, setPairIssue] = useState('');
   const automatic = state.automaticScreening, cda = state.cdaTracking;
-  const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : '即时交易设置';
+  const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : settingsView === 'live' ? '币安 U 本位实盘' : '即时交易设置';
   const closeSettings = () => { setSettingsView(null); setEditingAfter(false); };
   const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
   const pending = automatic?.pending ?? 0;
@@ -110,6 +114,7 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
       <span role="status">{screeningStatus}</span>
+      {follow?.paired && <span role="status">{follow.connected ? follow.paused ? 'U 本位 · 已暂停开仓和加仓' : 'U 本位 · 本机实盘跟随中' : follow.issue || 'U 本位 · 正在连接'}</span>}
       {needsSettings && <span>请先保存买前设置</span>}
       {screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {!!cda?.active && <span>持仓监测中 {cda.active} 条</span>}
@@ -131,7 +136,7 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
       </PopoverTrigger>
       <FishPopoverContent align="start" collisionPadding={12} aria-label={settingsLabel}
         className={settingsView === 'before' ? 'fish-condition-settings screening-settings-popover'
-          : settingsView === 'after' ? (editingAfter ? 'fish-condition-settings' : 'w-80 max-w-[calc(100vw-24px)] p-0') : 'w-32 p-1'}>
+          : settingsView === 'after' ? (editingAfter ? 'fish-condition-settings' : 'w-80 max-w-[calc(100vw-24px)] p-0') : settingsView === 'live' ? 'w-80 max-w-[calc(100vw-24px)] p-3' : 'w-36 p-1'}>
         {settingsView === 'menu' && <>
           <button type="button" className={settingsItem} disabled={!state.ready || !state.preEntry?.ready || !automatic?.saveSettings}
             title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'} onClick={() => setSettingsView('before')}>
@@ -141,7 +146,30 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
             title={state.instantMonitor?.settings?.name ?? '即时交易默认规则'} onClick={() => setSettingsView('after')}>
             <Settings2 aria-hidden className="h-3 w-3"/>买后设置
           </button>
+          {follow && <button type="button" className={settingsItem} onClick={() => { setPairCode(''); setPairIssue(''); setSettingsView('live'); }}>
+            <Zap aria-hidden className="h-3 w-3"/>币安 U 本位
+          </button>}
         </>}
+        {settingsView === 'live' && follow && <div ref={focusSettings} tabIndex={-1} className="space-y-3 text-xs outline-none">
+          <p className="font-medium">币安 U 本位实盘</p>
+          <p role="status" className="text-muted-foreground">{follow.connected
+            ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : '已连接。本机跟随开启后的新即时交易。'
+            : follow.issue || '在 Windows 启动执行端，将它生成的配对码填在这里。'}</p>
+          <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>
+          <form className="flex items-center gap-2" onSubmit={event => {
+            event.preventDefault();
+            try { follow.connect(pairCode); setPairIssue(''); setPairCode(''); }
+            catch (error) { setPairIssue(error instanceof Error ? error.message : '配对失败'); }
+          }}>
+            <input aria-label="本机配对码" type="password" autoComplete="off" spellCheck={false} value={pairCode}
+              onChange={event => setPairCode(event.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1.5"/>
+            <button type="submit" disabled={!pairCode} className="rounded border px-2 py-1.5 disabled:opacity-40">连接</button>
+          </form>
+          {pairIssue && <p role="alert" className="text-destructive">{pairIssue}</p>}
+          {follow.connected && <button type="button" className="rounded border px-2 py-1.5" onClick={follow.paused ? follow.resume : follow.pause}>
+            {follow.paused ? '恢复开仓和加仓' : '暂停开仓和加仓'}
+          </button>}
+        </div>}
         {settingsView === 'before' && automatic?.saveSettings && <div ref={focusSettings} tabIndex={-1} className="outline-none">
           <FishPreEntrySettings state={state} selectedCount={0} done={closeSettings}
             automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>

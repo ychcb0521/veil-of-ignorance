@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useInstantPositionQuote } from '@/hooks/useInstantPositionQuote';
+import type { UsdtFollowStatus } from '@/lib/fish/usdtFollow';
 import type { QualityResult } from '@/lib/fish/quality';
 import type { QualityMirrorFill } from '@/lib/fish/qualityMirror';
 import { instantPositionDisplay, instantPositionValuation, type InstantPositionFill } from '@/lib/fish/instantCampaign';
@@ -25,11 +26,12 @@ const linkClass = 'flex flex-1 items-center justify-center border-r border-borde
 
 const takeoverNotice = '确认后，这笔模拟仓位由手动操作接管。已成交的加减仓保留，原持仓监测停止下单。';
 
-export function InstantPositionRow({ position, mirror, monitor, manual, manage, limitMode = 'unlimited', entryMode, onToggleEntry }: {
+export function InstantPositionRow({ position, mirror, monitor, manual, live, manage, limitMode = 'unlimited', entryMode, onToggleEntry }: {
   position: InstantPositionFill;
   monitor?: QualityResult;
   mirror?: QualityMirrorFill;
   manual?: InstantManualExecution;
+  live?: UsdtFollowStatus;
   manage?: (position: InstantPositionFill, action: InstantManualAction) => Promise<void>;
   limitMode?: PositionLimitMode;
   entryMode: 'entry' | 'breakeven';
@@ -79,6 +81,13 @@ export function InstantPositionRow({ position, mirror, monitor, manual, manage, 
       <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">即时交易 · 模拟</span>
       <span className="text-[10px] text-muted-foreground">{EXCHANGE_NAMES[source.exchange ?? 'binance']}</span>
     </PositionCardHeader>
+    {live && <div data-testid="instant-usdt-follow" className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-2 text-xs text-muted-foreground">
+      <span className="font-medium text-foreground">币安 U 本位 · {live.state === 'tracking' ? '实盘持仓' : live.state === 'closed' ? '实盘已平'
+        : live.state === 'ignored' ? '未跟单' : live.state === 'waiting' ? '等待成交回报' : '待核对'}</span>
+      {live.quantity != null && <span>币安余仓 {live.quantity} {live.asset}</span>}
+      {live.orderId && <span className="font-mono">订单 {live.orderId}</span>}
+      {live.issue && <span role="status">{live.issue}</span>}
+    </div>}
     <PositionCardPnl pnl={held.pnl} roe={held.roe}/>
     <div className={positionDetailsClass}>
       <DetailCell label="持仓数量" value={formatAmount(held.remainingQuantity) + ' ' + symbol.replace(/USDT$/, '')} />

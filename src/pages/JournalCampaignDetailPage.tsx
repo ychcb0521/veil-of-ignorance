@@ -1,3 +1,4 @@
+import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
@@ -943,6 +944,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
   const paperCampaign = isPaperCampaignId(id);
+  const liveFollow = useScreenedInstantPositions()?.usdtFollow;
+  const live = !batchExport && isInstantCampaignId(id) ? liveFollow?.statuses.find(status => status.id === id) : undefined;
   // 计算用 K 线（峰值浮盈、决策准确度、反事实）：详情页始终要；批量导出只在图里画盈亏概览时要。
   const computeKlinesNeeded = !batchExport || batchExport.options.sections.overview !== false;
   // 显示用 K 线（盘面）：详情页始终要；批量导出只在图里画 K 线盘面时要。
@@ -2858,6 +2861,17 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                     <p>{campaign.actual_evolution?.find(event => event.event_type === 'main_fully_closed')?.notes}</p>}
                   {instantSummary.cdaValue != null && <p>CDA 收盘读数 {instantSummary.cdaValue}</p>}
                   <p>保证金 {instantSummary.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</p>
+                  {live && <div data-testid="instant-campaign-live-fills" className="space-y-1 border-t border-border/60 pt-2">
+                    <p className="font-medium text-foreground">币安 U 本位成交回报</p>
+                    {live.issue && <p role="status">{live.issue}</p>}
+                    {live.quantity != null && <p>实盘余仓 {live.quantity} {live.asset} · 已实现 {live.realizedUsdt ?? 0} USDT</p>}
+                    {live.executions?.map(execution => <div key={execution.actionId}>
+                      <p>{execution.side === 'BUY' ? '买入' : '卖出'} · 订单 {execution.orderId}</p>
+                      {execution.fills.map(fill => <p key={fill.id} className="font-mono">
+                        {formatBeijingTime(fill.at)} · {fill.quantity} {live.asset} @ {fill.price} · 手续费 {fill.commission} {fill.commissionAsset}
+                      </p>)}
+                    </div>)}
+                  </div>}
                   {instantOpen ? (
                     <InstantOpenCampaignQuote key={campaign.id} source={instantSummary.source} position={instantOpen}/>
                   ) : (
