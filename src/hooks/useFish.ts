@@ -143,7 +143,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
   }, [userId,reconcile]);
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const hitRateBusy = useRef(false);
-  const start = useCallback(async (settings: FishScanSettings = {}) => {
+  const startWithProgress = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current || hitRateBusy.current) return;
     // 持续挖掘让路：先打断这一档，等取数器空出来（这一档之后原地重扫）
     if (mineController.current) { mineController.current.abort(); await minePromise.current?.catch(() => undefined); if (controller.current || hitRateBusy.current) return; }
@@ -166,7 +166,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     const knownSignals = new Set(signalsRef.current.map(signalDedupKey));
     const valid = () => controller.current === mine && ownerRef.current === owner;
     try {
-      await scanner.current.scan({ ...settings, signal: mine.signal, combinationRef,
+      return await scanner.current.scan({ ...settings, signal: mine.signal, combinationRef,
         onLiveRound: round => { if (valid()) liveRef.current = { round, keys: settings.displayAlgorithmKeys }; },
         onProgress: value => { if (valid()) {captureWindow.current={anchorMs:value.anchorMs??settings.anchorMs,lookbackHours:settings.lookbackHours};progressRef.current=value;setProgress(value);} },
         onSignal: signal => {
@@ -188,10 +188,15 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
         onRound: round => { if (valid()) {roundRef.current = { data: round, mode: combinationRef.current,keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);setRoundPlans(round.plans);} },
       });
     } catch (error) {
-      if (valid()){const next={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};progressRef.current=next;setProgress(next);}
+      if (valid()) {
+        const next = { ...initialFishProgress(), status: 'aborted' as const, error: error instanceof Error ? error.message : String(error) };
+        progressRef.current = next; setProgress(next);
+        return next;
+      }
     } finally { if (controller.current === mine) {controller.current = null;liveRef.current=null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(combinationRef.current,settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
     } }
   }, [commit,persist]);
+  const start = useCallback(async (settings?: FishScanSettings) => { await startWithProgress(settings); }, [startWithProgress]);
   const estimate=useCallback(async(settings:FishScanSettings,signal:AbortSignal)=>{
     scanner.current??=pageScanner??=new FishScanner();
     return typeof scanner.current.estimateMarkets==='function'?scanner.current.estimateMarkets(settings,signal):null;
@@ -339,5 +344,5 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     commit(signalsRef.current.filter(s => s.id !== id));
   }, [commit]);
   const removeMany=useCallback((ids:readonly string[])=>{const selected=new Set(ids),gone=signalsRef.current.filter(s=>selected.has(s.id));if(!gone.length)return;recordFishDeletion(gone,ownerRef.current??null);commit(signalsRef.current.filter(s=>!selected.has(s.id)));},[commit]);
-  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
+  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, startWithProgress, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
 }

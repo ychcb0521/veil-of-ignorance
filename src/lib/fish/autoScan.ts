@@ -13,7 +13,12 @@ const HOURLY_INTERVALS = [0.5, 1, 2, 4, 8, 16, 32, 64] as const;
 export const FISH_AUTO_INTERVALS = [...SHORT_INTERVAL_MINUTES.map(minutes => minutes / 60), ...HOURLY_INTERVALS];
 export const fishAutoIntervalLabel = (hours: number) => hours < 1 ? `每 ${Math.round(hours * 60)} 分钟` : `每 ${hours} 小时`;
 export type FishAutoMode = 'manual' | 'auto';
-export interface FishAutoState { mode: FishAutoMode; hours: number; lastRunAt: number | null }
+export interface FishAutoState {
+  mode: FishAutoMode;
+  hours: number;
+  lastRunAt: number | null;
+  retry?: { anchorMs: number; until: number };
+}
 export type FishAutoSchedule = Pick<FishAutoState, 'mode' | 'hours'>;
 export type FishAccountAutoSchedule = FishAutoSchedule & { intervalMinutes?: typeof SHORT_INTERVAL_MINUTES[number] };
 
@@ -33,6 +38,9 @@ export function readFishAuto(): FishAutoState {
     const x = JSON.parse(readPersistedStateRaw(fishAutoKey()) ?? 'null');
     if (!x) return DEFAULT_FISH_AUTO;
     const state: FishAutoState = { mode: x.mode === 'manual' ? 'manual' : 'auto', hours: (FISH_AUTO_INTERVALS as readonly number[]).includes(x.hours) ? x.hours : 1, lastRunAt: Number.isFinite(x.lastRunAt) ? x.lastRunAt : null };
+    if (Number.isFinite(x.retry?.anchorMs) && x.retry.anchorMs > 0 && Number.isFinite(x.retry.until) && x.retry.until > 0) {
+      state.retry = { anchorMs: x.retry.anchorMs, until: x.retry.until };
+    }
     return state;
   } catch { return DEFAULT_FISH_AUTO; }
 }
@@ -64,12 +72,13 @@ function readFishAutoSchedule(account?: FishAccountAutoSchedule): FishAutoSchedu
 
 /** Restore an explicit local schedule or the latest account schedule when reopening. */
 export function resetFishAuto(): FishAutoState {
-  const state = { ...DEFAULT_FISH_AUTO, ...readFishAutoSchedule(readFishAccountSettings()?.auto), lastRunAt: readFishAuto().lastRunAt };
+  const { lastRunAt, retry } = readFishAuto();
+  const state = { ...DEFAULT_FISH_AUTO, ...readFishAutoSchedule(readFishAccountSettings()?.auto), lastRunAt, retry };
   saveFishAuto(state);
   return state;
 }
 /** 下次自动捕捞的时刻：手动模式没有；自动模式从没捕过就是现在。 */
-export const fishAutoNextAt = (s: FishAutoState): number | null => s.mode !== 'auto' ? null : s.lastRunAt === null ? 0 : s.lastRunAt + s.hours * HOUR;
+export const fishAutoNextAt = (s: FishAutoState): number | null => s.mode !== 'auto' ? null : s.retry ? s.retry.until : s.lastRunAt === null ? 0 : s.lastRunAt + s.hours * HOUR;
 
 /**
  * 同一台电脑开着好几个标签页时，只让一个去捕：谁先拿到「租约」谁捕，租约到期没续就让别人接手。

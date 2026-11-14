@@ -282,8 +282,14 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
       }, signal);
     },signal);}
     catch(error){
-      // 卡住的请求换一个新请求再试（照常计入限频额度）；连续超时才报错
-      if(!(error instanceof FishTimeoutError)||signal.aborted)throw error;
+      if(signal.aborted)throw error;
+      // 浏览器可能隐藏代理连接失败或限频响应。仅对币安连接失败限次重试，仍使用同一出口与请求预算。
+      if (exchange === 'binance' && error instanceof TypeError) {
+        if(attempt>=FISH_TIMEOUT_RETRIES)throw context(path,'连接中断：币安未返回可读取的响应，已重试；恢复后可继续未完成记录');
+        await fishDelay(1000*(attempt+1),signal);
+        return read(url,path,weight,signal,attempt+1);
+      }
+      if(!(error instanceof FishTimeoutError))throw error;
       if(attempt>=FISH_TIMEOUT_RETRIES)throw new FishError(`行情请求连续 ${attempt+1} 次超过 ${FISH_REQUEST_TIMEOUT_MS/1000} 秒未返回（网络不稳），请重试`,'failed',{path});
       await fishDelay(1000*(attempt+1),signal);return read(url,path,weight,signal,attempt+1);
     }
@@ -300,7 +306,7 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
       if(wasProxy&&proxyMissing(error))useProxy=false;
       if(error instanceof BinanceRateLimitError)throw context(path,error.message,error.cooldown.status);
       if(signal.aborted||!(error instanceof TypeError))throw error;
-      if(exchange==='binance'||wasProxy)throw context(path,'浏览器拦截（网络 / 跨域）'+(wasProxy?'；只读代理也未能连接，请检查是否已发布':''));
+      if(wasProxy)throw context(path,'浏览器拦截（网络 / 跨域）；只读代理也未能连接，请检查是否已发布');
       useProxy=true;
       try{return await read(proxyUrl(path),path,weight,signal);}
       catch(proxyError){if(proxyMissing(proxyError)){useProxy=false;throw context(path,`浏览器直连被拦截（网络 / 跨域），${PROXY_MISSING}`,404);}if(signal.aborted||!(proxyError instanceof TypeError))throw proxyError;throw context(path,'浏览器拦截（网络 / 跨域）；只读代理也未能连接，请检查是否已发布');}

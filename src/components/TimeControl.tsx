@@ -167,7 +167,7 @@ export function TimeControl({
   const reconstruction = turing ? turingReconstruction : onlineReconstruction;
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = onlineReconstruction.running || turingReconstruction.running;
-  const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.start, busy: () => fish.busy() || reconstructionRunning.current });
+  const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.startWithProgress, busy: () => fish.busy() || reconstructionRunning.current });
   const fishWasOpen = useRef(false);
   useEffect(() => {
     if (fishOpen && !fishWasOpen.current) {

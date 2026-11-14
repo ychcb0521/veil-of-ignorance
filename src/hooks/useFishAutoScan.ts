@@ -15,16 +15,17 @@ import { loadFishCardsForScan, readFishCombination } from '@/lib/fish/cards';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { readCaptureTurnoverSettings } from '@/lib/fish/turnoverSettings';
 import { fishAutoNextAt, fishAutoScheduleKey, readFishAuto, resetFishAuto, releaseFishAutoLease, saveFishAuto, saveFishAutoSchedule, takeFishAutoLease, type FishAutoMode, type FishAutoSchedule, type FishAutoState } from '@/lib/fish/autoScan';
-import type { FishScanSettings } from '@/lib/fishScanner';
+import type { FishProgress, FishScanSettings } from '@/lib/fishScanner';
+import { readBinanceCooldown } from '@/lib/binanceRateLimit';
 
 const TICK_MS = 30_000, RETRY_MS = 5 * 60_000;
 const online = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 export interface FishAutoScan {
-  mode: FishAutoMode; hours: number; nextAt: number | null; lastRunAt: number | null; error: string; online: boolean; waiting: boolean;
+  mode: FishAutoMode; hours: number; nextAt: number | null; cooldownUntil?: number; lastRunAt: number | null; error: string; online: boolean; waiting: boolean;
   setMode: (mode: FishAutoMode) => void; setHours: (hours: number) => void; noteManualRun: () => void; resetDefaults: () => void;
   setSchedule: (schedule: FishAutoSchedule) => boolean;
 }
-export function useFishAutoScan(o: { account?: string; selection: FishScanSelection; start: (settings: FishScanSettings) => Promise<unknown> | void; busy: () => boolean }): FishAutoScan {
+export function useFishAutoScan(o: { account?: string; selection: FishScanSelection; start: (settings: FishScanSettings) => Promise<FishProgress | void> | void; busy: () => boolean }): FishAutoScan {
   const defs = useFishFeatures();
   const { settings: accountSettings } = useFishAccountSettings();
   const [state, setStateRaw] = useState<FishAutoState>(readFishAuto);
@@ -57,16 +58,33 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
     if (!takeFishAutoLease(owner.current, now)) { setWaiting(true); return; }
     // 另一个标签页刚捕过（租约交接期间）：以本机保存的最新时刻为准
     const saved = readFishAuto();
-    const fresh = { ...s, lastRunAt: Math.max(s.lastRunAt ?? 0, saved.lastRunAt ?? 0) || null };
+    const fresh = { ...s, lastRunAt: Math.max(s.lastRunAt ?? 0, saved.lastRunAt ?? 0) || null, retry: saved.retry };
     if ((fishAutoNextAt(fresh) ?? Infinity) > now) { stateRef.current = fresh; setStateRaw(fresh); releaseFishAutoLease(owner.current); return; }
+    const cooldown = readBinanceCooldown(now);
+    if (cooldown) {
+      setState({ ...fresh, retry: { anchorMs: fresh.retry?.anchorMs ?? now, until: cooldown.until } });
+      releaseFishAutoLease(owner.current);
+      return;
+    }
     const cards = loadFishCardsForScan(defsRef.current.map(d => d.id));
     const turnover = readCaptureTurnoverSettings();
     const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '', lookbackHours: resolveFishCaptureLookback(readFishLookbackPreference(), fresh), turnoverFloors: turnover.enabled ? turnover.floors : [] });
     if (built.error !== undefined) { setError(`自动捕捞没开始：${built.error}`); retryAt.current = now + RETRY_MS; releaseFishAutoLease(owner.current); return; }
     setError(''); setWaiting(false); runningRef.current = true;
-    setState({ ...fresh, lastRunAt: now });
+    const account = latest.current.account;
+    const anchorMs = fresh.retry?.anchorMs;
+    setState({ ...fresh, lastRunAt: now, retry: undefined });
     const renew = setInterval(() => takeFishAutoLease(owner.current, Date.now()), TICK_MS);
-    try { await latest.current.start(built.settings); }
+    try {
+      const result = (await latest.current.start(anchorMs ? { ...built.settings, anchorMs } : built.settings)) || undefined;
+      const cooldown = readBinanceCooldown();
+      const errors = [result?.error, ...Object.values(result?.venues ?? {}).flatMap(venue => [venue.error, venue.skippedReason])];
+      const limited = result?.status !== 'cancelled' && errors.some(message => /币安.*HTTP (?:429|418)\b/.test(message ?? ''));
+      const current = stateRef.current;
+      if (limited && cooldown && latest.current.account === account && current.mode === 'auto' && current.lastRunAt === now) {
+        setState({ ...current, retry: { anchorMs: anchorMs ?? result?.anchorMs ?? now, until: cooldown.until } });
+      }
+    }
     catch (e) { setError(`自动捕捞出错：${e instanceof Error ? e.message : String(e)}`); }
     finally { clearInterval(renew); runningRef.current = false; releaseFishAutoLease(owner.current); }
   }, [setState]);
@@ -83,16 +101,16 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
   // 打开自动模式 / 改间隔后马上看一眼（刚打开自动就会立刻捕第一次）
   useEffect(() => { void tickRef.current(); }, [state.mode, state.hours]);
 
-  const setMode = useCallback((mode: FishAutoMode) => { retryAt.current = 0; setError(''); setState({ ...stateRef.current, mode, ...(mode === 'auto' && stateRef.current.mode !== 'auto' ? { lastRunAt: null } : {}) }); }, [setState]);
+  const setMode = useCallback((mode: FishAutoMode) => { retryAt.current = 0; setError(''); setState({ ...stateRef.current, mode, retry: undefined, ...(mode === 'auto' && stateRef.current.mode !== 'auto' ? { lastRunAt: null } : {}) }); }, [setState]);
   const setHours = useCallback((hours: number) => setState({ ...stateRef.current, hours }), [setState]);
   const setSchedule = useCallback((schedule: FishAutoSchedule) => {
     const saved = saveFishAutoSchedule(schedule);
     retryAt.current = 0;
     setError('');
     const current = stateRef.current;
-    setState({ ...current, ...schedule, lastRunAt: schedule.mode === 'auto' && current.mode !== 'auto' ? null : current.lastRunAt });
+    setState({ ...current, ...schedule, retry: schedule.mode === 'auto' ? current.retry : undefined, lastRunAt: schedule.mode === 'auto' && current.mode !== 'auto' ? null : current.lastRunAt });
     return saved;
   }, [setState]);
-  const noteManualRun = useCallback(() => { if (stateRef.current.mode === 'auto') setState({ ...stateRef.current, lastRunAt: Date.now() }); }, [setState]);
-  return { mode: state.mode, hours: state.hours, nextAt: fishAutoNextAt(state), lastRunAt: state.lastRunAt, error, online: isOnline, waiting, setMode, setHours, setSchedule, noteManualRun, resetDefaults };
+  const noteManualRun = useCallback(() => { if (stateRef.current.mode === 'auto') setState({ ...stateRef.current, lastRunAt: Date.now(), retry: undefined }); }, [setState]);
+  return { mode: state.mode, hours: state.hours, nextAt: fishAutoNextAt(state), cooldownUntil: state.mode === 'auto' ? state.retry?.until : undefined, lastRunAt: state.lastRunAt, error, online: isOnline, waiting, setMode, setHours, setSchedule, noteManualRun, resetDefaults };
 }

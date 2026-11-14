@@ -16,6 +16,8 @@ import {FISH_CAPTURE_TURNOVER_KEY,readCaptureTurnoverSettings} from '@/lib/fish/
 import {saveFishDownwardWick} from '@/lib/fish/downwardWick';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
 import {fishDelay} from '@/lib/fish/shared';
+import {initialFishProgress, type FishScanSettings} from '@/lib/fishScanner';
+import {noteBinanceRateLimit} from '@/lib/binanceRateLimit';
 const HOUR=3_600_000,selection={exchanges:['binance' as const],includeDuplicates:false};
 let online=true;
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();online=true;vi.spyOn(navigator,'onLine','get').mockImplementation(()=>online);vi.useFakeTimers({shouldAdvanceTime:false});vi.setSystemTime(Date.UTC(2026,9,21,0,0));});
@@ -182,4 +184,29 @@ it.each([5,15] as const)('uses the chosen %s minute interval after reopening and
   expect(reopened.start).toHaveBeenCalledOnce();
   expect(reopened.view.result.current.hours).toBe(minutes/60);
   expect(reopened.start.mock.calls[0][0]).toMatchObject({lookbackHours:minutes/60});
+});
+
+it('waits through a real capture cooldown, preserves the missed window across mounts and then resumes the normal cadence', async () => {
+ const anchor = Date.now();
+ const start = vi.fn(async (_settings: FishScanSettings) => {
+  if (start.mock.calls.length === 1) {
+   noteBinanceRateLimit(new Response('{}', {status: 429, headers: {'Retry-After': '90'}}));
+   return {...initialFishProgress(), status: 'aborted' as const, error: '币安 HTTP 429'};
+  }
+  return {...initialFishProgress(), status: 'complete' as const};
+ });
+ const a = renderHook(() => useFishAutoScan({account: 'a', selection, start, busy: () => false}));
+ await flush();
+ expect(start).toHaveBeenCalledTimes(1);
+ expect(a.result.current.cooldownUntil).toBe(anchor + 90_000);
+ expect(readFishAuto().retry).toEqual({anchorMs: anchor, until: anchor + 90_000});
+ a.unmount();
+ const b = renderHook(() => useFishAutoScan({account: 'a', selection, start, busy: () => false}));
+ await flush(89_999);
+ expect(start).toHaveBeenCalledTimes(1);
+ await flush(1);
+ expect(start).toHaveBeenCalledTimes(2);
+ expect(start.mock.calls[1][0]).toMatchObject({anchorMs: anchor});
+ expect(readFishAuto().retry).toBeUndefined();
+ expect(b.result.current.nextAt).toBe(anchor + 90_000 + HOUR);
 });

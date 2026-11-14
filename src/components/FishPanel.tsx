@@ -431,7 +431,7 @@ export function FishPanel(p: FishPanelProps) {
           <Settings aria-hidden className="h-3.5 w-3.5"/>捕捞设置
           <ChevronDown aria-hidden className={`h-3 w-3 transition-transform ${open.settings ? 'rotate-180' : ''}`}/>
         </button>
-        {p.auto?.mode === 'auto' && <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>}
+        {p.auto?.mode === 'auto' && <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.cooldownUntil&&p.auto.cooldownUntil>Date.now()?`币安限频 · ${formatUTC8(p.auto.cooldownUntil).slice(11,19)} 后补扫`:p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>}
         {x && <div className="inline-flex shrink-0 items-center gap-1.5">
           <p role="status" aria-live="polite" className="inline-flex items-center gap-1.5 whitespace-nowrap" data-testid="fish-status" title={[
             ...(x.lookbackHours !== undefined ? [`本轮覆盖过去 ${coverageText(x.lookbackHours)}${x.counts.outside ? `，${x.counts.outside} 个起点超出范围` : ''}`] : []),

@@ -480,8 +480,10 @@ function ResultCell({ plan, result, onClick, section, onOpenCampaign }: { plan: 
     return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title={title}>{content}</Link> : <a href={href} className={className} title={title}>{content}</a>;
   }
   if (result?.status === 'error') {
-    const limited=/(?:HTTP|API)\s*(?:429|418)\b/.test(result.reason??'');
-    return <button type="button" onClick={onClick} className={className} title={result.reason}>{content}<span className={'col-span-4 max-w-80 whitespace-normal text-[10px] '+(limited?'text-muted-foreground':'text-destructive')} data-testid={limited?'quality-monitor-rate-wait':'quality-monitor-error'}>{limited?'行情限流 · 待续跑；点击监测按钮继续未完成项':'未完成：'+(result.reason||'行情读取失败，请重试')}</span></button>;
+    const limited = /(?:HTTP|API)\s*(?:429|418)\b/.test(result.reason ?? '');
+    const disconnected = /币安.*(?:连接中断|浏览器拦截)/.test(result.reason ?? '');
+    const errorText = limited ? '行情限流 · 待续跑' : disconnected ? '币安行情连接中断 · 可继续监测' : '未完成：' + (result.reason || '行情读取失败，请重试');
+    return <button type="button" onClick={onClick} className={className} title={result.reason}>{content}<span className={'col-span-4 max-w-80 whitespace-normal text-[10px] '+(limited?'text-muted-foreground':'text-destructive')} data-testid={limited?'quality-monitor-rate-wait':'quality-monitor-error'}>{errorText}</span></button>;
   }
   return <button type="button" className={className} onClick={onClick} title={result?.reason ? `${qualityStaticDrawdownReason(result)}\n${summary}` : summary}>{content}</button>;
 }

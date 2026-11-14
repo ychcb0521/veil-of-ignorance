@@ -64,3 +64,30 @@ it('a real holding run preserves completed results, waits on 429, and completes 
  expect(results).toHaveLength(1);expect(results[0]).toMatchObject({sampleId:qualityRunSamples(study)[1].id,status:'closed'});expect(progress.mock.calls.at(-1)![0]).toMatchObject({done:2,total:2});
  expect(fetcher.mock.calls.every(([u])=>!String(u).includes('DONEUSDT'))).toBe(true);expect(study).toEqual(before);expect(study.results[0]).toEqual(saved);
 });
+
+it('retries the same holding window after a browser connection failure and preserves existing results', async () => {
+ const {study, saved}=monitorFixture();
+ const results: QualityResult[]=[];
+ const candleRequests: string[]=[];
+ const fetcher=vi.fn(async (input: RequestInfo | URL) => {
+  const url=new URL(String(input));
+  if(url.pathname.endsWith('/time')) return new Response(JSON.stringify({serverTime:T+10*M}));
+  candleRequests.push(String(input));
+  if(candleRequests.length===1) throw new TypeError('Failed to fetch');
+  const rows=[];
+  const first=Number(url.searchParams.get('startTime')), last=Number(url.searchParams.get('endTime'));
+  for(let t=first;t<=last;t+=M) rows.push([t,100,101,99,100,1,t+M-1,100,1,.5,50,0]);
+  return new Response(JSON.stringify(rows));
+ });
+ const run=new FishScanner(fetcher).quality({study,task:'monitor',signal:new AbortController().signal,onResult:r=>results.push(r),onProgress:()=>{}});
+ await vi.advanceTimersByTimeAsync(999);
+ expect(results).toHaveLength(0);
+ expect(candleRequests).toHaveLength(1);
+ await vi.advanceTimersByTimeAsync(100);
+ await run;
+ expect(candleRequests[1]).toBe(candleRequests[0]);
+ expect(candleRequests.every(url=>!url.includes('DONEUSDT'))).toBe(true);
+ expect(results).toHaveLength(1);
+ expect(results[0]).toMatchObject({status:'closed'});
+ expect(study.results).toEqual([saved]);
+});
