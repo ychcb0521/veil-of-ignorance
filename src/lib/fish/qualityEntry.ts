@@ -39,7 +39,7 @@ export async function readQualityMetricAt(source: TradeSignal, snapshot: FishSna
   if (signal.aborted) throw new DOMException('已取消','AbortError');
   if (from<cut) validateFishBars(history,cut,(cut-from)/plan.step,plan.step);
   let bars=history,at=cut;
-  if(!closed&&cut<minute){
+  if(!closed&&cut<minute&&(mode !== 'signal' || !load.turingInitialization || from<=cut)){
     const minutes=await load(row,cut,minute,minuteTransport(plan),signal);
     if (signal.aborted) throw new DOMException('已取消','AbortError');
     validateFishBars(minutes,minute,(minute-cut)/60000,60000);

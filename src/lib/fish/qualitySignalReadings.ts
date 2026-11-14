@@ -7,16 +7,23 @@ import { DBL5_DEF, definitionKey } from '../deepDig/features';
 import { dbl5GuardVersion, dbl5Parameters } from '../dbl5m';
 import { createGuardDistanceReader, guardDistanceSignalChoice } from './qualityGuardDistance';
 import { qualityDefinition } from './quality';
-import type { QualityBuyFilter, QualityFilterReading, QualityRunOptions, QualitySample } from './quality';
+import type { FishQualityStudy, QualityBuyFilter, QualityFilterReading, QualityRunOptions, QualitySample } from './quality';
 import type { FishReconstructionLoader } from './reconstruction';
+import { withTuringInitialization } from './qualityInitialization';
 
-export type QualitySignalMetric = Pick<QualityBuyFilter, 'id' | 'label' | 'metric' | 'snapshot'>;
+export type QualitySignalMetric = Pick<QualityBuyFilter, 'id' | 'label' | 'metric' | 'snapshot' | 'initialization'>;
+export function activeSignalMetrics(study: FishQualityStudy): QualitySignalMetric[] {
+  const saved = study.independentFilters ? study.turingStaticSettings : undefined;
+  return saved?.active && saved.plan.staticFilter
+    ? saved.plan.staticFilter.metrics.map(metric => ({ ...metric, initialization: saved.plan.initialization }))
+    : study.signalMetrics ?? [];
+}
 export interface QualitySignalReadingBatch {
   metric: QualitySignalMetric;
   rows: readonly QualitySample[];
 }
 export const signalReadingKey = (row: QualitySample, metric: QualitySignalMetric) =>
-  'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id]));
+  'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id, ...(metric.initialization ? [metric.initialization] : [])]));
 
 export function signalReadingCell(row: QualitySample, metric: QualitySignalMetric, readings: ReadonlyMap<string, QualityFilterReading>) {
   const reading = readings.get(signalReadingKey(row,metric));
@@ -42,6 +49,9 @@ export async function collectQualitySignalReadings(options: QualityRunOptions, l
     let reading: QualityFilterReading;
     try {
       const time = qualitySignalTime(row.source);
+      const availableStart = metric.initialization ? await options.marketStart?.(row.source.symbol) : undefined;
+      const initialized: FishReconstructionLoader = metric.initialization
+        ? withTuringInitialization(load, row.source.symbol, availableStart ?? NaN) : load;
       const guard = guardDistanceSignalChoice(metric.snapshot.featureId, metric.metric);
       if (guard) {
         if (!Number.isFinite(time) || time <= 0) throw Error('缺少有效信号时间');
@@ -50,13 +60,13 @@ export async function collectQualitySignalReadings(options: QualityRunOptions, l
         if (!saved || dbl5GuardVersion(saved) !== guard.version || definitionKey({...DBL5_DEF, DBL5_config:saved}) !== metric.snapshot.definitionKey) {
           throw Error('防守线距离的冻结版本或参数不符，请保留原读数');
         }
-        const availableStart = await options.marketStart?.(row.source.symbol);
-        const read = createGuardDistanceReader(dbl5Parameters(saved), {row:{...row.source,timeMs:now},start:time,load,signal}, availableStart);
+        const guardStart = metric.initialization ? availableStart : await options.marketStart?.(row.source.symbol);
+        const read = createGuardDistanceReader(dbl5Parameters(saved), {row:{...row.source,timeMs:now},start:time,load:initialized,signal}, guardStart);
         const result = await read(time);
         reading = 'pending' in result ? {key,error:result.pending}
           : Number.isFinite(result.multiple) ? {key,value:result.multiple,at:result.at} : {key,error:'ATR 倍数无有效读数'};
       } else {
-        const result = await readQualityMetricAt(row.source,metric.snapshot,metric.metric,time,'signal',load,now,signal,'信号');
+        const result = await readQualityMetricAt(row.source,metric.snapshot,metric.metric,time,'signal',initialized,now,signal,'信号');
         reading = result.initializing ? {key,error:'等待指标初始化'} : {key,value:result.value,at:result.at};
       }
     } catch (error) {

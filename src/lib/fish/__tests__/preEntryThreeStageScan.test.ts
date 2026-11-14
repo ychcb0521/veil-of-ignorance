@@ -9,6 +9,7 @@ import { withTuringInitialization } from '../qualityInitialization';
 import { defaultEntryStallTurn } from '../preEntryStallTurn';
 import { sample as dblBars } from '@/lib/__tests__/fixtures/dblBars';
 import { ADDITION_VETO_DEFAULTS, guardDistanceConfig } from '../qualityAdditionVeto';
+import { createTuringPreEntryPlan } from '../qualityTuringPlan';
 
 const mocked=vi.hoisted(()=>({events:[] as number[],broken:[] as number[]}));
 vi.mock('../preEntryGuardEvent',async original=>{
@@ -37,6 +38,23 @@ async function run(p:QualityGroup,options:{load?:FishReconstructionLoader;old?:P
 beforeEach(()=>{mocked.events=[T+5*M,T+10*M];mocked.broken=[];});
 function retryPlan(){const p=plan();p.preEntryThreeStage=retryPreEntryThreeStage(p.preEntryThreeStage!);return p;}
 function stateOnlyPlan(){const p=retryPlan();p.preEntryThreeStage!.admission={guardEnabled:false,algorithms:[condition('状态 S',.8,'>','raw=C/100')]};return p;}
+it('waits at the archive origin and starts a 5-minute intrabar indicator at its first complete period', async () => {
+ const old=stateOnlyPlan();
+ old.preEntryThreeStage=signalAnchoredPreEntryThreeStage(old.preEntryThreeStage!);
+ old.preEntryThreeStage.steps!.admission=false;
+ old.preEntryThreeStage.requiredPaths={static:true,tracking:true};
+ old.preEntryThreeStage.required=[{...condition('必要条件',80),snapshot:snapshot('raw=C','5m')}];
+ const plan=createTuringPreEntryPlan(old,[],'turing'),start=T+M;
+ const initial: PreEntryRecord = {id:'r',roundId:'round',planId:plan.id,sample:{...sample,enteredAt:start,source:{...sample.source,timeMs:start}},
+  status:'queued',startTime:start,cursor:start,readings:[],updatedAt:T};
+ const read=loader();
+ const bounded: FishReconstructionLoader = async(row,from,to,program,signal)=>{
+  expect(from).toBeGreaterThanOrEqual(start);
+  return read(row,from,to,program,signal);
+ };
+ const result=await run(plan,{start,old:initial,load:bounded});
+ expect(result).toMatchObject({status:'matched',matchedAt:T+6*M,signalGate:{status:'pending'}});
+});
 it('keeps an automatic catch queued at the live boundary and admits on the later closed minute',async()=>{
  const p=stateOnlyPlan();
  p.preEntryThreeStage=signalGatePreEntryThreeStage(p.preEntryThreeStage!);

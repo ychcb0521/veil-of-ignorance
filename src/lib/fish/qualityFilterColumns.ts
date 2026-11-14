@@ -8,7 +8,7 @@ export function qualityFilterColumns(study: FishQualityStudy): QualityFilterColu
   const columns = new Map<string, QualityFilterColumn>();
   const sources = study.independentFilters ? [{label:'',filters:activeStandaloneBuyFilters(study)}] : (study.sellPlans ?? []).map(plan=>({label:plan.label,filters:activeBuyFilters(study,plan)}));
   for (const plan of sources) for (const filter of plan.filters) {
-    const id = JSON.stringify([filter.snapshot.definitionKey, filter.metric, filter.snapshot.interval, filter.direction, filter.threshold]);
+    const id = JSON.stringify([filter.snapshot.definitionKey, filter.metric, filter.snapshot.interval, filter.direction, filter.threshold, ...(filter.initialization ? [filter.initialization] : [])]);
     const previous = columns.get(id);
     if (previous) { if (plan.label && !previous.plans.includes(plan.label)) previous.plans.push(plan.label); }
     else columns.set(id, { id, filter, plans: plan.label ? [plan.label] : [] });

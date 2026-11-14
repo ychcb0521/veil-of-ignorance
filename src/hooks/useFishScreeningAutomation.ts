@@ -4,6 +4,7 @@ import { fishNotifyMissing } from '@/lib/fish/notify';
 import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { FISH_AUTOMATIC_SCREENING_KEY, readAutomaticScreeningSettings, selectedPreEntryPlan } from '@/lib/fish/preEntryActivePlan';
+import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
 import { isAutomaticPreEntryRound, type PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { isScreeningJob, readLocalScreeningQueue, readLocalScreeningValue, readScreeningQueue, readScreeningValue,
   screeningQueueJobKey, screeningQueuePrefix, writeScreeningQueueValue, type ScreeningJob as Job, type ScreeningQueueValue } from '@/lib/fish/screeningQueue';
@@ -53,6 +54,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     if (!owner) throw Error('请先登录后保存筛选鱼条件');
     if (!Number.isFinite(hours) || hours <= 0 || hours > 8784) throw Error('单标的筛选时限须大于 0 且不超过 8784 小时');
     if (plans.length !== 1 || !plans[0].preEntryThreeStage) throw Error('请保存一套三阶筛选方案');
+    if (plans[0].initialization === TURING_SCREENING_INITIALIZATION_VERSION) throw Error('图灵杯方案适用于手动回放，请为新鱼选择常规筛选方案');
     validatePreEntryThreeStage(plans[0].preEntryThreeStage);
     const previous = readAutomaticScreeningSettings(owner);
     const frozen = structuredClone(freezeSavedPlans(previous?.plans, plans));

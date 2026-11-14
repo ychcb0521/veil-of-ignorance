@@ -88,7 +88,9 @@ export const qualityPlanFromTemplate = (template: QualityPlanTemplate & { plan: 
 
 /** 模板列表里的一行摘要（各项参数仍以新建后的设置界面为准）。 */
 export function qualityPlanTemplateSummary(plan: QualityGroup): string {
-  if(plan.preEntryThreeStage){const c=plan.preEntryThreeStage;return `三阶筛选 · 必要条件 ${c.required.filter(f=>f.enabled).length} 项 · 原生防守线 · 排除条件 ${c.additionVetoes.filter(v=>v.enabled).length+c.sellRules.filter(r=>r.enabled).length+c.hardVetoes.filter(v=>v.enabled).length} 项`;}
+  const scope = plan.initialization ? '图灵杯专用 · ' : '';
+  if (plan.staticFilter) return `${scope}买前过滤 ${plan.staticFilter.filters.filter(filter=>filter.enabled).length} 项 · 信号时点读数 ${plan.staticFilter.metrics.length} 项`;
+  if(plan.preEntryThreeStage){const c=plan.preEntryThreeStage;return `${scope}三阶筛选 · 必要条件 ${c.required.filter(f=>f.enabled).length} 项 · 原生防守线 · 排除条件 ${c.additionVetoes.filter(v=>v.enabled).length+c.sellRules.filter(r=>r.enabled).length+c.hardVetoes.filter(v=>v.enabled).length} 项`;}
   if(plan.router)return routerTemplateSummary(plan.router);
   const sell = plan.combo && plan.rule ? `${qualityExitAlgorithmLabel(plan.rule,plan.combo.beforeLabel)} ${qualityExitThresholdText(plan.rule)} → 涨 ${plan.combo.switchPct}% 后 ${qualityExitAlgorithmLabel(plan.combo.after.rule,plan.combo.after.label)} ${qualityExitThresholdText(plan.combo.after.rule)}`
     : plan.rule ? `${qualityExitAlgorithmLabel(plan.rule,plan.snapshot.featureShort ?? plan.label)} ${qualityExitThresholdText(plan.rule)}` : '无普通卖出门槛';

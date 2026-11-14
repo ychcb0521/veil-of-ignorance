@@ -45,6 +45,7 @@ export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; 
 export interface QualityGroup {
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
   preEntryConditions?: import('./preEntryConditions').PreEntryConditions;
+  staticFilter?: import('./qualityStaticFilterPlan').QualityStaticFilter;
   initialization?: import('./qualityInitialization').QualityInitialization;
   advantage?: import('./qualityAdvantage').QualityAdvantageRule;
   id: string; label: string; metric: string; snapshot: FishSnapshot; rule?: QualityExitRule;
@@ -142,7 +143,7 @@ export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'sta
  * 【用户要求】2026-10-26「在比较卖出的时候，再增加一些买入的过滤机制，比如只有符合状态S大于0.7才买入（选择权给我）」
  * 买入过滤：全部启用的条件都满足才买入；读数取买入时刻之前最后一根已收盘的 K 线（不看买入之后）。
  */
-export interface QualityBuyFilter { id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot }
+export interface QualityBuyFilter { id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot; initialization?: QualityGroup['initialization'] }
 /** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
@@ -183,6 +184,7 @@ export interface FishQualityStudy {
   workspaceFilterDraftUpdatedAt?: number;
   signalMetrics?: import('./qualitySignalReadings').QualitySignalMetric[];
   signalMetricsUpdatedAt?: number;
+  turingStaticSettings?: import('./qualityStaticFilterPlan').TuringStaticSettings;
   signalReadings?: QualityFilterReading[];
   /** New workflow: filters are standalone experiments and never gate sell monitoring. */
   independentFilters?: true;
@@ -531,7 +533,7 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
   ].map(v => ({ ...v, label: `${v.label}（${v.rule.direction} ${v.rule.threshold}）` }));
 }
 
-export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval]));
+export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval, ...(f.initialization ? [f.initialization] : [])]));
 /** 某套卖出方案的买入过滤（含停用的）；方案没单独设过时沿用旧版本的全局过滤。 */
 export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => study.independentFilters ? [] : plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
 /** 某套卖出方案启用中的买入过滤。 */
@@ -549,7 +551,13 @@ export function standaloneBuyFilters(study: FishQualityStudy): QualityBuyFilter[
   }
   return [...filters.values()];
 }
-export const activeStandaloneBuyFilters = (study: FishQualityStudy) => standaloneBuyFilters(study).filter(f => f.enabled && Number.isFinite(f.threshold));
+export const activeStandaloneBuyFilters = (study: FishQualityStudy) => {
+  const saved = study.independentFilters ? study.turingStaticSettings : undefined;
+  const filters = saved?.active && saved.plan.staticFilter
+    ? saved.plan.staticFilter.filters.map(filter => ({ ...filter, initialization: saved.plan.initialization }))
+    : standaloneBuyFilters(study);
+  return filters.filter(f => f.enabled && Number.isFinite(f.threshold));
+};
 /** Call after archiving legacy trials. Re-running migration never overwrites later independent edits. */
 export function separateQualityFilters(study: FishQualityStudy): FishQualityStudy {
   if (study.independentFilters) return study;
@@ -585,10 +593,16 @@ function filterStatusForConditions(row: QualitySample, filters: readonly Quality
   return { state: error ? 'error' : fail ? 'fail' : pending ? 'pending' : 'pass', detail: parts.join('；') };
 }
 /** 买入时刻之前最后一根已收盘 K 线上的读数（原值，倍率 1）。 */
-export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFilter, now: number, load: FishReconstructionLoader, signal: AbortSignal): Promise<QualityFilterReading> {
+export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFilter, now: number, load: FishReconstructionLoader, signal: AbortSignal, marketStart?: QualityRunOptions['marketStart']): Promise<QualityFilterReading> {
   const key = qualityFilterReadingKey(row, f);
   if (!row.enteredAt) return { key, error: '缺少有效买入时间' };
   try {
+    if (f.initialization) {
+      const initialized = withTuringInitialization(load, row.source.symbol, await marketStart?.(row.source.symbol) ?? NaN);
+      const { readQualityMetricAt } = await import('./qualityEntry');
+      const reading = await readQualityMetricAt(row.source, f.snapshot, f.metric, row.enteredAt, 'closed', initialized, now, signal, '买入');
+      return reading.initializing ? { key, error: '买入时刻等待指标初始化' } : { key, value: reading.value, at: reading.at };
+    }
     const { plan, scale } = qualityMetricPlan(f.snapshot, f.metric);
     const cut = Math.floor(row.enteredAt / plan.step) * plan.step, from = qualityHistoryFrom(load, cut - (plan.warm + 1) * plan.step, plan.step);
     if (from < 0) return { key, error: '公式预热所需历史不足' };
@@ -937,6 +951,10 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   if(options.task==='entry'){const {collectQualityEntry}=await import('./qualityEntry');await collectQualityEntry(options.entryTargets??[],load,now,options.signal,r=>options.onEntryReading?.(r),options.onProgress);return;}
   if(options.task==='post-exit'){const {collectQualityPostExit}=await import('./qualityPostExit');await collectQualityPostExit(options.postExitTargets??[],load,now,options.signal,r=>options.onPostExitReading?.(r),options.onProgress,options.study.postExitReadings);return;}
   if (options.study.independentFilters && (options.task === 'filter' || options.mode === 'filter-only' || options.task !== 'monitor' && onlyQualityFilters(options.study))) {
+    if (options.study.turingStaticSettings?.active) {
+      const { validateTuringStaticFilterPlan } = await import('./qualityStaticFilterPlan');
+      validateTuringStaticFilterPlan(options.study.turingStaticSettings.plan);
+    }
     const {study,signal} = options, filters = activeStandaloneBuyFilters(study);
     const rows = new Map(qualityRunSamples(study).map(row => [row.id,row]));
     const total = rows.size, readings = new Map((study.filterReadings ?? []).filter(r => !r.error && Number.isFinite(r.value)).map(r=>[r.key,r]));
@@ -949,7 +967,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
       for (const f of filters) {
         const key = qualityFilterReadingKey(row,f);
         if (readings.has(key)) continue;
-        const reading = await evaluateQualityFilter(row,f,now,load,signal);
+        const reading = await evaluateQualityFilter(row,f,now,load,signal,options.marketStart);
         abort(signal); readings.set(key,reading); options.onFilterReading?.(reading);
       }
       if (filterStatusForConditions(row, filters, readings).state === 'pass') matched++;

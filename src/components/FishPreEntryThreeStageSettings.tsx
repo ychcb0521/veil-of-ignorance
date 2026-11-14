@@ -21,6 +21,8 @@ import { planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { defaultEntryStallTurn5m } from '@/lib/fish/preEntryStallTurn5m';
 import { additionMetricTime, withMetricSnapshotTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
+import { createTuringPreEntryPlan, validateTuringPreEntryPlan } from '@/lib/fish/qualityTuringPlan';
+import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
 
 const field='min-w-0 rounded border border-border/60 bg-background px-2';
 const button='screening-button disabled:opacity-40';
@@ -45,7 +47,14 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const contentId=useId();
   const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
-  const [initialSettings] = useState(() => automatic?.settings ?? monitor.library.settings);
+  const [initialSettings] = useState(() => {
+    const current = automatic?.settings ?? monitor.library.settings;
+    if (automatic && selectedPreEntryPlan(current?.plans)?.initialization === TURING_SCREENING_INITIALIZATION_VERSION) {
+      return (monitor.library.settingsHistory ?? []).slice().reverse().find(settings =>
+        selectedPreEntryPlan(settings.plans)?.preEntryThreeStage && !selectedPreEntryPlan(settings.plans)?.initialization);
+    }
+    return current;
+  });
   const [plans,setPlans]=useState<QualityGroup[]>(()=>{
     const chosen=selectedPreEntryPlan(initialSettings?.plans);
     if (chosen && (!automatic || chosen.preEntryThreeStage && (automatic.settings || !planVersionChanges(chosen).length))) {
@@ -64,6 +73,13 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const [metricTimes,setMetricTimes]=useState<Record<string,AdditionMetricTime>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
+  const savedSettings = monitor.library.settings;
+  const savedDraft = !!active && savedSettings?.plans.some(plan => plan.id === active.id && JSON.stringify(plan) === JSON.stringify(active))
+    && !Object.keys(vetoDrafts).length && !Object.keys(hardDrafts).length && !Object.keys(metricTimes).length
+    && Number(hours) === savedSettings.hours;
+  const otherSettings = !automatic && savedSettings && [savedSettings,...(monitor.library.settingsHistory ?? []).slice().reverse()].find(settings =>
+    selectedPreEntryPlan(settings.plans)?.preEntryThreeStage &&
+    !!selectedPreEntryPlan(settings.plans)?.initialization !== !!active?.initialization);
   const retry=c?.observationBasis==='retry-origin-v2';
   const signalGate=usesSignalTimeGate(c?.version), trackedGate=usesTrackedGate(c?.version), steps=c?.steps;
   const signalAnchored = c?.version === PRE_ENTRY_SIGNAL_ANCHOR_VERSION;
@@ -72,6 +88,12 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
+  const usePlan = (plan: QualityGroup, duration?: number) => {
+    onUseTemplate?.();
+    setPlans([plan]); setActiveId(plan.id);
+    if (duration != null) setHours(String(duration));
+    setVetoDrafts({}); setHardDrafts({}); setMetricTimes({});
+  };
   const applyConditionTime=(condition:EntryMarketCondition)=>withMetricSnapshotTime(condition,metricTimes[condition.id]);
   const applyExpressionTimes=(expression:EntryMarketExpression):EntryMarketExpression=>'condition' in expression
     ? {condition:applyConditionTime(expression.condition)}
@@ -122,7 +144,10 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
       const current=p.preEntryThreeStage!;
       const config={...applyTimes(current),additionVetoes:vetoDrafts[p.id]?parseAdditionVetoDraft(vetoDrafts[p.id]):current.additionVetoes,hardVetoes:hardDrafts[p.id]?parseHoldingVetoDraft(hardDrafts[p.id],definitions):current.hardVetoes};
       if(!p.label.trim())throw Error('请填写方案名称');
-      validatePreEntryThreeStage(config);return {...p,preEntryThreeStage:config};
+      validatePreEntryThreeStage(config);
+      const nextPlan = { ...p, preEntryThreeStage:config };
+      validateTuringPreEntryPlan(nextPlan);
+      return nextPlan;
     });
     if (automatic) {
       setSavingAutomatic(true);
@@ -177,10 +202,18 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   };
   return <div className="screening-settings" data-testid="pre-entry-three-stage-settings">
     <div className="screening-header"><div><h3 className="screening-title">{automatic ? '筛选鱼条件' : '动态筛选条件'}</h3><p className="screening-subtitle">{automatic ? '保存后用于后续捕到的新鱼' : '三阶准入 · 按首次满足时间入选'}</p></div><div className="screening-template-actions">
-      {!automatic&&active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate||!state.ready?'模板尚未恢复':!monitor.ready?'筛选库尚未读取完成':!monitor.library.settings?.plans.some(p=>p.id===active.id&&JSON.stringify(p)===JSON.stringify(active))||Object.keys(vetoDrafts).length>0||Object.keys(hardDrafts).length>0||Number(hours)!==monitor.library.settings?.hours?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
-      <TemplatePicker purpose="entry" plans={plans} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>{const next=qualityPlanFromTemplate(template,id());onUseTemplate?.();setPlans([next]);setActiveId(next.id);if(template.entryHours!=null)setHours(String(template.entryHours));setVetoDrafts({});setHardDrafts({});}}/>
+      {!automatic && active && !active.initialization && <button type="button" className={button}
+        title={savedDraft ? '从图灵杯首根完整 K 线初始化；适用图灵杯标的' : '请先保存当前三阶方案'}
+        disabled={!state.ready || !monitor.ready || !savedDraft}
+        onClick={()=>guardAction(()=>usePlan(createTuringPreEntryPlan(active, definitions, id())))}>图灵杯副本</button>}
+      {otherSettings && <button type="button" className={button} disabled={!state.ready || !monitor.ready}
+        onClick={()=>guardAction(()=>{ const plan = structuredClone(selectedPreEntryPlan(otherSettings.plans)!); if (planVersionChanges(plan).length) throw Error('该方案的冻结版本不符'); usePlan(plan, otherSettings.hours); })}>
+        {active?.initialization ? '载入常规方案' : '载入已存图灵杯方案'}
+      </button>}
+      {!automatic&&active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate||!state.ready?'模板尚未恢复':!monitor.ready?'筛选库尚未读取完成':!savedDraft?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
+      <TemplatePicker purpose="entry" allowTuring={!automatic} plans={plans} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>guardAction(()=>usePlan(qualityPlanFromTemplate(template,id()),template.entryHours))}/>
     </div></div>
-    {!active&&!!initialSettings?.plans.length&&<label className="block text-[11px]">{automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'}<select aria-label={automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'} className={field+' mt-1 w-full'} value="" onChange={e=>{
+    {!active&&!!initialSettings?.plans.some(plan=>!automatic || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)&&<label className="block text-[11px]">{automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'}<select aria-label={automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'} className={field+' mt-1 w-full'} value="" onChange={e=>{
       const saved=initialSettings.plans.find(p=>p.id===e.target.value);
       if (saved) {
         if (automatic && planVersionChanges(saved).length) {
@@ -191,8 +224,9 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
         const copy=copyAsThreeStage(saved), plan=automatic?{...copy,id:id()}:copy;
         setPlans([plan]);setActiveId(plan.id);
       }
-    }}><option value="">请选择已保存方案</option>{initialSettings.plans.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
+    }}><option value="">请选择已保存方案</option>{initialSettings.plans.filter(plan=>!automatic || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION).map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>}
     {active&&c&&<>
+      {active.initialization && <p className="mt-2 text-muted-foreground">图灵杯专用 v1 · 从首根完整 K 线初始化，指标未就绪时等待读数。</p>}
       <div className="screening-basics">
         <label className="screening-form-label">方案名称<input className={field+' w-full'} aria-label="三阶方案名称" value={active.label} onChange={e=>setPlans(plans.map(p=>p.id===active.id?{...p,label:e.target.value}:p))}/></label>
         <label className="screening-form-label">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>

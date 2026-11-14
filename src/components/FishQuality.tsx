@@ -62,7 +62,10 @@ import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { shortFishHash } from '@/lib/fish/algorithm';
 import { qualityResultMap, qualityRowResult } from '@/lib/fish/qualityComparison';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/lib/fish/qualityFilterColumns';
-import { signalReadingCell, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
+import { activeSignalMetrics, signalReadingCell, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
+import { createStaticFilterPlan, createTuringStaticFilterPlan } from '@/lib/fish/qualityStaticFilterPlan';
+import { activeQualityPlanTemplates, qualityPlanFromTemplate } from '@/lib/fish/qualityPlanTemplates';
+import { SaveTemplateButton, TemplatePicker } from './FishQualitySellPlansEditor';
 import { rangeSelect } from '@/lib/listRangeSelect';
 import { collapseQualityTableRows, qualityTableCaptureTime, qualityTableMembers, qualityTableRange, qualityTableSignalKey, type QualityTableRow } from '@/lib/fish/qualityTableRows';
 import { defaultQualityDetectorIds, qualityDetectorChoices, type QualityDetectorChoice } from '@/lib/fish/qualityDetectorSelection';
@@ -101,6 +104,14 @@ const resultText = (r?: QualityResult) => r?.status === 'closed' ? '已卖出' :
 type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean; saved?: QualityBuyFilter; time?: AdditionMetricTime };
 type SignalMetricDraft = { key: string; saved?: QualitySignalMetric; time?: AdditionMetricTime };
 
+const staticFilterDraft = (filters: readonly QualityBuyFilter[]): FilterDraft[] => filters.map(saved => ({
+  choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold),
+  enabled: saved.enabled, saved, time:additionMetricTime(saved.snapshot),
+}));
+const signalMetricDraft = (metrics: readonly QualitySignalMetric[]): SignalMetricDraft[] => metrics.map(saved => ({
+  key: qualityFilterChoiceKey(saved), saved, time:additionMetricTime(saved.snapshot),
+}));
+
 function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualityState; done: () => void; selectedCount: number }) {
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => qualityFilterMenuChoices(definitions), [definitions]);
@@ -110,23 +121,38 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
   const signalChoices = useMemo(() => qualityFilterMenuChoices(definitions, true), [definitions]);
   const signalGroups = [...new Set(signalChoices.map(choice => choice.group))];
   const savedFilters = standaloneBuyFilters(state.study);
-  const [draft, setDraft] = useState<FilterDraft[]>(() => savedFilters.map(saved => ({
-    choice: qualityFilterChoiceKey(saved), direction: saved.direction, threshold: String(saved.threshold), enabled: saved.enabled, saved, time:additionMetricTime(saved.snapshot),
-  })));
-  const [readingDraft, setReadingDraft] = useState<SignalMetricDraft[]>(() => (state.study.signalMetrics ?? []).map(saved => ({
-    key: qualityFilterChoiceKey(saved), saved, time:additionMetricTime(saved.snapshot),
-  })));
+  const savedTuring = state.study.turingStaticSettings;
+  const activePlan = savedTuring?.active ? savedTuring.plan : undefined;
+  const [planDraft, setPlanDraft] = useState(activePlan);
+  const [draft, setDraft] = useState(() => staticFilterDraft(activePlan?.staticFilter?.filters ?? savedFilters));
+  const [readingDraft, setReadingDraft] = useState(() => signalMetricDraft(activePlan?.staticFilter?.metrics ?? state.study.signalMetrics ?? []));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const turing = !!planDraft?.initialization;
   const configured = readingDraft.length > 0 || draft.some(row => row.enabled);
   const canSave = state.ready && !!(readingDraft.length || draft.length || state.study.signalMetrics?.length || savedFilters.length);
   const busy = saving || state.filterRunning || state.signalValues?.running;
-  const patch = (index: number, updates: Partial<FilterDraft>) =>
+  const patch = (index: number, updates: Partial<FilterDraft>) => {
+    setDirty(true);
     setDraft(previous => previous.map((row, i) => i === index ? {...row, ...updates} : row));
-  const add = () => setDraft(previous => [...previous, {
-    choice: choices.find(choice => choice.key === 'state:state')?.key ?? choices[0]?.key ?? '',
-    direction: '>', threshold: '0.7', enabled: true,
-  }]);
+  };
+  const add = () => {
+    setDirty(true);
+    const choice = turing ? choices.find(choice => choice.key === 'state-no-btc-v1:state') : choices.find(choice => choice.key === 'state:state');
+    setDraft(previous => [...previous, { choice: choice?.key ?? choices[0]?.key ?? '', direction: '>', threshold: '0.7', enabled: true }]);
+  };
+  const loadPlan = (plan?: QualityGroup) => {
+    setPlanDraft(plan);
+    setDraft(staticFilterDraft(plan?.staticFilter?.filters ?? savedFilters));
+    setReadingDraft(signalMetricDraft(plan?.staticFilter?.metrics ?? state.study.signalMetrics ?? []));
+    setDirty(plan !== activePlan);
+    setError('');
+  };
+  const createTuringCopy = () => {
+    try { loadPlan(createTuringStaticFilterPlan(savedFilters, state.study.signalMetrics ?? [], definitions)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '创建图灵杯副本失败'); }
+  };
   const apply = async (run: boolean) => {
     setSaving(true);
     try {
@@ -152,7 +178,14 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
       });
       const updatedFilters = filters.length !== savedFilters.length || filters.some((filter, i) => filter !== savedFilters[i]) ? filters : undefined;
       if (state.saveStaticSettings) {
-        if (!await state.saveStaticSettings(metrics, updatedFilters)) throw Error('设置尚未保存，请重试');
+        const original = planDraft?.staticFilter;
+        const unchanged = original?.filters.length === filters.length && original.filters.every((f, index) => f === filters[index])
+          && original.metrics.length === metrics.length && original.metrics.every((m, index) => m === metrics[index]);
+        const turingPlan = turing ? unchanged ? planDraft : createStaticFilterPlan(filters, metrics, planDraft?.initialization)
+          : activePlan ? null : undefined;
+        const saved = turingPlan === undefined ? await state.saveStaticSettings(metrics, updatedFilters)
+          : await state.saveStaticSettings(metrics, updatedFilters, turingPlan);
+        if (!saved) throw Error('设置尚未保存，请重试');
       } else if (updatedFilters) state.setFilters(updatedFilters);
       done();
       if (run) void (state.runStaticSettings ?? state.startFilter)();
@@ -164,6 +197,24 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
   };
   const moduleClass = 'space-y-3 rounded-lg border border-border/70 bg-background/45 p-3.5';
   return <div className="space-y-3" data-testid="quality-buy-filter-editor">
+    {state.saveStaticSettings && <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="text-muted-foreground">{turing ? '图灵杯专用 v1 · 从首根完整 K 线初始化' : '常规历史预热'}</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {!turing && <button type="button" className={button} disabled={!state.ready || !!busy || dirty || !!activePlan || !(savedFilters.length || state.study.signalMetrics?.length)}
+          title="先保存设置，再用已保存的条件与读数算法创建图灵杯副本" onClick={createTuringCopy}>图灵杯副本</button>}
+        {turing && <button type="button" className={button} disabled={!!busy} onClick={()=>loadPlan()}>载入常规设置</button>}
+        {!turing && savedTuring && <button type="button" className={button} disabled={!!busy} onClick={()=>loadPlan(savedTuring.plan)}>载入已存图灵杯设置</button>}
+        <SaveTemplateButton index={0} ariaLabel="把当前静态过滤设置存为模板" defaultName={turing ? '静态过滤 · 图灵杯专用 v1' : '静态过滤'}
+          disabledReason={!state.ready || !state.savePlanTemplate ? '模板尚未恢复' : busy || dirty || !(draft.length || readingDraft.length) ? '请先保存当前静态过滤设置' : undefined}
+          onSave={name=>state.savePlanTemplate!('static-filter',name)}/>
+        <TemplatePicker purpose="static" plans={[]} disabled={!state.ready || !!busy}
+          actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}}
+          onUse={template=>{
+            try { loadPlan(qualityPlanFromTemplate(template,crypto.randomUUID())); }
+            catch (cause) { setError(cause instanceof Error ? cause.message : '模板载入失败'); }
+          }}/>
+      </div>
+    </div>}
     {state.saveStaticSettings && <section className={moduleClass} aria-label="信号时点读数">
       <header className="flex items-start gap-2.5">
         <Activity aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"/>
@@ -171,7 +222,7 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
       </header>
       <select aria-label="添加信号读数算法" className={field + ' w-full'} value="" onChange={event => {
         const key = event.target.value;
-        if (key) setReadingDraft(previous => [...previous, {key}]);
+        if (key) { setDirty(true); setReadingDraft(previous => [...previous, {key}]); }
       }}>
         <option value="">添加算法（可多选）</option>
         {signalGroups.map(group => <optgroup key={group} label={group}>
@@ -184,11 +235,11 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
           const label = row.saved?.label ?? signalChoices.find(choice => choice.key === row.key)?.label ?? row.key;
           return <li key={row.saved?.id ?? row.key} className="flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-border/65 bg-muted/50 py-1 pl-2 pr-1">
             <span className="min-w-0 break-words">{label}</span><button type="button" className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label={'移除信号读数列 ' + label} onClick={() => setReadingDraft(previous => previous.filter((_, i) => i !== index))}><X aria-hidden className="h-3.5 w-3.5"/></button>
+              aria-label={'移除信号读数列 ' + label} onClick={() => { setDirty(true); setReadingDraft(previous => previous.filter((_, i) => i !== index)); }}><X aria-hidden className="h-3.5 w-3.5"/></button>
             {row.key.includes(':guard-distance-atr-') ? <span className="text-muted-foreground">K 线周期 5m</span> :
               <FishMetricTimeFields label={`信号读数 ${index+1}`} metric={row.saved?.metric ?? signalChoices.find(choice=>choice.key===row.key)?.metric}
                 definition={readingDefinitions.get(row.key.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time}
-                onChange={time=>setReadingDraft(previous=>previous.map((item,i)=>i===index?{...item,time}:item))}/>}
+                onChange={time=>{ setDirty(true); setReadingDraft(previous=>previous.map((item,i)=>i===index?{...item,time}:item)); }}/>}
           </li>;
         })}
       </ul>}
@@ -210,7 +261,7 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
         </select>
         <select aria-label={'买入条件 ' + (i + 1) + ' 方向'} className={field} value={row.direction} onChange={event => patch(i, {direction: event.target.value as '<' | '>'})}><option value=">">&gt;</option><option value="<">&lt;</option></select>
         <input aria-label={'买入条件 ' + (i + 1) + ' 门槛'} type="number" step="any" className={field} value={row.threshold} onChange={event => patch(i, {threshold: event.target.value})}/>
-        <button type="button" aria-label={'删除买入条件 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setDraft(previous => previous.filter((_, index) => index !== i))}><X aria-hidden className="h-3.5 w-3.5"/></button>
+        <button type="button" aria-label={'删除买入条件 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => { setDirty(true); setDraft(previous => previous.filter((_, index) => index !== i)); }}><X aria-hidden className="h-3.5 w-3.5"/></button>
         <FishMetricTimeFields label={`买入条件 ${i+1}`} className="col-span-full" metric={row.saved?.metric ?? choices.find(choice=>choice.key===row.choice)?.metric}
           definition={filterDefinitions.get(row.choice.split(':')[0])} snapshot={row.saved?.snapshot} time={row.time} onChange={time=>patch(i,{time})}/>
       </div>)}</div>}
@@ -422,10 +473,11 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
   const signalsOf = (ids: readonly string[]) => new Set(ids.flatMap(id => [...(detectorSignals.get(id) ?? [])])).size;
   const resultMap = useMemo(() => qualityResultMap({ results }), [results]);
   // 旧试验兼容绑定过滤；新工作流的过滤列与卖出结果各自显示。
-  const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings, signalMetrics = study.signalMetrics;
+  const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings;
+  const signalMetrics = useMemo(()=>activeSignalMetrics(study),[study.signalMetrics,study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
   const readingsOn = !!state.runStaticSettings && !!signalMetrics?.length;
   const signalReadingMap = useMemo(()=>new Map(study.signalReadings?.map(reading=>[reading.key,reading])),[study.signalReadings]);
-  const filterColumns = useMemo(() => { const columns = qualityFilterColumns(study); return qualityVariables(columns.map(c => c.filter)).flatMap(v => v.levels.map(f => columns.find(c => c.filter === f)!)); }, [study.sellPlans, study.buyFilters, study.independentFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filterColumns = useMemo(() => { const columns = qualityFilterColumns(study); return qualityVariables(columns.map(c => c.filter)).flatMap(v => v.levels.map(f => columns.find(c => c.filter === f)!)); }, [study.sellPlans, study.buyFilters, study.independentFilters, study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
   const filterReadingMap = useMemo(() => new Map((filterReadings ?? []).map(r => [r.key, r])), [filterReadings]);
   const filterStatus = useMemo(() => {
     const byPlan = new Map<string, Map<string, QualityFilterStatus>>(), readings = new Map((filterReadings ?? []).map(r => [r.key, r]));

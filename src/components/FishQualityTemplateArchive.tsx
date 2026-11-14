@@ -51,7 +51,9 @@ export function FishQualityTemplateArchive({ owner, purpose, restore }: {
     try {
       const template = await readQualityTemplateArchive(owner, row.id);
       if (!isCurrent()) return;
-      if (Boolean(template.plan?.preEntryThreeStage) !== (purpose === 'entry')) {
+      const plan = template.plan;
+      const archivedPurpose = plan?.staticFilter ? 'static' : plan?.preEntryThreeStage ? 'entry' : 'sell';
+      if (archivedPurpose !== purpose) {
         throw Error('这份存档属于另一类模板，请到对应的模板库恢复');
       }
       await restore(template);

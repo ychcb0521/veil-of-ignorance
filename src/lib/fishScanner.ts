@@ -322,6 +322,7 @@ export class FishScanner {
     const load = createFishReconstructionLoader(adapters, hasOffline ? onlineClock : async () => now);
     if (!hasOffline) return { now, load };
     const ends = new Map<string, Promise<number>>();
+    const starts = new Map<string, Promise<number>>();
     async function marketEnd(symbol: string) {
       if (!isTuringCupSymbol(symbol)) return now;
       let end = ends.get(symbol);
@@ -334,9 +335,16 @@ export class FishScanner {
     }
     async function marketStart(symbol: string) {
       if (!isTuringCupSymbol(symbol)) return undefined;
-      const [first] = await readTuringCupKlines(symbol, '1m', { startTime: 0, limit: 1 }, signal);
-      if (!first) throw Error('图灵杯没有可读取的连续行情，请先导入行情文件');
-      return Number(first[0]);
+      let start = starts.get(symbol);
+      if (!start) {
+        start = readTuringCupKlines(symbol, '1m', { startTime: 0, limit: 1 }, signal).then(([first]) => {
+          if (!first) throw Error('图灵杯没有可读取的连续行情，请先导入行情文件');
+          return Number(first[0]);
+        });
+        starts.set(symbol,start);
+        void start.catch(()=>starts.delete(symbol));
+      }
+      return start;
     }
     return { now, load, marketEnd, marketStart };
   }

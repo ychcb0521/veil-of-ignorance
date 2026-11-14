@@ -260,7 +260,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       }
       if (!settings?.plans.length) return;
     }
-    const legacyFilters = activeStandaloneBuyFilters(study), samples = qualityRunSamples(study);
+    const legacyFilters = activeStandaloneBuyFilters({ ...study, turingStaticSettings: undefined }), samples = qualityRunSamples(study);
     let plans = settings?.plans ?? (legacyFilters.length ? [{id:'entry-original',label:'买入方案 1',metric:legacyFilters[0].metric,snapshot:legacyFilters[0].snapshot,rule:{metric:legacyFilters[0].metric,direction:legacyFilters[0].direction,threshold:legacyFilters[0].threshold},execution:'intrabar-1m' as const,buyFilters:legacyFilters.slice(1)}] : []);
     const chosen=selectedPreEntryPlan(plans);
     if(plans.length>1&&(automaticId||plans.some(p=>!!p.preEntryThreeStage))){if(!chosen){reportError('请在条件设置中选择并保存唯一的筛选方案');return;}plans=[chosen];}

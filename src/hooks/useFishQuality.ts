@@ -2,7 +2,9 @@ import type { FishCdaTracking } from './useFishCdaTracking';
 import type { PreEntrySettings } from '@/lib/fish/preEntryMonitor';
 import { editWorkspaceFilter, editWorkspaceMonitor, importQualityWorkspaceRows, pickQualityWorkspaceRows, saveWorkspaceFilterRounds, saveWorkspaceMonitorRounds } from '@/lib/fish/qualityWorkspace';
 import {qualityExecutionSnapshot} from '@/lib/fish/qualityExecutionSnapshot';
-import { signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
+import { activeSignalMetrics, signalReadingKey, type QualitySignalMetric } from '@/lib/fish/qualitySignalReadings';
+import { createStaticFilterPlan, validateTuringStaticFilterPlan } from '@/lib/fish/qualityStaticFilterPlan';
+import { standaloneBuyFilters } from '@/lib/fish/quality';
 import {preserveQualitySourceRatings,rateQualitySource} from '@/lib/fish/qualitySourceRatings';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {editLibraryDirectory,renameLibraryDirectory} from '@/lib/fish/qualityMonitorArchive';
@@ -409,6 +411,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const frozen = paused
       ? { ...paused.frozen, filterReadings: [...paused.capture.readings.values()] }
       : qualityExecutionSnapshot(scopeForRun(current.current));
+    if (frozen.turingStaticSettings?.active) {
+      try { validateTuringStaticFilterPlan(frozen.turingStaticSettings.plan); }
+      catch (cause) { setFilterError(cause instanceof Error ? cause.message : '图灵杯静态过滤方案无效'); return; }
+    }
     const total = qualityRunSamples(frozen).length;
     const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => activeStandaloneBuyFilters(frozen).map(f => qualityFilterReadingKey(row, f))));
     const pending = filterRecalculationPending.current;
@@ -548,24 +554,37 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       }
     }
   }, [change]);
-  const saveStaticSettings = useCallback(async (metrics: readonly QualitySignalMetric[], filters?: QualityBuyFilter[]) => {
+  const saveStaticSettings = useCallback(async (metrics: readonly QualitySignalMetric[], filters?: QualityBuyFilter[], turingPlan?: QualityGroup | null) => {
     const epoch = generation.current;
     if (!readyRef.current || filterController.current) return false;
-    if (filters) setFilters(filters);
+    if (turingPlan) validateTuringStaticFilterPlan(turingPlan);
+    if (filters || turingPlan !== undefined) {
+      stopFilter(); setFilterProgress(null); setFilterError(''); setSignalValues(null);
+    }
     change(study => {
+      const prior = study.turingStaticSettings;
+      const settings = turingPlan || prior?.active && turingPlan === null
+        ? { turingStaticSettings: {
+          active: !!turingPlan, plan: structuredClone(turingPlan ?? prior!.plan),
+          updatedAt: Math.max(Date.now(), (prior?.updatedAt ?? 0) + 1),
+        } } : {};
+      if (turingPlan) return { ...study, ...settings, independentFilters: true };
       const saved = study.signalMetrics ?? [];
-      if (saved.length === metrics.length && saved.every((metric, index) => metric.id === metrics[index].id)) return study;
-      return {...study, signalMetrics: structuredClone([...metrics]),
-        signalMetricsUpdatedAt: Math.max(Date.now(), (study.signalMetricsUpdatedAt ?? 0) + 1)};
+      const metricChanges = saved.length !== metrics.length || saved.some((metric, index) => metric.id !== metrics[index]?.id);
+      if (!filters && !metricChanges && !settings.turingStaticSettings) return study;
+      return { ...study, ...settings, ...(filters ? { buyFilters: structuredClone(filters) } : {}),
+        ...(metricChanges ? { signalMetrics: structuredClone([...metrics]),
+          signalMetricsUpdatedAt: Math.max(Date.now(), (study.signalMetricsUpdatedAt ?? 0) + 1) } : {}),
+      };
     });
     const saved = await saveQualityStudy(account.current, current.current);
     return saved && epoch === generation.current;
-  }, [change, setFilters]);
+  }, [change, stopFilter]);
   const runStaticSettings = useCallback(async (force = false) => {
     if (!readyRef.current || (!force && filterController.current) || workspaceMode && archiveLock.current) return;
     const snapshot = scoped(current.current);
     const rowIds = snapshot.selectedRowIds ?? [];
-    const metrics = snapshot.signalMetrics ?? [];
+    const metrics = activeSignalMetrics(snapshot);
     const filtersOn = anyBuyFilters(snapshot);
     if (!qualityRunSamples(snapshot).length || (!metrics.length && !filtersOn)) return;
     if (force) {
@@ -574,6 +593,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }
     setFilterProgress(null);
     setFilterError('');
+    if (snapshot.turingStaticSettings?.active) {
+      try { validateTuringStaticFilterPlan(snapshot.turingStaticSettings.plan); }
+      catch (cause) { setFilterError(cause instanceof Error ? cause.message : '图灵杯静态过滤方案无效'); return; }
+    }
     const ownerEpoch = generation.current;
     const readings = generateSignalValues(metrics, rowIds, force);
     const revision = filterRevision.current;
@@ -774,6 +797,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change,cancel]);
   /** 【用户要求】2026-11-02 方案模板：只改模板，不暂停、不重算监测。 */
   const savePlanTemplate = useCallback((planId: string, name: string) => {
+    if (planId === 'static-filter') {
+      if (!readyRef.current || filterController.current) throw Error('请先保存静态过滤设置');
+      const study = current.current;
+      const plan = study.turingStaticSettings?.active ? study.turingStaticSettings.plan
+        : createStaticFilterPlan(standaloneBuyFilters(study), study.signalMetrics ?? []);
+      if (plan.initialization) validateTuringStaticFilterPlan(plan);
+      changeTemplates(previous => saveQualityPlanTemplate(previous, plan, name));
+      return;
+    }
     const settings=preEntry.library.settings,entryPlan=settings?.plans.find(p=>p.id===planId),plan=current.current.sellPlans?.find(p=>p.id===planId)??entryPlan;
     if (!plan) throw new Error('请先保存这套方案，再存为模板');
     const scope=entryPlan&&plan===entryPlan?{entryHours:settings!.hours}:undefined,at=Date.now();

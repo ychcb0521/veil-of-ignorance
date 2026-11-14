@@ -4,7 +4,7 @@ import type { ResearchBar } from '../deepRsa/window';
 import type { TradeSignal } from '../signalLibrary';
 import { aggregateQualityMinute } from './qualityIntrabar';
 import { qualityMetricPlan } from './quality';
-import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
+import { qualityHistoryFrom, qualityInitializationPending, TURING_SCREENING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { completeZeroTradeBar, zeroTradeReadingPending } from './qualityZeroTrade';
 import { isTuringCupSymbol } from '../turingCupSymbol';
 import { qualityConditionMet } from './qualityVeto';
@@ -56,7 +56,7 @@ export async function createPreEntryMarketReader(o:{condition:EntryMarketConditi
     return {id:c.id,at,value,met};
   };
   return {condition:c,plan,start,resetObservationOrigin(at:number){observationOrigin=at;},push(minute:ResearchBar){
-    if(minute.openTime<start)return;
+    if(minute.openTime<start||o.load.turingInitialization?.version===TURING_SCREENING_INITIALIZATION_VERSION&&minute.openTime<from)return;
     partial=aggregateQualityMinute(partial,minute,plan.step);
     const at=minute.openTime+60000;
     // Closed-only conditions observe the just-closed candle at its boundary.

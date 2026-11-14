@@ -12,7 +12,7 @@ import { shortFishHash } from './algorithm';
 import {qualityMonitoringSample} from './qualityAdmissionTime';
 import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
 import { finishLibraryRound, librarySignalIdentity, mergeLibraryRecords, mergeLibraryRounds, newLibraryRound, recoverLibraryRounds, type LibraryRecordBase, type LibraryRound } from './libraryRounds';
-import { signalReadingKey, type QualitySignalMetric } from './qualitySignalReadings';
+import { activeSignalMetrics, signalReadingKey, type QualitySignalMetric } from './qualitySignalReadings';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 export interface QualityFilterSetting { id: string; signature: string; filters: QualityBuyFilter[]; plans: string[] }
@@ -38,7 +38,7 @@ export interface QualityFilterCapture {
 }
 
 const empty = (): QualityFilterLibrary => ({ version: 1, settings: [], records: [], rounds: [] });
-const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold];
+const conditionKey = (f: QualityBuyFilter) => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.direction, f.threshold, ...(f.initialization ? [f.initialization] : [])];
 export const qualityFilterSettingSignature = (filters: readonly QualityBuyFilter[]) =>
   JSON.stringify(filters.map(conditionKey).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 
@@ -83,7 +83,7 @@ let sequence = 0;
 /** 冻结本轮组合表、启用的条件与可选信号读数。旧版轮次保留原有绑定信息。 */
 export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number, includeSignalValues = false): { study: FishQualityStudy; capture: QualityFilterCapture } | null {
   const library = study.filterLibrary ?? empty(), catalog = new Map(library.settings.map(s => [s.signature, s]));
-  const metrics = includeSignalValues ? frozen.signalMetrics ?? [] : [];
+  const metrics = includeSignalValues ? activeSignalMetrics(frozen) : [];
   const tasks = tasksFor(frozen, catalog, metrics.length > 0);
   if (!tasks.length) return null;
   const readings = new Map((frozen.filterReadings ?? []).filter(r => !r.error && Number.isFinite(r.value)).map(r => [r.key, r]));

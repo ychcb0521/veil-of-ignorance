@@ -1,4 +1,5 @@
 import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
+import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
 import { splitQualityBranches } from '@/lib/fish/qualitySplitBranches';
 import {FishQualitySavedPlanRecovery} from './FishQualitySavedPlanRecovery';
 import type {RecoverableQualityPlan} from '@/lib/fish/qualitySavedPlans';
@@ -64,8 +65,9 @@ function getTemplateDetails(plan: QualityGroup) {
   return details;
 }
 
-export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,purpose='sell' }: {purpose?:'sell'|'entry'; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void }) {
-  const templates=actions.templates.filter(t=>purpose==='entry'?!!t.plan.preEntryThreeStage:!t.plan.preEntryThreeStage);
+export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,purpose='sell', allowTuring=true }: {purpose?:'sell'|'entry'|'static'; allowTuring?:boolean; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void }) {
+  const templates=actions.templates.filter(({plan}) => (allowTuring || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)
+    && (plan.staticFilter ? purpose === 'static' : plan.preEntryThreeStage ? purpose === 'entry' : purpose === 'sell'));
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
   const bases = [...plans.map(p=>({key:'plan:'+p.id,label:'方案 · '+p.label,plan:p})), ...templates.map(t=>({key:'template:'+t.id,label:'模板 · '+t.name,plan:t.plan}))].filter(x=>x.plan.addition?.enabled||x.plan.router);
   const [baseKey,setBaseKey] = useState('');
@@ -86,7 +88,7 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,p
   };
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
   return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); setCreationError(undefined); }}><PopoverTrigger asChild>
-    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={purpose==='entry'?'三阶筛选模板库：保存整套条件，选用后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='entry'?'模板库':'从模板新建'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
+    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'?'从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
   </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-1 text-[11px]" data-testid="plan-template-list">
     {/* 【用户要求】2026-11-04 内置模板：代码里的配方，新建时按账号当前公式生成，保存时冻结版本；不占账号模板目录 */}
     {purpose==='sell'&&BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
@@ -102,7 +104,7 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,p
         <button type="button" disabled={disabled} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => createFromBuiltin(t)}>新建</button>
       </li>)}</ul>
     </div>}
-    {!templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。</p>
+    {!templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。保存当前设置后，可点「存为模板」。</p>
       : <ul className="max-h-80 overflow-y-auto">{templates.map(t => {
         const { summary, versionChanged } = getTemplateDetails(t.plan);
         return <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">

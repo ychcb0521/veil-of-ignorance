@@ -3,7 +3,6 @@ import { expressionConditions } from './preEntryThreeStage';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
-import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
@@ -11,6 +10,7 @@ import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, GUARD_DISTANCE_VETO_VERS
 import { compatibleHoldingParameterOrder, compatibleAdditionParameterOrder } from './qualityPlanParameterCompatibility';
 import { freezePreEntryThreeStage, threeStageFingerprint, stableEntryJson, PRE_ENTRY_OPTIONAL_STAGES_VERSION, PRE_ENTRY_SIGNAL_ANCHOR_VERSION } from './preEntryThreeStage';
 import { ENTRY_STALL_TURN_5M_VERSION, PULLBACK_NEW_HIGH_5M_VERSION } from './preEntryStallTurn5m';
+import { STATIC_FILTER_VERSION } from './qualityStaticFilterPlan';
 /**
  * 【用户要求】2026-11-02 「持仓监测」模板里涉及的所有算法都要版本保护：保存模板时冻结一份版本清单，
  * 之后代码里任何一项的逻辑变了（版本号变了），模板不会悄悄按新逻辑运行，而是明确指出哪一项变了、拒绝运行。
@@ -61,7 +61,12 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 /** 方案涉及的全部算法及其版本（顺序：卖出 → 组合切换 → 执行 → 镜像 → 硬性终止 → 加仓 → 各次加仓的箱体与方向 → 加仓后切换）。 */
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   validateQualityAdvantage(plan);
-  const initialization: PlanVersionEntry[] = plan.initialization ? [{ key: 'initialization', part: '历史初始化', name: '图灵杯首根行情初始化', version: TURING_INITIALIZATION_VERSION, summary: '从已有首根完整 K 线初始化；初期无定义的指标等待，不补造历史。与完整历史预热读数不同，原方案保留。' }] : [];
+  const initialization: PlanVersionEntry[] = plan.initialization ? [{ key: 'initialization', part: '历史初始化', name: '图灵杯首根行情初始化', version: plan.initialization, summary: '从已有首根完整 K 线初始化；初期无定义的指标等待，不补造历史。与完整历史预热读数不同，原方案保留。' }] : [];
+  if (plan.staticFilter) return [...initialization, {
+    key: 'static-filter', part: '静态过滤', name: '买前过滤与信号时点读数',
+    version: STATIC_FILTER_VERSION + ' · 参数 #' + shortFishHash(stableEntryJson(plan.staticFilter)),
+    summary: '冻结各条过滤条件及信号读数的公式、参数、周期和启用状态。过滤使用买入前最后一根已收盘 K 线。',
+  }];
   if (plan.positionManagement && !isLegacyQualityPlan(plan)) {
     validateQualityPositionManagement(plan.positionManagement);
     const { version, leverage, notional } = plan.positionManagement;

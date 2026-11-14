@@ -1,11 +1,71 @@
 import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '../deepDig/features';
 import type { FishSnapshot } from './algorithm';
-import { qualityDefinition, type QualityGroup } from './quality';
-import { TURING_INITIALIZATION_VERSION } from './qualityInitialization';
+import { qualityDefinition, qualityMetricPlan, type QualityGroup } from './quality';
+import { TURING_INITIALIZATION_VERSION, TURING_SCREENING_INITIALIZATION_VERSION } from './qualityInitialization';
 import { freezeQualityPlan, planVersionChanges } from './qualityPlanVersions';
 import { newQualitySellPlanId } from './qualitySellPlans';
-import { additionMetricTime, withMetricSnapshotTime } from './qualityAdditionMetric';
+import { additionMetricBaseDefinition, additionMetricTime, withMetricSnapshotTime } from './qualityAdditionMetric';
 import { researchChartFormula, researchIndicatorForFeature } from '../researchIndicators';
+import { expressionConditions, validatePreEntryThreeStage, type EntryMarketExpression } from './preEntryThreeStage';
+
+type ScreeningMetric = { label: string; metric: string; snapshot: FishSnapshot };
+
+export function turingScreeningMetric<T extends ScreeningMetric>(condition: T, definitions: readonly DeepDigFeatureDef[]): T {
+  const { snapshot, metric } = condition;
+  const original = qualityDefinition(snapshot);
+  if (!compileFeatureFormula(original.formula).usesBtc) return condition;
+  const variant = definitions.find(def => def.btcFreeSourceId === snapshot.featureId);
+  if (!variant) throw Error(`「${condition.label}」依赖 BTC，但没有可用的独立无 BTC 版本`);
+  const formula = researchChartFormula(researchIndicatorForFeature(variant), variant.formula);
+  if (compileFeatureFormula(formula).usesBtc) throw Error(`「${condition.label}」的无 BTC 版本仍依赖 BTC`);
+  const base = additionMetricBaseDefinition(snapshot);
+  const definition = { ...variant, formula, interval: base.interval, halfLifeHours: base.halfLifeHours, avgHours: base.avgHours };
+  const label = `${variant.short} · ${metric}`;
+  const copy = withMetricSnapshotTime({ ...condition, label, snapshot: {
+    ...snapshot, featureId: variant.id, featureShort: variant.short, featureName: variant.name,
+    definitionKey: definitionKey(definition), interval: definition.interval,
+  } }, additionMetricTime(snapshot));
+  qualityMetricPlan(copy.snapshot, metric);
+  return copy;
+}
+
+export function validateTuringScreeningMetrics(metrics: readonly ScreeningMetric[]) {
+  for (const metric of metrics) {
+    if (compileFeatureFormula(qualityDefinition(metric.snapshot).formula).usesBtc) {
+      throw Error(`「${metric.label}」依赖 BTC，请选用独立无 BTC 版本`);
+    }
+  }
+}
+
+export function createTuringPreEntryPlan(source: QualityGroup, definitions: readonly DeepDigFeatureDef[], id: string): QualityGroup {
+  const config = source.preEntryThreeStage;
+  validatePreEntryThreeStage(config);
+  if (source.engine || planVersionChanges(source).length) throw Error('原方案的冻结版本已变化，无法创建图灵杯副本');
+  const copy = turingScreeningMetric(structuredClone(source), definitions);
+  const screening = copy.preEntryThreeStage!;
+  const convert = <T extends ScreeningMetric>(metric: T) => turingScreeningMetric(metric, definitions);
+  const convertExpression = (expression: EntryMarketExpression): EntryMarketExpression => 'condition' in expression
+    ? { condition: convert(expression.condition) }
+    : { ...expression, children: expression.children.map(convertExpression) };
+  screening.required = screening.required.map(convert);
+  if (screening.admission) screening.admission.algorithms = screening.admission.algorithms.map(convert);
+  screening.sellRules = screening.sellRules.map(rule => ({ ...rule, expression: convertExpression(rule.expression) }));
+  screening.hardVetoes = screening.hardVetoes.map(veto => {
+    if (!veto.snapshot || !veto.metric) return veto;
+    return convert({ ...veto, snapshot: veto.snapshot, metric: veto.metric });
+  });
+  return freezeQualityPlan({ ...copy, id, label: `${source.label} · 图灵杯专用 v1`, initialization: TURING_SCREENING_INITIALIZATION_VERSION });
+}
+
+export function validateTuringPreEntryPlan(plan: QualityGroup) {
+  if (plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION || !plan.preEntryThreeStage) return;
+  const config = plan.preEntryThreeStage;
+  validateTuringScreeningMetrics([
+    ...config.required, ...(config.admission?.algorithms ?? []),
+    ...config.sellRules.flatMap(rule => expressionConditions(rule.expression)),
+    ...config.hardVetoes.flatMap(veto => veto.snapshot && veto.metric ? [{ ...veto, snapshot: veto.snapshot, metric: veto.metric }] : []),
+  ]);
+}
 
 /** Copy only: original formulas, thresholds, positions and archived results remain untouched. */
 export function createTuringQualityPlan(source: QualityGroup, definitions: readonly DeepDigFeatureDef[], id = newQualitySellPlanId()): QualityGroup {

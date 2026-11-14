@@ -7,7 +7,8 @@ import type { FishReconstructionLoader } from './reconstruction';
 import { qualityMetricPlan, type QualityProgress, qualityGroupId, qualityMembers } from './quality';
 import { stricterAdditionThreshold } from './qualityAddition';
 import { planVersionChanges } from './qualityPlanVersions';
-import { withTuringInitialization } from './qualityInitialization';
+import { withTuringInitialization, TURING_SCREENING_INITIALIZATION_VERSION } from './qualityInitialization';
+import { validateTuringPreEntryPlan, validateTuringScreeningMetrics } from './qualityTuringPlan';
 import { createPreEntryMarketReader, expressionResult, type EntryConditionReading } from './preEntryMarketReader';
 import { expressionConditions, validatePreEntryThreeStage, PRE_ENTRY_THREE_STAGE_VERSION, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, usesTrackedGate, usesSignalTimeGate, type EntryMarketCondition, type EntrySellRule } from './preEntryThreeStage';
 import { createPreEntryGuardReader, type EntryGuardEvent } from './preEntryGuardEvent';
@@ -93,7 +94,9 @@ async function readSignalGate(row: TradeSignal, signalAt: number, required: Entr
     condition, row, since: at, origin: availableStart ?? 0, load, signal,
   })));
   const transport = entryMinuteTransport(readers.map(reader => reader.plan));
-  const from = Math.min(at - M, ...readers.filter(reader => reader.condition.timing === 'intrabar').map(reader => reader.start));
+  const earliest = Math.min(at - M, ...readers.filter(reader => reader.condition.timing === 'intrabar').map(reader => reader.start));
+  const from = load.turingInitialization?.version === TURING_SCREENING_INITIALIZATION_VERSION
+    ? Math.max(earliest,load.turingInitialization.startMs) : earliest;
   let minute: ResearchBar | undefined;
   for (let cursor = from; cursor < at;) {
     const chunk = await loadQualityScanChunk(load, row, cursor, cursor, Math.min(at, cursor + 500 * M), transport, signal);
@@ -161,6 +164,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       if(!selected)throw Error('缺少本轮冻结的三阶筛选方案');
       if(planVersionChanges(selected).length)throw Error('三阶方案的冻结版本或参数已变化，请保留本轮');
       const config=selected.preEntryThreeStage;validatePreEntryThreeStage(config);
+      validateTuringPreEntryPlan(selected);
       // 已存 v5 方案继续按 v5 顺序产出证据；新方案走 v6（⓪ 必要条件 → ① 防守线 → ② 排除段）。
       const retry=config.observationBasis==='retry-origin-v2';
       const signalGate=usesSignalTimeGate(config.version);
@@ -173,7 +177,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       if(retry&&task.round.hours<=0)throw Error('否决重筛须设置有限总时限');
       const v6=config.version===PRE_ENTRY_THREE_STAGE_VERSION||retry;
       const row={...record.sample.source,timeMs:now},start=await bounds?.start?.(row.symbol),availableEnd=await bounds?.end?.(row.symbol)??now;
-      const initializedLoad=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN):baseLoad;
+      const initializedLoad=selected.initialization?withTuringInitialization(baseLoad,row.symbol,start??NaN,selected.initialization):baseLoad;
       const liveWindow = isAutomaticPreEntryRound(task.round) ? automaticPreEntryWindow(task.round, record, now, availableEnd) : undefined;
       const end=liveWindow?.end??record.endTime??Math.floor(Math.min(now,availableEnd,task.round.hours?record.startTime+task.round.hours*3600000:Infinity)/M)*M;
       const hardVetoes=exclusionEnabled ? config.hardVetoes : [];
@@ -186,6 +190,9 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
         return {id:d.id+':'+i,label:(f.featureShort??f.featureName??'原探测算法')+' 探测值',metric:'capture',snapshot:f,enabled:true,direction,threshold:d.stricterPct===0?f.threshold:stricterAdditionThreshold(f.threshold,direction,d.stricterPct),timing:'closed',originalDetector:{constraints:f.constraints??[]}};
       })}));
       const necessaryConditions = [...required,...detectorGroups.flatMap(group => group.conditions)];
+      if (selected.initialization === TURING_SCREENING_INITIALIZATION_VERSION) {
+        validateTuringScreeningMetrics(detectorGroups.flatMap(group => group.conditions));
+      }
       const signalAt = qualitySignalTime(record.sample.source);
       if (useGateTime && !(Number.isFinite(signalAt) && signalAt > 0)) throw Error('缺少有效原信号时间');
       const hasNecessary = required.length > 0 || detectorGroups.length > 0;

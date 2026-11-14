@@ -21,19 +21,22 @@ export function preserveQualityFilterDraft(saved: FilterDraftData | undefined, i
     : incoming;
 }
 
-type SavedSignalReadings = Pick<FishQualityStudy, 'signalMetrics' | 'signalMetricsUpdatedAt' | 'signalReadings'>;
+type SavedSignalReadings = Pick<FishQualityStudy, 'signalMetrics' | 'signalMetricsUpdatedAt' | 'signalReadings' | 'turingStaticSettings'>;
 
 export const signalReadingsStorageKey = (studyKey: string) => studyKey + ':signal-readings';
 
 export function preserveQualitySignalReadings<T extends SavedSignalReadings>(saved: SavedSignalReadings | undefined, incoming: T): T {
-  if (!saved?.signalMetricsUpdatedAt && !saved?.signalReadings?.length) return incoming;
+  if (!saved?.signalMetricsUpdatedAt && !saved?.signalReadings?.length && !saved?.turingStaticSettings) return incoming;
   const columns = (saved.signalMetricsUpdatedAt ?? 0) > (incoming.signalMetricsUpdatedAt ?? 0) ? saved : incoming;
   const readings = new Map(saved.signalReadings?.map(reading => [reading.key, reading]));
   for (const reading of incoming.signalReadings ?? []) {
     const previous = readings.get(reading.key);
     if (!previous || !reading.error && Number.isFinite(reading.value) || previous.error) readings.set(reading.key, reading);
   }
+  const turing = (saved.turingStaticSettings?.updatedAt ?? 0) > (incoming.turingStaticSettings?.updatedAt ?? 0)
+    ? saved.turingStaticSettings : incoming.turingStaticSettings;
   return {...incoming,...(columns.signalMetricsUpdatedAt ? {signalMetrics:columns.signalMetrics,signalMetricsUpdatedAt:columns.signalMetricsUpdatedAt} : {}),
+    ...(turing ? {turingStaticSettings:turing} : {}),
     ...(readings.size ? {signalReadings:[...readings.values()]} : {})};
 }
 
@@ -52,9 +55,9 @@ export function readStoredQualityWithSignalReadings(store: IDBObjectStore, key: 
 }
 
 export function writeStoredQualityWithSignalReadings(store: IDBObjectStore, key: string, study: FishQualityStudy) {
-  const {signalMetrics,signalMetricsUpdatedAt,signalReadings} = study;
+  const {signalMetrics,signalMetricsUpdatedAt,signalReadings,turingStaticSettings} = study;
   // Older tabs can still write the study row. This sibling record keeps the new readings recoverable.
-  if (signalMetricsUpdatedAt || signalReadings?.length) store.put({signalMetrics,signalMetricsUpdatedAt,signalReadings},signalReadingsStorageKey(key));
+  if (signalMetricsUpdatedAt || signalReadings?.length || turingStaticSettings) store.put({signalMetrics,signalMetricsUpdatedAt,signalReadings,turingStaticSettings},signalReadingsStorageKey(key));
   if (study.workspaceUpdatedAt) store.put(qualityWorkspaceData(study),key + ':workspace');
   if (study.workspaceFilterDraftUpdatedAt) {
     const {workspaceFilterDraft,workspaceFilterDraftUpdatedAt}=study;
