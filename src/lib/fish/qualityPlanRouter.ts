@@ -129,6 +129,6 @@ export async function evaluateQualityRouter(r: QualityPlanRouter, run: (plan: Qu
 }
 export function routedQualityPlan(plan: QualityGroup, result: Pick<QualityResult,'routeDecision'>): QualityGroup {
   if (!plan.router) return plan;
-  if (isRaceRouter(plan.router)) return mergedRacePlan(plan.router);
-  return plan.router[result.routeDecision?.branch === 'attack' ? 'attack' : 'structure'];
+  const branch = isRaceRouter(plan.router) ? mergedRacePlan(plan.router) : plan.router[result.routeDecision?.branch === 'attack' ? 'attack' : 'structure'];
+  return plan.positionManagement ? { ...branch, positionManagement: plan.positionManagement } : branch;
 }

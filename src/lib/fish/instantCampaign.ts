@@ -195,7 +195,7 @@ export async function freezeInstantCampaign(input: InstantCampaignInput, load: F
 
 export function instantPositionValuation(position: InstantPositionFill, monitor?: QualityResult, legacyMirror?: QualityMirrorFill, mark?: number, manual?: InstantManualExecution) {
   const entryPrice = monitor?.entryPrice ?? position.entryPrice;
-  const notional = position.marginUsdt * position.leverage;
+  const notional = position.monitor?.plan.positionManagement?.notional ?? position.marginUsdt * position.leverage;
   const mirror = monitor?.mirrorFill ?? legacyMirror;
   const additions = qualityAdditionFills(monitor ?? {});
   const reductions = monitor?.additionReductions ?? [];
@@ -276,7 +276,7 @@ function buildTemplateInstantCampaignData(owner: string, position: InstantPositi
   recordedAt: number; drawdown: number | null; staticDrawdown: number | null; sell?: ScreenedCdaTrigger;
 }): QualityCampaignData {
   const { id, source, buyAt, marginUsdt, leverage, monitor, recordId, detectors, metadata } = position;
-  const notional = marginUsdt * leverage;
+  const notional = monitor?.plan.positionManagement?.notional ?? marginUsdt * leverage;
   const sample: QualitySample = { id: recordId, source: { ...source, timeLabel: '', fallbackZone: '' },
     groups: [], enteredAt: buyAt, basis: 'signal', importedAt: buyAt };
   const data = buildQualityCampaignData(owner, { sample, plan: monitor!.plan, result,

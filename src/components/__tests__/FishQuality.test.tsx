@@ -291,9 +291,9 @@ it('keeps monitoring details behind help and removes the observation settings co
   const s = state(); render(<FishQuality state={s}/>);
   expect(screen.queryByRole('button', { name: '鱼质量观察设置' })).toBeNull();
   expect(screen.queryByLabelText('鱼质量观察小时')).toBeNull();
-  expect(screen.queryByText('100 USDT · 1 倍')).toBeNull();
+  expect(screen.queryByText('新方案默认 333 USDT 名义仓位、5 倍杠杆。')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '持仓监测说明' }));
-  expect(screen.getByText('100 USDT · 1 倍')).toBeVisible();
+  expect(screen.getByText('新方案默认 333 USDT 名义仓位、5 倍杠杆。')).toBeVisible();
   expect(s.setObserveHours).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '持仓监测条件' }));
   expect(screen.getByTestId('quality-monitor-editor')).toBeVisible(); expect(screen.queryByLabelText('鱼质量观察小时')).toBeNull();

@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { FISH_INSTANT_MONITOR_KEY, INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue, readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
-import type { QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
-import type { QualityGroup } from '@/lib/fish/quality';
+import { FISH_INSTANT_MONITOR_KEY, INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue, readInstantMonitorSettings, type InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
 import { persistFishAccountPreference } from './useFishAccountSettings';
 
 export function useInstantMonitorSettings(owner: string | undefined) {
@@ -18,7 +16,7 @@ export function useInstantMonitorSettings(owner: string | undefined) {
     refresh();
     return () => { unsubscribe(); window.removeEventListener('storage', onStorage); };
   }, [owner]);
-  const save = useCallback(async (template?: QualityPlanTemplate & { plan: QualityGroup }) => {
+  const save = useCallback(async (template?: InstantMonitorPlanChoice) => {
     if (!owner) throw new Error('请先登录后保存持仓监测设置');
     const issue = template && instantMonitorTemplateIssue(template);
     if (issue) throw new Error(issue);

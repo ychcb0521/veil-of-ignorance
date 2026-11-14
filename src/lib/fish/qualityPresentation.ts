@@ -88,7 +88,7 @@ export function halfMirrorSummary(rule:QualityMirrorTakeProfit|undefined,result?
  const mirrorPnl=result.mirrorRealizedPnl??(result.entryPrice && result.entryPrice>0?notional*filled.fraction*(filled.price/result.entryPrice-1):null);
  const remainingPnl=result.remainingPnl??(strategyReturn!=null && mirrorPnl!=null?notional*strategyReturn/100-mirrorPnl:null);
  const amounts=mirrorPnl!=null && remainingPnl!=null?`镜像平衡减仓盈亏 ${mirrorPnl.toFixed(2)} USDT + 余仓${result.status==='open'?'估值':''}盈亏 ${remainingPnl.toFixed(2)} USDT = 合计 ${(mirrorPnl+remainingPnl).toFixed(2)} USDT；除以${result.marginUsdt ? '初始保证金' : '开仓总金额'} ${(result.marginUsdt ?? notional).toFixed(2)} USDT。`:'';
- const coins=result.entryPrice && result.entryPrice>0?`；每 100 USDT 初始持仓已卖 ${(100/result.entryPrice*filled.fraction).toPrecision(8)} 币`:'';
+ const coins=result.entryPrice && result.entryPrice>0?`；已卖 ${(notional/result.entryPrice*filled.fraction).toPrecision(8)} 币`:'';
  return {state:'filled',label,value,text:value==null?`${label} · 开仓价缺失`:`${pct(value)} · ${label}`,detail:`显示的是开仓至镜像平衡减仓成交时的实际涨幅 =（成交价 ÷ 开仓价 − 1）× 100%，不按卖出比例折算。${config}；${formatUTC8(filled.at)} 按 ${filled.price.toPrecision(9)} 成交${coins}。${amounts}${strategyReturn!=null?`整笔交易${result.status==='open'?'估值':''}回报率 ${pct(strategyReturn)}。`:''}总盈亏 = 镜像平衡减仓已兑现盈亏 + 余仓盈亏；投资回报率 = 总盈亏 ÷ ${result.marginUsdt ? '初始保证金' : '开仓总金额'}。已全部卖出时为最终收益，仍持有的余仓按本次价格估值。按实际设置比例计算，每笔持仓仅触发一次。`};
 }
 export const qualityHalfMirror = (plan:QualityGroup,result?:QualityResult)=>halfMirrorSummary(plan.mirrorTakeProfit,result);

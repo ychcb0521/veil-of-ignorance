@@ -11,7 +11,8 @@ import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
 import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, isRetainedQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
-import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, qualityDrawdownPct, type FishQualityStudy } from './quality';
+import { qualityPositionSize } from './qualityPositionManagement';
+import { hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, qualityDrawdownPct, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { isStaticDrawdownSell, qualityStaticDrawdownReason, STATIC_DRAWDOWN_SELL_LABEL } from './qualityStaticDrawdownSell';
 import { syncQualitySellDefinitions } from './qualityComparison';
@@ -33,7 +34,7 @@ const iso = (time: number) => new Date(time).toISOString();
 // 记录时间（recorded_at / created_at）仍是计算时刻。旧版把实际时间写成计算时刻，交易战役按实际时间排先后，
 // 加仓前的镜像卖出被排到加仓之后，几何仓位漏乘 (1 − αf)（2026-11-01 用户要求与组合表一致）。
 /** Adapt the frozen paper trade into the exact inputs of existing campaign charts/metrics/exports. */
-export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string, size = { notional: QUALITY_NOTIONAL, marginUsdt: QUALITY_NOTIONAL, leverage: 1 }): QualityCampaignData {
+export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string, size = qualityPositionSize(run.plan)): QualityCampaignData {
   const { notional, marginUsdt, leverage } = size;
   const { sample, plan: storedPlan, result: r } = run, plan=routedQualityPlan(storedPlan,r), id = campaignId ?? qualityCampaignId(r.key, section), closed = r.status === 'closed';
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
@@ -66,7 +67,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     strategy_template: 'main_only', title: `${sample.source.symbol} · ${label}`, opened_at: iso(entry), closed_at: closed ? iso(end) : null,
     initial_main_size_usdt: notional, initial_leverage: leverage, final_realized_pnl: pnl, final_r_multiple: null,
     peak_unrealized_pnl: mirror || r.peakPct == null ? null : notional * r.peakPct / 100, peak_drawdown: null,
-    importance_weight: 0, notes: `${qualitySourceLabel(sample)} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n${marginUsdt} USDT · ${leverage} 倍模拟多单；未扣手续费、资金费与滑点。`,
+    importance_weight: 0, notes: `${qualitySourceLabel(sample)} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n保证金 ${+marginUsdt.toPrecision(12)} USDT · ${leverage} 倍模拟多单 · 名义仓位 ${notional} USDT；未扣手续费、资金费与滑点。`,
     actual_evolution: [opening, ...exits],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     // 【用户要求】2026-11-02 战役元数据底部「持仓监测」：完整显示这场战役运行时冻结的整套条件设置
@@ -160,7 +161,9 @@ export function qualityMonitorCampaignDataFromStudy(owner:string, study:FishQual
 function buildMonitorCampaignData(owner:string,record:QualityMonitorRecord,setting:QualityMonitorSetting):QualityCampaignData {
   const run=qualityMonitorCampaignRun(record,setting);
   if(!run)throw new Error('这条监测记录尚未形成有效交易，不能生成交易战役');
-  const data=buildQualityCampaignData(owner,run,'sell',qualityMonitorCampaignId(record.id));
+  const data=buildQualityCampaignData(owner,run,'sell',qualityMonitorCampaignId(record.id), {
+    notional: setting.notional, leverage: setting.leverage, marginUsdt: setting.notional / setting.leverage,
+  });
   data.campaign.notes += `\n监测库历史快照 · ${setting.filtersKnown?'买前过滤：'+(setting.plan.buyFilters?.map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')||'无'):'历史买前条件未记录'}\n记录编号：${record.id}`;
   return data;
 }

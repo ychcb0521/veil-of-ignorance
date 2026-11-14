@@ -14,7 +14,9 @@ export interface InstantMonitorSettings {
   plan: QualityGroup;
 }
 
-export function instantMonitorTemplateIssue(template: QualityPlanTemplate & { plan: QualityGroup }) {
+export type InstantMonitorPlanChoice = Pick<QualityPlanTemplate, 'id' | 'name'> & Partial<Omit<QualityPlanTemplate, 'id' | 'name' | 'plan'>> & { plan: QualityGroup };
+
+export function instantMonitorTemplateIssue(template: InstantMonitorPlanChoice) {
   if (template.entryHours != null || template.plan.preEntryThreeStage || template.plan.preEntryConditions || !hasQualityExit(template.plan)) return '请选择持仓监测模板';
   if (template.versionsBackfilledAt || !template.plan.frozenVersions?.length || planVersionChanges(template.plan).length) return '模板缺少可核验的原执行版本';
 }

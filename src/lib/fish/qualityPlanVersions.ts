@@ -19,6 +19,7 @@ import { ENTRY_STALL_TURN_5M_VERSION, PULLBACK_NEW_HIGH_5M_VERSION } from './pre
  *  - 引擎版本号：代码里写死的标记（如 holding-veto-v3、mirror-limit-v1、dbl-5-v2）。改了引擎逻辑的人必须换新标记。
  *  - 公式指纹：卖出算法、方向指标、否决指标等用户公式，取公式全文与参数的短哈希。公式改一个字，指纹就变。
  */
+import { qualityPositionIdentity, validateQualityPositionManagement } from './qualityPositionManagement';
 import { shortFishHash } from './algorithm';
 import type { QualityGroup } from './quality';
 import { qualityComboIdentity, qualityVetoVersion } from './quality';
@@ -61,6 +62,13 @@ const join = (parts: (string | undefined | false)[]) => parts.filter(Boolean).jo
 export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   validateQualityAdvantage(plan);
   const initialization: PlanVersionEntry[] = plan.initialization ? [{ key: 'initialization', part: '历史初始化', name: '图灵杯首根行情初始化', version: TURING_INITIALIZATION_VERSION, summary: '从已有首根完整 K 线初始化；初期无定义的指标等待，不补造历史。与完整历史预热读数不同，原方案保留。' }] : [];
+  if (plan.positionManagement && !isLegacyQualityPlan(plan)) {
+    validateQualityPositionManagement(plan.positionManagement);
+    const { version, leverage, notional } = plan.positionManagement;
+    initialization.push({ key: 'position-management', part: '仓位管理', name: '首仓名义仓位与杠杆',
+      version: version + ' · 参数 #' + shortFishHash(JSON.stringify(qualityPositionIdentity(plan.positionManagement))),
+      summary: '首仓 ' + notional + ' USDT · ' + leverage + ' 倍杠杆。按名义金额计算成交数量、盈亏与加仓，保证金按杠杆折算。' });
+  }
   if(plan.router){
     validateQualityRouter(plan.router);
     return [...initialization,{key:'router',part:'条件分支',name:'结构为底·强势进攻',version:plan.router.version+' · 参数 #'+routerFingerprint(plan.router),summary:routerVersionSummary(plan.router)},...(['structure','attack'] as const).flatMap(branch=>qualityPlanVersions(plan.router![branch]).map(e=>({...e,key:branch+':'+e.key,part:(branch==='structure'?'结构分支 · ':'进攻分支 · ')+e.part})))];

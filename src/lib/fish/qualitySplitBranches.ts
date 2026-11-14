@@ -22,6 +22,12 @@ export function splitQualityBranches(source:QualityGroup,ids:{structure:string;a
       const initialization=source.frozenVersions?.find(v=>v.key==='initialization');
       if(initialization)plan.frozenVersions.unshift({...initialization});
     }
+    if (source.positionManagement) {
+      plan.positionManagement = structuredClone(source.positionManagement);
+      const sizing = source.frozenVersions?.find(v => v.key === 'position-management')
+        ?? qualityPlanVersions(plan).find(v => v.key === 'position-management');
+      if (sizing) plan.frozenVersions = [...plan.frozenVersions.filter(v => v.key !== sizing.key), { ...sizing }];
+    }
     if(planVersionChanges(plan).length)throw Error('分支冻结版本不完整，无法保证原参数；已停止拆分');
     return plan;
   }) as [QualityGroup,QualityGroup];

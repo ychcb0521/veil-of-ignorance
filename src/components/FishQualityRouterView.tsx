@@ -16,7 +16,7 @@ export function FishQualityRouterView({plan}:{plan:QualityGroup}) {
   <p className="text-muted-foreground">整套参数与版本已冻结，可复制、改名或删除；分支内容在此只读查看，避免普通表单覆盖条件分支。保存模板不会启动运行。</p>
   <div role="tablist" aria-label="查看条件分支" className="flex gap-2">{(['structure','attack'] as const).map(b=><button type="button" role="tab" aria-selected={b===branch} key={b} onClick={()=>setBranch(b)} className={`rounded px-2 py-1 ${branch===b?'bg-primary text-primary-foreground':'bg-muted'}`}>{b==='structure'?'结构分支':'进攻分支'}</button>)}</div>
   <p>{qualityPlanTemplateSummary(r[branch])}</p>
-  <FishQualityMonitorSettingsView key={branch} plan={r[branch]}/>
-  {imageCapture&&<div hidden data-settings-image-include=""><h4>{branch==='structure'?'进攻分支':'结构分支'}</h4><FishQualityMonitorSettingsView plan={r[branch==='structure'?'attack':'structure']}/></div>}
+  <FishQualityMonitorSettingsView key={branch} plan={r[branch]} showSize={false}/>
+  {imageCapture&&<div hidden data-settings-image-include=""><h4>{branch==='structure'?'进攻分支':'结构分支'}</h4><FishQualityMonitorSettingsView plan={r[branch==='structure'?'attack':'structure']} showSize={false}/></div>}
  </section>;
 }

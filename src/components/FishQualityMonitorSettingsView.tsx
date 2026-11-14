@@ -21,13 +21,19 @@ import { hasPreBoxAdditionShape, isLegacyQualityPlan } from '@/lib/fish/qualityL
 
 import { useCampaignQualityTemplates } from '@/contexts/FishQualityContext';
 
+import { FishQualityPositionManagement, positionManagementDraft } from './FishQualityPositionManagement';
+import { qualityPositionSize } from '@/lib/fish/qualityPositionManagement';
+
 const ignore = () => {};
 /** holdingOnly：只显示镜像、加仓、硬性终止与版本（持仓监测条件设置里选中旧引擎方案时用，方案卡片已在上方）。 */
-export function FishQualityMonitorSettingsView({ plan, holdingOnly = false }: { plan: QualityGroup; holdingOnly?: boolean }) {
+export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, showSize = true, size = qualityPositionSize(plan) }: { plan: QualityGroup; holdingOnly?: boolean; showSize?: boolean; size?: ReturnType<typeof qualityPositionSize> }) {
   // 11-01 之前形态的方案（10-31 及更早的战役）也只可能是旧引擎算的，同样按原始参数显示
   const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
   const plans = useMemo(() => [plan], [plan]);
-  if(plan.router)return <FishQualityRouterView plan={plan}/>;
+  if(plan.router) return <>
+    {showSize && <FishQualityPositionManagement draft={positionManagementDraft(size)}/>}
+    <FishQualityRouterView plan={plan}/>
+  </>;
   const mirror = mirrorDraft(plan.mirrorTakeProfit ?? { enabled: false, gainPct: 5, sellPct: 50 });
   const addition = additionDraft(plan.addition, plan.sellStages);
   const vetoStages = { enabled: !!plan.vetoStages?.length, mode: plan.vetoStageMode ?? 'overlay', peakBasis: plan.vetoPeakBasis ?? 'stage', stages: (plan.vetoStages ?? []).map(s => ({ afterAdditions: String(s.afterAdditions), conditions: holdingVetoDraft(s.conditions) })) };
@@ -36,6 +42,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false }: { 
     {!holdingOnly && <p className="text-[10.5px] text-muted-foreground">这场战役运行时冻结的设置 · 只读</p>}
     {legacy && <LegacyEngineNote/>}
     {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly onSave={ignore}/>}
+    {showSize && <FishQualityPositionManagement draft={positionManagementDraft(size)}/>}
     <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled} holdingLedger={addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>
     {/* 旧引擎方案的加仓按 10-31 原始参数显示：新版编辑器会把它换算成箱体，显示的就不是当时的规则了 */}
     {legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
@@ -84,6 +91,9 @@ export function QualityMonitorSettingsButton({ plan, campaign }: { plan: Quality
       </form>}
       {message && <p role="status" className="text-primary">{message}</p>}
     </div>}
-    <FishQualityMonitorSettingsView plan={plan}/>
+    <FishQualityMonitorSettingsView plan={plan} size={campaign ? {
+      leverage: campaign.initial_leverage, notional: campaign.initial_main_size_usdt,
+      marginUsdt: campaign.comparison?.instant?.marginUsdt ?? campaign.initial_main_size_usdt / campaign.initial_leverage,
+    } : undefined}/>
   </PopoverContent></Popover>;
 }

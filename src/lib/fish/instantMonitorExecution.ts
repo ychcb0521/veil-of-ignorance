@@ -1,5 +1,6 @@
 import { evaluateQualitySampleWithMarketRepair, qualityResultKey, QUALITY_MINUTE, QUALITY_NOTIONAL, type QualityResult, type QualitySample } from './quality';
 import { evaluateLegacyQualitySample, isLegacyQualityPlan } from './qualityLegacyEngine';
+import { qualityPositionSize } from './qualityPositionManagement';
 import { planVersionChanges } from './qualityPlanVersions';
 import { additionPosition, qualityAdditionFills } from './qualityAddition';
 import { preEntryWindowLoader } from './preEntryWindowLoader';
@@ -11,6 +12,7 @@ import { INSTANT_TEMPLATE_MONITOR } from './instantMonitorSettings';
 
 export const INSTANT_POSITION = { marginUsdt: 40, leverage: 5 } as const;
 export function instantMonitorSize(monitor?: InstantMonitorSettings) {
+  if (monitor?.plan.positionManagement && !isLegacyQualityPlan(monitor.plan)) return qualityPositionSize(monitor.plan);
   return isLegacyQualityPlan(monitor?.plan)
     ? { ...INSTANT_POSITION, marginUsdt: QUALITY_NOTIONAL / INSTANT_POSITION.leverage }
     : INSTANT_POSITION;
@@ -30,7 +32,8 @@ export async function evaluateInstantMonitor(sample: QualitySample, monitor: Ins
   }
   const initialized = plan.initialization ? withTuringInitialization(tradeLoad, sample.source.symbol, marketStart ?? NaN) : tradeLoad;
   const { marginUsdt, leverage } = instantMonitorSize(monitor);
-  const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, marginUsdt * leverage);
+  const notional = plan.positionManagement?.notional ?? marginUsdt * leverage;
+  const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, notional);
   return initialized.turingInitialization ? { ...result, initialization: initialized.turingInitialization } : result;
 }
 
@@ -41,7 +44,7 @@ export function instantMonitorSale(result: QualityResult): ScreenedCdaTrigger {
 
 export function manualInstantMonitorClose(result: QualityResult, monitor: InstantMonitorSettings, at: number, price: number): QualityResult {
   const { marginUsdt, leverage } = instantMonitorSize(monitor);
-  const position = additionPosition(marginUsdt * leverage, result.entryPrice!, price, true, qualityAdditionFills(result),
+  const position = additionPosition(monitor.plan.positionManagement?.notional ?? marginUsdt * leverage, result.entryPrice!, price, true, qualityAdditionFills(result),
     result.mirrorFill, result.additionReductions ?? [], result.entryTime);
   const peakPct = Math.max(result.peakPct ?? 0, (price / result.entryPrice! - 1) * 100);
   return { ...result, status: 'closed', complete: true, evaluatedAt: Date.now(), endTime: at, endPrice: price,

@@ -7,7 +7,8 @@ import {qualitySellStagesIdentity} from './qualitySellStages';
 import { additionIdentity, additionMirrorIdentity } from './qualityAddition';
 import { mirrorIdentity, mirrorExecutionIdentity } from './qualityMirror';
 import { shortFishHash } from './algorithm';
-import { QUALITY_NOTIONAL, activeBuyFilters, qualityComparisonRows, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, qualityRunGroups, qualityMonitorRunSamples, qualityVetoVersion, type FishQualityStudy, type QualityFilterReading, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityComboIdentity } from './quality';
+import { qualityPositionIdentity, qualityPositionSize } from './qualityPositionManagement';
+import { activeBuyFilters, qualityComparisonRows, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, qualityRunGroups, qualityMonitorRunSamples, qualityVetoVersion, type FishQualityStudy, type QualityFilterReading, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample, qualityComboIdentity } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity } from './qualityVeto';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -113,14 +114,15 @@ function settingFor(study: FishQualityStudy, sample: QualitySample, plan: Qualit
   const selected = new Set(study.selectedRowIds ?? []);
   const detectors = study.groups.filter(g => sample.groups.includes(g.id) && (!study.selectedRowIds || selected.has(sample.id) || selected.has(`${sample.id}/detector/${g.id}`)));
   const filters = activeBuyFilters(study, plan);
+  const { notional, leverage } = qualityPositionSize(plan);
   const signature = JSON.stringify([...(qualityAdvantageIdentity(plan)?[qualityAdvantageIdentity(plan)]:[]),...(isLegacyQualityPlan(plan)?[LEGACY_QUALITY_ENGINE]:[]),...(plan.payoffRiskVersion ? [plan.payoffRiskVersion] : []),...(qualityVetoStagesIdentity(plan)?[qualityVetoStagesIdentity(plan)]:[]),...(qualitySellStagesIdentity(plan)?[qualitySellStagesIdentity(plan)]:[]),...(additionIdentity(plan.addition).length ? [additionIdentity(plan.addition)] : []),...additionMirrorIdentity(plan.addition,plan.mirrorTakeProfit),algorithm(plan), plan.rule ?? null, ...(plan.combo ? [qualityComboIdentity(plan)] : []), plan.execution ?? 'close', qualityVetoVersion(plan), holdingVetoIdentity(plan.holdingVetoes),
     ordered(activeHoldingVetoes(plan.holdingVetoes).map(v => [v.kind, v.direction, v.threshold, v.metric, v.snapshot?.scale, v.snapshot?.H])),
     ordered(filters.map(f => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.snapshot.scale, f.snapshot.H, f.direction, f.threshold])),
-    ordered(detectors.map(g => [algorithm(g), g.snapshot.direction, g.snapshot.threshold])), study.observeHours, study.entryMode, filtersKnown, detectorsKnown, QUALITY_NOTIONAL, 1, ...(mirrorExecutionIdentity(plan).length ? [mirrorExecutionIdentity(plan)] : []), ...(mirrorIdentity(plan.mirrorTakeProfit).length ? [mirrorIdentity(plan.mirrorTakeProfit)] : [])]);
+    ordered(detectors.map(g => [algorithm(g), g.snapshot.direction, g.snapshot.threshold])), study.observeHours, study.entryMode, filtersKnown, detectorsKnown, notional, leverage, ...(plan.positionManagement ? [qualityPositionIdentity(plan.positionManagement)] : []), ...(mirrorExecutionIdentity(plan).length ? [mirrorExecutionIdentity(plan)] : []), ...(mirrorIdentity(plan.mirrorTakeProfit).length ? [mirrorIdentity(plan.mirrorTakeProfit)] : [])]);
   const existing = catalog.get(signature); if (existing) return existing;
   const value: QualityMonitorSetting = { id: `setting-${shortFishHash(signature)}`, signature,
     plan: structuredClone({ ...plan, buyFilters: filters }), detectors: structuredClone(detectors),
-    observeHours: study.observeHours, entryMode: study.entryMode, filtersKnown, detectorsKnown, notional: QUALITY_NOTIONAL, leverage: 1 };
+    observeHours: study.observeHours, entryMode: study.entryMode, filtersKnown, detectorsKnown, notional, leverage };
   catalog.set(signature, value); return value;
 }
 function taskFor(study: FishQualityStudy, sample: QualitySample, plan: QualityGroup, catalog: Map<string, QualityMonitorSetting>, filtersKnown = true, detectorsKnown = true): MonitorTask {

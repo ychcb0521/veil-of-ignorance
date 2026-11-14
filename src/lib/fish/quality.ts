@@ -36,7 +36,10 @@ import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorP
 
 import { BOX_MARKET_REPAIR_VERSION, BOX_STOP_INVALID_DATA, qualityBoxMarketRepair } from './qualityBoxMarketRepair';
 
-export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
+import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type QualityPositionManagement } from './qualityPositionManagement';
+
+export { QUALITY_NOTIONAL };
+export const QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION }
 export interface QualityGroup {
@@ -52,6 +55,7 @@ export interface QualityGroup {
   router?: import('./qualityPlanRouter').QualityPlanRouter;
   holdingVetoes?: QualityHoldingVeto[];
   payoffRiskVersion?: typeof LIMITED_PAYOFF_RISK_VERSION;
+  positionManagement?: QualityPositionManagement;
   mirrorTakeProfit?: QualityMirrorTakeProfit;
   addition?: QualityAdditionRule;
   /** 回撤否决的成交方式版本：'stop' = 盘中触及止损价即按止损价成交（2026-10-26 起）；缺省 = 旧版（下一分钟开盘价）。 */
@@ -423,6 +427,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number, timeBasis?: QualityMonitorTimeBasis) => {
   const identity: unknown[] = [s.signalId ?? s.id, qualityMonitorEntryAt(s, timeBasis), g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.initialization) identity.push(g.initialization);
+  if (g.positionManagement) identity.push(qualityPositionIdentity(g.positionManagement));
   if (g.router) identity.push(routerResultFingerprint(g.router));
   const advantage=qualityAdvantageIdentity(g);if(advantage)identity.push(advantage);
   if (isLegacyQualityPlan(g)) identity.push(LEGACY_QUALITY_ENGINE);
@@ -601,12 +606,12 @@ const pricePlan = () => compileFishProgram({ id: 'quality-price', short: '价格
 const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 /** Replay each selected seller only until the next actual addition boundary. */
-export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=QUALITY_NOTIONAL):Promise<QualityResult>{
+export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=qualityPositionSize(group).notional):Promise<QualityResult>{
  sample=qualityMonitoringSample(sample);
  if(sample.monitorEntry?.error)return {key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:sample.monitorEntry.error};
  if(group.router){
   const key=qualityResultKey(sample,group,observeHours);
-  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior,initialNotional),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id};}
+  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior,initialNotional),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id,...(group.positionManagement ? { initialNotional } : {})};}
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
@@ -840,6 +845,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         initialNotional,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?position.remainingPnl+position.reductionPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
       ...(additionNote?{additionNote}:{}),...(savedAdvantage?{advantageState:savedAdvantage}:{}),
+      ...(group.positionManagement ? { initialNotional } : {}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: !sellStageBoundary&&(closed || end >= limit && !trigger),
@@ -858,7 +864,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
   }
 }
 export async function evaluateQualitySampleWithMarketRepair(sample: QualitySample, group: QualityGroup, hours: number, now: number,
-  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, initialNotional=QUALITY_NOTIONAL): Promise<QualityResult> {
+  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, initialNotional=qualityPositionSize(group).notional): Promise<QualityResult> {
   const repair = qualityBoxMarketRepair(load, sample.source.symbol);
   if (previous?.boxMarketRepair && repair) {
     const result = await evaluateQualitySample(sample, group, hours, now, repair, signal, previous, initialNotional);
