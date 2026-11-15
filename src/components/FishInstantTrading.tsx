@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Pause, Play, Settings2, Zap } from 'lucide-react';
+import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue, type InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
@@ -12,7 +12,7 @@ import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
 import { FishConditionSettings } from './FishConditionSettings';
 import { HoldingMonitorSettings } from './FishHoldingMonitorSettings';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
-import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySettingsAction } from './FishQualityModule';
+import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualityRowItem, qualitySettingsAction } from './FishQualityModule';
 import { Popover, PopoverTrigger } from './ui/popover';
 
 function InstantHoldingPlanEditor({ state, plan, save }: { state: FishQualityState; plan: QualityGroup; save: (plan: QualityGroup) => Promise<void> }) {
@@ -111,7 +111,9 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const liveHolding = follow?.connected && follow.statuses.some(status =>
     status.state !== 'closed' && status.state !== 'ignored' && (status.quantity ?? 0) > 0);
   const holding = liveHolding || !!instant?.positions.length;
-  const stage = holding ? '持仓中' : screening ? '筛选中' : capturing ? '捕捞中' : '等待中';
+  const { label: stage, icon: StageIcon } = holding ? { label: '持仓中', icon: BriefcaseBusiness }
+    : screening ? { label: '筛选中', icon: Filter }
+    : capturing ? { label: '捕捞中', icon: Pickaxe } : { label: '等待中', icon: Clock3 };
   const pending = automatic?.pending ?? 0;
   const followStatus = follow?.connected
     ? follow.paused ? '已暂停开仓和加仓' : '本机实盘跟随中'
@@ -121,9 +123,6 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={children}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
-      <span role="status">{stage}{liveHolding &&
-        <strong className="font-bold text-[var(--chart-profit)]">（实盘中）</strong>}
-      </span>
       {needsSettings && <span>请先保存买前设置</span>}
       {screening && !holding && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
@@ -193,5 +192,9 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
         </div>}
       </FishPopoverContent>
     </Popover>
+    {automatic && <span role="status" className={`${qualityRowItem} shrink-0 whitespace-nowrap`}>
+      <StageIcon aria-hidden className="h-3 w-3"/>
+      <span>{stage}{liveHolding && <strong className="font-bold text-[var(--chart-profit)]">（实盘中）</strong>}</span>
+    </span>}
   </FishQualityModule>;
 }

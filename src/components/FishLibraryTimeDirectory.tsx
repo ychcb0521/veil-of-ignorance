@@ -3,7 +3,7 @@ import {ChevronDown,Database,Download,MoreHorizontal,Copy,Trash2,Undo2,Pencil} f
 import {DIRECTORY_NAME_MAX_LENGTH,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle,DialogTrigger} from './ui/dialog';
 import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from './ui/dropdown-menu';
-import {FishQualityInfo} from './FishQualityModule';
+import {FishQualityInfo,qualityRowItem} from './FishQualityModule';
 import {formatUTC8} from '@/lib/timeFormat';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import {combineDirectoryStudies} from '@/lib/fish/qualityDirectorySelection';
@@ -19,7 +19,7 @@ export interface FishDirectoryPicker {
   triggerLabel: string;
   footer: (close: () => void) => ReactNode;
 }
-export const libraryDirectoryAction='inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
+export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
 export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onDeleteRecords,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
   loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string;info:ReactNode;dataActions?:ReactNode;transferMenu?:(handleExport:()=>void,canExport:boolean)=>ReactNode;items:FishDirectoryItem[];
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;

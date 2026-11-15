@@ -16,7 +16,8 @@ export const qualityPauseAction = `${shape} w-[5.5rem] rounded-md ${pause}`;
 export const qualitySplitPrimaryAction = `${shape} w-[4.5rem] rounded-l-md border-r-0 ${primary}`;
 export const qualitySplitPauseAction = `${shape} w-[4.5rem] rounded-l-md border-r-0 ${pause}`;
 export const qualitySplitMenuAction = 'inline-flex w-4 shrink-0 items-center justify-center rounded-r-md border outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40';
-export const qualitySettingsAction = 'inline-flex h-7 w-[5.5rem] shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
+export const qualityRowItem = 'inline-flex h-7 items-center gap-1 px-2 text-[10.5px] text-muted-foreground';
+export const qualitySettingsAction = `${qualityRowItem} w-[5.5rem] shrink-0 justify-center whitespace-nowrap rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
 
 export function FishQualityInfo({ label, children }: { label: string; children: ReactNode }) {
   const imageCapture=useSettingsImageCapture();
