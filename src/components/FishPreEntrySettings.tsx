@@ -8,7 +8,7 @@ import {SettingsImageScope} from './SettingsImageExport';
  * 旧版筛选（入选确认 / 三组否决 / 卖出排除）连同方案集下拉一起下线；
  * 已保存的旧方案由 FishPreEntryThreeStageSettings 自动转成「三阶副本」再编辑。
  */
-export function FishPreEntrySettings(props: { state: FishQualityState; selectedCount: number; done: () => void; automatic?: AutomaticPreEntryEditor }) {
+export function FishPreEntrySettings(props: { state: FishQualityState; selectedCount: number; done: () => void; automatic?: AutomaticPreEntryEditor; dialog?: boolean }) {
   const savedRevision = props.state.preEntry?.library.settings?.updatedAt ?? 'new';
   // Keep a chosen template draft mounted when screening history finishes loading.
   const [draftRevision, setDraftRevision] = useState<number | string>();

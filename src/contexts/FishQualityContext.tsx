@@ -9,6 +9,7 @@ import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishCdaTracking } from '@/hooks/useFishCdaTracking';
 import { useInstantCampaigns } from '@/hooks/useInstantCampaigns';
 import { useUsdtFollow } from '@/hooks/useUsdtFollow';
+import { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { useFishScreeningAutomation } from '@/hooks/useFishScreeningAutomation';
 
 import { useInstantMonitorSettings } from '@/hooks/useInstantMonitorSettings';
@@ -17,6 +18,7 @@ const EMPTY: readonly TradeSignal[] = [];
 type InstantPositionsView = Pick<ReturnType<typeof useFishCdaTracking>, 'monitorResults' | 'mirrorFills' | 'manualPositions'> & {
   positions: ReturnType<typeof useInstantCampaigns>['positions'];
   usdtFollow?: ReturnType<typeof useUsdtFollow>;
+  usdtLive?: ReturnType<typeof useUsdtLiveTrading>;
   manage?: ReturnType<typeof useFishCdaTracking>['managePosition'];
 };
 export const InstantPositionsContext = createContext<InstantPositionsView | null>(null);
@@ -35,6 +37,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const automaticScreening = useFishScreeningAutomation(owner, !!state.preEntry?.ready, state.preEntry, notify);
   const cdaTracking = useFishCdaTracking(owner, state.preEntry?.library, !!state.preEntry?.ready, notify, true);
   const usdtFollow = useUsdtFollow(owner, cdaTracking);
+  const usdtLive = useUsdtLiveTrading(owner, usdtFollow);
   const { issue: campaignIssue, positions } = useInstantCampaigns(owner, cdaTracking, true);
   const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0 || (notify.config.enabled && cdaTracking.hasPendingSaleMail) || positions.length > 0;
   useEffect(() => { if (hasAutomaticWork) setScreeningRequested(true); }, [hasAutomaticWork]);
@@ -48,7 +51,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const templates=state.study.planTemplates??state.templateCatalog;
   const names=useMemo(()=>({owner,resolver:qualityTemplateNames({planTemplates:templates})}),[owner,templates]);
   return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
-    <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
+    <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, usdtLive, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}
       {state.filterRunning && <div>过滤后台运行中 · {state.filterProgress?.done ?? 0}/{state.filterProgress?.total ?? 0}</div>}

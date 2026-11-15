@@ -1,4 +1,5 @@
 import './FishPreEntryThreeStageSettings.css';
+import { DialogDescription, DialogTitle } from './ui/dialog';
 import {SettingsImageButton} from './SettingsImageExport';
 import {selectedPreEntryPlan,newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {SaveTemplateButton,TemplatePicker} from './FishQualitySellPlansEditor';
@@ -43,7 +44,7 @@ export interface AutomaticPreEntryEditor {
   settings?: PreEntrySettings;
   save: (plans: QualityGroup[], hours: number) => Promise<void>;
 }
-type LiveEditorProps={state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void;automatic?:AutomaticPreEntryEditor};
+type LiveEditorProps={state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void;automatic?:AutomaticPreEntryEditor;dialog?:boolean};
 const noDefinitions:ReturnType<typeof useFeatureDefinitions>=[];
 type FrozenView={plan:QualityGroup;hours:number;displayName?:string};
 export function FishPreEntryThreeStageSettings(props:LiveEditorProps){
@@ -52,7 +53,7 @@ export function FishPreEntryThreeStageSettings(props:LiveEditorProps){
 export function FishFrozenPreEntryThreeStageSettings({plan,hours,displayName}:FrozenView){
   return <ThreeStageSettings frozen={{plan,hours,displayName}} definitions={noDefinitions}/>;
 }
-function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,frozen,definitions}:Partial<LiveEditorProps>&{frozen?:FrozenView;definitions:ReturnType<typeof useFeatureDefinitions>}){
+function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,dialog,frozen,definitions}:Partial<LiveEditorProps>&{frozen?:FrozenView;definitions:ReturnType<typeof useFeatureDefinitions>}){
   const readOnly=!!frozen;
   const contentId=useId();
   const monitor=state?.preEntry,choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
@@ -216,7 +217,15 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,fr
     </div>;
   };
   return <fieldset disabled={readOnly} className={'screening-settings min-w-0 '+(readOnly?'screening-settings-readonly':'')} data-testid="pre-entry-three-stage-settings">
-    {!readOnly&&state&&monitor&&<div className="screening-header"><div><h3 className="screening-title">{automatic ? '筛选鱼条件' : '动态筛选条件'}</h3><p className="screening-subtitle">{automatic ? '保存后用于后续捕到的新鱼' : '三阶准入 · 按首次满足时间入选'}</p></div><div className="screening-template-actions">
+    {!readOnly&&state&&monitor&&<div className="screening-header"><div>
+      {dialog ? <>
+        <DialogTitle asChild><h3 className="screening-title">{automatic ? '即时交易 · 买前设置' : '动态筛选条件'}</h3></DialogTitle>
+        <DialogDescription asChild><p className="screening-subtitle">{automatic ? '保存后用于后续捕到的新鱼' : '三阶准入 · 按首次满足时间入选'}</p></DialogDescription>
+      </> : <>
+        <h3 className="screening-title">{automatic ? '筛选鱼条件' : '动态筛选条件'}</h3>
+        <p className="screening-subtitle">{automatic ? '保存后用于后续捕到的新鱼' : '三阶准入 · 按首次满足时间入选'}</p>
+      </>}
+    </div><div className="screening-template-actions">
       {!automatic && active && !active.initialization && <button type="button" className={button}
         title={savedDraft ? '从图灵杯首根完整 K 线初始化；适用图灵杯标的' : '请先保存当前三阶方案'}
         disabled={!state.ready || !monitor.ready || !savedDraft}

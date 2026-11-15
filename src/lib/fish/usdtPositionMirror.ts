@@ -36,3 +36,7 @@ export interface UsdtMirrorSnapshot {
 export const usdtMirrorKey = (position: Pick<UsdtMirrorPosition, 'symbol' | 'positionSide'>) => position.symbol + ':' + position.positionSide;
 export const usdtMirrorRevision = (position: UsdtMirrorPosition) =>
   JSON.stringify([usdtMirrorKey(position), position.quantity, position.direction, position.entryPrice, position.updatedAt]);
+
+export const usdtSettlementAsset = (symbol: string) => symbol.split('_')[0].endsWith('USDC') ? 'USDC' : 'USDT';
+const amountFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 8 });
+export const usdtAmountText = (amount: number) => Number.isFinite(amount) ? amountFormat.format(amount) : '—';

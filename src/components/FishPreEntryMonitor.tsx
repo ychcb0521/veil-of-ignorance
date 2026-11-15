@@ -1,6 +1,7 @@
 import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirectory';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
-import './FishConditionSettings.css';
+import { FishConditionDialogContent } from './FishConditionSettings';
+import { Dialog, DialogDescription, DialogTitle, DialogTrigger } from './ui/dialog';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress,latestScreeningRound} from './FishPreEntryProgress';
@@ -143,11 +144,15 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         </PopoverContent>
       </Popover>
     </div>
-    <Popover open={settingsOpen} onOpenChange={setSettingsOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="动态筛选条件" title="设置动态筛选条件与时长"><Settings2 aria-hidden className="h-3 w-3"/>条件设置</button></PopoverTrigger>
-      <PopoverContent align="start" collisionPadding={12} className="fish-condition-settings screening-settings-popover">
-        {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings key={state.account} state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
-      </PopoverContent>
-    </Popover>
+    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}><DialogTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="动态筛选条件" title="设置动态筛选条件与时长"><Settings2 aria-hidden className="h-3 w-3"/>条件设置</button></DialogTrigger>
+      <FishConditionDialogContent>
+        {renderConditions ? <>
+          <DialogTitle className="sr-only">动态筛选条件</DialogTitle>
+          <DialogDescription className="sr-only">设置动态筛选条件与时长</DialogDescription>
+          {renderConditions(() => setSettingsOpen(false))}
+        </> : <FishPreEntrySettings dialog key={state.account} state={state} selectedCount={selectedCount} done={() => setSettingsOpen(false)}/>}
+      </FishConditionDialogContent>
+    </Dialog>
     <FishPreEntryLibrary renderTemplate={renderTemplate} state={state} onSelected={onSelected} onJump={onJump} openRequest={openRequest}
       onSelectDirectory={onSelectDirectory} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy}/>
     <FishPreEntryProgress monitor={monitor} open={resultsOpen&&!automaticResults} onOpenChange={open=>{setAutomaticResults(false);setResultsOpen(open);}}/>

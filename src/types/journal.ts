@@ -402,6 +402,7 @@ export interface TradeCampaign {
     holdingDrawdowns?: { staticDrawdown: number | null; drawdown: number | null };
     /** Frozen monitoring metrics shared with the fish-quality table. */
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
+    liveUsdt?: import('@/lib/fish/usdtLiveCampaign').UsdtLiveCampaign;
     instant?: {
       metadata?: import('@/lib/fish/instantCampaignMetadata').InstantCampaignMetadata;
       source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;

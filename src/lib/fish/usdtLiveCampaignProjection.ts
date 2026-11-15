@@ -1,0 +1,43 @@
+import { campaignStatusFromRealizedPnl } from '@/lib/campaignRealizedPnl';
+import type { TradeCampaign } from '@/types/journal';
+import type { QualityCampaignData } from './qualityCampaignProjection';
+import { usdtCampaignAmounts, usdtLiveCampaignId, type UsdtLiveCampaign } from './usdtLiveCampaign';
+
+export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampaign): QualityCampaignData {
+  const id = usdtLiveCampaignId(position);
+  const opened = new Date(position.openedAt).toISOString();
+  const closed = position.closedAt ? new Date(position.closedAt).toISOString() : null;
+  const last = position.fills.at(-1)!;
+  const updated = new Date(last.at).toISOString();
+  const opening = position.fills[0];
+  const initialNotional = position.fills.filter(fill => fill.orderId === opening.orderId && fill.action !== 'reduce')
+    .reduce((sum, fill) => sum + Number(fill.price) * Number(fill.positionQuantity), 0);
+  const { realized, net } = usdtCampaignAmounts(position);
+  const source = position.followId ? '系统跟单' : '币安开仓';
+  const campaign: TradeCampaign = {
+    id, user_id: owner, campaign_code: 'BN-' + opening.id, symbol: position.symbol,
+    direction: position.direction === 'long' ? 'main_long' : 'main_short',
+    status: closed ? campaignStatusFromRealizedPnl({ settled: true, total: net ?? realized }, closed) : 'active',
+    strategy_template: 'main_only', title: position.symbol + ' · ' + source,
+    opened_at: opened, closed_at: closed, initial_main_size_usdt: position.asset === 'USDT' ? initialNotional : null, initial_leverage: null,
+    final_realized_pnl: position.asset === 'USDT' ? net : null, final_r_multiple: null, peak_unrealized_pnl: null, peak_drawdown: null,
+    importance_weight: 0, notes: null, deviation_notes: {}, deleted_at: null, created_at: opened, updated_at: updated,
+    actual_evolution: position.fills.map((fill, index) => ({
+      id: id + '-' + fill.id, timestamp: new Date(fill.at).toISOString(), recorded_at: new Date(fill.at).toISOString(),
+      event_type: fill.action !== 'reduce' ? 'main_opened' : index === position.fills.length - 1 && closed ? 'main_fully_closed' : 'main_partial_closed',
+      leg_role: fill.action === 'open' ? 'main_open' : null, journal_id: null, trade_record_id: null,
+      pending_order_id: null, price: Number(fill.price), size_usdt: position.asset === 'USDT' ? Number(fill.price) * Number(fill.positionQuantity) : null,
+      ...(fill.action !== 'reduce' ? { entry_price: Number(fill.price) } : { exit_price: Number(fill.price) }), notes: null,
+    })),
+    comparison: { section: 'instant', runKey: id, sellKey: 'binance-live', sellLabel: '币安实盘', detectors: [],
+      valuedAt: last.at, liveUsdt: position },
+  };
+  return { campaign, legs: [], tradeRecords: [], pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [],
+    legExitPriceCorrections: {}, timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0,
+      missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
+}
+
+export function mergeUsdtLiveCampaignRows(rows: QualityCampaignData[]) {
+  const linked = new Set(rows.flatMap(row => row.campaign.comparison?.liveUsdt?.followId ?? []));
+  return [...new Map(rows.filter(row => !linked.has(row.campaign.id)).map(row => [row.campaign.id, row])).values()];
+}

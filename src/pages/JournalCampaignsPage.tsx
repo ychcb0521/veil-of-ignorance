@@ -1759,6 +1759,7 @@ function statSignTone(value: number | null | undefined): string {
 
 /** 封面标题旁的标签（方向 / 标的 / 杠杆 / 仓位击穿 / 编号）统一高度与圆角。 */
 const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';
+const rowOperationTime = (row: CampaignCardData) => row.campaign.comparison?.liveUsdt?.openedAt ?? campaignOperationTime(row.legs, row.tradeRecords);
 /** 批量下载选择条里的次级按钮：与排序按钮同高同字号，平时只有淡边框。 */
 const BATCH_BAR_BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border border-border/60 bg-background/60 px-2 text-foreground/80 transition-[color,background-color,border-color] duration-150 hover:border-border hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40';
 /**
@@ -1849,7 +1850,7 @@ const CampaignCard = memo(function CampaignCard({
   const importance = importanceValue(campaign);
   /** 自评量表上悬停 / 聚焦的那一档（预览文字用）；null = 显示已选的那一档。 */
   const [ratingPreview, setRatingPreview] = useState<number | null>(null);
-  const operationTime = campaignOperationTime(legs, tradeRecords);
+  const operationTime = rowOperationTime(row);
   const campaignDisplayCode = formatCampaignDisplayCode(
     campaign.campaign_code,
     campaignAccountName,
@@ -1942,6 +1943,10 @@ const CampaignCard = memo(function CampaignCard({
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
             {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
             <QualityCampaignCardTitle campaign={campaign} highlight={litAttr('alpha')} className={`mr-0.5 text-[13px] font-semibold leading-5 text-foreground ${byLevel('alpha', 'underline decoration-[#F0B90B]/70 decoration-2 underline-offset-[5px]', 'underline decoration-[#F0B90B]/35 decoration-2 underline-offset-[5px]', '')}`}/>
+            {campaign.comparison?.section === 'instant' && <span className={`${CARD_CHIP} text-[10px] font-medium ${campaign.comparison.liveUsdt
+              ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-muted text-muted-foreground'}`}>
+              {campaign.comparison.liveUsdt ? '币安实盘' : '模拟'}
+            </span>}
             <span className={`${CARD_CHIP} text-[10px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
               {campaign.direction === 'main_short' ? '主空' : '主多'}
             </span>
@@ -2694,7 +2699,7 @@ export default function JournalCampaignsPage() {
   const scopedRows = useMemo(() => {
     if (isAllRange(operationRange)) return rows;
     const next = rows.filter(row => isWithinOperationRange(
-      campaignOperationTime(row.legs, row.tradeRecords),
+      rowOperationTime(row),
       operationRange,
     ));
     // 时间段外的行变了（rows 换了数组）而段内的行一个没变：沿用上一个数组，下游的统计、排序、散点序列都不白算。
@@ -2718,18 +2723,19 @@ export default function JournalCampaignsPage() {
     return selected.length === scopedRows.length ? scopedRows : selected;
   }, [scopedRows, selectedCampaignIds]);
   const monitoringCategoryRows = useMemo(() => baseRows.filter(row => selectedCampaignIds.has(row.campaign.id)
-    && (isAllRange(operationRange) || isWithinOperationRange(campaignOperationTime(row.legs, row.tradeRecords), operationRange))),
+    && (isAllRange(operationRange) || isWithinOperationRange(rowOperationTime(row), operationRange))),
   [baseRows, selectedCampaignIds, operationRange]);
   const comparisonReturns = useMemo(() => {
-    const closed = statisticsRows.filter(row => isResolvedCampaign(row.campaign));
+    const paper = statisticsRows.filter(row => !row.campaign.comparison?.liveUsdt);
+    const closed = paper.filter(row => isResolvedCampaign(row.campaign));
     const values = closed.map(row => row.campaign.comparison?.instant ? row.campaign.comparison.holdingMetrics?.returnPct ?? 0 : row.campaign.final_realized_pnl!);
-    return { closed: closed.length, total: statisticsRows.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
+    return { closed: closed.length, total: paper.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
       mean: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, worst: values.length ? Math.min(...values) : null };
   }, [statisticsRows]);
   /** 因为没有客观操作时间而被时间段挡在外面的场数——不声不响地少几场是不能接受的。 */
   const undatedExcludedCount = useMemo(() => {
     if (isAllRange(operationRange)) return 0;
-    return rows.filter(row => campaignOperationTime(row.legs, row.tradeRecords) == null).length;
+    return rows.filter(row => rowOperationTime(row) == null).length;
   }, [rows, operationRange]);
 
   const activeCount = useMemo(
@@ -3132,7 +3138,7 @@ export default function JournalCampaignsPage() {
         campaignId: row.campaign.id,
         title: row.campaign.title,
         symbol: row.campaign.symbol,
-        operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+        operationTime: rowOperationTime(row),
         pnl: row.campaign.final_realized_pnl ?? null,
         payoffRatio: rowPayoffRatio(row),
       };
@@ -3269,7 +3275,7 @@ export default function JournalCampaignsPage() {
     campaignId: row.campaign.id,
     title: row.campaign.title,
     symbol: row.campaign.symbol,
-    operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+    operationTime: rowOperationTime(row),
     pnl: row.campaign.final_realized_pnl ?? null,
     payoffRatio: rowPayoffRatio(row),
     value: rowUnrealizedPriceChangePct(row),
@@ -3294,7 +3300,7 @@ export default function JournalCampaignsPage() {
   const extraOverviewSeries = useMemo(() => Object.fromEntries(OVERVIEW_EXTRA_SORT_MODES.map(mode => [mode,
     buildCampaignMetricSeries(metricRows.map(row => ({
       campaignId: row.campaign.id, title: row.campaign.title, symbol: row.campaign.symbol,
-      operationTime: campaignOperationTime(row.legs, row.tradeRecords), pnl: row.campaign.final_realized_pnl ?? null,
+      operationTime: rowOperationTime(row), pnl: row.campaign.final_realized_pnl ?? null,
       payoffRatio: rowPayoffRatio(row), value: rowOverviewSortMetric(row, mode),
     }))),
   ])) as Record<OverviewExtraSortMode, CampaignMetricSeries>, [metricRows]);

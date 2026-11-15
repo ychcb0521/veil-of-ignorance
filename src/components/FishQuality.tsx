@@ -9,7 +9,7 @@ import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
 import {FishCombinationHelp} from './FishCombinationHelp';
-import {FishConditionSettings} from './FishConditionSettings';
+import {FishConditionDialogContent,FishConditionSettings} from './FishConditionSettings';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import { qualityMonitorEntryAt, qualityMonitorTimeLabels, qualityRowMonitorTimeBasis, qualitySignalTime } from '@/lib/fish/qualityAdmissionTime';
 import {ScreeningHeaders,ScreeningCells,type ScreeningSortKey} from './FishQualityScreeningResults';
@@ -965,9 +965,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
             </Popover>
           </div>
           {/* 【用户要求】2026-10-28 旁边已有「条件设置」，原「未设置过滤条件 · 点此设置」等行内提示纯属重复，已删除；为何不能开始见按钮悬停 */}
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
-            <FishConditionSettings title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={state.account} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
-          </PopoverContent></Popover>
+          <Dialog open={filterOpen} onOpenChange={setFilterOpen}><DialogTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></DialogTrigger><FishConditionDialogContent>
+            <FishConditionSettings dialog title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={state.account} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
+          </FishConditionDialogContent></Dialog>
           <FishFilterLibrary renderTemplate={(table,close,source)=>renderTemplate(table,close,'filter',source)} onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           {staticRunning && <FishQualityProgress
             testId="static-filter-progress"
@@ -1003,11 +1003,10 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
                 <ChevronDown aria-hidden className="h-3 w-3"/>
               </button>}/>
           </div>
-          <Dialog open={monitorOpen} onOpenChange={setMonitorOpen}><DialogTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${planName(p)}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像平衡减仓 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像平衡减仓与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></DialogTrigger><DialogContent className="fish-monitor-settings-dialog block gap-0 overflow-hidden rounded-xl bg-popover p-0">
-            <div className="fish-condition-settings fish-monitor-settings-scroll">
+          <Dialog open={monitorOpen} onOpenChange={setMonitorOpen}><DialogTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${planName(p)}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像平衡减仓 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像平衡减仓与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></DialogTrigger><FishConditionDialogContent>
+
               <FishConditionSettings dialog imageExport title="持仓监测条件" description="按方案设置首仓、卖出、加仓、镜像和持仓否决"><HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/></FishConditionSettings>
-            </div>
-          </DialogContent></Dialog>
+          </FishConditionDialogContent></Dialog>
           <FishMonitorLibrary renderTemplate={(table,close,source)=>renderTemplate(table,close,'monitor',source)} openRequest={directoryRequests.monitor} onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onPurgeDirectory={state.purgeMonitorEntries} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={renderArchive}/>
           {running && <FishQualityProgress testId="holding-monitor-progress" progressLabel="持仓监测处理进度"
             label={progress?.waitingUntil ? '等待续跑' : '监测进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}

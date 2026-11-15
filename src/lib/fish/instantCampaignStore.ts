@@ -20,7 +20,7 @@ const localJobKey = (owner: string, input: InstantPositionInput) => (input.monit
 const table = () => supabase.from('user_sim_state' as never);
 type Saved = { input: InstantPositionInput | InstantCampaignInput; opened?: InstantPositionFill; snapshot?: InstantCampaignSnapshot; synced?: true };
 
-function publish(owner: string) {
+export function publishInstantCampaigns(owner: string) {
   openReads.delete(owner);
   window.dispatchEvent(new CustomEvent(INSTANT_CAMPAIGN_EVENT, { detail: { owner } }));
   try {
@@ -75,7 +75,7 @@ export async function saveInstantCampaignInput(owner: string, input: InstantCamp
     }
     return { ...previous, input };
   });
-  publish(owner);
+  publishInstantCampaigns(owner);
   return saved;
 }
 
@@ -84,14 +84,14 @@ export async function saveInstantPosition(owner: string, input: InstantPositionI
     if (previous?.snapshot || previous?.opened || (previous && !opened)) return previous;
     return { ...previous, input: previous?.input ?? input, ...(opened ? { opened } : {}) };
   });
-  publish(owner);
+  publishInstantCampaigns(owner);
   return saved;
 }
 
 export async function saveInstantCampaignSnapshot(owner: string, snapshot: InstantCampaignSnapshot): Promise<InstantCampaignSnapshot> {
   const saved = await updateFishPreference<Saved>(localJobKey(owner, snapshot), previous =>
     previous?.snapshot ? previous : { input: snapshot, snapshot });
-  publish(owner);
+  publishInstantCampaigns(owner);
   return saved.snapshot!;
 }
 
@@ -130,7 +130,7 @@ async function cacheRemote(owner: string, snapshot: InstantCampaignSnapshot, not
     changed = JSON.stringify(previous?.snapshot) !== JSON.stringify(snapshot);
     return previous?.synced && !changed ? previous : { input: snapshot, snapshot, synced: true };
   });
-  if (changed && notify) publish(owner);
+  if (changed && notify) publishInstantCampaigns(owner);
 }
 
 export function readLocalInstantCampaignJobs(owner: string) {

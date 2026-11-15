@@ -1,5 +1,8 @@
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
+import { UsdtLiveCampaignDetail } from '@/components/journal/UsdtLiveCampaignDetail';
+import { isUsdtLiveCampaignId } from '@/lib/fish/usdtLiveCampaign';
+import { usdtAmountText } from '@/lib/fish/usdtPositionMirror';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
@@ -940,7 +943,13 @@ function CampaignBatchBoardRenderer({
   );
 }
 
-export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
+export default function JournalCampaignDetailPage(props: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
+  const { id } = useParams<{ id: string }>();
+  if (id && isUsdtLiveCampaignId(id) && !props.batchExport) return <UsdtLiveCampaignDetail key={id} id={id}/>;
+  return <JournalCampaignDetail {...props}/>;
+}
+
+function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps }) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
   const paperCampaign = isPaperCampaignId(id);
@@ -2864,11 +2873,11 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                   {live && <div data-testid="instant-campaign-live-fills" className="space-y-1 border-t border-border/60 pt-2">
                     <p className="font-medium text-foreground">币安 U 本位成交回报</p>
                     {live.issue && <p role="status">{live.issue}</p>}
-                    {live.quantity != null && <p>实盘余仓 {live.quantity} {live.asset} · 已实现 {live.realizedUsdt ?? 0} USDT</p>}
+                    {live.quantity != null && live.entryPrice != null && <p>实盘余仓名义金额 {usdtAmountText(live.quantity * live.entryPrice)} USDT · 已实现 {live.realizedUsdt ?? 0} USDT</p>}
                     {live.executions?.map(execution => <div key={execution.actionId}>
                       <p>{execution.side === 'BUY' ? '买入' : '卖出'} · 订单 {execution.orderId}</p>
                       {execution.fills.map(fill => <p key={fill.id} className="font-mono">
-                        {formatBeijingTime(fill.at)} · {fill.quantity} {live.asset} @ {fill.price} · 手续费 {fill.commission} {fill.commissionAsset}
+                        {formatBeijingTime(fill.at)} · 成交金额 {usdtAmountText(fill.quantity * fill.price)} USDT · 成交价 {fill.price} · 手续费 {fill.commission} {fill.commissionAsset}
                       </p>)}
                     </div>)}
                   </div>}

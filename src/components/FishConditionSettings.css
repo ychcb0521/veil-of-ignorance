@@ -11,18 +11,18 @@ div.fish-condition-settings {
   font-size: 12px;
   line-height: 1.6;
 }
-div.fish-monitor-settings-dialog {
+div.fish-condition-dialog {
   width: min(68rem, calc(100dvw - 1.5rem));
   max-width: none;
 }
-div.fish-monitor-settings-scroll {
+div.fish-condition-scroll {
   width: 100%;
   max-width: none;
   max-height: min(90dvh, calc(100dvh - 1.5rem));
   border-radius: inherit;
   box-shadow: none;
 }
-.fish-monitor-settings-scroll .fish-settings-header { padding-inline-end: 3.5rem; }
+.fish-condition-scroll :is(.fish-settings-header,.screening-settings .screening-header) { padding-inline-end: 3.5rem; }
 .fish-condition-settings :is(div,label,span,summary,button,select),
 .fish-condition-settings .screening-settings :is(div,label,span,summary,button,select) { font-size: 12px; }
 .fish-condition-settings p,

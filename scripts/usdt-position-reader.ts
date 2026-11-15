@@ -22,7 +22,7 @@ const quantityText = (value: bigint) => {
 const day = 24 * 60 * 60 * 1000;
 const pageSize = 1000;
 
-function decodePositions(value: unknown): UsdtMirrorPosition[] {
+export function decodePositions(value: unknown): UsdtMirrorPosition[] {
   if (!Array.isArray(value)) throw Error('币安 U 本位持仓回报无效');
   const positions = new Map<string, UsdtMirrorPosition>();
   for (const row of value) {

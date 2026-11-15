@@ -1,4 +1,6 @@
 import { createUsdtPositionReader } from './usdt-position-reader.ts';
+import { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
+import { findUsdtCampaignFollow } from '../src/lib/fish/usdtLiveCampaign.ts';
 import { execFileSync } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -87,16 +89,18 @@ const json = (res: ServerResponse, status: number, data: unknown) => {
 };
 
 export function serveUsdtFollower({
-  owner, token, exchange, store, mode, startedAt, positionReader, allowedOrigin = origin, port = dashPort, statusFile,
+  owner, token, exchange, store, mode, startedAt, positionReader, campaignReader, allowedOrigin = origin, port = dashPort, statusFile,
 }: {
   owner: string; token: string; exchange: ReturnType<typeof createUsdtExchange>;
   store: ReturnType<typeof openUsdtFollowStore>; mode: 'hedge' | 'one-way'; startedAt: number;
   positionReader?: ReturnType<typeof createUsdtPositionReader>;
+  campaignReader?: ReturnType<typeof createUsdtCampaignReader>;
   allowedOrigin?: string; port?: number; statusFile?: string;
 }) {
   const follower = createUsdtFollower(store, exchange, owner, mode, startedAt);
   const tokenDigest = digest(token);
-  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(), ...(positionReader ? { positionMirror: 1 } : {}) });
+  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
+    ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
@@ -119,6 +123,15 @@ export function serveUsdtFollower({
       }
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
+      if (content.command === 'position-campaigns') {
+        if (!campaignReader) return json(res, 501, { error: '请更新 Windows 本机执行端以同步实盘战役' });
+        const result = await campaignReader(content.since, content.open);
+        const statuses = follower.statuses();
+        return json(res, 200, { ...result, campaigns: result.campaigns.map(campaign => {
+          const follow = findUsdtCampaignFollow(campaign, statuses);
+          return follow ? { ...campaign, followId: follow.id } : campaign;
+        }) });
+      }
       if (content.command === 'positions' || content.command === 'position-history') {
         if (!positionReader) return json(res, 501, { error: '请更新 Windows 本机执行端以同步币安持仓' });
         const state = content.command === 'positions'
@@ -201,7 +214,8 @@ async function main() {
   process.once('exit', close);
   store = openUsdtFollowStore(join(directory, 'usdt-follow.sqlite'), verified.id, config.owner);
   const server = serveUsdtFollower({ owner: config.owner, token: config.token, exchange, store, mode: verified.mode,
-    startedAt: Date.now(), positionReader: createUsdtPositionReader(request), statusFile: join(directory, 'usdt-follow-status.json') });
+    startedAt: Date.now(), positionReader: createUsdtPositionReader(request), campaignReader: createUsdtCampaignReader(request),
+    statusFile: join(directory, 'usdt-follow-status.json') });
   server.once('listening', () => console.log('币安 U 本位执行端已就绪，等待已配对的即时交易。'));
   server.once('error', () => { console.error('本机执行端端口不可用'); process.exit(1); });
 }

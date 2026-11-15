@@ -1,4 +1,5 @@
 import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorPosition, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
+import type { UsdtCampaignBatch, UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
@@ -23,6 +24,7 @@ interface FollowState {
   startedAt: number;
   statuses: UsdtFollowStatus[];
   positionMirror?: 1;
+  campaignMirror?: 1;
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -159,6 +161,11 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     if(!Array.isArray(result.fills)) throw Error('币安逐笔成交回报无效');
     return result;
   },[readMirror]);
+  const readCampaigns = useCallback(async (since: number, open: Pick<UsdtLiveCampaign, 'symbol' | 'openedAt'>[], signal: AbortSignal) => {
+    const batch = await readMirror<UsdtCampaignBatch>({command:'position-campaigns', since, open}, signal, 70_000);
+    if (!Number.isSafeInteger(batch.observedAt) || !Array.isArray(batch.campaigns)) throw Error('币安实盘战役回报无效');
+    return batch;
+  }, [readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
-  return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory };
+  return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns };
 }

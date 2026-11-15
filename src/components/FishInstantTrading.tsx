@@ -1,6 +1,6 @@
 import { FishUsdtPositions } from './FishUsdtPositions';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -11,24 +11,24 @@ import { FishPopoverContent } from './FishPopoverContent';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
 import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
-import { FishConditionSettings } from './FishConditionSettings';
+import { FishConditionDialogContent, FishConditionSettings } from './FishConditionSettings';
 import { HoldingMonitorSettings } from './FishHoldingMonitorSettings';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualityRowItem, qualitySettingsAction } from './FishQualityModule';
+import { fishRail } from './FishSection';
 import { Popover, PopoverTrigger } from './ui/popover';
+import { Dialog } from './ui/dialog';
 
 function InstantHoldingPlanEditor({ state, plan, save }: { state: FishQualityState; plan: QualityGroup; save: (plan: QualityGroup) => Promise<void> }) {
   const study = useMemo(() => ({ version: 1 as const, startedAt: 0, entryMode: 'signal' as const, observeHours: 0, tracking: false,
     groups: [], samples: [], results: [], sellPlans: [plan] }), [plan]);
-  return <FishConditionSettings imageExport title="即时交易 · 买后设置" description="编辑本次选用的工作副本，应用于保存后新入选的持仓。">
-    <HoldingMonitorSettings instant state={{ ...state, study, setSellPlans: plans => {
+  return <HoldingMonitorSettings instant state={{ ...state, study, setSellPlans: plans => {
       const next = replaceQualitySellPlans(study, plans).sellPlans?.[0];
       if (next) void save(next);
-    } }} activeId={plan.id} onSelect={() => {}} done={() => {}} selectedCount={0}/>
-  </FishConditionSettings>;
+    } }} activeId={plan.id} onSelect={() => {}} done={() => {}} selectedCount={0}/>;
 }
 
-function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualityState; done: () => void; onEdit: (editing: boolean) => void }) {
+function HoldingTemplateSettings({ state, done }: { state: FishQualityState; done: () => void }) {
   const names=useQualityTemplateNames();
   const monitor = state.instantMonitor;
   const selected = monitor?.settings;
@@ -63,17 +63,18 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
   const saveNotice = saving ? '正在等待云端确认保存…' : localOnly
     ? monitor?.pendingCloud ? '设置已保存到本机，云端暂未确认。可再次保存重试。' : '云端已确认保存'
     : '';
-  if (editing && choice) return <>
+  if (editing && choice) return <FishConditionSettings dialog imageExport title="即时交易 · 买后设置" description="编辑本次选用的工作副本，应用于保存后新入选的持仓。">
     <button className="px-4 pt-3 text-xs text-primary" type="button" disabled={saving}
-      onClick={() => { setEditing(false); onEdit(false); }}>返回模板选择</button>
+      onClick={() => setEditing(false)}>返回模板选择</button>
     <fieldset disabled={saving}>
       <InstantHoldingPlanEditor state={state} plan={choice.plan} save={save}/>
     </fieldset>
     {saveNotice && <p role="status" className="p-3 text-xs text-muted-foreground">{saveNotice}</p>}
     {error && <p role="alert" className="p-3 text-xs text-destructive">{error}</p>}
-  </>;
+  </FishConditionSettings>;
   const size = instantMonitorSize(choice && { version: INSTANT_TEMPLATE_MONITOR, templateId: choice.id, name: choice.name, plan: choice.plan });
-  return <div className="space-y-3 p-3 text-xs">
+  return <FishConditionSettings dialog title="即时交易 · 买后设置" description="选择新入选持仓使用的监测模板。">
+    <div className="space-y-3">
     <label className="block space-y-1.5">
       <span className="block font-medium">持仓监测模板</span>
       <select className="w-full rounded-md border bg-background px-2 py-1.5" value={id} onChange={event => setId(event.target.value)} disabled={saving}>
@@ -90,12 +91,13 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
     {choice && <p className="text-muted-foreground">首仓名义仓位 {+(size.marginUsdt * size.leverage).toPrecision(12)} USDT · {size.leverage} 倍 · 保证金 {+size.marginUsdt.toPrecision(12)} USDT</p>}
     {saveNotice && <p role="status" className="text-muted-foreground">{saveNotice}</p>}
     {(error || issue) && <p role="alert" className="text-destructive">{error || issue}</p>}
-    <div className="flex flex-wrap justify-end gap-2">
+    <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t px-4">
       {choice && !issue && !isLegacyQualityPlan(choice.plan) && <button type="button" className="rounded-md border px-3 py-1.5"
-        disabled={saving} onClick={() => { setEditing(true); onEdit(true); }}>编辑持仓监测条件</button>}
+        disabled={saving} onClick={() => setEditing(true)}>编辑持仓监测条件</button>}
       <button type="button" className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40"
       disabled={!monitor || !state.ready || saving || !!issue || (!!id && !choice)} onClick={() => void save()}>{saving ? '保存中…' : '保存设置'}</button></div>
-  </div>;
+    </div>
+  </FishConditionSettings>;
 }
 
 const settingsItem = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] outline-none hover:bg-muted focus-visible:bg-muted disabled:opacity-40';
@@ -103,18 +105,22 @@ const focusSettings = (panel: HTMLDivElement | null) => panel?.focus({ preventSc
 
 export function FishInstantTrading({ state, capturing, children }: { state: FishQualityState; capturing?: boolean; children: ReactNode }) {
   const [settingsView, setSettingsView] = useState<'menu' | 'before' | 'after' | 'live' | null>(null);
-  const [editingAfter, setEditingAfter] = useState(false);
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
   const instant = useScreenedInstantPositions();
   const follow = instant?.usdtFollow;
+  const live = instant?.usdtLive;
   const [pairCode, setPairCode] = useState('');
   const [pairIssue, setPairIssue] = useState('');
   const [pairSaving, setPairSaving] = useState(false);
   const automatic = state.automaticScreening, cda = state.cdaTracking;
-  const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : settingsView === 'live' ? '币安 U 本位实盘' : '即时交易条件设置';
-  const closeSettings = () => { setSettingsView(null); setEditingAfter(false); };
+  const settingsDialog = settingsView === 'before' || settingsView === 'after';
+  const closeSettings = () => setSettingsView(null);
   const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
-  const liveHolding = follow?.connected && follow.statuses.some(status =>
-    status.state !== 'closed' && status.state !== 'ignored' && (status.quantity ?? 0) > 0);
+  const realPositions = follow?.connected && !live?.issue ? live?.snapshot?.positions : undefined;
+  const liveHolding = !!realPositions?.length;
+  const following = realPositions?.some(position => position.direction === 'long' && follow?.statuses.some(status =>
+    status.state === 'tracking' && (status.market ?? status.symbol.replace(/\//g, '')) === position.symbol &&
+    Number(position.quantity) === status.quantity));
   const holding = liveHolding || !!instant?.positions.length;
   const { label: stage, icon: StageIcon } = holding ? { label: '持仓中', icon: BriefcaseBusiness }
     : screening ? { label: '筛选中', icon: Filter }
@@ -125,28 +131,32 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
   const needsSettings = pending > 0 && !(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length;
   const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
-  return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={<>{children}{follow&&<FishUsdtPositions key={follow.owner} follow={follow}/>}</>}
+  return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={<div className={fishRail + ' mt-2 space-y-1'}>
+    {children}{follow && <FishUsdtPositions key={follow.owner} follow={follow} live={live}/>}
+  </div>}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
       {needsSettings && <span>请先保存买前设置</span>}
       {screening && !holding && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
       {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
+      {live?.archiveIssue && <span role="status">实盘战役 · {live.archiveIssue}</span>}
       {automatic.storageIssue && <span role="alert" className="text-destructive">本机队列暂未保存，正在重试，请保留页面</span>}
     </>}>
     <button type="button" className={automatic?.paused ? qualityPrimaryAction : qualityPauseAction} disabled={!automatic}
       onClick={() => automatic?.setAutoPaused(!automatic.paused)}>
       {automatic?.paused ? <><Play className="h-3 w-3"/>继续筛选</> : <><Pause className="h-3 w-3"/>暂停筛选</>}
     </button>
-    <Popover open={settingsView !== null} onOpenChange={open => open ? setSettingsView('menu') : closeSettings()}>
+    <Popover open={settingsView === 'menu' || settingsView === 'live'} onOpenChange={open => open ? setSettingsView('menu') : closeSettings()}>
       <PopoverTrigger asChild>
-        <button type="button" aria-label="即时交易条件设置" className={qualitySettingsAction}>
+        <button ref={settingsTrigger} type="button" aria-label="即时交易条件设置" className={qualitySettingsAction}>
           <Settings2 aria-hidden className="h-3 w-3"/>条件设置
         </button>
       </PopoverTrigger>
-      <FishPopoverContent align="start" collisionPadding={12} aria-label={settingsLabel}
-        className={settingsView === 'before' ? 'fish-condition-settings screening-settings-popover'
-          : settingsView === 'after' ? (editingAfter ? 'fish-condition-settings' : 'w-80 max-w-[calc(100vw-24px)] p-0') : settingsView === 'live' ? 'w-80 max-w-[calc(100vw-24px)] p-3' : 'w-36 p-1'}>
+      <FishPopoverContent align="start" collisionPadding={12}
+        aria-label={settingsView === 'live' ? '币安 U 本位实盘' : '即时交易条件设置'}
+        className={settingsView === 'live' ? 'w-80 max-w-[calc(100vw-24px)] p-3' : 'w-36 p-1'}
+        onCloseAutoFocus={event => { if (settingsDialog) event.preventDefault(); }}>
         {settingsView === 'menu' && <>
           <button type="button" className={settingsItem} disabled={!state.ready || !state.preEntry?.ready || !automatic?.saveSettings}
             title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'} onClick={() => setSettingsView('before')}>
@@ -188,18 +198,24 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
             {follow.paused ? '恢复开仓和加仓' : '暂停开仓和加仓'}
           </button>}
         </div>}
-        {settingsView === 'before' && automatic?.saveSettings && <div ref={focusSettings} tabIndex={-1} className="outline-none">
-          <FishPreEntrySettings state={state} selectedCount={0} done={closeSettings}
-            automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>
-        </div>}
-        {settingsView === 'after' && <div ref={focusSettings} tabIndex={-1} className="outline-none">
-          <HoldingTemplateSettings state={state} done={closeSettings} onEdit={setEditingAfter}/>
-        </div>}
       </FishPopoverContent>
     </Popover>
-    {automatic && <span role="status" className={`${qualityRowItem} shrink-0 whitespace-nowrap`}>
-      <StageIcon aria-hidden className="h-3 w-3"/>
-      <span>{stage}{liveHolding && <strong className="font-bold text-[var(--chart-profit)]">（实盘中）</strong>}</span>
-    </span>}
+    <Dialog open={settingsDialog} onOpenChange={open => { if (!open) closeSettings(); }}>
+      {settingsDialog && <FishConditionDialogContent onCloseAutoFocus={event => {
+        event.preventDefault();
+        settingsTrigger.current?.focus({ preventScroll: true });
+      }}>
+        {settingsView === 'before' && automatic?.saveSettings && <FishPreEntrySettings dialog state={state} selectedCount={0}
+          done={closeSettings} automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>}
+        {settingsView === 'after' && <HoldingTemplateSettings state={state} done={closeSettings}/>}
+      </FishConditionDialogContent>}
+    </Dialog>
+    {(automatic || liveHolding) && (liveHolding
+      ? <span role="status" className="inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current"/><span>持仓中{following ? '（跟随中）' : ''}</span>
+      </span>
+      : <span role="status" className={`${qualityRowItem} shrink-0 whitespace-nowrap`}>
+        <StageIcon aria-hidden className="h-3 w-3"/><span>{stage}</span>
+      </span>)}
   </FishQualityModule>;
 }

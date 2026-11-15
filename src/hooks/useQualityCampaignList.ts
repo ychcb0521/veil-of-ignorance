@@ -15,7 +15,8 @@ function mergeInstantCampaignCards(current: CampaignCardData[], incoming: Campai
     ))) continue;
     byId.set(row.campaign.id, row);
   }
-  return [...byId.values()];
+  const linked = new Set([...byId.values()].flatMap(row => row.campaign.comparison?.liveUsdt?.followId ?? []));
+  return [...byId.values()].filter(row => !linked.has(row.campaign.id));
 }
 
 export function useQualityCampaignList(owner: string | undefined, section: CampaignSection, binView = false) {

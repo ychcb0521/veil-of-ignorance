@@ -14,6 +14,9 @@ import { readInstantPositionProgress } from './instantPositionProgress';
 import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, type InstantCampaignInput } from './instantCampaign';
 import { instantMonitorSize } from './instantMonitorExecution';
 import { listInstantCampaignSnapshots, loadInstantCampaignSnapshot, readInstantCampaignJob, readLocalInstantCampaignJobs } from './instantCampaignStore';
+import { isUsdtLiveCampaignId } from './usdtLiveCampaign';
+import { buildUsdtLiveCampaignData, mergeUsdtLiveCampaignRows } from './usdtLiveCampaignProjection';
+import { listCloudUsdtCampaigns, loadUsdtCampaign, readUsdtCampaigns } from './usdtLiveCampaignStore';
 export { buildQualityCampaignData, qualityDetectorCategory, qualityBuyFilterSummary, qualityCampaignDataFromStudy, qualityMonitorCampaignDataFromStudy } from './qualityCampaignProjection';
 export type { QualityCampaignData } from './qualityCampaignProjection';
 
@@ -58,11 +61,11 @@ function projectPendingTemplateSale(owner: string, sale: InstantCampaignInput) {
 }
 
 export async function listLocalInstantCampaignData(owner: string) {
-  const jobs = await readLocalInstantCampaignJobs(owner);
+  const [jobs, live] = await Promise.all([readLocalInstantCampaignJobs(owner), readUsdtCampaigns(owner).catch(() => [])]);
   const openJobs = jobs.filter(job => job.opened && !job.snapshot);
   const progress = await readInstantPositionProgress(owner, openJobs.map(job => job.input.recordId));
   const progressById = new Map(openJobs.map((job, index) => [job.input.id, progress[index]]));
-  return jobs.flatMap(job => {
+  const paper = jobs.flatMap(job => {
     if (job.snapshot) return [buildInstantCampaignData(owner, job.snapshot)];
     const saved = progressById.get(job.input.id);
     const position = job.opened;
@@ -75,14 +78,18 @@ export async function listLocalInstantCampaignData(owner: string) {
     if (!position || saved?.monitorResult?.status === 'closed') return [];
     return [buildOpenInstantCampaignData(owner, position, saved?.monitorResult, saved?.risk?.mirror, saved?.risk?.through, saved?.manual)];
   });
+  return mergeUsdtLiveCampaignRows([...paper, ...live.map(({ campaign }) => buildUsdtLiveCampaignData(owner, campaign))]);
 }
 
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' | 'instant' = 'quality',signal?:AbortSignal) {
   if (section === 'instant') {
-    const { snapshots, warning } = await listInstantCampaignSnapshots(owner, signal);
+    const [{ snapshots, warning }, live] = await Promise.all([listInstantCampaignSnapshots(owner, signal),
+      listCloudUsdtCampaigns(owner, signal).catch(() => undefined)]);
     const closedIds = new Set(snapshots.map(snapshot => snapshot.id));
     const local = await listLocalInstantCampaignData(owner).catch(() => []);
-    return { rows: [...snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), ...local.filter(data => !closedIds.has(data.campaign.id))], warning,
+    const rows = mergeUsdtLiveCampaignRows([...(live ?? []).map(campaign => buildUsdtLiveCampaignData(owner, campaign)),
+      ...snapshots.map(snapshot => buildInstantCampaignData(owner, snapshot)), ...local.filter(data => !closedIds.has(data.campaign.id))]);
+    return { rows, warning: warning ?? (live ? undefined : '币安实盘战役云端暂未读完'),
       selectedSellKey: undefined, buyFilterLabel: '', repair: undefined };
   }
   if(signal?.aborted)throw new DOMException('读取已取消','AbortError');
@@ -120,6 +127,10 @@ export async function loadQualityCampaignData(owner: string, id: string, signal?
       : data;
   };
   if (instant) {
+    if (isUsdtLiveCampaignId(id)) {
+      const real = await loadUsdtCampaign(owner, id, signal);
+      return applyTrash(buildUsdtLiveCampaignData(owner, real));
+    }
     const job = await readInstantCampaignJob(owner, id);
     throwIfReadAborted(signal);
     if (!job?.snapshot && job?.opened) {
