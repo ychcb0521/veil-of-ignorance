@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { latestReplayCatch } from '@/lib/fish/latestReplayCatch';
 import {
   type TradeSignal,
   parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
@@ -66,6 +67,7 @@ interface Props {
   timeMode?: TimeMode;
   originTime?: number | null;
   onSymbolChange?: (symbol: string) => void;
+  onSelectDefaultReplaySymbol?: (symbol: string) => boolean;
   activeSymbol?: string;
   onJumpToSignal?: (symbol: string, timeMs: number, options?: SignalJumpOptions) => Promise<SignalJumpResult>;
   signalJumpInterval?: string;
@@ -77,7 +79,7 @@ const EMPTY_TURING_SIGNALS: TradeSignal[] = [];
 export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
-  originTime, onSymbolChange, activeSymbol, onJumpToSignal,
+  originTime, onSymbolChange, onSelectDefaultReplaySymbol, activeSymbol, onJumpToSignal,
   signalJumpInterval = '1m', signalJumpIntervalMs = 60_000,
 }: Props) {
   const ctx = useTradingContext();
@@ -100,6 +102,7 @@ export function TimeControl({
     setNoEntryOpen(true);
   };
   const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
+  const replayDateEdited = useRef(false);
 
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
@@ -131,6 +134,15 @@ export function TimeControl({
   useEffect(() => { setFishSelection(fishAccountSettings?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false }); }, [fishAccountSettings, user?.id]);
   const { enqueue, notify: fishNotify } = useFishCaptureAutomation();
   const fish = useFish(user?.id, { onNewFish: enqueue });
+  const replayCatch = useMemo(() =>
+    onSelectDefaultReplaySymbol && status === 'stopped' && fish.signalsOwner === user?.id
+      ? latestReplayCatch(fish.signals) : undefined,
+  [onSelectDefaultReplaySymbol, status, fish.signals, fish.signalsOwner, user?.id]);
+  useEffect(() => {
+    if (status !== 'stopped') replayDateEdited.current = true;
+    if (replayDateEdited.current || !replayCatch) return;
+    if (onSelectDefaultReplaySymbol?.(replayCatch.symbol)) setDateInput(formatUTC8(replayCatch.timeMs));
+  }, [status, replayCatch, onSelectDefaultReplaySymbol]);
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
   const needsTuringArchive = (turing && signalLibOpen) || fishOpen || isTuringCupSymbol(activeSymbol ?? '');
@@ -644,7 +656,10 @@ export function TimeControl({
             <input
               type="text"
               value={dateInput}
-              onChange={e => setDateInput(e.target.value)}
+              onChange={e => {
+                replayDateEdited.current = true;
+                setDateInput(e.target.value);
+              }}
               placeholder="YYYY-MM-DD HH:mm:ss"
               className="input-dark w-52 text-xs"
             />

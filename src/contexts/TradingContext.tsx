@@ -221,6 +221,7 @@ interface TradingState {
   sim: ReturnType<typeof useTimeSimulator>;
   activeSymbol: string;
   setActiveSymbol: (s: string) => void;
+  setDefaultActiveSymbol: (s: string) => void;
   interval: string;
   setInterval: (i: string) => void;
   positionsMap: PositionsMap;
@@ -596,7 +597,13 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     } : undefined
   );
 
-  const [activeSymbol, setActiveSymbol] = usePersistedState('symbol', persistedSim?.symbol ?? 'BTCUSDT');
+  const [savedActiveSymbol, setSavedActiveSymbol] = usePersistedState('symbol', persistedSim?.symbol ?? 'BTCUSDT');
+  const [defaultActiveSymbol, setDefaultActiveSymbol] = useState<string | null>(null);
+  const activeSymbol = defaultActiveSymbol ?? savedActiveSymbol;
+  const setActiveSymbol = useCallback((symbol: string) => {
+    setDefaultActiveSymbol(null);
+    setSavedActiveSymbol(symbol);
+  }, [setSavedActiveSymbol]);
   const [interval, setInterval] = usePersistedState('interval', persistedSim?.interval ?? '1m');
   const [positionsMap, setPositionsMapState] = usePersistedState<PositionsMap>('positions_map', {});
   const positionsMapRef = useRef(positionsMap);
@@ -3242,7 +3249,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
   const value: TradingState = {
     sim,
-    activeSymbol, setActiveSymbol,
+    activeSymbol, setActiveSymbol, setDefaultActiveSymbol,
     interval, setInterval,
     positionsMap, setPositionsMap,
     ordersMap, setOrdersMap,

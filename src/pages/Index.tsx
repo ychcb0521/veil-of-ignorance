@@ -101,6 +101,7 @@ const Index = () => {
     sim,
     activeSymbol,
     setActiveSymbol,
+    setDefaultActiveSymbol,
     interval,
     setInterval: setIntervalVal,
     positionsMap,
@@ -1790,11 +1791,12 @@ const Index = () => {
   }, [handlePause]);
 
   // ===== Symbol switch: reload chart data =====
-  const handleSymbolChange = useCallback(
-    async (newSymbol: string) => {
+  const replayDefaultBlocked = useRef(false);
+  const changeSymbol = useCallback(
+    async (newSymbol: string, selectSymbol: (symbol: string) => void) => {
+      selectSymbol(newSymbol);
       if (newSymbol === activeSymbol) return;
 
-      setActiveSymbol(newSymbol);
       // Clear stale price to prevent cross-symbol pollution on chart
       latestChartPriceRef.current = 0;
       activeDisplayPriceRef.current = 0;
@@ -1835,6 +1837,17 @@ const Index = () => {
     },
     [activeSymbol, sim.status, sim.currentSimulatedTime, interval, initLoad, reset, timeMode, coinTimelines],
   );
+  const handleSymbolChange = useCallback((symbol: string) => {
+    replayDefaultBlocked.current = true;
+    return changeSymbol(symbol, setActiveSymbol);
+  }, [changeSymbol, setActiveSymbol]);
+  const selectDefaultReplaySymbol = useCallback((symbol: string) => {
+    if (replayDefaultBlocked.current || activeCoinState.status !== 'stopped') return false;
+    const target = timeMode === 'isolated' ? coinTimelines[symbol] : undefined;
+    if (target && target.status !== 'stopped') return false;
+    if (symbol !== activeSymbol) void changeSymbol(symbol, setDefaultActiveSymbol);
+    return true;
+  }, [activeCoinState.status, activeSymbol, changeSymbol, coinTimelines, setDefaultActiveSymbol, timeMode]);
 
   const handleIntervalChange = useCallback(
     async (newInterval: string) => {
@@ -1856,10 +1869,12 @@ const Index = () => {
 
   const handleStart = useCallback(
     async (timestamp: number) => {
+      replayDefaultBlocked.current = true;
       const data = await initLoad(activeSymbol, interval, timestamp, { reverse: timeDirection === -1 });
       // 取数期间用户又切了标的 / 周期：以后一次操作为准，这次静默放弃，不报「数据获取失败」。
       if (data === SUPERSEDED_INIT_LOAD) return;
       if (data.length > 0) {
+        setActiveSymbol(activeSymbol);
         matchCursorRef.current = null;
         gameLoopInitRef.current = false;
         lastReverseSimTimeRef.current = null;
@@ -1904,7 +1919,7 @@ const Index = () => {
         toast.error("数据获取失败", { description: "请检查时间范围和交易对" });
       }
     },
-    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setReverseCapTime, profile, forkReplayTimeline],
+    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setActiveSymbol, setReverseCapTime, profile, forkReplayTimeline],
   );
 
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
@@ -1912,6 +1927,7 @@ const Index = () => {
   const signalJumpSequence = useRef(0);
   const handleJumpToSignal = useCallback(
     async (symbol: string, timeMs: number, options?: SignalJumpOptions): Promise<SignalJumpResult> => {
+      replayDefaultBlocked.current = true;
       const request = ++signalJumpSequence.current;
       const offline = isTuringCupSymbol(symbol);
       const normalized = offline ? symbol : symbol.toUpperCase().replace(/[\s/]+/g, "");
@@ -1971,8 +1987,8 @@ const Index = () => {
         setTimeDirection(direction);
         timeDirectionRef.current = direction;
       }
+      setActiveSymbol(normalized);
       if (normalized !== activeSymbol) {
-        setActiveSymbol(normalized);
         latestChartPriceRef.current = 0;
         activeDisplayPriceRef.current = 0;
         renderedDisplayPriceRef.current = 0;
@@ -2382,6 +2398,7 @@ const Index = () => {
           clockRef={clockRef}
           timeMode={timeMode}
           onSymbolChange={handleSymbolChange}
+          onSelectDefaultReplaySymbol={selectDefaultReplaySymbol}
           onJumpToSignal={handleJumpToSignal}
           signalJumpInterval={interval}
           signalJumpIntervalMs={iMs}

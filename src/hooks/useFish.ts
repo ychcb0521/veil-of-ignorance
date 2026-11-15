@@ -89,6 +89,7 @@ export async function readPageInstantCampaignCandles(source: import('@/lib/fish/
 export function useFish(userId: string | undefined, options: { onNewFish?: (fish: TradeSignal) => void } = {}) {
   const onNewFish = useRef(options.onNewFish); onNewFish.current = options.onNewFish;
   const [signals, setSignals] = useState(loadFishSignals);
+  const [signalsOwner, setSignalsOwner] = useState(userId);
   const signalsRef = useRef(signals); signalsRef.current = signals;
   const ownerRef = useRef(userId); ownerRef.current = userId;
   const scanner = useRef<FishScanner | null>(null);
@@ -131,6 +132,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     const hydrated = () => { refresh(); backupFishSignals(signalsRef.current, userId ?? null); };
     // Read the durable library before mirroring a possibly stale localStorage cache into it.
     refresh(false); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
+    setSignalsOwner(userId);
     const version=++generation.current;
     void loadFishLibraryBackup(userId).then(backup => {
       if (cancelled || ownerRef.current !== userId) return;
@@ -352,5 +354,5 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     const saved = !result.added || commit(result.signals, value => { backup = value; });
     return { added: result.added, skipped: result.skipped, durable: saved || !!(await backup) };
   }, [commit]);
-  return { switchLive, unionFish, signals, signalsRef, commit, importCabin, progress, start, startWithProgress, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
+  return { switchLive, unionFish, signals, signalsOwner, signalsRef, commit, importCabin, progress, start, startWithProgress, cancel, mine, stopMining, testHitRate, estimate, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, removeMany, busy };
 }
