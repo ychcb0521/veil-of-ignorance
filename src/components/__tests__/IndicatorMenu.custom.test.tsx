@@ -5,16 +5,25 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
-import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators } from '@/lib/researchIndicators';
+import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators, IMPULSE_1115_CHART_ID } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DBL5_DISTANCE', 'DBL5_WIDTH', 'DBL5_AGE', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DBL5_GUARD_PLUS', 'DBL5_DISTANCE', 'DBL5_WIDTH', 'DBL5_AGE', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
+  it('adds the pure 1115 chart beside DBL-5 and the original 1115 combination', () => {
+    const changed = vi.fn();
+    render(<IndicatorMenu open indicators={[{type:'DBL5',period:3,enabled:true},{type:'DBL5_GUARD_PLUS',period:3,enabled:true}]} onClose={()=>{}} onIndicatorsChange={changed}/>);
+    fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'急拉线-1115'}});
+    fireEvent.click(screen.getByText(name(IMPULSE_1115_CHART_ID)));
+    expect(changed.mock.lastCall?.[0].map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5','DBL5_GUARD_PLUS',IMPULSE_1115_CHART_ID]);
+    expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).figures.map((figure:{key:string})=>figure.key)).toEqual(['value']);
+    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).figures.map((figure:{key:string})=>figure.key)).toEqual(['value','DBL5P_base','DBL5P_impulse']);
+  });
   it('adds the 5m impulse line independently and draws it only after the qualifying bar closes', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5', period:3, enabled:true}]} onClose={() => {}} onIndicatorsChange={changed}/>);
@@ -57,7 +66,7 @@ describe('自制区的十个特征值', () => {
     expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
-    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M', ...ids]);
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M',IMPULSE_1115_CHART_ID, ...ids]);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');

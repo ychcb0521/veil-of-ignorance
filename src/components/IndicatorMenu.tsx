@@ -1,6 +1,6 @@
 import { chartFeaturePeriod } from '@/lib/featureSource';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { accountResearchIndicators, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
+import { accountResearchIndicators, IMPULSE_1115_CHART, IMPULSE_1115_CHART_DESCRIPTION, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
 import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION, type Dbl5GuardVersion } from '@/lib/dbl5m';
 import { boxAlgorithmVersion } from '@/lib/fish/boxAlgorithmVersions';
 import { CTBA_DEFAULTS, CTBA_DESCRIPTION } from '@/lib/ctba';
@@ -76,6 +76,9 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   { id: IMPULSE_5M_ID, nameZh: '急拉线', nameEn: '5m Impulse Support', isOverlay: true, defaultPeriod: 5,
     color: '#a855f7', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: '5 分钟收盘确认放量突破后，在主图标出起涨低点。再次触及低点或满 60 分钟后结束。' },
+  { id: IMPULSE_1115_CHART_ID, nameZh: IMPULSE_1115_CHART.short, nameEn: IMPULSE_1115_CHART.name, isOverlay: true,
+    defaultPeriod: IMPULSE_1115_CHART.period, color: '#a21caf', category: 'custom', fixedPeriod: true, rawOnly: true,
+    description: IMPULSE_1115_CHART_DESCRIPTION },
   // ═══════════════════════════════════════════
   // OVERLAYS (主图叠加)
   // ═══════════════════════════════════════════
@@ -354,6 +357,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
 
   const availableCatalog = useMemo(() => [
     ...INDICATOR_CATALOG.map(item => {
+      if (item.id===IMPULSE_1115_CHART_ID) return item;
       const spec = researchItems.find(spec => spec.id === item.id);
       const entry = supportsDbl5GuardVersion(spec) ? { ...item, guardVersionSelect:true } : item;
       const legacyId = item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : undefined;
@@ -625,7 +629,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         </select>}
         {active ? (
           <>
-            {item.fixedPeriod?<span className="text-[10px] text-muted-foreground" title={item.id===IMPULSE_5M_ID?IMPULSE_5M_VERSION:'在 Deep Dig 的定义参数中设置'}>{item.id===IMPULSE_5M_ID?'5m':'5m · 定义参数'}</span>:<ParamInput
+            {item.fixedPeriod?<span className="text-[10px] text-muted-foreground" title={item.id===IMPULSE_5M_ID?IMPULSE_5M_VERSION:item.id===IMPULSE_1115_CHART_ID?IMPULSE_1115_CHART_DESCRIPTION:'在 Deep Dig 的定义参数中设置'}>{item.id===IMPULSE_5M_ID||item.id===IMPULSE_1115_CHART_ID?'5m':'5m · 定义参数'}</span>:<ParamInput
               value={active.period}
               parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
