@@ -47,9 +47,11 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
     const cursorKey = 'usdt-campaign-sync-v1/' + encodeURIComponent(owner);
     let busy = false;
     const sync = async () => {
+      if (signal.aborted) return;
       const [previous] = await readFishPreferences<number>([cursorKey]);
       const open = (await readUsdtCampaigns(owner, saved => !saved.campaign.closedAt))
         .map(({ campaign }) => ({ symbol: campaign.symbol, openedAt: campaign.openedAt }));
+      if (signal.aborted) return;
       const now = Date.now();
       const since = Math.max(1, Math.min(now, previous ?? now - recentHistory) - retryOverlap);
       const batch = await readCampaigns(since, open, signal);
@@ -62,7 +64,8 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
     const refresh = () => {
       if (busy || signal.aborted) return;
       busy = true;
-      const work = navigator.locks ? navigator.locks.request('veil-usdt-campaign:' + owner, { signal, ifAvailable: true },
+      // Non-blocking lock requests cannot take an abort signal. The work itself checks the effect's lifetime.
+      const work = navigator.locks ? navigator.locks.request('veil-usdt-campaign:' + owner, { ifAvailable: true },
         lock => lock ? sync() : undefined) : sync();
       void work.catch(error => {
         if (!signal.aborted) setArchiveView({ owner, issue: error instanceof Error ? error.message : '实盘战役等待同步' });
