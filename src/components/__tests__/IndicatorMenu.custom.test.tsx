@@ -15,6 +15,21 @@ const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DB
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
+  it('adds the 5m impulse line independently and draws it only after the qualifying bar closes', () => {
+    const changed = vi.fn();
+    render(<IndicatorMenu open indicators={[{type:'DBL5', period:3, enabled:true}]} onClose={() => {}} onIndicatorsChange={changed}/>);
+    fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: '急拉线' } });
+    fireEvent.click(screen.getByText('急拉线'));
+    expect(changed.mock.lastCall?.[0]).toMatchObject([{ type: 'DBL5', enabled: true }, { type: 'IMPULSE_5M', enabled: true }]);
+    const bars = Array.from({length: 27}, (_, i) => ({timestamp: i * 300_000, open: 100, high: 100.2, low: 99.8,
+      close: 100, turnover: 1000, takerBuyTurnover: 500}));
+    bars[24] = {...bars[24], high: 101.35, low: 99.8, close: 101.3, turnover: 1800, takerBuyTurnover: 1100};
+    bars[25] = {...bars[25], open: 101.3, high: 101.4, low: 100.5, close: 101.1};
+    const calc = registered.get('IMPULSE_5M_CUSTOM').calc;
+    expect(calc(bars.slice(0, 25)).at(-1)).toEqual({});
+    expect(calc(bars)[25]).toEqual({ value: 99.8, confirmedAt: bars[25].timestamp });
+    expect(calc(bars.map(bar => ({ ...bar, timestamp: bar.timestamp * 3 }))).every(point => point.value == null)).toBe(true);
+  });
   it.each([['ATI-6H','ATI6H',1,1],['PRS-6H','PRS6H',.5,100]] as const)('%s 与 CDA 一样能添加原值、avg、avg₂并独立开关',(label,id,period,max)=>{
     const changed=vi.fn();function Menu(){const [items,setItems]=useState<IndicatorConfig[]>([]);return <IndicatorMenu open indicators={items} onClose={()=>{}} onIndicatorsChange={next=>{setItems(next);changed(next);}}/>;}
     render(<Menu/>);fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:label}});
@@ -42,7 +57,7 @@ describe('自制区的十个特征值', () => {
     expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
-    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(ids);
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M', ...ids]);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');

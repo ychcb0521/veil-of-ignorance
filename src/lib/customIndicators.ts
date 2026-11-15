@@ -1,5 +1,6 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
+import { IMPULSE_5M_ID, IMPULSE_5M_INDICATOR, registerImpulse5mChart } from '@/lib/impulse5mChart';
 import type {Dbl5GuardVersion} from '@/lib/dbl5m';
 import {supportsDbl5GuardVersion} from '@/lib/researchIndicators';
 import {registerSbsPriceIndicator} from '@/lib/sbs5mChart';
@@ -1484,6 +1485,7 @@ export function registerCustomIndicators() {
   }
 
   // One source of truth: the account's Deep dig formula, including both named averages.
+  registerImpulse5mChart();
   for (const item of RESEARCH_INDICATORS) {
     if(item.id.startsWith('DBL5')){registerDbl5Indicator(item);continue;}
     if('priceOverlay' in item&&item.priceOverlay){registerSbsPriceIndicator(item);continue;}
@@ -1555,6 +1557,7 @@ export function registerCustomIndicators() {
  * Returns null if no mapping exists (will use fallback).
  */
 export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
+  [IMPULSE_5M_ID]: IMPULSE_5M_INDICATOR,
   // Built-in klinecharts indicators (verified in klinecharts 9.8.12 ESM)
   MA: 'MA', EMA: 'EMA', SMA: 'SMA',
   BOLL: 'BOLL', SAR: 'SAR',

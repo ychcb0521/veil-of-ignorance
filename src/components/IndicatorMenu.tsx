@@ -26,6 +26,7 @@ import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod 
 import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
 import { SELLER_CONTROL_DEF, BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { BUILD_STAMP } from '@/lib/buildStamp';
+import { IMPULSE_5M_ID, IMPULSE_5M_VERSION } from '@/lib/impulse5mChart';
 
 export interface IndicatorCatalogItem {
   id: string;
@@ -72,6 +73,9 @@ function shortCustomNames(items: IndicatorCatalogItem[]): IndicatorCatalogItem[]
 }
 
 export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
+  { id: IMPULSE_5M_ID, nameZh: '急拉线', nameEn: '5m Impulse Support', isOverlay: true, defaultPeriod: 5,
+    color: '#a855f7', category: 'custom', fixedPeriod: true, rawOnly: true,
+    description: '5 分钟收盘确认放量突破后，在主图标出起涨低点。再次触及低点或满 60 分钟后结束。' },
   // ═══════════════════════════════════════════
   // OVERLAYS (主图叠加)
   // ═══════════════════════════════════════════
@@ -621,7 +625,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         </select>}
         {active ? (
           <>
-            {item.fixedPeriod?<span className="text-[10px] text-muted-foreground" title="在 Deep Dig 的定义参数中设置">5m · 定义参数</span>:<ParamInput
+            {item.fixedPeriod?<span className="text-[10px] text-muted-foreground" title={item.id===IMPULSE_5M_ID?IMPULSE_5M_VERSION:'在 Deep Dig 的定义参数中设置'}>{item.id===IMPULSE_5M_ID?'5m':'5m · 定义参数'}</span>:<ParamInput
               value={active.period}
               parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}

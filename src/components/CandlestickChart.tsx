@@ -1,4 +1,5 @@
 import {Dbl5ChartTimeline} from '@/lib/dbl5ChartTimeline';
+import { IMPULSE_5M_ID } from '@/lib/impulse5mChart';
 import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
 import { mbi2MinutesOf } from '@/lib/mbi2';
 import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
@@ -117,10 +118,11 @@ const OVERLAY_INDICATOR_IDS = new Set([
   "AVGP",
   "VWAP",
   "DSP",
+  IMPULSE_5M_ID,
 ]);
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc" };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc", [IMPULSE_5M_ID]: "急拉线" };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
@@ -2580,7 +2582,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
+                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type===IMPULSE_5M_ID||ind.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
