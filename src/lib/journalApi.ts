@@ -4,6 +4,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { isAuthSessionMissingError } from '@supabase/supabase-js';
 import { isPaperCampaignId } from '@/lib/campaignSections';
 import { loadQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { updateQualityCampaignTrash } from '@/lib/fish/qualityCampaignTrash';
@@ -2446,15 +2447,40 @@ export interface FetchCampaignSourceRowsOptions {
   signal?: AbortSignal;
 }
 
+function campaignSessionExpired(result: { error: { message: string } | null }) {
+  return /\bjwt (?:has )?expired\b/i.test(result.error?.message ?? '');
+}
+
 export async function fetchCampaignSourceRows(
   userId: string,
   options: FetchCampaignSourceRowsOptions = {},
 ): Promise<CampaignSourceRows> {
   const { previous, signal } = options;
-  const [campaignResult, journalResult] = await Promise.all([
+  const read = () => Promise.all([
     previous ? readCampaignSourceDelta('trade_campaigns', userId, previous.campaigns, signal) : readCampaignSourcePages('trade_campaigns', userId, { signal }),
     previous ? readCampaignSourceDelta('trade_journals', userId, previous.journals, signal) : readCampaignSourcePages('trade_journals', userId, { signal }),
   ]);
+  let results = await read();
+  if (results.some(campaignSessionExpired)) {
+    if (signal?.aborted) throw new DOMException('Campaign read aborted', 'AbortError');
+    const retryMessage = '登录续期暂未完成，请稍后重试。';
+    const signInMessage = '登录凭证已过期，请重新登录后重试。';
+    const renewed = await supabase.auth.refreshSession().catch(() => null);
+    if (signal?.aborted) throw new DOMException('Campaign read aborted', 'AbortError');
+    if (!renewed) throw new Error(retryMessage);
+    if (renewed.error) {
+      const { code, message } = renewed.error;
+      const signInRequired = isAuthSessionMissingError(renewed.error) ||
+        ['session_expired', 'session_not_found', 'refresh_token_not_found', 'refresh_token_already_used'].includes(code ?? '') ||
+        /^invalid refresh token\b/i.test(message);
+      throw new Error(signInRequired ? signInMessage : retryMessage);
+    }
+    if (!renewed.data.session) throw new Error(signInMessage);
+    if (renewed.data.session.user.id !== userId) throw new Error('登录账号已切换，请重新打开战役列表。');
+    results = await read();
+    if (results.some(campaignSessionExpired)) throw new Error(signInMessage);
+  }
+  const [campaignResult, journalResult] = results;
   if (campaignResult.error && !isMissingTradeCampaignsTableError(campaignResult.error)) {
     throw new Error(`加载战役列表失败：${campaignResult.error.message}`);
   }

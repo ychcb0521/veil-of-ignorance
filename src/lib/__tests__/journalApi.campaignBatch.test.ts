@@ -8,11 +8,15 @@ const state = vi.hoisted(() => ({
   errors: {} as Record<string, { code: string; message: string }>,
   requests: [] as Array<{ table: string; range?: [number, number]; columns?: string; ids?: unknown[] }>,
   signals: [] as AbortSignal[],
+  refreshSession: vi.fn(),
 }));
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
-    auth: { getUser: () => Promise.resolve({ data: { user: { id: 'user-1' } }, error: null }) },
+    auth: {
+      getUser: () => Promise.resolve({ data: { user: { id: 'user-1' } }, error: null }),
+      refreshSession: state.refreshSession,
+    },
     from(table: string) {
       const filters: Array<(row: Record<string, unknown>) => boolean> = [];
       let range: [number, number] | undefined;
@@ -112,6 +116,7 @@ describe('complete campaign batch source', () => {
     state.journals = [];
     state.errors = {};
     state.requests = [];
+    state.refreshSession.mockReset();
     localStorage.clear();
   });
 
@@ -194,6 +199,53 @@ describe('complete campaign batch source', () => {
     await expect(getCampaignsWithLegs('user-1')).rejects.toThrow('connection lost');
     state.errors = { trade_campaigns: { code: 'NETWORK', message: 'campaign connection lost' } };
     await expect(getCampaignsWithLegs('user-1')).rejects.toThrow('campaign connection lost');
+    expect(state.refreshSession).not.toHaveBeenCalled();
+  });
+
+  it('renews an expired session once and retries both deltas without mixing old and new rows', async () => {
+    state.campaigns = [campaign('old')];
+    state.journals = [leg('old-leg', 'old')];
+    const previous = await fetchCampaignSourceRows('user-1');
+    state.requests = [];
+    state.campaigns = [campaign('new')];
+    state.journals = [leg('new-leg', 'new')];
+    state.errors.trade_campaigns = { code: 'PGRST301', message: 'JWT expired' };
+    state.refreshSession.mockImplementationOnce(async () => {
+      state.errors = {};
+      return { data: { session: { user: { id: 'user-1' } } }, error: null };
+    });
+
+    const rows = await fetchCampaignSourceRows('user-1', { previous });
+    expect(state.refreshSession).toHaveBeenCalledOnce();
+    expect(rows.campaigns).toEqual(state.campaigns);
+    expect(rows.journals).toEqual(state.journals);
+    expect(state.requests.filter(request => request.columns === 'id, updated_at')).toHaveLength(4);
+    expect(previous.campaigns).toEqual([campaign('old')]);
+  });
+
+  it.each([
+    { code: 'refresh_token_not_found', message: '请重新登录后重试' },
+    { code: undefined, message: '请重新登录后重试', legacy: 'Invalid Refresh Token: Refresh Token Not Found' },
+    { code: 'request_timeout', message: '登录续期暂未完成' },
+  ])('stops reading when renewal returns $code $legacy', async ({ code, message, legacy }) => {
+    state.errors.trade_journals = { code: 'PGRST303', message: 'JWT expired' };
+    state.refreshSession.mockResolvedValueOnce({ data: { session: null }, error: { code, message: legacy ?? 'Auth error' } });
+    await expect(fetchCampaignSourceRows('user-1')).rejects.toThrow(message);
+    expect(state.refreshSession).toHaveBeenCalledOnce();
+    expect(state.requests).toHaveLength(2);
+  });
+
+  it.each(['still expired', 'account switched', 'aborted'])('does not keep retrying when %s', async (outcome) => {
+    state.errors.trade_campaigns = { code: 'PGRST303', message: 'JWT expired' };
+    const controller = new AbortController();
+    state.refreshSession.mockImplementationOnce(async () => {
+      if (outcome === 'aborted') controller.abort();
+      return { data: { session: { user: { id: outcome === 'account switched' ? 'user-2' : 'user-1' } } }, error: null };
+    });
+    const read = fetchCampaignSourceRows('user-1', { signal: controller.signal });
+    await expect(read).rejects.toThrow(outcome === 'aborted' ? /abort/i : outcome === 'account switched' ? '登录账号已切换' : '请重新登录后重试');
+    expect(state.refreshSession).toHaveBeenCalledOnce();
+    expect(state.requests).toHaveLength(outcome === 'still expired' ? 4 : 2);
   });
 
   it('uses a stable real creation time for legacy events without a recorded timestamp', async () => {
