@@ -154,6 +154,14 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     if(doubleDrops.length)add('addition-support-quality','加仓否决','二次急跌未收复前高',DOUBLE_DROP_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(doubleDrops)), '首次急跌前高与 ATR 固定；连续下跌只计一次，反弹脱离急跌区后再跌计第二次；5 分钟收盘收复前高才恢复。原箱体和防守线输出不变。');
     if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
     const rounds = a.rounds?.length ? a.rounds : [a];
+    [...rounds,...(a.alternativeRounds??[])].forEach((round,index)=>{
+      const position=round.impulsePosition;
+      if(!position)return;
+      const label=index<rounds.length?'第 '+(index+1)+' 次加仓':'第 '+(index-rounds.length+1)+' 次加仓 · 进攻备选';
+      add('addition-impulse-'+index,label+' · 位置','急拉线 5m · 低点 − '+position.bufferAtr+' ATR',
+        position.version+' · 参数 #'+shortFishHash(JSON.stringify(position)),
+        position.skipNative?'仅急拉线。5 分钟收盘确认，使用同一持仓账。':'急拉线与原位置同时等待，最多成交一次，成交后进入下一轮。');
+    });
     const timed = [
       ...[...rounds, ...(a.alternativeRounds ?? [])].flatMap(round => [
         ...(round.source === 'custom' ? qualityAdditionConditions(round) : qualityAdditionPrerequisites(round)),

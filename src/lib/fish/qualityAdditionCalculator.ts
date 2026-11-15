@@ -1,5 +1,6 @@
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
 import { createAdditionIncreaseReader } from './qualityAdditionIncrease';
+import { createImpulseAdditionReader } from './qualityImpulseAddition';
 import { createVetoHistoryReader } from './qualityVetoHistory';
 import { qualityHistoryFrom } from './qualityInitialization';
 import {advanceChartAtr,type ChartAtrState} from '@/lib/atr';
@@ -17,7 +18,7 @@ import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
-type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'>&{entryVetoes?:QualityAdditionEntryVeto[]};
+type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'|'impulsePosition'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
  positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
@@ -69,6 +70,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
  let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const readIncrease=createAdditionIncreaseReader(o);
+ let readImpulse:ReturnType<typeof createImpulseAdditionReader>|undefined;
+ let positionAttempts:{at:number;ids:Set<string>}|undefined;
  const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
  const historyReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createVetoHistoryReader>>();
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
@@ -185,8 +188,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  interface SupportDrop {at:number;support:number;atr:number;evidence:import('./qualityAdditionStructure').StructureAdditionEvidence;basis:number}
  /** 最近一次加仓所依据的箱体支撑（或减仓后的新支撑）在 (from, until) 内首次下移 ≥ minDropAtr×ATR 的 5 分钟收盘。 */
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
-  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence)return;
-  const rule=o.roundRules?.[fills.length-1]?.structure??o.structure;if(!rule)return;
+  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m')return;
+  const previousRound=o.roundRules?.[fills.length-1];
+  const winningAlternative=last.lane==='attack'&&(previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition);
+  const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
   const lastReduction=reductions.filter(r=>r.at>last.at).at(-1),basis=lastReduction?lastReduction.newSupport:evidence.basePrice;
   for(const p of await readStructure.supports(rule,until)){
    if(p.at<=from||p.at>=until)continue;
@@ -236,19 +241,20 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    skip({at:x.at,round:roundNo,support:x.support,...(x.reason==='gain'?{kind:'gain',label:'涨幅门槛未达',reading:`收盘 ${p8(x.close!)} 比${basis==='real-average'?'持仓均价':'成本线 S'} ${p8(x.referencePrice!)} 只涨 ${((x.close!/x.referencePrice!-1)*100).toFixed(2)}%，要求 ≥ ${x.thresholdPct}%`}:x.reason==='no-guard'?{kind:'no-guard',label:'防守线断开',reading:'这一刻防守线刚被跌破、尚未重建，没有 K 基准'}:x.reason==='guard-range'?{kind:'guard-range',label:'防守线是虚线（震荡期）',reading:'只用实线时，震荡期不加仓'}:{kind:'no-old-c',label:'没有旧 C',reading:'上一根 5 分钟线上没有不同的有效箱体（首个箱体或中间支撑失效），K 没有旧 C 可用'})});
   };
   const previousFillAt=fills.at(-1)?.at??o.entry;
-  const findRoundHit=async(rule:RoundScan|Options,end:number,gainBasis:typeof basis,reference:number)=>{
-   if(rule.unavailable||end<=after)return;
+  const findRoundHit=async(rule:RoundScan|Options,end:number,gainBasis:typeof basis,reference:number,start=after,impulse=false)=>{
+   if(rule.unavailable||end<=start)return;
    const gain=rule.minGainPct==null?undefined:{referencePrice:reference,thresholdPct:rule.minGainPct,basis:gainBasis};
    const check=rule.indicatorIncrease ? async(at:number,support?:number)=>{
     const {readings,reason}=await readIncrease(rule.indicatorIncrease!.metrics,at,previousFillAt);
     if(!reason)return readings;
     skip({at,round:roundNo,kind:'indicator-increase',label:'指标读数未较上次成交增大',reading:reason,...(support==null?{}:{support})});
    }:undefined;
-   if(!rule.structure)return findQualityAdditionTrigger({...o,candidates:rule.candidates,required:rule.required,
-    after,end,priceAt,checkIncrease:check,...(gain?{priceGate:gain}:{})});
-   let cursor=after;
+   if(!impulse&&!rule.structure)return findQualityAdditionTrigger({...o,candidates:rule.candidates,required:rule.required,
+    after:start,end,priceAt,checkIncrease:check,...(gain?{priceGate:gain}:{})});
+   let cursor=start;
    while(cursor<end){
-    const hit=await readStructure(rule.structure,cursor,end,fills,gain,onSkip);
+    const hit=impulse?await (readImpulse??=createImpulseAdditionReader(o))(rule.impulsePosition!,cursor,end,gain):
+      await readStructure(rule.structure!,cursor,end,fills,gain,onSkip);
     if(!hit||!check)return hit;
     const readings=await check(hit.at,hit.structureEvidence?.supportPrice);
     if(readings)return {...hit,indicatorIncrease:readings};
@@ -256,16 +262,48 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    }
   };
   const skipMark=skipped.length;
-  let hit=await findRoundHit(round,addEnd,basis,referencePrice);
-  if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
-  // 【用户要求】2026-11-05 每轮分流：这一轮的进攻备选同时等候，只在保守成交之前找；更早成交就走进攻，同一分钟先保守。
-  // 进攻赢了时，保守那边在它之后记下的「未加仓理由」作废（下一轮会从成交之后重新扫到）。
-  if(alternative&&!alternative.unavailable){
-   const altBasis=alternative.gainBasis==='average'?'real-average' as const:'cost-line' as const,altReference=altBasis==='real-average'?realAverageBefore:support??o.entryPrice,altEnd=hit?hit.at:addEnd;
-   const alt=await findRoundHit(alternative,altEnd,altBasis,altReference);
-   if(alt?.structureEvidence){const price=priceAt.get(alt.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');alt.price=price!;}
-   if(alt&&(!hit||alt.at<hit.at)){for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>alt.at)skipped.splice(i,1);hit=alt;round=alternative;hit.lane='attack';}
-   else if(hit)hit.lane='structure';
+  let hit:Omit<QualityAdditionFill,'quantity'|'notional'>|undefined;
+  if(primaryRule.impulsePosition||alternative?.impulsePosition){
+   let first:typeof hit;
+   const choose=async(rule:RoundScan|Options,lane:'structure'|'attack',impulse:boolean)=>{
+    if(impulse?!rule.impulsePosition:rule.impulsePosition?.skipNative)return;
+    const key=lane+(impulse?'-impulse':'-native');
+    const revisit=positionAttempts?.at===after&&fills.at(-1)?.at!==after&&!positionAttempts.ids.has(key);
+    const candidateBasis=rule.gainBasis==='average'?'real-average':'cost-line';
+    const reference=candidateBasis==='real-average'?realAverageBefore:support??o.entryPrice;
+    const found=await findRoundHit(rule,first?Math.min(addEnd,first.at+MINUTE):addEnd,candidateBasis,reference,revisit?after-MINUTE:after,impulse);
+    if(found&&(!first||found.at<first.at)){
+     first=found;round=rule;winner=key;
+     if(alternative&&!alternative.unavailable)first.lane=lane;
+    }
+   };
+   let winner='';
+   await choose(primaryRule,'structure',false);
+   await choose(primaryRule,'structure',true);
+   if(alternative){await choose(alternative,'attack',false);await choose(alternative,'attack',true);}
+   hit=first;
+   if(hit){
+    for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>hit.at)skipped.splice(i,1);
+    if(positionAttempts?.at!==hit.at)positionAttempts={at:hit.at,ids:new Set()};
+    positionAttempts.ids.add(winner);
+   }
+  }else{
+   hit=await findRoundHit(round,addEnd,basis,referencePrice);
+   if(hit?.structureEvidence){const price=priceAt.get(hit.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');hit.price=price!;}
+   // 【用户要求】2026-11-05 每轮分流：这一轮的进攻备选同时等候，只在保守成交之前找；更早成交就走进攻，同一分钟先保守。
+   // 进攻赢了时，保守那边在它之后记下的「未加仓理由」作废（下一轮会从成交之后重新扫到）。
+   if(alternative&&!alternative.unavailable){
+    const altBasis=alternative.gainBasis==='average'?'real-average' as const:'cost-line' as const,altReference=altBasis==='real-average'?realAverageBefore:support??o.entryPrice,altEnd=hit?hit.at:addEnd;
+    const alt=await findRoundHit(alternative,altEnd,altBasis,altReference);
+    if(alt?.structureEvidence){const price=priceAt.get(alt.at);if(!(price!>0)||!Number.isFinite(price))throw Error('缺少箱体加仓下一分钟开盘价');alt.price=price!;}
+    if(alt&&(!hit||alt.at<hit.at)){for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>alt.at)skipped.splice(i,1);hit=alt;round=alternative;hit.lane='attack';}
+    else if(hit)hit.lane='structure';
+   }
+  }
+  if(hit?.structureEvidence&&Number.isNaN(hit.price)){
+   const price=priceAt.get(hit.at);
+   if(!(price!>0)||!Number.isFinite(price))throw Error('缺少位置加仓下一分钟开盘价');
+   hit.price=price!;
   }
   if(!hit){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}if(pendingMirror!=null&&addEnd===pendingMirror+MINUTE){after=pendingMirror;continue;}return done(stop);}
   if(independent&&o.mirror?.at===hit.at){after=hit.at;skip({at:hit.at,round:roundNo,kind:'mirror-minute',label:'镜像成交分钟不加仓',reading:'同一分钟不借用尚未完成的镜像成交与落袋盈亏，等待下一次机会'});continue;}
@@ -306,7 +344,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const {supportOffsetAtr}=qualityAdditionAtrSettings(round);
   const boxK=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
   // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
-  const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,round.structure?.minDistancePct):boxK;
+  const minDistancePct=hit.structureEvidence?.algorithm==='impulse5m'?round.impulsePosition?.minDistancePct:round.structure?.minDistancePct;
+  const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,minDistancePct):boxK;
   const floorRule=o.breakevenFloor?.enabled&&hit.structureEvidence?.guardCloses&&selected?o.breakevenFloor:undefined;
   const floorK=floorRule?structureAdditionK({...hit.structureEvidence!,...selected!,basePrice:selected!.k,buffer:floorRule.atr,bufferUnit:'atr'},atr!)?.k??NaN:undefined;
   const K=floorK??(hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!),S=support??o.entryPrice;after=hit.at;

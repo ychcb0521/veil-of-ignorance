@@ -1,3 +1,4 @@
+import { additionStructureEvidenceLabel } from './qualityAdditionStructure';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 /** Preserve each acquisition lot in campaign events, partial closes and realized profit. */
 import type { QualityCampaignData } from './qualityCampaigns';
@@ -21,7 +22,7 @@ export function withQualityAdditionCampaign(data:QualityCampaignData,run:Quality
    const fraction=mirror?(mirror.fraction===1?1:index===0?mirror.fraction:0):0;
    const mirrorQty=lot.quantity*fraction,remaining=lot.quantity-mirrorQty;
    const add=adds[index-1];
-   const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price}${add.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?` · 成本线 S=${add.sizing.previousSupport} · 剩余成本=${add.ledger?.costBefore} · 已实现净盈亏=${add.ledger?.realizedBefore} · 整笔保本价 b=${add.ledger?.breakevenBefore}`:` · S=${add.sizing.previousSupport}`} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}${add.structureEvidence?` · ${add.structureEvidence.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${add.structureEvidence.event} · 新C ${add.structureEvidence.supportPrice} · 旧C ${add.structureEvidence.previousSupportPrice??'—'} · 冗余 ${add.structureEvidence.buffer}${add.structureEvidence.bufferUnit==='atr'?'ATR':'%'}`:''}`:''}`;
+   const note=index===0?data.campaign.notes:`第 ${index} 轮条件加仓：${add.label} · 读数 ${add.reading} ${add.direction} ${add.threshold} · ${add.quantity} 枚，成交 ${add.notional} USDT${add.sizing?` · T=${add.price}${add.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?` · 成本线 S=${add.sizing.previousSupport} · 剩余成本=${add.ledger?.costBefore} · 已实现净盈亏=${add.ledger?.realizedBefore} · 整笔保本价 b=${add.ledger?.breakevenBefore}`:` · S=${add.sizing.previousSupport}`} · K=${add.sizing.support} · 5m ATR(14)=${add.sizing.atr}${add.structureEvidence?` · ${additionStructureEvidenceLabel(add.structureEvidence.algorithm)} ${add.structureEvidence.event} · 新C ${add.structureEvidence.supportPrice} · 旧C ${add.structureEvidence.previousSupportPrice??'—'} · 冗余 ${add.structureEvidence.buffer}${add.structureEvidence.bufferUnit==='atr'?'ATR':'%'}`:''}`:''}`;
    const leg:TradeJournal={...data.legs[0],id:lot.id,trade_record_id:positionId,leg_role:lot.role,leg_sequence:index+1,
      quality_addition_fill:add,pre_simulated_time:iso(lot.at),pre_real_time:iso(lot.at),pre_entry_price:lot.price,pre_planned_stop_loss:add?.sizing?.support??null,pre_position_size:lot.notional,pre_entry_reason:note,
      pre_account_equity_usdt:summary.totalInvested,post_realized_pnl:closed?lot.quantity*r.endPrice!-lot.notional:null};

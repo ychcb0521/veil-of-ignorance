@@ -92,6 +92,8 @@ function convergenceHistory(program: Program,params: Record<string,number>,minut
   return maximum;
 }
 export interface FishProgram {
+  /** Request verified quote precision and native market amounts for a direct price reader. */
+  requiresMarketEvidence?: boolean;
   usesTaker: boolean; def: DeepDigFeatureDef; settings: FishAlgorithmSettings; compiled: CompiledFeature;
   resultName: string; statisticName: string; scale: number; unit: string; averageName: string; mainName: string; constraintNames: string[];
   texts: string[]; constraintKey: string; algorithmKey: string; warm: number; N: number; step: number; unavailable?: string;

@@ -26,7 +26,7 @@ export interface StructureAdditionRule {
  minDistancePct?:number;
 }
 export interface StructureAdditionEvidence {
- algorithm:StructureAdditionRule['algorithm'];trigger:StructureAdditionRule['trigger'];event:string;eventId:string;
+ algorithm:StructureAdditionRule['algorithm']|'impulse5m';trigger:StructureAdditionRule['trigger'];event:string;eventId:string;
  boxId:string;episodeId:string|null;at:number;confirmedAt:number;supportPrice:number;upperPrice:number;nativeInvalidation:number|null;
  tickSize:string;algorithmVersion:string;definitionKey:string;parameters:unknown;initializationStart:number;dataChecksum:string;marketRuleVersion:string;
  kBasis:StructureAdditionRule['kBasis'];basePrice:number;bufferUnit:StructureAdditionRule['bufferUnit'];buffer:number;
@@ -86,6 +86,7 @@ export const guardTrendOnly=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendO
 export const structureKSourceLabel=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendOnly'>)=>r.kSource==='current'?'新C':r.kSource==='guard'?(guardTrendOnly(r)?'防守线（只用实线）':'防守线'):'旧C';
 export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${structureVersions(r).guard}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(guardTrendOnly(r)?['guard-trend-only-v1']:[]),...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[])];
 export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
+export const additionStructureEvidenceLabel=(algorithm:StructureAdditionEvidence['algorithm'])=>algorithm==='impulse5m'?'急拉线 5m':structureAlgorithmLabel({algorithm});
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
 export const structureAdditionLabel=(r:StructureAdditionRule)=>`${structureVersionLabel(r)} · ${structureTriggerLabel(r)} · K＝${structureKSourceLabel(r)}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}${r.minDistancePct!=null?`（离现价 ≥ ${r.minDistancePct}%）`:''}`;
 /** Only selected, still-active confirmed structures may emit a decision. Pending boxes never qualify. */

@@ -1,6 +1,7 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
+import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { additionMetricTime, withAdditionMetricTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
@@ -43,7 +44,9 @@ export interface SellSwitchDraft extends ConditionDraft {enabled:boolean}
 interface DetectorPreDraft {enabled:boolean;featureId:string;stricterPct:string}
 type IncreaseDraft = MetricDraft & { saved?: AdditionIncreaseMetric };
 const DEFAULT_INCREASE_METRIC = 'state:avg_state_2';
-interface RoundDraft extends ConditionDraft {increaseMetrics: IncreaseDraft[];detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
+interface RoundDraft extends ConditionDraft {
+ impulse?: { bufferAtr: string; minDistancePct: string; skipNative?: true };
+increaseMetrics: IncreaseDraft[];detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
  /** 【用户要求】2026-11-04 恢复 S/T/K 位置：入场距离 T ≥ S＋n×ATR（空＝不检查）；涨幅门槛基准。 */
  entryDistanceAtr?:string;gainBasis?:'average'|'cost-line'}
 /** 【用户要求】2026-11-03 防守线要说明是哪条线、虚线算不算、断掉意味着什么等细节。 */
@@ -90,6 +93,7 @@ const sellSwitchDraft=(stage?:QualitySellStage):SellSwitchDraft=>stage
 const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=false):RoundDraft=>{
  const custom=rule.source==='custom',conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);
  const common={stricterPct:String(rule.stricterPct),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage),entryVetoes:vetoDraftOf(rule.entryVetoes),
+  impulse:rule.impulsePosition?{bufferAtr:String(rule.impulsePosition.bufferAtr),minDistancePct:String(rule.impulsePosition.minDistancePct??''),skipNative:rule.impulsePosition.skipNative}:undefined,
   increaseMetrics:(rule.indicatorIncrease?.metrics ?? []).map(saved => ({choice:saved.snapshot.featureId+':'+saved.metric,time:additionMetricTime(saved.snapshot),saved:structuredClone(saved)})),
   entryDistanceAtr:rule.entryDistanceAtr!=null?String(rule.entryDistanceAtr):'',gainBasis:rule.gainBasis==='average'?'average' as const:'cost-line' as const,
   // 旧的「原探测算法再次命中」轮次：打开时把它作为「方向」里的探测算法条件找回来（保存后才写入）
@@ -100,7 +104,7 @@ const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=f
  return {source:'structure',structure:structuredClone(rule.source==='structure'&&rule.structure?rule.structure:defaultStructureAddition()),structureBuffer:String(rule.source==='structure'?rule.structure?.buffer??0:0),
   ...conditionDraft(undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),...common};
 };
-const copyRound=(d:RoundDraft):RoundDraft=>({entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,time:structuredClone(d.time),savedCondition:structuredClone(d.savedCondition),extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
+const copyRound=(d:RoundDraft):RoundDraft=>({impulse:d.impulse&&{...d.impulse},entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,time:structuredClone(d.time),savedCondition:structuredClone(d.savedCondition),extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
 export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellStages?:readonly QualitySellStage[]):AdditionDraft {
  rule??={...defaultQualityAddition(),positionVersion:HOLDING_LEDGER_ADDITION_VERSION};
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
@@ -109,6 +113,10 @@ export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellS
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
+ if(d.impulse)rule.impulsePosition={version:IMPULSE_5M_VERSION,
+   bufferAtr:d.impulse.bufferAtr.trim()?Number(d.impulse.bufferAtr):NaN,
+   ...(d.impulse.minDistancePct.trim()?{minDistancePct:Number(d.impulse.minDistancePct)}:{}),
+   ...(d.impulse.skipNative?{skipNative:true}:{})};
  if(d.source==='structure'){rule.structure={...structuredClone(d.structure),buffer:d.structureBuffer.trim()?Number(d.structureBuffer):NaN};if(!guardTrendOnly(rule.structure))delete rule.structure.guardTrendOnly;}
  const build=(rows:ConditionDraft[])=>rows.flatMap(row=>{
   try {
@@ -245,6 +253,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   <button type="button" disabled={!d.enabled} aria-label={`删除加仓方向条件 ${i+1}`} className="shrink-0 px-1 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40" onClick={()=>patch({extraConditions:d.extraConditions.filter((_,j)=>j!==i)})}>删除</button>
  </div>;
  const box=d.source==='structure';
+ const nativeActive=!d.impulse?.skipNative;
  return <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/[0.03] p-3" data-testid="quality-addition-editor">
   <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">③ 加仓细节</h4><FishQualityInfo label="加仓细节说明">
    <div className="space-y-3">
@@ -362,15 +371,33 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </div>}>
    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-[11px]">
     <span className="text-muted-foreground">位置算法</span>
-    <select aria-label="加仓条件来源" disabled={!d.enabled} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{entryDistanceAtr:d.entryDistanceAtr||'2',supportOffsetAtr:d.supportOffsetAtr||'1.5'})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">指标 · S / T / K</option></select>
+    <select aria-label="加仓条件来源" disabled={!d.enabled||!nativeActive} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{entryDistanceAtr:d.entryDistanceAtr||'2',supportOffsetAtr:d.supportOffsetAtr||'1.5'})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">指标 · S / T / K</option></select>
     {/* 【用户要求】2026-11-04 恢复「指标＋入场距离（S/T/K）」：指标达标、且 T 高出成本线 S 足够时加仓，K＝T−m×ATR */}
-    {d.source==='custom'&&<><span className="text-muted-foreground">加仓条件</span>
+    <span className="text-muted-foreground">并行位置</span>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+      <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={!!d.impulse} disabled={!d.enabled}
+        onChange={e=>patch({impulse:e.target.checked?{bufferAtr:'0',minDistancePct:''}:undefined})}/>5 分钟急拉线</label>
+      {d.impulse&&<label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={nativeActive} disabled={!d.enabled}
+        onChange={e=>patch({impulse:{...d.impulse!,skipNative:e.target.checked?undefined:true}})}/>同时启用原位置算法</label>}
+    </div>
+    {d.impulse&&<>
+      <span className="text-muted-foreground">急拉线 K</span>
+      <div className="flex flex-wrap items-center gap-1.5">起涨低点 −
+        <input aria-label="急拉线冗余 ATR" type="number" min="0" max="20" step="any" className={cell+' w-20'} value={d.impulse.bufferAtr} disabled={!d.enabled}
+          onChange={e=>patch({impulse:{...d.impulse!,bufferAtr:e.target.value}})}/>× ATR
+        <label className="ml-2 inline-flex items-center gap-1.5">K 离加仓价 ≥
+          <input aria-label="急拉线 K 最小距离" type="number" min="0" max="50" step="any" placeholder="不限" className={cell+' w-20'} value={d.impulse.minDistancePct} disabled={!d.enabled}
+            onChange={e=>patch({impulse:{...d.impulse!,minDistancePct:e.target.value}})}/>%</label>
+      </div>
+      <p className="col-start-2 text-muted-foreground">币安 U 本位 · 5 分钟收盘确认。两种位置都满足时同分钟只加一次，原位置优先。下一轮续用成交后的余仓、成本和 K。</p>
+    </>}
+    {nativeActive&&d.source==='custom'&&<><span className="text-muted-foreground">加仓条件</span>
     <div data-testid="addition-sttk-trigger">{indicator(d,'加仓条件 {x}',change=>patch(change))}</div>
     <span className="text-muted-foreground">入场距离</span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-entry-distance">T ≥ S ＋<input aria-label="入场距离ATR倍数" type="number" min="0" step="any" placeholder="不限" disabled={!d.enabled} value={d.entryDistanceAtr??''} onChange={e=>patch({entryDistanceAtr:e.target.value})} className={cell+' w-14'}/>ATR<span className="text-[10px] text-muted-foreground/70">T 加仓价 · S 成本线</span></div>
     <span className="text-muted-foreground">K =</span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-sttk-k">T −<input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={cell+' w-14'}/>× ATR</div></>}
-    {box&&<><span className="text-muted-foreground">箱体算法</span>
+    {nativeActive&&box&&<><span className="text-muted-foreground">箱体算法</span>
     <div className="flex min-w-0 items-center gap-2"><select aria-label="箱体加仓算法" className={field+' h-7 min-w-0 flex-1'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:e.target.value==='sbs5m'&&d.structure.kSource==='guard'?'previous':d.structure.kSource}})}><option value="dbl5">{boxAlgorithmVersion(CURRENT_BOX_VERSION.dbl5)!.label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select><span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-primary" data-testid="addition-box-version" title="保存时冻结的版本">{structureVersionLabel(d.structure)}</span><FishQualityInfo label="箱体算法版本说明"><BoxAlgorithmVersionNotes/></FishQualityInfo></div>
     <span className="text-muted-foreground">箱体时间</span>
     <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
@@ -411,7 +438,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </div>}>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
     <label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" checked disabled aria-label="碰到K卖出"/><span className="font-medium">碰到 K</span></label>
-    <div className="space-y-1 text-muted-foreground" data-testid="addition-sell-k"><select aria-label="碰到K执行版本" className={field+' h-7'} disabled={!d.enabled} value={all.kStopVersion??'legacy'} onChange={e=>setDraft({...all,kStopVersion:e.target.value===ADDITION_K_TOUCH_VERSION?ADDITION_K_TOUCH_VERSION:undefined})}><option value={ADDITION_K_TOUCH_VERSION}>即时触价新版 · 碰到 K 全仓卖出（最灵敏）</option><option value="legacy">保留原版执行方式</option></select><p>{all.kStopVersion===ADDITION_K_TOUCH_VERSION?'低于或等于 K 即按 K 卖出全部余仓与加仓；开盘越线按开盘价。影线算，不等 1 分钟或 5 分钟收盘确认。':d.structure.kSource==='guard'&&d.source==='structure'?'原版：5 分钟收盘跌破 K 即卖出（上涨期 1 根、震荡期连续 2 根；影线不算）。':'原版：价格碰到 K 即卖出全部持仓。'}</p>{all.kStopVersion===ADDITION_K_TOUCH_VERSION&&<p className="text-[10px] text-primary">各次加仓的 K / K′ 均使用即时触价。保存后运行新轮次；旧轮次和旧版保留，加仓量仍沿用原公式与保本底线设置。</p>}</div>
+    <div className="space-y-1 text-muted-foreground" data-testid="addition-sell-k"><select aria-label="碰到K执行版本" className={field+' h-7'} disabled={!d.enabled} value={all.kStopVersion??'legacy'} onChange={e=>setDraft({...all,kStopVersion:e.target.value===ADDITION_K_TOUCH_VERSION?ADDITION_K_TOUCH_VERSION:undefined})}><option value={ADDITION_K_TOUCH_VERSION}>即时触价新版 · 碰到 K 全仓卖出（最灵敏）</option><option value="legacy">保留原版执行方式</option></select><p>{all.kStopVersion===ADDITION_K_TOUCH_VERSION?'低于或等于 K 即按 K 卖出全部余仓与加仓；开盘越线按开盘价。影线算，不等 1 分钟或 5 分钟收盘确认。':nativeActive&&d.structure.kSource==='guard'&&d.source==='structure'?'原版：5 分钟收盘跌破 K 即卖出（上涨期 1 根、震荡期连续 2 根；影线不算）。':'原版：价格碰到 K 即卖出全部持仓。'}</p>{all.kStopVersion===ADDITION_K_TOUCH_VERSION&&<p className="text-[10px] text-primary">各次加仓的 K / K′ 均使用即时触价。保存后运行新轮次；旧轮次和旧版保留，加仓量仍沿用原公式与保本底线设置。</p>}</div>
    {(()=>{const cut:NonNullable<AdditionDraft['supportReduction']>=all.supportReduction??{enabled:false,minDropAtr:'0.5',maxPct:'80',exitEnabled:false,exitAfterDrops:'3',version:2},set=(next:Partial<typeof cut>)=>setDraft({...all,supportReduction:{...cut,...next}});
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="支撑线下移时减仓" disabled={!d.enabled} checked={cut.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={cut.enabled?'font-medium':'text-muted-foreground'}>支撑下移减仓</span></label>
      <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${cut.enabled?'':'opacity-55'}`} data-testid="addition-support-reduction">下移 ≥<input aria-label="支撑下移ATR倍数" type="number" min="0" step="any" disabled={!d.enabled||!cut.enabled} value={cut.minDropAtr} onChange={e=>set({minDropAtr:e.target.value})} className={cell+' w-14'}/>ATR<span className="px-0.5 text-muted-foreground/50">·</span>单次最多减<input aria-label="单次减仓上限" type="number" min="0" max="100" step="any" disabled={!d.enabled||!cut.enabled} value={cut.maxPct} onChange={e=>set({maxPct:e.target.value})} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">各次通用</span>

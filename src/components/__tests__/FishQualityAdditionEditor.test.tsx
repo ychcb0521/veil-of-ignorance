@@ -140,7 +140,7 @@ it('keeps custom-indicator rounds as S/T/K on open and save; an original-detecto
 });
 it('persists calculator defaults and the chosen number of rounds with no cash input',()=>{
  const d={...additionDraft(),enabled:true};expect(parseAdditionDraft({...d,quantityMode:'fixed',quantity:'75'},BUILTIN_FEATURES).quantityMode).toBe('calculator');expect(parseAdditionDraft(d,BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:true});expect(parseAdditionDraft({...d,maxRounds:'1'},BUILTIN_FEATURES)).toMatchObject({quantityMode:'calculator',repeat:false});
- render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮为镜像止盈后的剩余币数/)).toBeInTheDocument();expect(screen.getByText('Q × (K − S) + P = 新增币数 × (T − K)')).toBeInTheDocument();expect(screen.getByText(/最早从下一分钟起检查/)).toBeInTheDocument();expect(screen.getByRole('heading',{name:'加仓量（均衡公式）'})).toBeInTheDocument();
+ render(<Editor/>);expect(screen.queryByLabelText('加仓金额')).not.toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'加仓细节说明'}));expect(screen.getByText(/首轮为镜像平衡减仓后的剩余币数/)).toBeInTheDocument();expect(screen.getByText('Q × (K − S) + P = 新增币数 × (T − K)')).toBeInTheDocument();expect(screen.getByText(/最早从下一分钟起检查/)).toBeInTheDocument();expect(screen.getByRole('heading',{name:'加仓量（均衡公式）'})).toBeInTheDocument();
 });
 it('adds and removes 方向 indicators, saves gain against the latest cost line S and restores every constraint',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
@@ -324,4 +324,22 @@ it('defaults the first increase metric to State S avg2, saves multiple choices p
  expect(saved.rounds?.[0].indicatorIncrease?.metrics.map(m=>m.metric)).toEqual(['avg_state_2','state']);
  expect(saved.rounds?.[1].indicatorIncrease).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+});
+
+it('selects the 5m impulse with or without the existing position and keeps each round independent', () => {
+  render(<Editor/>);
+  fireEvent.click(screen.getByLabelText('启用条件加仓'));
+  fireEvent.click(screen.getByLabelText('5 分钟急拉线'));
+  expect(screen.getByLabelText('同时启用原位置算法')).toBeChecked();
+  fireEvent.change(screen.getByLabelText('急拉线冗余 ATR'), {target:{value:'0.35'}});
+  fireEvent.change(screen.getByLabelText('急拉线 K 最小距离'), {target:{value:'2'}});
+  const saved = save();
+  expect(saved.rounds[0].impulsePosition).toEqual({version:'impulse-low-5m-v1',bufferAtr:.35,minDistancePct:2});
+  expect(saved.rounds[1].impulsePosition).toBeUndefined();
+  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+  fireEvent.click(screen.getByLabelText('同时启用原位置算法'));
+  expect(screen.getByLabelText('加仓条件来源')).toBeDisabled();
+  expect(save().rounds[0].impulsePosition.skipNative).toBe(true);
+  tab(2);
+  expect(screen.getByLabelText('5 分钟急拉线')).not.toBeChecked();
 });

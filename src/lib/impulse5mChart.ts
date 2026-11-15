@@ -1,17 +1,13 @@
 import { registerIndicator, type IndicatorDrawParams, type KLineData } from 'klinecharts';
+import { confirmedImpulse5m, IMPULSE_5M_STEP as STEP } from './impulse5m';
+export { IMPULSE_5M_VERSION } from './impulse5m';
 
 export const IMPULSE_5M_ID = 'IMPULSE_5M';
 export const IMPULSE_5M_INDICATOR = 'IMPULSE_5M_CUSTOM';
-export const IMPULSE_5M_VERSION = 'impulse-low-5m-v1';
-const STEP = 300_000;
+
 const COLOR = '#a855f7';
 type Candle = KLineData & { cba2Closed?: boolean; turnover?: number; takerBuyTurnover?: number };
 type Point = { value?: number; confirmedAt?: number };
-
-function median(values: number[]) {
-  values.sort((a, b) => a - b);
-  return (values[11] + values[12]) / 2;
-}
 
 /** The low appears from the following 5m candle, when the impulse candle is closed. */
 export function impulse5mChartSeries(bars: readonly Candle[]): Point[] {
@@ -26,26 +22,9 @@ export function impulse5mChartSeries(bars: readonly Candle[]): Point[] {
     }
     contiguous++;
     if (active && (tip.low <= active.low || bar.timestamp - active.confirmedAt >= 12 * STEP)) active = undefined;
-    if (contiguous >= 25 && tip.turnover != null && tip.takerBuyTurnover != null && tip.turnover > 0 && tip.high > tip.low) {
-      const baseline = bars.slice(index - 25, index - 1);
-      const volumes = baseline.map(candle => candle.turnover ?? NaN);
-      const ranges = baseline.map((candle, i) => {
-        const prior = bars[index - 26 + i];
-        return !prior || candle.timestamp - prior.timestamp !== STEP ? candle.high - candle.low :
-          Math.max(candle.high - candle.low, Math.abs(candle.high - prior.close), Math.abs(candle.low - prior.close));
-      });
-      const typicalRange = median(ranges);
-      const volume = median(volumes);
-      const body = tip.close - tip.open;
-      const width = tip.high - tip.low;
-      const ceiling = Math.max(...baseline.slice(-6).map(candle => candle.high));
-      const base = Math.min(...baseline.slice(-4).map(candle => candle.low));
-      if (volumes.every(value => Number.isFinite(value) && value >= 0) && typicalRange > 0 && volume > 0 && base > 0 && tip.open > 0 &&
-        body / tip.open >= .006 && body >= 1.45 * typicalRange && tip.close > ceiling + .1 * typicalRange &&
-        body / width >= .55 && (tip.close - tip.low) / width >= .77 && tip.open / base - 1 <= .025 &&
-        tip.turnover >= 1.5 * volume && tip.takerBuyTurnover / tip.turnover >= .58 && tip.takerBuyTurnover <= tip.turnover) {
-        active = { low: tip.low, confirmedAt: bar.timestamp };
-      }
+    if (contiguous >= 25) {
+      const hit = confirmedImpulse5m(tip, bars.slice(index - 25, index - 1), bars[index - 26]);
+      if (hit) active = hit;
     }
     return active ? { value: active.low, confirmedAt: active.confirmedAt } : {};
   });
