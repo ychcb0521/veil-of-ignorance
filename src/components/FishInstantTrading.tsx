@@ -102,6 +102,7 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
   const follow = useScreenedInstantPositions()?.usdtFollow;
   const [pairCode, setPairCode] = useState('');
   const [pairIssue, setPairIssue] = useState('');
+  const [pairSaving, setPairSaving] = useState(false);
   const automatic = state.automaticScreening, cda = state.cdaTracking;
   const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : settingsView === 'live' ? '币安 U 本位实盘' : '即时交易设置';
   const closeSettings = () => { setSettingsView(null); setEditingAfter(false); };
@@ -156,14 +157,18 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
             ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : '已连接。本机跟随开启后的新即时交易。'
             : follow.issue || '在 Windows 启动执行端，将它生成的配对码填在这里。'}</p>
           <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>
-          <form className="flex items-center gap-2" onSubmit={event => {
+          <form className="flex items-center gap-2" onSubmit={async event => {
             event.preventDefault();
-            try { follow.connect(pairCode); setPairIssue(''); setPairCode(''); }
+            if (pairSaving) return;
+            setPairSaving(true);
+            setPairIssue('');
+            try { await follow.connect(pairCode); setPairCode(''); }
             catch (error) { setPairIssue(error instanceof Error ? error.message : '配对失败'); }
+            finally { setPairSaving(false); }
           }}>
-            <input aria-label="本机配对码" type="password" autoComplete="off" spellCheck={false} value={pairCode}
+            <input aria-label="本机配对码" type="password" autoComplete="off" spellCheck={false} value={pairCode} disabled={pairSaving}
               onChange={event => setPairCode(event.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1.5"/>
-            <button type="submit" disabled={!pairCode} className="rounded border px-2 py-1.5 disabled:opacity-40">连接</button>
+            <button type="submit" disabled={!pairCode || pairSaving} className="rounded border px-2 py-1.5 disabled:opacity-40">{pairSaving ? '保存中…' : '连接'}</button>
           </form>
           {pairIssue && <p role="alert" className="text-destructive">{pairIssue}</p>}
           {follow.connected && <button type="button" className="rounded border px-2 py-1.5" onClick={follow.paused ? follow.resume : follow.pause}>

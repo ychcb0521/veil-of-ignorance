@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
+import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { usdtFollowCampaigns, type UsdtFollowStatus } from '@/lib/fish/usdtFollow';
 
 const endpoint = 'http://127.0.0.1:47321/api/usdt-follow';
 const key = (owner: string) => 'veil.usdt-follow-pairing.v1:' + owner;
+const pairingCode = /^[0-9a-f]{64}$/;
+
+async function readPairing(owner: string) {
+  const storageKey = key(owner);
+  const [saved] = await readFishPreferences<string>([storageKey]).catch(() => []);
+  if (typeof saved === 'string' && pairingCode.test(saved)) return saved;
+  try {
+    const legacy = localStorage.getItem(storageKey);
+    return legacy && pairingCode.test(legacy) ? legacy : undefined;
+  } catch { return undefined; }
+}
 interface FollowState {
   connected: boolean;
   paused: boolean;
@@ -23,16 +35,33 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   latest.current = campaigns;
   const wake = useRef<() => void>();
   const commandPending = useRef<'pause' | 'resume'>();
+  const pairingChannel = useRef<BroadcastChannel>();
+  const pairingWrite = useRef(0);
   useEffect(() => {
     if (!owner) return;
-    const refresh = () => {
-      try { setPairing({ owner, token: localStorage.getItem(key(owner)) ?? undefined }); }
-      catch { setPairing({ owner }); }
+    let active = true;
+    let revision = 0;
+    const refresh = async () => {
+      const request = ++revision;
+      const write = pairingWrite.current;
+      const token = await readPairing(owner);
+      if (active && request === revision && write === pairingWrite.current) setPairing({ owner, token });
     };
-    const storage = (event: StorageEvent) => { if (event.key === key(owner)) refresh(); };
-    refresh();
+    const storage = (event: StorageEvent) => { if (event.key === key(owner)) void refresh(); };
+    let channel: BroadcastChannel | undefined;
+    try {
+      channel = new BroadcastChannel(key(owner));
+      channel.onmessage = () => void refresh();
+      pairingChannel.current = channel;
+    } catch { /* A page reload will read the saved pairing. */ }
+    void refresh();
     window.addEventListener('storage', storage);
-    return () => window.removeEventListener('storage', storage);
+    return () => {
+      active = false;
+      window.removeEventListener('storage', storage);
+      channel?.close();
+      pairingChannel.current = undefined;
+    };
   }, [owner]);
 
   useEffect(() => {
@@ -88,11 +117,21 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   }, [owner, token]);
   useEffect(() => { wake.current?.(); }, [campaigns]);
 
-  const connect = useCallback((value: string) => {
+  const connect = useCallback(async (value: string) => {
     const token = value.trim().toLowerCase();
-    if (!owner || !/^[0-9a-f]{64}$/.test(token)) throw Error('请输入本机执行端的 64 位配对码');
-    localStorage.setItem(key(owner), token);
+    if (!owner || !pairingCode.test(token)) throw Error('请输入本机执行端的 64 位配对码');
+    const write = ++pairingWrite.current;
+    const channel = pairingChannel.current;
+    try {
+      await writeFishPreference(key(owner), token);
+    } catch {
+      throw Error('浏览器暂时无法保存配对码，请稍后重试。');
+    }
+    if (write !== pairingWrite.current) return;
+    // Ignore a read that started before this transaction committed.
+    pairingWrite.current++;
     setPairing({ owner, token });
+    if (pairingChannel.current === channel) channel?.postMessage('saved');
   }, [owner]);
   const pause = useCallback(() => { commandPending.current = 'pause'; wake.current?.(); }, []);
   const resume = useCallback(() => { commandPending.current = 'resume'; wake.current?.(); }, []);
