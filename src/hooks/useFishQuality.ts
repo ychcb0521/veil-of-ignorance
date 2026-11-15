@@ -736,11 +736,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
   },[cancel,stopFilter,entry.cancel,postExit.cancel,change]);
   /** 打开一份完整归档：正文按需从本机归档库（或账号云端）读出。 */
-  const loadMonitorArchive=useCallback(async(archive:QualityMonitorArchive)=>{
+  const loadMonitorArchive=useCallback(async(archive:QualityMonitorArchive, updateDirectory=true)=>{
     const base=current.current,owner=account.current,epoch=generation.current;
     if(isPermanentlyDeletedMonitorEntry(base.monitorLibrary,archive.id))throw Error('这份归档已永久删除');
     const body=await loadQualityMonitorArchive(owner,archive,base);
-    if(!archive.templateDirectory&&body.sellPlans?.length&&generation.current===epoch&&account.current===owner){
+    if(updateDirectory&&!archive.templateDirectory&&body.sellPlans?.length&&generation.current===epoch&&account.current===owner){
       const group=createQualityTemplateDirectory(base).groupPlans(body.sellPlans);
       change(study=>{
         const library=study.monitorLibrary;

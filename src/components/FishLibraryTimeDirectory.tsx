@@ -1,5 +1,6 @@
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ChevronDown,Database,Download,MoreHorizontal,Copy,Trash2,Undo2,Pencil} from 'lucide-react';
+import {FishDirectorySettingsButton,type DirectorySettingsEntry} from './FishDirectorySettingsButton';
 import {unknownTemplateGroup,type QualityTemplateDirectoryGroup} from '@/lib/fish/qualityTemplateDirectory';
 import {DIRECTORY_NAME_MAX_LENGTH,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle,DialogTrigger} from './ui/dialog';
@@ -13,6 +14,7 @@ export interface FishDirectoryItem {
   id:string; at:number; label:string; summary:string; note?:string; sourceRoundId?:string;
   revision?:unknown;
   templateGroup?:QualityTemplateDirectoryGroup;
+  settings?:()=>ReactNode|Promise<ReactNode>;
   purgeable?: boolean;
   details?:ReactNode|((close:()=>void)=>ReactNode);
   study:()=>FishQualityStudy|Promise<FishQualityStudy>;
@@ -141,8 +143,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       finally { setBusy(''); }
     })();
   };
+  const settingsEntry = (item: FishDirectoryItem): DirectorySettingsEntry[] => item.settings ? [{
+    id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
+  }] : [];
   const renderItem = (item: FishDirectoryItem) => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
           <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>setSelectedId(selectedId===item.id?'':item.id)}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span><span className="text-muted-foreground">{item.summary}</span></button>
+            {item.settings&&<FishDirectorySettingsButton name={settingsEntry(item)[0].name} entries={settingsEntry(item)} disabled={!!busy}/>}
             {(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
           </div>
           {editingId===item.id&&<form className="flex flex-wrap items-center gap-2 border-t px-3 py-3 text-[11px]" onSubmit={e=>{e.preventDefault();void rename();}}>
@@ -207,7 +213,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           const expanded=containsSelection||(expandedGroups[group.id]??index===0);
           const checkedCount=members.filter(item=>checkedSet.has(item.id)).length;
           return <section key={group.id} className="rounded-lg border border-border/60" data-testid={prefix+'-template-group'}>
-            <button type="button" aria-expanded={expanded} className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-left text-xs hover:bg-muted/60"
+            <div className="flex items-center rounded-lg bg-muted/40 pr-2">
+            <button type="button" aria-expanded={expanded} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-muted/60"
               onClick={()=>{
                 if(expanded&&containsSelection)setSelectedId('');
                 setExpandedGroups(previous=>({...previous,[group.id]:!expanded}));
@@ -216,6 +223,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               <span className="min-w-0 flex-1 break-words font-medium">{group.title}</span>
               <span className="shrink-0 text-muted-foreground">{members.length} 项{checkedCount>0?' · 已选 '+checkedCount:''}</span>
             </button>
+            <FishDirectorySettingsButton name={group.title} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
+            </div>
             {expanded&&<div className="space-y-2 p-2">{members.map(renderItem)}</div>}
           </section>;
         }):visible.map(renderItem)}

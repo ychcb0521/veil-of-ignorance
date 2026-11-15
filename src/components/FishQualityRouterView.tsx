@@ -3,8 +3,8 @@ import { useState } from 'react';
 import type { QualityGroup } from '@/lib/fish/quality';
 import { qualityPlanTemplateSummary } from '@/lib/fish/qualityPlanTemplates';
 import { isRaceRouter, raceFromText, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
-import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
-export function FishQualityRouterView({plan}:{plan:QualityGroup}) {
+import { FishQualityMonitorSettingsView, SavedMonitorVersions } from './FishQualityMonitorSettingsView';
+export function FishQualityRouterView({plan,savedOnly=false}:{plan:QualityGroup;savedOnly?:boolean}) {
  const imageCapture=useSettingsImageCapture();
  const [branch,setBranch]=useState<'structure'|'attack'>('structure');
  if(!plan.router)return null;
@@ -13,10 +13,10 @@ export function FishQualityRouterView({plan}:{plan:QualityGroup}) {
   <p className="font-medium">条件分支 · 结构为底，强势进攻</p>
   {isRaceRouter(r) ? <p>{raceFromText(r)}每一次加仓前都分流：结构分支与进攻分支这一次的加仓规则同时等候，先满足者成交（同一分钟先结构）。进攻分支各次的状态 S 门槛不低于 {r.threshold}。</p>
    : <p>{routerPrefixText(r)}按结构分支加仓。第{routerOrdinal(r)}次成交时，读取此前已收盘的 5 分钟状态 S：大于 {r.threshold}，从第{routerNextOrdinal(r)}次起使用进攻分支；否则本场保持结构分支。只选择一次。</p>}
-  <p className="text-muted-foreground">整套参数与版本已冻结，可复制、改名或删除；分支内容在此只读查看，避免普通表单覆盖条件分支。保存模板不会启动运行。</p>
+  {savedOnly?<details><summary className="cursor-pointer">整套算法版本</summary><SavedMonitorVersions plan={plan}/></details>:<p className="text-muted-foreground">整套参数与版本已冻结，可复制、改名或删除；分支内容在此只读查看，避免普通表单覆盖条件分支。保存模板不会启动运行。</p>}
   <div role="tablist" aria-label="查看条件分支" className="flex gap-2">{(['structure','attack'] as const).map(b=><button type="button" role="tab" aria-selected={b===branch} key={b} onClick={()=>setBranch(b)} className={`rounded px-2 py-1 ${branch===b?'bg-primary text-primary-foreground':'bg-muted'}`}>{b==='structure'?'结构分支':'进攻分支'}</button>)}</div>
   <p>{qualityPlanTemplateSummary(r[branch])}</p>
-  <FishQualityMonitorSettingsView key={branch} plan={r[branch]} showSize={false}/>
+  <FishQualityMonitorSettingsView key={branch} plan={r[branch]} showSize={false} savedOnly={savedOnly}/>
   {imageCapture&&<div hidden data-settings-image-include=""><h4>{branch==='structure'?'进攻分支':'结构分支'}</h4><FishQualityMonitorSettingsView plan={r[branch==='structure'?'attack':'structure']} showSize={false}/></div>}
  </section>;
 }

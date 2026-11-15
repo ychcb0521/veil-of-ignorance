@@ -5,6 +5,7 @@ import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress,latestScreeningRound} from './FishPreEntryProgress';
 import {FishDeferredDetails,FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {ScreeningDirectorySettings} from './FishLibraryFrozenSettings';
 import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
 import {entryDirectoryGroups,entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
 import type {FishQualityStudy} from '@/lib/fish/quality';
@@ -94,6 +95,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
     return entryDirectoryGroups(archived).map(({ round, label, summary }) => ({
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),
+      settings: () => <ScreeningDirectorySettings round={round}/>,
       study: () => entryDirectoryStudy(archived, round), details: close => renderEvidence(round.id, close),
     }));
   };

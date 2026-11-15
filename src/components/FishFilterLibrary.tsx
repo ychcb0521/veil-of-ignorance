@@ -1,6 +1,7 @@
 import {createQualityTemplateDirectory, unknownTemplateGroup} from '@/lib/fish/qualityTemplateDirectory';
 import {useCallback,useState,type ReactNode} from 'react';
 import {filterLibraryCondition,libraryConditionSearch} from '@/lib/fish/libraryConditions';
+import {FilterDirectorySettings} from './FishLibraryFrozenSettings';
 import {FishLibraryCondition} from './FishLibraryConditions';
 import {libraryCell} from './FishLibraryDialog';
 import {FishDeferredDetails,FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
@@ -22,10 +23,12 @@ export function FishFilterLibrary({study,renderStudy,onCopyStudy,onSetHidden,onR
    const data=filterDirectoryData(library,r);
    const used=new Set(data.records.map(record=>record.settingId));
    const templateGroup=templates.groupFilters(data.settings.filter(setting=>used.has(setting.id)),r.filterSnapshot);
-   return {id:r.id,templateGroup,at:r.startedAt,label:'过滤轮次',summary:data.records.length+' 条记录 · '+ROUND_STATE[r.state],revision:library,study:()=>filterDirectoryStudy(library,r),details:<FilterEvidence {...data}/>,note:r.filterSnapshot?'保留本轮组合表输入、冻结条件和判断；后续重算不会覆盖。':'早期轮次仅保存记录引用，展示当前仍保存的版本；未保存的探测值和评分保持缺失。'};
+   return {id:r.id,templateGroup,at:r.startedAt,label:'过滤轮次',summary:data.records.length+' 条记录 · '+ROUND_STATE[r.state],revision:library,
+     settings:()=> <FilterDirectorySettings settings={data.settings.filter(setting=>used.has(setting.id))} snapshot={r.filterSnapshot}/>,study:()=>filterDirectoryStudy(library,r),details:<FilterEvidence {...data}/>,note:r.filterSnapshot?'保留本轮组合表输入、冻结条件和判断；后续重算不会覆盖。':'早期轮次仅保存记录引用，展示当前仍保存的版本；未保存的探测值和评分保持缺失。'};
   });
   const legacy=filterDirectoryData(library);
-  if(legacy.records.length)items.push({id:'filter-legacy',templateGroup:unknownTemplateGroup,at:legacy.records.reduce((at,r)=>Math.max(at,r.updatedAt),0),label:'历史记录',summary:legacy.records.length+' 条记录',revision:library,study:()=>filterDirectoryStudy(library),details:<FilterEvidence {...legacy}/>,note:'历史记录未保存轮次，只展示已有的冻结条件与读数，不补造缺失数据。'});
+  if(legacy.records.length)items.push({id:'filter-legacy',templateGroup:unknownTemplateGroup,at:legacy.records.reduce((at,r)=>Math.max(at,r.updatedAt),0),label:'历史记录',summary:legacy.records.length+' 条记录',revision:library,
+   settings:()=> <FilterDirectorySettings settings={legacy.settings.filter(setting=>legacy.records.some(record=>record.settingId===setting.id))}/>,study:()=>filterDirectoryStudy(library),details:<FilterEvidence {...legacy}/>,note:'历史记录未保存轮次，只展示已有的冻结条件与读数，不补造缺失数据。'});
   return items;
  },[library,study.planTemplates]);
  return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" kind="template" items={getItems} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}

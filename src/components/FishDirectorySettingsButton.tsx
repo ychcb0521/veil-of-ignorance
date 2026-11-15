@@ -1,0 +1,63 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Settings2 } from 'lucide-react';
+import { Popover, PopoverTrigger } from './ui/popover';
+import { FishPopoverContent } from './FishPopoverContent';
+
+export interface DirectorySettingsEntry {
+  id: string;
+  name: string;
+  load: () => ReactNode | Promise<ReactNode>;
+}
+
+export function FishDirectorySettingsButton({ name, entries, disabled }: {
+  name: string;
+  entries: DirectorySettingsEntry[];
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{ id: string; content?: ReactNode; error?: string }>();
+  const entry = entries.find(item => item.id === selected) ?? entries[0];
+  const entryRef = useRef(entry);
+  entryRef.current = entry;
+  const id = entry?.id;
+  useEffect(() => {
+    const item = entryRef.current;
+    if (!open || !item) return;
+    let current = true;
+    setLoaded(undefined);
+    void Promise.resolve().then(item.load).then(
+      content => { if (current) setLoaded({ id: item.id, content }); },
+      error => { if (current) setLoaded({ id: item.id, error: error instanceof Error ? error.message : '模板设置读取失败' }); },
+    );
+    return () => { current = false; };
+  }, [open, id, attempt]);
+  if (!entry) return null;
+  const current = loaded?.id === id ? loaded : undefined;
+  return <Popover open={open} onOpenChange={value => {
+    setOpen(value);
+    if (!value) setLoaded(undefined);
+  }}>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={disabled} aria-label={'查看模板设置 '+name}
+        className="inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+        <Settings2 aria-hidden className="h-3.5 w-3.5"/>模板设置
+      </button>
+    </PopoverTrigger>
+    <FishPopoverContent align="end" aria-label="模板设置" data-testid="directory-template-settings"
+      className="w-[46rem] space-y-3 text-[11px]">
+      <p className="text-xs font-medium">模板设置 · {name}</p>
+      {entries.length > 1 && <label className="flex items-center gap-2">查看轮次或归档
+        <select value={id} onChange={event=>setSelected(event.target.value)}
+          className="min-w-0 rounded border bg-background px-2 py-1">
+          {entries.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </label>}
+      <p className="text-muted-foreground">本轮保存的设置 · 只读</p>
+      {!current ? <p role="status">正在读取保存的设置…</p> : current.error ? <p role="alert" className="text-destructive">
+        {current.error} <button type="button" className="underline" onClick={()=>setAttempt(v=>v+1)}>重试</button>
+      </p> : current.content}
+    </FishPopoverContent>
+  </Popover>;
+}
