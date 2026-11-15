@@ -111,7 +111,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const liveHolding = follow?.connected && follow.statuses.some(status =>
     status.state !== 'closed' && status.state !== 'ignored' && (status.quantity ?? 0) > 0);
   const holding = liveHolding || !!instant?.positions.length;
-  const stage = holding ? '持仓中' : screening ? '筛选中' : capturing ? '捕捞中' : null;
+  const stage = holding ? '持仓中' : screening ? '筛选中' : capturing ? '捕捞中' : '等待中';
   const pending = automatic?.pending ?? 0;
   const followStatus = follow?.connected
     ? follow.paused ? '已暂停开仓和加仓' : '本机实盘跟随中'
@@ -121,9 +121,9 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={children}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
-      {stage && <span role="status">{stage}{liveHolding &&
+      <span role="status">{stage}{liveHolding &&
         <strong className="font-bold text-[var(--chart-profit)]">（实盘中）</strong>}
-      </span>}
+      </span>
       {needsSettings && <span>请先保存买前设置</span>}
       {screening && !holding && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
