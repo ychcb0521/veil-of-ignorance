@@ -42,8 +42,9 @@ async function saveUsdtCampaign(owner: string, incoming: Saved, notify = true) {
       if (existing.followId === followId && JSON.stringify(existing) === JSON.stringify(candidate)) {
         return incoming.synced && !previous.synced ? { ...previous, synced: true } : previous;
       }
-      next = { ...incoming, campaign: { ...candidate, ...(followId ? { followId } : {}) } };
-      if (incoming.synced && followId !== candidate.followId) next.synced = undefined;
+      const management = candidate.management ?? existing.management;
+      next = { ...incoming, campaign: { ...candidate, ...(followId ? { followId } : {}), ...(management ? { management } : {}) } };
+      if (incoming.synced && (followId !== candidate.followId || management !== candidate.management)) next.synced = undefined;
     }
     changed = true;
     return next;

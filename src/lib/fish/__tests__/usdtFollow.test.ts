@@ -9,6 +9,14 @@ import { createUsdtExchange, formatQuantity, quantityUnits, type UsdtExchange } 
 import { openUsdtFollowStore, type UsdtOrder } from '../../../../scripts/usdt-follow-store';
 import { serveUsdtFollower } from '../../../../scripts/usdt-follow-server';
 import type { UsdtFollowCampaign } from '../usdtFollow';
+import { binanceManualId } from '../binanceManualMonitor';
+import { binanceManualSeed, binanceManualSample, binanceManualAdvance } from '../binanceManualStrategy';
+import type { UsdtCampaignFill, UsdtLiveCampaign } from '../usdtLiveCampaign';
+import { INSTANT_TEMPLATE_MONITOR } from '../instantMonitorSettings';
+import { evaluateInstantMonitor } from '../instantMonitorExecution';
+import { makeQualitySellPlan } from '../qualitySellPlans';
+import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
+import { freezeQualityPlan } from '../qualityPlanVersions';
 
 const symbol = 'NIGHTUSDT', market = { symbol, step: '0.001', min: 1, max: 100000, minNotional: 5 };
 const owner = 'fixture-user';
@@ -48,6 +56,75 @@ function exchange() {
     }),
   } satisfies UsdtExchange;
 }
+
+it('接手币安手动首仓后用冻结卖出条件，按实际部分成交续算，重启后平掉实际余仓', async () => {
+  const m = 60_000, at = Math.floor(Date.now() / m) * m;
+  const anchor = { symbol, positionSide: 'LONG' as const, openedAt: at - 50_123, openingOrderId: '200', openingTradeId: '201' };
+  let clock = at;
+  const opener: UsdtCampaignFill = { id: '201', orderId: '200', side: 'BUY', at: anchor.openedAt,
+    quantity: '10.000', positionQuantity: '10.000', price: '4.000', action: 'open', commission: .01, commissionAsset: 'USDT', realized: 0 };
+  const actual: UsdtLiveCampaign = { symbol, positionSide: 'LONG', direction: 'long', asset: 'USDT',
+    openedAt: anchor.openedAt, quantity: '10.000', fills: [opener] };
+  const read = vi.fn(async () => structuredClone(actual));
+  const venue = exchange(), name = file();
+  const monitor = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'frozen-plan', name: '原方案',
+    plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 5, [])) };
+  const runner = createUsdtFollower(makeStore(name), venue, owner, 'hedge', at, read, () => clock);
+  const managed = (await runner.adopt(anchor, monitor))!;
+  const id = binanceManualId(anchor);
+  expect(managed).toMatchObject({ anchor, entryPrice: 4, entryQuantity: 10, monitor });
+  expect(await runner.adopt(anchor, { ...monitor, name: '第二个浏览器传了不同模板' })).toMatchObject({ monitor });
+  expect(venue.check).toHaveBeenCalledWith(market, 'hedge', 10000, 4, false, 0, 'existing-position');
+  expect(venue.order).not.toHaveBeenCalled();
+  const sample = binanceManualSample(managed);
+  const seed = binanceManualSeed(managed, sample);
+  const add = { at: at + m, price: 4.25, quantity: 5, notional: 21.25, direction: '>' as const,
+    reading: 2, threshold: 1, label: '加仓规则', metric: 'CDA', scanFrom: at, barOpenTime: at };
+  clock = at + 2*m;
+  const addition = binanceManualAdvance(managed, seed, { ...seed, endTime: clock, additionFill: add, additionFills: [add] })!;
+  runner.updateManaged(id, managed.revision, addition.checkpoint, addition.decision);
+  venue.order.mockImplementationOnce(async (_market, _mode, order, send) => {
+    expect(send).toBe(true);
+    expect(order.side).toBe('BUY');
+    const fill = { id: '203', orderId: '202', side: 'BUY' as const, at: clock + 310,
+      quantity: '2.000', positionQuantity: '2.000', price: '4.003', action: 'add' as const,
+      commission: .02, commissionAsset: 'USDT', realized: 0 };
+    actual.fills.push(fill);
+    actual.quantity = '12';
+    return { exchangeId: fill.orderId, terminal: true, fills: [{ ...fill, price: Number(fill.price), quantity: 2000 }] };
+  });
+  await runner.tick();
+  const resumed = createUsdtFollower(makeStore(name), venue, owner, 'hedge', at, read, () => clock);
+  const position = resumed.managed()[0].position;
+  expect(position.checkpoint).toMatchObject({ remainingQuantity: 12, remainingCost: expect.closeTo(48.006),
+    additionFills: [{ ...add, price: 4.003, quantity: 2, notional: 8.006 }] });
+  expect(position.pending).toBeUndefined();
+  clock = at + 4*m;
+  const observed = await evaluateInstantMonitor(sample, monitor, clock, async (_row, from, to, plan) =>
+    Array.from({ length: (to - from) / plan.step }, (_, i) => ({
+      openTime: from + i*plan.step, open: 4.05, high: 4.08, low: 3.7, close: 3.75, volume: 1, takerBuyVolume: .5,
+    })), new AbortController().signal, position.checkpoint, undefined, clock);
+  expect(observed).toMatchObject({ status: 'closed', entryPrice: 4, endPrice: 3.8 });
+  const closing = binanceManualAdvance(position, position.checkpoint!, observed)!;
+  resumed.updateManaged(id, position.revision, closing.checkpoint, closing.decision);
+  resumed.updateManaged(id, position.revision, closing.checkpoint, closing.decision);
+  venue.order.mockImplementationOnce(async (_market, _mode, order, send) => {
+    expect(send).toBe(true);
+    const fill = { id: '205', orderId: '204', side: 'SELL' as const, at: clock + 101,
+      quantity: '12.000', positionQuantity: '12.000', price: '3.790', action: 'reduce' as const,
+      commission: .02, commissionAsset: 'USDT', realized: -2.526 };
+    actual.fills.push(fill);
+    actual.quantity = '0';
+    actual.closedAt = fill.at;
+    return { exchangeId: fill.orderId, terminal: true,
+      fills: [{ ...fill, price: Number(fill.price), quantity: quantityUnits(order.quantity, market.step) }] };
+  });
+  await resumed.tick();
+  expect(venue.order.mock.calls.map(([, , order]) => [order.side, order.quantity])).toEqual([['BUY', '5.308'], ['SELL', '12.000']]);
+  expect(resumed.statuses()[0]).toMatchObject({ state: 'closed', quantity: 0 });
+  expect(resumed.managedArchive(id)).toMatchObject({ monitor, exitReason: expect.stringContaining('回撤') });
+  expect(resumed.managed()).toHaveLength(0);
+});
 
 it('按方案的 U 本位名义额下首仓，使用逐笔成交跟随镜像、加仓、手动减仓和清仓', async () => {
   const at = Date.now(), store = makeStore(file()), venue = exchange(), runner = createUsdtFollower(store, venue, owner, 'hedge', at);

@@ -47,7 +47,7 @@ export function UsdtLiveCampaignDetail({ id }: { id: string }) {
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <h1 className="font-mono text-base font-semibold">{campaign.symbol}</h1>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">币安实盘</span>
-          <span className="text-[11px] text-muted-foreground">{campaign.followId ? '系统跟单' : '币安开仓'} · {campaign.direction === 'long' ? '多' : '空'}</span>
+          <span className="text-[11px] text-muted-foreground">{campaign.management ? '币安手动开仓 · 策略托管' : campaign.followId ? '系统跟单' : '币安开仓'} · {campaign.direction === 'long' ? '多' : '空'}</span>
           <span className={campaign.closedAt ? 'text-[11px] text-muted-foreground' : 'rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300'}>{campaign.closedAt ? '已平仓' : '持仓中'}</span>
         </div>
         <dl className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
@@ -56,6 +56,8 @@ export function UsdtLiveCampaignDetail({ id }: { id: string }) {
           {total.net !== null && <div><dt className="text-muted-foreground">扣手续费后</dt><dd className="mt-0.5 font-mono font-medium">{amount(total.net)}</dd></div>}
           <div><dt className="text-muted-foreground">开仓时间</dt><dd className="mt-0.5 font-mono">{time(campaign.openedAt)}</dd></div>
           {campaign.closedAt && <div><dt className="text-muted-foreground">平仓时间</dt><dd className="mt-0.5 font-mono">{time(campaign.closedAt)}</dd></div>}
+          {campaign.management && <div><dt className="text-muted-foreground">冻结持仓模板</dt><dd className="mt-0.5">{campaign.management.monitor.name}</dd></div>}
+          {campaign.management?.exitReason && <div><dt className="text-muted-foreground">策略平仓原因</dt><dd className="mt-0.5">{campaign.management.exitReason}</dd></div>}
         </dl>
       </header>
       <section aria-label="币安逐笔成交" className="overflow-x-auto rounded-lg border bg-card">

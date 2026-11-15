@@ -1,6 +1,6 @@
 import { createUsdtPositionReader } from './usdt-position-reader.ts';
 import { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
-import { findUsdtCampaignFollow } from '../src/lib/fish/usdtLiveCampaign.ts';
+import { findUsdtCampaignFollow, usdtLiveCampaignId } from '../src/lib/fish/usdtLiveCampaign.ts';
 import { execFileSync } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -10,6 +10,10 @@ import { createUsdtExchange, createUsdtRequest } from './usdt-exchange.ts';
 import { openUsdtFollowStore } from './usdt-follow-store.ts';
 import { createUsdtFollower } from './usdt-follow-engine.ts';
 import type { UsdtFollowCampaign } from '../src/lib/fish/usdtFollow.ts';
+import type { BinanceManualAnchor, BinanceManualDecision } from '../src/lib/fish/binanceManualMonitor.ts';
+import type { InstantMonitorSettings } from '../src/lib/fish/instantMonitorSettings.ts';
+import type { QualityResult } from '../src/lib/fish/quality.ts';
+import { matchesManualAnchor } from './usdt-managed-execution.ts';
 
 const origin = 'https://veil-of-ignorance-ten.vercel.app';
 const dashPort = 47321;
@@ -91,19 +95,46 @@ const json = (res: ServerResponse, status: number, data: unknown) => {
   res.end(JSON.stringify(data));
 };
 
+function manualAnchor(value: BinanceManualAnchor, now: number) {
+  if (!value || !/^[A-Z0-9]{2,24}USDT$/.test(value.symbol) ||
+    (value.positionSide !== 'LONG' && value.positionSide !== 'BOTH') ||
+    !Number.isSafeInteger(value.openedAt) || value.openedAt <= 0 || value.openedAt > now + 1000 ||
+    typeof value.openingTradeId !== 'string' || !/^\d{1,25}$/.test(value.openingTradeId) ||
+    typeof value.openingOrderId !== 'string' || !/^\d{1,25}$/.test(value.openingOrderId)) throw Error('币安首仓身份无效');
+  return { symbol: value.symbol, positionSide: value.positionSide, openedAt: value.openedAt,
+    openingTradeId: value.openingTradeId, openingOrderId: value.openingOrderId };
+}
+
+function manualMonitor(value: InstantMonitorSettings) {
+  if (!value || value.version !== 'instant-template-monitor-v1' || typeof value.templateId !== 'string' ||
+    typeof value.name !== 'string' || value.name.length > 200 || typeof value.plan?.id !== 'string' ||
+    !Array.isArray(value.plan.frozenVersions) || !value.plan.frozenVersions.length ||
+    value.plan.preEntryThreeStage || value.plan.preEntryConditions) throw Error('手动仓位需要已保存且版本可核验的买后策略');
+  return value;
+}
+
 export function serveUsdtFollower({
-  owner, token, exchange, store, mode, startedAt, positionReader, campaignReader, allowedOrigin = origin, port = dashPort, statusFile,
+  owner, token, exchange, store, mode, startedAt, positionReader, campaignReader, managedClock, allowedOrigin = origin, port = dashPort, statusFile,
 }: {
   owner: string; token: string; exchange: ReturnType<typeof createUsdtExchange>;
   store: ReturnType<typeof openUsdtFollowStore>; mode: 'hedge' | 'one-way'; startedAt: number;
   positionReader?: ReturnType<typeof createUsdtPositionReader>;
   campaignReader?: ReturnType<typeof createUsdtCampaignReader>;
+  managedClock?: () => number;
   allowedOrigin?: string; port?: number; statusFile?: string;
 }) {
-  const follower = createUsdtFollower(store, exchange, owner, mode, startedAt);
+  const readManaged = campaignReader && managedClock ? async (anchor: BinanceManualAnchor) => {
+    const from = Math.max(1, anchor.openedAt - 1000);
+    const result = await campaignReader(from, [{ symbol: anchor.symbol, openedAt: anchor.openedAt }], anchor.symbol);
+    const actual = result.campaigns.find(campaign => matchesManualAnchor(anchor, campaign));
+    if (!actual) throw Error('币安未返回这一笔仓位的完整成交');
+    return actual;
+  } : undefined;
+  const follower = createUsdtFollower(store, exchange, owner, mode, startedAt, readManaged, managedClock);
   const tokenDigest = digest(token);
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),guardPlusAdditions:1,
-    ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}) });
+    ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
+    ...(readManaged ? { manualMonitor: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
@@ -126,11 +157,29 @@ export function serveUsdtFollower({
       }
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
+      if (readManaged && managedClock) {
+        if (content.command === 'manual-monitor-status') {
+          return json(res, 200, { observedAt: managedClock(), positions: follower.managed() });
+        }
+        if (content.command === 'manual-monitor-adopt') {
+          const position = await follower.adopt(manualAnchor(content.anchor, managedClock()), manualMonitor(content.monitor));
+          return json(res, 200, { position });
+        }
+        if (content.command === 'manual-monitor-update') {
+          if (typeof content.id !== 'string' || !Number.isSafeInteger(content.revision) || !content.checkpoint) throw Error('手动托管进度无效');
+          follower.updateManaged(content.id, content.revision, content.checkpoint as QualityResult, content.decision as BinanceManualDecision | undefined);
+          json(res, 200, { ok: true });
+          void follower.tick();
+          return;
+        }
+      }
       if (content.command === 'position-campaigns') {
         if (!campaignReader) return json(res, 501, { error: '请更新 Windows 本机执行端以同步实盘战役' });
         const result = await campaignReader(content.since, content.open);
         const statuses = follower.statuses();
         return json(res, 200, { ...result, campaigns: result.campaigns.map(campaign => {
+          const management = follower.managedArchive(usdtLiveCampaignId(campaign));
+          if (management) return { ...campaign, management };
           const follow = findUsdtCampaignFollow(campaign, statuses);
           return follow ? { ...campaign, followId: follow.id } : campaign;
         }) });
@@ -216,8 +265,14 @@ async function main() {
   };
   process.once('exit', close);
   store = openUsdtFollowStore(join(directory, 'usdt-follow.sqlite'), verified.id, config.owner);
-  const server = serveUsdtFollower({ owner: config.owner, token: config.token, exchange, store, mode: verified.mode,
-    startedAt: Date.now(), positionReader: createUsdtPositionReader(request), campaignReader: createUsdtCampaignReader(request),
+  const clockStart = performance.now();
+  const clockReply = await fetch('https://fapi.binance.com/fapi/v1/time', { redirect: 'error', signal: AbortSignal.timeout(10_000) });
+  const { serverTime } = await clockReply.json();
+  if (!clockReply.ok || !Number.isSafeInteger(serverTime) || serverTime <= 0) throw Error('币安服务器时间暂不可用');
+  const clockMidpoint = (clockStart + performance.now()) / 2;
+  const managedClock = () => Math.round(serverTime + performance.now() - clockMidpoint);
+  const server = serveUsdtFollower({ owner: config.owner, token: config.token, exchange, store, mode: verified.mode, managedClock,
+    startedAt: Date.now(), positionReader: createUsdtPositionReader(request, managedClock), campaignReader: createUsdtCampaignReader(request, managedClock),
     statusFile: join(directory, 'usdt-follow-status.json') });
   server.once('listening', () => console.log('币安 U 本位执行端已就绪，等待已配对的即时交易。'));
   server.once('error', () => { console.error('本机执行端端口不可用'); process.exit(1); });

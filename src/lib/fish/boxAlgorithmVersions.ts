@@ -101,6 +101,7 @@ export function assertStructureVersionsAvailable(rule: Parameters<typeof structu
 
 /** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */
 export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
+  {id:'binance-manual-monitor-v1',since:'2026-11-15',summary:'币安 U 本位手动首仓按真实成交数量和价格初始化，冻结所选买后模板；每笔托管动作先核对实际持仓，随后按实际成交续算。'},
   {id:'holding-dbl5-binance-trade-grid-v1',since:'2026-11-13',summary:'持仓监测遇到可核验的币安 AKEUSDT / RAVEUSDT 报价格点错误时，从入场前按交易所公布的精确成交格点重放。保留原始成交价格、箱体、防守线及卖出参数，成功结果单独标记数据修复版本；真实缺口继续报错。'},
   {id:'holding-box-stop-guard-regime-v2',since:'2026-11-13',summary:'DBL-5 防守线可按上涨期实线或震荡期虚线建立与更新硬止损 K。其他线型出现时沿用已有 K，尚无 K 时等待。沿用冻结的防守线算法、冗余、K 更新与成交确认设置。'},
   {id:'breakeven-floor-v2',since:'2026-11-15',summary:'保本底线跟随实际触发加仓的位置 K，按 F 定量；逐笔冻结卖出 K 与 F。防守线按配置收盘或触价，其他位置按触价。'},

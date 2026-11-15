@@ -13,7 +13,7 @@ export function buildUsdtLiveCampaignData(owner: string, position: UsdtLiveCampa
   const initialNotional = position.fills.filter(fill => fill.orderId === opening.orderId && fill.action !== 'reduce')
     .reduce((sum, fill) => sum + Number(fill.price) * Number(fill.positionQuantity), 0);
   const { realized, net } = usdtCampaignAmounts(position);
-  const source = position.followId ? '系统跟单' : '币安开仓';
+  const source = position.management ? '币安手动开仓 · 策略托管' : position.followId ? '系统跟单' : '币安开仓';
   const campaign: TradeCampaign = {
     id, user_id: owner, campaign_code: 'BN-' + opening.id, symbol: position.symbol,
     direction: position.direction === 'long' ? 'main_long' : 'main_short',

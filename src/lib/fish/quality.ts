@@ -91,6 +91,8 @@ export function qualityRuleText(g: QualityGroup): string {
 export const hasQualityExit = (group: QualityGroup) => !!group.router || !!group.addition?.enabled || (group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0);
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
+  /** Verified first exchange order for a position adopted by the live monitor. */
+  binanceEntry?: { version: 'binance-manual-monitor-v1'; orderId: string; price: number; quantity: number };
   /** First-match admission for holding only; never changes the original scan/capture input. */
   monitorEntry?: QualityMonitorEntry;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
@@ -429,6 +431,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number, timeBasis?: QualityMonitorTimeBasis) => {
   const identity: unknown[] = [s.signalId ?? s.id, qualityMonitorEntryAt(s, timeBasis), g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  if (s.binanceEntry) identity.push(s.binanceEntry);
   if (g.initialization) identity.push(g.initialization);
   if (g.positionManagement) identity.push(qualityPositionIdentity(g.positionManagement));
   if (g.router) identity.push(routerResultFingerprint(g.router));
@@ -626,7 +629,7 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
  if(sample.monitorEntry?.error)return {key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:sample.monitorEntry.error};
  if(group.router){
   const key=qualityResultKey(sample,group,observeHours);
-  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior,initialNotional,liveAt),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined),key,groupId:group.id,...(group.positionManagement ? { initialNotional } : {})};}
+  try{return {...await evaluateQualityRouter(group.router,(p,prior)=>evaluateQualitySample(sample,p,observeHours,now,load,signal,prior,initialNotional,liveAt),p=>qualityResultKey(sample,p,observeHours),previous?.key===key?previous:undefined,!!sample.binanceEntry),key,groupId:group.id,...(group.positionManagement ? { initialNotional } : {})};}
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
@@ -670,6 +673,12 @@ export async function evaluateQualitySample(sample:QualitySample,group:QualityGr
 async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult,runtime:{initialNotional?:number;pauseAfterAdditionCount?:number;ordinaryUntil?:number;conditionsUntil?:number;trackVetoPath?:boolean;initialPayoffRiskPct?:number;liveAt?:number}={}): Promise<QualityResult&{sellStageBoundary?:boolean}> {
   const {initialNotional=QUALITY_NOTIONAL,pauseAfterAdditionCount,ordinaryUntil,conditionsUntil,trackVetoPath,initialPayoffRiskPct,liveAt}=runtime;
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
+  const actualPrice = sample.binanceEntry?.price;
+  if (sample.binanceEntry && (!(actualPrice! > 0) || !Number.isFinite(actualPrice) ||
+    !(sample.binanceEntry.quantity > 0) || !Number.isFinite(sample.binanceEntry.quantity) ||
+    Math.abs(initialNotional - actualPrice! * sample.binanceEntry.quantity) > 1e-9 * initialNotional)) {
+    return { ...base, status: 'error', reason: '币安首仓的成交金额、币数和均价无法核对' };
+  }
   if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少有效买入时间，不能可靠还原买入时点' };
   if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
   const entry = Math.ceil(sample.enteredAt / QUALITY_MINUTE) * QUALITY_MINUTE;
@@ -682,7 +691,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       // Enter now, but wait for a chosen exit experiment before loading the whole holding history.
       const bars = await load(row, entry, entry + QUALITY_MINUTE, pp, signal);
       validateFishBars(bars, entry + QUALITY_MINUTE, 1, QUALITY_MINUTE);
-      return { ...base, status: 'waiting', entryTime: entry, entryPrice: bars[0].open, reason: '已登记买入，待选择卖出规则后评估收益' };
+      return { ...base, status: 'waiting', entryTime: entry, entryPrice: actualPrice ?? bars[0].open, reason: '已登记买入，待选择卖出规则后评估收益' };
     }
     validateQualityMirror(group.mirrorTakeProfit);
     validateQualityAddition(group.addition);
@@ -724,9 +733,9 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         let holding;
         // 组合卖出要跟踪最高价（判断是否已过分水岭），与回撤否决、镜像止盈共用同一条持仓路径
         if(vetoes.some(v=>v.kind!=='indicator') || group.mirrorTakeProfit?.enabled || combo || staticSell) {
-          const initial=prior?.entryPrice ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
+          const initial=(prior?.entryPrice ?? actualPrice) ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
           if(initial)validateFishBars(initial,entry+QUALITY_MINUTE,1,QUALITY_MINUTE);
-          const entryPrice=prior?.entryPrice??initial![0].open;
+          const entryPrice=prior?.entryPrice??actualPrice??initial![0].open;
           holding=trackVetoPath&&prior?.vetoPath?{...prior.vetoPath}:{entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
@@ -761,7 +770,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     let prices: readonly ResearchBar[] | undefined = replayedPrices?.filter(b => b.openTime >= since && b.openTime < priceEnd);
     if (!prices || prices.length !== (priceEnd - since) / QUALITY_MINUTE) prices = await load(row, since, priceEnd, pp, signal);
     validateFishBars(prices, priceEnd, (priceEnd - since) / QUALITY_MINUTE, QUALITY_MINUTE);
-    const entryPrice = prior?.entryPrice ?? prices[0].open;
+    const entryPrice = prior?.entryPrice ?? actualPrice ?? prices[0].open;
     let exitBar = trigger ? prices.find(b => b.openTime === trigger.at) : undefined;
     let closed = !!exitBar, finalTime = closed ? exitBar!.openTime : end;
     // 回撤止损盘中触及：按止损价成交；其余按卖出分钟的开盘价
@@ -889,7 +898,7 @@ export async function evaluateQualitySampleWithMarketRepair(sample: QualitySampl
   }
   const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous, initialNotional,liveAt);
   if (!repair || original.status !== 'error' || original.reason !== BOX_STOP_INVALID_DATA) return original;
-  const recovered = await evaluateQualitySample(sample, group, hours, now, repair, signal, undefined, initialNotional,liveAt);
+  const recovered = await evaluateQualitySample(sample, group, hours, now, repair, signal, sample.binanceEntry ? previous : undefined, initialNotional,liveAt);
   return recovered.status === 'open' || recovered.status === 'closed'
     ? { ...recovered, boxMarketRepair: BOX_MARKET_REPAIR_VERSION } : original;
 }

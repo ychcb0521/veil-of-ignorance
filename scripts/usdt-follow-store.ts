@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { UsdtFollowCampaign, UsdtFollowStatus } from '../src/lib/fish/usdtFollow.ts';
+import type { BinanceManualPosition } from '../src/lib/fish/binanceManualMonitor.ts';
 
 export interface UsdtFill {
   id: string;
@@ -21,6 +22,7 @@ export interface UsdtOrder {
 }
 export interface UsdtCampaignLedger {
   campaign: UsdtFollowCampaign;
+  managed?: BinanceManualPosition;
   orders: Record<string, UsdtOrder>;
   skipped: string[];
   status: UsdtFollowStatus;
@@ -33,6 +35,7 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
     db.exec('CREATE TABLE IF NOT EXISTS connection (id INTEGER PRIMARY KEY CHECK(id=1), account TEXT NOT NULL, owner TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS managed_campaigns (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
     db.prepare('INSERT OR IGNORE INTO connection VALUES (1, ?, ?)').run(account, owner);
     const connection = db.prepare('SELECT account, owner FROM connection WHERE id=1').get();
     if (connection?.account !== account || connection.owner !== owner) throw Error('本机实盘账本绑定了另一个账户');
@@ -41,13 +44,15 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
     throw error;
   }
   const read = db.prepare('SELECT payload FROM campaigns ORDER BY rowid');
+  const readManaged = db.prepare('SELECT payload FROM managed_campaigns ORDER BY rowid');
   const save = db.prepare('INSERT INTO campaigns VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload');
+  const saveManaged = db.prepare('INSERT INTO managed_campaigns VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload');
   return {
     paused: () => db.prepare("SELECT 1 FROM settings WHERE key='paused'").get() != null,
     pause: () => { db.prepare("INSERT OR IGNORE INTO settings VALUES ('paused','1')").run(); },
     resume: () => { db.prepare("DELETE FROM settings WHERE key='paused'").run(); },
-    readAll: () => read.all().map(row => JSON.parse(String(row.payload)) as UsdtCampaignLedger),
-    save: (row: UsdtCampaignLedger) => { save.run(row.campaign.id, JSON.stringify(row)); },
+    readAll: () => [...read.all(), ...readManaged.all()].map(row => JSON.parse(String(row.payload)) as UsdtCampaignLedger),
+    save: (row: UsdtCampaignLedger) => { (row.managed ? saveManaged : save).run(row.campaign.id, JSON.stringify(row)); },
     close: () => db.close(),
   };
 }

@@ -3,6 +3,7 @@ import type { useUsdtFollow } from './useUsdtFollow';
 import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
 import { readFishPreferences, updateFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { readUsdtCampaigns, saveUsdtCampaignBatch, syncClosedUsdtCampaigns } from '@/lib/fish/usdtLiveCampaignStore';
+import type { UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
 
 type Follow = ReturnType<typeof useUsdtFollow>;
 const recentHistory = 86_400_000;
@@ -66,6 +67,7 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
   const { connected, positionMirror, campaignMirror, readPositions, readCampaigns, readPositionHistory } = follow;
   const [positionView, setPositionView] = useState<{ owner: string; snapshot?: UsdtMirrorSnapshot; issue?: string }>();
   const [archiveView, setArchiveView] = useState<{ owner: string; issue?: string }>();
+  const [openCampaigns, setOpenCampaigns] = useState<{ owner: string; rows: UsdtLiveCampaign[] }>();
   const wakePositions = useRef<() => void>();
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const retryPositions = useCallback(() => {
@@ -114,6 +116,7 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
       const since = Math.max(1, Math.min(now, previous ?? now - recentHistory) - retryOverlap);
       const batch = await readCampaigns(since, open, signal);
       if (signal.aborted) return;
+      setOpenCampaigns({ owner, rows: batch.campaigns.filter(row => !row.closedAt) });
       await saveUsdtCampaignBatch(owner, batch.campaigns, batch.observedAt);
       await updateFishPreference<number>(cursorKey, cursor => Math.max(cursor ?? 0, batch.observedAt));
       await syncClosedUsdtCampaigns(owner, signal);
@@ -138,5 +141,6 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
   const current = connected && positionView?.owner === owner ? positionView : undefined;
   const histories = usePositionHistories(current?.snapshot, readPositionHistory, historyAttempt);
   return { snapshot: current?.snapshot, issue: current?.issue, retryPositions, histories,
+    openCampaigns: connected && openCampaigns?.owner === owner ? openCampaigns?.rows : undefined,
     archiveIssue: archiveView?.owner === owner ? archiveView?.issue : undefined };
 }

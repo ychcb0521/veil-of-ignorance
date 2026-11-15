@@ -1,5 +1,8 @@
 import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorPosition, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
 import type { UsdtCampaignBatch, UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
+import type { BinanceManualAnchor, BinanceManualDecision, BinanceManualState } from '@/lib/fish/binanceManualMonitor';
+import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
+import type { QualityResult } from '@/lib/fish/quality';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
@@ -26,6 +29,7 @@ interface FollowState {
   positionMirror?: 1;
   campaignMirror?: 1;
   guardPlusAdditions?: 1;
+  manualMonitor?: 1;
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -174,6 +178,13 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     if (!Number.isSafeInteger(batch.observedAt) || !Array.isArray(batch.campaigns)) throw Error('币安实盘战役回报无效');
     return batch;
   }, [readMirror]);
+  const readManualMonitor = useCallback((signal: AbortSignal) =>
+    readMirror<BinanceManualState>({ command: 'manual-monitor-status' }, signal, 10_000), [readMirror]);
+  const adoptManualMonitor = useCallback((anchor: BinanceManualAnchor, monitor: InstantMonitorSettings, signal: AbortSignal) =>
+    readMirror({ command: 'manual-monitor-adopt', anchor, monitor }, signal, 60_000), [readMirror]);
+  const advanceManualMonitor = useCallback((id: string, revision: number, checkpoint: QualityResult, decision: BinanceManualDecision | undefined, signal: AbortSignal) =>
+    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision }, signal, 15_000), [readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
-  return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns };
+  return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
+    readManualMonitor, adoptManualMonitor, advanceManualMonitor };
 }

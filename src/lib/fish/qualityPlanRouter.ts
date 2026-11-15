@@ -101,7 +101,7 @@ export function validateQualityRouter(r: QualityPlanRouter) {
 /** The existing causal replay evaluates each branch; only a closed-bar observation selects it.
  * A matching executed prefix is required, so a discarded branch cannot change earlier trades.
  */
-export async function evaluateQualityRouter(r: QualityPlanRouter, run: (plan: QualityGroup, previous?: QualityResult) => Promise<QualityResult>, keyOf: (p: QualityGroup) => string, previous?: QualityResult): Promise<QualityResult> {
+export async function evaluateQualityRouter(r: QualityPlanRouter, run: (plan: QualityGroup, previous?: QualityResult) => Promise<QualityResult>, keyOf: (p: QualityGroup) => string, previous?: QualityResult, confirmedLiveFills = false): Promise<QualityResult> {
   validateQualityRouter(r);
   if (isRaceRouter(r)) {
     // 每轮分流：一套合成方案跑完全程，各次成交记录 lane 写明走的是哪一边；没有一次性的分支选择
@@ -122,7 +122,7 @@ export async function evaluateQualityRouter(r: QualityPlanRouter, run: (plan: Qu
   if (!o || !Number.isFinite(o.reading) || o.at!==decisive.at || o.barOpenTime+300000>decisive.at) throw Error(`第${routerOrdinal(r)}次结构加仓缺少此前已收盘的状态 S，未选择分支`);
   const decision:QualityRouteDecision={branch:o.reading>r.threshold?'attack':'structure',at:decisive.at,reading:o.reading,threshold:r.threshold};
   if (decision.branch==='structure') return {...structure,routeDecision:decision};
-  const attack=await run(r.attack);
+  const attack=await run(r.attack,confirmedLiveFills&&previous?.status==='open'?{...previous,key:keyOf(r.attack)}:undefined);
   if (attack.status==='error'||attack.status==='waiting') return attack;
   if (canonicalRouterJson(attack.additionFills?.slice(0,r.afterAdditions))!==canonicalRouterJson(structure.additionFills?.slice(0,r.afterAdditions))) throw Error('进攻分支改变了选择前的成交，已停止计算');
   return {...attack,routeDecision:decision};

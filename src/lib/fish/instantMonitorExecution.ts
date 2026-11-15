@@ -19,7 +19,7 @@ export function instantMonitorSize(monitor?: InstantMonitorSettings) {
 }
 
 export function instantMonitorSample(sample: QualitySample, buyAt: number): QualitySample {
-  return { ...sample, enteredAt: Math.floor(buyAt / QUALITY_MINUTE) * QUALITY_MINUTE, monitorEntry: undefined };
+  return { ...sample, enteredAt: sample.binanceEntry ? buyAt : Math.floor(buyAt / QUALITY_MINUTE) * QUALITY_MINUTE, monitorEntry: undefined };
 }
 
 export async function evaluateInstantMonitor(sample: QualitySample, monitor: InstantMonitorSettings, end: number,
@@ -28,11 +28,12 @@ export async function evaluateInstantMonitor(sample: QualitySample, monitor: Ins
   if (!plan.frozenVersions?.length || planVersionChanges(plan).length) throw new Error('即时交易的持仓模板执行版本无法核验');
   const tradeLoad = preEntryWindowLoader(load, end);
   if (isLegacyQualityPlan(plan)) {
+    if (sample.binanceEntry) throw Error('该历史引擎无法以真实首仓执行');
     return evaluateLegacyQualitySample(sample, plan, 0, end, tradeLoad, signal, qualityResultKey(sample, plan, 0));
   }
   const initialized = plan.initialization ? withTuringInitialization(tradeLoad, sample.source.symbol, marketStart ?? NaN) : tradeLoad;
   const { marginUsdt, leverage } = instantMonitorSize(monitor);
-  const notional = plan.positionManagement?.notional ?? marginUsdt * leverage;
+  const notional = sample.binanceEntry ? sample.binanceEntry.quantity * sample.binanceEntry.price : plan.positionManagement?.notional ?? marginUsdt * leverage;
   const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, notional,liveAt);
   return initialized.turingInitialization ? { ...result, initialization: initialized.turingInitialization } : result;
 }

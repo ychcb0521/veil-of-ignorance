@@ -1060,7 +1060,7 @@ export function PositionPanel({
                     <section aria-label="币安实盘持仓" className="space-y-1.5">
                       <div className="flex items-center gap-2 text-xs">
                         <span className="font-semibold">币安实盘持仓</span>
-                        <span className="text-muted-foreground">只读</span>
+                        {live.management?.positions.length ? <span className="text-muted-foreground">即时交易策略</span> : null}
                       </div>
                       <UsdtPositionRows live={live} positions={livePositions}/>
                     </section>

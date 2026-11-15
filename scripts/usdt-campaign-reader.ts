@@ -91,8 +91,9 @@ export function reconstructUsdtCampaigns(symbol: string, positions: readonly Usd
 export function createUsdtCampaignReader(read: Read, clock = Date.now) {
   let running: Promise<UsdtCampaignBatch> | undefined;
   let cached: { key: string; data: UsdtCampaignBatch } | undefined;
-  async function scan(since: number, known: ReadonlyMap<string, ReadonlySet<number>>): Promise<UsdtCampaignBatch> {
-    const positions = decodePositions(await read('GET', '/fapi/v3/positionRisk'));
+  async function scan(since: number, known: ReadonlyMap<string, ReadonlySet<number>>, target?: string): Promise<UsdtCampaignBatch> {
+    const params = target ? { symbol: target } : undefined;
+    const positions = decodePositions(await read('GET', '/fapi/v3/positionRisk', params));
     const observedAt = clock();
     const earliest = Math.max(1, observedAt - 89 * DAY);
     const start = Math.max(earliest, Math.min(since, observedAt));
@@ -114,7 +115,7 @@ export function createUsdtCampaignReader(read: Read, clock = Date.now) {
       const middle = Math.floor((from + through) / 2);
       return [...await windows(path, from, middle, params), ...await windows(path, middle + 1, through, params)];
     };
-    const orders = await windows('/fapi/v1/allOrders', start, observedAt);
+    const orders = target ? [] : await windows('/fapi/v1/allOrders', start, observedAt);
     const symbols = new Set([...groups.keys(), ...known.keys()]);
     for (const order of orders) {
       const item = order as { symbol?: string; executedQty?: string };
@@ -143,12 +144,12 @@ export function createUsdtCampaignReader(read: Read, clock = Date.now) {
     };
     const queue = [...symbols];
     for (let i = 0; i < queue.length; i += 3) await Promise.all(queue.slice(i, i + 3).map(scanSymbol));
-    const current = decodePositions(await read('GET', '/fapi/v3/positionRisk'));
+    const current = decodePositions(await read('GET', '/fapi/v3/positionRisk', params));
     const anchor = (rows: UsdtMirrorPosition[]) => JSON.stringify(rows.map(p => [p.symbol, p.positionSide, p.direction, p.quantity, p.updatedAt]));
     if (anchor(positions) !== anchor(current)) throw Error('币安仓位刚发生变化，正在重新核对成交');
     return { observedAt, campaigns, ...(incomplete ? { incomplete } : {}) };
   }
-  const readBatch = (since: unknown, open: unknown): Promise<UsdtCampaignBatch> => {
+  const readBatch = (since: unknown, open: unknown, target?: string): Promise<UsdtCampaignBatch> => {
     if (typeof since !== 'number' || !Number.isSafeInteger(since) || since < 1 || since > clock() + 60_000 ||
       !Array.isArray(open) || open.length > 200) throw Error('币安战役同步请求无效');
     const known = new Map<string, Set<number>>();
@@ -159,10 +160,10 @@ export function createUsdtCampaignReader(read: Read, clock = Date.now) {
       openingTimes.add(anchor.openedAt);
       known.set(anchor.symbol, openingTimes);
     }
-    const key = JSON.stringify([since, [...known].map(([symbol, openingTimes]) => [symbol, [...openingTimes]])]);
+    const key = JSON.stringify([since, target, [...known].map(([symbol, openingTimes]) => [symbol, [...openingTimes]])]);
     if (cached?.key === key && clock() - cached.data.observedAt < 4000) return Promise.resolve(cached.data);
-    if (running) return running.then(() => readBatch(since, open), () => readBatch(since, open));
-    running = scan(since, known).then(data => { cached = { key, data }; return data; }).finally(() => { running = undefined; });
+    if (running) return running.then(() => readBatch(since, open, target), () => readBatch(since, open, target));
+    running = scan(since, known, target).then(data => { cached = { key, data }; return data; }).finally(() => { running = undefined; });
     return running;
   };
   return readBatch;

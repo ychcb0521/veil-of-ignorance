@@ -5,7 +5,7 @@ import {defaultStructureAddition} from '../qualityAdditionStructure';
 import {evaluateQualityRouter,validateQualityRouter,QUALITY_ROUTER_VERSION,QUALITY_ROUTER_FIRST_VERSION,QUALITY_ROUTER_RACE_VERSION,QUALITY_ROUTER_RACE_FROM_VERSION,routerFingerprint,equivalentRouterVersion,routerOrdinal,mergedRacePlan,routedQualityPlan,routerVersionFor,routerVersionSummary,routerTemplateSummary,routerRuleLabel,type QualityPlanRouter} from '../qualityPlanRouter';
 import {makeQualityBuyFilter} from '../qualityFilters';
 import {freezeQualityPlan,planVersionChanges,comparePlanVersions} from '../qualityPlanVersions';
-import {qualityResultKey,newQualityStudy,type QualityGroup} from '../quality';
+import {qualityResultKey,newQualityStudy,type QualityGroup,type QualityResult} from '../quality';
 import {qualityPlanFromTemplate} from '../qualityPlanTemplates';
 import {syncQualitySellDefinitions} from '../qualityComparison';
 const base=()=>({...makeQualitySellPlan('state:state','<',.5,BUILTIN_FEATURES,undefined,'structure'),addition:{enabled:true,source:'structure' as const,quantityMode:'calculator' as const,maxRounds:2,repeat:true,stricterPct:10,structure:defaultStructureAddition(),rounds:[0,1].map(()=>({source:'structure' as const,stricterPct:10,structure:defaultStructureAddition()}))}});
@@ -23,6 +23,17 @@ it('rejects missing / future readings and different prefixes',async()=>{
 });
 it('resumes the already selected branch without choosing again',async()=>{
  const prior={...result(.95),status:'open' as const,routeDecision:{branch:'attack' as const,at:1200000,reading:.95,threshold:.9}};const r=router(),run=vi.fn(async()=>result(.1));await evaluateQualityRouter(r,run,p=>p.id,prior);expect(run).toHaveBeenCalledExactlyOnceWith(r.attack,expect.objectContaining({key:'attack'}));
+});
+it('shares confirmed live partial fills with the alternate branch before choosing it', async () => {
+  const first = { ...fills(.95)[0], quantity: .2, price: 5.1, notional: 1.02 };
+  const prior = { ...result(.95), status: 'open' as const, additionFills: [first] };
+  const plan = router();
+  const run = vi.fn(async (_plan: QualityGroup, checkpoint?: QualityResult) => ({
+    ...result(.95), additionFills: [...(checkpoint?.additionFills ?? []), fills(.95)[1]],
+  }));
+  const observed = await evaluateQualityRouter(plan, run, p => p.id, prior, true);
+  expect(run).toHaveBeenNthCalledWith(2, plan.attack, expect.objectContaining({ key: 'attack', additionFills: [first] }));
+  expect(observed).toMatchObject({ routeDecision: { branch: 'attack' }, additionFills: [first, fills(.95)[1]] });
 });
 it('separates identity and versions, preserves copying and account formulas',()=>{
  const p=freezeQualityPlan({...base(),router:router()} as QualityGroup);expect(planVersionChanges(p)).toEqual([]);

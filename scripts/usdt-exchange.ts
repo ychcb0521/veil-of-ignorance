@@ -138,7 +138,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       if (quote.symbol !== symbol || !quantityText.test(price) || !Number.isFinite(Number(price)) || Number(price) <= 0) throw Error('币安盘口价格无效');
       return price;
     },
-    async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number) {
+    async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number, managed?: 'existing-position') {
       const { symbol } = market;
       const [positions, regular, algo, settings, modes] = await Promise.all([
         request('GET', '/fapi/v3/positionRisk', { symbol }),
@@ -149,15 +149,15 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       ]);
       if (modes.dualSidePosition !== (mode === 'hedge')) throw Error('币安持仓模式已变化');
       if (![positions, regular, algo, settings].every(Array.isArray)) throw Error('币安仓位或挂单读数不可用');
-      if ((regular.length || algo.length) && leverage !== 0) throw Error('该合约有外部挂单，需核对仓位');
+      if ((regular.length || algo.length) && (leverage !== 0 || managed)) throw Error('该合约有外部挂单，需核对仓位');
       const active = positions.filter((row: Json) => Number(row.positionAmt) !== 0);
       const row = active.find((item: Json) => item.symbol === symbol && item.positionSide === positionSide(mode));
-      if (active.some((item: Json) => item !== row)
-        || (row ? quantityUnits(String(row.positionAmt), market.step) : 0) !== held
+      if (active.some((item: Json) => item !== row && !(managed && mode === 'hedge' && item.positionSide === 'SHORT'))
+        || (row && Number(row.positionAmt) > 0 ? quantityUnits(String(row.positionAmt), market.step) : row ? -1 : 0) !== held
         || (held > 0 && (!Number.isFinite(Number(row.entryPrice)) || Math.abs(Number(row.entryPrice) - entry) > Math.max(1e-8, entry * 1e-5)))) {
         throw Error('币安实际仓位与本机成交记录不一致');
       }
-      if (leverage === 0) return; // Reducing exposure never needs to change symbol settings.
+      if (leverage === 0 || managed) return; // Keep the existing exchange setup of an adopted position.
       const config = settings.find((item: Json) => item.symbol === symbol);
       if (!config) throw Error('币安合约配置不可用');
       if (opening) {

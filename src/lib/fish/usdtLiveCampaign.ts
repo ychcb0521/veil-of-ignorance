@@ -1,5 +1,6 @@
 import type { UsdtMirrorFill, UsdtMirrorSide } from './usdtPositionMirror';
 import type { UsdtFollowStatus } from './usdtFollow';
+import type { BinanceManualPosition } from './binanceManualMonitor';
 
 export type UsdtCampaignFill = UsdtMirrorFill & {
   realized: number;
@@ -17,6 +18,7 @@ export interface UsdtLiveCampaign {
   quantity: string;
   fills: UsdtCampaignFill[];
   followId?: string;
+  management?: Pick<BinanceManualPosition, 'version' | 'monitor' | 'armedAt'> & { exitReason?: string };
 }
 
 export interface UsdtCampaignBatch {

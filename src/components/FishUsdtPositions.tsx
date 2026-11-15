@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw, Wallet } from 'lucide-react';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import type { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
+import type { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { usdtMirrorKey, usdtMirrorRevision, usdtPositionDecimal, usdtPositionQuantityUnit, usdtPositionValue, usdtSettlementAsset, type UsdtMirrorHistory, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
 import { fishSubHeading } from './FishSection';
@@ -9,7 +10,7 @@ import { fishSubHeading } from './FishSection';
 const time = (at:number) => formatUTC8(at)+'.'+String(at%1000).padStart(3,'0');
 const actionNames = {open:'开仓',add:'加仓',reduce:'减仓'} as const;
 type Follow = ReturnType<typeof useUsdtFollow>;
-type Live = ReturnType<typeof useUsdtLiveTrading>;
+type Live = ReturnType<typeof useUsdtLiveTrading> & { management?: ReturnType<typeof useBinanceManualMonitor> };
 
 export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? []}:{
   live: Live;
@@ -23,10 +24,13 @@ export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? 
         className="inline-flex items-center gap-1 rounded px-1.5 py-1 hover:bg-muted focus-visible:outline focus-visible:outline-1"><RefreshCw aria-hidden className="h-3 w-3"/>重新同步</button>
     </div>
     {issue&&<p role="alert" className="text-destructive">{issue}{snapshot?'。以下为上次成功同步的持仓。':''}</p>}
+    {live.management?.issue && <p role="status" className="text-muted-foreground">{live.management.issue}</p>}
     {!snapshot&&!issue&&<p role="status">正在读取币安持仓…</p>}
     {snapshot&&!positions.length&&!issue&&<p role="status" className="py-1 text-muted-foreground">当前无实盘持仓</p>}
     {positions.map(position=>{
       const evidence=histories.get(usdtMirrorRevision(position));
+      const managed=live.management?.positions.find(({ position: row }) => row.anchor.symbol === position.symbol &&
+        row.anchor.positionSide === position.positionSide && row.anchor.openedAt === evidence?.openedAt);
       const asset = usdtSettlementAsset(position.symbol), unit = usdtPositionQuantityUnit(position.symbol);
       const pnl = Number(position.unrealizedPnl);
       return <PositionDetails key={usdtMirrorKey(position)} evidence={evidence} asset={asset} unit={unit}>
@@ -40,11 +44,15 @@ export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? 
             <span title="币安持仓数量 × 当前标记价" className="font-mono text-[11px] font-semibold">名义仓位 {usdtPositionValue(position.quantity,position.markPrice)} {asset}</span>
             <span className="font-mono">数量 {usdtPositionDecimal(position.quantity)} {unit}</span>
             <span className="font-mono text-muted-foreground">未实现 <span className={pnl > 0 ? 'text-[var(--chart-profit)]' : pnl < 0 ? 'text-[var(--chart-loss)]' : ''}>{pnl > 0 ? '+' : ''}{pnl===0?'0':usdtPositionDecimal(position.unrealizedPnl)} {asset}</span></span>
+            {managed && <span className={managed.status.state === 'blocked' ? 'text-destructive' : 'font-medium text-primary'}>
+              {managed.status.state === 'blocked' ? '托管待核对' : managed.position.pending ? '等待成交回报' : '策略托管中'}
+            </span>}
           </span>
           <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 pl-[18px] font-mono text-muted-foreground">
             <span>均价 {position.entryPrice}</span><span>标记价 {position.markPrice}</span>
             <span>剩余成本 {usdtPositionValue(position.quantity,position.entryPrice)} {asset}</span>
             <span title={evidence?.issue}>开仓 {evidence?.openedAt?time(evidence.openedAt):evidence?'未核验':'核对中…'}</span>
+            {managed && <span>持仓模板 {managed.position.monitor.name}{managed.status.issue ? ' · ' + managed.status.issue : ''}</span>}
           </span>
         </summary>
       </PositionDetails>;

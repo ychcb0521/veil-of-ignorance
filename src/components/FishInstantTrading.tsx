@@ -73,7 +73,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
     {error && <p role="alert" className="p-3 text-xs text-destructive">{error}</p>}
   </FishConditionSettings>;
   const size = instantMonitorSize(choice && { version: INSTANT_TEMPLATE_MONITOR, templateId: choice.id, name: choice.name, plan: choice.plan });
-  return <FishConditionSettings dialog title="即时交易 · 买后设置" description="选择新入选持仓使用的监测模板。">
+  return <FishConditionSettings dialog title="即时交易 · 买后设置" description="选择自动入选和币安手动开仓使用的监测模板。">
     <div className="space-y-3">
     <label className="block space-y-1.5">
       <span className="block font-medium">持仓监测模板</span>
@@ -85,7 +85,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
       </select>
     </label>
     <p className="text-muted-foreground">{id
-      ? '按模板执行加仓、减仓和卖出。筛选鱼入选开仓时保存当时所选的模板快照。'
+      ? '自动入选和已接手的币安手动多仓各自冻结当时的模板，按模板执行加仓、减仓和卖出。'
       : '40 USDT 保证金、5 倍。CDA 原始值低于 −10 或 DBL-5 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。'}</p>
     {choiceName&&<p className="text-muted-foreground">原名：{choiceName.originalName}</p>}
     {choice && <p className="text-muted-foreground">首仓名义仓位 {+(size.marginUsdt * size.leverage).toPrecision(12)} USDT · {size.leverage} 倍 · 保证金 {+size.marginUsdt.toPrecision(12)} USDT</p>}
@@ -177,7 +177,9 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
         {settingsView === 'live' && follow && <div ref={focusSettings} tabIndex={-1} className="space-y-3 text-xs outline-none">
           <p className="font-medium">币安 U 本位实盘</p>
           <p role="status" className="text-muted-foreground">{follow.connected
-            ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : '已连接。本机跟随开启后的新即时交易。'
+            ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : follow.manualMonitor === 1
+              ? '已连接。按买后模板管理新即时交易和已接手的币安手动多仓。'
+              : '已连接。本机跟随开启后的新即时交易。'
             : follow.issue || '在 Windows 启动执行端，将它生成的配对码填在这里。'}</p>
           <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>
           <form className="flex items-center gap-2" onSubmit={async event => {
