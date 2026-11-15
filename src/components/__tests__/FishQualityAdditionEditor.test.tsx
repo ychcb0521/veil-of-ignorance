@@ -365,6 +365,8 @@ it('edits both acute positions independently from the guard and from other round
  expect(saved.rounds[1].impulse1115Position).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
  fireEvent.click(screen.getByLabelText('同时启用原位置算法'));
+ expect(screen.queryByLabelText('K基准箱体')).toBeNull();
+ expect(screen.queryByLabelText('上涨期防守冗余')).toBeNull();
  expect(save().rounds[0].impulse1115Position.skipNative).toBe(true);
  expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('严格低于本次 K');
 });
@@ -377,11 +379,27 @@ it('keeps a saved combined 1115 position until the draft is explicitly changed',
  expect(screen.getByLabelText('急拉线-1115')).toBeDisabled();
  expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
  expect(save().impulse1115Position).toBeUndefined();
- fireEvent.click(screen.getByRole('button',{name:'取消沿用组合位置'}));
+ expect(screen.getByLabelText('加仓防守算法')).toHaveValue(DBL5_GUARD_PLUS_VERSION);
+ fireEvent.change(screen.getByLabelText('加仓防守算法'),{target:{value:''}});
  fireEvent.click(screen.getByLabelText('急拉线-1115'));
  expect(save().structure.guardPlusVersion).toBeUndefined();
  expect(save().impulse1115Position.version).toBe(IMPULSE_1115_POSITION_VERSION);
  expect(legacy.structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
+});
+
+it('offers the existing combined 1115 version for new drafts',()=>{
+ render(<Editor/>);
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+ const mode=screen.getByLabelText('加仓防守算法');
+ fireEvent.change(mode,{target:{value:DBL5_GUARD_PLUS_VERSION}});
+ expect(save().rounds[0].structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
+ expect(screen.getByLabelText('急拉线-1115')).toBeDisabled();
+ fireEvent.change(mode,{target:{value:''}});
+ fireEvent.click(screen.getByLabelText('急拉线-1115'));
+ expect((mode as HTMLSelectElement).selectedOptions[0].value).toBe('');
+ expect(Array.from((mode as HTMLSelectElement).options).find(option=>option.value===DBL5_GUARD_PLUS_VERSION)?.disabled).toBe(true);
+ expect(save().rounds[0].structure.guardPlusVersion).toBeUndefined();
 });
 
 it('selects the winning position for F and retains the chosen floor version on reopen', () => {

@@ -1,4 +1,4 @@
-import {DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_PARAMS, IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_PARAMS, IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
 
 export interface Impulse1115Draft {
   minDistancePct: string;
@@ -8,22 +8,18 @@ export interface Impulse5mDraft extends Impulse1115Draft {
   bufferAtr: string;
 }
 
-export function FishQualityImpulsePositions({impulse, impulse1115, legacy1115, disabled, inputClass, change, clearLegacy}: {
+export function FishQualityImpulsePositions({impulse, impulse1115, legacy1115, disabled, inputClass, change}: {
   impulse?: Impulse5mDraft;
   impulse1115?: Impulse1115Draft;
   legacy1115: boolean;
   disabled: boolean;
   inputClass: string;
   change: (impulse?: Impulse5mDraft, impulse1115?: Impulse1115Draft) => void;
-  clearLegacy: () => void;
 }) {
   const p=DBL5_GUARD_PLUS_PARAMS;
   const lock=disabled||legacy1115;
   return <div className="grid gap-2 sm:grid-cols-2" data-testid="addition-impulse-positions">
-    {legacy1115&&<div className="flex flex-wrap items-center gap-2 rounded border border-border/60 p-2 sm:col-span-2">
-      <span>已保存的组合位置 · {DBL5_GUARD_PLUS_LABEL}</span>
-      <button type="button" className="text-muted-foreground underline" disabled={disabled} onClick={clearLegacy}>取消沿用组合位置</button>
-    </div>}
+    {legacy1115&&<p className="text-muted-foreground sm:col-span-2">当前使用 1115 组合位置。切回「仅使用所选箱体防守线」后即可勾选独立急拉线。</p>}
     <fieldset className="min-w-0 space-y-2 rounded border border-border/60 p-2" disabled={lock}>
       <label className="inline-flex items-center gap-2 font-medium">
         <input type="checkbox" checked={!!impulse} onChange={e=>change(e.target.checked?{bufferAtr:'0',minDistancePct:''}:undefined,impulse1115)}/>

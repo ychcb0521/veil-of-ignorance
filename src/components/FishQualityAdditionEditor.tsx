@@ -2,8 +2,9 @@ import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
-import {IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
 import {FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
+import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { additionMetricTime, withAdditionMetricTime, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
@@ -428,7 +429,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     </div>
     <span className="text-muted-foreground">触发事件</span>
     <select aria-label="箱体加仓时机" className={field+' h-7 w-full'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></>}
-    {box&&<><span className="text-muted-foreground">K =</span>
+    {nativeActive&&box&&<><span className="text-muted-foreground">K =</span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-row"><select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-36'} disabled={!d.enabled} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION?boxAlgorithmVersion(DBL5_RETEST_GUARD_VERSION)!.label:`${boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）`}</option>}</select>−<input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={cell+' w-14'}/>{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</div>
     {d.structure.kSource==='guard'&&<><span className="flex items-center gap-1 text-muted-foreground">防守线<FishQualityInfo label="防守线说明"><GuardLineNotes/></FishQualityInfo></span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-guard-row"><select aria-label="防守线类型" className={field+' h-7 w-28'} disabled={!d.enabled} value={d.structure.guardTrendOnly?'trend':'both'} onChange={e=>patch({structure:{...d.structure,guardTrendOnly:e.target.value==='trend'?true:undefined}})}><option value="both">实线和虚线</option><option value="trend">只用实线</option></select><span className="px-0.5 text-muted-foreground/50">·</span>上涨期 箱底 −<input aria-label="上涨期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_trend_atr:v}}}});}} className={cell+' w-14'}/>ATR<span className="px-0.5 text-muted-foreground/50">·</span>震荡期 区间底 −<input aria-label="震荡期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_range_atr:v}}}});}} className={cell+' w-14'}/>ATR</div></>}
@@ -438,13 +439,28 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
           onChange={version=>{const structure=selectStructureGuardVersion(d.structure,version);delete structure.guardPlusVersion;patch({structure});}}/>
         {structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION&&<span className="text-[10px] text-muted-foreground">首根低点等独立回踩确认后再判断加仓</span>}
       </div></>}
+    {d.structure.kSource==='guard'&&<><span className="text-muted-foreground">急拉参考</span>
+      <div className="min-w-0 space-y-1">
+        <select aria-label="加仓防守算法" className={field+' h-7 w-full'} disabled={!d.enabled}
+          value={d.structure.guardPlusVersion??''} onChange={event=>{
+            if(event.target.value===DBL5_GUARD_PLUS_VERSION){
+              patch({structure:{...selectStructureGuardVersion(d.structure,CURRENT_GUARD_VERSION),guardPlusVersion:DBL5_GUARD_PLUS_VERSION}});
+            }else{
+              const structure={...d.structure};
+              delete structure.guardPlusVersion;
+              patch({structure});
+            }
+          }}>
+          <option value="">仅使用所选箱体防守线</option>
+          <option value={DBL5_GUARD_PLUS_VERSION} disabled={!!d.impulse||!!d.impulse1115}>{DBL5_GUARD_PLUS_LABEL}</option>
+        </select>
+        {legacy1115&&<GuardPlusEvidence/>}
+      </div></>}
     <span className="text-muted-foreground">最小距离</span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div></>}
    </div></div>
    <FishQualityImpulsePositions impulse={d.impulse} impulse1115={d.impulse1115} legacy1115={legacy1115}
-     inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={setPositions} clearLegacy={()=>{
-       const structure={...d.structure};delete structure.guardPlusVersion;patch({structure});
-     }}/>
+     inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={setPositions}/>
    {(d.impulse||d.impulse1115)&&<p className="text-muted-foreground">同一轮只成交一次。同分钟按箱体／指标位置、5 分钟急拉线、急拉线-1115 的顺序评估。</p>}
    </div>
   </Part>
