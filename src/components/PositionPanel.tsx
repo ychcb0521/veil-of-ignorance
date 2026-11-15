@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantPositionRow } from '@/components/InstantPositionRow';
+import { UsdtPositionRows } from '@/components/FishUsdtPositions';
 import { instantPositionDisplay, instantPositionValuation, type InstantPositionFill } from '@/lib/fish/instantCampaign';
 import { buildTpSlOrders } from '@/lib/tpSlOrders';
 import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
@@ -304,6 +305,8 @@ export function PositionPanel({
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const instant = useScreenedInstantPositions();
   const instantPositions = (instant?.positions ?? []).filter(row => !hideOtherContracts || row.source.symbol === activeSymbol);
+  const live = instant?.usdtFollow?.connected && instant.usdtFollow.positionMirror === 1 ? instant.usdtLive : undefined;
+  const livePositions = live?.snapshot?.positions.filter(row => !hideOtherContracts || row.symbol === activeSymbol.replace(/\//g, '')) ?? [];
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
   // Rollback modal state
   const [rollbackOpen, setRollbackOpen] = useState(false);
@@ -721,7 +724,7 @@ export function PositionPanel({
   }, [rollbackSymbol, tradeHistory, positionsMap, ordersMap]);
 
   const TABS = [
-    { key: 'positions', label: '仓位', count: mergedPositions.length + instantPositions.length, showCount: true },
+    { key: 'positions', label: '仓位', count: mergedPositions.length + instantPositions.length + livePositions.length, showCount: true },
     { key: 'pending', label: '当前委托', count: allOrders.length, showCount: true },
     { key: 'history', label: '历史委托', count: 0, showCount: false },
     { key: 'trades', label: '历史成交', count: tradeRecords.length, showCount: true },
@@ -1042,7 +1045,7 @@ export function PositionPanel({
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
-              {mergedPositions.length === 0 && instantPositions.length === 0 ? (
+              {mergedPositions.length === 0 && instantPositions.length === 0 && livePositions.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
                     <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -1053,6 +1056,15 @@ export function PositionPanel({
                 </div>
               ) : (
                 <div className="p-3 space-y-3">
+                  {live && livePositions.length > 0 && (
+                    <section aria-label="币安实盘持仓" className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-semibold">币安实盘持仓</span>
+                        <span className="text-muted-foreground">只读</span>
+                      </div>
+                      <UsdtPositionRows live={live} positions={livePositions}/>
+                    </section>
+                  )}
                   {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
                     monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
                     manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status => status.id === position.id)} manage={instant?.manage} limitMode={limitMode} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}

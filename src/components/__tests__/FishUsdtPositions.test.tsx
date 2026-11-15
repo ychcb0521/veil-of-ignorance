@@ -1,30 +1,62 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+import { InstantPositionsContext } from '@/contexts/FishQualityContext';
+import { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { FishUsdtPositions } from '../FishUsdtPositions';
+import { PositionPanel } from '../PositionPanel';
 import { usdtPositionValue, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
+
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'mirror-owner' } }) }));
+vi.mock('@/contexts/TradingContext', () => ({ useTradingContext: () => ({ tradingMode: 'direct' }) }));
 
 const at=Date.parse('2026-11-15T19:28:42.697+08:00');
 const position:UsdtMirrorPosition={symbol:'BEATUSDT',positionSide:'LONG',direction:'long',
   quantity:'100.000',entryPrice:'0.0822712',markPrice:'0.08236000',unrealizedPnl:'0.00888000',updatedAt:at};
 
-it('opens the mirror for live positions and shows both exchange sides with exact units and opening time', async () => {
+it('shows and clears real exchange positions in both views with one shared read of each opening', async () => {
+  let positions: UsdtMirrorPosition[] = [];
   const readPositionHistory=vi.fn(async ()=>({openedAt:at,fills:[]}));
-  const follow={connected:true,positionMirror:1,campaignMirror:1,readPositionHistory} as const;
-  const retryPositions=()=>{};
-  const view=render(<FishUsdtPositions follow={follow as never} live={{snapshot:{observedAt:at,positions:[]},retryPositions,issue:undefined,archiveIssue:undefined}}/>);
-  expect(screen.getByRole('button',{name:/币安实盘持仓/})).toHaveAttribute('aria-expanded','false');
-
+  const follow = {
+    connected: true, positionMirror: 1 as const, readPositionHistory,
+    readPositions: vi.fn(async () => ({ observedAt: at, positions })),
+    readCampaigns: async () => ({ observedAt: at, campaigns: [] }),
+  };
+  function Fixture() {
+    const live = useUsdtLiveTrading('mirror-owner', follow);
+    return <InstantPositionsContext.Provider value={{ positions: [], usdtFollow: follow, usdtLive: live } as never}>
+      <div data-testid="fish"><FishUsdtPositions follow={follow as never} live={live}/></div>
+      <div data-testid="main-positions"><PositionPanel positionsMap={{}} ordersMap={{}} tradeHistory={[]} priceMap={{}}
+        activeSymbol="EVAAUSDT" activeTab="positions" onClosePosition={vi.fn()} onCancelOrder={vi.fn()} onTabChange={vi.fn()}/></div>
+    </InstantPositionsContext.Provider>;
+  }
+  render(<Fixture/>);
+  const fish = within(screen.getByTestId('fish'));
+  const table = within(screen.getByTestId('main-positions'));
+  await waitFor(() => expect(follow.readPositions).toHaveBeenCalledTimes(1));
+  expect(fish.getByRole('button',{name:/币安实盘持仓/})).toHaveAttribute('aria-expanded','false');
+  expect(table.getByRole('button',{name:'仓位(0)'})).toBeVisible();
   const short:UsdtMirrorPosition={...position,positionSide:'SHORT',direction:'short',quantity:'21.005',unrealizedPnl:'-0.001'};
-  view.rerender(<FishUsdtPositions follow={follow as never} live={{snapshot:{observedAt:at,positions:[position,short]},retryPositions,issue:undefined,archiveIssue:undefined}}/>);
-  expect(screen.getByRole('button',{name:/币安实盘持仓/})).toHaveAttribute('aria-expanded','true');
-  expect(screen.getByText('数量 100 BEAT')).toBeVisible();
-  expect(screen.getByText('数量 21.005 BEAT')).toBeVisible();
-  expect(screen.getByText('名义仓位 8.236 USDT')).toBeVisible();
-  expect(screen.getAllByText('均价 0.0822712')).toHaveLength(2);
-  expect(await screen.findAllByText('开仓 2026-11-15 19:28:42.697')).toHaveLength(2);
+  positions = [position, short];
+  fireEvent(document, new Event('visibilitychange'));
+  expect(await table.findByRole('button',{name:'仓位(2)'})).toBeVisible();
+  expect(fish.getByRole('button',{name:/币安实盘持仓/})).toHaveAttribute('aria-expanded','true');
+  for (const view of [fish, table]) {
+    expect(view.getByText('数量 100 BEAT')).toBeVisible();
+    expect(view.getByText('数量 21.005 BEAT')).toBeVisible();
+    expect(view.getByText('名义仓位 8.236 USDT')).toBeVisible();
+    expect(view.getAllByText('均价 0.0822712')).toHaveLength(2);
+  }
+  await waitFor(() => expect(screen.getAllByText('开仓 2026-11-15 19:28:42.697')).toHaveLength(4));
   expect(readPositionHistory).toHaveBeenCalledTimes(2);
-  view.rerender(<FishUsdtPositions follow={follow as never} live={{snapshot:{observedAt:at+1000,positions:[]},retryPositions,issue:undefined,archiveIssue:undefined}}/>);
+  expect(table.queryByRole('button',{name:'一键平仓'})).not.toBeInTheDocument();
+  fireEvent.click(table.getByRole('checkbox',{name:'隐藏其他合约'}));
+  expect(table.queryByText('数量 100 BEAT')).not.toBeInTheDocument();
+  expect(fish.getByText('数量 100 BEAT')).toBeVisible();
+  fireEvent.click(table.getByRole('checkbox',{name:'隐藏其他合约'}));
+  positions = [];
+  fireEvent(document,new Event('visibilitychange'));
   await waitFor(()=>expect(screen.queryByText('BEATUSDT')).not.toBeInTheDocument());
+  expect(table.getByRole('button',{name:'仓位(0)'})).toBeVisible();
 });
 
 it('keeps decimal precision when calculating quote values', () => {

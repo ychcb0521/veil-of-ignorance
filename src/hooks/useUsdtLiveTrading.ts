@@ -1,19 +1,77 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { useUsdtFollow } from './useUsdtFollow';
-import type { UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
+import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
 import { readFishPreferences, updateFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { readUsdtCampaigns, saveUsdtCampaignBatch, syncClosedUsdtCampaigns } from '@/lib/fish/usdtLiveCampaignStore';
 
 type Follow = ReturnType<typeof useUsdtFollow>;
 const recentHistory = 86_400_000;
 const retryOverlap = 120_000;
+const EMPTY_HISTORIES: ReadonlyMap<string, UsdtMirrorHistory> = new Map();
 
-export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follow, 'connected' | 'positionMirror' | 'campaignMirror' | 'readPositions' | 'readCampaigns'>) {
-  const { connected, positionMirror, campaignMirror, readPositions, readCampaigns } = follow;
+function usePositionHistories(snapshot: UsdtMirrorSnapshot | undefined, read: Follow['readPositionHistory'], attempt: number) {
+  const [histories, setHistories] = useState(EMPTY_HISTORIES);
+  const positions = useRef(snapshot?.positions);
+  positions.current = snapshot?.positions;
+  const hasPositions = !!snapshot?.positions.length;
+  useEffect(() => {
+    setHistories(EMPTY_HISTORIES);
+    if (!hasPositions) return;
+    const lifetime = new AbortController();
+    const { signal } = lifetime;
+    const history = new Map<string, UsdtMirrorHistory>();
+    const retryAt = new Map<string, number>();
+    let busy = false;
+    const tick = async () => {
+      if (busy || signal.aborted || document.hidden) return;
+      busy = true;
+      try {
+        const rows = positions.current ?? [];
+        const revisions = new Set(rows.map(usdtMirrorRevision));
+        for (const revision of history.keys()) {
+          if (!revisions.has(revision)) {
+            history.delete(revision);
+            retryAt.delete(revision);
+          }
+        }
+        for (const position of rows) {
+          if (signal.aborted || document.hidden) return;
+          const revision = usdtMirrorRevision(position);
+          if (history.has(revision) && Date.now() < (retryAt.get(revision) ?? Infinity)) continue;
+          let result: UsdtMirrorHistory;
+          try { result = await read(position, signal); }
+          catch (error) { result = { fills: [], issue: error instanceof Error ? error.message : '币安成交读取失败' }; }
+          if (signal.aborted || !positions.current?.some(row => usdtMirrorRevision(row) === revision)) continue;
+          history.set(revision, result);
+          if (!result.openedAt && result.issue) retryAt.set(revision, Date.now() + 24_000);
+          else retryAt.delete(revision);
+          setHistories(new Map(history));
+        }
+      } finally { busy = false; }
+    };
+    const refresh = () => void tick();
+    const timer = window.setInterval(refresh, 8000);
+    document.addEventListener('visibilitychange', refresh);
+    refresh();
+    return () => {
+      lifetime.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [hasPositions, read, attempt]);
+  return hasPositions ? histories : EMPTY_HISTORIES;
+}
+
+export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follow, 'connected' | 'positionMirror' | 'campaignMirror' | 'readPositions' | 'readCampaigns' | 'readPositionHistory'>) {
+  const { connected, positionMirror, campaignMirror, readPositions, readCampaigns, readPositionHistory } = follow;
   const [positionView, setPositionView] = useState<{ owner: string; snapshot?: UsdtMirrorSnapshot; issue?: string }>();
   const [archiveView, setArchiveView] = useState<{ owner: string; issue?: string }>();
   const wakePositions = useRef<() => void>();
-  const retryPositions = useCallback(() => wakePositions.current?.(), []);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
+  const retryPositions = useCallback(() => {
+    wakePositions.current?.();
+    setHistoryAttempt(value => value + 1);
+  }, []);
 
   useEffect(() => {
     if (!owner || !connected || !positionMirror) {
@@ -78,6 +136,7 @@ export function useUsdtLiveTrading(owner: string | undefined, follow: Pick<Follo
   }, [owner, connected, campaignMirror, readCampaigns]);
 
   const current = connected && positionView?.owner === owner ? positionView : undefined;
-  return { snapshot: current?.snapshot, issue: current?.issue, retryPositions,
+  const histories = usePositionHistories(current?.snapshot, readPositionHistory, historyAttempt);
+  return { snapshot: current?.snapshot, issue: current?.issue, retryPositions, histories,
     archiveIssue: archiveView?.owner === owner ? archiveView?.issue : undefined };
 }

@@ -1,9 +1,9 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw, Wallet } from 'lucide-react';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import type { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { usdtMirrorKey, usdtMirrorRevision, usdtPositionDecimal, usdtPositionQuantityUnit, usdtPositionValue, usdtSettlementAsset, type UsdtMirrorHistory } from '@/lib/fish/usdtPositionMirror';
+import { usdtMirrorKey, usdtMirrorRevision, usdtPositionDecimal, usdtPositionQuantityUnit, usdtPositionValue, usdtSettlementAsset, type UsdtMirrorHistory, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
 import { fishSubHeading } from './FishSection';
 
 const time = (at:number) => formatUTC8(at)+'.'+String(at%1000).padStart(3,'0');
@@ -11,57 +11,21 @@ const actionNames = {open:'开仓',add:'加仓',reduce:'减仓'} as const;
 type Follow = ReturnType<typeof useUsdtFollow>;
 type Live = ReturnType<typeof useUsdtLiveTrading>;
 
-function Positions({ live, readPositionHistory }: { live: Live; readPositionHistory: Follow['readPositionHistory'] }) {
-  const { snapshot, issue } = live;
-  const current = useRef(snapshot?.positions);
-  current.current = snapshot?.positions;
-  const [histories,setHistories]=useState<ReadonlyMap<string,UsdtMirrorHistory>>(new Map());
-  const [attempt,setAttempt]=useState(0);
-  useEffect(()=>{
-    const lifetime=new AbortController();
-    const history=new Map<string,UsdtMirrorHistory>();
-    const retryAt=new Map<string,number>();
-    setHistories(new Map());
-    let running=false;
-    const tick=async()=>{
-      if(running||lifetime.signal.aborted||document.hidden)return;
-      running=true;
-      try{
-        const rows = current.current ?? [];
-        const revisions = new Set(rows.map(usdtMirrorRevision));
-        for (const key of history.keys()) if (!revisions.has(key)) { history.delete(key); retryAt.delete(key); }
-        for (const position of rows) {
-          if(lifetime.signal.aborted||document.hidden)return;
-          const revision=usdtMirrorRevision(position);
-          if (history.has(revision) && Date.now() < (retryAt.get(revision) ?? Infinity)) continue;
-          let result: UsdtMirrorHistory;
-          try { result = await readPositionHistory(position, lifetime.signal); }
-          catch(error) { result={fills:[],issue:error instanceof Error?error.message:'币安成交读取失败'}; }
-          if(!lifetime.signal.aborted && current.current?.some(row => usdtMirrorRevision(row) === revision)){
-            history.set(revision,result);
-            if (!result.openedAt && result.issue) retryAt.set(revision,Date.now()+24000);
-            else retryAt.delete(revision);
-            setHistories(new Map(history));
-          }
-        }
-      }finally{running=false;}
-    };
-    const schedule=()=>void tick();
-    const timer=setInterval(schedule,8000);
-    document.addEventListener('visibilitychange',schedule);
-    schedule();
-    return ()=>{lifetime.abort();clearInterval(timer);document.removeEventListener('visibilitychange',schedule);};
-  },[readPositionHistory,attempt]);
+export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? []}:{
+  live: Live;
+  positions?: readonly UsdtMirrorPosition[];
+}) {
+  const { snapshot, issue, histories } = live;
   return <div className="space-y-2 rounded-md border border-border/60 bg-card/60 px-2.5 pb-2.5 pt-1.5 text-[10px]">
     <div className="flex flex-wrap items-center justify-between gap-1.5 text-muted-foreground">
       <span>{snapshot ? '同步于 ' + formatUTC8(snapshot.observedAt) + '（北京）' : '北京时间'}</span>
-      <button type="button" onClick={()=>{live.retryPositions();setAttempt(value=>value+1);}}
+      <button type="button" onClick={live.retryPositions}
         className="inline-flex items-center gap-1 rounded px-1.5 py-1 hover:bg-muted focus-visible:outline focus-visible:outline-1"><RefreshCw aria-hidden className="h-3 w-3"/>重新同步</button>
     </div>
     {issue&&<p role="alert" className="text-destructive">{issue}{snapshot?'。以下为上次成功同步的持仓。':''}</p>}
     {!snapshot&&!issue&&<p role="status">正在读取币安持仓…</p>}
-    {snapshot&&!snapshot.positions.length&&!issue&&<p role="status" className="py-1 text-muted-foreground">当前无实盘持仓</p>}
-    {snapshot?.positions.map(position=>{
+    {snapshot&&!positions.length&&!issue&&<p role="status" className="py-1 text-muted-foreground">当前无实盘持仓</p>}
+    {positions.map(position=>{
       const evidence=histories.get(usdtMirrorRevision(position));
       const asset = usdtSettlementAsset(position.symbol), unit = usdtPositionQuantityUnit(position.symbol);
       const pnl = Number(position.unrealizedPnl);
@@ -127,7 +91,7 @@ export function FishUsdtPositions({follow,live}:{follow:Follow;live?:Live}) {
     <div id={id} hidden={!open}>
       {open && (follow.connected && follow.positionMirror === 1 && live ?
         <>
-          <Positions live={live} readPositionHistory={follow.readPositionHistory}/>
+          <UsdtPositionRows live={live}/>
           {!follow.campaignMirror && <p className="px-2 pb-1 text-[10px] text-muted-foreground">更新本机执行端后可同步实盘战役。</p>}
         </> :
         <p role="status" className="px-2 pb-2 text-[10px] text-muted-foreground">{follow.connected?'请更新 Windows 本机执行端，再同步持仓。':follow.issue||'请先连接本机 U 本位执行端。'}</p>)}
