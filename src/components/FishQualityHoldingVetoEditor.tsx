@@ -8,8 +8,17 @@ import { qualityFilterDefinitions, qualityFilterMenuChoices, type HoldingVetoDra
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { FREE_STATIC_DRAWDOWN_LABEL, isHoldingPriceChoice, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, type QualityOperator } from '@/lib/fish/qualityVeto';
 const field='h-7 min-w-0 rounded-md bg-muted/50 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
-export function FishQualityHoldingVetoEditor({draft,setDraft,compact=false,labelPrefix='',entry=false}:{draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;labelPrefix?:string;entry?:boolean}) {
-  const definitions=useFeatureDefinitions();
+type VetoEditorProps={draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;labelPrefix?:string;entry?:boolean};
+const noDefinitions:ReturnType<typeof useFeatureDefinitions>=[];
+const ignore=()=>{};
+export function FishQualityHoldingVetoEditor(props:VetoEditorProps){
+  return <HoldingVetoFields {...props} definitions={useFeatureDefinitions()}/>;
+}
+export function FishFrozenHoldingVetoEditor(props:Omit<VetoEditorProps,'setDraft'>){
+  return <HoldingVetoFields {...props} definitions={noDefinitions} setDraft={ignore} frozen/>;
+}
+function HoldingVetoFields({draft,setDraft,compact=false,labelPrefix='',entry=false,definitions,frozen=false}:
+  VetoEditorProps & {definitions:ReturnType<typeof useFeatureDefinitions>;frozen?:boolean}) {
   const newBoxBreak=()=>defaultBoxBreak(definitions, DBL5_RETEST_GUARD_VERSION);
   const choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]),groups=[...new Set(choices.map(c=>c.group))];
   const metricDefinitions=useMemo(()=>qualityFilterDefinitions(definitions),[definitions]);
@@ -27,7 +36,8 @@ export function FishQualityHoldingVetoEditor({draft,setDraft,compact=false,label
     </>}
     <div className="space-y-2">{draft.map((d,i)=>{const risk=isHoldingPriceChoice(d.choice),addition=d.choice===ADDITION_PROFIT_KIND,payoff=d.choice===PAYOFF_STOP_KIND,box=d.choice===BOX_STOP_KIND||d.choice===BOX_BREAK_CHOICE,choice=choices.find(c=>c.key===d.choice);return <div key={i} className={addition||box?'flex flex-wrap items-center gap-2 rounded border border-border/60 p-2':'flex flex-wrap items-center gap-1'}>
       <input type="checkbox" className="h-3 w-3 shrink-0" aria-label={`${labelPrefix}启用持仓否决 ${i+1}`} disabled={entry&&(addition||payoff)} checked={d.enabled} onChange={e=>patch(i,{enabled:e.target.checked})}/>
-      <select aria-label={`${labelPrefix}持仓否决 ${i+1} 指标`} className={`${field} flex-1`} value={d.choice} onChange={e=>patch(i,{choice:e.target.value,time:undefined,saved:undefined,...(e.target.value===BOX_BREAK_CHOICE?{boxStop:newBoxBreak(),threshold:'0'}:e.target.value===BOX_STOP_KIND?{boxStop:defaultBoxStop(definitions),threshold:'0'}:{}),direction:isHoldingPriceChoice(e.target.value)||e.target.value===ADDITION_PROFIT_KIND||e.target.value===PAYOFF_STOP_KIND?'>=':d.direction,...(e.target.value===ADDITION_PROFIT_KIND?{threshold:'5',geometricMultiple:'100'}:e.target.value===PAYOFF_STOP_KIND?{threshold:'5000'}:{})})}>
+      <select aria-label={`${labelPrefix}持仓否决 ${i+1} 指标`} className={`${field} flex-1`} value={frozen&&d.saved?'frozen':d.choice} onChange={e=>patch(i,{choice:e.target.value,time:undefined,saved:undefined,...(e.target.value===BOX_BREAK_CHOICE?{boxStop:newBoxBreak(),threshold:'0'}:e.target.value===BOX_STOP_KIND?{boxStop:defaultBoxStop(definitions),threshold:'0'}:{}),direction:isHoldingPriceChoice(e.target.value)||e.target.value===ADDITION_PROFIT_KIND||e.target.value===PAYOFF_STOP_KIND?'>=':d.direction,...(e.target.value===ADDITION_PROFIT_KIND?{threshold:'5',geometricMultiple:'100'}:e.target.value===PAYOFF_STOP_KIND?{threshold:'5000'}:{})})}>
+        {frozen&&d.saved&&<option value="frozen">{d.saved.label}</option>}
         {d.choice.includes(':')&&!choices.some(c=>c.key===d.choice)&&<option hidden disabled value={d.choice}>已保存指标：{d.choice}</option>}<optgroup label="止盈"><option value={PAYOFF_STOP_KIND} disabled={entry}>盈亏比 ≥ N R{entry?'（观察期间无持仓，不适用）':'（立刻全部卖出）'}</option><option value={ADDITION_PROFIT_KIND} disabled={entry}>{ADDITION_PROFIT_LABEL}{entry?'（观察筛选不适用）':''}</option></optgroup><optgroup label={entry?'筛选过程':'持仓过程'}><option value="static-drawdown">{entry?'筛选过程静态最大回撤':FREE_STATIC_DRAWDOWN_LABEL}</option><option value="dynamic-drawdown">{entry?'筛选过程':'持仓过程'}动态最大回撤</option></optgroup>
         <optgroup label="短时跌幅"><option value="drop-1m">1分钟内跌幅</option><option value="drop-5m">5分钟内跌幅</option></optgroup>
         <optgroup label="箱体硬止损"><option value={BOX_STOP_KIND}>箱体算法 · K 硬止损</option><option value={BOX_BREAK_CHOICE}>支撑断裂即终止 · DBL-5 红叉</option></optgroup>{groups.map(g=><optgroup key={g} label={g}>{choices.filter(c=>c.group===g).map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</optgroup>)}

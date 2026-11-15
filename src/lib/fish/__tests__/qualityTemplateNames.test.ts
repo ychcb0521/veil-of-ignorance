@@ -39,7 +39,7 @@ describe('template display names',()=>{
   expect(study).toEqual(original);
   const stored=createQualityTemplateDirectory(study).groupPlans([frozen]);
   expect(createQualityTemplateDirectory(study,true).present(stored)).toEqual({
-    id:stored.id,title:'监测_20261111_B',originalTitle:'乙',
+    id:stored.id,title:'监测_20261111_B',originalTitle:'乙',savedTemplate:true,
   });
  });
 });

@@ -9,6 +9,7 @@ export interface QualityTemplateDirectoryGroup {
   id: string;
   title: string;
   originalTitle?: string;
+  savedTemplate?: true;
   historical?: { firstArchivedAt:number };
 }
 
@@ -27,10 +28,12 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
   const titleOf=(id:string,name:string)=>numbered?catalog.names.get(id)?.name??name:name;
   const groupPlans = (batch: readonly QualityGroup[], screening?: PreEntryRound): QualityTemplateDirectoryGroup => {
     if (!batch.length) return unknownTemplateGroup;
+    let allSaved=numbered;
     const groups = new Map<string, {title:string;original:string}>();
     for (const plan of batch) {
       const key=catalog.signature(plan);
       const match=catalog.matchPlan(plan,screening?'screen':'monitor',screening?.hours);
+      if(!match||!catalog.names.has(match.id))allSaved=false;
       const original=match?.name||plan.label||'历史方案';
       const unmatchedKey=numbered&&screening ? exact([key,screening.hours,screening.engine]) : key;
       groups.set(match ? 'tpl:' + match.id : unmatchedKey, {title:match?titleOf(match.id,original):original,original});
@@ -39,7 +42,7 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
     const title = [...groups.values()].map(value=>value.title).join('、')+suffix;
     const originalTitle = [...groups.values()].map(value=>value.original).join('、')+suffix;
     return {...displayGroup(screening ? 'screen' : 'monitor', exact([...groups.keys()].sort()), title),
-      ...(title!==originalTitle?{originalTitle}:{})};
+      ...(title!==originalTitle?{originalTitle}:{}),...(allSaved?{savedTemplate:true as const}:{})};
   };
   const groupFilters = (settings: readonly QualityFilterSetting[], snapshot?: QualityFilterRoundSnapshot): QualityTemplateDirectoryGroup => {
     if (!settings.length) return unknownTemplateGroup;
@@ -50,7 +53,7 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
       const match=catalog.matchFilter(conditions[0],metrics,settings[0].plans.length===1?settings[0].plans[0]:undefined);
       if(match){
         const title=titleOf(match.id,match.name);
-        return {id:'filter:'+match.id,title,...(title!==match.name?{originalTitle:match.name}:{})};
+        return {id:'filter:'+match.id,title,...(title!==match.name?{originalTitle:match.name}:{}),...(numbered&&catalog.names.has(match.id)?{savedTemplate:true as const}:{})};
       }
     }
     const labels = [...new Set(settings.flatMap(setting => setting.plans))];
@@ -61,7 +64,7 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
   const storedGroups=new Map<string,QualityTemplateDirectoryGroup>();
   if(numbered)for(const entry of catalog.names.values()){
     const id=entry.kind==='filter'?'filter:'+entry.id:displayGroup(entry.kind,exact(['tpl:'+entry.id]),'').id;
-    storedGroups.set(id,{id,title:entry.name,originalTitle:entry.originalName});
+    storedGroups.set(id,{id,title:entry.name,originalTitle:entry.originalName,savedTemplate:true});
   }
   const present=(group:QualityTemplateDirectoryGroup,candidate?:QualityTemplateDirectoryGroup)=>{
     if(!numbered)return group;
@@ -75,7 +78,7 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
     for(const item of items){
       const group=item.templateGroup;
       if(!group||group.id===unknownTemplateGroup.id)continue;
-      if(group.originalTitle!==undefined){known.set(group.id,group);continue;}
+      if(group.savedTemplate){known.set(group.id,group);continue;}
       if(!beijingTemplateDay(item.at))continue;
       const earliest=firstSeen.get(group.id);
       if(!earliest||item.at<earliest.at)firstSeen.set(group.id,{at:item.at,group});
@@ -86,7 +89,7 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
       const day=beijingTemplateDay(at)!;
       const ordinal=(days.get(day)??catalog.numberedCount(kind,day))+1;
       days.set(day,ordinal);
-      aliases.set(group.id,{...group,title:TEMPLATE_KIND_PREFIX[kind]+'_'+day+'_'+ordinalLetters(ordinal),originalTitle:group.title,historical:{firstArchivedAt:at}});
+      aliases.set(group.id,{...group,title:TEMPLATE_KIND_PREFIX[kind]+'_'+day+'_'+ordinalLetters(ordinal),originalTitle:group.originalTitle??group.title,historical:{firstArchivedAt:at}});
     }
     return items.map(item=>{
       const alias=item.templateGroup&&aliases.get(item.templateGroup.id);

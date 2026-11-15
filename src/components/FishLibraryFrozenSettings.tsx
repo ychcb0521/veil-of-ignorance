@@ -6,6 +6,7 @@ import type { QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
 import { filterLibraryCondition, libraryCondition } from '@/lib/fish/libraryConditions';
 import { qualityMonitorTimeLabels, type QualityMonitorTimeBasis } from '@/lib/fish/qualityAdmissionTime';
 import { FishLibraryCondition } from './FishLibraryConditions';
+import { FishFrozenPreEntryThreeStageSettings } from './FishPreEntryThreeStageSettings';
 import { FishFrozenScreeningSettings } from './FishFrozenScreeningSettings';
 import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
 
@@ -52,7 +53,8 @@ export function ScreeningDirectorySettings({ round }: { round: PreEntryRound }) 
     <FrozenFilters filters={round.filters}/>
   </>;
   return <>{round.plans.map(plan => <section className={card} key={plan.id}>
-    <FishFrozenScreeningSettings templateName={names?.forPlan(plan,'screen',round.hours)} screening={{ plan, hours:round.hours, engine:round.engine }}/>
+    {plan.preEntryThreeStage ? <FishFrozenPreEntryThreeStageSettings plan={plan} hours={round.hours} displayName={names?.forPlan(plan,'screen',round.hours)?.name}/> :
+      <FishFrozenScreeningSettings templateName={names?.forPlan(plan,'screen',round.hours)} screening={{ plan, hours:round.hours, engine:round.engine }}/>}
   </section>)}</>;
 }
 

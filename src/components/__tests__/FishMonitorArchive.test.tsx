@@ -11,7 +11,9 @@ import type {FishQualityStudy} from '@/lib/fish/quality';
 afterEach(cleanup);
 function state(study:FishQualityStudy){const noop=vi.fn(),run=vi.fn(async()=>{});return {study,ready:true,running:false,progress:null,filterRunning:false,filterProgress:null,filterError:'',warning:'',error:'',start:run,restart:run,cancel:noop,startFilter:run,cancelFilter:noop,setRule:noop,setCombo:noop,setObserveHours:noop,selectSell:noop,setSelectedRows:noop,setPriority:noop,setScope:noop,setFilters:noop,setHoldingVetoes:noop,setSellPlans:noop} satisfies FishQualityState;}
 it('opens one monitoring result table per template and keeps saved results from different rounds',async()=>{
- let study=archiveQualityMonitorStudy(monitorArchiveFixture(),T+4_000_000);
+ const original=monitorArchiveFixture();
+ const saved=original.sellPlans!.map((plan,i)=>({id:'saved-'+i,name:plan.label,savedAt:T-1000+i,updatedAt:T-1000+i,plan}));
+ let study=archiveQualityMonitorStudy({...original,planTemplates:saved},T+4_000_000);
  const first=study.monitorLibrary!.archives![0];
  study=archiveQualityMonitorStudy({...study,results:study.results.map(result=>({...result,returnPct:-7}))},T+5_000_000);
  const view=state(study);
@@ -31,15 +33,15 @@ it('opens one monitoring result table per template and keeps saved results from 
  expect(first.study.results[0].returnPct).toBe(10);
 });
 
-it('still displays the frozen results of record-only historical monitoring',async()=>{
- const study=monitorArchiveFixture();
+it('omits unmatched historical snapshots from the default list without removing their records',()=>{
+ const study=monitorArchiveFixture(),before=structuredClone(study);
  render(<FishQuality state={state(study)}/>);
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
- const group=screen.getAllByTestId('monitor-template-group')[0];
- fireEvent.click(within(group).getAllByRole('button')[0]);
- const board=await within(group).findByTestId('quality-archive-board');
- expect(within(board).getByTestId('quality-fish-table')).toHaveTextContent('+10.00%');
- expect(within(board).queryAllByTestId('quality-entry-reading')).toHaveLength(0);
+ expect(screen.queryByTestId('monitor-template-group')).not.toBeInTheDocument();
+ expect(screen.getByText('暂无与已保存模板对应的记录。')).toBeVisible();
+ fireEvent.keyDown(screen.getByRole('button',{name:'监测库更多操作'}),{key:'Enter'});
+ expect(screen.getByRole('menuitem',{name:'导出库内记录（Excel）'})).not.toHaveAttribute('data-disabled');
+ expect(study).toEqual(before);
 });
 
 it('selects samples in the full monitoring archive and tests their original signal time', async () => {

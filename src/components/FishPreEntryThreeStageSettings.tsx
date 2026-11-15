@@ -13,7 +13,7 @@ import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalAnchoredPreEntryThreeStage, PRE_ENTRY_SIGNAL_ANCHOR_VERSION, usesSignalTimeGate, usesTrackedGate, type PreEntryStageSwitches, entryCondition, preEntryPlanFilters, validatePreEntryThreeStage, copyAdditionMarketConditions, copyOrdinaryMarketSeller, type EntryMarketCondition, type EntryMarketExpression, type EntrySellRule } from '@/lib/fish/preEntryThreeStage';
 import { vetoDraftOf, parseAdditionVetoDraft, type AdditionVetoDraft } from '@/lib/fish/qualityEntryVetoDraft';
 import { FishQualityEntryVetoEditor } from './FishQualityEntryVetoEditor';
-import { FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
+import { FishFrozenHoldingVetoEditor, FishQualityHoldingVetoEditor } from './FishQualityHoldingVetoEditor';
 import { FishQualityBoxStopEditor } from './FishQualityBoxStopEditor';
 import { FishQualityInfo } from './FishQualityModule';
 import { PlanVersionList } from './FishQualityPlanVersions';
@@ -43,19 +43,31 @@ export interface AutomaticPreEntryEditor {
   settings?: PreEntrySettings;
   save: (plans: QualityGroup[], hours: number) => Promise<void>;
 }
-export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic}:{state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void;automatic?:AutomaticPreEntryEditor}){
+type LiveEditorProps={state:FishQualityState;selectedCount:number;done:()=>void;onUseTemplate?:()=>void;automatic?:AutomaticPreEntryEditor};
+const noDefinitions:ReturnType<typeof useFeatureDefinitions>=[];
+type FrozenView={plan:QualityGroup;hours:number;displayName?:string};
+export function FishPreEntryThreeStageSettings(props:LiveEditorProps){
+  return <ThreeStageSettings {...props} definitions={useFeatureDefinitions()}/>;
+}
+export function FishFrozenPreEntryThreeStageSettings({plan,hours,displayName}:FrozenView){
+  return <ThreeStageSettings frozen={{plan,hours,displayName}} definitions={noDefinitions}/>;
+}
+function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,frozen,definitions}:Partial<LiveEditorProps>&{frozen?:FrozenView;definitions:ReturnType<typeof useFeatureDefinitions>}){
+  const readOnly=!!frozen;
   const contentId=useId();
-  const monitor=state.preEntry!,definitions=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
+  const monitor=state?.preEntry,choices=useMemo(()=>qualityFilterMenuChoices(definitions),[definitions]);
   const defaultAdmission=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter('state:state','>',.8,true,definitions),id:'admission-'+id()});
   const [initialSettings] = useState(() => {
-    const current = automatic?.settings ?? monitor.library.settings;
+    if(frozen)return {plans:[frozen.plan],hours:frozen.hours};
+    const current = automatic?.settings ?? monitor!.library.settings;
     if (automatic && selectedPreEntryPlan(current?.plans)?.initialization === TURING_SCREENING_INITIALIZATION_VERSION) {
-      return (monitor.library.settingsHistory ?? []).slice().reverse().find(settings =>
+      return (monitor?.library.settingsHistory ?? []).slice().reverse().find(settings =>
         selectedPreEntryPlan(settings.plans)?.preEntryThreeStage && !selectedPreEntryPlan(settings.plans)?.initialization);
     }
     return current;
   });
   const [plans,setPlans]=useState<QualityGroup[]>(()=>{
+    if(frozen)return [frozen.plan];
     const chosen=selectedPreEntryPlan(initialSettings?.plans);
     if (chosen && (!automatic || chosen.preEntryThreeStage && (automatic.settings || !planVersionChanges(chosen).length))) {
       const draft = copyAsThreeStage(chosen);
@@ -67,25 +79,25 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
     plan.label='三阶筛选';plan.preEntryThreeStage=signalAnchoredPreEntryThreeStage(emptyPreEntryThreeStage(),[defaultAdmission()]);
     return [plan];
   });
-  const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(newPreEntryHours(initialSettings?.hours))),[error,setError]=useState('');
+  const [activeId,setActiveId]=useState(plans[0]?.id),[hours,setHours]=useState(String(frozen?frozen.hours:newPreEntryHours(initialSettings?.hours))),[error,setError]=useState('');
   const [savingAutomatic, setSavingAutomatic] = useState(false);
   const [vetoDrafts,setVetoDrafts]=useState<Record<string,AdditionVetoDraft>>({}),[hardDrafts,setHardDrafts]=useState<Record<string,HoldingVetoDraft[]>>({});
   const [metricTimes,setMetricTimes]=useState<Record<string,AdditionMetricTime>>({});
   const [sourceId,setSourceId]=useState(''),[roundIndex,setRoundIndex]=useState('0');
   const active=plans.find(p=>p.id===activeId)??plans[0],c=active?.preEntryThreeStage;
-  const savedSettings = monitor.library.settings;
+  const savedSettings = monitor?.library.settings;
   const savedDraft = !!active && savedSettings?.plans.some(plan => plan.id === active.id && JSON.stringify(plan) === JSON.stringify(active))
     && !Object.keys(vetoDrafts).length && !Object.keys(hardDrafts).length && !Object.keys(metricTimes).length
     && Number(hours) === savedSettings.hours;
-  const otherSettings = !automatic && savedSettings && [savedSettings,...(monitor.library.settingsHistory ?? []).slice().reverse()].find(settings =>
+  const otherSettings = !automatic && savedSettings && [savedSettings,...(monitor?.library.settingsHistory ?? []).slice().reverse()].find(settings =>
     selectedPreEntryPlan(settings.plans)?.preEntryThreeStage &&
     !!selectedPreEntryPlan(settings.plans)?.initialization !== !!active?.initialization);
   const retry=c?.observationBasis==='retry-origin-v2';
   const signalGate=usesSignalTimeGate(c?.version), trackedGate=usesTrackedGate(c?.version), steps=c?.steps;
   const signalAnchored = c?.version === PRE_ENTRY_SIGNAL_ANCHOR_VERSION;
-  const sources=state.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
+  const sources=state?.study.sellPlans??[],source=sources.find(p=>p.id===sourceId),rounds=source?.addition?.rounds?.length?source.addition.rounds:source?.addition?[source.addition]:[];
   const patch=(p:Partial<NonNullable<typeof c>>)=>setPlans(old=>old.map(plan=>plan.id===active?.id?{...plan,preEntryThreeStage:{...plan.preEntryThreeStage!,...p}}:plan));
-  const eventName=(condition:EntryMarketCondition)=>choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
+  const eventName=(condition:EntryMarketCondition)=>readOnly ? condition.label : choices.find(item=>item.key===qualityFilterChoiceKey({...condition,direction:'>'}))?.group||condition.snapshot.featureShort||condition.label;
   const newCondition=():EntryMarketCondition=>entryCondition({...makeQualityBuyFilter(choices[0].key,'>',0,true,definitions),id:id()});
   const guardAction=(action:()=>void)=>{try{action();setError('');}catch(e){setError(e instanceof Error?e.message:'设置无效');}};
   const usePlan = (plan: QualityGroup, duration?: number) => {
@@ -138,6 +150,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
     setPlans([copy]);setActiveId(copy.id);setVetoDrafts({});setHardDrafts({});
   });
   const save=(start:boolean)=>guardAction(()=>{
+    if(readOnly||!monitor||!done)return;
     if(!hours.trim()||!Number.isFinite(Number(hours))||Number(hours)<=0||Number(hours)>8784)throw Error('单标的筛选时限须大于 0 且不超过 8784 小时');
     if(!plans.length)throw Error('请先新增三阶方案');
     const next=plans.map(p=>{
@@ -170,9 +183,11 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   };
   const conditionEditor=(condition:EntryMarketCondition,put:(c:EntryMarketCondition)=>void,remove:()=>void,prefix:string)=><div className="screening-condition-row">
     <input type="checkbox" aria-label={prefix+'启用'} checked={condition.enabled} onChange={e=>put({...condition,enabled:e.target.checked})}/>
-    <select className={field+' max-w-full flex-1'} aria-label={prefix+'指标'} value={qualityFilterChoiceKey(condition)} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
-      {!choices.some(choice=>choice.key===qualityFilterChoiceKey({...condition,direction:'>'}))&&<option hidden disabled value={qualityFilterChoiceKey({...condition,direction:'>'})}>{condition.label}（保存的公式）</option>}
-      {choices.map(choice=><option key={choice.key} value={choice.key}>{choice.group} · {choice.label}</option>)}
+    <select className={field+' max-w-full flex-1'} aria-label={prefix+'指标'} value={readOnly?'frozen':qualityFilterChoiceKey(condition)} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
+      {readOnly?<option value="frozen">{condition.label}</option>:<>
+        {!choices.some(choice=>choice.key===qualityFilterChoiceKey({...condition,direction:'>'}))&&<option hidden disabled value={qualityFilterChoiceKey({...condition,direction:'>'})}>{condition.label}（保存的公式）</option>}
+        {choices.map(choice=><option key={choice.key} value={choice.key}>{choice.group} · {choice.label}</option>)}
+      </>}
     </select>
     <select className={field} aria-label={prefix+'方向'} value={condition.direction} onChange={e=>put({...condition,direction:e.target.value as EntryMarketCondition['direction']})}>{['>','>=','<','<='].map(v=><option key={v}>{v}</option>)}</select>
     <input className={field+' w-20'} aria-label={prefix+'门槛'} type="number" step="any" value={Number.isFinite(condition.threshold)?condition.threshold:''} onChange={e=>put({...condition,threshold:e.target.value.trim()?Number(e.target.value):NaN})}/>
@@ -183,8 +198,8 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
   const eventConditionEditor=(condition:EntryMarketCondition,put:(c:EntryMarketCondition)=>void,prefix:string)=>{
     const choice=qualityFilterChoiceKey({...condition,direction:'>'});
     return <div className="screening-event-fields min-w-0">
-      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>指标</span><select className={field+' w-full text-foreground'} aria-label={prefix+'指标'} value={choice} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
-        {!choices.some(item=>item.key===choice)&&<option hidden disabled value={choice}>{condition.label}（保存的公式）</option>}{choices.map(item=><option key={item.key} value={item.key}>{item.group} · {item.label}</option>)}
+      <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>指标</span><select className={field+' w-full text-foreground'} aria-label={prefix+'指标'} value={readOnly?'frozen':choice} onChange={e=>guardAction(()=>put(changeIndicator(condition,e.target.value)))}>
+        {readOnly?<option value="frozen">{condition.label}</option>:<>{!choices.some(item=>item.key===choice)&&<option hidden disabled value={choice}>{condition.label}（保存的公式）</option>}{choices.map(item=><option key={item.key} value={item.key}>{item.group} · {item.label}</option>)}</>}
       </select></label>
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>方向</span><select className={field+' w-full text-foreground'} aria-label={prefix+'方向'} value={condition.direction} onChange={e=>put({...condition,direction:e.target.value as EntryMarketCondition['direction']})}>{['>','>=','<','<='].map(v=><option key={v}>{v}</option>)}</select></label>
       <label className="flex min-w-0 flex-col gap-1 text-[10px] text-muted-foreground"><span>门槛</span><input className={field+' w-full text-foreground'} aria-label={prefix+'门槛'} type="number" step="any" value={Number.isFinite(condition.threshold)?condition.threshold:''} onChange={e=>put({...condition,threshold:e.target.value.trim()?Number(e.target.value):NaN})}/></label>
@@ -200,8 +215,8 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
       <div className="flex gap-2"><button type="button" className={button} disabled={!choices.length} onClick={()=>put({...expression,children:[...expression.children,{condition:newCondition()}]})}>添加子条件</button>{depth<8&&<button type="button" className={button} disabled={!choices.length} onClick={()=>put({...expression,children:[...expression.children,{join:'any',children:[{condition:newCondition()}]}]})}>添加且／或子组</button>}</div>
     </div>;
   };
-  return <div className="screening-settings" data-testid="pre-entry-three-stage-settings">
-    <div className="screening-header"><div><h3 className="screening-title">{automatic ? '筛选鱼条件' : '动态筛选条件'}</h3><p className="screening-subtitle">{automatic ? '保存后用于后续捕到的新鱼' : '三阶准入 · 按首次满足时间入选'}</p></div><div className="screening-template-actions">
+  return <fieldset disabled={readOnly} className={'screening-settings min-w-0 '+(readOnly?'screening-settings-readonly':'')} data-testid="pre-entry-three-stage-settings">
+    {!readOnly&&state&&monitor&&<div className="screening-header"><div><h3 className="screening-title">{automatic ? '筛选鱼条件' : '动态筛选条件'}</h3><p className="screening-subtitle">{automatic ? '保存后用于后续捕到的新鱼' : '三阶准入 · 按首次满足时间入选'}</p></div><div className="screening-template-actions">
       {!automatic && active && !active.initialization && <button type="button" className={button}
         title={savedDraft ? '从图灵杯首根完整 K 线初始化；适用图灵杯标的' : '请先保存当前三阶方案'}
         disabled={!state.ready || !monitor.ready || !savedDraft}
@@ -212,8 +227,8 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
       </button>}
       {!automatic&&active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate||!state.ready?'模板尚未恢复':!monitor.ready?'筛选库尚未读取完成':!savedDraft?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
       <TemplatePicker purpose="entry" allowTuring={!automatic} plans={plans} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>guardAction(()=>usePlan(qualityPlanFromTemplate(template,id()),template.entryHours))}/>
-    </div></div>
-    {!active&&!!initialSettings?.plans.some(plan=>!automatic || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)&&<label className="block text-[11px]">{automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'}<select aria-label={automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'} className={field+' mt-1 w-full'} value="" onChange={e=>{
+    </div></div>}
+    {!readOnly&&!active&&!!initialSettings?.plans.some(plan=>!automatic || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)&&<label className="block text-[11px]">{automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'}<select aria-label={automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'} className={field+' mt-1 w-full'} value="" onChange={e=>{
       const saved=initialSettings.plans.find(p=>p.id===e.target.value);
       if (saved) {
         if (automatic && planVersionChanges(saved).length) {
@@ -228,22 +243,22 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
     {active&&c&&<>
       {active.initialization && <p className="mt-2 text-muted-foreground">图灵杯专用 v1 · 从首根完整 K 线初始化，指标未就绪时等待读数。</p>}
       <div className="screening-basics">
-        <label className="screening-form-label">方案名称<input className={field+' w-full'} aria-label="三阶方案名称" value={active.label} onChange={e=>setPlans(plans.map(p=>p.id===active.id?{...p,label:e.target.value}:p))}/></label>
+        <label className="screening-form-label">方案名称<input className={field+' w-full'} aria-label="三阶方案名称" value={frozen?.displayName??active.label} onChange={e=>setPlans(plans.map(p=>p.id===active.id?{...p,label:e.target.value}:p))}/></label>
         <label className="screening-form-label">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>
       </div>
-      {!signalAnchored && <button type="button" className={button+' mt-3'} onClick={createOptionalStagesCopy}>{steps?'另存信号时点副本':'另存三步可选方案'}</button>}
+      {!readOnly&&!signalAnchored && <button type="button" className={button+' mt-3'} onClick={createOptionalStagesCopy}>{steps?'另存信号时点副本':'另存三步可选方案'}</button>}
       {steps && !Object.values(steps).some(Boolean) &&
         <p role="status" className="mt-3 text-muted-foreground">三个步骤均已跳过。{signalAnchored?'各信号按原信号时间入选。':'各信号在首个可观察时点入选。'}</p>}
-      <details className="screening-detail mt-4"><summary className="cursor-pointer">从持仓方案复制市场条件</summary>
+      {!readOnly&&<details className="screening-detail mt-4"><summary className="cursor-pointer">从持仓方案复制市场条件</summary>
         <div className="mt-2 flex flex-wrap gap-2"><select aria-label="复制条件来源方案" className={field} value={sourceId} onChange={e=>{setSourceId(e.target.value);setRoundIndex('0');}}><option value="">选择明确的来源方案</option>{sources.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select>
           <select aria-label="复制加仓轮次" className={field} value={roundIndex} onChange={e=>setRoundIndex(e.target.value)}>{rounds.map((_,i)=><option key={i} value={i}>第 {i+1} 次加仓 · 主分支</option>)}</select>
           <button type="button" className={button} disabled={!rounds.length} onClick={()=>guardAction(()=>{if(planVersionChanges(source!).length)throw Error('来源方案版本不符，不能复制');const copied=copyAdditionMarketConditions(rounds[Number(roundIndex)]);const existing=vetoDrafts[active.id]?parseAdditionVetoDraft(vetoDrafts[active.id]):c.additionVetoes;if(existing.some(v=>v.enabled))throw Error('当前已配置加仓共用否决，请使用新副本复制以免覆盖');patch({required:[...c.required,...copied.required],additionVetoes:copied.additionVetoes,detectors:[...(c.detectors??[]),...copied.detectors],additionSource:{planId:source!.id,label:source!.label,round:Number(roundIndex)+1,versions:structuredClone(source!.frozenVersions)}});setVetoDrafts(old=>{const next={...old};delete next[active.id];return next;});})}>复制该轮必要条件与否决</button>
           <button type="button" className={button} disabled={!source} onClick={()=>guardAction(()=>{if(planVersionChanges(source!).length)throw Error('来源方案版本不符，不能复制');const rule=copyOrdinaryMarketSeller(source!);patch({sellRules:[...c.sellRules,rule]});})}>复制完整普通卖出规则</button>
         </div><p className="mt-2 text-muted-foreground">仅复制所选轮次的市场条件；原探测算法按每条原信号的冻结公式和门槛判断。实际成本、分段持仓及动态退出确认不能直接转换。来源配置和旧模板保持原样。</p>
-      </details>
+      </details>}
       <section className="screening-stage space-y-3" data-testid="three-stage-zero">
         <div className="flex items-center gap-0.5">{stageTitle('required','必要条件','⓪')}<FishQualityInfo label="必要条件使用说明"><p>所有已启用的必要条件都满足，才具备入选资格。未设置必要条件时，直接检查后两阶段。</p><p>{trackedGate?'静态门槛在原信号时点判断一次。原信号时点全部通过就继续。未通过时，启用动态门槛则在原时限内逐分钟追踪至全部满足。':signalGate?'只在原信号时点判断一次。逐分钟复原使用截至信号时刻已结束的分钟，收盘模式读取当时已收盘的原周期。重筛沿用本次判定。':'此版本逐分钟判断，必要条件须在准入时点同时满足。'}</p><p>原信号探测条件沿用该信号保存的公式和门槛。</p></FishQualityInfo><span className="screening-stage-note">{steps?.required===false?'已跳过':trackedGate&&c.requiredPaths?.tracking?(c.requiredPaths.static?'静态优先':'时限内追踪'):signalGate?'仅信号时点':'全部满足'}</span></div>
-        {steps?.required!==false && <>
+        {(readOnly||steps?.required!==false) && <>
         {trackedGate && c.requiredPaths ? <fieldset className="flex flex-wrap gap-4 text-[11px]">
           <legend className="mb-1 text-muted-foreground">必要条件路径</legend>
           <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={c.requiredPaths.static} onChange={event=>patch({requiredPaths:{...c.requiredPaths!,static:event.target.checked}})}/>静态门槛</label>
@@ -271,7 +286,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
           <span className="screening-stage-note">{steps?.admission===false?'已跳过':'任一满足'}</span>
         </div>
         {signalAnchored && steps?.admission === false && <p className="text-[11px] text-muted-foreground">静态门槛通过或无需必要条件时，按原信号时点检查排除条件。动态门槛通过时，按首次达标时点检查。通过后在该时点入选。</p>}
-        {steps?.admission!==false && <>
+        {(readOnly||steps?.admission!==false) && <>
         <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-muted-foreground">{signalGate?'同一指标持续达标只记一次。读到未达标后，再次达标才会产生候选。':'各模块互为“或”：满足任一已勾选事件即可。'}</p>{retry?<div className="flex gap-2"><button type="button" className={button} aria-label="全选准入标准" onClick={()=>patch({admission:{...c.admission!,guardEnabled:true,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:true}))}})}>全选</button><button type="button" className={button} onClick={()=>patch({admission:{...c.admission!,guardEnabled:false,algorithms:c.admission!.algorithms.map(a=>({...a,enabled:false}))}})}>取消全选</button></div>:<button type="button" className={button+' text-primary'} onClick={()=>createEventAdmissionCopy()}>配置事件准入（另存副本）</button>}</div>
         {!retry&&<p className="text-[10px] text-muted-foreground">原方案保留。配置事件准入时创建独立副本，新副本默认全选。</p>}
         <div className="space-y-3" data-testid="admission-event-modules">
@@ -301,7 +316,7 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
           </FishQualityInfo>
           <span className="screening-stage-note">{steps?.exclusion===false?'已跳过':'任一排除'}</span>
         </div>
-        {steps?.exclusion!==false && <>
+        {(readOnly||steps?.exclusion!==false) && <>
         {retry&&<div className="space-y-2 rounded border border-border/60 p-2 text-[11px]"><label className="flex items-center gap-2"><input type="checkbox" aria-label="启用长周期回撤否决" checked={!!c.longDrawdown?.enabled} onChange={e=>patch({longDrawdown:e.target.checked?{enabled:true,hours:24,pct:NaN,mode:'current'}:undefined})}/>可选：长周期回撤否决</label>
           {c.longDrawdown?.enabled&&<div className="flex flex-wrap items-center gap-2"><label>回看时长<input aria-label="长周期回撤回看时长（小时）" className={field+' ml-1 w-20'} type="number" min="0.016666666666666666" max="8784" step="any" value={Number.isFinite(c.longDrawdown.hours)?c.longDrawdown.hours:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,hours:e.target.value.trim()?Number(e.target.value):NaN}})}/>小时</label><select aria-label="长周期回撤口径" className={field} value={c.longDrawdown.mode} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,mode:e.target.value as 'current'|'maximum'}})}><option value="current">当前距窗口高点的回撤</option><option value="maximum">窗口内最大回撤</option></select><label>达到<input aria-label="长周期回撤阈值（%）" className={field+' mx-1 w-20'} type="number" min="0" max="100" step="any" placeholder="填写阈值" value={Number.isFinite(c.longDrawdown.pct)?c.longDrawdown.pct:''} onChange={e=>patch({longDrawdown:{...c.longDrawdown!,pct:e.target.value.trim()?Number(e.target.value):NaN}})}/>% 即否决</label></div>}
           <p className="text-muted-foreground">默认关闭。检查截至筛选时点的历史窗口，包含本次观察起点之前的行情，不随重筛清空。当前回撤＝（窗口最高价－当前收盘价）÷窗口最高价；最大回撤按窗口内先高后低计算。历史不足时等待，不补造数据。</p>
@@ -321,26 +336,29 @@ export function FishPreEntryThreeStageSettings({state,selectedCount,done,onUseTe
           </div>;
         })}
         <button type="button" className={button} disabled={!choices.length} onClick={()=>patch({sellRules:[...c.sellRules,{id:id(),label:'普通卖出 '+(c.sellRules.length+1),enabled:true,expression:{join:'all',children:[{condition:newCondition()}]},confirmation:{samples:1,minutes:1}}]})}>添加完整卖出规则</button>
-        <p className="screening-subheading">硬性终止</p><FishQualityHoldingVetoEditor entry compact labelPrefix="三阶硬性终止 " draft={hardDrafts[active.id]??holdingVetoDraft(c.hardVetoes)} setDraft={draft=>setHardDrafts({...hardDrafts,[active.id]:draft})}/>
+        <p className="screening-subheading">硬性终止</p>{readOnly?
+          <FishFrozenHoldingVetoEditor entry compact labelPrefix="三阶硬性终止 " draft={holdingVetoDraft(c.hardVetoes)}/>:
+          <FishQualityHoldingVetoEditor entry compact labelPrefix="三阶硬性终止 " draft={hardDrafts[active.id]??holdingVetoDraft(c.hardVetoes)} setDraft={draft=>setHardDrafts({...hardDrafts,[active.id]:draft})}/>
+        }
         </>}
       </section>
       <details className="screening-detail mt-4"><summary>观察基准与适用范围</summary><p className="mt-2 text-muted-foreground">{retry?'否决后从下一分钟重建观察起点：峰值、回撤、急跌锁定与卖出连续确认重新累计，指标历史和原生结构保持因果连续；每次仍按原公式、阈值完整判断。总截止时间始终从原筛选起点计算，不延长；命中最早符合条件的时点即停止。':'峰值、回撤、急跌、二次急跌均以本轮冻结的筛选起点累计；规则所需历史按原算法预热。曾发生急跌及最大回撤达到阈值的锁定保留；未收复锁定须依原规则解除。'}实际成本线、已落袋利润、仓位数量及第 N 次实际加仓后的阶段不在观察阶段模拟。</p></details>
-      {active.frozenVersions&&<details className="screening-detail mt-3"><summary>已保存版本</summary><PlanVersionList plan={active} draft/></details>}
+      {active.frozenVersions&&<details className="screening-detail mt-3"><summary>已保存版本</summary>{readOnly?<ul className="space-y-1">{active.frozenVersions.map(v=><li key={v.key} className="break-words">{v.part} · {v.name} · {v.version}</li>)}</ul>:<PlanVersionList plan={active} draft/>}</details>}
     </>}
-    {!active&&<label className="screening-form-label mt-4">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>}
-    <p className="mt-4 text-muted-foreground">首次满足即停止；到达时限仍未满足则结束。{automatic ? '保存后供新捕到的鱼使用。' : '修改时限后，从头重新筛选生效。'}</p>
+    {!readOnly&&!active&&<label className="screening-form-label mt-4">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>}
+    {!readOnly&&<p className="mt-4 text-muted-foreground">首次满足即停止；到达时限仍未满足则结束。{automatic ? '保存后供新捕到的鱼使用。' : '修改时限后，从头重新筛选生效。'}</p>}
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
-    {!monitor.ready && <div className="flex flex-wrap items-center gap-2 text-[11px]">
+    {!readOnly&&monitor&&!monitor.ready && <div className="flex flex-wrap items-center gap-2 text-[11px]">
       <p role={monitor.error ? 'alert' : 'status'} className={monitor.error ? 'text-destructive' : 'text-muted-foreground'}>
         {monitor.error || '正在读取筛选库，完成后可保存方案或开始筛选。'}
       </p>
       {monitor.error && <button type="button" className={button} onClick={monitor.retry}>重试读取筛选库</button>}
     </div>}
-    <div className="screening-footer"><span className="screening-footer-meta">{!automatic && <>已选择 {selectedCount} 个标的</>}</span><div className="screening-footer-actions"><SettingsImageButton/>
+    {!readOnly&&monitor&&state&&<div className="screening-footer"><span className="screening-footer-meta">{!automatic && <>已选择 {selectedCount} 个标的</>}</span><div className="screening-footer-actions"><SettingsImageButton/>
       <button type="button" disabled={!state.ready||!monitor.ready||savingAutomatic} className={automatic ? button+' screening-save-primary' : button} onClick={()=>save(false)}>
         {automatic ? savingAutomatic ? '保存中…' : '保存筛选鱼条件' : '保存三阶方案'}
       </button>
       {!automatic && <button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' screening-save-primary'} onClick={()=>save(true)}>保存并开始三阶筛选</button>}
-    </div></div>
-  </div>;
+    </div></div>}
+  </fieldset>;
 }

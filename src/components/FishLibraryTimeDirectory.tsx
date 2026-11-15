@@ -2,7 +2,7 @@ import {FishLibraryTransferMenu} from './FishLibraryDataMenu';
 import {FishLibraryRowExportContext,type FishLibraryRowExport,type FishLibraryExportActions} from './FishLibraryRowExport';
 import {createQualityTemplateTable,type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import {useCallback,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
-import {ChevronDown,Database,Download,MoreHorizontal,Copy,Trash2,Undo2,Pencil} from 'lucide-react';
+import {ChevronDown,Database,Download,MoreHorizontal,Search,Copy,Trash2,Undo2,Pencil} from 'lucide-react';
 import {FishDirectorySettingsButton,type DirectorySettingsEntry} from './FishDirectorySettingsButton';
 import {unknownTemplateGroup,type QualityTemplateDirectoryGroup} from '@/lib/fish/qualityTemplateDirectory';
 import {DIRECTORY_NAME_MAX_LENGTH,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
@@ -25,6 +25,7 @@ export interface FishDirectoryItem {
   study:()=>FishQualityStudy|Promise<FishQualityStudy>;
 }
 const NO_DIRECTORY_ITEMS: FishDirectoryItem[] = [];
+const normalizeTemplateQuery=(value:string)=>value.normalize('NFKC').toLocaleLowerCase().replace(/[\s_·.-]/g,'');
 
 export function FishDeferredDetails({summary,className,children}:{summary:string;className?:string;children:ReactNode|(()=>ReactNode)}) {
   const [open,setOpen] = useState(false);
@@ -104,6 +105,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [purgeMode,setPurgeMode]=useState(false),[confirmPurge,setConfirmPurge]=useState(false),[purgeMessage,setPurgeMessage]=useState('');
   const [manage,setManage]=useState(false),[activeTemplate,setActiveTemplate]=useState('');
   const [importSelection,setImportSelection]=useState(false);
+  const [templateQuery,setTemplateQuery]=useState('');
   const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted;
   const [selectedExport,setSelectedExport]=useState<FishLibraryRowExport>();
   const registerExport=useCallback((action:FishLibraryRowExport)=>{
@@ -134,21 +136,28 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const currentLoad=loaded?.id===selectedId?loaded:undefined;
   const snapshot=currentLoad?.study;
   const archiveError=currentLoad?.error;
-  const visible=useMemo(()=>items.filter(item=>kind==='template'&&!picker ? !!edits?.[item.id]?.hidden===showDeleted : showDeleted||!edits?.[item.id]?.hidden).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,picker]);
+  const visible=useMemo(()=>items.filter(item=>{
+    const hidden=!!edits?.[item.id]?.hidden;
+    const group=item.templateGroup;
+    if(templateView&&!group?.savedTemplate)return false;
+    return compactDirectory ? hidden===showDeleted : showDeleted||!hidden;
+  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,compactDirectory,templateView]);
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
   const selectable=visible.filter(item=>purgeMode ? item.purgeable : !edits?.[item.id]?.hidden);
   const checkedSet=new Set(checkedIds),checked=selectable.filter(item=>checkedSet.has(item.id));
+  const query=normalizeTemplateQuery(templateQuery);
   const grouping = useMemo(() => {
     if (kind !== 'template') return [];
     const groups = new Map<string,{group:QualityTemplateDirectoryGroup;items:FishDirectoryItem[]}>();
     for (const item of visible) {
       const group = item.templateGroup ?? unknownTemplateGroup;
+      if(templateView&&query&&![group.title,group.originalTitle].some(value=>value&&normalizeTemplateQuery(value).includes(query)))continue;
       const bucket = groups.get(group.id);
       if (bucket) bucket.items.push(item);
       else groups.set(group.id,{group,items:[item]});
     }
     return [...groups.values()];
-  },[kind,visible]);
+  },[kind,visible,templateView,query]);
   const purge = async () => {
     if (!onPurgeDirectory || busy || !checked.length) return;
     setBusy('purge'); setError(''); setPurgeMessage('');
@@ -189,7 +198,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
     selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
-    if(!value){setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    if(!value){setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError&&!selectedExport?.busy;
   const handleExport=()=>{
@@ -248,6 +257,11 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
+        {templateView&&<div className="relative mt-1 max-w-md">
+          <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"/>
+          <input type="search" value={templateQuery} onChange={event=>setTemplateQuery(event.target.value)} aria-label={'搜索'+name+'模板'}
+            placeholder="搜索模板编号、原名或日期…" className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
+        </div>}
         <DialogDescription className={compactDirectory?"sr-only":"text-[11px]"}>{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
@@ -277,7 +291,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         </div>}
         {!picker&&!compactDirectory&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
         {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
-        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{showDeleted&&compactDirectory?'没有已删除的目录。':empty}</p>}
+        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{showDeleted&&compactDirectory?'没有已删除的目录。':templateView&&items.length?'暂无与已保存模板对应的记录。':empty}</p>}
+        {templateView&&visible.length>0&&!grouping.length&&query&&<p role="status" className="py-5 text-center text-xs text-muted-foreground">没有匹配的模板。</p>}
         {kind==='template'?grouping.map(({group,items:members},index)=>{
           const containsSelection=members.some(item=>item.id===selectedId);
           const expanded=templateView?activeTemplate===group.id:containsSelection||(expandedGroups[group.id]??index===0);

@@ -162,3 +162,8 @@
   .screening-settings .screening-footer-actions { width: 100%; }
   .screening-settings .screening-footer-actions button { flex: 1 1 auto; }
 }
+
+.screening-settings-readonly { padding: 4px 4px 12px; }
+.screening-settings-readonly input:disabled,
+.screening-settings-readonly select:disabled { opacity: 1; }
+.screening-settings-readonly button:disabled { display: none; }
