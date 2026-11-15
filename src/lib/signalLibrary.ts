@@ -292,7 +292,7 @@ export function signalDedupKey(s: Pick<TradeSignal, 'exchange' | 'symbol' | 'tim
   if (s.market === 'us_stock') return `us:${s.exchange ?? 'binance'}:${stockCode(s)}@${s.timeMs}`;
   return `${s.exchange && s.exchange !== 'binance' ? `${s.exchange}:` : ''}${s.symbol}@${s.timeMs}`;
 }
-export function signalChartSymbol(s: TradeSignal): string | null {
+export function signalChartSymbol(s: Pick<TradeSignal, 'symbol' | 'market' | 'exchange' | 'binanceSymbol'>): string | null {
   if (isTuringCupSymbol(s.symbol)) return s.symbol;
   if (s.market === 'us_stock') return null;
   return !s.exchange || s.exchange === 'binance' ? s.symbol : s.binanceSymbol ?? null;

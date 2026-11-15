@@ -10,6 +10,8 @@ import { notifyPersistedStateHydrated } from '@/lib/persistedStateStorage';
 import { saveFishAuto } from '@/lib/fish/autoScan';
 import { archiveFishForNextRound } from '@/lib/fish/records';
 import { saveFishPreference } from '@/lib/fish/preferences';
+import { InstantPositionsContext } from '@/contexts/FishQualityContext';
+import type { InstantPositionFill } from '@/lib/fish/instantCampaign';
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn() }));
 vi.mock('@/lib/fishScanner', async original => ({ ...await original<typeof import('@/lib/fishScanner')>(), FishScanner: class { scan = mocks.scan; isBusy = () => false; } }));
@@ -34,36 +36,55 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 
-it('defaults to the latest signal from the new fish and starts only on request', () => {
-  const latest = Date.parse('2026-10-19T08:12:37+08:00');
-  const records: TradeSignal[] = [
-    { ...SIGNAL, id: 'old-round', symbol: 'OLDUSDT', timeMs: latest + 60_000, fishArchive: { id: 'older', at: latest } },
-    { ...SIGNAL, id: 'new-older', symbol: 'BBBUSDT', timeMs: latest - 60_000, caughtAt: latest + 3, freshCatch: true },
-    { ...SIGNAL, id: 'new-latest', symbol: 'BYBITUSDT', binanceSymbol: 'LATESTUSDT', exchange: 'bybit', timeMs: latest, caughtAt: latest + 2, freshCatch: true },
-    { ...SIGNAL, id: 'unsupported', symbol: 'NONEUSDT', binanceSymbol: null, exchange: 'bybit', timeMs: latest + 30_000, freshCatch: true },
-  ];
-  localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify(records));
-  const selectDefault = vi.fn(() => true), start = vi.fn();
-  render(<TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onStart={start} onSelectDefaultReplaySymbol={selectDefault}/>);
-  expect(selectDefault).toHaveBeenLastCalledWith('LATESTUSDT');
-  expect(screen.getByPlaceholderText('YYYY-MM-DD HH:mm:ss')).toHaveValue('2026-10-19 08:12:37');
-  expect(start).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '启动' }));
-  expect(start).toHaveBeenCalledWith(latest);
+const SCREENED_AT = Date.parse('2026-10-19T08:12:37+08:00');
+const screenedPosition = (symbol: string, buyAt: number, source: Partial<InstantPositionFill['source']> = {}): InstantPositionFill => ({
+  id: symbol, recordId: symbol, buyAt, source: { id: symbol, symbol, timeMs: buyAt - 60_000, ...source },
+  detectors: [], entryPrice: 1, marginUsdt: 100, leverage: 1,
 });
 
-it('keeps a manually entered replay time when the fish library recovers later', async () => {
-  localStorage.setItem(FISH_STORAGE_KEY, '[]');
-  const selectDefault = vi.fn(() => true);
-  render(<TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onSelectDefaultReplaySymbol={selectDefault}/>);
+it('prefills the latest screened symbol and follows the wall clock until replay starts', () => {
+  const wallTime = Date.parse('2026-11-15T13:20:14+08:00');
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  try {
+    vi.setSystemTime(wallTime);
+    localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify([{ ...SIGNAL, timeMs: wallTime - 1_000, freshCatch: true }]));
+    const positions = [
+      screenedPosition('EARLIERUSDT', SCREENED_AT - 60_000),
+      screenedPosition('BYBITUSDT', SCREENED_AT, { exchange: 'bybit', binanceSymbol: 'LATESTUSDT' }),
+      screenedPosition('UNSUPPORTEDUSDT', SCREENED_AT + 30_000, { exchange: 'bybit', binanceSymbol: null }),
+    ];
+    const selectDefault = vi.fn(), start = vi.fn();
+    const view = render(<InstantPositionsContext.Provider value={{ positions }}>
+      <TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onStart={start} onSelectDefaultReplaySymbol={selectDefault}/>
+    </InstantPositionsContext.Provider>);
+    expect(selectDefault).toHaveBeenLastCalledWith('LATESTUSDT');
+    const input = screen.getByPlaceholderText('YYYY-MM-DD HH:mm:ss');
+    expect(input).toHaveValue('2026-11-15 13:20:14');
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(input).toHaveValue('2026-11-15 13:20:15');
+    expect(start).not.toHaveBeenCalled();
+    vi.setSystemTime(wallTime + 6_500);
+    fireEvent.click(screen.getByRole('button', { name: '启动' }));
+    expect(start).toHaveBeenCalledWith(wallTime + 6_000);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('keeps a manually entered replay time when a screened fish arrives later', () => {
+  const selectDefault = vi.fn(), start = vi.fn();
+  const replay = (positions: InstantPositionFill[]) => <InstantPositionsContext.Provider value={{ positions }}>
+    <TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onStart={start} onSelectDefaultReplaySymbol={selectDefault}/>
+  </InstantPositionsContext.Provider>;
+  const view = render(replay([]));
   const input = screen.getByPlaceholderText('YYYY-MM-DD HH:mm:ss');
   fireEvent.change(input, { target: { value: '2026-10-19 09:10:11' } });
-  await act(async () => {
-    localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify([{ ...SIGNAL, timeMs: Date.parse('2026-10-19T08:30:00+08:00'), freshCatch: true }]));
-    notifyPersistedStateHydrated(FISH_STORAGE_KEY);
-  });
+  view.rerender(replay([screenedPosition('LATESTUSDT', SCREENED_AT)]));
   expect(input).toHaveValue('2026-10-19 09:10:11');
   expect(selectDefault).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '启动' }));
+  expect(start).toHaveBeenCalledWith(Date.parse('2026-10-19T09:10:11+08:00'));
 });
 
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { latestReplayCatch } from '@/lib/fish/latestReplayCatch';
+import { latestScreenedReplaySymbol } from '@/lib/fish/latestScreenedReplaySymbol';
 import {
   type TradeSignal,
   parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
@@ -28,7 +28,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
-import { useFishCaptureAutomation, usePageFishQuality } from '@/contexts/FishQualityContext';
+import { useFishCaptureAutomation, usePageFishQuality, useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { armQualityReturn } from '@/lib/fish/qualityReturn';
 import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
@@ -67,7 +67,7 @@ interface Props {
   timeMode?: TimeMode;
   originTime?: number | null;
   onSymbolChange?: (symbol: string) => void;
-  onSelectDefaultReplaySymbol?: (symbol: string) => boolean;
+  onSelectDefaultReplaySymbol?: (symbol: string) => void;
   activeSymbol?: string;
   onJumpToSignal?: (symbol: string, timeMs: number, options?: SignalJumpOptions) => Promise<SignalJumpResult>;
   signalJumpInterval?: string;
@@ -76,6 +76,44 @@ interface Props {
 
 const FISH_TIME_KEY = 'veil.fish.time';
 const EMPTY_TURING_SIGNALS: TradeSignal[] = [];
+
+function ReplayStartControls({ dateInput, onChange, onStart }: {
+  dateInput: string | null;
+  onChange: (value: string) => void;
+  onStart: (timestamp: number) => void;
+}) {
+  const [now, setNow] = useState(Date.now);
+  const [focusedAt, setFocusedAt] = useState<number | null>(null);
+  const followingClock = dateInput === null && focusedAt === null;
+  useEffect(() => {
+    if (!followingClock) return;
+    const update = () => setNow(Date.now());
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [followingClock]);
+  const start = () => {
+    const timestamp = dateInput === null
+      ? Math.floor(Date.now() / 1_000) * 1_000
+      : new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
+    if (Number.isFinite(timestamp)) onStart(timestamp);
+  };
+  return <div className="flex items-center gap-2">
+    <input
+      type="text"
+      value={dateInput ?? formatUTC8(focusedAt ?? now)}
+      onFocus={() => setFocusedAt(now)}
+      onBlur={() => setFocusedAt(null)}
+      onChange={event => onChange(event.target.value)}
+      placeholder="YYYY-MM-DD HH:mm:ss"
+      className="input-dark w-52 text-xs"
+    />
+    <button onClick={start} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
+      <Play className="w-3.5 h-3.5" /> 启动
+    </button>
+  </div>;
+}
+
 export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
@@ -101,7 +139,7 @@ export function TimeControl({
     if (status === 'playing') onPause();
     setNoEntryOpen(true);
   };
-  const [dateInput, setDateInput] = useState('2024-01-15 16:00:00');
+  const [dateInput, setDateInput] = useState<string | null>(null);
   const replayDateEdited = useRef(false);
 
   // ===== 信号库（Time Machine 旁的折叠接口）=====
@@ -134,15 +172,6 @@ export function TimeControl({
   useEffect(() => { setFishSelection(fishAccountSettings?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false }); }, [fishAccountSettings, user?.id]);
   const { enqueue, notify: fishNotify } = useFishCaptureAutomation();
   const fish = useFish(user?.id, { onNewFish: enqueue });
-  const replayCatch = useMemo(() =>
-    onSelectDefaultReplaySymbol && status === 'stopped' && fish.signalsOwner === user?.id
-      ? latestReplayCatch(fish.signals) : undefined,
-  [onSelectDefaultReplaySymbol, status, fish.signals, fish.signalsOwner, user?.id]);
-  useEffect(() => {
-    if (status !== 'stopped') replayDateEdited.current = true;
-    if (replayDateEdited.current || !replayCatch) return;
-    if (onSelectDefaultReplaySymbol?.(replayCatch.symbol)) setDateInput(formatUTC8(replayCatch.timeMs));
-  }, [status, replayCatch, onSelectDefaultReplaySymbol]);
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
   const needsTuringArchive = (turing && signalLibOpen) || fishOpen || isTuringCupSymbol(activeSymbol ?? '');
@@ -158,6 +187,15 @@ export function TimeControl({
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
   const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, fishOpen || signalLibOpen, fishOpen);
+  const openScreenedPositions = useScreenedInstantPositions()?.positions;
+  const { admitted, alerts } = fishQuality.cdaTracking ?? {};
+  const replaySymbol = useMemo(() => latestScreenedReplaySymbol(admitted, alerts, openScreenedPositions),
+    [admitted, alerts, openScreenedPositions]);
+  useEffect(() => {
+    if (status !== 'stopped') replayDateEdited.current = true;
+    if (replayDateEdited.current || !replaySymbol) return;
+    onSelectDefaultReplaySymbol?.(replaySymbol);
+  }, [status, replaySymbol, onSelectDefaultReplaySymbol]);
   const { deletedSources, resolvedLegacySources } = fishQuality.study;
   const turingSignals = useMemo(() => {
     const deleted = sourceDeletionMatcher(deletedSources, resolvedLegacySources);
@@ -583,12 +621,6 @@ export function TimeControl({
     }
   }, [fish.commit, fish.signalsRef, rememberFishPosition, setOnlineSignals, setTuringSignals]);
 
-  const handleStart = () => {
-    const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
-    if (isNaN(ts)) return;
-    onStart(ts);
-  };
-
   // 元素而不是内部组件：TimeControl 每跳一格时钟就重渲染，内部组件会被卸载重建、下拉面板随之关掉
   const speedButtons = <SpeedSelector speed={visualSpeed} onSelect={s => { setVisualSpeed(s); onSetSpeed(s); }} />;
 
@@ -652,21 +684,10 @@ export function TimeControl({
         </button>
 
         {status === 'stopped' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={dateInput}
-              onChange={e => {
-                replayDateEdited.current = true;
-                setDateInput(e.target.value);
-              }}
-              placeholder="YYYY-MM-DD HH:mm:ss"
-              className="input-dark w-52 text-xs"
-            />
-            <button onClick={handleStart} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
-              <Play className="w-3.5 h-3.5" /> 启动
-            </button>
-          </div>
+          <ReplayStartControls dateInput={dateInput} onStart={onStart} onChange={value => {
+            replayDateEdited.current = true;
+            setDateInput(value);
+          }}/>
         )}
 
         {status === 'playing' && (

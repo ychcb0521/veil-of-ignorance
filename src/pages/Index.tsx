@@ -1842,11 +1842,10 @@ const Index = () => {
     return changeSymbol(symbol, setActiveSymbol);
   }, [changeSymbol, setActiveSymbol]);
   const selectDefaultReplaySymbol = useCallback((symbol: string) => {
-    if (replayDefaultBlocked.current || activeCoinState.status !== 'stopped') return false;
+    if (replayDefaultBlocked.current || activeCoinState.status !== 'stopped') return;
     const target = timeMode === 'isolated' ? coinTimelines[symbol] : undefined;
-    if (target && target.status !== 'stopped') return false;
+    if (target && target.status !== 'stopped') return;
     if (symbol !== activeSymbol) void changeSymbol(symbol, setDefaultActiveSymbol);
-    return true;
   }, [activeCoinState.status, activeSymbol, changeSymbol, coinTimelines, setDefaultActiveSymbol, timeMode]);
 
   const handleIntervalChange = useCallback(

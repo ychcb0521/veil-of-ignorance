@@ -47,23 +47,22 @@ export function registerDbl5Indicator(item:ResearchIndicator){
   },
   draw:({ctx,indicator,visibleRange,xAxis,yAxis,bounding,defaultStyles}:IndicatorDrawParams<Record<string,number>>)=>{
     ctx.save();ctx.setLineDash([]);
-    for(const field of price?['value','DBL5_upper']:['value']){
-      let previous:{x:number;y:number;identity:number}|undefined;
-      let drew=false;
-      ctx.beginPath();
-      ctx.lineWidth=1;ctx.globalAlpha=field==='value'?.55:.4;ctx.strokeStyle=field==='DBL5_upper'?'#8a96a5':'#0b9f78';
-      for(let i=Math.max(0,visibleRange.from-2);i<Math.min(indicator.result.length,visibleRange.to+1);i++){
-        const row=indicator.result[i],value=row?.[field],identity=row?.[field==='DBL5_upper'?'_DBL5_box':'_DBL5_episode'];
-        if(!Number.isFinite(value)||!Number.isFinite(identity)){previous=undefined;continue;}
-        // Source candle timestamps are opens. Publish at its close, never at its opening centre.
-        const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);
-        if(previous?.identity===identity){ctx.moveTo(previous.x,previous.y);ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}
-        drew=true;previous={x,y,identity};
-      }
-      if(drew)ctx.stroke();
+    const field=price?'DBL5_upper':'value',identityField=price?'_DBL5_box':'_DBL5_episode';
+    let previousPoint:{x:number;y:number;identity:number}|undefined;
+    let drew=false;
+    ctx.beginPath();
+    ctx.lineWidth=1;ctx.globalAlpha=price?.4:.55;ctx.strokeStyle=price?'#8a96a5':'#0b9f78';
+    for(let i=Math.max(0,visibleRange.from-2);i<Math.min(indicator.result.length,visibleRange.to+1);i++){
+      const row=indicator.result[i],value=row?.[field],identity=row?.[identityField];
+      if(!Number.isFinite(value)||!Number.isFinite(identity)){previousPoint=undefined;continue;}
+      // Source candle timestamps are opens. Publish at its close, never at its opening centre.
+      const x=xAxis.convertToPixel(i+1),y=yAxis.convertToPixel(value);
+      if(previousPoint?.identity===identity){ctx.moveTo(previousPoint.x,previousPoint.y);ctx.lineTo(x,previousPoint.y);ctx.lineTo(x,y);}else {ctx.moveTo(x-1,y);ctx.lineTo(x+1,y);}
+      drew=true;previousPoint={x,y,identity};
     }
-    // 【用户要求】2026-11-02「颜色太多分不清」：防守线是唯一的主线（蓝色加粗），上涨期实线、震荡期虚线；箱底、箱顶退为淡色细线；
-    // 只保留防守线收盘确认跌破的红叉，箱底被影线刺穿的小叉不再画
+    if(drew)ctx.stroke();
+    // The main pane shows the guard and fixed upper rail. Box-floor readings remain in the tooltip.
+    // Only a confirmed close below the guard draws a red cross.
     ctx.globalAlpha=1;
     if(price){
       let previous:{x:number;y:number;identity:number;trend:boolean}|undefined;

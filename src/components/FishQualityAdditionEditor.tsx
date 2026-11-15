@@ -48,7 +48,7 @@ interface RoundDraft extends ConditionDraft {increaseMetrics: IncreaseDraft[];de
  entryDistanceAtr?:string;gainBasis?:'average'|'cost-line'}
 /** 【用户要求】2026-11-03 防守线要说明是哪条线、虚线算不算、断掉意味着什么等细节。 */
 export function GuardLineNotes(){return <div className="space-y-2 text-[11px] leading-relaxed" data-testid="guard-line-notes">
- <p><b className="font-medium text-foreground">是哪条线</b>：K 线图上 DBL-5 那条<b className="font-medium text-foreground">蓝色加粗线</b>，就是防守线，只有这一条。淡绿色细线是箱底（下轨），淡灰色细线是固定上轨，都不是防守线。红色 × 表示防守线被收盘确认跌破。</p>
+ <p><b className="font-medium text-foreground">是哪条线</b>：K 线图上 DBL-5 那条<b className="font-medium text-foreground">蓝色加粗线</b>，就是防守线，只有这一条。箱底（下轨）读数可在图表提示里查看。淡灰色细线是固定上轨。红色 × 表示防守线被收盘确认跌破。</p>
  <p><b className="font-medium text-foreground">实线和虚线</b>：都是防守线，只是行情状态不同。<b className="font-medium text-foreground">实线＝上涨期</b>：新箱底比上一箱体高，且两箱重叠不到较小箱高的一半，线＝新箱底 − a×ATR（默认 0.5），只升不降。<b className="font-medium text-foreground">虚线＝震荡期</b>：其他情况都算震荡（第一个箱体也算），线＝震荡区里最低的箱底 − b×ATR（默认 1）；区间里的小箱体不抬线，箱底创新低时线跟着下移。ATR 是 5 分钟 ATR(14)。</p>
  <p><b className="font-medium text-foreground">防守线类型</b>：选「实线和虚线」（默认）时，两种线都能当 K。选「只用实线」时，新 C 产生那一刻如果防守线是虚线（震荡期），这次就不加仓，原因记进战役「未加仓理由」，等到实线（上涨期）时的新 C 再加。</p>
  <p><b className="font-medium text-foreground">怎样算跌破</b>：只看 5 分钟收盘价，影线刺穿不算。上涨期（实线）1 根收盘低于线即跌破；震荡期（虚线）要连续 2 根，中间有一根收回线上就重新计数。</p>
