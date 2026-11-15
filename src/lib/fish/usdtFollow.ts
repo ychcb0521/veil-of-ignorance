@@ -39,7 +39,7 @@ function usesGuardPlus(plan?: QualityGroup): boolean {
   if(plan?.router)return usesGuardPlus(plan.router.structure)||usesGuardPlus(plan.router.attack);
   const addition=plan?.addition;
   return !!addition?.enabled&&[...(addition.rounds?.length?addition.rounds:[addition]),...(addition.alternativeRounds??[])]
-    .some(rule=>rule.source==='structure'&&!!rule.structure?.guardPlusVersion);
+    .some(rule=>!!rule.impulse1115Position||rule.source==='structure'&&!!rule.structure?.guardPlusVersion);
 }
 
 function followCampaign({ record, round }: ScreenedFishAdmission, tracking: FishCdaTracking): UsdtFollowCampaign | undefined {

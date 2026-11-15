@@ -4,6 +4,7 @@ export const ADDITION_INDICATOR_INCREASE_VERSION='addition-indicator-increase-v1
 import { activeAdditionVetoes, additionVetoIdentity, validateAdditionVetoes } from './qualityAdditionVeto';
 import type { QualityBuyFilter } from './quality';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
+import { IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 import {validateStructureAddition,structureAdditionIdentity,structureAdditionLabel,type StructureAdditionRule,type StructureAdditionEvidence} from './qualityAdditionStructure';
 export type AdditionIncreaseMetric = Pick<QualityBuyFilter, 'label' | 'metric' | 'snapshot'>;
@@ -26,9 +27,17 @@ export interface ImpulseAdditionPosition {
   minDistancePct?: number;
   skipNative?: true;
 }
+export interface Impulse1115Position {
+  version: typeof IMPULSE_1115_POSITION_VERSION;
+  minDistancePct?: number;
+  skipNative?: true;
+}
+export const additionUsesNativePosition = (rule: Pick<QualityAdditionRule,'impulsePosition'|'impulse1115Position'>) =>
+  !rule.impulsePosition?.skipNative && !rule.impulse1115Position?.skipNative;
 
 export interface QualityAdditionRule {
   impulsePosition?: ImpulseAdditionPosition;
+  impulse1115Position?: Impulse1115Position;
   positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
   /** Opt-in execution upgrade; missing keeps the original guard close confirmation. */
   kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
@@ -121,7 +130,7 @@ export interface QualityReductionFill { at: number; price: number; fraction: num
   previousPositionK?: number;
   newPositionK?: number }
 export interface QualityDetectorPrerequisite { enabled: boolean; stricterPct: number; featureId?: string }
-export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'impulsePosition'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
+export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'impulsePosition'|'impulse1115Position'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
 export const activeDetectorPrerequisite=(r?:Pick<QualityAdditionRoundRule,'detectorPrerequisite'|'source'>)=>r?.source!=='custom'&&r?.detectorPrerequisite?.enabled?r.detectorPrerequisite:undefined;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
 const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(rule).supportOffsetAtr;
@@ -184,6 +193,8 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...prerequisiteIdentity(rule),
   ...([rule,...(rule.rounds??[]),...(rule.alternativeRounds??[])].some(r=>r.impulsePosition)?
     [[ADDITION_POSITION_RACE_VERSION,rule.impulsePosition??null,rule.rounds?.map(r=>r.impulsePosition??null)??null,rule.alternativeRounds?.map(r=>r.impulsePosition??null)??null]]:[]),
+  ...([rule,...(rule.rounds??[]),...(rule.alternativeRounds??[])].some(r=>r.impulse1115Position)?
+    [[IMPULSE_1115_POSITION_VERSION,rule.impulse1115Position??null,rule.rounds?.map(r=>r.impulse1115Position??null)??null,rule.alternativeRounds?.map(r=>r.impulse1115Position??null)??null]]:[]),
   ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,rule.quantityMode==='calculator'?'cost-line':'real-average']]:[]),
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
@@ -207,18 +218,23 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if(rule.positionVersion!==undefined&&(rule.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION||rule.quantityMode!=='calculator'))throw Error('加仓持仓账版本不可用');
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
-  const impulse=rule.impulsePosition;
-  if(impulse&&rule.source==='structure'&&rule.structure?.guardPlusVersion)throw Error('同一轮请选择一种急拉位置算法');
+  const impulse=rule.impulsePosition, impulse1115=rule.impulse1115Position;
+  if((impulse||impulse1115)&&rule.source==='structure'&&rule.structure?.guardPlusVersion)throw Error('请先退出原 1115 组合方式，再启用独立急拉位置');
   if(impulse && (rule.quantityMode!=='calculator'||impulse.version!==IMPULSE_5M_VERSION||
     !Number.isFinite(impulse.bufferAtr)||impulse.bufferAtr<0||impulse.bufferAtr>20||
     impulse.skipNative!=null&&impulse.skipNative!==true||
     impulse.minDistancePct!=null&&(!Number.isFinite(impulse.minDistancePct)||impulse.minDistancePct<=0||impulse.minDistancePct>=50)))
     throw Error('急拉线参数无效，冗余须为 0–20 ATR，最小距离须大于 0 且小于 50%');
-  if(rule.source==='structure'&&!impulse?.skipNative){validateStructureAddition(rule.structure);if(rule.quantityMode!=='calculator')throw Error('箱体加仓须使用按平衡公式定量');}
+  if(impulse1115&&(rule.quantityMode!=='calculator'||impulse1115.version!==IMPULSE_1115_POSITION_VERSION||
+    impulse1115.skipNative!=null&&impulse1115.skipNative!==true||
+    impulse1115.minDistancePct!=null&&(!Number.isFinite(impulse1115.minDistancePct)||impulse1115.minDistancePct<=0||impulse1115.minDistancePct>=50)))
+    throw Error('急拉线-1115 的最小距离须大于 0 且小于 50%');
+  const nativeActive=additionUsesNativePosition(rule);
+  if(rule.source==='structure'&&nativeActive){validateStructureAddition(rule.structure);if(rule.quantityMode!=='calculator')throw Error('箱体加仓须使用按平衡公式定量');}
   if(rule.quantityMode){if(rule.quantityMode==='fixed'&&(!(rule.quantity!>0)||!Number.isFinite(rule.quantity)))throw new Error('加仓数量须为大于 0 的有限数字');}
   else if (rule.amountMode === 'fixed' && (!(rule.amountUsdt! > 0) || !Number.isFinite(rule.amountUsdt))) throw new Error('加仓金额须为大于 0 的有限数字');
   if (rule.source === 'detector' && (!(rule.stricterPct > 0) || !Number.isFinite(rule.stricterPct))) throw new Error('加仓门槛提高幅度须为大于 0 的有限数字');
-  if (rule.source === 'custom' && !impulse?.skipNative && (!qualityAdditionConditions(rule).length || qualityAdditionConditions(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))) throw new Error('请选择加仓指标并填写有限数字门槛');
+  if (rule.source === 'custom' && nativeActive && (!qualityAdditionConditions(rule).length || qualityAdditionConditions(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))) throw new Error('请选择加仓指标并填写有限数字门槛');
   if(rule.source!=='custom'&&qualityAdditionPrerequisites(rule).some(f=>!Number.isFinite(f.threshold)||!['<','>'].includes(f.direction)))throw new Error('加仓方向条件的指标须填写有限数字门槛');
   if(rule.minGainPct!=null&&(!Number.isFinite(rule.minGainPct)||rule.minGainPct<0))throw new Error('加仓涨幅门槛须为不小于 0 的有限数字');
   if (rule.indicatorIncrease) {
@@ -245,11 +261,11 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
     }
   }
   if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
-  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
+  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
   if(rule.alternativeRounds?.length){
     if(!rule.rounds?.length||rule.quantityMode!=='calculator')throw new Error('每轮分流的进攻备选须配合逐轮独立条件与按平衡公式定量');
     if(rule.alternativeRounds.length>rule.rounds.length)throw new Error('进攻备选的轮数不能多于保守轮数');
-    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
+    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
     if(rule.attackFromRound!=null&&(!Number.isInteger(rule.attackFromRound)||rule.attackFromRound<1||rule.attackFromRound>rule.alternativeRounds.length))throw new Error(`进攻备选参与竞速的起始次数须为 1 至 ${rule.alternativeRounds.length} 的整数`);
   }else if(rule.attackFromRound!=null)throw new Error('「进攻从第几次起」须配合进攻备选');
 }
@@ -261,6 +277,7 @@ export function stricterAdditionThreshold(threshold: number, direction: '<' | '>
 }
 function additionFormulaLabel(rule:QualityAdditionRule){
   const rounds=rule.rounds?.length?rule.rounds:[rule],first=qualityAdditionAtrSettings(rounds[0]);
+  if([...rounds,...(rule.alternativeRounds??[])].some(r=>r.impulse1115Position))return '逐轮位置 · 已启用急拉线-1115';
   if([...rounds,...(rule.alternativeRounds??[])].some(r=>r.impulsePosition))return '逐轮位置 · 已启用 5 分钟急拉线';
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
   // 2026-11-04 S/T/K：设了入场距离时一并写出（各次相同才合写）

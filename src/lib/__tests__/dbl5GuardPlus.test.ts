@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {computeDbl5} from '../dbl5m';
-import {DBL5_GUARD_PLUS_VERSION,Dbl5GuardPlusEngine} from '../dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_VERSION,Dbl5GuardPlusEngine,IMPULSE_1115_POSITION_VERSION} from '../dbl5GuardPlus';
 import {compileFeatureFormula,DBL5_DEF,DBL5_GUARD_PLUS_DEF,evaluateOnBars} from '../deepDig/features';
 import {createStructureAdditionReader,defaultStructureAddition,structureAdditionK,type StructureAdditionRule} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
@@ -206,6 +206,18 @@ describe('DBL-5防守线+急拉-1115',()=>{
   expect(attack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:k}});
   const resumed=await findCalculatorAdditions({...options,structure:rule,previous:main.fills,since:at+minute,prices:prices.filter(bar=>bar.openTime>=at+minute)});
   expect(resumed.fills).toEqual(main.fills);
+  const independent={version:IMPULSE_1115_POSITION_VERSION,skipNative:true} as const;
+  const split=await findCalculatorAdditions({...options,impulse1115Position:independent});
+  expect(split.fills).toHaveLength(1);
+  expect(split.fills[0]).toMatchObject({at,price:101.4,sizing:{support:k},structureEvidence:{
+   algorithmVersion:IMPULSE_1115_POSITION_VERSION,event:'IMPULSE_EARLY',guardCloses:1,buffer:0,
+  }});
+  const splitAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',alternative:{candidates:[],impulse1115Position:independent}}]});
+  expect(splitAttack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:k}});
+  const calm=async(_row:TradeSignal,from:number,to:number)=>[...warm(),bar(20,100,100.2,99.95,100)].filter(row=>row.openTime>=from&&row.openTime<to);
+  const notAnImpulse=createStructureAdditionReader({...options,load:Object.assign(calm,{turingInitialization:{version:'turing-origin-v1' as const,startMs:START}})});
+  expect(await notAnImpulse({...defaultStructureAddition(),trigger:'confirm',kSource:'guard'},entry,at,[])).toMatchObject({at:START+20*STEP});
+  expect(await notAnImpulse.impulse1115(entry,at,[])).toBeUndefined();
  });
  it('gates real forwarding on the executor capability and the exact next close',()=>{
   const early=events([...warm(),impulse()])[0];

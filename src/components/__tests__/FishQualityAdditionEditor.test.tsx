@@ -7,10 +7,12 @@ import { additionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
+import { DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
+import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
 import type {VetoStagesDraft} from '../FishQualityVetoStagesEditor';
 afterEach(cleanup);
 // The original editor regressions intentionally exercise the preserved legacy scope.
-function Editor(){const [draft,setDraft]=useState(()=>{const d=additionDraft(defaultQualityAddition());for(const r of [d,...d.otherRounds])for(const v of Object.values(r.entryVetoes))v.historyHours=undefined;return d;});return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
+function Editor({initial=defaultQualityAddition()}:{initial?:QualityAdditionRule}){const [draft,setDraft]=useState(()=>{const d=additionDraft(initial);for(const r of [d,...d.otherRounds])for(const v of Object.values(r.entryVetoes))v.historyHours=undefined;return d;});return <><FishQualityAdditionEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{const r=parseAdditionDraft(draft,BUILTIN_FEATURES);document.querySelector('output')!.textContent=JSON.stringify(r);document.querySelector('[data-stages]')!.textContent=JSON.stringify(parseAdditionSellStages(draft,BUILTIN_FEATURES)??null)}}>验证保存</button><output/><pre data-stages/></>}
 const save=()=>{fireEvent.click(screen.getByRole('button',{name:'验证保存'}));return JSON.parse(document.querySelector('output')!.textContent!);};
 const tab=(n:number)=>fireEvent.click(screen.getByRole('tab',{name:`第 ${n} 次`}));
 it('defaults new addition vetoes to six history hours and independently edits or restores their original scope',()=>{
@@ -342,6 +344,44 @@ it('selects the 5m impulse with or without the existing position and keeps each 
   expect(save().rounds[0].impulsePosition.skipNative).toBe(true);
   tab(2);
   expect(screen.getByLabelText('5 分钟急拉线')).not.toBeChecked();
+});
+
+it('edits both acute positions independently from the guard and from other rounds',()=>{
+ render(<Editor/>);
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+ fireEvent.change(screen.getByLabelText('上涨期防守冗余'),{target:{value:'0.7'}});
+ fireEvent.click(screen.getByLabelText('急拉线-1115'));
+ fireEvent.click(screen.getByLabelText('5 分钟急拉线'));
+ fireEvent.change(screen.getByLabelText('急拉线-1115 K 最小距离'),{target:{value:'1.8'}});
+ fireEvent.change(screen.getByLabelText('急拉线 K 最小距离'),{target:{value:'2.5'}});
+ expect(screen.getByTestId('addition-impulse-positions')).not.toHaveTextContent('防守线版本');
+ const saved=save();
+ expect(saved.rounds[0]).toMatchObject({
+  structure:{definition:{DBL5_config:{guard_trend_atr:.7}}},
+  impulse1115Position:{version:IMPULSE_1115_POSITION_VERSION,minDistancePct:1.8},
+  impulsePosition:{version:'impulse-low-5m-v1',minDistancePct:2.5},
+ });
+ expect(saved.rounds[1].impulse1115Position).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
+ fireEvent.click(screen.getByLabelText('同时启用原位置算法'));
+ expect(save().rounds[0].impulse1115Position.skipNative).toBe(true);
+ expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('严格低于本次 K');
+});
+
+it('keeps a saved combined 1115 position until the draft is explicitly changed',()=>{
+ const legacy={...defaultQualityAddition(),enabled:true,source:'structure',structure:{
+  ...defaultStructureAddition(),kSource:'guard',guardPlusVersion:DBL5_GUARD_PLUS_VERSION,
+ }} satisfies QualityAdditionRule;
+ render(<Editor initial={legacy}/>);
+ expect(screen.getByLabelText('急拉线-1115')).toBeDisabled();
+ expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
+ expect(save().impulse1115Position).toBeUndefined();
+ fireEvent.click(screen.getByRole('button',{name:'取消沿用组合位置'}));
+ fireEvent.click(screen.getByLabelText('急拉线-1115'));
+ expect(save().structure.guardPlusVersion).toBeUndefined();
+ expect(save().impulse1115Position.version).toBe(IMPULSE_1115_POSITION_VERSION);
+ expect(legacy.structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
 });
 
 it('selects the winning position for F and retains the chosen floor version on reopen', () => {

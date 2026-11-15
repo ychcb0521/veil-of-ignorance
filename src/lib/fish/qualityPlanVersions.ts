@@ -1,6 +1,6 @@
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
 import { expressionConditions } from './preEntryThreeStage';
-import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
@@ -202,6 +202,15 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     };
     addGuardPlusVersions(rounds,'primary');
     addGuardPlusVersions(a.alternativeRounds??[],'alternative');
+    for(const [lane,rules] of [['主分支',rounds],['进攻备选',a.alternativeRounds??[]]] as const){
+      rules.forEach((round,index)=>{
+        const position=round.impulse1115Position;
+        if(position)add(`addition-impulse-1115-${lane==='主分支'?'primary':'alternative'}-${index+1}`,
+          `第 ${index+1} 次加仓 · ${lane}`,IMPULSE_1115_POSITION_LABEL,
+          join([position.version,DBL5_GUARD_PLUS_VERSION,'参数 #'+shortFishHash(JSON.stringify([position,DBL5_GUARD_PLUS_PARAMS]))]),
+          boxAlgorithmVersion(position.version)?.summary);
+      });
+    }
     rounds.forEach((r, i) => {
       if (r.source === 'structure' && r.structure) {
         const v = structureVersions(r.structure), box = boxAlgorithmVersion(v.box), guard = v.guard ? boxAlgorithmVersion(v.guard) : undefined;

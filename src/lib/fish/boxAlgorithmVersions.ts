@@ -8,7 +8,7 @@
  *  3. src/lib/__tests__/boxAlgorithmVersions.test.ts 用固定 K 线锁住每个版本的输出；那里的期望值不能改，只能为新版本另加。
  */
 import type { StructureAdditionRule } from './qualityAdditionStructure';
-import { DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION } from '@/lib/dbl5GuardPlus';
+import { DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import { DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
 
 export type BoxAlgorithm = StructureAdditionRule['algorithm'];
@@ -50,6 +50,9 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
       '急拉一根收盘严格跌破或起点满 360 分钟时失效，保留与基线独立的事件。',
       '急拉起点参考，尚不代表回踩验证。量能仅作为辅助证据。'
     ] },
+  { id: IMPULSE_1115_POSITION_VERSION, algorithm: 'dbl5', layer: 'guard', label: IMPULSE_1115_POSITION_LABEL, since: '2026-11-15',
+    summary: '1115 的独立加仓位置。只有首次急拉可以触发，K 取当时有效的急拉参考。',
+    rules: ['沿用 1115 的阶段、过伸、失效和收盘确认规则。', '以急拉参考单独评估加仓，与同轮其他位置共用方向、否决和仓位计算。'] },
 ]);
 export const CURRENT_BOX_VERSION: Readonly<Record<BoxAlgorithm, string>> = Object.freeze({ dbl5: 'dbl-5-v2', sbs5m: 'sbs-5m-v1' });
 export const CURRENT_GUARD_VERSION = 'dbl5-guard-v1';

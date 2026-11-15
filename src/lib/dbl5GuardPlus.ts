@@ -5,6 +5,8 @@ import {
 
 export const DBL5_GUARD_PLUS_VERSION = 'dbl5-guard-impulse-1115-v1';
 export const DBL5_GUARD_PLUS_LABEL = 'DBL-5防守线+急拉-1115';
+export const IMPULSE_1115_POSITION_VERSION = 'holding-impulse-1115-position-v1';
+export const IMPULSE_1115_POSITION_LABEL = '急拉线-1115';
 export const DBL5_GUARD_PLUS_PARAMS = Object.freeze({
   interval: '5m', atrPeriod: DBL5_GUARD_DEFAULTS.atr_period, windowBars: 3,
   referenceBars: 69, minIncrements: 14, halfLifeBars: 12, breakoutBars: 3,

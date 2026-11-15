@@ -2,12 +2,12 @@ import { qualityHistoryFrom } from './qualityInitialization';
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,DBL5_GUARD_PLUS_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {assertStructureVersionsAvailable,CURRENT_GUARD_VERSION,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
-import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,type Dbl5GuardPlusCheckpoint,type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL,IMPULSE_1115_POSITION_VERSION,type Dbl5GuardPlusCheckpoint,type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
 import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import {sbsParameters,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {compileFishProgram} from './algorithm';
-import {fishDelay,validateFishBars} from './shared';
+import {FishError,fishDelay,validateFishBars} from './shared';
 import type {QualityAdditionFill} from './qualityAddition';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
@@ -133,10 +133,10 @@ export function structureAdditionK(e:StructureAdditionEvidence,atr:number):{k:nu
  if(ticks<=0n)return;
  const k=dbl5TickPrice(ticks,e.tickSize);return {k,bufferPrice:e.basePrice-k};
 }
-function guardPlusEvidence(rule:StructureAdditionRule, base:Dbl5Row, plus:Dbl5GuardPlusRow, raw:StructureAdditionEvidence|undefined, from:number, def:DeepDigFeatureDef):StructureAdditionEvidence|undefined {
- const early=plus.early_impulse_event, price=plus.guard_plus_value;
+function guardPlusEvidence(rule:StructureAdditionRule, base:Dbl5Row, plus:Dbl5GuardPlusRow, raw:StructureAdditionEvidence|undefined, from:number, def:DeepDigFeatureDef, impulseOnly:boolean):StructureAdditionEvidence|undefined {
+ const early=plus.early_impulse_event, price=impulseOnly?plus.impulse_guard_value:plus.guard_plus_value;
  if(price===null||!base.tick_size||!early&&!raw)return;
- const usesImpulse=plus.guard_source==='IMPULSE';
+ const usesImpulse=impulseOnly||plus.guard_source==='IMPULSE';
  if(!usesImpulse&&guardTrendOnly(rule)&&base.darvas_5m_guard_regime!=='trend')return;
  const regime=usesImpulse?'trend':base.darvas_5m_guard_regime;
  const closes=usesImpulse?1:base.darvas_5m_guard_closes;
@@ -147,7 +147,7 @@ function guardPlusEvidence(rule:StructureAdditionRule, base:Dbl5Row, plus:Dbl5Gu
   boxId:early?eventId:raw!.boxId,episodeId:base.episode_id,at:base.at,
   confirmedAt:early?early.detected_at:raw!.confirmedAt,supportPrice:early?price:raw!.supportPrice,
   upperPrice:base.darvas_5m_upper??price,nativeInvalidation:null,tickSize:base.tick_size,
-  algorithmVersion:DBL5_GUARD_PLUS_VERSION,definitionKey:definitionKey(def),
+  algorithmVersion:impulseOnly?IMPULSE_1115_POSITION_VERSION:DBL5_GUARD_PLUS_VERSION,definitionKey:definitionKey(def),
   parameters:{base:base.effective_parameters,impulse:DBL5_GUARD_PLUS_PARAMS},initializationStart:from,
   dataChecksum:base.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,
   basePrice:price,bufferUnit:rule.bufferUnit,buffer:usesImpulse?0:rule.buffer,
@@ -163,8 +163,9 @@ export type StructureSkip={at:number;support:number;reason:'gain'|'no-old-c'|'no
 export type StructureSkipReporter=(skip:StructureSkip)=>void;
 export function createStructureAdditionReader(o:ReaderOptions){
  const readers=new Map<string,{guardPlus?:boolean;supports:(until:number)=>Promise<readonly StructureSupportPoint[]>;read:(after:number,end:number,used:ReadonlySet<string>,gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'},onSkip?:StructureSkipReporter)=>Promise<Omit<QualityAdditionFill,'quantity'|'notional'>|undefined>}>();
- const getReader=(rule:StructureAdditionRule)=>{
-  validateStructureAddition(rule);const key=JSON.stringify(structureAdditionIdentity(rule));let reader=readers.get(key);
+ const getReader=(rule:StructureAdditionRule,impulseOnly=false)=>{
+  validateStructureAddition(rule);
+  const key=JSON.stringify([...structureAdditionIdentity(rule),...(impulseOnly?[IMPULSE_1115_POSITION_VERSION]:[])]);let reader=readers.get(key);
   if(!reader){
    const def=rule.guardPlusVersion?{...DBL5_GUARD_PLUS_DEF,DBL5_config:rule.definition.DBL5_config}:rule.definition;
    const compiled=compileFeatureFormula(def.formula),plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
@@ -185,11 +186,11 @@ export function createStructureAdditionReader(o:ReaderOptions){
      const plusRows=result.DBL5P_details&&new Map(result.DBL5P_details.map(point=>[point.at,point]));
      for(const row of rows){
       if(!row.data_valid){if(row.at!=null)invalid.push(row.at);lastBox=undefined;continue;}
-      const raw=structureAdditionSignal(rule,row,from);
+      const raw=impulseOnly?undefined:structureAdditionSignal(rule,row,from);
       const guarded=raw&&rule.kSource==='guard'?withGuard(raw,row as Dbl5Row):undefined;
       const rangeGuard=!!guarded&&guardTrendOnly(rule)&&guarded.guardRegime!=='trend';
       const plus=row.at!=null?plusRows?.get(row.at):undefined;
-      const e=plus?guardPlusEvidence(rule,row as Dbl5Row,plus,raw,from,def):
+      const e=plus?guardPlusEvidence(rule,row as Dbl5Row,plus,raw,from,def,impulseOnly):
        raw&&(rule.kSource==='current'?raw:rule.kSource==='guard'?(rangeGuard?undefined:guarded):withPreviousBox(rule,raw,lastBox));
       const box=structureActiveBox(rule,row);
       lastBox=box;
@@ -210,11 +211,11 @@ export function createStructureAdditionReader(o:ReaderOptions){
      if(stop?.())break;
     }
    };
-   reader={guardPlus:!!rule.guardPlusVersion,supports:async until=>{await advance(Math.floor(until/STEP)*STEP);return supportPoints.filter(p=>p.at<=until);},read:async(after,until,used,gain,onSkip)=>{
+   reader={guardPlus:!!rule.guardPlusVersion&&!impulseOnly,supports:async until=>{await advance(Math.floor(until/STEP)*STEP);return supportPoints.filter(p=>p.at<=until);},read:async(after,until,used,gain,onSkip)=>{
     const cut=Math.floor(until/STEP)*STEP;
     const reportDropped=(to:number)=>{if(onSkip)for(const d of dropped)if(d.at>after&&d.at<to&&!used.has(d.key))onSkip({at:d.at,support:d.support,reason:d.reason});};
     const eligible=(e:StructureAdditionEvidence)=>{
-     if(e.at<=after||e.at>=until||used.has(`${e.algorithm}:${e.boxId}`))return false;
+     if(e.at<=after||e.at>=until||used.has(`${e.algorithm}:${e.boxId}`)||impulseOnly&&invalid.some(t=>t<=e.at))return false;
      const early=e.guardPlus?.early_impulse_event;
      return !early||o.liveAt===undefined||o.liveAt>=early.available_at&&o.liveAt<early.fresh_until;
     };
@@ -225,18 +226,28 @@ export function createStructureAdditionReader(o:ReaderOptions){
      if(gain){if(!(gain.referencePrice>0)||!Number.isFinite(gain.referencePrice))throw Error('加仓涨幅基准价无效');if(close<gain.referencePrice*(1+gain.thresholdPct/100)){onSkip?.({at:e.at,support:e.supportPrice,reason:'gain',close,referencePrice:gain.referencePrice,thresholdPct:gain.thresholdPct});continue;}priceGate={...gain,basis:gain.basis??'real-average',observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at};}
      if(invalid.some(t=>t<=e.at))throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');
      reportDropped(e.at);
-     return {at:e.at,price:NaN,scanFrom:o.entry,reading:e.supportPrice,threshold:0,direction:'>',metric:'confirmed_support',label:e.event==='IMPULSE_EARLY'?`${DBL5_GUARD_PLUS_LABEL} · 首次急拉`:`${structureAlgorithmLabel(rule)} · ${structureTriggerLabel(rule)}`,featureId:def.id,definitionKey:e.definitionKey,barOpenTime:e.at-STEP,structureEvidence:structuredClone(e),...(priceGate?{priceGate}:{})};
+     return {at:e.at,price:NaN,scanFrom:o.entry,reading:e.supportPrice,threshold:0,direction:'>',metric:'confirmed_support',label:e.event==='IMPULSE_EARLY'?`${impulseOnly?IMPULSE_1115_POSITION_LABEL:DBL5_GUARD_PLUS_LABEL} · 首次急拉`:`${structureAlgorithmLabel(rule)} · ${structureTriggerLabel(rule)}`,featureId:impulseOnly?IMPULSE_1115_POSITION_VERSION:def.id,definitionKey:e.definitionKey,barOpenTime:e.at-STEP,structureEvidence:structuredClone(e),...(priceGate?{priceGate}:{})};
     }
-    if(invalid.some(t=>t<until))throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');
+    if(!impulseOnly&&invalid.some(t=>t<until))throw Error('箱体加仓行情或历史报价精度无效，不能作为加仓依据');
     reportDropped(until);
    }};readers.set(key,reader);
   }
   return reader;
  };
- const read=(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:{referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'},onSkip?:StructureSkipReporter)=>
-  getReader(rule).read(after,end,new Set(previous.flatMap(f=>f.structureEvidence?[`${f.structureEvidence.algorithm}:${f.structureEvidence.boxId}`]:[])),gain,onSkip);
+ type Gain={referencePrice:number;thresholdPct:number;basis?:'real-average'|'cost-line'};
+ const usedEvents=(previous:readonly QualityAdditionFill[])=>new Set(previous.flatMap(f=>f.structureEvidence?[`${f.structureEvidence.algorithm}:${f.structureEvidence.boxId}`]:[]));
+ const read=(rule:StructureAdditionRule,after:number,end:number,previous:readonly QualityAdditionFill[],gain?:Gain,onSkip?:StructureSkipReporter)=>
+  getReader(rule).read(after,end,usedEvents(previous),gain,onSkip);
  const readerFor=(rule:StructureAdditionRule)=>{validateStructureAddition(rule);return readers.get(JSON.stringify(structureAdditionIdentity(rule)));};
  return Object.assign(read,{
+  impulse1115:async(after:number,end:number,previous:readonly QualityAdditionFill[],gain?:Gain,onSkip?:StructureSkipReporter)=>{
+   const rule:StructureAdditionRule={...defaultStructureAddition(),trigger:'confirm',kSource:'guard',guardPlusVersion:DBL5_GUARD_PLUS_VERSION};
+   try{return await getReader(rule,true).read(after,end,usedEvents(previous),gain,onSkip);}
+   catch(error){
+    if(error instanceof FishError&&['history','gap','readings','skipped'].includes(error.kind))return;
+    throw error;
+   }
+  },
   /** 截至 until（含）每根已收盘 5 分钟线的支撑；该规则的读取器须已通过 read 建立。 */
   supports:async(rule:StructureAdditionRule,until:number):Promise<readonly StructureSupportPoint[]>=>{
    const reader=rule.guardPlusVersion?getReader(rule):readerFor(rule);return reader?reader.supports(until):[];

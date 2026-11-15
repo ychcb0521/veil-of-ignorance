@@ -80,7 +80,7 @@ function parseChangedMonitorDraft(plan: QualityGroup, draft: MonitorDraft, defin
     const oldFirst = plan.addition.rounds?.[0];
     if (oldFirst && same(roundDraftAt(draft, 0), roundDraftAt(original, 0))) {
       // Preserve the first-round fields duplicated on the root addition rule as well.
-      for (const key of ['source','structure','impulsePosition','stricterPct','condition','conditions','prerequisites','indicatorIncrease','minGainPct','entryBufferAtr','supportOffsetAtr','entryDistanceAtr','gainBasis','entryVetoes','detectorPrerequisite'] as const) {
+      for (const key of ['source','structure','impulsePosition','impulse1115Position','stricterPct','condition','conditions','prerequisites','indicatorIncrease','minGainPct','entryBufferAtr','supportOffsetAtr','entryDistanceAtr','gainBasis','entryVetoes','detectorPrerequisite'] as const) {
         if (plan.addition[key] === undefined) delete parsed.addition[key]; else restoreAdditionField(key);
       }
     }
