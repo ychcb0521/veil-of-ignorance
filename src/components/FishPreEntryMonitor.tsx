@@ -1,3 +1,4 @@
+import {createQualityTemplateDirectory} from '@/lib/fish/qualityTemplateDirectory';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import './FishConditionSettings.css';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
@@ -88,16 +89,20 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
           {!selectedOnly && (r.status === 'error' || rounds.get(r.roundId)?.state === 'paused') && <button type="button" disabled={monitor.running} className="text-primary disabled:opacity-40" onClick={() => void monitor.resume(r.roundId)}>{r.status === 'error' ? '重试本轮缺数据' : '继续本轮'}</button>}</td>
       </tr>;})}</tbody></table></div></>;
   }}</FishDeferredDetails>;
-  const getDirectoryItems = (): FishDirectoryItem[] => entryDirectoryGroups(archived).map(({ round, label, summary }) => ({
-    id: round.id, at: round.startedAt, label, summary, revision: archived,
-    study: () => entryDirectoryStudy(archived, round), details: close => renderEvidence(round.id, close),
-  }));
+  const getDirectoryItems = (): FishDirectoryItem[] => {
+    const templates = createQualityTemplateDirectory(state.study);
+    return entryDirectoryGroups(archived).map(({ round, label, summary }) => ({
+      id: round.id, at: round.startedAt, label, summary, revision: archived,
+      templateGroup: templates.groupPlans(round.plans ?? [], round),
+      study: () => entryDirectoryStudy(archived, round), details: close => renderEvidence(round.id, close),
+    }));
+  };
   return <FishLibraryTimeDirectory picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
-    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
-    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复时间目录与入选记录…'):items=>`${admittedCount} 条入选记录 · ${items.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
+    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
+    description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${admittedCount} 条入选记录 · ${items.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
     dataActions={!samplePicker && <FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)}} onImport={monitor.importLibrary}/>}
     download={()=>downloadDirectoryTables('筛选库',getDirectoryItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
-    info={<><p>与监测库共用时间目录，按轮次保存入选组合表，目录菜单可编辑并保存名称。手动保存的轮次包含各标的的判定结果，自动筛选照常记录入选。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开目录后，可选择记录导入组合表。下载和导入保留各版本历史。</p></>}
+    info={<><p>按冻结模板整理筛选轮次，按轮次保存入选组合表，目录菜单可编辑并保存名称。手动保存的轮次包含各标的的判定结果，自动筛选照常记录入选。</p><p>v8 在原信号时点判定一次必要条件。v7 支持多条准入取“或”和否决后重建起点，总截止时间不变。旧方案 v6 保留固定起点：⓪ 必要条件、① 防守线新事件、② 排除门槛（加仓否决／卖出／硬终止）同刻通过才入选；v5 旧轮次沿用原顺序，旧版筛选引擎已下线。</p><p>展开目录后，可选择记录导入组合表。下载和导入保留各版本历史。</p></>}
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
 }
 

@@ -15,8 +15,9 @@ import {serializeArchiveWork} from '../serializeArchiveWork';
 import {prepareStoredQuality} from './qualityBackup';
 import {restorePreEntryStudy} from './preEntryArchive';
 import { compactQualityStudyForStorage } from './qualityStudyCompact';
+import { permanentlyDeletedMonitorArchiveIds } from './qualityMonitorDeletion';
 import { assertQualityArchivesDetached } from './qualityArchiveDirectory';
-import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies } from './qualityArchiveStore';
+import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, purgeLocalQualityArchives, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies } from './qualityArchiveStore';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -59,7 +60,11 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
   if (pending) return pending;
   const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: applyQualitySourceRatings(applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner))) }));
   pendingReads.set(key, task);
-  void task.then(loaded => { void backfillQualityArchiveCounts(owner, loaded.study).finally(() => syncStoredQualityArchiveBodies(owner, loaded.study)); }, () => {});
+  void task.then(loaded => {
+    const removed = permanentlyDeletedMonitorArchiveIds(loaded.study.monitorLibrary);
+    if (removed.length) void purgeLocalQualityArchives(owner, removed).catch(() => {});
+    void backfillQualityArchiveCounts(owner, loaded.study).finally(() => syncStoredQualityArchiveBodies(owner, loaded.study));
+  }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };
   void task.then(release, release);
   return task;

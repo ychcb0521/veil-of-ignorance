@@ -35,7 +35,7 @@ it('defaults to the newest screening directory without replacing saved data, and
 it('opens the filter library from the source picker and changes the table only after a directory is chosen',async()=>{
  const {state,filterId}=fixture();render(<FishQuality state={state}/>);
  fireEvent.click(screen.getByRole('combobox',{name:'鱼质量的来源'}));fireEvent.click(screen.getByRole('option',{name:/^过滤库/}));
- const dialog=screen.getByRole('dialog');expect(within(dialog).getByRole('heading',{name:'时间目录'})).toBeInTheDocument();expect(state.restoreMonitorStudy).not.toHaveBeenCalled();
+ const dialog=screen.getByRole('dialog');expect(within(dialog).getByRole('heading',{name:'模板目录'})).toBeInTheDocument();expect(state.restoreMonitorStudy).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByLabelText('打开过滤归档 '+filterId));fireEvent.click(within(dialog).getByRole('button',{name:'选择此目录'}));
  await waitFor(()=>expect(state.restoreMonitorStudy).toHaveBeenCalledWith(expect.objectContaining({buyFilters:expect.arrayContaining([expect.objectContaining({threshold:.7})])}),undefined,true));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('combobox',{name:'鱼质量的来源'})).toHaveTextContent('过滤库');

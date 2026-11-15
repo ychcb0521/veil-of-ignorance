@@ -11,13 +11,16 @@
  */
 import type { FishQualityStudy } from './quality';
 import type { QualityMonitorArchive, QualityMonitorArchiveStudy } from './qualityMonitorLibrary';
+import { supabase } from '@/integrations/supabase/client';
 import { applyArchiveSourceDeletions } from './libraryDeletion';
 import { compactQualityRuns } from './qualityStudyCompact';
-import { hasSyncedImmutableAccountBlob, noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import { hasSyncedImmutableAccountBlob, readImmutableAccountBlobForVerification, noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 const DATABASE = 'veil-fish-quality-archives-v1', STORE = 'bodies';
 const ownerKey = (owner?: string | null) => owner ?? 'anonymous';
 const bodyKey = (owner: string | null | undefined, id: string) => `${ownerKey(owner)}\u0000${id}`;
+
+const purgedKey = (owner: string | null | undefined, id: string) => 'purged:' + bodyKey(owner,id);
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -38,8 +41,14 @@ async function getBody(owner: string | null | undefined, id: string): Promise<Qu
   const db = await open();
   try {
     return await new Promise((resolve, reject) => {
-      const req = db.transaction(STORE).objectStore(STORE).get(bodyKey(owner, id));
-      req.onsuccess = () => resolve(validBody(req.result) ? req.result : undefined); req.onerror = () => reject(req.error);
+      const store = db.transaction(STORE).objectStore(STORE), marker = store.get(purgedKey(owner,id));
+      marker.onsuccess = () => {
+        if (marker.result) { resolve(undefined); return; }
+        const req = store.get(bodyKey(owner,id));
+        req.onsuccess = () => resolve(validBody(req.result) ? req.result : undefined);
+        req.onerror = () => reject(req.error);
+      };
+      marker.onerror = () => reject(marker.error);
     });
   } finally { db.close(); }
 }
@@ -60,7 +69,10 @@ async function putBody(owner: string | null | undefined, id: string, body: Quali
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
-      if (body) store.put(body, bodyKey(owner, id)); else store.delete(bodyKey(owner, id));
+      if (body) {
+        const marker = store.get(purgedKey(owner,id));
+        marker.onsuccess = () => { if (marker.result) tx.abort(); else store.put(body,bodyKey(owner,id)); };
+      } else store.delete(bodyKey(owner, id));
       tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
     });
   } finally { db.close(); }
@@ -118,8 +130,8 @@ export async function detachQualityArchiveBodies(owner: string | null | undefine
   return stripStoredQualityArchiveBodies(owner, study);
 }
 
-/** 打开某份归档：先看总表里有没有内嵌，再读本机归档库，本机没有就从账号云端取回。按当前删除标记过滤后返回。 */
-export async function loadQualityMonitorArchive(owner: string | null | undefined, archive: QualityMonitorArchive, current: Pick<FishQualityStudy, 'resolvedLegacySources' | 'deletedSources' | 'deletedReadings'>): Promise<QualityMonitorArchiveStudy> {
+/** Read the original body for verification without applying display filters. */
+export async function readOriginalQualityArchive(owner: string | null | undefined, archive: QualityMonitorArchive): Promise<QualityMonitorArchiveStudy> {
   let body = archive.study;
   if (!body) { try { body = await getBody(owner, archive.id); } catch { /* 再试云端 */ } }
   if (!body && owner) {
@@ -129,7 +141,46 @@ export async function loadQualityMonitorArchive(owner: string | null | undefined
   }
   if (!body) throw new Error('这份归档的正文不在本机');
   storedIds(owner).add(archive.id);
-  return applyArchiveSourceDeletions(body, current);
+  return body;
+}
+
+export async function loadQualityMonitorArchive(owner: string | null | undefined, archive: QualityMonitorArchive, current: Pick<FishQualityStudy, 'resolvedLegacySources' | 'deletedSources' | 'deletedReadings'>): Promise<QualityMonitorArchiveStudy> {
+  return applyArchiveSourceDeletions(await readOriginalQualityArchive(owner, archive), current);
+}
+
+export async function readQualityArchiveForPurge(owner: string | undefined, archive: QualityMonitorArchive) {
+  if (!owner) return {body:await readOriginalQualityArchive(owner,archive), revision:null};
+  const blob=qualityArchiveBodyBlob(archive.id);
+  const {value,revision}=await readImmutableAccountBlobForVerification(blob,owner);
+  const body=value??archive.study??await getBody(owner,archive.id);
+  if(!validBody(body))throw Error('归档正文未能核验');
+  return {body,revision};
+}
+
+/** Match the checked revision immediately before removing its parts. */
+export async function purgeCloudQualityArchives(owner: string | undefined, archives: readonly {id:string;revision:string|null}[]): Promise<void> {
+  if (!owner || !archives.length) return;
+  const { error } = await supabase.rpc('purge_quality_monitor_archives' as never, {
+    p_owner: owner, p_archive_ids: archives.map(archive=>archive.id), p_expected_revisions: archives.map(archive=>archive.revision),
+  } as never);
+  if (error) throw Error('云端归档版本已变化或暂不可用，请重新核验后再删除');
+}
+
+export async function purgeLocalQualityArchives(owner: string | undefined, ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  const db = await open();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+      for (const id of ids) {
+        store.put(true,purgedKey(owner,id));
+        store.delete(bodyKey(owner,id));
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? Error('本机归档未能删除，请重试'));
+    });
+    for (const id of ids) storedIds(owner).delete(id);
+  } finally { db.close(); }
 }
 
 /**

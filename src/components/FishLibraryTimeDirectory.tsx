@@ -1,5 +1,6 @@
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ChevronDown,Database,Download,MoreHorizontal,Copy,Trash2,Undo2,Pencil} from 'lucide-react';
+import {unknownTemplateGroup,type QualityTemplateDirectoryGroup} from '@/lib/fish/qualityTemplateDirectory';
 import {DIRECTORY_NAME_MAX_LENGTH,type LibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle,DialogTrigger} from './ui/dialog';
 import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from './ui/dropdown-menu';
@@ -11,6 +12,8 @@ import {combineDirectoryStudies} from '@/lib/fish/qualityDirectorySelection';
 export interface FishDirectoryItem {
   id:string; at:number; label:string; summary:string; note?:string; sourceRoundId?:string;
   revision?:unknown;
+  templateGroup?:QualityTemplateDirectoryGroup;
+  purgeable?: boolean;
   details?:ReactNode|((close:()=>void)=>ReactNode);
   study:()=>FishQualityStudy|Promise<FishQualityStudy>;
 }
@@ -30,21 +33,24 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onDeleteRecords,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
   loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(handleExport:()=>void,canExport:boolean)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
   onDeleteRecords?:(id:string)=>void;
+  onPurgeDirectory?:(ids:readonly string[])=>Promise<{removed:readonly string[];retained:readonly string[]}>;
   renderStudy?:(study:FishQualityStudy, close?: () => void)=>ReactNode;
   onCopyStudy?:(study:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;
-  onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;empty:string;kind?:'time'|'algorithm';onOpenChange?:(open:boolean)=>void;
+  onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;empty:string;kind?:'time'|'algorithm'|'template';onOpenChange?:(open:boolean)=>void;
   openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,study:FishQualityStudy,ids?:string[])=>Promise<boolean>;
 }){
   const [open,setOpen]=useState(false),[selectedId,setSelectedId]=useState(''),[showDeleted,setShowDeleted]=useState(false),[deleteId,setDeleteId]=useState(''),[busy,setBusy]=useState(''),[error,setError]=useState('');
   const [loaded,setLoaded]=useState<{id:string;study?:FishQualityStudy;error?:string}>();
   const [loadAttempt,setLoadAttempt]=useState(0);
   const [checkedIds,setCheckedIds]=useState<string[]>([]);
+  const [purgeMode,setPurgeMode]=useState(false),[confirmPurge,setConfirmPurge]=useState(false),[purgeMessage,setPurgeMessage]=useState('');
+  const [expandedGroups,setExpandedGroups]=useState<Record<string,boolean>>({});
   const [editingId,setEditingId]=useState(''),[draftName,setDraftName]=useState('');
   const selectionEpoch=useRef(0);
   useEffect(()=>()=>{selectionEpoch.current++;},[]);
@@ -68,7 +74,32 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const archiveError=currentLoad?.error;
   const visible=useMemo(()=>items.filter(item=>showDeleted||!edits?.[item.id]?.hidden).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind]);
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
-  const selectable=visible.filter(item=>!edits?.[item.id]?.hidden),checked=selectable.filter(item=>checkedIds.includes(item.id));
+  const selectable=visible.filter(item=>purgeMode ? item.purgeable : !edits?.[item.id]?.hidden);
+  const checkedSet=new Set(checkedIds),checked=selectable.filter(item=>checkedSet.has(item.id));
+  const grouping = useMemo(() => {
+    if (kind !== 'template') return [];
+    const groups = new Map<string,{group:QualityTemplateDirectoryGroup;items:FishDirectoryItem[]}>();
+    for (const item of visible) {
+      const group = item.templateGroup ?? unknownTemplateGroup;
+      const bucket = groups.get(group.id);
+      if (bucket) bucket.items.push(item);
+      else groups.set(group.id,{group,items:[item]});
+    }
+    return [...groups.values()];
+  },[kind,visible]);
+  const purge = async () => {
+    if (!onPurgeDirectory || busy || !checked.length) return;
+    setBusy('purge'); setError(''); setPurgeMessage('');
+    try {
+      const answer=await onPurgeDirectory(checked.map(item=>item.id));
+      if (answer.removed.includes(selectedId)) setSelectedId('');
+      setCheckedIds(ids=>ids.filter(id=>!answer.removed.includes(id)));
+      setConfirmPurge(false);
+      setPurgeMessage('已永久删除 '+answer.removed.length+' 项'+(answer.retained.length?'，保护或无法核验的 '+answer.retained.length+' 项已保留。':'。'));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '永久删除未完成，请重试');
+    } finally { setBusy(''); }
+  };
   const applySelection=async()=>{
     if(!onSelectDirectory||!checked.length||busy||loading||loadError)return;const epoch=selectionEpoch.current;setBusy('selection');setError('');
     try{
@@ -93,7 +124,11 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
     try{if(!await onCopyStudy(snapshot,selected?.sourceRoundId))throw Error('副本未载入，当前总表仍保留，请重试');setOpen(false);onOpenChange?.(false);}
     catch(e){setError(e instanceof Error?e.message:'复制失败');}finally{setBusy('');}
   };
-  const changeOpen=(value:boolean)=>{selectionEpoch.current++;setOpen(value);onOpenChange?.(value);};
+  const changeOpen=(value:boolean)=>{
+    if(!value&&busy==='purge')return;
+    selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
+    if(!value){setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+  };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError;
   const handleExport=()=>{
     if (!canExport) return;
@@ -106,30 +141,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       finally { setBusy(''); }
     })();
   };
-  return <Dialog open={open} onOpenChange={changeOpen}>
-    <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
-    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
-      <DialogHeader className="shrink-0 space-y-1 text-left">
-        <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
-          <DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
-          {transferMenu ? <div className="ml-auto">{transferMenu(handleExport,canExport)}</div> :
-            <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
-        </div>
-        <DialogDescription className="text-[11px]">{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
-      </DialogHeader>
-      <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':'时间目录'}</h3>
-      <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
-        {onSelectDirectory&&<div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2 text-[11px]">
-          <label className="inline-flex items-center gap-2"><input type="checkbox" aria-label={'全选'+name+'可见目录'} ref={el=>{if(el)el.indeterminate=checked.length>0&&checked.length<selectable.length;}} disabled={loading||!!loadError||!!busy||!selectable.length} checked={!!selectable.length&&checked.length===selectable.length} onChange={e=>setCheckedIds(e.target.checked?selectable.map(item=>item.id):[])}/>全选可见目录</label>
-          <button type="button" className={action} disabled={loading||!!loadError||!!busy||!checkedIds.length} onClick={()=>setCheckedIds([])}>清空选择</button>
-          <span className="text-muted-foreground">可选一个或多个目录</span>
-          <button type="button" className={action+' ml-auto text-primary'} disabled={loading||!!loadError||!!busy||!checked.length} onClick={()=>void applySelection()}>{busy==='selection'?'正在载入…':`应用所选目录（${checked.length}）`}</button>
-        </div>}
-        {!picker&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
-        {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
-        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{empty}</p>}
-        {visible.map(item=><div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
-          <div className="flex items-center">{onSelectDirectory&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||!!edits?.[item.id]?.hidden} checked={checkedIds.includes(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>setSelectedId(selectedId===item.id?'':item.id)}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind==='time'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span><span className="text-muted-foreground">{item.summary}</span></button>
+  const renderItem = (item: FishDirectoryItem) => <div key={item.id} className={'group/archive rounded-lg border border-border/60 '+(edits?.[item.id]?.hidden?'opacity-60':'')} data-testid={prefix+'-archive-item'}>
+          <div className="flex items-center">{(onSelectDirectory||purgeMode)&&<input type="checkbox" className="ml-3 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]" aria-label={'选择'+name+'目录 '+(edits?.[item.id]?.name||item.label)+' '+item.id} disabled={loading||!!loadError||!!busy||confirmPurge||(purgeMode ? !item.purgeable : !!edits?.[item.id]?.hidden)} checked={checkedSet.has(item.id)} onChange={e=>setCheckedIds(ids=>e.target.checked?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id))}/>}<button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-3 p-3 text-left text-[11px] hover:bg-muted/40" aria-label={'打开'+noun+' '+item.id} aria-expanded={selectedId===item.id} onClick={()=>setSelectedId(selectedId===item.id?'':item.id)}><ChevronDown className={'h-3 w-3 '+(selectedId===item.id?'rotate-180':'')}/>{kind!=='algorithm'&&<span className="font-mono">{formatUTC8(item.at)}</span>}<span className="font-medium">{edits?.[item.id]?.name||item.label}</span><span className="text-muted-foreground">{item.summary}</span></button>
             {(onSetHidden||onRename||onDeleteRecords)&&<DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={'管理'+noun+' '+item.id} disabled={loading||!!loadError||!!busy} className="mr-2 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted group-hover/archive:opacity-100 group-focus-within/archive:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5"/></button></DropdownMenuTrigger><DropdownMenuContent align="end">{onRename&&<DropdownMenuItem onSelect={()=>{setEditingId(item.id);setDraftName(edits?.[item.id]?.name??'');setDeleteId('');setError('');}}><Pencil className="mr-2 h-3 w-3"/>编辑名称</DropdownMenuItem>}{onDeleteRecords&&<DropdownMenuItem className="text-destructive" onSelect={()=>onDeleteRecords(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录记录</DropdownMenuItem>}{onSetHidden&&(edits?.[item.id]?.hidden?<DropdownMenuItem onSelect={()=>void hide(item.id,false)}><Undo2 className="mr-2 h-3 w-3"/>恢复目录</DropdownMenuItem>:<DropdownMenuItem className="text-destructive" onSelect={()=>setDeleteId(item.id)}><Trash2 className="mr-2 h-3 w-3"/>删除目录</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
           </div>
           {editingId===item.id&&<form className="flex flex-wrap items-center gap-2 border-t px-3 py-3 text-[11px]" onSubmit={e=>{e.preventDefault();void rename();}}>
@@ -146,7 +159,66 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <div key={selectedId}>{renderStudy?.(snapshot,()=>changeOpen(false))??<p className="px-4 py-3 text-xs text-muted-foreground">{snapshot.results.length} 项运行结果 · 可复制至组合表继续操作</p>}</div>
             {typeof item.details==='function'?item.details(()=>changeOpen(false)):item.details}
           </div>}
-        </div>)}
+        </div>;
+  return <Dialog open={open} onOpenChange={changeOpen}>
+    <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
+    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
+      <DialogHeader className="shrink-0 space-y-1 text-left">
+        <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
+          <DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
+          {transferMenu ? <div className="ml-auto">{transferMenu(handleExport,canExport)}</div> :
+            <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
+        </div>
+        <DialogDescription className="text-[11px]">{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
+      </DialogHeader>
+      <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
+      <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
+        {onPurgeDirectory&&!picker&&<div className="flex flex-wrap items-center gap-2 text-xs">
+          <button type="button" disabled={!!busy||loading} className={action} onClick={()=>{
+            setPurgeMode(!purgeMode);setCheckedIds([]);setConfirmPurge(false);setError('');setPurgeMessage('');
+          }}>{purgeMode?'退出批量删除':'批量删除'}</button>
+          {purgeMode&&<>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" aria-label="全选可删除目录"
+              ref={element=>{if(element)element.indeterminate=checked.length>0&&checked.length<selectable.length;}}
+              checked={!!selectable.length&&checked.length===selectable.length}
+              disabled={!selectable.length||!!busy||confirmPurge}
+              onChange={event=>setCheckedIds(event.target.checked?selectable.map(item=>item.id):[])}/>全选可删除目录</label>
+            <button type="button" className={action+' text-destructive'} disabled={!checked.length||!!busy||confirmPurge}
+              onClick={()=>setConfirmPurge(true)}>永久删除所选（{checked.length}）</button>
+          </>}
+        </div>}
+        {confirmPurge&&<div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 p-2 text-xs">
+          <span>永久删除所选 {checked.length} 项？此操作不可恢复。交易战役及其依赖的数据会保留。</span>
+          <button type="button" className={action+' text-destructive'} disabled={!!busy} onClick={()=>void purge()}>{busy==='purge'?'正在核验并删除…':'确认永久删除'}</button>
+          <button type="button" className={action} disabled={!!busy} onClick={()=>setConfirmPurge(false)}>取消</button>
+        </div>}
+        {purgeMessage&&<p role="status" className="text-xs text-muted-foreground">{purgeMessage}</p>}
+        {onSelectDirectory&&<div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2 text-[11px]">
+          <label className="inline-flex items-center gap-2"><input type="checkbox" aria-label={'全选'+name+'可见目录'} ref={el=>{if(el)el.indeterminate=checked.length>0&&checked.length<selectable.length;}} disabled={loading||!!loadError||!!busy||!selectable.length} checked={!!selectable.length&&checked.length===selectable.length} onChange={e=>setCheckedIds(e.target.checked?selectable.map(item=>item.id):[])}/>全选可见目录</label>
+          <button type="button" className={action} disabled={loading||!!loadError||!!busy||!checkedIds.length} onClick={()=>setCheckedIds([])}>清空选择</button>
+          <span className="text-muted-foreground">可选一个或多个目录</span>
+          <button type="button" className={action+' ml-auto text-primary'} disabled={loading||!!loadError||!!busy||!checked.length} onClick={()=>void applySelection()}>{busy==='selection'?'正在载入…':`应用所选目录（${checked.length}）`}</button>
+        </div>}
+        {!picker&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
+        {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
+        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{empty}</p>}
+        {kind==='template'?grouping.map(({group,items:members},index)=>{
+          const containsSelection=members.some(item=>item.id===selectedId);
+          const expanded=containsSelection||(expandedGroups[group.id]??index===0);
+          const checkedCount=members.filter(item=>checkedSet.has(item.id)).length;
+          return <section key={group.id} className="rounded-lg border border-border/60" data-testid={prefix+'-template-group'}>
+            <button type="button" aria-expanded={expanded} className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-left text-xs hover:bg-muted/60"
+              onClick={()=>{
+                if(expanded&&containsSelection)setSelectedId('');
+                setExpandedGroups(previous=>({...previous,[group.id]:!expanded}));
+              }}>
+              <ChevronDown aria-hidden className={'h-3.5 w-3.5 '+(expanded?'rotate-180':'')}/>
+              <span className="min-w-0 flex-1 break-words font-medium">{group.title}</span>
+              <span className="shrink-0 text-muted-foreground">{members.length} 项{checkedCount>0?' · 已选 '+checkedCount:''}</span>
+            </button>
+            {expanded&&<div className="space-y-2 p-2">{members.map(renderItem)}</div>}
+          </section>;
+        }):visible.map(renderItem)}
       </div>
       {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}
     </DialogContent>

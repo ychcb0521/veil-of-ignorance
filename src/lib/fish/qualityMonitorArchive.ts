@@ -1,4 +1,5 @@
 import {renameLibraryDirectoryEdit} from './libraryDirectoryEdits';
+import {createQualityTemplateDirectory} from './qualityTemplateDirectory';
 import {newQualityStudy,qualityDisplayRows,qualityComparisonRows,qualityResultKey,qualityFilterReadingKey,type FishQualityStudy,type QualitySample,type QualityGroup} from './quality';
 import {archiveQualityMonitorStudy,qualityMonitorRoundRecordIds,type QualityMonitorRound} from './qualityMonitorLibrary';
 import {librarySignalIdentity} from './libraryRounds';
@@ -37,7 +38,7 @@ export function copyMonitorStudy(current:FishQualityStudy,snapshot:FishQualitySt
   if(round){
    const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...frozen}=structuredClone(snapshot);
    const id=`monitor-round-snapshot-${round.id}`,edit=current.monitorLibrary.directoryEdits?.[round.id];
-   source={...current,monitorLibrary:{...current.monitorLibrary,...(edit?{directoryEdits:{...current.monitorLibrary.directoryEdits,[id]:{...edit}}}:{}),archives:[...(current.monitorLibrary.archives??[]),{id,version:1,createdAt:round.startedAt,reason:'copy-source',sourceRoundId:round.id,study:frozen}]}};
+   source={...current,monitorLibrary:{...current.monitorLibrary,...(edit?{directoryEdits:{...current.monitorLibrary.directoryEdits,[id]:{...edit}}}:{}),archives:[...(current.monitorLibrary.archives??[]),{id,version:1,createdAt:round.startedAt,reason:'copy-source',sourceRoundId:round.id,templateDirectory:createQualityTemplateDirectory(current).groupPlans(snapshot.sellPlans ?? []),study:frozen}]}};
   }
  }
  const saved=archiveQualityMonitorStudy(source,at,'copy'),copy=structuredClone(snapshot);

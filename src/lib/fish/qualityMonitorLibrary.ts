@@ -1,4 +1,6 @@
+import {pruneDeletedMonitorEntries} from './qualityMonitorDeletion';
 import {mergeLibraryDirectoryEdits} from './libraryDirectoryEdits';
+import {createQualityTemplateDirectory, type QualityTemplateDirectoryGroup} from './qualityTemplateDirectory';
 import { qualityMonitoringSample, qualityRowMonitorTimeBasis, type QualityMonitorTimeBasis } from './qualityAdmissionTime';
 import { qualityAdvantageIdentity } from './qualityAdvantage';
 import {qualityVetoStagesIdentity} from './qualityVetoStages';
@@ -37,6 +39,8 @@ export interface QualityMonitorRound {
 }
 /** 还原某一轮的完整记录编号（沿差异链回溯到存完整清单的那一轮）。基准缺失时只算本轮新增的部分。 */
 export function qualityMonitorRoundRecordIds(library: Pick<QualityMonitorLibrary, 'rounds'>, round: QualityMonitorRound, cache = new Map<string, string[]>()): string[] {
+  const previous = cache.get(round.id);
+  if (previous) return previous;
   const byId = new Map(library.rounds.map(r => [r.id, r]));
   const chain: QualityMonitorRound[] = [];
   const seen = new Set<string>();
@@ -91,7 +95,9 @@ export type QualityMonitorArchiveStudy=Omit<FishQualityStudy,'monitorLibrary'|'f
  */
 export interface QualityMonitorArchive {id:string;version:1;createdAt:number;reason:'restart'|'copy'|'copy-source';sourceRoundId?:string;study?:QualityMonitorArchiveStudy;
   /** 目录显示用的运行结果数：正文移走时记下，目录不必为它读正文。 */
-  resultCount?:number}
+  resultCount?:number;
+  templateDirectory?: QualityTemplateDirectoryGroup;
+}
 /** 目录里的「N 项运行结果」：正文在就数正文，不在就用目录里记下的数；都没有返回 null（只读目录项时绝不能去碰 study）。 */
 export function qualityMonitorArchiveResultCount(archive:QualityMonitorArchive):number|null{return archive.study?archive.study.results.length:Number.isFinite(archive.resultCount)?archive.resultCount!:null;}
 /** Save the whole current table, including rows outside today's filters/selection. */
@@ -100,7 +106,7 @@ export function archiveQualityMonitorStudy(study:FishQualityStudy,at=Date.now(),
   const library=study.monitorLibrary??empty();
   const {monitorLibrary:_monitor,filterLibrary:_filter,campaignRepair:_repair,...table}=study;
   const latest=library.rounds.filter(r=>!r.legacy).reduce<QualityMonitorRound|undefined>((last,r)=>!last||r.startedAt>=last.startedAt?r:last,undefined)??library.rounds.at(-1);
-  const archive:QualityMonitorArchive={id:`monitor-archive-${at}-${++sequence}-${Math.random().toString(36).slice(2,10)}`,version:1,createdAt:at,reason,sourceRoundId:latest?.id,study:structuredClone(table)};
+  const archive:QualityMonitorArchive={id:`monitor-archive-${at}-${++sequence}-${Math.random().toString(36).slice(2,10)}`,version:1,createdAt:at,reason,sourceRoundId:latest?.id,templateDirectory:createQualityTemplateDirectory(study).groupPlans(study.sellPlans ?? []),study:structuredClone(table)};
   return {...study,monitorLibrary:{...library,archives:[...(library.archives??[]),archive]}};
 }
 interface MonitorTask { id: string; setting: QualityMonitorSetting; sample: QualitySample; plan: QualityGroup; resultKey: string }
@@ -202,11 +208,16 @@ export function recoverQualityMonitorRounds(input: FishQualityStudy, at = Date.n
 /** Additive history must survive stale tabs and repair-only writes. */
 export function preserveQualityMonitorLibrary(saved: FishQualityStudy | undefined, incoming: FishQualityStudy): FishQualityStudy {
   const a = saved?.monitorLibrary, b = incoming.monitorLibrary;
-  if (!a) return incoming; if (!b) return { ...incoming, monitorLibrary: a };
+  if (!a) return b ? {...incoming,monitorLibrary:pruneDeletedMonitorEntries(b)} : incoming;
+  if (!b) return { ...incoming, monitorLibrary: pruneDeletedMonitorEntries(a) };
   const settings = new Map(a.settings.map(s => [s.id, s])); b.settings.forEach(s => settings.set(s.id, s));
   const records = new Map(a.records.map(r => [r.id, r])); for (const r of b.records) { const old = records.get(r.id); if (!old || old.updatedAt < r.updatedAt || old.updatedAt === r.updatedAt && (r.result || !old.result)) records.set(r.id, r); }
   const rounds = new Map(a.rounds.map(r => [r.id, r])); for (const r of b.rounds) { const old = rounds.get(r.id); if (!old || old.updatedAt < r.updatedAt || old.updatedAt === r.updatedAt && (r.state !== 'running' || old.state === 'running')) rounds.set(r.id, r); }
-  const archives=new Map((a.archives??[]).map(s=>[s.id,s]));for(const s of b.archives??[])if(!archives.has(s.id))archives.set(s.id,s);
+  const archives=new Map((a.archives??[]).map(s=>[s.id,s]));for(const s of b.archives??[]){
+    const old=archives.get(s.id);
+    if(!old)archives.set(s.id,s);
+    else if(!old.templateDirectory&&s.templateDirectory)archives.set(s.id,{...old,templateDirectory:s.templateDirectory});
+  }
   const directoryEdits=mergeLibraryDirectoryEdits(a.directoryEdits,b.directoryEdits);
-  return { ...incoming, monitorLibrary: { ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()],...(archives.size?{archives:[...archives.values()]}:{}) } };
+  return { ...incoming, monitorLibrary: pruneDeletedMonitorEntries({ ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()],...(archives.size?{archives:[...archives.values()]}:{}) }) };
 }

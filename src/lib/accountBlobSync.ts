@@ -106,9 +106,12 @@ async function putRecord(key: string, value: unknown): Promise<void> {
 const readMeta = (name: string, owner: string) => getRecord<Meta>(`meta:${idOf(name, owner)}`);
 
 /** A local receipt for an immutable body. Mutable stores must still reconcile. */
-export async function hasSyncedImmutableAccountBlob(name: string, owner: string): Promise<boolean> {
+export async function syncedImmutableAccountBlobRevision(name: string, owner: string): Promise<string | undefined> {
   const meta = await readMeta(name, owner);
-  return !!meta?.rev && (meta.parts ?? 0) > 0 && meta.syncedAt >= meta.savedAt;
+  return meta?.rev && (meta.parts ?? 0) > 0 && meta.syncedAt >= meta.savedAt ? meta.rev : undefined;
+}
+export async function hasSyncedImmutableAccountBlob(name: string, owner: string): Promise<boolean> {
+  return !!await syncedImmutableAccountBlobRevision(name,owner);
 }
 const writeMeta = (name: string, owner: string, meta: Meta) => putRecord(`meta:${idOf(name, owner)}`, meta);
 
@@ -464,6 +467,23 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
     if (loads.get(id) === load) loads.delete(id);
     controller.abort();
   });
+}
+
+/** Verification only. Do not adopt, back up or overwrite either copy. */
+export async function readImmutableAccountBlobForVerification<T>(adapter: AccountBlobAdapter<T>, owner: string) {
+  if (!await signedInAs(owner)) throw Error('账号已切换，请重新打开归档');
+  const signal=AbortSignal.timeout(180_000);
+  const head=await fetchHead(adapter.name,owner,signal);
+  if(!head||head.deleted)return {value:undefined,revision:head?.rev??null};
+  if(await syncedImmutableAccountBlobRevision(adapter.name,owner)===head.rev){
+    const local=await adapter.read(owner);
+    if(local!==undefined&&await syncedImmutableAccountBlobRevision(adapter.name,owner)===head.rev){
+      return {value:local,revision:head.rev};
+    }
+  }
+  const cloud=await fetchValue(adapter.name,owner,head,adapter.decodeRemote,signal);
+  if(!cloud.ok||cloud.value==null)throw Error('云端归档分片不完整或版本已变化');
+  return {value:cloud.value as T,revision:head.rev};
 }
 
 /** 本机存储每次保存成功后调用：记下「改过未上传」，几秒后上传（连续保存只传最后一版）。 */

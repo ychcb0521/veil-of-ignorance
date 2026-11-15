@@ -35,7 +35,9 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityMonitorRunSamples, qualityComparisonRows, qualityDisplayRows, qualityEntryIdentity, qualityMiningEntryKey, type QualityGroup, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualitySellCombo, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, ensureQualitySellCombo, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
-import { loadQualityMonitorArchive, stripStoredQualityArchiveBodies } from '@/lib/fish/qualityArchiveStore';
+import { createQualityTemplateDirectory } from '@/lib/fish/qualityTemplateDirectory';
+import { archiveDeletionGuard, isPermanentlyDeletedMonitorEntry, markMonitorEntriesDeleted } from '@/lib/fish/qualityMonitorDeletion';
+import { loadQualityMonitorArchive, readQualityArchiveForPurge, purgeCloudQualityArchives, purgeLocalQualityArchives, stripStoredQualityArchiveBodies } from '@/lib/fish/qualityArchiveStore';
 import type { QualityMonitorArchive } from '@/lib/fish/qualityMonitorLibrary';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
 import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/qualityVeto';
@@ -662,6 +664,44 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       change(s=>preserveQualityMonitorLibrary(next,s));return true;
     }catch(e){if(account.current===savedOwner&&generation.current===epoch)setError(e instanceof Error?e.message:'目录修改失败');return false;}
   },[change]);
+  const purgeMonitorEntries=useCallback(async(ids:readonly string[])=>{
+    if(!readyRef.current||archiveLock.current||controller.current)throw Error('请先暂停当前监测并等待进度保存');
+    const owner=account.current,epoch=generation.current,before=current.current,library=before.monitorLibrary;
+    if(!library||!ids.length)return {removed:[],retained:[]};
+    const archiveById=new Map(library.archives?.map(archive=>[archive.id,archive]));
+    const rounds=new Map(library.rounds.map(round=>[round.id,round]));
+    const canPurgeArchive=archiveDeletionGuard(before),archives:{id:string;revision:string|null}[]=[],removed:string[]=[],retained:string[]=[];
+    archiveLock.current=true;setArchiving(true);
+    try {
+      for(const id of new Set(ids)){
+        if(account.current!==owner||generation.current!==epoch)throw Error('账号已切换，请重新打开监测库');
+        const round=rounds.get(id),archive=archiveById.get(id);
+        if(archive){
+          try{
+            const {body,revision}=await readQualityArchiveForPurge(owner,archive);
+            if(!canPurgeArchive(body)){retained.push(id);continue;}
+            archives.push({id,revision});removed.push(id);
+          }catch{retained.push(id);continue;}
+        }else if(round&&(round.state==='complete'||round.state==='failed')){
+          removed.push(id);
+        }else retained.push(id);
+      }
+      if(!removed.length)return {removed,retained};
+      if(account.current!==owner||generation.current!==epoch)throw Error('账号已切换，请重新打开监测库');
+      const live=current.current;
+      if(live.campaignRuns!==before.campaignRuns||live.results!==before.results||live.planTemplates!==before.planTemplates)
+        throw Error('核验期间战役、模板或运行结果有更新，请重新核验');
+      const next=markMonitorEntriesDeleted(live,removed);
+      await purgeCloudQualityArchives(owner,archives);
+      // Keep the local body available for another attempt if the directory write fails.
+      if(!await saveQualityStudy(owner,next,{repairOnly:true}))throw Error('删除标记未保存，本机正文仍可重试');
+      await purgeLocalQualityArchives(owner,archives.map(archive=>archive.id));
+      if(account.current===owner&&generation.current===epoch)change(s=>preserveQualityMonitorLibrary(next,s));
+      return {removed,retained};
+    }finally{
+      if(account.current===owner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}
+    }
+  },[change]);
   const setLibraryEntryHidden=useCallback(async(id:string,hidden:boolean)=>{
     if(!readyRef.current||archiveLock.current)return false;
     const savedOwner=account.current,epoch=generation.current,next=editLibraryDirectory(current.current,id,hidden);
@@ -696,7 +736,20 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     finally{if(account.current===savedOwner&&generation.current===epoch){archiveLock.current=false;setArchiving(false);}}
   },[cancel,stopFilter,entry.cancel,postExit.cancel,change]);
   /** 打开一份完整归档：正文按需从本机归档库（或账号云端）读出。 */
-  const loadMonitorArchive=useCallback((archive:QualityMonitorArchive)=>loadQualityMonitorArchive(account.current,archive,current.current),[]);
+  const loadMonitorArchive=useCallback(async(archive:QualityMonitorArchive)=>{
+    const base=current.current,owner=account.current,epoch=generation.current;
+    if(isPermanentlyDeletedMonitorEntry(base.monitorLibrary,archive.id))throw Error('这份归档已永久删除');
+    const body=await loadQualityMonitorArchive(owner,archive,base);
+    if(!archive.templateDirectory&&body.sellPlans?.length&&generation.current===epoch&&account.current===owner){
+      const group=createQualityTemplateDirectory(base).groupPlans(body.sellPlans);
+      change(study=>{
+        const library=study.monitorLibrary;
+        if(!library?.archives?.some(item=>item.id===archive.id&&!item.templateDirectory))return study;
+        return {...study,monitorLibrary:{...library,archives:library.archives.map(item=>item.id===archive.id?{...item,templateDirectory:group}:item)}};
+      });
+    }
+    return body;
+  },[change]);
   // 挖到的鱼自动导入和勾选；只有已经主动开始监测，才把新鱼接到监测任务中。
   useEffect(() => {
     if (workspaceMode || !ready || !readyRef.current) return;
@@ -953,12 +1006,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
     restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
     resume: async (roundId: string) => { if (canResumeScreening(roundId)) await preEntry.resume(roundId, current.current); } };
-  return {workspace: workspaceMode ? {sources:workspaceSources,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+  return {workspace: workspaceMode ? {sources:workspaceSources,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,purgeMonitorEntries,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
 type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'>>;
 type AutomationMonitorFields = 'startAutomatic' | 'pauseAutomatic' | 'automaticRunning' | 'automaticError' | 'savedLibrary' | 'saveWorkspaceScreening' | 'savingWorkspaceDraft';
 type QualityPreEntryView = Omit<CompleteFishQualityState['preEntry'], AutomationMonitorFields> & Partial<Pick<CompleteFishQualityState['preEntry'], AutomationMonitorFields>>;
-export type FishQualityState=Omit<CompleteFishQualityState,'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'> & Partial<Pick<CompleteFishQualityState,'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'>> & { preEntry?: QualityPreEntryView; cdaTracking?: FishCdaTracking; instantMonitor?: ReturnType<typeof import('./useInstantMonitorSettings').useInstantMonitorSettings>; automaticScreening?: { paused: boolean; pending: number; awaitingMail: number; storageIssue: boolean; attemptIssue?: string; settings?: PreEntrySettings; saveSettings?: (plans: QualityGroup[], hours: number) => Promise<void>; setAutoPaused: (paused: boolean) => void } };
+export type FishQualityState=Omit<CompleteFishQualityState,'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'purgeMonitorEntries'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'> & Partial<Pick<CompleteFishQualityState,'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'purgeMonitorEntries'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'>> & { preEntry?: QualityPreEntryView; cdaTracking?: FishCdaTracking; instantMonitor?: ReturnType<typeof import('./useInstantMonitorSettings').useInstantMonitorSettings>; automaticScreening?: { paused: boolean; pending: number; awaitingMail: number; storageIssue: boolean; attemptIssue?: string; settings?: PreEntrySettings; saveSettings?: (plans: QualityGroup[], hours: number) => Promise<void>; setAutoPaused: (paused: boolean) => void } };
 
 /**
  * 持仓监测耗时（调试用）：每轮结束在控制台打一行汇总，并把明细放在 window.__veilQualityTimings，
