@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Ellipsis, Pause, Play, Settings2, Zap } from 'lucide-react';
+import { Pause, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue, type InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
@@ -12,7 +12,7 @@ import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
 import { FishConditionSettings } from './FishConditionSettings';
 import { HoldingMonitorSettings } from './FishHoldingMonitorSettings';
 import { FishPreEntrySettings } from './FishPreEntrySettings';
-import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from './FishQualityModule';
+import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySettingsAction } from './FishQualityModule';
 import { Popover, PopoverTrigger } from './ui/popover';
 
 function InstantHoldingPlanEditor({ state, plan, save }: { state: FishQualityState; plan: QualityGroup; save: (plan: QualityGroup) => Promise<void> }) {
@@ -96,19 +96,23 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
 const settingsItem = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px] outline-none hover:bg-muted focus-visible:bg-muted disabled:opacity-40';
 const focusSettings = (panel: HTMLDivElement | null) => panel?.focus({ preventScroll: true });
 
-export function FishInstantTrading({ state, children }: { state: FishQualityState; children: ReactNode }) {
+export function FishInstantTrading({ state, capturing, children }: { state: FishQualityState; capturing?: boolean; children: ReactNode }) {
   const [settingsView, setSettingsView] = useState<'menu' | 'before' | 'after' | 'live' | null>(null);
   const [editingAfter, setEditingAfter] = useState(false);
-  const follow = useScreenedInstantPositions()?.usdtFollow;
+  const instant = useScreenedInstantPositions();
+  const follow = instant?.usdtFollow;
   const [pairCode, setPairCode] = useState('');
   const [pairIssue, setPairIssue] = useState('');
   const [pairSaving, setPairSaving] = useState(false);
   const automatic = state.automaticScreening, cda = state.cdaTracking;
-  const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : settingsView === 'live' ? '币安 U 本位实盘' : '即时交易设置';
+  const settingsLabel = settingsView === 'before' ? '买前设置' : settingsView === 'after' ? '买后设置' : settingsView === 'live' ? '币安 U 本位实盘' : '即时交易条件设置';
   const closeSettings = () => { setSettingsView(null); setEditingAfter(false); };
   const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
+  const liveHolding = follow?.connected && follow.statuses.some(status =>
+    status.state !== 'closed' && status.state !== 'ignored' && (status.quantity ?? 0) > 0);
+  const holding = liveHolding || !!instant?.positions.length;
+  const stage = holding ? '持仓中' : screening ? '筛选中' : capturing ? '捕捞中' : null;
   const pending = automatic?.pending ?? 0;
-  const screeningStatus = screening ? '筛选中' : automatic?.paused ? '已暂停' : pending ? `待筛选 ${pending} 条` : '空闲';
   const followStatus = follow?.connected
     ? follow.paused ? '已暂停开仓和加仓' : '本机实盘跟随中'
     : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
@@ -117,11 +121,11 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={children}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
-      <span role="status">{screeningStatus}</span>
-      {follow?.paired && <span role="status">{followStatus}</span>}
+      {stage && <span role="status">{stage}{liveHolding &&
+        <strong className="font-bold text-[var(--chart-profit)]">（实盘中）</strong>}
+      </span>}
       {needsSettings && <span>请先保存买前设置</span>}
-      {screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
-      {!!cda?.active && <span>持仓监测中 {cda.active} 条</span>}
+      {screening && !holding && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
       {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
       {automatic.storageIssue && <span role="alert" className="text-destructive">本机队列暂未保存，正在重试，请保留页面</span>}
@@ -132,9 +136,8 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
     </button>
     <Popover open={settingsView !== null} onOpenChange={open => open ? setSettingsView('menu') : closeSettings()}>
       <PopoverTrigger asChild>
-        <button type="button" aria-label="即时交易设置" title="即时交易设置"
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring">
-          <Ellipsis aria-hidden className="h-4 w-4"/>
+        <button type="button" aria-label="即时交易条件设置" className={qualitySettingsAction}>
+          <Settings2 aria-hidden className="h-3 w-3"/>条件设置
         </button>
       </PopoverTrigger>
       <FishPopoverContent align="start" collisionPadding={12} aria-label={settingsLabel}
@@ -150,7 +153,11 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
             <Settings2 aria-hidden className="h-3 w-3"/>买后设置
           </button>
           {follow && <button type="button" className={settingsItem} onClick={() => { setPairCode(''); setPairIssue(''); setSettingsView('live'); }}>
-            <Zap aria-hidden className="h-3 w-3"/>币安 U 本位
+            <Zap aria-hidden className="h-3 w-3 shrink-0"/>
+            <span>
+              <span className="block">币安 U 本位</span>
+              {follow.paired && <span className="mt-0.5 block text-[10px] text-muted-foreground">{followStatus}</span>}
+            </span>
           </button>}
         </>}
         {settingsView === 'live' && follow && <div ref={focusSettings} tabIndex={-1} className="space-y-3 text-xs outline-none">

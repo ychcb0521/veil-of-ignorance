@@ -383,7 +383,7 @@ function DetectorPicker({ choices, signalsOf, selected, onChange, children }: { 
     </li>; })}</ul> : <p className="px-3 py-3 text-muted-foreground">当前数据里没有默认探测算法的信号</p>}
   </PopoverContent></Popover>;
 }
-export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false }: { archiveView?:boolean;state: FishQualityState; mining?: FishMiningApi; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
+export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false }: { archiveView?:boolean;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
   const { study, ready, running, progress, resumeMonitoring, resumeFiltering, setSourceQuality } = state;
   const workspace = archiveView ? undefined : state.workspace;
   const lockedBatch = archiveView || workspace ? null : state.lockedBatch;
@@ -926,7 +926,7 @@ export function FishQuality({ state, mining, onJump, onRate,canJump,jumpingSigna
             label={progress?.waitingUntil ? '等待续跑' : '监测进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
             waitingUntil={progress?.waitingUntil} detail={study.monitorTimeBasis && `监测起点：${qualityMonitorTimeLabels[study.monitorTimeBasis]}`}/>}
         </FishQualityModule>
-        {state.preEntry && <FishInstantTrading key={state.account} state={state}>
+        {state.preEntry && <FishInstantTrading key={state.account} state={state} capturing={capturing}>
           <FishScreened state={state} library={state.preEntry.library} ratings={study.sourceRatings} onJump={onJump} canJump={canJump} onRate={onRate}
             jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
         </FishInstantTrading>}
