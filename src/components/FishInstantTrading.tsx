@@ -1,3 +1,4 @@
+import { FishUsdtPositions } from './FishUsdtPositions';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import { useMemo, useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
@@ -124,7 +125,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
   const needsSettings = pending > 0 && !(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length;
   const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
-  return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={children}
+  return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={<>{children}{follow&&<FishUsdtPositions key={follow.owner} follow={follow}/>}</>}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
       {needsSettings && <span>请先保存买前设置</span>}

@@ -1,3 +1,4 @@
+import { createUsdtPositionReader } from './usdt-position-reader.ts';
 import { execFileSync } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -86,15 +87,16 @@ const json = (res: ServerResponse, status: number, data: unknown) => {
 };
 
 export function serveUsdtFollower({
-  owner, token, exchange, store, mode, startedAt, allowedOrigin = origin, port = dashPort, statusFile,
+  owner, token, exchange, store, mode, startedAt, positionReader, allowedOrigin = origin, port = dashPort, statusFile,
 }: {
   owner: string; token: string; exchange: ReturnType<typeof createUsdtExchange>;
   store: ReturnType<typeof openUsdtFollowStore>; mode: 'hedge' | 'one-way'; startedAt: number;
+  positionReader?: ReturnType<typeof createUsdtPositionReader>;
   allowedOrigin?: string; port?: number; statusFile?: string;
 }) {
   const follower = createUsdtFollower(store, exchange, owner, mode, startedAt);
   const tokenDigest = digest(token);
-  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses() });
+  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(), ...(positionReader ? { positionMirror: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
@@ -117,6 +119,13 @@ export function serveUsdtFollower({
       }
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
+      if (content.command === 'positions' || content.command === 'position-history') {
+        if (!positionReader) return json(res, 501, { error: '请更新 Windows 本机执行端以同步币安持仓' });
+        const state = content.command === 'positions'
+          ? await positionReader.positions()
+          : await positionReader.history(content.symbol, content.positionSide, content.revision);
+        return json(res, 200, state);
+      }
       if (content.command === 'pause') follower.pauseNewOrders();
       else if (content.command === 'resume') follower.resumeNewOrders();
       else if (content.command !== 'sync') throw Error('未知的实盘指令');
@@ -145,7 +154,8 @@ async function main() {
   const live = process.argv.includes('--live');
   const setup = process.argv.includes('--prepare');
   const credentials = loadCredentials(directory);
-  const exchange = createUsdtExchange(createUsdtRequest(credentials));
+  const request = createUsdtRequest(credentials);
+  const exchange = createUsdtExchange(request);
   let verified: Awaited<ReturnType<typeof exchange.account>>;
   try { verified = await exchange.account(); }
   catch (error) {
@@ -191,7 +201,7 @@ async function main() {
   process.once('exit', close);
   store = openUsdtFollowStore(join(directory, 'usdt-follow.sqlite'), verified.id, config.owner);
   const server = serveUsdtFollower({ owner: config.owner, token: config.token, exchange, store, mode: verified.mode,
-    startedAt: Date.now(), statusFile: join(directory, 'usdt-follow-status.json') });
+    startedAt: Date.now(), positionReader: createUsdtPositionReader(request), statusFile: join(directory, 'usdt-follow-status.json') });
   server.once('listening', () => console.log('币安 U 本位执行端已就绪，等待已配对的即时交易。'));
   server.once('error', () => { console.error('本机执行端端口不可用'); process.exit(1); });
 }

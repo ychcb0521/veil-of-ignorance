@@ -1,3 +1,4 @@
+import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorPosition, type UsdtMirrorSnapshot } from '@/lib/fish/usdtPositionMirror';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
@@ -21,6 +22,7 @@ interface FollowState {
   paused: boolean;
   startedAt: number;
   statuses: UsdtFollowStatus[];
+  positionMirror?: 1;
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -135,6 +137,28 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   }, [owner]);
   const pause = useCallback(() => { commandPending.current = 'pause'; wake.current?.(); }, []);
   const resume = useCallback(() => { commandPending.current = 'resume'; wake.current?.(); }, []);
+  const readMirror = useCallback(async <T,>(content:Record<string,unknown>, signal:AbortSignal, timeout:number):Promise<T> => {
+    if (!owner || !token) throw Error('请先连接本机 U 本位执行端');
+    const response = await fetch(endpoint, {
+      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token },
+      credentials:'omit', redirect:'error', signal:AbortSignal.any([signal,AbortSignal.timeout(timeout)]),
+      body:JSON.stringify({...content,owner}),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw Error(typeof payload?.error === 'string' ? payload.error : '本机执行端拒绝读取币安仓位');
+    return payload as T;
+  },[owner,token]);
+  const readPositions=useCallback(async (signal:AbortSignal) => {
+    const result=await readMirror<UsdtMirrorSnapshot>({command:'positions'},signal,25000);
+    if(!Array.isArray(result.positions)||!Number.isSafeInteger(result.observedAt)) throw Error('币安持仓回报无效');
+    return result;
+  },[readMirror]);
+  const readPositionHistory=useCallback(async (position:UsdtMirrorPosition,signal:AbortSignal) => {
+    const result=await readMirror<UsdtMirrorHistory>({command:'position-history',symbol:position.symbol,positionSide:position.positionSide,
+      revision:usdtMirrorRevision(position)},signal,60000);
+    if(!Array.isArray(result.fills)) throw Error('币安逐笔成交回报无效');
+    return result;
+  },[readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
-  return { ...data, owner, paired: !!token, issue, connect, pause, resume };
+  return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory };
 }

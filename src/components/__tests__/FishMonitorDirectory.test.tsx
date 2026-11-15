@@ -11,7 +11,8 @@ it('keeps deletion in the hover menu, confirms before hiding, and offers restora
  const study=archived(),id=study.monitorLibrary!.archives![0].id,hide=vi.fn().mockResolvedValue(true),view=render(<FishMonitorLibrary study={study} renderStudy={renderStudy} onSetHidden={hide}/>);
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));const menu=screen.getByRole('button',{name:'管理监测归档 '+id});expect(menu).toHaveClass('opacity-0');
  fireEvent.keyDown(menu,{key:'Enter'});fireEvent.click(await screen.findByRole('menuitem',{name:'删除目录'}));expect(hide).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'确认删除目录'}));await waitFor(()=>expect(hide).toHaveBeenCalledWith(id,true));
- view.rerender(<FishMonitorLibrary study={editMonitorDirectory(study,id,true)} renderStudy={renderStudy} onSetHidden={hide}/>);expect(screen.queryByRole('button',{name:'打开监测归档 '+id})).toBeNull();fireEvent.click(screen.getByRole('checkbox',{name:/显示已删除目录/}));
+ view.rerender(<FishMonitorLibrary study={editMonitorDirectory(study,id,true)} renderStudy={renderStudy} onSetHidden={hide}/>);expect(screen.queryByRole('button',{name:'打开监测归档 '+id})).toBeNull();fireEvent.keyDown(screen.getByRole('button',{name:'监测库更多操作'}),{key:'Enter'});
+ fireEvent.click(await screen.findByRole('menuitem',{name:/已删除目录/}));
  fireEvent.keyDown(screen.getByRole('button',{name:'管理监测归档 '+id}),{key:'Enter'});fireEvent.click(await screen.findByRole('menuitem',{name:'恢复目录'}));await waitFor(()=>expect(hide).toHaveBeenCalledWith(id,false));
 });
 it('offers copying only within an opened entry and closes after a durable successful copy',async()=>{
