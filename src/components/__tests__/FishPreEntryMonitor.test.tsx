@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishPreEntryMonitor } from '../FishPreEntryMonitor';
+import {newQualityStudy} from '@/lib/fish/quality';
 import { TooltipProvider } from '../ui/tooltip';
 import { emptyPreEntryLibrary, PRE_ENTRY_INTRABAR_VERSION, PRE_ENTRY_ZERO_TRADE_VERSION, type PreEntryRecord } from '@/lib/fish/preEntryMonitor';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -9,11 +10,13 @@ import { emptyPreEntryThreeStage, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAG
 
 afterEach(cleanup);
 it.each(['loading','failed'])('distinguishes an unfinished %s recovery from a truly empty library',state=>{
-  const retry=vi.fn(),api={ready:true,preEntry:{ready:false,running:false,error:state==='failed'?'历史读取超时':'',retry,library:emptyPreEntryLibrary()}} as unknown as FishQualityState;
+  const retry=vi.fn(),api={ready:true,study:newQualityStudy(),preEntry:{ready:false,running:false,error:state==='failed'?'历史读取超时':'',retry,library:emptyPreEntryLibrary()}} as unknown as FishQualityState;
   render(<TooltipProvider><FishPreEntryMonitor state={api} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   fireEvent.click(screen.getByLabelText('打开筛选库'));const dialog=screen.getByRole('dialog');
   expect(within(dialog).queryByText('暂无入选记录。满足全部条件后才会进入筛选库。')).toBeNull();
-  expect(within(dialog).getByLabelText('完整下载筛选库')).toBeDisabled();
+  fireEvent.keyDown(within(dialog).getByRole('button',{name:'筛选库导入导出'}),{key:'Enter'});
+  expect(screen.getByRole('menuitem',{name:'下载备份（JSON）'})).toHaveAttribute('aria-disabled','true');
+  fireEvent.keyDown(screen.getByRole('menu'),{key:'Escape'});
   if(state==='loading')expect(within(dialog).getByRole('status')).toHaveTextContent('正在读取筛选库');
   else{fireEvent.click(within(dialog).getByRole('button',{name:'重试读取'}));expect(retry).toHaveBeenCalledOnce();}
 });

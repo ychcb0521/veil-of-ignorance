@@ -3,7 +3,7 @@ import {createQualityTemplateDirectory, unknownTemplateGroup} from '@/lib/fish/q
 import { qualityMonitorTimeLabels } from '@/lib/fish/qualityAdmissionTime';
 import {useCallback,useMemo,useRef,type ReactNode} from 'react';
 import {ArchiveDirectorySettings,MonitorDirectorySettings} from './FishLibraryFrozenSettings';
-import {FishLibraryDataActions} from './FishLibraryTransferContext';
+import {FishStoredLibraryTransferMenu} from './FishLibraryTransferContext';
 import {FishLibraryTimeDirectory,type FishDirectoryItem,type FishTemplateRenderer,type FishDirectoryPicker,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {archivedMonitorCampaignLookup,monitorRoundStudy} from '@/lib/fish/qualityMonitorArchive';
 import type {FishQualityStudy} from '@/lib/fish/quality';
@@ -49,7 +49,7 @@ export function FishMonitorLibrary({study,renderStudy,renderTemplate,onCopyStudy
  },[library,loadArchive,settings,study.planTemplates]);
  const records=useMemo(()=>(library?.records??[]).filter(r=>settings.has(r.settingId)),[library?.records,settings]);
  const rounds=library?.rounds??[], archives=library?.archives??[];
- return <FishLibraryTimeDirectory renderTemplate={renderTemplate} name="监测库" prefix="monitor" kind="template" openRequest={openRequest} picker={picker} onOpenChange={onOpenChange} items={getItems} edits={library?.directoryEdits} onSetHidden={onSetHidden} onPurgeDirectory={picker?undefined:onPurgeDirectory} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={records.length} download={()=>downloadMonitorRecords(records,settings)} dataActions={!picker&&<FishLibraryDataActions scope="monitor"/>}
+ return <FishLibraryTimeDirectory renderTemplate={renderTemplate} name="监测库" prefix="monitor" kind="template" openRequest={openRequest} picker={picker} onOpenChange={onOpenChange} items={getItems} edits={library?.directoryEdits} onSetHidden={onSetHidden} onPurgeDirectory={picker?undefined:onPurgeDirectory} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={records.length} download={()=>downloadMonitorRecords(records,settings)} transferMenu={!picker?actions=><FishStoredLibraryTransferMenu scope="monitor" actions={actions}/>:undefined}
   description={`${library?.records.length??0} 条记录 · ${rounds.filter(r=>!r.legacy).length} 轮监测 · ${archives.length} 份完整归档${rounds.some(r=>r.legacy)?' · 含历史快照':''}`}
   info={<><p>模板下的监测轮次和归档按时间排列，保留每份运行的条件和结果。目录菜单可编辑名称、删除并恢复目录，保存后保留原时间和全部内容。</p><p>展开目录后可选择记录导入组合表，原归档保留。</p><p>早期轮次只展示仍保存的记录和条件，不补造缺失读数。完整下载、导入及导出保留。</p></>}
   empty="暂无监测归档。运行完成后可在组合表保存到监测库。"/>;

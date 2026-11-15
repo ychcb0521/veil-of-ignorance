@@ -48,6 +48,7 @@ import { FishCaptureTemplates } from './FishCaptureTemplates';
 import { captureCardDefinition, type FishCaptureDefinition } from '@/lib/fish/captureDefinition';
 import { freezeFishCaptureTemplate, validateFishCaptureTemplate, type FishCaptureTemplateSettings } from '@/lib/fish/captureTemplates';
 import { FishQuality } from '@/components/FishQuality';
+import { FishLibraryDataManager } from './FishLibraryDataManager';
 import { ModuleErrorBoundary } from '@/components/ModuleErrorBoundary';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 
@@ -639,6 +640,6 @@ export function FishPanel(p: FishPanelProps) {
       info={<><p><a href="/guide#fish-cabin" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">阅读完整说明 · 3.3.3 鱼舱</a></p><p>每次开始捕捞时，上一轮的新鱼归入鱼舱；不手动删除就一直保留。</p><p className="text-muted-foreground">标题右侧「⋯」里的「导出 Excel」下载全部鱼舱记录。「完整下载 JSON」保留可重新导入的原始记录。</p></>} emptyText="鱼舱还是空的。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishQuality state={p.quality} mining={p.mining} capturing={scanning} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality} jumpingSignalId={p.qualityJumpPending ? p.jumpingSignalId : null}/></ModuleErrorBoundary>}
+    {p.quality && <ModuleErrorBoundary label="鱼质量" backgroundTasks><FishLibraryDataManager key={p.quality.account} account={p.quality.account} study={p.quality.study} ready={p.quality.ready}><FishQuality state={p.quality} mining={p.mining} capturing={scanning} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} onRate={p.onRateQuality} onJump={jumpQuality} canJump={canJumpQuality} jumpingSignalId={p.qualityJumpPending ? p.jumpingSignalId : null}/></FishLibraryDataManager></ModuleErrorBoundary>}
   </section>;
 }

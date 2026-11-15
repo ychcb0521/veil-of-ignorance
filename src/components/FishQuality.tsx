@@ -1,6 +1,7 @@
+import {FishLibraryRowExportContext} from './FishLibraryRowExport';
 import {fishCaughtBy} from '@/lib/fish/records';
 import {hasCampaignOnSignalDay,hasTradeOnSignalDay} from '@/lib/signalCampaignIndex';
-import {templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
+import {qualityTemplateImportSelection,templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
@@ -389,8 +390,10 @@ function DetectorPicker({ choices, signalsOf, selected, onChange, children }: { 
     </li>; })}</ul> : <p className="px-3 py-3 text-muted-foreground">当前数据里没有默认探测算法的信号</p>}
   </PopoverContent></Popover>;
 }
-export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false, archiveKind, templateTable, onArchiveCampaign }: { archiveView?:boolean;archiveKind?:ArchiveKind;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
+export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false, archiveKind, templateTable, onArchiveCampaign, onImportArchiveRows }: { onImportArchiveRows?:(ids:readonly string[])=>boolean;archiveView?:boolean;archiveKind?:ArchiveKind;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
   const { study, ready, running, progress, resumeMonitoring, resumeFiltering, setSourceQuality } = state;
+  const registerLibraryExport = useContext(FishLibraryRowExportContext);
+  const importingArchive = archiveView && !!onImportArchiveRows;
   const workspace = archiveView ? undefined : state.workspace;
   const lockedBatch = archiveView || workspace ? null : state.lockedBatch;
   const rateSource=useCallback((source:TradeSignal,value:number)=>{try{if(onRate)onRate(source,value);else setSourceQuality?.(source,normalizeSignalQuality(source.quality)===value?undefined:value);}catch(error){toast.error(error instanceof Error?error.message:'评分保存失败');}},[onRate,setSourceQuality]);
@@ -451,8 +454,8 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const allRows = useMemo(() => {
     if (!open) return NO_QUALITY_ROWS;
     const rows = templateTable?.rows ?? qualityDisplayRows({ samples });
-    return archiveView ? rows : rows.filter(row => !isDelayedTuringReplaySample(row.source));
-  }, [templateTable, samples, archiveView, open]);
+    return archiveView && !importingArchive ? rows : rows.filter(row => !isDelayedTuringReplaySample(row.source));
+  }, [templateTable, samples, archiveView, importingArchive, open]);
   const screeningResults=useMemo(()=>open ? qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library,archiveView) : [],[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView,open]);
   const screeningIndex=useMemo(()=>screeningResultIndex(screeningResults),[screeningResults]);
   const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running'&&(!workspace||!isAutomaticPreEntryRound(r))).reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
@@ -658,6 +661,8 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const rowSelected = (row: QualityTableRow) => qualityTableMembers(row).every(member => selectedIds.has(member.id));
   // 【用户要求】2026-11-02 像 Excel 那样：每行左侧有行号（选中的行号高亮），底部显示已选行数
   const selectedRowCount = rows.filter(rowSelected).length;
+  const sourcePicked=useMemo(()=>importingArchive?allRows.filter(row=>selectedIds.has(row.id)):[],[importingArchive,allRows,selectedIds]);
+  const sourcePickedCount=new Set(sourcePicked.map(row=>row.signalId??row.id)).size;
   const allSelected = rows.length > 0 && selectedRowCount === rows.length;
   // Shift 连选的起点：最后一次单击（或连选）的那一行
   const selectAnchor = useRef<string | null>(null);
@@ -726,7 +731,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     setDirectoryChoice(undefined);setOrigin(value);if(value === 'fish')setDetectorExpanded(false);resetScroll();
   };
   const openWorkspaceLibrary = (kind: QualitySourceDirectory['kind']|'monitor') =>
-    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1}}));
+    setDirectoryRequests(requests=>({...requests,[kind]:{key:(requests[kind]?.key??0)+1,importSelection:kind!=='mined'}}));
   const importWorkspace = (snapshot: FishQualityStudy, ids: readonly string[]) => {
     if (!workspace?.importRows(snapshot,ids)) return false;
     setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();
@@ -738,9 +743,14 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
     </FishDeferredDetails>
   </div> : <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>;
-  const renderTemplate = (table:QualityTemplateTable, close:()=>void, kind:ArchiveKind) =>
+  const renderTemplate = (table:QualityTemplateTable, close:()=>void, kind:ArchiveKind, importSelection:boolean) =>
     <ArchivedQualityBoard study={table.study} templateTable={table} archiveKind={kind}
       tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}
+      onImportRows={workspace&&importSelection ? ids=>{
+        const selection=qualityTemplateImportSelection(table,ids);
+        if(!selection.ids.length||!importWorkspace(selection.snapshot,selection.ids))return false;
+        close();return true;
+      }:undefined}
       onJump={onJump ? signal=>{close();onJump(signal);} : undefined} canJump={canJump} onOpenCampaign={rememberReturn}/>;
   const completeScreening = state.preEntry?.library.rounds.filter(round=>round.workspaceDraft&&round.state==='complete').length ?? 0;
   const completeFiltering = study.workspaceFilterDraft?.rounds.some(round=>round.state==='complete');
@@ -866,6 +876,12 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     const sheet=readQualityTableSheet(empty);
     setError('');setTableExport({entries:picked,render:renderRow,header:header.cloneNode(true) as HTMLTableSectionElement,offset:0,sheet,owner:exportOwner});
   }catch(error){const message=error instanceof Error?error.message:'导出失败';setError(message);toast.error(message);}};
+  const exportRowsRef=useRef(exportRows);exportRowsRef.current=exportRows;
+  const exportingRows=!!tableExport;
+  useLayoutEffect(()=>{
+    if(!archiveView||!registerLibraryExport||!open)return;
+    return registerLibraryExport({count:selectedRowCount,busy:exportingRows,run:()=>exportRowsRef.current()});
+  },[archiveView,registerLibraryExport,open,selectedRowCount,exportingRows]);
   useEffect(()=>{
     if(!tableExport)return;
     const timer=window.setTimeout(()=>{try{
@@ -942,7 +958,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
             <FishConditionSettings title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={state.account} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
           </PopoverContent></Popover>
-          <FishFilterLibrary renderTemplate={(table,close)=>renderTemplate(table,close,'filter')} onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
+          <FishFilterLibrary renderTemplate={(table,close,source)=>renderTemplate(table,close,'filter',source)} onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           {staticRunning && <FishQualityProgress
             testId="static-filter-progress"
             label={staticProgress?.waitingUntil ? '等待续跑' : readingsRunning ? '生成读数中' : '过滤进行中'}
@@ -957,7 +973,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls"
             trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
-            <FishPreEntryMonitor renderTemplate={(table,close)=>renderTemplate(table,close,'screening')} openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
+            <FishPreEntryMonitor renderTemplate={(table,close,source)=>renderTemplate(table,close,'screening',source)} openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
         </FishQualityModuleGroup>
@@ -980,7 +996,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像平衡减仓 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像平衡减仓与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
             <FishConditionSettings imageExport title="持仓监测条件" description="按方案设置首仓、卖出、加仓、镜像和持仓否决"><HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/></FishConditionSettings>
           </PopoverContent></Popover>
-          <FishMonitorLibrary renderTemplate={(table,close)=>renderTemplate(table,close,'monitor')} openRequest={directoryRequests.monitor} onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onPurgeDirectory={state.purgeMonitorEntries} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={renderArchive}/>
+          <FishMonitorLibrary renderTemplate={(table,close,source)=>renderTemplate(table,close,'monitor',source)} openRequest={directoryRequests.monitor} onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onPurgeDirectory={state.purgeMonitorEntries} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={renderArchive}/>
           {running && <FishQualityProgress testId="holding-monitor-progress" progressLabel="持仓监测处理进度"
             label={progress?.waitingUntil ? '等待续跑' : '监测进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
             waitingUntil={progress?.waitingUntil} detail={study.monitorTimeBasis && `监测起点：${qualityMonitorTimeLabels[study.monitorTimeBasis]}`}/>}
@@ -1040,6 +1056,16 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           </span>}
         </div>
         <div className="flex flex-wrap items-center gap-1">
+          {onImportArchiveRows&&<>
+            <span className="mr-1 text-[10.5px] text-muted-foreground">勾选记录，或用表头全选当前筛选</span>
+            <button type="button" className={button+' text-primary'} disabled={!sourcePickedCount}
+              onClick={()=>{
+                if(onImportArchiveRows(sourcePicked.map(row=>row.id)))setError('');
+                else setError('没有可导入的记录，或组合表尚未就绪');
+              }}>
+              <Download aria-hidden className="h-3 w-3"/>导入所选到组合表（{sourcePickedCount}）
+            </button>
+          </>}
           {lockedBatch && <button type="button" className="px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline disabled:opacity-40" disabled={!!state.archiving} onClick={unlockSelection}>解除锁定</button>}
           {!workspace && !archiveView && !lockedBatch && state.setLockedBatch && <button type="button" className={button} disabled={!ready || !selectedCount || !!state.archiving}
             title="固定当前筛选内已勾选的记录，单独查看和处理这一批" onClick={lockSelection}>
@@ -1057,7 +1083,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
               setConfirmRemove(false);resetScroll();
             }}>确认删除所选行</button>
           </PopoverContent></Popover>}
-          <button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.entries.length:'导出数据'}</button>
+          {(!archiveView||!registerLibraryExport)&&<button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.entries.length:'导出数据'}</button>}
           {!archiveView && <button type="button" className={button} onClick={toggleTableHeight}
             aria-pressed={tableMaximized} title={tableMaximized ? '还原组合表（Esc）' : '纵向最大化组合表'}>
             {tableMaximized ? <Minimize aria-hidden className="h-3 w-3"/> : <Maximize aria-hidden className="h-3 w-3"/>}
@@ -1125,7 +1151,8 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */
-export function ArchivedQualityBoard({ study, onJump, canJump, selection, templateTable, onOpenCampaign, archiveKind, tradedDayIndex, campaignDayIndex }: {
+export function ArchivedQualityBoard({ study, onJump, canJump, selection, templateTable, onOpenCampaign, archiveKind, tradedDayIndex, campaignDayIndex, onImportRows }: {
+  onImportRows?:(ids:readonly string[])=>boolean;
   archiveKind?:ArchiveKind;
   tradedDayIndex?:Set<string>;
   campaignDayIndex?:Set<string>;
@@ -1136,7 +1163,7 @@ export function ArchivedQualityBoard({ study, onJump, canJump, selection, templa
   canJump?: (source: TradeSignal) => boolean;
   selection?: { rowIds: string[]; onChange: (ids: readonly string[]) => void };
 }) {
-  const [localSelection, setLocalSelection] = useState(study.selectedRowIds ?? []);
+  const [localSelection, setLocalSelection] = useState(onImportRows ? [] : study.selectedRowIds ?? []);
   const selectedRowIds = selection?.rowIds ?? localSelection;
   const onSelectionChange = selection?.onChange;
   const state = useMemo(() => {
@@ -1151,5 +1178,5 @@ export function ArchivedQualityBoard({ study, onJump, canJump, selection, templa
       setPriority: noop, setScope: noop, setFilters: noop, setHoldingVetoes: noop, setSellPlans: noop,
     } satisfies FishQualityState;
   }, [study, selectedRowIds, onSelectionChange]);
-  return <FishQuality archiveView archiveKind={archiveKind} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} templateTable={templateTable} onArchiveCampaign={onOpenCampaign} state={state} onJump={onJump} canJump={canJump}/>;
+  return <FishQuality archiveView onImportArchiveRows={onImportRows} archiveKind={archiveKind} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} templateTable={templateTable} onArchiveCampaign={onOpenCampaign} state={state} onJump={onJump} canJump={canJump}/>;
 }

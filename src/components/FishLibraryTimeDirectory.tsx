@@ -1,5 +1,6 @@
+import {FishLibraryRowExportContext,type FishLibraryRowExport,type FishLibraryExportActions} from './FishLibraryRowExport';
 import {createQualityTemplateTable,type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
-import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ChevronDown,Database,Download,MoreHorizontal,Copy,Trash2,Undo2,Pencil} from 'lucide-react';
 import {FishDirectorySettingsButton,type DirectorySettingsEntry} from './FishDirectorySettingsButton';
 import {unknownTemplateGroup,type QualityTemplateDirectoryGroup} from '@/lib/fish/qualityTemplateDirectory';
@@ -32,8 +33,8 @@ export function FishDeferredDetails({summary,className,children}:{summary:string
   </details>;
 }
 
-export type FishTemplateRenderer=(table:QualityTemplateTable,close:()=>void)=>ReactNode;
-function FishTemplateDirectoryTable({members,renderTemplate,close}:{members:FishDirectoryItem[];renderTemplate:FishTemplateRenderer;close:()=>void}) {
+export type FishTemplateRenderer=(table:QualityTemplateTable,close:()=>void,importSelection:boolean)=>ReactNode;
+function FishTemplateDirectoryTable({members,renderTemplate,close,importSelection}:{importSelection:boolean;members:FishDirectoryItem[];renderTemplate:FishTemplateRenderer;close:()=>void}) {
   const [attempt,setAttempt]=useState(0);
   const [result,setResult]=useState<{table:QualityTemplateTable;errors:number}>();
   const [progress,setProgress]=useState(0);
@@ -45,7 +46,7 @@ function FishTemplateDirectoryTable({members,renderTemplate,close}:{members:Fish
     const entries=currentMembers.current;
     setResult(undefined);setProgress(0);
     void (async()=>{
-      const table=createQualityTemplateTable();
+      const table=createQualityTemplateTable(importSelection);
       let errors=0,done=0;
       for(const member of entries){
         if(!active)return;
@@ -64,7 +65,7 @@ function FishTemplateDirectoryTable({members,renderTemplate,close}:{members:Fish
       if(active)setResult({table:table.finish(),errors});
     })();
     return()=>{active=false;};
-  },[version,attempt]);
+  },[version,attempt,importSelection]);
   useEffect(()=>{
     const previous=latest.current;latest.current=members;
     if(previous.length===members.length&&previous.every((item,i)=>item.id===members[i].id)&&previous.some((item,i)=>item.revision!==members[i].revision))setAttempt(n=>n+1);
@@ -72,18 +73,18 @@ function FishTemplateDirectoryTable({members,renderTemplate,close}:{members:Fish
   if(!result)return <p role="status" className="px-4 py-3 text-xs text-muted-foreground">正在读取模板记录… {progress}/{members.length}</p>;
   return <>
     {!!result.errors&&<p role="alert" className="px-4 py-3 text-xs text-destructive">{result.errors} 项未能读取，已读取的记录如下。 <button type="button" className="underline" onClick={()=>setAttempt(n=>n+1)}>重试读取</button></p>}
-    {result.table.rows.length?renderTemplate(result.table,close):<p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的记录。</p>}
+    {result.table.rows.length?renderTemplate(result.table,close,importSelection):<p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的记录。</p>}
   </>;
 }
 
-export interface FishDirectoryRequest {key:number;selectedId?:string;selectedIds?:string[]}
+export interface FishDirectoryRequest {key:number;selectedId?:string;selectedIds?:string[];importSelection?:boolean}
 export interface FishDirectoryPicker {
   triggerLabel: string;
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
 export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
-  loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(handleExport:()=>void,canExport:boolean)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
+  loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
@@ -101,7 +102,14 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [checkedIds,setCheckedIds]=useState<string[]>([]);
   const [purgeMode,setPurgeMode]=useState(false),[confirmPurge,setConfirmPurge]=useState(false),[purgeMessage,setPurgeMessage]=useState('');
   const [manage,setManage]=useState(false),[activeTemplate,setActiveTemplate]=useState('');
+  const [importSelection,setImportSelection]=useState(false);
   const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode;
+  const [selectedExport,setSelectedExport]=useState<FishLibraryRowExport>();
+  const registerExport=useCallback((action:FishLibraryRowExport)=>{
+    setSelectedExport(action);
+    return ()=>setSelectedExport(current=>current===action?undefined:current);
+  },[]);
+  const managedExports=kind==='template'&&!!transferMenu&&!picker;
   const [expandedGroups,setExpandedGroups]=useState<Record<string,boolean>>({});
   const [editingId,setEditingId]=useState(''),[draftName,setDraftName]=useState('');
   const selectionEpoch=useRef(0);
@@ -109,7 +117,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const items = useMemo(() => open ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,itemsSource]);
   const selected=items.find(item=>item.id===selectedId),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
-  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
+  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);setImportSelection(!!request.importSelection);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
     if(!open){setLoaded(undefined);return;}if(!selectedId)return;
     const item=itemRef.current;if(!item)return;
@@ -179,9 +187,9 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
     selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
-    if(!value){setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    if(!value){setImportSelection(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
-  const canExport=!!recordCount&&!busy&&!loading&&!loadError;
+  const canExport=!!recordCount&&!busy&&!loading&&!loadError&&!selectedExport?.busy;
   const handleExport=()=>{
     if (!canExport) return;
     const epoch = selectionEpoch.current;
@@ -216,15 +224,16 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             {typeof item.details==='function'?item.details(()=>changeOpen(false)):item.details}
           </div>}
         </div>;
-  return <Dialog open={open} onOpenChange={changeOpen}>
+  return <FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
     <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
           <DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
-          {transferMenu ? <div className="ml-auto">{transferMenu(handleExport,canExport)}</div> :
+          {transferMenu ? <div className="ml-auto">{transferMenu({exportLibrary:handleExport,canExportLibrary:canExport,selected:selectedExport,busy:!!busy})}</div> :
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
+        {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
         <DialogDescription className="text-[11px]">{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
@@ -280,12 +289,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <FishDirectorySettingsButton name={group.title} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
             </div>
             {expanded&&(templateView&&renderTemplate?<div className="min-w-0" data-testid={prefix+'-template-content'}>
-              <FishTemplateDirectoryTable key={group.id} members={members} renderTemplate={renderTemplate} close={()=>changeOpen(false)}/>
+              <FishTemplateDirectoryTable key={group.id} importSelection={importSelection} members={members} renderTemplate={renderTemplate} close={()=>changeOpen(false)}/>
             </div>:<div className="space-y-2 p-2">{members.map(renderItem)}</div>)}
           </section>;
         }):visible.map(renderItem)}
       </div>
       {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}
     </DialogContent>
-  </Dialog>;
+  </Dialog></FishLibraryRowExportContext.Provider>;
 }

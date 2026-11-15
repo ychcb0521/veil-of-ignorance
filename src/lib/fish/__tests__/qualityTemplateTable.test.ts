@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {createQualityTemplateTable,templateCampaignPath} from '../qualityTemplateTable';
+import {createQualityTemplateTable,qualityTemplateImportSelection,templateCampaignPath} from '../qualityTemplateTable';
 import {archivedMonitorCampaignLookup,monitorRoundStudy} from '../qualityMonitorArchive';
 import {monitorArchiveFixture} from './monitorArchive.fixture';
 import {qualityMonitorCampaignPath} from '../qualityMonitorCampaign';
@@ -48,4 +48,20 @@ it('keeps frozen screening evidence available when a saved snapshot carries a wo
   const builder=createQualityTemplateTable();builder.append(snapshot);
   const table=builder.finish(),row=table.rows[0];
   expect(table.screening.get(row.signalId!)?.[0].record).toMatchObject({status:'matched',matchedAt:at+60_000,tableClearedAt:at+120_000});
+});
+
+it('imports a batch of original input records without copying view IDs, plans or results',()=>{
+  const input=monitorArchiveFixture(), before=structuredClone(input);
+  const builder=createQualityTemplateTable(true);
+  builder.append(input);
+  builder.append(structuredClone(input));
+  const directory=builder.finish();
+  expect(directory.rows).toHaveLength(2);
+  const selected=qualityTemplateImportSelection(directory,[directory.rows[1].id]);
+  expect(selected.snapshot.samples).toEqual([input.samples[1]]);
+  expect(selected.snapshot.results).toEqual([]);
+  expect(selected.snapshot.sellPlans).toBeUndefined();
+  expect(selected.ids).toHaveLength(1);
+  expect(selected.ids[0]).not.toMatch(/^template-/);
+  expect(input).toEqual(before);
 });

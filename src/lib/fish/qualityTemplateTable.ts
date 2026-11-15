@@ -1,11 +1,16 @@
+import {isDelayedTuringReplaySample} from '@/lib/turingReplaySamples';
 import {serializeAccountBlob} from '@/lib/accountBlobCodec';
-import {activeBuyFilters, activeStandaloneBuyFilters, newQualityStudy, qualityComparisonRows, qualityEntryIdentity, qualityFilterReadingKey, qualityFilterStatus, type FishQualityStudy, type QualityBuyFilter, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample} from './quality';
+import {activeBuyFilters, activeStandaloneBuyFilters, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityEntryIdentity, qualityFilterReadingKey, qualityFilterStatus, type FishQualityStudy, type QualityBuyFilter, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample} from './quality';
 import {qualityResultMap, qualityRowResult} from './qualityComparison';
 import {qualityScreeningResults, screeningResultIndex, screeningRowResults, type QualityScreeningResult} from './qualityScreeningResults';
 import {activeSignalMetrics, signalReadingKey, type QualitySignalMetric} from './qualitySignalReadings';
 import {qualityPostExitKey, type QualityPostExitReading} from './qualityPostExit';
 import {qualityRowMonitorTimeBasis,qualitySignalTime} from './qualityAdmissionTime';
 
+interface TemplateSourceRow {
+  samples:readonly QualitySample[];
+  detector?:QualityGroup;
+}
 export interface QualityTemplateTable {
   study: FishQualityStudy;
   rows: QualitySample[];
@@ -13,6 +18,7 @@ export interface QualityTemplateTable {
   filterStatus: Map<string, Map<string, QualityFilterStatus>>;
   screening: Map<string, QualityScreeningResult[]>;
   postExit: Map<string, Map<string, QualityPostExitReading>>;
+  importRows?:Map<string,TemplateSourceRow>;
 }
 
 const savedCampaignPaths = new WeakMap<QualityResult, string>();
@@ -24,9 +30,10 @@ const resultEvidence = ({key:_key,sampleId:_sampleId,groupId:_groupId,evaluatedA
 const withoutKey = <T extends {key: string}>({key: _key, ...value}: T) => value;
 
 /** A disposable view. Keep separate rows for differing saved evidence and never rewrite a campaign key. */
-export function createQualityTemplateTable() {
+export function createQualityTemplateTable(importSelection=false) {
   const study: FishQualityStudy = {...newQualityStudy(0), independentFilters:true, sellPlans:[], buyFilters:[], filterReadings:[], signalMetrics:[], signalReadings:[], selectedRowIds:[], monitorTimeBasisByRow:{}};
   const table: QualityTemplateTable = {study, rows:[], results:new Map(), filterStatus:new Map(), screening:new Map(), postExit:new Map()};
+  if(importSelection)table.importRows=new Map();
   const keys = new Set<string>(), detectors = new Map<string, QualityGroup>(), columns = new Map<string, QualityGroup>();
   const conditions = new Map<string, QualityBuyFilter>(), metrics = new Map<string, QualitySignalMetric>();
   const column = <T extends {id:string}>(items: Map<string,T>, prefix:string, value:T, body:unknown=withoutId(value)):T => {
@@ -41,6 +48,14 @@ export function createQualityTemplateTable() {
     const screeningOnly=!!input.screeningResults&&!input.results.length&&!input.sellPlans?.length;
     const displayRows=screeningOnly?input.samples.map(sample=>qualityComparisonRows({samples:[sample]})[0]):qualityComparisonRows(input);
     if(!displayRows.length) return;
+    const originalRows=importSelection?new Map<string,QualitySample[]>():undefined;
+    const originalKey=(sample:QualitySample)=>JSON.stringify([
+      qualityEntryIdentity(sample.source,sample.enteredAt),screeningOnly?sample.source.preEntryMonitor?.recordId:undefined,
+    ]);
+    if(originalRows)for(const sample of input.samples){
+      const key=originalKey(sample), matches=originalRows.get(key);
+      if(matches)matches.push(sample);else originalRows.set(key,[sample]);
+    }
     const savedResults=qualityResultMap(input), byResult=new Map<string,QualityResult | null>();
     for (const result of input.results) {
       const key=JSON.stringify([result.sampleId,result.groupId]);
@@ -104,6 +119,11 @@ export function createQualityTemplateTable() {
       for(const detectorId of base.groups.length?base.groups:[undefined]){
         const expanded={...base,signalId:id,id:id+'/detector/'+(detectorId??'none'),detectorId,groups:detectorId?[detectorId]:[]};
         table.rows.push(expanded);study.selectedRowIds!.push(expanded.id);
+        if(originalRows&&table.importRows){
+          const originals=originalRows.get(originalKey(row))??[];
+          const originalDetector=sources.find(([,group])=>group.id===detectorId)?.[0];
+          table.importRows.set(expanded.id,{samples:originals,detector:originalDetector?detectorMap.get(originalDetector):undefined});
+        }
       }
     }
   };
@@ -114,4 +134,24 @@ export function createQualityTemplateTable() {
     study.signalMetrics=[...metrics.values()];
     return table;
   }};
+}
+
+/** Batch import copies original inputs only. View IDs, settings, and archived results stay in the library. */
+export function qualityTemplateImportSelection(table:QualityTemplateTable,ids:readonly string[]) {
+  const groups=new Map<string,QualityGroup>(), samples=new Map<string,{original:QualitySample;groups:Set<string>}>();
+  for(const id of ids){
+    const entry=table.importRows?.get(id);
+    if(!entry)continue;
+    for(const sample of entry.samples){
+      if(isDelayedTuringReplaySample(sample.source))continue;
+      const detector=entry.detector;
+      if(detector&&!sample.groups.includes(detector.id)||!detector&&sample.groups.length)continue;
+      const key=JSON.stringify([sample.id,qualityEntryIdentity(sample.source,sample.enteredAt)]);
+      let picked=samples.get(key);
+      if(!picked){picked={original:sample,groups:new Set()};samples.set(key,picked);}
+      if(detector){groups.set(detector.id,detector);picked.groups.add(detector.id);}
+    }
+  }
+  const snapshot={...newQualityStudy(0),samples:[...samples.values()].map(({original,groups})=>({...original,groups:[...groups]})),groups:[...groups.values()]};
+  return {snapshot,ids:qualityDisplayRows(snapshot).map(row=>row.id)};
 }

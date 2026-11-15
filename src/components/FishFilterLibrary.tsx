@@ -5,7 +5,7 @@ import {FilterDirectorySettings} from './FishLibraryFrozenSettings';
 import {FishLibraryCondition} from './FishLibraryConditions';
 import {libraryCell} from './FishLibraryDialog';
 import {FishDeferredDetails,FishLibraryTimeDirectory,type FishDirectoryItem,type FishTemplateRenderer,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
-import {FishLibraryDataActions} from './FishLibraryTransferContext';
+import {FishStoredLibraryTransferMenu} from './FishLibraryTransferContext';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import type {QualityFilterRecord,QualityFilterSetting} from '@/lib/fish/qualityFilterLibrary';
 import {createFilterDirectoryReader,filterDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
@@ -35,7 +35,7 @@ export function FishFilterLibrary({study,renderStudy,renderTemplate,onCopyStudy,
   return items;
  },[library,study.planTemplates]);
  return <FishLibraryTimeDirectory renderTemplate={renderTemplate} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" kind="template" items={getItems} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
-  description={`${library?.records.length??0} 条记录 · ${library?.rounds.length??0} 轮过滤`} dataActions={<FishLibraryDataActions scope="filter"/>} download={()=>downloadDirectoryTables('过滤库',getItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
+  description={`${library?.records.length??0} 条记录 · ${library?.rounds.length??0} 轮过滤`} transferMenu={actions=><FishStoredLibraryTransferMenu scope="filter" actions={actions}/>} download={()=>downloadDirectoryTables('过滤库',getItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}
   info={<><p>按冻结模板整理过滤轮次。展开后展示该轮组合表，条件、读数和判断取自保存记录，不重新计算。</p><p>新轮次单独保存组合表输入和过滤结果；早期轮次只有记录引用，会明确标注。目录可编辑名称、删除和恢复，复制前先完整归档当前组合表。</p></>}
   empty="暂无过滤记录。运行完成后可在组合表保存到过滤库。"/>;
 }
