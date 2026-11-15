@@ -100,14 +100,14 @@ it('shows the running anchor, reached target, caught-up and error states', () =>
     lastAnchorMs: MINING_START_MS, endMs: MINING_START_MS + 3 * MINING_STEP_MS };
   const { rerender } = render(<FishMiningPanel mining={api({ running: true, anchorMs, progress: { done: 12, total: 300 } }, state) as never} sellFixed campaignHref="#"/>);
   expect(screen.getByRole('status')).toHaveTextContent('捕捞中27/50');
-  expect(screen.getByText('04-01 12:00:15')).toHaveAttribute('dateTime', '2026-04-01T04:00:15.000Z');
+  expect(screen.queryByText('正在扫')).toBeNull();
+  expect(screen.queryByText(/04-01 12:00:15/)).toBeNull();
   expect(screen.queryByText('12/300')).toBeNull();
-  expect(screen.getByRole('status')).toHaveAccessibleName('正在挖 2026-04-01 12:00:15 这一档（12 / 300 个标的）');
   expect(screen.getByRole('button', { name: '暂停' })).toBeVisible(); expect(screen.queryByText(/还没固定卖出方案/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '批量捕捞设置' }));
   const progress = within(screen.getByRole('region', { name: '本轮捕捞进度' }));
   expect(progress.getByText('12/300')).toBeVisible();
-  expect(progress.getByText('正在扫').parentElement).toHaveTextContent('2026-04-01 12:00:15');
+  expect(within(progress.getByText('正在扫').parentElement!).getByText('2026-04-01 12:00:15')).toHaveAttribute('dateTime', '2026-04-01T04:00:15.000Z');
   expect(progress.getByText('已扫至').parentElement).toHaveTextContent('2026-04-01 00:00');
   expect(progress.getByText('扫描结束').parentElement).toHaveTextContent('2026-04-02 12:00');
   expect(progress.queryByText('下一档')).toBeNull();
@@ -118,7 +118,8 @@ it('shows the running anchor, reached target, caught-up and error states', () =>
   expect(progress.queryByText('下一档')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.getByRole('status')).toHaveTextContent('已达目标53/50');
-  expect(screen.getByText('04-01 12:00:15').parentElement).toHaveTextContent('已扫至');
+  expect(screen.queryByText('已扫至')).toBeNull();
+  expect(screen.queryByText(/04-01 12:00:15/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '批量捕捞说明与进度' }));
   expect(screen.getAllByText('已达目标：可重新开始新一轮')[0]).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '批量捕捞说明与进度' }));

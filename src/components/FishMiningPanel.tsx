@@ -26,11 +26,11 @@ import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 
-function MiningTime({ ms, compact = false }: { ms: number; compact?: boolean }) {
+function MiningTime({ ms }: { ms: number }) {
   const full = formatUTC8(ms);
   const text = full.endsWith(':00') ? full.slice(0, 16) : full;
   return <time dateTime={new Date(ms).toISOString()} title={`${full} 北京时间`} className="whitespace-nowrap font-mono tabular-nums">
-    {compact ? text.slice(5) : text}
+    {text}
   </time>;
 }
 
@@ -209,7 +209,6 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
   const retryText=s.errorKind==='configuration'?'配置需修正后重新检查':s.retryAt?`${Math.max(0,Math.ceil((s.retryAt-clock)/1000))} 秒后原地重试（${short(s.retryAt)}）`:'2 分钟后原地重试';
   const hasStarted = !!(s.round || s.mined || s.anchorsDone || s.rules.length || s.lastError);
   const activeAnchor = running && s.enabled && !rangeComplete && !reached && anchorMs === s.cursorMs ? anchorMs : null;
-  const displayAnchor = activeAnchor ?? s.lastAnchorMs;
   const status = activeAnchor != null ? `正在挖 ${formatUTC8(activeAnchor)} 这一档${progress?.total ? `（${progress.done} / ${progress.total} 个标的）` : ''}`
     : rangeComplete ? '已完成所选时间区间；历史结果已保留，重新开始可设置新的起止时间'
     : reached ? '已达目标：可重新开始新一轮'
@@ -222,6 +221,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
     : !s.enabled ? hasStarted ? '已暂停' : '未开始'
     : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : waiting ? (/限频/.test(waiting)?'限频等待':'等待中') : s.lastError ? '等待重试' : '排队中';
   const hasError = !!s.lastError && !running && !reached && !caughtUp && !rangeComplete;
+  const statusDetail = hasError || waiting ? status : undefined;
   return <FishQualityModule title="批量捕捞" icon={Pickaxe} testId="fish-mining-panel" summary={<>
         <FishQualityInfo label="批量捕捞说明与进度">
           <div className="space-y-2.5">
@@ -278,17 +278,11 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           </DialogContent>
         </Dialog>
         <FishMiningLibrary openRequest={openRequest} onSelectDirectory={onSelectDirectory} directoryEdits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump} onSelectInTable={onSelectInTable}/>
-        {(running || hasError || s.enabled || hasStarted) && <div className="ml-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-4">
-          <span role="status" aria-label={status} title={status}
-            className={`inline-flex items-center gap-2 whitespace-nowrap ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}>
-            <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${activeAnchor != null ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>
-            {statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>
-          </span>
-          {displayAnchor != null && <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
-            <span aria-hidden className="text-muted-foreground/50">·</span>
-            {activeAnchor != null ? '正在扫' : '已扫至'} <MiningTime ms={displayAnchor} compact/>
-          </span>}
-        </div>}
+        {(running || hasError || s.enabled || hasStarted) && <span role="status" aria-label={statusDetail} title={statusDetail}
+          className={`ml-1 inline-flex items-center gap-2 whitespace-nowrap text-[10px] leading-4 ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}>
+          <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${activeAnchor != null ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>
+          {statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>
+        </span>}
 
         {hasError&&<button type="button" disabled={running} onClick={mining.retry??mining.start} className={qualityPrimaryAction}>{s.errorKind==='configuration'?'重新检查':'立即重试'}</button>}
         {s.errorKind==='configuration'&&!running&&<><a href="/journal/deep-dig" className="text-[10.5px] text-primary hover:underline">检查算法定义</a>{!s.scan&&mining.useCurrentScope&&<button type="button" onClick={mining.useCurrentScope} className="text-[10.5px] text-primary hover:underline" title="使用当前捕捞选择的交易所范围重新检查，保留已挖进度与原算法">更新为当前捕捞范围</button>}{!s.scan&&mining.resetConfiguration&&<button type="button" onClick={mining.resetConfiguration} className="text-[10.5px] text-primary hover:underline" title="使用可用的默认批量捕捞算法和当前捕捞范围，保留已挖进度与全部历史结果">恢复默认挖掘条件</button>}</>}
