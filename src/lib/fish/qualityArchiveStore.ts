@@ -13,7 +13,7 @@ import type { FishQualityStudy } from './quality';
 import type { QualityMonitorArchive, QualityMonitorArchiveStudy } from './qualityMonitorLibrary';
 import { applyArchiveSourceDeletions } from './libraryDeletion';
 import { compactQualityRuns } from './qualityStudyCompact';
-import { noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import { hasSyncedImmutableAccountBlob, noteAccountBlobSaved, syncAccountBlobFully, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 const DATABASE = 'veil-fish-quality-archives-v1', STORE = 'bodies';
 const ownerKey = (owner?: string | null) => owner ?? 'anonymous';
@@ -97,12 +97,6 @@ export function stripStoredQualityArchiveBodies(owner: string | null | undefined
   if (!ids || !library?.archives?.some(a => a.study && ids.has(a.id))) return study;
   return { ...study, monitorLibrary: { ...library, archives: library.archives.map(a => a.study && ids.has(a.id) ? directoryEntry(a) : a) } };
 }
-/** 上传给云端的总表不带任何归档正文（正文各有各的云端存档）。 */
-export function withoutQualityArchiveBodies(study: FishQualityStudy): FishQualityStudy {
-  const library = study.monitorLibrary;
-  if (!hasInlineBody(study)) return study;
-  return { ...study, monitorLibrary: { ...library!, archives: library!.archives!.map(directoryEntry) } };
-}
 
 /**
  * 把总表里还内嵌着的归档正文写进归档库，返回只留目录的总表。
@@ -149,8 +143,14 @@ export function syncStoredQualityArchiveBodies(owner: string | null | undefined,
   if (!ids.length || uploads.has(owner)) return uploads.get(owner) ?? Promise.resolve();
   const task = (async () => {
     for (const id of ids) {
-      try { if (await hasBody(owner, id)) { storedIds(owner).add(id); await syncAccountBlobFully(qualityArchiveBodyBlob(id), owner); } }
-      catch { /* 下次打开再补 */ }
+      try {
+        const blob = qualityArchiveBodyBlob(id);
+        if (await hasSyncedImmutableAccountBlob(blob.name, owner)) continue;
+        if (await hasBody(owner, id)) {
+          storedIds(owner).add(id);
+          await syncAccountBlobFully(blob, owner);
+        }
+      } catch { /* 下次打开再补 */ }
     }
   })();
   uploads.set(owner, task);

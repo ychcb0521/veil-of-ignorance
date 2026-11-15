@@ -83,6 +83,11 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       }),
         records: value.records.map(r => r.status === 'scanning' ? { ...r, status: 'paused' as const, updatedAt: at } : r) };
       commit(recovered); loaded = true; readyRef.current = true; setReady(true);
+      if (draft?.rounds.length) {
+        const savedInV6 = new Set(newLibrary.rounds.filter(round => round.workspaceSaved).map(round => round.id));
+        const duplicates = draft.rounds.filter(round => round.workspaceDraft && round.state === 'complete' && savedInV6.has(round.id)).map(round => round.id);
+        if (duplicates.length) void discardPublishedWorkspaceDraft(owner,duplicates).catch(()=>undefined);
+      }
     }).catch(reason => { if (epoch.current === generation) setError(reason instanceof Error ? reason.message : '读取买前监测库失败'); });
     const flush = () => { if (loaded) void persistence.save(current.current).catch(() => undefined); };
     window.addEventListener('pagehide', flush);
@@ -357,9 +362,9 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     savingDraft.current = true;setSavingWorkspaceDraft(true);setError('');
     try {
       await savePreEntryLibrary(owner,{version:1,rounds,records});
+      void discardPublishedWorkspaceDraft(owner,[...ids]).catch(()=>undefined);
       if (generation !== epoch.current) return false;
       commit({...current.current,rounds:current.current.rounds.map(round => rounds.find(saved => saved.id === round.id) ?? round)});
-      void discardPublishedWorkspaceDraft(owner,ids,records.map(record=>record.id)).catch(()=>undefined);
       return true;
     } catch (cause) {
       if (generation === epoch.current) setError(cause instanceof Error ? cause.message : '保存筛选结果失败');

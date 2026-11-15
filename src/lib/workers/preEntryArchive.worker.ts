@@ -1,4 +1,4 @@
-import {readPreEntrySnapshot,validPreEntryLibrary,readPreEntryReadModel,readPreEntryCacheRevision,cachePreEntryReadModel,readPreEntryTableClears} from '../fish/preEntryPersistence';
+import {readPreEntrySnapshot,validPreEntryLibrary,readPreEntryReadModel,readPreEntryCacheRevision,cachePreEntryReadModel,readPreEntryTableClears,removePublishedPreEntryDrafts} from '../fish/preEntryPersistence';
 import {withPreEntryTableClears} from '../fish/preEntryTableClears';
 import {projectPreEntryRecord,projectPreEntryRecords} from '../fish/preEntryArchive';
 import {deserializeAccountBlobStream} from '../accountBlobStream';
@@ -12,7 +12,7 @@ import {restorePreEntryStudy} from '../fish/preEntryArchive';
 import {buildQualitySheets} from '../fish/qualityExport';
 import {buildXlsx} from '../xlsxWorkbook';
 
-type Request={owner?:string;preview?:boolean;rebuild?:boolean}&({kind:'load'}|{kind:'project';records:PreEntryRecord[]}|{kind:'decode';enc:'gzip'|'json';pieces:readonly string[]}|{kind:'backup';library:PreEntryLibrary}|{kind:'import';file:File}|{kind:'tables';tables:{id:string;study:FishQualityStudy}[]});
+type Request={owner?:string;preview?:boolean;rebuild?:boolean}&({kind:'load'}|{kind:'cleanup-published';draftOwner:string;roundIds:readonly string[]}|{kind:'project';records:PreEntryRecord[]}|{kind:'decode';enc:'gzip'|'json';pieces:readonly string[]}|{kind:'backup';library:PreEntryLibrary}|{kind:'import';file:File}|{kind:'tables';tables:{id:string;study:FishQualityStudy}[]});
 self.onmessage=async(event:MessageEvent<Request>)=>{
   try{
     const request=event.data;let value:PreEntryLibrary|PreEntryRecord[]|Blob|undefined;
@@ -27,7 +27,8 @@ self.onmessage=async(event:MessageEvent<Request>)=>{
       for await(const chunk of accountBlobChunkBatches(()=>serializePreEntryLibraryChunks(request.library)))parts.push(new Blob([encoder.encode(chunk) as Uint8Array<ArrayBuffer>]));
       parts.push('}');
       value=new Blob(parts,{type:'application/json'});
-    }else if(request.kind==='project')value=await projectPreEntryRecords(request.records,request.owner);
+    }else if(request.kind==='cleanup-published')await removePublishedPreEntryDrafts(request.draftOwner,request.owner,request.roundIds);
+    else if(request.kind==='project')value=await projectPreEntryRecords(request.records,request.owner);
     else if(request.kind==='load'){
       const revision=await readPreEntryCacheRevision(request.owner);
       const cached=!request.rebuild&&await readPreEntryReadModel(request.owner);

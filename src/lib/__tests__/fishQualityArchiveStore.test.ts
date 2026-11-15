@@ -53,6 +53,10 @@ it('keeps a body inline when it cannot be written to the archive store, and fini
   const legacy = legacyStudy();
   expect(await store.saveQualityStudy('retry', legacy)).toBe(true);
   expect(inline(disk.get('fish-quality:retry'))).toBe(2);
+  expect(inline(await store.qualityAccountBlob.read('retry'))).toBe(2);
+  await expect(store.qualityAccountBlob.prepareStored!('retry')).rejects.toThrow('暂缓云端备份');
+  localStorage.setItem('fish-quality:retry', JSON.stringify(legacy));
+  await expect(store.qualityAccountBlob.prepareStored!('retry')).rejects.toThrow('暂缓云端备份');
   expect(localStorage.getItem('veil-fish-quality-archives-detached-v1:retry')).toBeNull();
   failPut = () => false;
   expect(await store.saveQualityStudy('retry', legacy)).toBe(true);
@@ -88,4 +92,16 @@ it('records result counts on directory entries and backfills entries migrated be
   disk.set('fish-quality:counted', uncounted);
   await store.backfillQualityArchiveCounts('counted', uncounted);
   expect((disk.get('fish-quality:counted') as FishQualityStudy).monitorLibrary!.archives!.map(a => a.resultCount)).toEqual(slim.monitorLibrary!.archives!.map(a => a.resultCount));
+});
+
+it('uses immutable backup receipts to skip already-synced archives, without skipping one still pending', async () => {
+  const legacy = legacyStudy(), [acknowledged, pending] = legacy.monitorLibrary!.archives!;
+  const account = await import('@/lib/accountBlobSync');
+  const receipt = vi.spyOn(account, 'hasSyncedImmutableAccountBlob').mockImplementation(async name => name.endsWith(acknowledged.id));
+  const sync = vi.spyOn(account, 'syncAccountBlobFully').mockResolvedValue('pushed');
+  const { detachQualityArchiveBodies, syncStoredQualityArchiveBodies } = await import('@/lib/fish/qualityArchiveStore');
+  const directory = await detachQualityArchiveBodies('archive-fixture',legacy);
+  await syncStoredQualityArchiveBodies('archive-fixture',directory);
+  expect(receipt).toHaveBeenCalledTimes(2);
+  expect(sync).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({name:`fish-quality-archive/${pending.id}`}), 'archive-fixture');
 });

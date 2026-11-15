@@ -104,6 +104,12 @@ async function putRecord(key: string, value: unknown): Promise<void> {
   } catch { /* 内存里那份仍可用到本页结束；下次打开按「从没同步过」处理，空白数据不会盖掉云端 */ }
 }
 const readMeta = (name: string, owner: string) => getRecord<Meta>(`meta:${idOf(name, owner)}`);
+
+/** A local receipt for an immutable body. Mutable stores must still reconcile. */
+export async function hasSyncedImmutableAccountBlob(name: string, owner: string): Promise<boolean> {
+  const meta = await readMeta(name, owner);
+  return !!meta?.rev && (meta.parts ?? 0) > 0 && meta.syncedAt >= meta.savedAt;
+}
 const writeMeta = (name: string, owner: string, meta: Meta) => putRecord(`meta:${idOf(name, owner)}`, meta);
 
 /** 被云端替换前的本机版本（每份只留最近一次），供排查和人工找回。 */

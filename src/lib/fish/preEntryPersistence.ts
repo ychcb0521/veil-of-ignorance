@@ -1,4 +1,5 @@
-import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, type PreEntryLibrary, type PreEntryRecord } from './preEntryMonitor';
+import { emptyPreEntryLibrary, isAutomaticPreEntryRound, mergePreEntryLibraries, preEntryRecordPending, type PreEntryLibrary, type PreEntryRecord, type PreEntryRound } from './preEntryMonitor';
+import { serializeAccountBlobChunks } from '../accountBlobCodec';
 import {restorePreEntryRecord,projectPreEntryRecord,projectPreEntryRecords} from './preEntryArchive';
 import { mergePreEntryTableClears, validPreEntryTableClears, withPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 
@@ -96,7 +97,15 @@ export async function cachePreEntryReadModel(owner:string|undefined,library:PreE
   let merged=library;
   try{await new Promise<void>((resolve,reject)=>{
     const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),request=store.get(viewKey(owner)),metadata=store.get(metaKey(owner));
-    metadata.onsuccess=()=>{const old=validReadModel(request.result)?request.result:undefined,previous=old?.library??emptyPreEntryLibrary(),meta=JSON.stringify(metadata.result??null),sameRevision=!expected||expected.generation===old?.generation&&expected.meta===meta;merged=preferIncoming?mergePreEntryLibraries(previous,library):mergePreEntryLibraries(library,previous);store.put({version:1,generation:old?.generation,meta,complete:sameRevision&&(complete||!!old?.complete&&old.meta===meta),library:merged},viewKey(owner));};
+    metadata.onsuccess=()=>{
+      const old=validReadModel(request.result)?request.result:undefined,meta=JSON.stringify(metadata.result??null);
+      if(expected&&(expected.generation!==old?.generation||expected.meta!==meta))return;
+      const previous=old?.library??emptyPreEntryLibrary();
+      // An authoritative rebuild must not carry forward rows already removed
+      // from the canonical checkpoint or reinstate a stale reader's cache.
+      merged=complete&&!preferIncoming&&expected?library:preferIncoming?mergePreEntryLibraries(previous,library):mergePreEntryLibraries(library,previous);
+      store.put({version:1,generation:old?.generation,meta,complete:complete||!!old?.complete&&old.meta===meta,library:merged},viewKey(owner));
+    };
     tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);
   });}finally{db.close();}
   return merged;
@@ -215,6 +224,7 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
   const generation=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let checkpointMeta='null';
   let previousMeta='null';
+  let committed=false;
   const db = await open();
   const staged=delta.records.some(record=>!!record.processRef);
   const stageKey=(index:number)=>`staging:${keyOf(owner)}:${generation}:${index}`;
@@ -246,7 +256,10 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
     update(metaKey(owner), {...delta, records:[]});
     const updateRow=(index:number)=>{
       if(index>=delta.records.length)return;
-      const save=(record:PreEntryLibrary['records'][number])=>update(rowPrefix(owner)+record.id,{version:1,rounds:[],records:[record]},true,()=>updateRow(index+1));
+      const save=(record:PreEntryLibrary['records'][number])=>update(rowPrefix(owner)+record.id,{version:1,rounds:[],records:[record]},true,()=>{
+        if(staged)store.delete(stageKey(index));
+        updateRow(index+1);
+      });
       if(!staged){save(delta.records[index]);return;}
       const request=store.get(stageKey(index));
       request.onsuccess=()=>{try{const record=request.result;if(!record||record.id!==delta.records[index].id||record.processRef)throw Error('筛选恢复暂存不完整，原库保留');save(record);}catch(error){failure=error;tx.abort();}};
@@ -258,8 +271,8 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
     }
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? Error('入选库保存失败'));
-  }); } finally {
-    if(staged){try{await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);for(let i=0;i<delta.records.length;i++)store.delete(stageKey(i));tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});}catch{/* Only this attempt's private staging keys; canonical history is untouched. */}}
+  }); committed=true; } finally {
+    if(staged&&!committed){try{await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE);for(let i=0;i<delta.records.length;i++)store.delete(stageKey(i));tx.oncomplete=()=>resolve();tx.onerror=tx.onabort=()=>reject(tx.error);});}catch{/* Only this attempt's private staging keys; canonical history is untouched. */}}
     db.close();
   }
   // A live save only acknowledges the canonical row. The metadata comparison
@@ -275,22 +288,79 @@ export async function writePreEntrySnapshot(owner: string | undefined, delta: Pr
   }catch{/* The canonical checkpoint remains saved and the read index incomplete. */}
 }
 
-/** Delete only published draft records after the public library write has committed. */
-export async function removePublishedPreEntryDrafts(owner: string, rounds: ReadonlySet<string>, records: readonly string[]): Promise<void> {
+/** Compare the complete persisted wire without materializing two large strings. */
+function sameStoredScreening(left: unknown, right: unknown): boolean {
+  const a = serializeAccountBlobChunks(left), b = serializeAccountBlobChunks(right);
+  for (;;) {
+    const nextA = a.next(), nextB = b.next();
+    if (nextA.done || nextB.done) return !!nextA.done && !!nextB.done;
+    if (nextA.value !== nextB.value) return false;
+  }
+}
+
+function samePublishedRound(draft: PreEntryRound | undefined, saved: PreEntryRound | undefined): boolean {
+  if (!draft?.workspaceDraft || draft.workspaceSaved || draft.state !== 'complete' ||
+      !saved?.workspaceSaved || saved.workspaceDraft || saved.state !== 'complete' ||
+      !(saved.updatedAt > draft.updatedAt)) return false;
+  const { workspaceDraft, updatedAt: _draftAt, ...draftContents } = draft;
+  const { workspaceSaved, updatedAt: _savedAt, ...savedContents } = saved;
+  return sameStoredScreening(draftContents, savedContents);
+}
+
+/** Remove a completed local draft only when the full durable public copy still
+ * matches. Recheck both stores in one transaction to protect other open tabs. */
+export async function removePublishedPreEntryDrafts(draftOwner: string, owner: string | undefined, roundIds: readonly string[]): Promise<void> {
+  if (!roundIds.length) return;
   const db = await open();
   try {
-    await new Promise<void>((resolve,reject) => {
-      const tx=db.transaction(STORE,'readwrite'),store=tx.objectStore(STORE),meta=store.get(metaKey(owner));
-      meta.onsuccess=()=>{
-        if (validPreEntryLibrary(meta.result)) {
-          const next = {...meta.result,rounds:meta.result.rounds.filter((round:PreEntryLibrary['rounds'][number])=>!rounds.has(round.id))};
-          store.put(next,metaKey(owner));
-        }
-        for (const id of records) store.delete(rowPrefix(owner)+id);
-        store.delete(viewKey(owner));
-      };
-      tx.oncomplete=()=>resolve();
-      tx.onerror=tx.onabort=()=>reject(tx.error??Error('清理已保存的筛选草稿失败'));
-    });
-  } finally {db.close();}
+    // Release the write lock between rounds so live checkpoints can proceed.
+    for (const roundId of new Set(roundIds)) {
+      // Workspace rounds are generated without a colon; each row is roundId:index:planId.
+      if (!roundId || roundId.includes(':')) continue;
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+        const draft = store.get(metaKey(draftOwner)), saved = store.get(metaKey(owner));
+        const legacy = store.count(keyOf(draftOwner));
+        let failure: unknown;
+        const stop = (cause: unknown) => { failure = cause; tx.abort(); };
+        legacy.onsuccess = () => {
+          try {
+            // Leave an unexpected legacy draft layout or non-incremental data intact.
+            if (legacy.result || !validPreEntryLibrary(draft.result) || draft.result.records.length ||
+                !validPreEntryLibrary(saved.result)) return;
+            const find = (library: PreEntryLibrary) => library.rounds.find(round => round.id === roundId);
+            if (!samePublishedRound(find(draft.result), find(saved.result))) return;
+            const draftPrefix = rowPrefix(draftOwner), prefix = draftPrefix + roundId + ':';
+            const cursorRequest = store.openKeyCursor(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+            const matched: IDBValidKey[] = [];
+            cursorRequest.onsuccess = () => {
+              try {
+                const cursor = cursorRequest.result;
+                if (!cursor) {
+                  if (!matched.length) return;
+                  store.put({...draft.result,rounds:draft.result.rounds.filter((round: PreEntryRound) => round.id !== roundId)},metaKey(draftOwner));
+                  for (const key of matched) store.delete(key);
+                  store.delete(viewKey(draftOwner));
+                  return;
+                }
+                const key = cursor.primaryKey as string, id = key.slice(draftPrefix.length);
+                const draftRow = store.get(key), savedRow = store.get(rowPrefix(owner) + id);
+                savedRow.onsuccess = () => {
+                  try {
+                    const a = draftRow.result as PreEntryRecord | undefined, b = savedRow.result as PreEntryRecord | undefined;
+                    if (!a || !b || a.id !== id || b.id !== id || a.roundId !== roundId || b.roundId !== roundId ||
+                        a.processRef || b.processRef || preEntryRecordPending(a) || !sameStoredScreening(a,b)) return;
+                    matched.push(key);
+                    cursor.continue();
+                  } catch (cause) { stop(cause); }
+                };
+              } catch (cause) { stop(cause); }
+            };
+          } catch (cause) { stop(cause); }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(failure ?? tx.error ?? Error('清理已保存的筛选草稿失败'));
+      });
+    }
+  } finally { db.close(); }
 }

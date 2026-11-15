@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from '../preEntryMonitor';
-import { readPreEntrySnapshot, writePreEntrySnapshot, readPreEntryTableClears, writePreEntryTableClears, readPreEntryReadModel, readPreEntryCacheRevision, cachePreEntryReadModel } from '../preEntryPersistence';
+import { readPreEntrySnapshot, writePreEntrySnapshot, readPreEntryTableClears, writePreEntryTableClears, readPreEntryReadModel, readPreEntryCacheRevision, cachePreEntryReadModel, removePublishedPreEntryDrafts } from '../preEntryPersistence';
 import { withPreEntryTableClears } from '../preEntryTableClears';
 import { qualityScreeningResults } from '../qualityScreeningResults';
 import { persistPreEntrySnapshot } from '../preEntryPersistenceClient';
@@ -22,6 +22,8 @@ beforeEach(() => {
    get(key:string){reads.push(key);const request:{result?:unknown;onsuccess?:()=>void}={};queueMicrotask(()=>{request.result=structuredClone(disk.get(key));request.onsuccess?.();complete();});return request;},
    put(value:unknown,key:string){puts.push(key);staged.set(key,structuredClone(value));const request:{onsuccess?:()=>void}={};queueMicrotask(()=>{request.onsuccess?.();complete();});complete();return request;},
    delete(key:string){deleted.add(key);complete();},
+   count(key:string){const request:{result?:number;onsuccess?:()=>void}={};queueMicrotask(()=>{request.result=Number(disk.has(key));request.onsuccess?.();complete();});return request;},
+   openKeyCursor(range:{lower:string;upper:string}){const keys=[...disk.keys()].filter(k=>k>=range.lower&&k<=range.upper).sort();const request:{result?:unknown;onsuccess?:()=>void}={};let i=0;const step=()=>queueMicrotask(()=>{const key=keys[i++];request.result=key?{primaryKey:key,continue:step}:null;request.onsuccess?.();complete();});step();return request;},
    openCursor(range:{lower:string;upper:string}){const entries=[...disk].filter(([k])=>k>=range.lower&&k<=range.upper).sort(([a],[b])=>a.localeCompare(b));const request:{result?:unknown;onsuccess?:()=>void}={};let i=0;const step=()=>queueMicrotask(()=>{const item=entries[i++];request.result=item?{value:structuredClone(item[1]),continue:step}:null;request.onsuccess?.();complete();});step();return request;}
   })};return tx;
  }};
@@ -144,4 +146,40 @@ it('keeps the entire old checkpoint when a later body is missing or the atomic c
  disk.set('body-b',body);failCanonical=true;
  await expect(writePreEntrySnapshot('alice',next)).rejects.toThrow();failCanonical=false;
  expect(await readPreEntrySnapshot('alice')).toEqual(initial);expect([...disk.keys()].filter(k=>k.startsWith('staging:'))).toEqual([]);expect(disk.get('body-b')).toEqual(body);
+});
+
+it('cleans exact published draft history without touching the saved result or reviving a stale cached copy', async () => {
+ const draftOwner='quality-workspace-draft:alice', value=fixture();
+ const draft:PreEntryLibrary={version:1,rounds:[{...value.rounds[0],state:'complete',workspaceDraft:true}],records:[{...value.records[0],id:'r:0:plan',status:'matched'}]};
+ const {workspaceDraft,...round}=draft.rounds[0];
+ const published:PreEntryLibrary={...draft,rounds:[{...round,workspaceSaved:true,updatedAt:20}]};
+ await writePreEntrySnapshot(draftOwner,draft);
+ await writePreEntrySnapshot('alice',published);
+ const staleRevision=await readPreEntryCacheRevision(draftOwner);
+ await removePublishedPreEntryDrafts(draftOwner,'alice',['r']);
+ await cachePreEntryReadModel(draftOwner,draft,true,false,staleRevision);
+ expect((await readPreEntrySnapshot(draftOwner))?.records).toEqual([]);
+ expect((await readPreEntrySnapshot(draftOwner))?.rounds).toEqual([]);
+ expect(await readPreEntryReadModel(draftOwner)).toBeUndefined();
+ expect(await readPreEntrySnapshot('alice')).toEqual(published);
+});
+it('keeps the entire draft if a newer row, new row, or unfinished round has no exact official copy', async () => {
+ const draftOwner='quality-workspace-draft:alice', value=fixture();
+ const draft:PreEntryLibrary={version:1,rounds:[{...value.rounds[0],state:'complete',workspaceDraft:true}],records:[0,1].map(i=>({...value.records[0],id:`r:${i}:plan`,status:'matched'}))};
+ const {workspaceDraft,...round}=draft.rounds[0];
+ const published:PreEntryLibrary={...draft,rounds:[{...round,workspaceSaved:true,updatedAt:20}]};
+ await writePreEntrySnapshot(draftOwner,draft);
+ await writePreEntrySnapshot('alice',{...published,records:published.records.slice(0,1)});
+ await removePublishedPreEntryDrafts(draftOwner,'alice',['r']);
+ expect(await readPreEntrySnapshot(draftOwner)).toEqual(draft);
+ await writePreEntrySnapshot('alice',published);
+ const newer={...draft,records:[draft.records[0],{...draft.records[1],updatedAt:11,cursor:11}]};
+ await writePreEntrySnapshot(draftOwner,newer);
+ await removePublishedPreEntryDrafts(draftOwner,'alice',['r']);
+ expect(await readPreEntrySnapshot(draftOwner)).toEqual(newer);
+ const paused={...newer,rounds:[{...newer.rounds[0],state:'paused' as const,updatedAt:12}]};
+ await writePreEntrySnapshot(draftOwner,paused);
+ await writePreEntrySnapshot('alice',{...published,records:newer.records});
+ await removePublishedPreEntryDrafts(draftOwner,'alice',['r']);
+ expect(await readPreEntrySnapshot(draftOwner)).toEqual(paused);
 });

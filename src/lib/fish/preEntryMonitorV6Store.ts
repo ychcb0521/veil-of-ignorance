@@ -1,8 +1,8 @@
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
-import { validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears, removePublishedPreEntryDrafts } from './preEntryPersistence';
-import {readProjectedPreEntry as read,decodeProjectedPreEntry} from './preEntryArchiveClient';
+import { validPreEntryLibrary as valid, readPreEntryTableClears, writePreEntryTableClears } from './preEntryPersistence';
+import {readProjectedPreEntry as read,decodeProjectedPreEntry,cleanPublishedPreEntryDrafts} from './preEntryArchiveClient';
 import { validPreEntryTableClears, type PreEntryTableClears } from './preEntryTableClears';
 import { persistPreEntrySnapshot } from './preEntryPersistenceClient';
 import { prepareStoredPreEntry } from './preEntryBackup';
@@ -69,8 +69,8 @@ export async function loadPreEntryWorkspaceDraft(owner?: string): Promise<PreEnt
 }
 export const savePreEntryWorkspaceDraft = (owner: string | undefined, delta: PreEntryLibrary) => write(workspaceDraftOwner(owner),delta);
 
-export async function discardPublishedWorkspaceDraft(owner:string|undefined,rounds:ReadonlySet<string>,records:readonly string[]):Promise<void> {
+export async function discardPublishedWorkspaceDraft(owner:string|undefined,rounds:readonly string[]):Promise<void> {
   const draftOwner = workspaceDraftOwner(owner);
   await queues.get(keyOf(draftOwner));
-  await removePublishedPreEntryDrafts(draftOwner,rounds,records);
+  await cleanPublishedPreEntryDrafts(owner,draftOwner,rounds);
 }

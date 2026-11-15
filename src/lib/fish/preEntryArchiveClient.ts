@@ -1,11 +1,11 @@
 import type {PreEntryLibrary,PreEntryRecord} from './preEntryMonitor';
 import type {FishQualityStudy} from './quality';
-import {readPreEntrySnapshot} from './preEntryPersistence';
+import {readPreEntrySnapshot,removePublishedPreEntryDrafts} from './preEntryPersistence';
 import {projectPreEntryRecords} from './preEntryArchive';
 import {restorePreEntryLibrary} from './preEntryArchive';
 import {parsePreEntryLibraryBackup} from './preEntryLibraryTransfer';
 import {serializeArchiveWork} from '../serializeArchiveWork';
-type Request={owner?:string;preview?:boolean;rebuild?:boolean}&({kind:'load'}|{kind:'project';records:PreEntryRecord[]}|{kind:'decode';enc:'gzip'|'json';pieces:readonly string[]}|{kind:'backup';library:PreEntryLibrary}|{kind:'import';file:File}|{kind:'tables';tables:{id:string;study:FishQualityStudy}[]});
+type Request={owner?:string;preview?:boolean;rebuild?:boolean}&({kind:'load'}|{kind:'cleanup-published';draftOwner:string;roundIds:readonly string[]}|{kind:'project';records:PreEntryRecord[]}|{kind:'decode';enc:'gzip'|'json';pieces:readonly string[]}|{kind:'backup';library:PreEntryLibrary}|{kind:'import';file:File}|{kind:'tables';tables:{id:string;study:FishQualityStudy}[]});
 function request<T>(body:Request,fallback:()=>Promise<T>,preview?:(library:PreEntryLibrary)=>void):Promise<T>{
   return serializeArchiveWork(()=>{
     if(typeof Worker!=='function')return fallback();
@@ -20,6 +20,10 @@ function request<T>(body:Request,fallback:()=>Promise<T>,preview?:(library:PreEn
   });
 }
 export function readProjectedPreEntry(owner?:string,preview?:(library:PreEntryLibrary)=>void,rebuild=false):Promise<PreEntryLibrary|undefined>{return request({kind:'load',owner,preview:!!preview,rebuild},async()=>{return readPreEntrySnapshot(owner,true);},preview);}
+export function cleanPublishedPreEntryDrafts(owner:string|undefined,draftOwner:string,roundIds:readonly string[]):Promise<void>{
+  if(!roundIds.length)return Promise.resolve();
+  return request({kind:'cleanup-published',owner,draftOwner,roundIds},()=>removePublishedPreEntryDrafts(draftOwner,owner,roundIds));
+}
 export function projectPreEntryBatch(owner:string|undefined,records:PreEntryRecord[]):Promise<PreEntryRecord[]>{return request({kind:'project',owner,records},()=>projectPreEntryRecords(records,owner));}
 export function decodeProjectedPreEntry(owner:string,enc:'gzip'|'json',pieces:readonly string[]):Promise<unknown>{return request({kind:'decode',owner,enc,pieces},async()=>{const {decodeAccountBlob}=await import('../accountBlobSync');const value=await decodeAccountBlob(enc,pieces) as PreEntryLibrary;return {...value,records:await projectPreEntryRecords(value.records,owner)};});}
 export function preparePreEntryDownload(owner:string|undefined,library:PreEntryLibrary):Promise<Blob>{return request({kind:'backup',owner,library},async()=>new Blob([JSON.stringify({format:'veil-pre-entry-library',version:1,exportedAt:Date.now(),library:await restorePreEntryLibrary(library)})],{type:'application/json'}));}

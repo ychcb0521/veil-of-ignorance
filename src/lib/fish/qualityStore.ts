@@ -15,7 +15,8 @@ import {serializeArchiveWork} from '../serializeArchiveWork';
 import {prepareStoredQuality} from './qualityBackup';
 import {restorePreEntryStudy} from './preEntryArchive';
 import { compactQualityStudyForStorage } from './qualityStudyCompact';
-import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies, withoutQualityArchiveBodies } from './qualityArchiveStore';
+import { assertQualityArchivesDetached } from './qualityArchiveDirectory';
+import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies } from './qualityArchiveStore';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -256,7 +257,11 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     // A legacy emergency localStorage copy may be newer; retain that exact
     // recovery path instead of bypassing it in the durable-only worker.
     let fallback=false;try{fallback=localStorage.getItem(keyOf(owner))!=null;}catch{/* durable copy remains available */}
-    if(fallback){const value=await qualityAccountBlob.read(owner);return value?prepareAccountBlob(value,knownHash):undefined;}
+    if(fallback){
+      const value=await qualityAccountBlob.read(owner);
+      assertQualityArchivesDetached(value);
+      return value?prepareAccountBlob(value,knownHash):undefined;
+    }
     return prepareStoredQuality(owner,readSavedQualityPlans(owner),knownHash);
   },
   async mergeRemote(owner,value,context){if(value&&!await saveQualityStudy(owner,value,{remote:{preferRemote:context?.preferRemote??false}}))throw Error('鱼质量跨设备合并未保存');},
@@ -270,11 +275,11 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
       const db = await open();
       try {
         const stored = await readStoredQualityWithSignalReadings(db.transaction(STORE).objectStore(STORE),key);
-        // 上传的总表不带归档正文：正文各有各的云端存档（qualityArchiveBodyBlob）。
-        if (valid(fallback)) return withoutQualityArchiveBodies(applySavedQualityPlans(preserveStudy(valid(stored) ? stored : undefined, fallback),readSavedQualityPlans(owner)));
-        return valid(stored) ? withoutQualityArchiveBodies(applySavedQualityPlans(stored,readSavedQualityPlans(owner))) : undefined;
+        const study = valid(fallback) ? preserveStudy(valid(stored) ? stored : undefined, fallback) : stored;
+        if (!valid(study)) return undefined;
+        return applySavedQualityPlans(await detachQualityArchiveBodies(owner, study),readSavedQualityPlans(owner));
       } finally { db.close(); }
-    } catch { return valid(fallback) ? withoutQualityArchiveBodies(applySavedQualityPlans(fallback,readSavedQualityPlans(owner))) : undefined; }
+    } catch { return valid(fallback) ? applySavedQualityPlans(await detachQualityArchiveBodies(owner, fallback),readSavedQualityPlans(owner)) : undefined; }
   },
   write(owner, study) {
     const key = keyOf(owner);
