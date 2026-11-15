@@ -931,7 +931,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
             jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>
         </FishInstantTrading>}
       </div>}
-      {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources">
+      {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources" defaultOpen={false}>
         <FishWorkspaceSource name="信号库" snapshot={workspace.sources?.library} onImport={importWorkspace}/>
         <FishWorkspaceSource name="图灵杯" snapshot={workspace.sources?.turing} onImport={importWorkspace}/>
         <FishWorkspaceSource name="鱼舱" snapshot={workspace.sources?.fish} onImport={importWorkspace}/>

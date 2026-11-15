@@ -26,7 +26,7 @@ export function FishQualityInfo({ label, children }: { label: string; children: 
 
 /** 鱼质量的工作模块共用尺寸、留白和标题层级。 */
 /** trailing：放在行尾最右侧的次要操作（如组合表结果的隐藏 / 清除），不打乱三行按钮的逐列对齐。 */
-export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, subsection, trailing, testId, titleTestId, level='module' }: {
+export function FishQualityModule({ title, icon: Icon, summary, children, status, progress, subsection, trailing, testId, titleTestId, defaultOpen = true, level='module' }: {
   title: string;
   icon: LucideIcon;
   summary?: ReactNode;
@@ -37,9 +37,10 @@ export function FishQualityModule({ title, icon: Icon, summary, children, status
   trailing?: ReactNode;
   testId?: string;
   titleTestId?: string;
+  defaultOpen?: boolean;
   level?: 'module' | 'submodule';
 }) {
-  const [open, setOpen] = useState(true), contentId = useId(), subsectionId = useId();
+  const [open, setOpen] = useState(defaultOpen), contentId = useId(), subsectionId = useId();
   const Heading = level==='module'?'h4':'h5';
   return <section aria-label={`${title}模块`} data-testid={testId} data-module-level={level} className="relative flex min-w-0 flex-wrap items-start gap-x-3 border-b border-border/40 py-1.5 last:border-b-0">
     {/* 顶层标题列补齐子模块的左缩进（ml-1.5 + border-l + pl-3 / sm:pl-4），让四行操作按钮对齐。 */}
