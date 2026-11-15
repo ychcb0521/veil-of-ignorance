@@ -10,6 +10,15 @@ export interface QualityTemplateName {
 }
 
 const prefixes={filter:'过滤',screen:'筛选',monitor:'监测'} as const;
+function ordinalLetters(ordinal:number):string {
+  let suffix='';
+  while(ordinal>0){
+    ordinal--;
+    suffix=String.fromCharCode(65+ordinal%26)+suffix;
+    ordinal=Math.floor(ordinal/26);
+  }
+  return suffix;
+}
 function ordered(value:unknown):unknown{
   if(Array.isArray(value))return value.map(ordered);
   if(value&&Object.getPrototypeOf(value)===Object.prototype){
@@ -42,7 +51,7 @@ function build(catalog:readonly QualityPlanTemplate[]) {
     const stamp=day.toISOString().slice(0,10).replace(/-/g,''),key=kind+stamp;
     const ordinal=(ordinals.get(key)??0)+1;ordinals.set(key,ordinal);
     if(!template.deleted&&template.plan)names.set(template.id,{id:template.id,originalName:template.name,
-      name:prefixes[kind]+'_'+stamp+'_'+String(ordinal).padStart(2,'0'),kind});
+      name:prefixes[kind]+'_'+stamp+'_'+ordinalLetters(ordinal),kind});
   }
   const cacheBody=new WeakMap<QualityGroup,string>(), activeByBody=new Map<string,typeof templates>();
   const signature=(plan:QualityGroup)=>{

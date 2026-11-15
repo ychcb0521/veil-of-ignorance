@@ -16,16 +16,20 @@ describe('template display names',()=>{
     template('s','screen',monitor,midnight,10),template('f','filter',filter),
   ]};
   const before=structuredClone(study),names=qualityTemplateNames(study);
-  expect([...names.names.values()].map(n=>n.name)).toEqual(['监测_20261110_01','监测_20261111_01','过滤_20261111_01','筛选_20261111_01','监测_20261111_02']);
+  expect([...names.names.values()].map(n=>n.name)).toEqual(['监测_20261110_A','监测_20261111_A','过滤_20261111_A','筛选_20261111_A','监测_20261111_B']);
   const after=qualityTemplateNames(deleteQualityPlanTemplate(study,'a',midnight+90));
   expect(after.names.get('z')).toEqual(names.names.get('z'));
   expect(study).toEqual(before);
+ });
+ it('continues with AA after Z',()=>{
+  const names=qualityTemplateNames({planTemplates:Array.from({length:28},(_,i)=>template('t'+i,'test',monitor,midnight+i))});
+  expect([25,26,27].map(i=>names.names.get('t'+i)?.name)).toEqual(['监测_20261111_Z','监测_20261111_AA','监测_20261111_AB']);
  });
  it('uses the exact original identity and scope, and does not guess when ambiguous',()=>{
   const study={planTemplates:[template('a','甲'),template('b','乙'),template('s','筛选原名',monitor,midnight,96)]};
   const original=structuredClone(study);
   const names=qualityTemplateNames(study);
-  expect(names.forPlan({...monitor,id:'working',label:'乙'})).toMatchObject({id:'b',name:'监测_20261111_02',originalName:'乙'});
+  expect(names.forPlan({...monitor,id:'working',label:'乙'})).toMatchObject({id:'b',name:'监测_20261111_B',originalName:'乙'});
   expect(names.forPlan(monitor)).toBeUndefined();
   expect(names.forPlan(monitor,'screen',48)).toBeUndefined();
   expect(names.forPlan(monitor,'screen',96)?.id).toBe('s');
@@ -35,7 +39,7 @@ describe('template display names',()=>{
   expect(study).toEqual(original);
   const stored=createQualityTemplateDirectory(study).groupPlans([frozen]);
   expect(createQualityTemplateDirectory(study,true).present(stored)).toEqual({
-    id:stored.id,title:'监测_20261111_02',originalTitle:'乙',
+    id:stored.id,title:'监测_20261111_B',originalTitle:'乙',
   });
  });
 });
