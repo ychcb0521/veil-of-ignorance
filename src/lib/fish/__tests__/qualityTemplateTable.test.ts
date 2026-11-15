@@ -3,6 +3,9 @@ import {createQualityTemplateTable,templateCampaignPath} from '../qualityTemplat
 import {archivedMonitorCampaignLookup,monitorRoundStudy} from '../qualityMonitorArchive';
 import {monitorArchiveFixture} from './monitorArchive.fixture';
 import {qualityMonitorCampaignPath} from '../qualityMonitorCampaign';
+import {entryDirectoryStudy} from '../qualityLibraryDirectory';
+import {qualityScreeningResults} from '../qualityScreeningResults';
+import type {PreEntryLibrary} from '../preEntryMonitor';
 
 it('merges duplicate snapshots on display without discarding changed results or retargeting a campaign',()=>{
   const original=monitorArchiveFixture(),before=structuredClone(original);
@@ -31,4 +34,18 @@ it('links record-only rounds to their frozen monitor record rather than a synthe
   expect(view.rows).toHaveLength(2);
   const paths=view.study.results.map(templateCampaignPath);
   expect(paths).toContain(qualityMonitorCampaignPath(record.id));
+});
+
+it('keeps frozen screening evidence available when a saved snapshot carries a working-table erase marker',()=>{
+  const study=monitorArchiveFixture(),sample=study.samples[0],at=sample.source.timeMs;
+  const round={id:'screening',state:'complete' as const,filters:[],hours:1,startedAt:at,updatedAt:at};
+  const library:PreEntryLibrary={version:1,rounds:[round],records:[{
+    id:'match',roundId:round.id,sample,status:'matched',startTime:at,matchedAt:at+60_000,cursor:at+60_000,updatedAt:at+60_000,readings:[],
+  }]};
+  const snapshot=entryDirectoryStudy(library,round);
+  snapshot.screeningResults![0].tableClearedAt=at+120_000;
+  expect(qualityScreeningResults(snapshot)).toEqual([]);
+  const builder=createQualityTemplateTable();builder.append(snapshot);
+  const table=builder.finish(),row=table.rows[0];
+  expect(table.screening.get(row.signalId!)?.[0].record).toMatchObject({status:'matched',matchedAt:at+60_000,tableClearedAt:at+120_000});
 });

@@ -31,8 +31,6 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   /** 标题旁 ⓘ 里的说明。 */
   info?: ReactNode;
   headerAction?: ReactNode;
-  embeddedCabin?:boolean;
-  readOnlyRatings?:boolean;
 }
 type FishSortKey = SignalSortKey | 'algorithm' | 'algorithmCount' | 'caughtAt';
 interface FishView { open?: boolean; algorithm?: string; query?: string; month?: string; sortKey?: FishSortKey; sortDir?: 'asc'|'desc'; scroll?: SignalScrollPosition; frozen?: {key:string;values:[string,number|null][]} }
@@ -54,7 +52,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const title = p.title ?? '鱼舱';
   const isSection = !p.level || p.level === 'section';
-  const isCabin = p.embeddedCabin || title === '鱼舱' && isSection;
+  const isCabin = title === '鱼舱' && isSection;
   const cabin = useMemo(() => isCabin ? groupFishCabin(p.signals) : undefined, [isCabin, p.signals]);
   const displaySignals = useMemo(() => cabin?.map(row => row.signal) ?? p.signals, [cabin, p.signals]);
   const soldSignalIds = useMemo(() => {
@@ -203,12 +201,12 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
           algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }}
           algorithmCountSort={{ active: sortKey === 'algorithmCount', onClick: () => toggleSort('algorithmCount') }}
           caughtAtSort={canSortCaughtAt ? { active: sortKey === 'caughtAt', onClick: () => toggleSort('caughtAt') } : undefined} />
-        <SignalLibraryList rows={tableRows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={sold ? undefined : scroll.current} onScrollPositionChange={sold ? undefined : onScrollPositionChange} onDelete={p.onDelete ? deleteRow : undefined} selectedIds={bulk?selectedIds:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} readOnlyRatings={p.readOnlyRatings} rowAlgorithmTypes={rowAlgorithmTypes} rowProcessSignals={rowProcessSignals} nested showProcess showScreeningTime={p.showScreeningTime} cdaAlerts={p.cdaAlerts} confirmDelete={!bulk} />
+        <SignalLibraryList rows={tableRows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={sold ? undefined : scroll.current} onScrollPositionChange={sold ? undefined : onScrollPositionChange} onDelete={p.onDelete ? deleteRow : undefined} selectedIds={bulk?selectedIds:undefined} onSelect={bulk?toggleSelection:undefined} onRate={onRate} rowAlgorithmTypes={rowAlgorithmTypes} rowProcessSignals={rowProcessSignals} nested showProcess showScreeningTime={p.showScreeningTime} cdaAlerts={p.cdaAlerts} confirmDelete={!bulk} />
       </div>
     </div>
   );
   return <div className={'min-w-0'} data-testid={testId}>
-    {!p.embeddedCabin&&<div className="group/library-header flex items-center justify-between gap-2">
+    <div className="group/library-header flex items-center justify-between gap-2">
     <span className="flex items-center gap-0.5">
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={isSection ? fishSectionHeading : fishSubHeading}>
       {p.title === '新鱼' || p.showScreeningTime ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
@@ -218,8 +216,8 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}
     </span>
     {p.headerAction}
-    </div>}
-    {(open||p.embeddedCabin) && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">
+    </div>
+    {open && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <span className="relative shrink-0"><select aria-label={`${title}的月份`} title="按月份定位信号（选中某个月会自动按时间旧→新排列）" className={`${filterCls} font-mono`} value={month} onChange={e => { setMonth(e.target.value); if (e.target.value) { setSortKey('time'); setSortDir('asc'); } }}>
           <option value="">全部月份（{displaySignals.length}）</option>

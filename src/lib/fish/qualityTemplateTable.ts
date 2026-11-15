@@ -49,7 +49,7 @@ export function createQualityTemplateTable() {
     }
     const savedFilters=new Map(input.filterReadings?.map(r=>[r.key,r])), savedSignals=new Map(input.signalReadings?.map(r=>[r.key,r]));
     const savedPostExit=new Map(input.postExitReadings?.map(r=>[r.key,r]));
-    const savedScreening=qualityScreeningResults(input);
+    const savedScreening=qualityScreeningResults(input,undefined,true);
     const screeningIndex=screeningResultIndex(savedScreening);
     const screeningById=new Map(savedScreening.map(item=>[item.record.id,item]));
     if(input.screeningResults) study.screeningResults ??= [];

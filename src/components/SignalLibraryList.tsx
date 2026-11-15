@@ -227,7 +227,6 @@ interface RowProps {
   onJump: (id: string) => void;
   onDelete?: (id: string) => void;
   onRate: (id: string, next: number) => void;
-  readOnlyRatings?:boolean;
   /** 行内任一控件拿到焦点时报上自己的 id，列表据此把这一行钉在 DOM 里。 */
   onFocusRow: (id: string) => void;
   /** 删除要点两下：第一下变成「确认删除」，3 秒内再点才删（「鱼」用）。 */
@@ -242,7 +241,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, readOnlyRatings, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   // 【用户要求】2026-10-21「鱼那里的数据…不能轻易删除」：× 紧挨着跳转箭头，容易点错——鱼要再点一次「确认删除」
@@ -311,7 +310,7 @@ function SignalLibraryRowImpl({
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
           整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
       <span className="flex w-[74px] shrink-0 items-center justify-start">
-        <SignalQualityStars readOnly={readOnlyRatings}
+        <SignalQualityStars
           signalId={id}
           value={quality}
           onChange={handleRate}
@@ -393,7 +392,6 @@ interface Props {
   onJump: (id: string) => void;
   onDelete?: (id: string) => void;
   onRate: (id: string, next: number) => void;
-  readOnlyRatings?:boolean;
 }
 
 /** 当前铺出来的是哪一段、按什么尺寸算的，以及这是哪个口径（resetKey）下的结果。 */
@@ -413,7 +411,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect,
-  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, readOnlyRatings, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, showScreeningTime = false, cdaAlerts, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
+  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, showScreeningTime = false, cdaAlerts, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef(rows); rowsRef.current = rows;
@@ -629,7 +627,6 @@ function SignalLibraryListImpl({
         onJump={onJump}
         onDelete={onDelete}
         onRate={onRate}
-        readOnlyRatings={readOnlyRatings}
         onFocusRow={handleRowFocus} selected={selectedIds?.has(sig.id)} onSelect={onSelect}
         confirmDelete={confirmDelete}
       />,
