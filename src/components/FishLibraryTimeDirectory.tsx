@@ -296,7 +296,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         {kind==='template'?grouping.map(({group,items:members},index)=>{
           const containsSelection=members.some(item=>item.id===selectedId);
           const expanded=templateView?activeTemplate===group.id:containsSelection||(expandedGroups[group.id]??index===0);
-          const checkedCount=members.filter(item=>checkedSet.has(item.id)).length;
+          const checkedCount=templateView?0:members.filter(item=>checkedSet.has(item.id)).length;
           return <section key={group.id} className="rounded-lg border border-border/60" data-testid={prefix+'-template-group'}>
             <div className="flex items-center rounded-lg bg-muted/40 pr-2">
             <button type="button" aria-expanded={expanded} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-muted/60"
@@ -307,8 +307,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               }}>
               <ChevronDown aria-hidden className={'h-3.5 w-3.5 '+(expanded?'rotate-180':'')}/>
               <span className="min-w-0 flex-1 break-words font-medium">{group.title}</span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">{group.historical?'历史快照':''}</span>
-              <span className="shrink-0 text-muted-foreground">{members.length} 项{checkedCount>0?' · 已选 '+checkedCount:''}</span>
+              {!templateView&&group.historical&&<span className="shrink-0 text-[10px] text-muted-foreground">历史快照</span>}
+              {!templateView&&<span className="shrink-0 text-muted-foreground">{members.length} 项{checkedCount>0?' · 已选 '+checkedCount:''}</span>}
             </button>
             <FishDirectorySettingsButton name={group.title} originalName={group.originalTitle} historicalAt={group.historical?.firstArchivedAt} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
             </div>
