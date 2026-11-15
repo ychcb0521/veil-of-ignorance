@@ -65,3 +65,19 @@ it('does no result-row formatting while closed and bounds open rows without drop
  fireEvent.click(screen.getByText('上一页'));expect(screen.getByText('LOAD0USDT')).toBeInTheDocument();
  formatter.mockRestore();
 });
+
+
+it('keeps manual results independent of a newer automatic screening round',()=>{
+ const state=monitor();
+ state.running=false;state.library.rounds[0].state='complete';
+ state.library.rounds.push({id:'auto',instantTrading:true,state:'complete',startedAt:T+1,updatedAt:T+2,filters:[],hours:1});
+ const source={...state.library.records[0].sample.source,id:'auto',symbol:'AUTOUSDT'};
+ state.library.records.push({...state.library.records[0],id:'auto',roundId:'auto',sample:{...state.library.records[0].sample,source}});
+ const view=render(<FishPreEntryProgress monitor={state} open/>);
+ expect(screen.getAllByTestId('pre-entry-current-result-row')).toHaveLength(7);
+ expect(screen.queryByText('AUTOUSDT')).not.toBeInTheDocument();
+ view.rerender(<FishPreEntryProgress monitor={state} open automatic/>);
+ expect(screen.getByRole('dialog')).toHaveTextContent('自动筛选 · 最近结果');
+ expect(screen.getAllByTestId('pre-entry-current-result-row')).toHaveLength(1);
+ expect(screen.getByText('AUTOUSDT')).toBeInTheDocument();
+});

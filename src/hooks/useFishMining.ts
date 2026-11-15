@@ -1,5 +1,6 @@
 import { algorithmMetricMenu } from '@/lib/fish/algorithmMetricMenu';
 import { readBinanceCooldown } from '@/lib/binanceRateLimit';
+import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { formatUTC8 } from '@/lib/timeFormat';
 /**
  * 「比较探测」持续挖掘的调度（见 lib/fish/mining.ts）。网站开着就在后台一档一档往前挖：
@@ -21,9 +22,11 @@ import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
 import { buildConfiguredMiningScan, continuousMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
+const MINING_STATE_KEYS = [MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY];
+const hasMiningWork = (s: FishMiningState) => s.enabled && s.mined < s.target && (s.endMs == null || s.cursorMs <= s.endMs);
 type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'> & { settings?: FishMiningSettings };
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
@@ -72,11 +75,20 @@ export function useFishMining(o: {
     runningStop.current?.();
   }, []);
   const tick = useCallback(async (): Promise<void> => {
+    const persisted = readMiningState();
     if (runningRef.current) {
-      if (readMiningState().round?.id !== stateRef.current.round?.id) cancelScan();
+      if (!hasMiningWork(persisted) || persisted.round?.id !== stateRef.current.round?.id || persisted.cursorMs !== stateRef.current.cursorMs) cancelScan();
       return;
     }
-    const now = Date.now();let s = load(latest.current.signalsRef.current);
+    if (!hasMiningWork(persisted)) {
+      stateRef.current = persisted;
+      setStateRaw(persisted);
+      setWaiting('');
+      return;
+    }
+    const now = Date.now();
+    let s = reconcileMiningWithFish(persisted, latest.current.signalsRef.current);
+    if (s !== persisted) setState(s);
     const resolved=resolveMiningRuleAliases(s.rules,latest.current.defs);
     if(resolved.repairs.length){s={...s,rules:resolved.rules,ruleRepairs:[...(s.ruleRepairs??[]),...resolved.repairs],lastError:'',retryAt:null,errorKind:undefined};setState(s);}
     stateRef.current = s; setStateRaw(s);
@@ -143,29 +155,46 @@ export function useFishMining(o: {
       if(active()){
         runId.current++;runningStop.current=null;releaseMiningLease(owner.current);runningRef.current = false; setRunning(false); setAnchorMs(null); setProgress(null);
         // 补历史时一档接一档连着挖
-        if (advanced || readMiningState().round?.id !== s.round?.id) setTimeout(() => {if(epoch===generation.current)void tickRef.current();}, 0);
+        const fresh = readMiningState();
+        if (advanced || !hasMiningWork(fresh) || fresh.round?.id !== s.round?.id || fresh.cursorMs !== anchor) {
+          setTimeout(() => { if (epoch === generation.current) void tickRef.current(); }, 0);
+        }
       }
     }
   }, [cancelScan, setState]);
   const tickRef = useRef(tick); tickRef.current = tick;
   useEffect(() => {
     const run = () => { void tickRef.current(); };
-    const timer = setInterval(run, TICK_MS);
+    const keys = MINING_STATE_KEYS.map(miningKey);
+    const refresh = () => {
+      const fresh = readMiningState();
+      const local = stateRef.current;
+      if (fresh.savedAt !== local.savedAt || fresh.enabled !== local.enabled || fresh.round?.id !== local.round?.id
+        || fresh.cursorMs !== local.cursorMs || fresh.target !== local.target) run();
+    };
+    const unlisten = keys.map(key => subscribePersistedStateHydration(key, refresh));
     const onStorage = (event: StorageEvent) => {
-      if ([MINING_ROUND_LOGICAL_KEY,MINING_RANGE_LOGICAL_KEY,MINING_CONFIGURED_ROUND_KEY,MINING_TIMED_ROUND_KEY].some(key=>event.key===miningKey(key)) && readMiningState().round?.id !== stateRef.current.round?.id) run();
+      if (event.key === null || keys.includes(event.key)) run();
     };
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
     window.addEventListener('storage', onStorage);
     run();
     return () => {
-      clearInterval(timer);
+      for (const off of unlisten) off();
       window.removeEventListener('online', run);
       window.removeEventListener('focus', run);
       window.removeEventListener('storage', onStorage);
       releaseMiningLease(owner.current);
     };
   }, [o.account]);
+
+  const polling = hasMiningWork(state);
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(() => void tickRef.current(), TICK_MS);
+    return () => clearInterval(timer);
+  }, [o.account, polling]);
 
   const start = useCallback(() => {
     const s = load(latest.current.signalsRef.current);

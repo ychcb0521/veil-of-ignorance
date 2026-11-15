@@ -13,6 +13,7 @@ vi.mock('@/lib/fish/miningLibraryStore', () => ({ MINING_LIBRARY_EVENT: 'x',upda
 async function openFamily(family='CBI-2'){
  await waitFor(()=>expect(screen.getByLabelText('打开捕捞归档 mining-family-'+family)).toBeInTheDocument());
  fireEvent.click(screen.getByLabelText('打开捕捞归档 mining-family-'+family));fireEvent.click(screen.getByText('挖掘记录详情'));
+ await screen.findAllByTestId('mining-library-row');
 }
 const A = Date.UTC(2026, 4, 16, 4);
 const snap = (featureShort: string, statistic: string, algorithmKey: string) => ({ average: 0.05, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: A, threshold: 0.04, featureShort, statistic, algorithmKey });

@@ -123,3 +123,24 @@ it('freezes the independently saved settings per catch, including queued work re
   ]);
   expect(library.settings?.plans[0].label).toBe('手动 B');
 });
+
+
+it('leaves an empty or paused queue dormant and wakes immediately when a queued capture may run',async()=>{
+ vi.useFakeTimers({now:T});
+ const timeouts=vi.spyOn(globalThis,'setTimeout'), intervals=vi.spyOn(globalThis,'setInterval');
+ const scheduledScanPoll=()=>[...timeouts.mock.calls,...intervals.mock.calls].some(([,ms])=>ms===1200);
+ const library:PreEntryLibrary={version:1,rounds:[],records:[],settings:{updatedAt:T,plans:[{} as never],hours:48}};
+ const monitor={ready:true,running:false,library,pauseAutomatic:vi.fn(),startAutomatic:vi.fn(async()=>{})};
+ const notify={config:{enabled:false,emails:[]},sendAdmission:vi.fn()};
+ const view=renderHook(()=>useFishScreeningAutomation('dormant-screening',true,monitor as never,notify as never));
+ await act(async()=>vi.advanceTimersByTimeAsync(60_000));
+ expect(scheduledScanPoll()).toBe(false);
+ await act(async()=>{view.result.current.setAutoPaused(true);view.result.current.enqueue(signal('PAUSEDUSDT'));});
+ expect(view.result.current.pending).toBe(1);
+ expect(monitor.startAutomatic).not.toHaveBeenCalled();
+ expect(scheduledScanPoll()).toBe(false);
+ await act(async()=>view.result.current.setAutoPaused(false));
+ await act(async()=>vi.advanceTimersByTimeAsync(10));
+ expect(monitor.startAutomatic).toHaveBeenCalledOnce();
+ timeouts.mockRestore(); intervals.mockRestore();
+});

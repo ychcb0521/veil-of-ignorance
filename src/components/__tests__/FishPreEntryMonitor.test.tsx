@@ -17,7 +17,7 @@ it.each(['loading','failed'])('distinguishes an unfinished %s recovery from a tr
   if(state==='loading')expect(within(dialog).getByRole('status')).toHaveTextContent('正在读取筛选库');
   else{fireEvent.click(within(dialog).getByRole('button',{name:'重试读取'}));expect(retry).toHaveBeenCalledOnce();}
 });
-it('renders a v5 admission with guard evidence even when no extra primary indicator is required',()=>{
+it('renders a v5 admission with guard evidence even when no extra primary indicator is required',async()=>{
   const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
   const record:PreEntryRecord={id:'v5',roundId:'r',planId:'p',status:'matched',startTime:time,cursor:time+300000,matchedAt:time+300000,updatedAt:1,readings:[],detail:'三阶同刻通过',sample:{id:'sample',source:{id:'source',symbol:'TESTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time},
     threeStage:{at:time+300000,state:'matched',first:{status:'pass'},second:{status:'pass'},third:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
@@ -26,7 +26,7 @@ it('renders a v5 admission with guard evidence even when no extra primary indica
   fireEvent.click(screen.getByLabelText('打开筛选库'));
   if(screen.queryByLabelText('打开筛选归档 r')){fireEvent.click(screen.getByLabelText('打开筛选归档 r'));fireEvent.click(screen.getByText('入选判定详情'));}
   const dialog=screen.getByRole('dialog');
-  expect(within(dialog).getByText('分钟筛选 v5 · 三阶准入')).toBeInTheDocument();
+  expect(await within(dialog).findByText('分钟筛选 v5 · 三阶准入')).toBeInTheDocument();
   fireEvent.click(within(dialog).getByText('三阶判定证据'));
   expect(within(dialog).getByText(/价格下移 · 90 · 虚线/)).toBeInTheDocument();
   expect(within(dialog).getByText(/native-event/)).toBeInTheDocument();
@@ -59,7 +59,7 @@ it('shows only admitted records and preserves all underlying scan records', asyn
   fireEvent.click(screen.getByLabelText('打开筛选库'));
   if(screen.queryByLabelText('打开筛选归档 r')){fireEvent.click(screen.getByLabelText('打开筛选归档 r'));fireEvent.click(screen.getByText('入选判定详情'));}
   const admitted=screen.getByRole('dialog');
-  expect(within(admitted).getAllByTestId('pre-entry-library-row')).toHaveLength(1);
+  expect(await within(admitted).findAllByTestId('pre-entry-library-row')).toHaveLength(1);
   expect(within(admitted).getByText('TURING:TURING 1')).toBeInTheDocument();
   expect(within(admitted).queryByText('缺数据')).not.toBeInTheDocument();
   fireEvent.click(within(admitted).getByLabelText('全选当前筛选的筛选库记录'));
@@ -124,7 +124,7 @@ it('does not resume an older paused round after a newer restart has completed', 
   fireEvent.click(screen.getByText('开始筛选'));
   expect(start).toHaveBeenCalledWith(48); expect(resume).not.toHaveBeenCalled();
 });
-it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → ② 排除门槛',()=>{
+it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → ② 排除门槛',async()=>{
   const time=Date.UTC(2026,2,29,5),config=emptyPreEntryThreeStage();
   const record:PreEntryRecord={id:'v6',roundId:'r',planId:'p',status:'matched',startTime:time,cursor:time+300000,matchedAt:time+300000,updatedAt:1,readings:[],detail:'三阶同刻通过',sample:{id:'sample',source:{id:'source',symbol:'TESTUSDT',timeMs:time,timeLabel:'',fallbackZone:''},groups:[],enteredAt:time,basis:'signal',importedAt:time},
     threeStage:{at:time+300000,state:'matched',zero:{status:'pass'},first:{status:'pass'},second:{status:'pass'},readings:[],event:{id:'native-event',at:time+300000,kind:'lower',price:90,regime:'range',previousPrice:95,previousRegime:'trend',boxId:'box',segment:0,broken:false,tickSize:'1',algorithmVersion:'dbl-5-v2',guardVersion:'dbl5-guard-v1',parameters:{n:3},initializationStart:time-300000,initializationId:'fixture',dataChecksum:'sum'}}};
@@ -133,8 +133,8 @@ it('renders the reordered v6 evidence as ⓪ 必要条件 → ① 防守线 → 
   fireEvent.click(screen.getByLabelText('打开筛选库'));
   if(screen.queryByLabelText('打开筛选归档 r'))fireEvent.click(screen.getByLabelText('打开筛选归档 r'));
   const dialog=screen.getByRole('dialog');
-  expect(within(dialog).getByText('分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）')).toBeInTheDocument();
   fireEvent.click(within(dialog).getByText('入选判定详情'));
+  expect(await within(dialog).findByText('分钟筛选 v6 · 三阶准入（⓪必要条件 → ①防守线 → ②排除）')).toBeInTheDocument();
   expect(within(dialog).getByText(/⓪ 必要条件：通过/)).toBeInTheDocument();
   expect(within(dialog).getByText(/② 排除门槛：通过/)).toBeInTheDocument();
 });

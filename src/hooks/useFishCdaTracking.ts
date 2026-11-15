@@ -47,7 +47,7 @@ export interface FishCdaTracking {
   alerts: ReadonlyMap<string, ScreenedCdaTrigger>;
   admitted?: readonly ScreenedFishAdmission[];
   localSales?: readonly ScreenedFishAdmission[];
-  hasSavedSales?: boolean;
+  hasPendingSaleMail?: boolean;
   campaignIssue?: string;
   managePosition?: (input: InstantPositionFill, action: InstantManualAction) => Promise<void>;
   manualPositions?: ReadonlyMap<string, InstantManualExecution>;
@@ -81,7 +81,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   }, [autoPositions, settings]);
   const [saving, setSaving] = useState(!!configKey);
   const [error, setError] = useState('');
-  const [savedSales, setSavedSales] = useState<{ owner: string; admitted: ScreenedFishAdmission[] }>();
+  const [savedSales, setSavedSales] = useState<{ owner: string; admitted: ScreenedFishAdmission[]; pendingMail: boolean }>();
   const [revision, setRevision] = useState(0);
   const [refreshVersion, refreshCheckpoints] = useState(0);
   const checkpoints = useRef(new Map<string, Checkpoint>());
@@ -121,6 +121,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const current = useRef({ entries, notify });
   current.current = { entries, notify };
   const wake = useRef<() => void>();
+  const setPoll = useRef<(enabled: boolean) => void>();
   const manual = useRef<(input: InstantPositionFill, action: InstantManualAction) => Promise<void>>();
   const managePosition = useCallback(async (input: InstantPositionFill, action: InstantManualAction) => {
     if (!manual.current) throw Error('即时交易正在初始化，请稍后再试');
@@ -187,13 +188,14 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         const key = jobPrefix + suffix;
         if (!checkpoints.current.get(key)?.alert) checkpoints.current.set(key, saved);
       }
-      setSavedSales(previous => previous?.owner === owner ? previous : { owner, admitted: [] });
+      const pendingMail = [...sales.values()].some(saved => !saved.delivered);
+      setSavedSales(previous => ({ owner, admitted: previous?.owner === owner ? previous.admitted : [], pendingMail }));
       const ids = [...sales.keys()].flatMap(key => {
         try { return [decodeURIComponent(key)]; } catch { return []; }
       });
       const saved = await readAutomaticPreEntrySales(owner, ids);
       if (!active) return;
-      setSavedSales({ owner, admitted: saved });
+      setSavedSales({ owner, admitted: saved, pendingMail });
       setRevision(value => value + 1);
     })().catch(() => undefined); // Full library recovery remains available for older archives.
     return () => { active = false; };
@@ -578,7 +580,14 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       }
     };
     wake.current = tick;
-    const timer = window.setInterval(tick, POLL_MS);
+    let timer: number | undefined;
+    setPoll.current = enabled => {
+      if (enabled && timer === undefined) timer = window.setInterval(tick, POLL_MS);
+      else if (!enabled && timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
     window.addEventListener('online', tick);
     window.addEventListener('focus', tick);
     document.addEventListener('visibilitychange', tick);
@@ -587,7 +596,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       lifetime.abort();
       wake.current = undefined;
       manual.current = undefined;
-      window.clearInterval(timer);
+      setPoll.current?.(false);
+      setPoll.current = undefined;
       window.removeEventListener('online', tick);
       window.removeEventListener('focus', tick);
       document.removeEventListener('visibilitychange', tick);
@@ -596,15 +606,20 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
 
   useEffect(() => { wake.current?.(); }, [entries, notify.config]);
   const counts = useMemo(() => {
-    let active = 0, awaitingMail = 0;
+    let active = 0, awaitingMail = 0, watching = false;
     for (const { record } of entries) {
       const key = jobPrefix + encodeURIComponent(record.id);
       const checkpoint = checkpoints.current.get(key) ?? readLocal<Checkpoint>(key);
-      if (!checkpoint?.alert) active++;
-      else if (!checkpoint.delivered) awaitingMail++;
+      if (!checkpoint?.alert) {
+        active++;
+        if (!checkpoint?.manual || checkpoint.manual.orders) watching = true;
+      } else if (!checkpoint.delivered) awaitingMail++;
     }
-    return { active, awaitingMail };
+    return { active, awaitingMail, watching };
   }, [entries, jobPrefix, revision]);
+  const shouldPoll = counts.watching || (counts.awaitingMail > 0 && notify.config.enabled && !fishNotifyMissing(notify.config));
+  useEffect(() => { setPoll.current?.(shouldPoll); }, [shouldPoll, configKey, activeSettings, autoPositions]);
+
   const alerts = useMemo(() => {
     const result = new Map<string, ScreenedCdaTrigger>();
     for (const { record } of [...(localSales ?? []), ...admitted]) {
@@ -640,5 +655,5 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     }
     return results;
   }, [admitted, jobPrefix, revision]);
-  return { enabled: !!activeSettings, managePosition, manualPositions, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasSavedSales: !!owner && savedSales?.owner === owner, ...counts };
+  return { enabled: !!activeSettings, managePosition, manualPositions, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasPendingSaleMail: !!owner && savedSales?.owner === owner && savedSales.pendingMail, active: counts.active, awaitingMail: counts.awaitingMail };
 }

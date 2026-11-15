@@ -13,7 +13,7 @@ const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn(), clear: vi.fn()
 vi.mock('@/lib/fish/preEntryMonitorStore', () => ({ loadPreEntryLibrary: storage.v1Load, savePreEntryLibrary: storage.v1Save }));
 vi.mock('@/lib/fish/preEntryMonitorV2Store', () => ({ loadPreEntryLibraryV2: storage.v2Load, savePreEntryLibraryV2: storage.v2Save }));
 vi.mock('@/lib/fish/preEntryMonitorV3Store', () => ({ loadPreEntryLibraryV3: storage.v3Load, savePreEntryLibraryV3: storage.v3Save }));
-vi.mock('@/lib/fish/preEntryMonitorV6Store', () => ({ loadPreEntryLibraryV6: storage.load, savePreEntryLibraryV6: storage.save, savePreEntryTableClears: storage.clear }));
+vi.mock('@/lib/fish/preEntryMonitorV6Store', () => ({ loadPreEntryLibraryV6: storage.load, loadPreEntryWorkspaceDraft: async()=>undefined, savePreEntryLibraryV6: storage.save, savePreEntryTableClears: storage.clear }));
 vi.mock('@/lib/fish/preEntryMonitorV5Store', () => ({ loadPreEntryLibraryV5: storage.v5Load, savePreEntryLibraryV5: storage.v5Save }));
 vi.mock('@/lib/fish/preEntryMonitorV4Store', () => ({ loadPreEntryLibraryV4: storage.v4Load, savePreEntryLibraryV4: storage.v4Save }));
 const t = Date.UTC(2026, 2, 29, 5);
@@ -292,4 +292,16 @@ it('executes the dedicated automatic plan without creating manual settings', asy
   await act(() => result.current.startAutomatic('catch-one',study(),false,undefined,{plans:[plan],updatedAt:t,hours:4}));
   expect(tasks[0].preEntry?.round).toMatchObject({id:'catch-one',automatic:true,hours:4,plans:[plan]});
   expect(result.current.library.settings).toBeUndefined();
+});
+
+
+it('requires a dedicated screening plan for a new workspace run even if static filtering is configured',async()=>{
+ const run=vi.fn(async()=>undefined), input=study();
+ const {result}=renderHook(()=>usePreEntryMonitor('workspace-independent-screening',true,run,true));
+ await waitFor(()=>expect(result.current.ready).toBe(true));
+ await act(()=>result.current.start(input,48));
+ expect(run).not.toHaveBeenCalled();
+ expect(result.current.library.rounds).toHaveLength(0);
+ expect(result.current.library.settings).toBeUndefined();
+ expect(result.current.error).toContain('设置筛选条件');
 });

@@ -285,14 +285,16 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         }
       }
       const { ready, monitor, paused } = current.current;
-      if (!queue.ready || !ready || !monitor?.ready) return;
+      const retryStorage = queue.failedWrites.size > 0 || queueReadFailed;
+      if (!queue.ready || !ready || !monitor?.ready) return retryStorage;
       const jobs = [...queue.entries.values()].filter(isScreeningJob);
-      if (!jobs.length) return;
+      if (!jobs.length) return retryStorage;
       const ids = new Set(jobs.map(job => job.id));
       const records = new Map(monitor.library.records.filter(record => ids.has(record.roundId)).map(record => [record.roundId, record]));
       const completed = new Set(monitor.library.rounds.filter(round => ids.has(round.id) && round.state === 'complete').map(round => round.id));
       const defaultSettings = readAutomaticScreeningSettings(owner) ?? monitor.library.settings;
-      const next = jobs.filter(job => !job.matched && (resumeJobs.has(job.key) || job.nextCheckAt <= now)
+      const isMail = (job: Job) => job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched';
+      const next = jobs.filter(job => !isMail(job) && (resumeJobs.has(job.key) || job.nextCheckAt <= now)
         && (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length))
         .reduce<Job | undefined>((first, job) => !first || job.nextCheckAt < first.nextCheckAt ? job : first, undefined);
       if (next && !paused && !(monitor.automaticRunning ?? monitor.running)) void exclusive('scan', async () => {
@@ -329,31 +331,38 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
         await save({ ...saved, failures, nextCheckAt: failures ? Date.now() + Math.min(15, 2 ** Math.min(failures, 4)) * MINUTE : nextClose });
         return true;
       });
-      const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && (job.matched || completed.has(job.id) && records.get(job.id)?.status === 'matched'));
+      const pendingMail = jobs.find(job => (job.nextMailAt ?? 0) <= now && isMail(job));
       if (pendingMail) mail(pendingMail);
+      const config = current.current.notify.config;
+      return retryStorage || (!paused && jobs.some(job => !isMail(job) && (records.has(job.id) || (job.settings ?? defaultSettings)?.plans.length)))
+        || ((!config.enabled || !fishNotifyMissing(config)) && jobs.some(isMail));
     };
-    wake.current = tick;
-    const poll = () => tick();
-    const refreshAndPoll = () => { void hydrate(); tick(); };
-    const timer = setInterval(poll, 1200);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = (resumeNow = false) => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = tick(resumeNow) ? setTimeout(() => poll(), 1200) : undefined;
+    };
+    wake.current = poll;
+    const onVisible = () => poll();
+    const refreshAndPoll = () => { void hydrate(); poll(); };
     window.addEventListener('online', refreshAndPoll);
     window.addEventListener('focus', refreshAndPoll);
-    document.addEventListener('visibilitychange', poll);
+    document.addEventListener('visibilitychange', onVisible);
     void hydrate();
-    tick();
+    poll();
     return () => {
       lifetime.abort();
       wake.current = undefined;
-      clearInterval(timer);
+      clearTimeout(timer);
       window.removeEventListener('storage', refresh);
       window.removeEventListener('online', refreshAndPoll);
       window.removeEventListener('focus', refreshAndPoll);
-      document.removeEventListener('visibilitychange', poll);
+      document.removeEventListener('visibilitychange', onVisible);
       queue.channel?.close();
       queue.channel = undefined;
     };
   }, [owner, pauseKey, persist, prefix, publish, queue, save]);
-  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config]);
+  useEffect(() => { wake.current?.(); }, [ready, monitor?.ready, monitor?.automaticRunning, monitor?.library.settings, paused, settings, notify.config, jobs.length, storageIssue]);
 
   const matchedIds = useMemo(() => {
     if (!jobs.length || !monitor) return undefined;

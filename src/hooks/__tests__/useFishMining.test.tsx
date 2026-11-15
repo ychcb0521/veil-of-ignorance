@@ -4,7 +4,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { initialMiningSettings, saveMiningSettings } from '@/lib/fish/miningSettings';
 import { useFishMining } from '@/hooks/useFishMining';
-import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
+import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -288,4 +288,29 @@ it('cancels the running scan when restarting locally and starts the new round wi
   await flush(10);
   expect(mine).toHaveBeenCalledTimes(2);
   expect(list.current.map(signal => signal.symbol)).toEqual(['NEWUSDT']);
+});
+
+
+it('does not poll when unused and stops an in-flight anchor when another tab pauses the same round',async()=>{
+ const scheduled=vi.spyOn(globalThis,'setInterval');
+ let finish!:(value:TradeSignal[])=>void;
+ const pending=new Promise<TradeSignal[]>(resolve=>{finish=resolve;});
+ const {h,mine,stop,commit}=setup({mine:async()=>pending});
+ await flush(120_000);
+ expect(scheduled).not.toHaveBeenCalled();
+ act(()=>h.result.current.restart({startMs:MINING_START_MS,target:100,rules:currentDefaultRulesForRange()}));
+ await flush(10);expect(mine).toHaveBeenCalledOnce();
+ const running=readMiningState(),key=miningKey(MINING_ROUND_LOGICAL_KEY);
+ const update=(enabled:boolean)=>{
+  const newValue=JSON.stringify({...running,enabled});
+  localStorage.setItem(key,newValue);window.dispatchEvent(new StorageEvent('storage',{key,newValue}));
+ };
+ act(()=>update(false));await flush(10);
+ expect(stop).toHaveBeenCalledOnce();
+ expect(h.result.current.state).toMatchObject({enabled:false,cursorMs:MINING_START_MS});
+ await act(async()=>finish([sig('LATEUSDT',MINING_START_MS)]));expect(commit).not.toHaveBeenCalled();
+ mine.mockImplementationOnce(async()=>new Promise<TradeSignal[]>(()=>{}));
+ act(()=>update(true));await flush(10);
+ expect(mine).toHaveBeenCalledTimes(2);
+ expect(mine.mock.calls[1][0].anchorMs).toBe(MINING_START_MS);
 });

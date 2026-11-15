@@ -79,10 +79,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const workspaceSources = useMemo(() => {
     if (!workspaceMode || !enabled) return undefined;
     return {
-      fish:importQualityFish(newQualityStudy(),signals),
-      mined:importQualityFish(newQualityStudy(),mined,Date.now(),'mined'),
-      library:importQualityLibrary(newQualityStudy(),library),
-      turing:importQualityLibrary(newQualityStudy(),turing,Date.now(),'turing'),
+      fish: () => importQualityFish(newQualityStudy(), signals),
+      mined: () => importQualityFish(newQualityStudy(), mined, Date.now(), 'mined'),
+      library: () => importQualityLibrary(newQualityStudy(), library),
+      turing: () => importQualityLibrary(newQualityStudy(), turing, Date.now(), 'turing'),
     };
   },[workspaceMode,enabled,signals,mined,library,turing]);
   const screeningLibrary = useRef(preEntry.library); screeningLibrary.current = preEntry.library;

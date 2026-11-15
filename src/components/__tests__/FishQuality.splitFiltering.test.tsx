@@ -8,8 +8,8 @@ import {preEntrySignal,type PreEntryLibrary} from '@/lib/fish/preEntryMonitor';
 import type {FishQualityState} from '@/hooks/useFishQuality';
 import {enableQualityComparison} from '@/lib/fish/qualityComparison';
 import type {XlsxSheet} from '@/lib/xlsxWorkbook';
-const captured=vi.hoisted(()=>({sheets:[] as XlsxSheet[][]}));
-vi.mock('@/lib/fish/qualityExport',async original=>({...await original<typeof import('@/lib/fish/qualityExport')>(),downloadQualityComparison:(_s:unknown,_r:unknown,_at:unknown,leading:XlsxSheet[])=>{captured.sheets.push(leading);return 'test.xlsx';}}));
+const captured=vi.hoisted(()=>({sheets:[] as XlsxSheet[]}));
+vi.mock('@/lib/fish/qualityTableExport',async original=>({...await original<typeof import('@/lib/fish/qualityTableExport')>(),downloadQualityTableSheet:(sheet:XlsxSheet)=>{captured.sheets.push(sheet);return 'test.xlsx';}}));
 const T=Date.UTC(2026,10,8),noop=vi.fn();
 afterEach(()=>{cleanup();localStorage.clear();sessionStorage.clear();captured.sheets=[];vi.clearAllMocks();});
 function fixture():FishQualityState{
@@ -43,10 +43,22 @@ it('confirms each erase separately and clears only the matching working-table re
  expect(clearStatic).not.toHaveBeenCalled();expect(screen.getAllByTestId('quality-filter-cell')).toHaveLength(2);expect(initial.preEntry!.library).toEqual(original);expect(initial.study.results).toEqual(holding);
  fireEvent.click(screen.getByRole('button',{name:'清除组合表中的静态过滤结果'}));fireEvent.click(screen.getByRole('button',{name:'确认清除'}));await waitFor(()=>expect(clearStatic).toHaveBeenCalledOnce());expect(clearDynamic).toHaveBeenCalledOnce();expect(screen.queryByTestId('quality-filter-cell')).toBeNull();expect(screen.getAllByTestId('quality-sell-relative-gain')).toHaveLength(4);
 });
-it('exports the same separate groups and leaves hidden dynamic results out of the visible table export',()=>{
- render(<FishQuality state={fixture()}/>);fireEvent.click(screen.getByRole('button',{name:'导出鱼质量数据'}));
- const shown=captured.sheets[0];expect(shown[0].headerRows![0].map(c=>c.text)).toEqual(expect.arrayContaining(['静态过滤','动态筛选','持仓监测']));expect(shown[0].columns.map(c=>c.header)).toEqual(expect.arrayContaining(['筛选方案','筛选结果','首次满足时间']));expect(shown.find(s=>s.name==='动态筛选')!.rows).toHaveLength(2);
- fireEvent.click(screen.getByRole('button',{name:'隐藏组合表中的动态筛选结果'}));fireEvent.click(screen.getByRole('button',{name:'导出鱼质量数据'}));const hidden=captured.sheets[1];expect(hidden[0].columns.map(c=>c.header)).not.toContain('筛选结果');expect(hidden.find(s=>s.name==='动态筛选')).toBeUndefined();expect(hidden[0].headerRows![0].some(c=>c.text==='静态过滤')).toBe(true);
+it('exports only the visible groups and completes a requested export if the board is collapsed',async()=>{
+ render(<FishQuality state={fixture()}/>);
+ const exportButton=()=>screen.getByRole('button',{name:'导出已选组合表数据'});
+ const toggle=screen.getByRole('button',{name:/^鱼质量$/});
+ fireEvent.click(exportButton());fireEvent.click(toggle);
+ await waitFor(()=>expect(captured.sheets).toHaveLength(1));
+ const shown=captured.sheets[0];
+ expect(shown.headerRows![0].map(c=>c.text)).toEqual(expect.arrayContaining(['静态过滤','动态筛选','持仓监测']));
+ expect(shown.columns.map(c=>c.header)).toEqual(expect.arrayContaining(['筛选方案','筛选结果','首次满足时间']));
+ expect(shown.rows).toHaveLength(2);
+ fireEvent.click(toggle);
+ fireEvent.click(screen.getByRole('button',{name:'隐藏组合表中的动态筛选结果'}));
+ fireEvent.click(exportButton());await waitFor(()=>expect(captured.sheets).toHaveLength(2));
+ const hidden=captured.sheets[1];
+ expect(hidden.columns.map(c=>c.header)).not.toContain('筛选结果');
+ expect(hidden.headerRows![0].map(c=>c.text)).toContain('静态过滤');
 });
 it('retains the confirmation and current results when clearing cannot be saved',async()=>{
  const state=fixture();state.clearScreeningResults=vi.fn().mockResolvedValue(false);render(<FishQuality state={state}/>);fireEvent.click(screen.getByRole('button',{name:'清除组合表中的动态筛选结果'}));fireEvent.click(screen.getByRole('button',{name:'确认清除'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('清除未保存'));expect(screen.getAllByTestId('quality-screening-result').every(cell=>cell.textContent==='已入选')).toBe(true);
@@ -61,7 +73,10 @@ it('refreshes an older selected screening directory to the started round immedia
  function Harness(){const [state,setState]=useState(initial);update=status=>setState(s=>({...s,preEntry:{...s.preEntry!,running:status!=='complete',library:{...s.preEntry!.library,rounds:[...history.rounds,{...round,state:status==='complete'?'complete':'running'}],records:[...history.records,...records.map((r,i)=>({...r,status:status==='complete'?(i?'unmatched' as const:'matched' as const):(i?'queued' as const:'scanning' as const),matchedAt:status==='complete'&&!i?T+300000:undefined,updatedAt:T+300000}))]}}}));return <FishQuality state={{...state,preEntry:{...state.preEntry!,start:async()=>setState(s=>({...s,preEntry:{...s.preEntry!,running:true,library:{...s.preEntry!.library,rounds:[...history.rounds,round],records:[...history.records,...records]}}}))}}}/>;}
  render(<Harness/>);expect(screen.getAllByTestId('quality-screening-result').every(c=>c.textContent==='已入选')).toBe(true);const shownHoldings=screen.getAllByTestId('quality-sell-relative-gain').map(c=>c.textContent);
  fireEvent.click(screen.getByRole('button',{name:'开始筛选'}));await waitFor(()=>expect(screen.getAllByTestId('quality-screening-result').every(c=>c.textContent==='待筛选')).toBe(true));
- fireEvent.click(screen.getByRole('button',{name:'导出鱼质量数据'}));expect(captured.sheets.at(-1)!.find(s=>s.name==='动态筛选')!.rows.every(r=>r[3]==='待筛选'&&r[4]===null)).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'导出已选组合表数据'}));await waitFor(()=>expect(captured.sheets).toHaveLength(1));
+ const exported=captured.sheets[0],statusColumn=exported.columns.findIndex(c=>c.header==='筛选结果'),timeColumn=exported.columns.findIndex(c=>c.header==='首次满足时间');
+ expect(exported.rows).toHaveLength(2);
+ expect(exported.rows.every(row=>row[statusColumn]==='待筛选'&&row[timeColumn]==='—')).toBe(true);
  expect(screen.getAllByTestId('quality-screening-plan').every(c=>c.textContent==='本轮新方案')).toBe(true);expect(screen.getAllByTestId('quality-screening-time').every(c=>c.textContent==='—')).toBe(true);
  act(()=>update('scanning'));expect(screen.getAllByTestId('quality-screening-result').map(c=>c.textContent)).toContain('筛选中');act(()=>update('complete'));
  expect(screen.getAllByTestId('quality-screening-result').map(c=>c.textContent)).toEqual(expect.arrayContaining(['已入选','未入选']));expect(screen.getAllByTestId('quality-screening-time').map(c=>c.textContent)).toContain('2026-11-08 08:05:00');expect(screen.getAllByTestId('quality-sell-relative-gain').map(c=>c.textContent)).toEqual(shownHoldings);

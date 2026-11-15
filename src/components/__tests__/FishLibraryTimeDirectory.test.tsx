@@ -64,3 +64,23 @@ it('ignores a late archive read after the user has selected another directory',a
  fireEvent.click(screen.getByLabelText('打开筛选库'));fireEvent.click(screen.getByLabelText('打开筛选归档 one'));fireEvent.click(screen.getByLabelText('打开筛选归档 two'));expect(screen.getByText('冻结时间 2')).toBeInTheDocument();resolve(newQualityStudy(99));
  await waitFor(()=>expect(screen.queryByText('冻结时间 99')).toBeNull());
 });
+
+
+it('loads directory metadata on demand and lets the user recover from asynchronous read and export errors',async()=>{
+ const read=vi.fn().mockRejectedValueOnce(Error('归档暂时不可用')).mockResolvedValueOnce(snapshot);
+ const getItems=vi.fn(()=>[{...items[0],study:read}]);
+ const download=vi.fn().mockRejectedValueOnce(Error('导出服务暂时不可用')).mockResolvedValueOnce('export.xlsx');
+ render(<FishLibraryTimeDirectory name="监测库" prefix="monitor" description="测试" info={null} items={getItems} recordCount={1} download={download} empty="空" />);
+ expect(getItems).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ expect(getItems).toHaveBeenCalledOnce();expect(read).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'打开监测归档 one'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('归档暂时不可用');
+ fireEvent.click(screen.getByRole('button',{name:'重试读取归档'}));
+ expect(await screen.findByTestId('monitor-archive-content')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'导出监测库数据'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('导出服务暂时不可用');
+ fireEvent.click(screen.getByRole('button',{name:'导出监测库数据'}));
+ await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+ expect(download).toHaveBeenCalledTimes(2);
+});

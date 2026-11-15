@@ -1,4 +1,4 @@
-import {FishLibraryTimeDirectory,libraryDirectoryAction,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishDeferredDetails,FishLibraryTimeDirectory,libraryDirectoryAction,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {FishMiningTransfer} from './FishMiningTransfer';
 import {miningAlgorithmDirectories,miningFamilyLibrary,miningDirectoryStudy} from '@/lib/fish/miningLibraryDirectory';
 import {downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
@@ -29,12 +29,26 @@ type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null 
 type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;account?:string;holdKeys?:()=>ReadonlySet<string>;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onSelectInTable?:(signals:readonly TradeSignal[])=>boolean;renderStudy?:(s:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>};
 export function FishMiningLibrary(props:MiningDirectoryProps){
  const {account,renderStudy,onCopyStudy,directoryEdits,openRequest,onSelectDirectory}=props;
- const bulk=useFishBulkDelete(); const [library,setLibrary]=useState<FishMiningLibrary>(emptyMiningLibrary),[open,setOpen]=useState(false),[loadError,setLoadError]=useState('');
+ const bulk=useFishBulkDelete(); const [library,setLibrary]=useState<FishMiningLibrary>(emptyMiningLibrary),[open,setOpen]=useState(false),[loadError,setLoadError]=useState(''),[loading,setLoading]=useState(false),[attempt,setAttempt]=useState(0);
  const generation=useRef(0);
- useEffect(()=>{const epoch=++generation.current;setLibrary(emptyMiningLibrary());setLoadError('');if(!open)return;
-  const reload=()=>{void loadMiningLibrary(account).then(value=>{if(generation.current===epoch)setLibrary(value);},()=>{if(generation.current===epoch)setLoadError('读取捕捞库失败，请关闭后重试');});};
-  reload();const refresh=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(account??null))reload();};window.addEventListener(MINING_LIBRARY_EVENT,refresh);return()=>{generation.current=epoch+1;window.removeEventListener(MINING_LIBRARY_EVENT,refresh);};
- },[open,account]);
+ useEffect(()=>{
+  const epoch=++generation.current;
+  setLibrary(emptyMiningLibrary());setLoadError('');setLoading(open);
+  if(!open)return;
+  let revision=0;
+  const reload=()=>{
+   const request=++revision;
+   const current=()=>generation.current===epoch&&request===revision;
+   void loadMiningLibrary(account).then(value=>{
+    if(current()){setLibrary(value);setLoadError('');setLoading(false);}
+   },()=>{
+    if(current()){setLoadError('读取捕捞库失败，请重试');setLoading(false);}
+   });
+  };
+  reload();const refresh=(e:Event)=>{if(((e as CustomEvent).detail?.owner??null)===(account??null))reload();};
+  window.addEventListener(MINING_LIBRARY_EVENT,refresh);
+  return()=>{generation.current=epoch+1;window.removeEventListener(MINING_LIBRARY_EVENT,refresh);};
+ },[open,account,attempt]);
  const directories=useMemo(()=>miningAlgorithmDirectories(library).map(directory=>{
    const edit=directoryEdits?.[directory.id];
    return !edit?.hidden?directory:{...directory,records:directory.records.filter(record=>miningRecordSavedAt(record)>edit.at)};
@@ -44,14 +58,14 @@ export function FishMiningLibrary(props:MiningDirectoryProps){
   const ids=records.map(r=>r.id);
   bulk?.({kind:'mining',ids,targets:miningRecordDeleteTargets(library.records,new Set(ids)),clearAll});
  };
- const items:FishDirectoryItem[]=directories.map(d=>({id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><details className="m-4 text-[11px]"><summary className="cursor-pointer text-muted-foreground">挖掘记录详情</summary><FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} allRecords={library.records} onClose={close}/></details>}));
- return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} renderStudy={renderStudy} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
+ const items:FishDirectoryItem[]=directories.map(d=>({id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><FishDeferredDetails summary="挖掘记录详情" className="m-4 text-[11px]">{()=> <FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} allRecords={library.records} onClose={close}/>}</FishDeferredDetails>}));
+ return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" loading={loading} loadError={loadError} onRetry={()=>setAttempt(a=>a+1)} items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} renderStudy={renderStudy} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
   description={`${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`}
   transferMenu={(onExport,canExport)=><FishMiningTransfer key={account} account={account} onExport={onExport} canExport={canExport}/>}
   dataActions={bulk&&<button type="button" className={libraryDirectoryAction+" text-destructive"} disabled={!!loadError||(!library.records.length&&!library.anchors.length)} onClick={()=>requestDelete(library.records,true)}>清空捕捞库</button>}
   download={()=>downloadDirectoryTables('捕捞库',directories.map(d=>({id:d.id,study:miningDirectoryStudy(d.records,d.family)})))}
-  info={<><p>与监测库共用目录布局和操作，按实际命中的算法大类归档。CDA、BSS、CBI-2 等同系列的门槛、周期和版本放在同一个目录，原始条件和读数分别保留。</p><p>一个记录命中多个系列时，可在对应目录分别查看；原始信号不复制入库。展开后展示组合表，可复制至主组合表，复制前先完整归档当前表。</p>{loadError&&<p role="alert">{loadError}</p>}</>}
-  empty={loadError||'暂无挖掘记录。开始批量捕捞后，每一档会自动保存。'}/>;
+  info={<><p>与监测库共用目录布局和操作，按实际命中的算法大类归档。CDA、BSS、CBI-2 等同系列的门槛、周期和版本放在同一个目录，原始条件和读数分别保留。</p><p>一个记录命中多个系列时，可在对应目录分别查看；原始信号不复制入库。展开后展示组合表，可复制至主组合表，复制前先完整归档当前表。</p></>}
+  empty="暂无挖掘记录。开始批量捕捞后，每一档会自动保存。"/>;
 }
 function FishMiningRecords({ onJump, canJump, onSelectInTable,librarySource,allRecords,onClose }: MiningDirectoryProps & {librarySource:FishMiningLibrary;allRecords:readonly FishMiningRecord[];onClose:()=>void}) {
   const bulk=useFishBulkDelete(),[selected,setSelected]=useState<Set<string>>(()=>new Set());

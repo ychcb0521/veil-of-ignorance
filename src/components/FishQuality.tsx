@@ -9,7 +9,7 @@ import {ScreeningHeaders,ScreeningCells,type ScreeningSortKey} from './FishQuali
 import {qualityScreeningResults,screeningResultIndex,screeningRowResults,screeningCell} from '@/lib/fish/qualityScreeningResults';
 import {FishQualitySourcePicker} from './FishQualitySourcePicker';
 import {latestEntryDirectory,sourceDirectoryKeys,sourceDirectoryIds,matchesMiningDirectory,type QualitySourceDirectory} from '@/lib/fish/qualitySourceDirectories';
-import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishDeferredDetails,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import { FishPreEntryMonitor } from './FishPreEntryMonitor';
 import { FishInstantTrading } from './FishInstantTrading';
 import { HoldingMonitorSettings, MonitorTimePicker } from './FishHoldingMonitorSettings';
@@ -89,6 +89,7 @@ const hasSource = (row: QualitySample,source:QualityOrigin) => qualityOrigins(ro
 // 只渲染可见窗口；数据行统一高度，遇到多行内容时只增高，不用新窗口首行反向缩小估计。
 // 否则启动监测 / 结果更新后，33px 与 40px 的首行可能交替出现，形成布局更新死循环。
 const ROW_PX = 33, OVERSCAN = 12;
+const NO_QUALITY_ROWS: QualitySample[] = [];
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」：空值（未评估、无评分等）不论升降都排在最后
 type SortKey = `signal-value:${string}` | `addition:${string}` | `entry:${string}` | `price-change:${string}` | `label:${string}` | PostExitSortKey | ScreeningSortKey | 'time' | 'mined-at' | 'symbol' | 'market' | 'quality' | 'process' | 'detector' | 'detector-value' | `filter:${string}` | `sell:${string}` | `static:${string}` | `peak:${string}` | `mirror:${string}` | `held:${string}` | `relative:${string}` | `payoff:${string}` | `geometric:${string}`;
 const TEXT_KEYS = new Set(['symbol', 'market', 'detector']);
@@ -439,10 +440,11 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
   const { samples, results, monitorTimeBasisByRow } = study;
   const allRows = useMemo(() => {
+    if (!open) return NO_QUALITY_ROWS;
     const rows = qualityDisplayRows({ samples });
     return archiveView ? rows : rows.filter(row => !isDelayedTuringReplaySample(row.source));
-  }, [samples, archiveView]);
-  const screeningResults=useMemo(()=>qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library),[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView]);
+  }, [samples, archiveView, open]);
+  const screeningResults=useMemo(()=>open ? qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library) : [],[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView,open]);
   const screeningIndex=useMemo(()=>screeningResultIndex(screeningResults),[screeningResults]);
   const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running'&&(!workspace||!isAutomaticPreEntryRound(r))).reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
   const activeScreeningId=activeScreeningRound?.id,activeScreeningAt=activeScreeningRound?.updatedAt;
@@ -471,7 +473,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const detectorSignals = useMemo(() => { const ids = new Map<string, Set<string>>(); for (const r of searched) if (r.detectorId) { if (!ids.has(r.detectorId)) ids.set(r.detectorId, new Set()); ids.get(r.detectorId)!.add(r.signalId ?? r.id); } return ids; }, [searched]);
   // 一项默认算法可能对应几个历史版本的组：按信号去重计数
   const signalsOf = (ids: readonly string[]) => new Set(ids.flatMap(id => [...(detectorSignals.get(id) ?? [])])).size;
-  const resultMap = useMemo(() => qualityResultMap({ results }), [results]);
+  const resultMap = useMemo(() => qualityResultMap({ results: open ? results : [] }), [open, results]);
   // 旧试验兼容绑定过滤；新工作流的过滤列与卖出结果各自显示。
   const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings;
   const signalMetrics = useMemo(()=>activeSignalMetrics(study),[study.signalMetrics,study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -480,7 +482,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const filterColumns = useMemo(() => { const columns = qualityFilterColumns(study); return qualityVariables(columns.map(c => c.filter)).flatMap(v => v.levels.map(f => columns.find(c => c.filter === f)!)); }, [study.sellPlans, study.buyFilters, study.independentFilters, study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
   const filterReadingMap = useMemo(() => new Map((filterReadings ?? []).map(r => [r.key, r])), [filterReadings]);
   const filterStatus = useMemo(() => {
-    const byPlan = new Map<string, Map<string, QualityFilterStatus>>(), readings = new Map((filterReadings ?? []).map(r => [r.key, r]));
+    const byPlan = new Map<string, Map<string, QualityFilterStatus>>();
+    if (!narrowed.length) return byPlan;
+    const readings = new Map((filterReadings ?? []).map(r => [r.key, r]));
     for (const plan of study.sellPlans ?? []) {
       if (!activeBuyFilters(study, plan).length) continue;
       const map = new Map<string, QualityFilterStatus>();
@@ -563,11 +567,12 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const showDetectorColumns = !workspace && !hideFilter;
   const detectorChoices = useMemo(() => qualityDetectorChoices(groups), [groups]), chosenChoices = detectorChoices.filter(c => c.ids.some(id => activeAlgorithms.includes(id)));
   const requestPostExit=state.postExit?.request;
-  const postExitPlanIds=postExitExpanded.filter(id=>plans.some(p=>p.id===id));
+  const postExitPlanIds = !archiveView && open && ready && !hideMonitor && sortedRows.length && requestPostExit
+    ? postExitExpanded.filter(id => plans.some(p => p.id === id)) : [];
   const postExitScopeKey=JSON.stringify([postExitPlanIds,sortedRows.map(r=>r.signalId??r.id)]);
   const requestObservations=(retry=false)=>{if(postExitPlanIds.length)requestPostExit?.(postExitPlanIds,sortedRows.map(r=>r.signalId??r.id),retry);};
   useEffect(()=>{if(archiveView||!open||!ready||!postExitPlanIds.length)return;requestObservations();const timer=setInterval(()=>requestObservations(),60000);return()=>clearInterval(timer);},[open,ready,postExitScopeKey,study.results,requestPostExit]); // eslint-disable-line react-hooks/exhaustive-deps
-  const togglePostExit=(id:string)=>{const opening=!postExitOpen.has(id);setPostExitExpanded(ids=>opening?[...ids,id]:ids.filter(v=>v!==id));if(opening)requestPostExit?.([id],sortedRows.map(r=>r.signalId??r.id),true);};
+  const togglePostExit=(id:string)=>{const opening=!postExitOpen.has(id);setPostExitExpanded(ids=>opening?[...ids,id]:ids.filter(v=>v!==id));if(opening&&!archiveView&&ready&&!hideMonitor&&sortedRows.length)requestPostExit?.([id],sortedRows.map(r=>r.signalId??r.id),true);};
   const selectedIds = useMemo(() => new Set(lockedBatch?.rowIds ?? study.selectedRowIds ?? []), [lockedBatch, study.selectedRowIds]);
   const selectedRows = useMemo(() => rows.filter(row => qualityTableMembers(row).some(member => selectedIds.has(member.id))), [rows, selectedIds]);
   // 【用户要求】2026-10-27 买前过滤、持仓监测只处理「当前筛选下可见、且已勾选」的行；筛选外勾着的不动
@@ -615,7 +620,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const outsideHint = outsideSelection && <span className="inline-flex flex-wrap items-center gap-1" data-testid="quality-outside-selection">{selectedCount === 0 ? <>勾选的 {outsideSelection.count} 条都在当前筛选外</> : <>筛选外另有 {outsideSelection.count} 条已勾选</>}（{outsideSelection.text}）
     <button type="button" className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20" onClick={revealSelected}>切到包含勾选的筛选</button></span>;
   const { setScope } = state;
-  useLayoutEffect(() => { setScope?.(sortedRows.map(r => r.id), {roundId:screeningRoundId,workingRoundId:screeningRunId}); }, [setScope, sortedRows, screeningRoundId, screeningRunId]);
+  useLayoutEffect(() => { if (open) setScope?.(sortedRows.map(r => r.id), {roundId:screeningRoundId,workingRoundId:screeningRunId}); }, [open, setScope, sortedRows, screeningRoundId, screeningRunId]);
   const selectedEntryCount = new Set(scopedSelected.map(r => r.signalId ?? r.id)).size;
   const rowSelected = (row: QualityTableRow) => qualityTableMembers(row).every(member => selectedIds.has(member.id));
   // 【用户要求】2026-11-02 像 Excel 那样：每行左侧有行号（选中的行号高亮），底部显示已选行数
@@ -689,9 +694,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   };
   const renderArchive = (snapshot: FishQualityStudy, close?: () => void) => workspace ? <div className="space-y-2 px-4 py-3">
     <FishWorkspaceRows snapshot={snapshot} onImport={importWorkspace} onDone={close}/>
-    <details><summary className="cursor-pointer text-[11px] text-muted-foreground">查看归档组合表</summary>
+    <FishDeferredDetails summary="查看归档组合表" className="text-[11px]">
       <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
-    </details>
+    </FishDeferredDetails>
   </div> : <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>;
   const completeScreening = state.preEntry?.library.rounds.filter(round=>round.workspaceDraft&&round.state==='complete').length ?? 0;
   const completeFiltering = study.workspaceFilterDraft?.rounds.some(round=>round.state==='complete');
@@ -759,13 +764,13 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   // Keep the live table virtualized. Export only frozen selected rows in small
   // offscreen batches, using exactly the same cell renderer as the live table.
   const EXPORT_BATCH=40,exportTableRef=useRef<HTMLTableElement>(null);
-  type TableExport={nodes:ReactNode[];header:HTMLTableSectionElement;offset:number;sheet:ReturnType<typeof readQualityTableSheet>;owner?:string};
+  type TableExport={entries:{row:QualityTableRow;index:number}[];render:(row:QualityTableRow,index:number)=>ReactNode;header:HTMLTableSectionElement;offset:number;sheet:ReturnType<typeof readQualityTableSheet>;owner?:string};
   const [tableExport,setTableExport]=useState<TableExport|null>(null);
   const visible=rows.slice(first,last),padTop=first*rowPx,padBottom=(rows.length-last)*rowPx;
 
   // 评估先算屏幕上看得见的行，再按表格顺序往下
   const { setPriority } = state;
-  useEffect(() => { setPriority?.([...visible.flatMap(qualityTableMembers), ...rows.flatMap(qualityTableMembers)].map(r => r.signalId ?? r.id)); }, [setPriority, rows, first, last]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) setPriority?.([...visible.flatMap(qualityTableMembers), ...rows.flatMap(qualityTableMembers)].map(r => r.signalId ?? r.id)); }, [open, setPriority, rows, first, last]); // eslint-disable-line react-hooks/exhaustive-deps
   const changeSort = (key: SortKey) => { if (sort === key) setAscending(!ascending); else { setSort(key); setAscending(TEXT_KEYS.has(key)); } resetScroll(); };
   const arrow = (key: SortKey) => sort === key ? ascending ? ' ↑' : ' ↓' : '';
   const ariaSort = (key: SortKey) => sort === key ? ascending ? 'ascending' as const : 'descending' as const : 'none' as const;
@@ -805,7 +810,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     if(!header)throw Error('组合表还没显示，无法导出');
     const empty=document.createElement('table');empty.appendChild(header.cloneNode(true));
     const sheet=readQualityTableSheet(empty);
-    setError('');setTableExport({nodes:picked.map(({row,index})=>renderRow(row,index)),header:header.cloneNode(true) as HTMLTableSectionElement,offset:0,sheet,owner:exportOwner});
+    setError('');setTableExport({entries:picked,render:renderRow,header:header.cloneNode(true) as HTMLTableSectionElement,offset:0,sheet,owner:exportOwner});
   }catch(error){const message=error instanceof Error?error.message:'导出失败';setError(message);toast.error(message);}};
   useEffect(()=>{
     if(!tableExport)return;
@@ -814,9 +819,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       const body=exportTableRef.current?.tBodies[0];if(!body)throw Error('导出行尚未准备好，请重试');
       const table=document.createElement('table');table.append(tableExport.header.cloneNode(true),body.cloneNode(true));
       const batch=readQualityTableSheet(table),sheet={...tableExport.sheet,rows:[...tableExport.sheet.rows,...batch.rows]};
-      const offset=Math.min(tableExport.offset+EXPORT_BATCH,tableExport.nodes.length);
+      const offset=Math.min(tableExport.offset+EXPORT_BATCH,tableExport.entries.length);
       if(batch.rows.length!==offset-tableExport.offset)throw Error('已选行导出不完整，请重试');
-      if(offset<tableExport.nodes.length)setTableExport({...tableExport,sheet,offset});
+      if(offset<tableExport.entries.length)setTableExport({...tableExport,sheet,offset});
       else{downloadQualityTableSheet(sheet);setTableExport(null);}
     }catch(error){const message=error instanceof Error?error.message:'导出失败';setError(message);toast.error(message);setTableExport(null);}},0);
     return()=>window.clearTimeout(timer);
@@ -898,7 +903,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls"
             trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
-            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:filtersOn} onJump={onJump}
+            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
         </FishQualityModuleGroup>
@@ -932,11 +937,11 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
         </FishInstantTrading>}
       </div>}
       {workspace && <FishQualityModule title="来源" icon={Database} testId="quality-workspace-sources" defaultOpen={false}>
-        <FishWorkspaceSource name="信号库" snapshot={workspace.sources?.library} onImport={importWorkspace}/>
-        <FishWorkspaceSource name="图灵杯" snapshot={workspace.sources?.turing} onImport={importWorkspace}/>
-        <FishWorkspaceSource name="鱼舱" snapshot={workspace.sources?.fish} onImport={importWorkspace}/>
+        <FishWorkspaceSource name="信号库" loadSnapshot={workspace.sources?.library} onImport={importWorkspace}/>
+        <FishWorkspaceSource name="图灵杯" loadSnapshot={workspace.sources?.turing} onImport={importWorkspace}/>
+        <FishWorkspaceSource name="鱼舱" loadSnapshot={workspace.sources?.fish} onImport={importWorkspace}/>
         {mining ? <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('mined')}><Database aria-hidden className="h-3 w-3"/>捕捞库</button> :
-          <FishWorkspaceSource name="捕捞库" snapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
+          <FishWorkspaceSource name="捕捞库" loadSnapshot={workspace.sources?.mined} onImport={importWorkspace}/>}
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('filter')}><Database aria-hidden className="h-3 w-3"/>过滤库</button>
         <button type="button" className={fishSourceButton} disabled={!state.preEntry} onClick={()=>openWorkspaceLibrary('pre-entry')}><Database aria-hidden className="h-3 w-3"/>筛选库</button>
         <button type="button" className={fishSourceButton} onClick={()=>openWorkspaceLibrary('monitor')}><Database aria-hidden className="h-3 w-3"/>监测库</button>
@@ -993,7 +998,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
               setConfirmRemove(false);resetScroll();
             }}>确认删除所选行</button>
           </PopoverContent></Popover>}
-          <button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.nodes.length:'导出数据'}</button>
+          <button type="button" className={button} disabled={!selectedRowCount||!!tableExport} onClick={exportRows} aria-label="导出已选组合表数据" title={selectedRowCount?'只导出当前组合表中已勾选的 '+selectedRowCount+' 行':'请先勾选组合表中要导出的行'}><Download className="h-3 w-3"/>{tableExport?'正在导出 '+tableExport.offset+'/'+tableExport.entries.length:'导出数据'}</button>
           {!archiveView && <button type="button" className={button} onClick={toggleTableHeight}
             aria-pressed={tableMaximized} title={tableMaximized ? '还原组合表（Esc）' : '纵向最大化组合表'}>
             {tableMaximized ? <Minimize aria-hidden className="h-3 w-3"/> : <Maximize aria-hidden className="h-3 w-3"/>}
@@ -1001,7 +1006,6 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           </button>}
         </div>
       </div>
-      {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.nodes.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH)}</tbody></table></div>}
       {rows.length ? <div ref={tableRef} onScroll={e => {const next=e.currentTarget.scrollTop;setScrollTop(current=>current===next?current:next);}} className={`w-fit max-w-full overflow-auto overscroll-x-contain rounded-lg border border-border/60 [overflow-anchor:none] ${tableMaximized ? 'min-h-0 flex-1 overscroll-y-contain' : archiveView ? 'max-h-[28rem]' : 'max-h-[max(16rem,calc(100dvh_-_20rem))]'}`} aria-label="组合表" data-testid="quality-fish-table"><table className="table-fixed border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]" style={{width:columnWidths.reduce((sum,width)=>sum+width,0)}}><colgroup>{columnWidths.map((width,i)=><col key={i} style={{width}}/>)}</colgroup>
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground">
           <tr className="bg-muted/35" data-testid="quality-algorithm-categories">
@@ -1042,6 +1046,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       </div>
       </div>
     </div>}
+    {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.entries.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH).map(({row,index})=>tableExport.render(row,index))}</tbody></table></div>}
     <RowDetail row={allRows.find(r => r.id === detailId)} state={state} close={() => setDetailId('')}/>
   </section>;
   return <QualityArchiveContext.Provider value={archiveView}>{body}</QualityArchiveContext.Provider>;

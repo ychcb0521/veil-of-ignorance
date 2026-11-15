@@ -24,6 +24,7 @@ export function FishWorkspaceRows({snapshot,onImport,onDone}:{
   const found = useMemo(() => rows.filter(row => row.source.symbol.toUpperCase().includes(query.trim().toUpperCase())),[rows,query]);
   const lastPage = Math.max(0,Math.ceil(found.length/pageSize)-1);
   const currentPage = Math.min(page,lastPage), visible = found.slice(currentPage*pageSize,(currentPage+1)*pageSize);
+  const eligibleSelected = useMemo(() => rows.filter(row => selected.has(row.id)).map(row => row.id), [rows, selected]);
   const checked = !!found.length && found.every(row => selected.has(row.id));
   const toggle = (ids: readonly string[], enabled: boolean) => setSelected(prior => {
     const next = new Set(prior);
@@ -34,9 +35,9 @@ export function FishWorkspaceRows({snapshot,onImport,onDone}:{
     <div className="flex flex-wrap items-center gap-2">
       <input aria-label="搜索来源标的" className={field} placeholder="搜索标的" value={query} onChange={e => {setQuery(e.target.value);setPage(0);}}/>
       <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={checked} disabled={!found.length} onChange={e=>toggle(found.map(row=>row.id),e.target.checked)}/>全选搜索结果</label>
-      <span className="text-muted-foreground">已选 {selected.size} 条</span>
-      <button type="button" className={fishSourceButton+' ml-auto text-primary'} disabled={!selected.size} onClick={()=>{
-        if(onImport(snapshot,[...selected])){setSelected(new Set());setError('');onDone?.();}
+      <span className="text-muted-foreground">已选 {eligibleSelected.length} 条</span>
+      <button type="button" className={fishSourceButton+' ml-auto text-primary'} disabled={!eligibleSelected.length} onClick={()=>{
+        if(onImport(snapshot,eligibleSelected)){setSelected(new Set());setError('');onDone?.();}
         else setError('组合表尚未就绪，请稍后导入');
       }}><Download aria-hidden className="h-3 w-3"/>导入组合表</button>
     </div>
@@ -60,10 +61,11 @@ export function FishWorkspaceRows({snapshot,onImport,onDone}:{
   </div>;
 }
 
-export function FishWorkspaceSource({name,snapshot,onImport}:{name:string;snapshot?:FishQualityStudy;onImport:ImportRows}) {
+export function FishWorkspaceSource({name,loadSnapshot,onImport}:{name:string;loadSnapshot?:()=>FishQualityStudy;onImport:ImportRows}) {
   const [open,setOpen] = useState(false);
+  const snapshot = useMemo(() => open ? loadSnapshot?.() : undefined, [open, loadSnapshot]);
   return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger asChild><button type="button" className={fishSourceButton} disabled={!snapshot}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
+    <DialogTrigger asChild><button type="button" className={fishSourceButton} disabled={!loadSnapshot}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
     <DialogContent className="w-[calc(100vw-1.5rem)] max-w-2xl">
       <DialogHeader><DialogTitle>{name}</DialogTitle><DialogDescription>勾选要带入组合表的记录。</DialogDescription></DialogHeader>
       {snapshot && <FishWorkspaceRows snapshot={snapshot} onImport={onImport} onDone={()=>setOpen(false)}/>}
