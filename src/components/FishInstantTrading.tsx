@@ -109,17 +109,19 @@ export function FishInstantTrading({ state, children }: { state: FishQualityStat
   const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
   const pending = automatic?.pending ?? 0;
   const screeningStatus = screening ? '筛选中' : automatic?.paused ? '已暂停' : pending ? `待筛选 ${pending} 条` : '空闲';
+  const followStatus = follow?.connected
+    ? follow.paused ? '已暂停开仓和加仓' : '本机实盘跟随中'
+    : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
   const needsSettings = pending > 0 && !(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length;
   const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={children}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
       <span role="status">{screeningStatus}</span>
-      {follow?.paired && <span role="status">{follow.connected ? follow.paused ? 'U 本位 · 已暂停开仓和加仓' : 'U 本位 · 本机实盘跟随中' : follow.issue || 'U 本位 · 正在连接'}</span>}
+      {follow?.paired && <span role="status">{followStatus}</span>}
       {needsSettings && <span>请先保存买前设置</span>}
       {screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {!!cda?.active && <span>持仓监测中 {cda.active} 条</span>}
-      {!!cda?.awaitingMail && <span>待发邮件 {cda.awaitingMail} 条</span>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
       {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
       {automatic.storageIssue && <span role="alert" className="text-destructive">本机队列暂未保存，正在重试，请保留页面</span>}
