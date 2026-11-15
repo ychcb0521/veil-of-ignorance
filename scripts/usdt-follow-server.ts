@@ -58,7 +58,10 @@ function parseCampaigns(value: unknown, now: number): UsdtFollowCampaign[] {
       if (!action || ids.has(action.id) || !safeTime(action.at) || (index > 0 && row.actions[index - 1].at > action.at)) throw Error('即时交易动作顺序无效');
       const actionValid = action.action === 'open' ? index === 0 && action.id === 'open'
         : action.action === 'close' ? /^(close|mirror|manual-[1-9]\d*)$/.test(action.id)
-        : action.action === 'add' ? /^add-[1-9]\d*$/.test(action.id) && validPositive(action.notional)
+        : action.action === 'add' ? validPositive(action.notional) && (action.impulseFreshUntil===undefined
+          ? /^add-[1-9]\d*$/.test(action.id)
+          : row.requiresGuardPlus===true && /^add-impulse-[a-f0-9]{32}$/.test(action.id) &&
+            action.at%300_000===0 && action.impulseFreshUntil===action.at+300_000)
         : action.action === 'mirror' ? action.id === 'mirror' && validPositive(action.fraction) && action.fraction < 1
         : action.action === 'support-reduction' ? /^support-[1-9]\d*$/.test(action.id) && validPositive(action.fraction) && action.fraction < 1
         : action.action === 'manual-reduction' && /^manual-[1-9]\d*$/.test(action.id) && validPositive(action.fraction) && action.fraction < 1;
@@ -99,7 +102,7 @@ export function serveUsdtFollower({
 }) {
   const follower = createUsdtFollower(store, exchange, owner, mode, startedAt);
   const tokenDigest = digest(token);
-  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
+  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),guardPlusAdditions:1,
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {

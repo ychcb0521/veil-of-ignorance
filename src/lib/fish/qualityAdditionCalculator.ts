@@ -16,6 +16,7 @@ import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
+import type {Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'|'impulsePosition'>&{entryVetoes?:QualityAdditionEntryVeto[]};
@@ -38,7 +39,7 @@ interface Options extends AtrSettings {
  roundRules?:(RoundScan&{alternative?:RoundScan})[];
  /** 【用户要求】2026-11-06 结构开局：进攻备选从第几次加仓起才参与竞速（缺省 1＝每一次）。 */
  attackFromRound?:number;maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
- prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;
+ prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;liveAt?:number;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
  initialPayoffRiskPct?: number;
 }
@@ -64,7 +65,7 @@ export interface AdditionSkipRecord {at:number;round:number;kind:string;label:st
 export interface AdditionVetoRecord {at:number;round:number;kind:string;label:string;reading:string;
  /** 冲高回落锁住时：要收复的最高点与锁住的 5 分钟边界（续算时据此恢复锁）。 */
  lockPeak?:number;lockAt?:number}
-export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[]}>{
+export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[];guardPlus?:Dbl5GuardPlusRow}>{
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
  const independent=o.positionVersion===HOLDING_LEDGER_ADDITION_VERSION,halfMirror=o.mirror;if(!independent&&!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
@@ -181,7 +182,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   return profit.at<stop.at||profit.at===stop.at&&profit.atOpen&&!stop.atOpen?profit:stop;
  };
 
- const done=(stop?:SupportStop)=>({fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})});
+ const hasGuardPlus=!!o.structure?.guardPlusVersion||o.roundRules?.some(round=>round.structure?.guardPlusVersion||round.alternative?.structure?.guardPlusVersion);
+ const done=async(stop?:SupportStop)=>{
+  const last=fills.at(-1),round=o.roundRules?.[fills.length-1];
+  const lastRule=last?.lane==='attack'?round?.alternative?.structure:round?.structure??o.structure;
+  const guardPlus=hasGuardPlus?await readStructure.latestGuardPlus(Math.min(o.end,stop?.at??o.end),lastRule):undefined;
+  return {fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{}),...(guardPlus?{guardPlus}:{})};
+ };
  /** 当前止损线 K：最近一次加仓的 K，或其后支撑下移减仓移到的 K′。 */
  const currentK=():{k?:number;at?:number;guard?:number;sellK?:number}=>{
   const f=fills.at(-1),r=reductions.at(-1);
@@ -204,11 +211,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
   const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m')return;
   const previousRound=o.roundRules?.[fills.length-1];
-  const winningAlternative=last.lane==='attack'&&(previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition);
+  const winningAlternative=last.lane==='attack'&&(evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
   const lastReduction=reductions.filter(r=>r.at>last.at).at(-1),basis=lastReduction?lastReduction.newSupport:evidence.basePrice;
   for(const p of await readStructure.supports(rule,until)){
    if(p.at<=from||p.at>=until)continue;
+   // A new segment or an expired impulse cannot relax a K frozen by the earlier combination.
+   if(evidence.guardPlus&&(p.guardPlus?.segment_id!==evidence.guardPlus.segment_id||
+     evidence.guardPlus.guard_source==='IMPULSE'&&p.guardPlus?.active_impulse?.impulse_id!==evidence.guardPlus.active_impulse?.impulse_id))continue;
    const value=rule.kSource==='guard'?p.guard:p.support;if(value==null||!(value>0))continue;
    const atr=await readAtr(p.at);if(!(atr!>0)||!Number.isFinite(atr))continue;
    if(value<basis-dropRule.minDropAtr*atr!)return {at:p.at,support:value,atr:atr!,evidence,basis};

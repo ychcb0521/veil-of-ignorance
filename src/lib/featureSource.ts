@@ -307,7 +307,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
     }
     chartBarBuffers.set(cache, bars);
     out = evaluateOnBars(bars, compiled.compiled, params, cache);
-    if(out.DBL5_checkpoint)void saveDbl5Checkpoint(out.DBL5_checkpoint);
+    if(out.DBL5_checkpoint&&!out.DBL5P_checkpoint)void saveDbl5Checkpoint(out.DBL5_checkpoint);
     if(out.SBS5M_checkpoint)void saveSbsCheckpoint(out.SBS5M_checkpoint);
     if(out.PRS6H_checkpoint)void savePrsCheckpoint(out.PRS6H_checkpoint);
   } catch { return null; }

@@ -129,7 +129,7 @@ async function pump() {
       }
       if(channel.sbsSeed)params={...params,SBS5M_checkpoint:channel.sbsSeed};
     }
-    if(r.compiled.usesDbl5){
+    if(r.compiled.usesDbl5&&!r.compiled.usesDbl5GuardPlus){
       if(channel.dblSeedFirst!==r.data[0]?.timestamp){const start=params.DBL5_initialization_start??r.data[0]?.timestamp,identity=new Dbl5Engine({symbol:params.DBL5_symbol??'UNSPECIFIED',market:params.DBL5_market,config:params.DBL5_config,tickSize:dbl5TickAt(params.DBL5_symbol??'UNSPECIFIED',r.data[0]?.timestamp??0,params.DBL5_tick_size,params.DBL5_data_source),dataSource:params.DBL5_data_source??'binance-usdm',dataVersion:params.DBL5_data_version??'ohlc-v1',initializationStart:start,initializationId:params.DBL5_initialization_id??`start:${start??'empty'}:v1`}).checkpoint();channel.dblSeed=await loadDbl5Checkpoint(identity,r.data[0]?.timestamp??0)??undefined;channel.dblSeedFirst=r.data[0]?.timestamp;}
       if(channel.dblSeed)params={...params,DBL5_checkpoint:channel.dblSeed};
     }

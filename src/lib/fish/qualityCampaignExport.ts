@@ -99,6 +99,11 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
       ...(hasSeparateFloor ? [p8(x.previousPositionK == null ? undefined : x.previousK), p8(x.newPositionK == null ? undefined : x.newK)] : [])])));
   sheets.push(sheet('交易事件', ['时间', '事件', '价格', '金额 USDT', '实现盈亏 USDT', '备注'],
     events.map(e => [time(e.timestamp), EVENT_LABELS[e.event_type] ?? e.event_type, p8(e.price), r(e.size_usdt, 4), r(e.realized_pnl, 4), e.notes ?? '']), ['备注']));
+  const plusRows=fills.flatMap(fill=>fill.structureEvidence?.guardPlus?[fill.structureEvidence.guardPlus]:[]);
+  if(ev?.additionGuardPlus)plusRows.push(ev.additionGuardPlus);
+  if(plusRows.length)sheets.push(sheet('急拉-1115', ['5m收盘','基线','急拉参考','组合','来源','阶段','事件及参数'],
+    plusRows.map(point=>[time(point.at),point.base_guard_value,point.impulse_guard_value,point.guard_plus_value,point.guard_source,point.phase_state,JSON.stringify(point)]),
+    ['事件及参数']));
   if (plan) sheets.push({ name: '方案参数（原文）', columns: [{ header: '字段路径', width: 60 }, { header: '值', width: 80 }], rows: flattenPlan(plan) });
   return sheets;
 }

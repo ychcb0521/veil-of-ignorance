@@ -1,5 +1,6 @@
 import {dbl5AsOf,DBL5_ID,dbl5FieldUnit,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
+import type {Dbl5GuardPlusRow,Dbl5GuardPlusCheckpoint} from '@/lib/dbl5GuardPlus';
 import {SBS5M_ID,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {saveSbsCheckpoint} from '@/lib/sbs5mPersistence';
 import {evaluateSbs5m} from '@/lib/sbs5mEvaluation';
@@ -52,6 +53,8 @@ export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short'
 export interface DeepDigRow {
   DBL5_details?:Dbl5Row;
   DBL5_checkpoint?:Dbl5Checkpoint;
+  DBL5P_details?:Dbl5GuardPlusRow;
+  DBL5P_checkpoint?:Dbl5GuardPlusCheckpoint;
   SBS5M_details?:SbsRow;
   SBS5M_checkpoint?:SbsCheckpoint;
   PRS6H_details?:PrsRow;
@@ -219,7 +222,7 @@ export async function collectDeepDigRun(
   const startedAt = Date.now();
   if(featureTemplateId(def)==='ati6h'&&!def.ATI6H_dependency)def={...def,ATI6H_dependency:ati6hDependencyOf(def)};
   const DBL5_windows:NonNullable<DeepDigSeries['DBL5_windows']>={};
-  const dblDetails=new Map<string,{row:Dbl5Row;checkpoint:Dbl5Checkpoint}>();
+  const dblDetails=new Map<string,{row:Dbl5Row;checkpoint:Dbl5Checkpoint;plus?:Dbl5GuardPlusRow;plusCheckpoint?:Dbl5GuardPlusCheckpoint}>();
   const DBL5_diagnostics:NonNullable<DeepDigData['DBL5_diagnostics']>={};
   const SBS5M_windows:NonNullable<DeepDigSeries['SBS5M_windows']>={};
   const sbsDetails=new Map<string,{row:SbsRow;checkpoint:SbsCheckpoint}>();
@@ -278,9 +281,15 @@ export async function collectDeepDigRun(
       if(mbi2Tuning&&ctx.bars)mbi2Samples.push({id:ctx.id,anchorMs:ctx.anchorMs,group:'other',bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)});
       if(featureTemplateId(def)===DBL5_ID&&inputWindow){
         const out=evaluateOnBars(inputWindow.bars,compiled,scopedParams),rows=out.DBL5_details??[],row=dbl5AsOf(rows,ctx.anchorMs),checkpoint=out.DBL5_checkpoint;
-        if(row&&checkpoint){dblDetails.set(ctx.id,{row,checkpoint});void saveDbl5Checkpoint(checkpoint);}
+        if(row&&checkpoint){
+          dblDetails.set(ctx.id,{row,checkpoint,plus:out.DBL5P_details?.find(point=>point.at===row.at),plusCheckpoint:out.DBL5P_checkpoint});
+          if(!compiled.usesDbl5GuardPlus)void saveDbl5Checkpoint(checkpoint);
+        }
         const begin=ctx.anchorMs-(def.researchWindowHours??6)*3600000;
         DBL5_windows[ctx.id]={checkpoint,rows:rows.filter(r=>r.at>begin),prices:inputWindow.bars.filter(b=>b.openTime+300000>begin).map(b=>({time:b.openTime+300000,close:b.close}))};
+        if(out.DBL5P_details)Object.assign(DBL5_windows[ctx.id],{
+          guardPlusRows:out.DBL5P_details.filter(point=>point.at>begin),guardPlusCheckpoint:out.DBL5P_checkpoint,
+        });
         const events=[...new Map(rows.flatMap(r=>r.events).map(e=>[e.id,e])).values()];
         DBL5_diagnostics[ctx.id]={available:rows.filter(r=>r.darvas_5m_available).length,missing:rows.filter(r=>!r.darvas_5m_available).length,event_counts:Object.fromEntries([...new Set(events.map(e=>e.type))].map(t=>[t,events.filter(e=>e.type===t).length])),initialization_start:checkpoint?.initialization_start??null,data_checksum:checkpoint?.data_checksum??''};
       }
@@ -325,6 +334,10 @@ export async function collectDeepDigRun(
     },
   });
   const described = describeDeepDig(collected.events);
+  for(const row of described.rows){
+    const detail=dblDetails.get(row.id);
+    if(detail?.plus){row.DBL5P_details=detail.plus;row.DBL5P_checkpoint=detail.plusCheckpoint;}
+  }
   for(const row of described.rows){const dbl=dblDetails.get(row.id);if(dbl){row.DBL5_details=dbl.row;row.DBL5_checkpoint=dbl.checkpoint;}const sbs=sbsDetails.get(row.id);if(sbs){row.SBS5M_details=sbs.row;row.SBS5M_checkpoint=sbs.checkpoint;}const prs=prsDetails.get(row.id);if(prs){row.PRS6H_details=prs.row;const {points,active,references,obstacles,archive,event_ids,last_row,...metadata}=prs.checkpoint;row.PRS6H_checkpoint=metadata;}const detail=atiDetails.get(row.id);if(detail){row.ATI6H_details=detail.row;row.ATI6H_archive=detail.archive;}}
   // Kept in Other for visibility/counts, but never enter the price-fetching event rows or inference.
   const unsupported=samples.filter(s=>s.unsupportedReason);

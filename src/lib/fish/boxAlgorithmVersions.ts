@@ -8,6 +8,7 @@
  *  3. src/lib/__tests__/boxAlgorithmVersions.test.ts 用固定 K 线锁住每个版本的输出；那里的期望值不能改，只能为新版本另加。
  */
 import type { StructureAdditionRule } from './qualityAdditionStructure';
+import { DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION } from '@/lib/dbl5GuardPlus';
 import { DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
 
 export type BoxAlgorithm = StructureAdditionRule['algorithm'];
@@ -40,6 +41,14 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
       '只在箱体完整确认后开始观察；已有防守线按自身规则继续有效。',
       `用箱体确认时的 ATR 冻结观察区：箱底至箱底＋${DBL5_GUARD_RETEST.nearAtr} ATR。先有一根最低价在观察区之上、收盘至少离箱底 ${DBL5_GUARD_RETEST.departureAtr} ATR 的 5 分钟线。`,
       '随后一根回到观察区，最低价未跌穿箱底且收盘回到观察区上方，才按当时的防守线公式生效。箱体破坏、到期、换箱或数据不连续会结束这次等待。',
+    ] },
+  { id: DBL5_GUARD_PLUS_VERSION, algorithm: 'dbl5', layer: 'guard', label: DBL5_GUARD_PLUS_LABEL, since: '2026-11-15',
+    summary: '独立无 BTC 依赖实验版本，合并原版防守线与仅凭已收盘 5m 确认的急拉起点参考。',
+    rules: [
+      '两根紧凑整理后观察 1–3 根。参考起点之前的 ATR、加权常态、最近三根最高价，最早合格窗口优先。',
+      '急拉首次确认冻结最低价减 0.5 倍前置 ATR，向下取至报价步长；不等新箱体。',
+      '急拉一根收盘严格跌破或起点满 360 分钟时失效，保留与基线独立的事件。',
+      '急拉起点参考，尚不代表回踩验证。量能仅作为辅助证据。'
     ] },
 ]);
 export const CURRENT_BOX_VERSION: Readonly<Record<BoxAlgorithm, string>> = Object.freeze({ dbl5: 'dbl-5-v2', sbs5m: 'sbs-5m-v1' });

@@ -437,6 +437,7 @@ export interface TradeCampaign {
       triggerAtOpen?:boolean;
       mirrorTakeProfit?: {enabled:boolean;gainPct:number;sellPct:number};
       addition?: QualityAdditionRule; additionFill?: QualityAdditionFill; additionFills?: QualityAdditionFill[]; totalInvested?: number; averageEntryPrice?: number;
+      additionGuardPlus?:import('@/lib/dbl5GuardPlus').Dbl5GuardPlusRow;
       /** 支撑线下移时按减仓计算器执行的减仓（持仓监测）。 */
       additionReductions?: import('@/lib/fish/qualityAddition').QualityReductionFill[];
       /** 未加仓理由：被否决的加仓、以及支撑线上移却没加仓的每一次；additionSkipsFrom＝从这一刻起才有记录。 */

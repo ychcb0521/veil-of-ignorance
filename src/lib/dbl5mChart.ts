@@ -27,7 +27,77 @@ export function dbl5VisibleGuardRegime(result:readonly Record<string,number>[],f
 }
 const chartRows = new WeakMap<ReturnType<typeof researchChartSeries>, Record<string, number>[]>();
 
+function registerGuardPlusIndicator(item:ResearchIndicator){
+ registerIndicator<Record<string,number>>({
+  name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:12,
+  figures:[{key:'value',title:'组合参考: ',type:'line'},{key:'DBL5P_base',title:'原防守线: ',type:'line'},{key:'DBL5P_impulse',title:'急拉参考: ',type:'line'}],
+  calc:(bars,indicator)=>{
+   const series=researchChartSeries(bars,item,indicator.calcParams[0]);
+   const cached=chartRows.get(series);
+   if(cached)return cached;
+   const rows=series.core.map((value,index)=>{
+    const row:Record<string,number>={_pending:series.pending?1:0};
+    if(value!=null&&Number.isFinite(value))row.value=value;
+    for(const [key,values] of Object.entries(series.components??{})){
+     const field=values[index];
+     if(field!=null&&Number.isFinite(field))row[key]=field;
+    }
+    return row;
+   });
+   chartRows.set(series,rows);
+   return rows;
+  },
+  draw:({ctx,indicator,visibleRange,xAxis,yAxis,bounding}:IndicatorDrawParams<Record<string,number>>)=>{
+   const from=Math.max(0,visibleRange.from-2),to=Math.min(indicator.result.length,visibleRange.to+1);
+   const rows=indicator.result.slice(from,to);
+   ctx.save();
+   const drawLine=(field:string,segment:string,color:string,dash:number[])=>{
+    let previous:{x:number;y:number;id:number}|undefined;
+    ctx.beginPath();
+    ctx.strokeStyle=color;
+    ctx.lineWidth=field==='value'?2.3:1.3;
+    ctx.setLineDash(dash);
+    rows.forEach((row,index)=>{
+     const value=row[field],id=row[segment];
+     if(!Number.isFinite(value)||!Number.isFinite(id)){previous=undefined;return;}
+     const x=xAxis.convertToPixel(index+from+1),y=yAxis.convertToPixel(value);
+     if(previous?.id===id){ctx.lineTo(x,previous.y);ctx.lineTo(x,y);}
+     else{ctx.moveTo(x-.7,y);ctx.lineTo(x+.7,y);}
+     previous={x,y,id};
+    });
+    ctx.stroke();
+   };
+   drawLine('DBL5P_base','_DBL5_guard_segment','#229173',[]);
+   drawLine('value','_DBL5P_segment','#c28a30',[5,3]);
+   const mark=(x:number,y:number,color:string,radius:number)=>{
+    ctx.beginPath();ctx.fillStyle=color;ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
+   };
+   rows.forEach((row,index)=>{
+    const x=xAxis.convertToPixel(index+from+1);
+    if(Number.isFinite(row._DBL5P_detected_origin)){
+     const y=yAxis.convertToPixel(row._DBL5P_detected_origin);
+     const start=xAxis.convertToPixel(index+from+1-row._DBL5P_detected_bars);
+     ctx.beginPath();ctx.setLineDash([2,3]);ctx.strokeStyle='#c28a30';
+     ctx.moveTo(start,y);ctx.lineTo(x,y);ctx.stroke();
+     mark(x,y,'#c28a30',3.8);
+    }
+    if(row.DBL5P_broken===1||row.DBL5P_expired===1){
+     const y=Number.isFinite(row._DBL5P_end)?yAxis.convertToPixel(row._DBL5P_end):16;
+     mark(x,y,row.DBL5P_broken===1?'#d06058':'#8895a5',3.5);
+    }
+    if(row.DBL5P_phase_change===1)mark(x,bounding.height-9,'#7e79d6',2);
+   });
+   if(rows.some(row=>row._pending===1)){
+    ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText('急拉-1115 · 正在准备5m历史行情…',8,40);
+   }
+   ctx.restore();
+   return true;
+  },
+ });
+}
+
 export function registerDbl5Indicator(item:ResearchIndicator){
+ if(item.core==='DBL5P'){registerGuardPlusIndicator(item);return;}
  const price=!!item.priceOverlay;
  registerIndicator<Record<string,number>>({name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:price?12:2,
   figures:(price?['value','DBL5_upper','_DBL5_guard']:['value']).map(key=>({key,title:(key==='value'?item.short:key==='_DBL5_guard'?'防守线':'固定上轨')+': ',type:'line' as const})),

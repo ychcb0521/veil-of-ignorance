@@ -208,6 +208,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule.positionVersion!==undefined&&(rule.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION||rule.quantityMode!=='calculator'))throw Error('加仓持仓账版本不可用');
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
   const impulse=rule.impulsePosition;
+  if(impulse&&rule.source==='structure'&&rule.structure?.guardPlusVersion)throw Error('同一轮请选择一种急拉位置算法');
   if(impulse && (rule.quantityMode!=='calculator'||impulse.version!==IMPULSE_5M_VERSION||
     !Number.isFinite(impulse.bufferAtr)||impulse.bufferAtr<0||impulse.bufferAtr>20||
     impulse.skipNative!=null&&impulse.skipNative!==true||

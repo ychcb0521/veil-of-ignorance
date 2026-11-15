@@ -1,4 +1,10 @@
 import {dbl5TickAt,DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
+import {
+  DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_NUMERIC, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_RENDER,
+  DBL5_GUARD_PLUS_VERSION, Dbl5GuardPlusEngine, guardPlusNumeric,
+  type Dbl5GuardPlusCheckpoint, type Dbl5GuardPlusRow,
+} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_VERSION,dbl5GuardVersion,type Dbl5Options} from '@/lib/dbl5m';
 import {dbl5AsOf,computeDbl5,dbl5Numeric,dbl5ConfigHash,dbl5Parameters,DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5Config,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {computeSbs5m,sbsHistoryBars,sbsNumeric,sbsConfigHash,sbsParameters,SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS,type SbsConfig,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {computePrs6h,prsNumeric,prsParameters,PRS6H_ID,PRS6H_VERSION,PRS6H_FIELDS,type PrsConfig,type PrsRow,type PrsCheckpoint} from '@/lib/prs6h';
@@ -982,6 +988,16 @@ export const SBS5M_DIMENSIONS:DeepDigFeatureDef[]=[
 export const DBL5_DEF:DeepDigFeatureDef={id:DBL5_ID,name:'DBL-5｜达瓦斯箱体下轨',short:'DBL-5',builtin:true,chartTemplate:DBL5_ID,chartCore:'DBL5',interval:'5m',researchWindowHours:6,scale:1,unit:'价格',source:'campaigns',groupVars:2,positive:DEFAULT_POSITIVE,control:DEFAULT_CONTROL,DBL5_dimension:'price',
  definition:'已收盘5分钟达瓦斯箱体工程改编，默认n=3、几何证据窗口360分钟。局部新高后独立观察箱底；上下边界等待完成才发布并冻结。相邻所选箱体分为基准、完整上移、内部箱底抬高和同底新箱。最低价严格低于当前下轨即破坏，触及不破坏；到期从局部新高依赖的最早K线计时，缺口重置。确认箱底不等于后续回踩已验证。主值有价格单位，请选单品种研究；跨品种使用基点或年龄维度。参数尚未实证拟合，不涉及真实止损、仓位或执行。',
  formula:'# dbl-5-v2 · exact tick structure, available only after full confirmation\n'+DBL5_FIELDS.filter(n=>n!=='DBL5').map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+'\nDBL5 = DBL5_raw_value'};
+export const featureUsesDbl5GuardPlus = (def: {formula?: string}) => /\bDBL5P_raw_\w+\b/.test(def.formula ?? '');
+function guardPlusInput(name: string): string {
+  return name === 'DBL5P' ? 'DBL5P_raw_value' : 'DBL5P_raw_' + name.slice(6);
+}
+export const DBL5_GUARD_PLUS_DEF: DeepDigFeatureDef = {
+  ...DBL5_DEF, id: DBL5_GUARD_PLUS_VERSION, name: DBL5_GUARD_PLUS_LABEL, short: DBL5_GUARD_PLUS_LABEL,
+  chartCore: 'DBL5P', definition: '无 BTC 依赖。5m 收盘后比较原版防守线与冻结的急拉起点参考。急拉起点参考，尚不代表回踩验证。',
+  formula: '# ' + DBL5_GUARD_PLUS_VERSION + '\n' +
+    [...DBL5_GUARD_PLUS_NUMERIC.slice(1), 'DBL5P'].map(name => `${name} = ${guardPlusInput(name)}`).join('\n'),
+};
 export const DBL5_DIMENSIONS:DeepDigFeatureDef[]=[
  {id:'darvas_5m_distance_bps',name:'DBL-5｜距下轨基点',short:'DBL·距离',core:'DBL5_distance_bps',dimension:'distance',unit:'bp'},
  {id:'darvas_5m_width_bps',name:'DBL-5｜箱宽基点',short:'DBL·箱宽',core:'DBL5_width_bps',dimension:'width',unit:'bp'},
@@ -1036,7 +1052,7 @@ export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEAT
     .join('\n'),
 }));
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, DBL5_GUARD_PLUS_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -1175,6 +1191,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
   if(featureUsesMbi2(d)){const p=featureParams(d);key.push(`MBI2_T_HOURS=${p.MBI2_T_HOURS}`,`MBI2_Z0=${p.MBI2_Z0}`,`MBI2_BAND=${p.MBI2_BAND}`,`MBI2_CONFIRM=${p.MBI2_CONFIRM}`);}
   if(featureTemplateId(d)===DBL5_ID)key.push(DBL5_VERSION,DBL5_MARKET_RULE_VERSION,dbl5ConfigHash(d.DBL5_config),'DBL5_config='+JSON.stringify(dbl5Parameters(d.DBL5_config)),'DBL5_dimension='+(d.DBL5_dimension??'price'),'DBL5_research_symbol='+(d.DBL5_research_symbol??''),'DBL5_initialization_start='+(d.DBL5_initialization_start??''));
+  if(featureUsesDbl5GuardPlus(d))key.push(DBL5_GUARD_PLUS_VERSION,JSON.stringify(DBL5_GUARD_PLUS_PARAMS));
   if(featureTemplateId(d)===SBS5M_ID)key.push(SBS5M_VERSION,sbsConfigHash(d.SBS5M_config),'SBS5M_config='+JSON.stringify(sbsParameters(d.SBS5M_config)),'SBS5M_dimension='+(d.SBS5M_dimension??'price'),'init:window-start-v1','SBS5M_research_symbol='+(d.SBS5M_research_symbol??''));
   if(featureTemplateId(d)==='prs6h')key.push(PRS6H_VERSION,'PRS6H_config='+JSON.stringify(d.PRS6H_config??{}),d.PRS6H_config?.volumeMode??'quote');
   if(featureTemplateId(d)==='ati6h')key.push(ATI6H_VERSION,'ATI6H_parameters='+JSON.stringify(d.ATI6H_parameters??{}),'ATI6H_volume_mode='+(d.ATI6H_volume_mode??'taker'),'ATI6H_dependency='+JSON.stringify(ati6hDependencyOf(d)));
@@ -1196,6 +1213,7 @@ export interface CompiledFeature {
   usesPrs6h?:boolean;
   usesSbs5m?:boolean;
   usesDbl5?:boolean;
+  usesDbl5GuardPlus?:boolean;
 }
 
 /** 公式里用到了哪些参数（界面上没用到的参数淡一点）；公式写错时返回 null。 */
@@ -1209,8 +1227,9 @@ export function formulaParamUse(formula: string): { hl: boolean; avgh: boolean }
 }
 
 export function compileFeatureFormula(formula: string): CompiledFeature {
-  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES, ...ATI6H_NUMERIC_FIELDS.map(n=>n==='ATI6H'?'ATI6H_raw_value':'ATI6H_raw_'+n.slice(6)),...DBL5_FIELDS.map(n=>n==='DBL5'?'DBL5_raw_value':'DBL5_raw_'+n.slice(5)),...SBS5M_FIELDS.map(n=>n==='SBS5M'?'SBS5M_raw_value':'SBS5M_raw_'+n.slice(6)),...PRS6H_FIELDS.map(n=>n==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+n.slice(6))]));
-  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }), usesMbi2: featureUsesMbi2({formula}), usesAti6h:[...program.inputs].some(n=>n.startsWith('ATI6H_raw_')),usesDbl5:[...program.inputs].some(n=>n.startsWith('DBL5_raw_')),usesSbs5m:[...program.inputs].some(n=>n.startsWith('SBS5M_raw_')),usesPrs6h:[...program.inputs].some(n=>n.startsWith('PRS6H_raw_')) };
+  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES, ...ATI6H_NUMERIC_FIELDS.map(n=>n==='ATI6H'?'ATI6H_raw_value':'ATI6H_raw_'+n.slice(6)),...DBL5_FIELDS.map(n=>n==='DBL5'?'DBL5_raw_value':'DBL5_raw_'+n.slice(5)),...DBL5_GUARD_PLUS_NUMERIC.map(guardPlusInput),...SBS5M_FIELDS.map(n=>n==='SBS5M'?'SBS5M_raw_value':'SBS5M_raw_'+n.slice(6)),...PRS6H_FIELDS.map(n=>n==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+n.slice(6))]));
+  const usesDbl5GuardPlus = [...program.inputs].some(name => name.startsWith('DBL5P_raw_'));
+  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }), usesMbi2: featureUsesMbi2({formula}), usesAti6h:[...program.inputs].some(n=>n.startsWith('ATI6H_raw_')),usesDbl5:usesDbl5GuardPlus||[...program.inputs].some(n=>n.startsWith('DBL5_raw_')),usesDbl5GuardPlus,usesSbs5m:[...program.inputs].some(n=>n.startsWith('SBS5M_raw_')),usesPrs6h:[...program.inputs].some(n=>n.startsWith('PRS6H_raw_')) };
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
@@ -1250,7 +1269,7 @@ export function computeFeatureValues(
 /** 在一串 K 线上逐根算公式：带回最后一句与每个起了名的变量的整条序列（会抛 FormulaError）。 */
 /** Only the two native engines read strict amounts; shared legacy formula inputs remain unchanged. */
 function nativeAmountBar(bar:ResearchBar):ResearchBar{return {...bar,...(bar.ATI6H_quoteVolume!==undefined?{quoteVolume:bar.ATI6H_quoteVolume}:{}),...(bar.ATI6H_takerBuyQuoteVolume!==undefined?{takerBuyQuoteVolume:bar.ATI6H_takerBuyQuoteVolume}:{})};}
-export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef = {}, cache?: FormulaEvaluationCache) {
+export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef & {DBL5P_checkpoint?: Dbl5GuardPlusCheckpoint} = {}, cache?: FormulaEvaluationCache) {
   if (compiled.usesMbi || params.id === 'mbi') validateMbiParams(mbiNOf(params), mbiZ0Of(params));
   if(compiled.usesMbi2||featureUsesMbi2(params))validateMbi2Params(params,intervalMs(intervalOf(params))/60000);
   const keys = ['T','C','O','H','L','Q','B','S','E','CB'] as const;
@@ -1271,6 +1290,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
     input.CB[i] = finite(b.refClose);
   }
   let DBL5_details:Dbl5Row[]|undefined,DBL5_checkpoint:Dbl5Checkpoint|undefined;
+  let DBL5P_details:Dbl5GuardPlusRow[]|undefined, DBL5P_checkpoint:Dbl5GuardPlusCheckpoint|undefined;
   let DBL5_inputs:Record<string,Float64Array>={};
   let SBS5M_details:SbsRow[]|undefined,SBS5M_checkpoint:SbsCheckpoint|undefined;
   let atiInputs:Record<string,Float64Array>={};
@@ -1307,22 +1327,47 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
   }
   if(compiled.usesDbl5){
     if(intervalOf(params)!=='5m')throw Error('DBL-5 只接受5m已收盘数据');
-    const first=bars[0],start=params.DBL5_initialization_start??params.DBL5_checkpoint?.initialization_start??first?.openTime;
+    const checkpoint=compiled.usesDbl5GuardPlus?params.DBL5P_checkpoint?.base:params.DBL5_checkpoint;
+    const first=bars[0],start=params.DBL5_initialization_start??checkpoint?.initialization_start??first?.openTime;
     const symbol=params.DBL5_symbol??first?.PRS6H_symbol??'UNSPECIFIED',source=params.DBL5_data_source??first?.PRS6H_data_source??'binance-usdm';
     const prepared=bars.map(bar=>({...bar,DBL5_tick_size:dbl5TickAt(symbol,bar.openTime,bar.DBL5_tick_size??params.DBL5_tick_size??bar.PRS6H_tick_size??bar.ATI6H_tick_size??null,source)}));
     const firstInput=prepared.find(b=>start===undefined||b.openTime>=start);
-    const result=computeDbl5(prepared,{
-      symbol,market:params.DBL5_market,config:params.DBL5_config,tickSize:params.DBL5_checkpoint?.tick_size??firstInput?.DBL5_tick_size??params.DBL5_tick_size,dataSource:source,dataVersion:params.DBL5_data_version??'ohlc-v1',
-      initializationStart:start,initializationId:params.DBL5_initialization_id??`start:${start??'empty'}:v1`,checkpoint:params.DBL5_checkpoint});
-    DBL5_details=result.rows;DBL5_checkpoint=result.checkpoint;const byTime=new Map(result.rows.map(r=>[r.at,r]));
+    const options:Dbl5Options={
+      symbol,market:params.DBL5_market,config:params.DBL5_config,tickSize:checkpoint?.tick_size??firstInput?.DBL5_tick_size??params.DBL5_tick_size,dataSource:source,dataVersion:params.DBL5_data_version??'ohlc-v1',
+      initializationStart:start,initializationId:params.DBL5_initialization_id??`start:${start??'empty'}:v1`,
+    };
+    if(compiled.usesDbl5GuardPlus){
+      if(params.DBL5_checkpoint&&!params.DBL5P_checkpoint)throw Error('急拉-1115 需要自己的检查点或完整顺序回放');
+      const engine=new Dbl5GuardPlusEngine({...options,checkpoint:params.DBL5P_checkpoint});
+      const points=prepared.flatMap(bar=>{const point=engine.push(bar);return point?[point]:[];});
+      DBL5_details=points.map(point=>point.base);
+      DBL5P_details=points.map(point=>point.plus);
+      DBL5P_checkpoint=engine.checkpoint();
+      DBL5_checkpoint=DBL5P_checkpoint.base;
+    }else{
+      const result=computeDbl5(prepared,{...options,checkpoint});
+      DBL5_details=result.rows;
+      DBL5_checkpoint=result.checkpoint;
+    }
+    const byTime=new Map(DBL5_details.map(r=>[r.at,r]));
     DBL5_inputs=Object.fromEntries([...DBL5_FIELDS,...DBL5_RENDER_FIELDS].map(name=>[name.startsWith('_')?name:name==='DBL5'?'DBL5_raw_value':'DBL5_raw_'+name.slice(5),Float64Array.from(bars,b=>{const row=byTime.get(b.openTime+300000);return row?dbl5Numeric(row,name)??NaN:NaN;})]));
+    if(DBL5P_details){
+      const plusByTime=new Map(DBL5P_details.map(row=>[row.at,row]));
+      for(const name of [...DBL5_GUARD_PLUS_NUMERIC,...DBL5_GUARD_PLUS_RENDER]){
+        DBL5_inputs[name.startsWith('_')?name:guardPlusInput(name)]=Float64Array.from(bars,bar=>{
+          const row=plusByTime.get(bar.openTime+300000);
+          return row?guardPlusNumeric(row,name)??NaN:NaN;
+        });
+      }
+    }
   }
   const evaluated = evaluateProgramVars(compiled.program, {
     ...DBL5_inputs, ...atiInputs, ...input,
     ...featureParams(params),
   }, { barMinutes: intervalMs(intervalOf(params)) / 60_000, cache });
   if(compiled.usesDbl5)for(const name of DBL5_RENDER_FIELDS)evaluated.vars.set(name,DBL5_inputs[name]);
-  return {...evaluated,...(DBL5_details?{DBL5_details,DBL5_checkpoint}:{}),...(SBS5M_details?{SBS5M_details,SBS5M_checkpoint}:{}), ...(ATI6H_details?{ATI6H_details,ATI6H_archive}: {}),...(PRS6H_details?{PRS6H_details,PRS6H_checkpoint}:{})};
+  if(DBL5P_details)for(const name of DBL5_GUARD_PLUS_RENDER)evaluated.vars.set(name,DBL5_inputs[name]);
+  return {...evaluated,...(DBL5_details?{DBL5_details,DBL5_checkpoint}:{}),...(DBL5P_details?{DBL5P_details,DBL5P_checkpoint}:{}),...(SBS5M_details?{SBS5M_details,SBS5M_checkpoint}:{}), ...(ATI6H_details?{ATI6H_details,ATI6H_archive}: {}),...(PRS6H_details?{PRS6H_details,PRS6H_checkpoint}:{})};
 }
 
 /** 公式里可选作因变量的变量：起了名的每一个；最后一句没起名时再加一个「结果」。写错时为空。 */
@@ -1481,7 +1526,21 @@ export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };
   return {
-    formula: msg(() => { const compiled = compileFeatureFormula(d.formula); if(featureTemplateId(d)===DBL5_ID){dbl5Parameters(d.DBL5_config);if(d.DBL5_initialization_start!==undefined&&(!Number.isSafeInteger(d.DBL5_initialization_start)||d.DBL5_initialization_start%300000!==0))throw Error('DBL-5 回放起点须对齐5m');} if(featureTemplateId(d)==='sbs_5m')sbsParameters(d.SBS5M_config); if(featureTemplateId(d)==='prs6h')prsParameters(d.PRS6H_config); if (/\bctba\s*\(/.test(d.formula)) evaluateOnBars([],compiled,d); if (featureUsesMbi(d)) validateMbiParams(mbiNOf(d), mbiZ0Of(d)); if(featureUsesMbi2(d))validateMbi2Params(d,intervalMs(intervalOf(d))/60000); }),
+    formula: msg(() => {
+      const compiled = compileFeatureFormula(d.formula), template=featureTemplateId(d);
+      if(template===DBL5_ID||compiled.usesDbl5GuardPlus){
+        dbl5Parameters(d.DBL5_config);
+        if(d.DBL5_initialization_start!==undefined&&(!Number.isSafeInteger(d.DBL5_initialization_start)||d.DBL5_initialization_start%300000!==0))throw Error('DBL-5 回放起点须对齐5m');
+      }
+      if(compiled.usesDbl5GuardPlus&&(intervalOf(d)!=='5m'||dbl5GuardVersion(d.DBL5_config)!==DBL5_GUARD_VERSION)){
+        throw Error('急拉-1115 需要已收盘 5m 数据及防守线 v1 基线');
+      }
+      if(template==='sbs_5m')sbsParameters(d.SBS5M_config);
+      if(template==='prs6h')prsParameters(d.PRS6H_config);
+      if(/\bctba\s*\(/.test(d.formula)) evaluateOnBars([],compiled,d);
+      if(featureUsesMbi(d)) validateMbiParams(mbiNOf(d),mbiZ0Of(d));
+      if(featureUsesMbi2(d))validateMbi2Params(d,intervalMs(intervalOf(d))/60000);
+    }),
     groups: msg(() => compileGroups(d.positive, d.control, d.source ?? 'campaigns')),
     scale: Number.isFinite(d.scale) && d.scale > 0 ? null : '显示倍数要是正数',
   };

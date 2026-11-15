@@ -1,7 +1,8 @@
 import {beforeEach,it,expect} from 'vitest';
-import {DBL5_DEF,DBL5_DIMENSIONS,PRS6H_DEF,ATI6H_DEF,SBS5M_DEF,compileFeatureFormula,evaluateOnBars,computeFeatureValues,definitionKey,mergeFeatureDefs,intervalOf} from '../features';
+import {DBL5_DEF,DBL5_DIMENSIONS,DBL5_GUARD_PLUS_DEF,PRS6H_DEF,ATI6H_DEF,SBS5M_DEF,compileFeatureFormula,evaluateOnBars,computeFeatureValues,definitionKey,mergeFeatureDefs,intervalOf} from '../features';
 import {computeDbl5,DBL5_FIELDS,dbl5Numeric} from '@/lib/dbl5m';
 import {T,bar,sample} from '@/lib/__tests__/fixtures/dblBars';
+import {START,warm,impulse} from '@/lib/__tests__/fixtures/dbl5GuardPlusBars';
 import {compileFishProgram,evaluateFishProgram} from '@/lib/fish/algorithm';
 import {qualityDefinition} from '@/lib/fish/quality';
 import {collectDeepDigRun,viewForVariable,applyExclusions} from '../analysis';
@@ -18,11 +19,29 @@ const def={...DBL5_DEF,DBL5_initialization_start:T};
 const params={...def,DBL5_symbol:'DBLUSDT',DBL5_tick_size:1};
 it('registers main price and three independent units using one causal state machine',()=>{
  const old=[PRS6H_DEF,ATI6H_DEF,SBS5M_DEF].map(definitionKey),bars=sample(),core=computeDbl5(bars,{symbol:'DBLUSDT',tickSize:1,initializationStart:T,initializationId:`start:${T}:v1`}),out=evaluateOnBars(bars,compileFeatureFormula(def.formula),params);
- expect(mergeFeatureDefs([]).filter(d=>d.chartTemplate==='darvas_5m_lower')).toHaveLength(4);expect(out.DBL5_details).toEqual(core.rows);
+ expect(mergeFeatureDefs([]).filter(d=>d.chartTemplate==='darvas_5m_lower').map(d=>d.id))
+  .toEqual([DBL5_DEF.id,...DBL5_DIMENSIONS.map(d=>d.id),DBL5_GUARD_PLUS_DEF.id]);
+ expect(out.DBL5_details).toEqual(core.rows);
  for(const n of DBL5_FIELDS)expect(out.vars.get(n)).toEqual(Float64Array.from(core.rows,r=>dbl5Numeric(r,n)??NaN));
  for(const d of DBL5_DIMENSIONS){expect(evaluateOnBars(bars,compileFeatureFormula(d.formula),{...params,...d}).DBL5_details.map(r=>r.darvas_5m_lower)).toEqual(core.rows.map(r=>r.darvas_5m_lower));expect(d.formula).not.toContain('DBL5_raw_value');}
  expect(intervalOf({...def,interval:'1h'})).toBe('5m');expect(accountResearchIndicators().find(i=>i.id==='DBL5').priceOverlay).toBe(true);
  expect(definitionKey({...def,DBL5_config:{n:2}})).not.toBe(definitionKey(def));expect(definitionKey({...def,DBL5_initialization_start:T+300000})).not.toBe(definitionKey(def));expect(old).toEqual([PRS6H_DEF,ATI6H_DEF,SBS5M_DEF].map(definitionKey));
+});
+it('publishes the independent 1115 overlay and early filter on the same closed 5m candle',()=>{
+ const bars=[...warm(),impulse()];
+ const feature={...DBL5_GUARD_PLUS_DEF,DBL5_initialization_start:START,DBL5_symbol:'TESTUSDT',DBL5_tick_size:'0.01'};
+ const out=evaluateOnBars(bars,compileFeatureFormula(feature.formula),feature);
+ const item=accountResearchIndicators().find(i=>i.featureId===feature.id)!;
+ expect(item).toMatchObject({core:'DBL5P',priceOverlay:true});
+ const candles=bars.map(b=>({...b,timestamp:b.openTime,researchSymbol:'TESTUSDT',PRS6H_tick_size:.01,DBL5_initialization_start:START}));
+ const chart=researchChartSeries(candles,item,3,{fetchReference:false});
+ expect(chart.core).toEqual(out.DBL5P_details!.map(row=>row.guard_plus_value));
+ expect(chart.components?.DBL5P_early?.slice(-2)).toEqual([0,1]);
+ expect(chart.components?._DBL5P_segment?.at(-1)).not.toBeNull();
+ const forming=researchChartSeries([...candles.slice(0,-1),{...candles.at(-1)!,cba2Closed:false}],item,3,{fetchReference:false});
+ expect(forming.core.at(-1)).toBeNull();
+ const filter=compileFishProgram(feature,{statistic:'DBL5P_early',direction:'>',threshold:.5,constraints:[]});
+ expect(evaluateFishProgram(bars,filter).condition.at(-1)).toBe(1);
 });
 it('fish flags can filter broken support even when the price is null; reconstruction retains native config',()=>{
  const d={...def,DBL5_config:{n:3,window_minutes:360}},plan=compileFishProgram(d,{statistic:'DBL5_event_support_broken',direction:'>',threshold:.5,constraints:[]}),out=evaluateFishProgram(sample(),plan);

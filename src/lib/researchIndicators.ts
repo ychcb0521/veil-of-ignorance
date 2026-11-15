@@ -1,6 +1,7 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5GuardVersion} from '@/lib/dbl5m';
+import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_NUMERIC,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_RENDER,DBL5_GUARD_PLUS_VERSION} from '@/lib/dbl5GuardPlus';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
 import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
@@ -24,6 +25,7 @@ import { mbiNOf } from '@/lib/mbi';
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
   {id:'DBL5',featureId:DBL5_ID,core:'DBL5',short:'DBL-5',name:'DBL-5｜达瓦斯箱体下轨',period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'),...DBL5_RENDER_FIELDS]},
+  {id:'DBL5_GUARD_PLUS',featureId:DBL5_GUARD_PLUS_VERSION,core:'DBL5P',short:DBL5_GUARD_PLUS_LABEL,name:DBL5_GUARD_PLUS_LABEL,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_GUARD_PLUS_NUMERIC.slice(1),...DBL5_GUARD_PLUS_RENDER,'_DBL5_guard_segment']},
   ...[{id:'DBL5_DISTANCE',featureId:'darvas_5m_distance_bps',core:'DBL5_distance_bps',short:'DBL·距离',name:'DBL-5｜距下轨基点'},{id:'DBL5_WIDTH',featureId:'darvas_5m_width_bps',core:'DBL5_width_bps',short:'DBL·箱宽',name:'DBL-5｜箱宽基点'},{id:'DBL5_AGE',featureId:'darvas_5m_age_minutes',core:'DBL5_age_minutes',short:'DBL·年龄',name:'DBL-5｜确认年龄'}].map(d=>({...d,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'&&n!=='DBL5_upper'),...DBL5_RENDER_FIELDS]})),
   {id:'SBS5M',featureId:SBS5M_ID,core:'SBS5M',short:'SBS-5M',name:'台阶箱体支撑',period:6,parameter:'有效期（定义配置）',parameterUnit:'h',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:SBS5M_FIELDS.filter(n=>n!=='SBS5M')},
   {id:'SBS5M_QUALITY',featureId:'sbs_5m_quality',core:'SBS5M_support_quality',short:'SBS·证据',name:'台阶箱体支撑｜证据分',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:100,seller:false,marketEvidence:true,rawOnly:true},
@@ -62,7 +64,7 @@ export interface ResearchIndicator {
   priceOverlay?:boolean; rawOnly?:boolean; marketEvidence?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
 export const supportsDbl5GuardVersion = (item?: ResearchIndicator) =>
-  !!item?.priceOverlay && (item.id === 'DBL5' || item.templateId?.startsWith('DBL5') === true);
+  !!item?.priceOverlay && item.core!=='DBL5P' && (item.id === 'DBL5' || item.templateId?.startsWith('DBL5') === true);
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
   const builtin = BUILTIN_FEATURES.find(d => d.id === def.id);
@@ -242,6 +244,7 @@ export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
   const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(featureTemplateId(def??{})===DBL5_ID?[DBL5_VERSION,DBL5_MARKET_RULE_VERSION,def?.DBL5_config,def?.DBL5_dimension,def?.DBL5_initialization_start,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  if(def?.formula.includes('DBL5P_raw_'))values.push(DBL5_GUARD_PLUS_VERSION,DBL5_GUARD_PLUS_PARAMS);
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }

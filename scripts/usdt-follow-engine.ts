@@ -5,6 +5,10 @@ import type { UsdtFollowAction, UsdtFollowCampaign } from '../src/lib/fish/usdtF
 const entryAgeMs = 120_000;
 const increaseAgeMs = 120_000;
 const positionTimeout = 45_000;
+const freshIncrease = (action:UsdtFollowAction, at:number) =>
+  action.action==='add'&&action.impulseFreshUntil!==undefined
+    ? action.at<=at&&at<action.impulseFreshUntil
+    : at-action.at<=increaseAgeMs;
 type Store = ReturnType<typeof openUsdtFollowStore>;
 
 export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: string, mode: UsdtPositionMode, startedAt: number) {
@@ -132,7 +136,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     if (closing && current.held && !action && !row.skipped.includes(closing.id)) action = closing;
     if (!action || row.skipped.includes(action.id)) return;
     const side = action.action === 'open' || action.action === 'add' ? 'BUY' : 'SELL';
-    if (side === 'BUY' && (!accepting || now - lastContactAt > positionTimeout || now - action.at > increaseAgeMs)) {
+    if (side === 'BUY' && (!accepting || now - lastContactAt > positionTimeout || !freshIncrease(action,now))) {
       row.skipped.push(action.id);
       row.status.issue = '该笔买入已过时，未追单';
       return write(row);
@@ -158,7 +162,8 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       return write(row);
     }
     await exchange.check(market, mode, current.held, current.entry, action.action === 'open', side === 'BUY' ? campaign.leverage : 0);
-    if (side === 'BUY' && (!accepting || Date.now() - lastContactAt > positionTimeout || Date.now() - action.at > increaseAgeMs
+    const readyAt=Date.now();
+    if (side === 'BUY' && (!accepting || readyAt - lastContactAt > positionTimeout || !freshIncrease(action,readyAt)
       || row.campaign.actions.some(event => event.action === 'close'))) return;
     const attempts = Object.entries(row.orders).filter(([key]) => key === closing?.id || key.startsWith(closing?.id + ':'));
     if (action.action === 'close' && attempts.length && !attempts.at(-1)?.[1].fills?.length) {

@@ -3,7 +3,7 @@ import type { UsdtCampaignBatch, UsdtLiveCampaign } from '@/lib/fish/usdtLiveCam
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
-import { usdtFollowCampaigns, type UsdtFollowStatus } from '@/lib/fish/usdtFollow';
+import { currentUsdtFollowCampaign, usdtFollowCampaigns, type UsdtFollowStatus } from '@/lib/fish/usdtFollow';
 
 const endpoint = 'http://127.0.0.1:47321/api/usdt-follow';
 const key = (owner: string) => 'veil.usdt-follow-pairing.v1:' + owner;
@@ -25,6 +25,7 @@ interface FollowState {
   statuses: UsdtFollowStatus[];
   positionMirror?: 1;
   campaignMirror?: 1;
+  guardPlusAdditions?: 1;
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -74,6 +75,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     if (!owner || !token) return;
     const lifetime = new AbortController();
     let running = false, pending = false, startedAt = 0;
+    let supportsGuardPlus = false;
     let known = new Set<string>();
     let lastResponse = '';
     commandPending.current = undefined;
@@ -82,7 +84,10 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
       if (running) { pending = true; return; }
       running = true;
       const command = commandPending.current ?? 'sync';
-      const current = latest.current.filter(row => known.has(row.id) || row.admittedAt >= startedAt && Date.now() - row.admittedAt <= 120_000);
+      const now=Date.now();
+      const current = latest.current
+        .filter(row => known.has(row.id) || row.admittedAt >= startedAt && now - row.admittedAt <= 120_000)
+        .flatMap(row=>{const campaign=currentUsdtFollowCampaign(row,supportsGuardPlus,now);return campaign?[campaign]:[];});
       void (async () => {
         try {
           const response = await fetch(endpoint, {
@@ -95,6 +100,9 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
           if (payload.connected !== true || !Array.isArray(payload.statuses)) throw Error('本机执行端回报无效');
           if (lifetime.signal.aborted) return;
           startedAt = payload.startedAt;
+          const capabilityChanged=supportsGuardPlus!==(payload.guardPlusAdditions===1);
+          supportsGuardPlus=payload.guardPlusAdditions===1;
+          if(capabilityChanged)pending=true;
           known = new Set(payload.statuses.filter((row: UsdtFollowStatus) => !['ignored', 'closed'].includes(row.state)).map((row: UsdtFollowStatus) => row.id));
           if (commandPending.current === command) commandPending.current = undefined;
           const wire = JSON.stringify(payload);

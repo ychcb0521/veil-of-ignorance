@@ -1,5 +1,6 @@
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
 import { expressionConditions } from './preEntryThreeStage';
+import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS} from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
@@ -191,6 +192,16 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     };
     addIncreaseVersions(rounds);
     if (a.alternativeRounds) addIncreaseVersions(a.alternativeRounds, true);
+    const addGuardPlusVersions = (rules: readonly import('./qualityAddition').QualityAdditionRoundRule[], lane: string) => {
+      rules.forEach((round, index) => {
+        const version=round.source==='structure'?round.structure?.guardPlusVersion:undefined;
+        if(version)add(`addition-guard-plus-${lane}-${index+1}`,`第 ${index+1} 次加仓 · ${lane==='primary'?'主分支':'进攻备选'}`,DBL5_GUARD_PLUS_LABEL,
+          version+' · 参数 #'+shortFishHash(JSON.stringify([round.structure?.definition.DBL5_config,DBL5_GUARD_PLUS_PARAMS])),
+          boxAlgorithmVersion(version)?.summary);
+      });
+    };
+    addGuardPlusVersions(rounds,'primary');
+    addGuardPlusVersions(a.alternativeRounds??[],'alternative');
     rounds.forEach((r, i) => {
       if (r.source === 'structure' && r.structure) {
         const v = structureVersions(r.structure), box = boxAlgorithmVersion(v.box), guard = v.guard ? boxAlgorithmVersion(v.guard) : undefined;

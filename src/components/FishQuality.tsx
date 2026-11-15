@@ -1,4 +1,5 @@
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
+import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
 import type { ScreeningPlanName } from '@/lib/fish/qualityScreeningResults';
 import {FishLibraryRowExportContext} from './FishLibraryRowExport';
@@ -362,6 +363,8 @@ function RowDetail({ row, state, close, templateTable }: { row?: QualitySample; 
       ['买入时间', (r?: QualityResult) => date(r?.entryTime)], ['买入价', (r?: QualityResult) => r?.entryPrice?.toPrecision(7) ?? '—'],
       ['卖出 / 估值时间', (r?: QualityResult) => date(r?.endTime)], ['卖出 / 估值价', (r?: QualityResult) => r?.endPrice?.toPrecision(7) ?? '—'],
       ['加仓', (r?: QualityResult) => qualityAdditionFills(r??{}).length ? qualityAdditionFills(r??{}).map((a,i)=>`第${i+1}轮 ${date(a.at)} · ${a.quantity.toPrecision(7)} 枚 · T ${a.price.toPrecision(7)}${a.sizing?` · S ${a.sizing.previousSupport.toPrecision(7)} · K ${a.sizing.support.toPrecision(7)} · ATR ${a.sizing.atr.toPrecision(7)}`:''}`).join('；') : r?.additionNote ?? '未触发'],
+      ...(study.sellPlans?.some(p=>(templateTable ? templateTable.results.get(row.signalId??row.id)?.get(p.id) : qualityRowResult(study,row,p))?.additionGuardPlus)
+        ? [['加仓防守参考', (r?:QualityResult)=>r?.additionGuardPlus?<GuardPlusEvidence row={r.additionGuardPlus}/>:null]]:[]),
       ['累计投入 / 持仓均价', (r?: QualityResult) => r?.additionFill ? `${r.totalInvested} USDT · ${r.averageEntryPrice?.toPrecision(8)}` : '—'],
       ['镜像平衡减仓', (r?: QualityResult) => r?.mirrorFill ? `${date(r.mirrorFill.at)} · 价格 ${r.mirrorFill.price.toPrecision(7)} · 卖出初始币数 ${+(r.mirrorFill.fraction*100).toPrecision(8)}%` : '未触发'],
       ['余仓 / 已兑现', (r?: QualityResult) => r?.mirrorFill ? `${+((r.remainingFraction ?? 0)*100).toPrecision(8)}% / ${r.realizedPnl?.toFixed(2)} USDT` : '—'],

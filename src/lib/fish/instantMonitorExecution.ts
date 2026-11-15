@@ -23,7 +23,7 @@ export function instantMonitorSample(sample: QualitySample, buyAt: number): Qual
 }
 
 export async function evaluateInstantMonitor(sample: QualitySample, monitor: InstantMonitorSettings, end: number,
-  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, marketStart?: number) {
+  load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, marketStart?: number, liveAt?:number) {
   const { plan } = monitor;
   if (!plan.frozenVersions?.length || planVersionChanges(plan).length) throw new Error('即时交易的持仓模板执行版本无法核验');
   const tradeLoad = preEntryWindowLoader(load, end);
@@ -33,7 +33,7 @@ export async function evaluateInstantMonitor(sample: QualitySample, monitor: Ins
   const initialized = plan.initialization ? withTuringInitialization(tradeLoad, sample.source.symbol, marketStart ?? NaN) : tradeLoad;
   const { marginUsdt, leverage } = instantMonitorSize(monitor);
   const notional = plan.positionManagement?.notional ?? marginUsdt * leverage;
-  const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, notional);
+  const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, notional,liveAt);
   return initialized.turingInitialization ? { ...result, initialization: initialized.turingInitialization } : result;
 }
 
