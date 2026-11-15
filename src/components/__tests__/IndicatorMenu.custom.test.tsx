@@ -18,9 +18,14 @@ describe('自制区的十个特征值', () => {
   it('adds the pure 1115 chart beside DBL-5 and the original 1115 combination', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5',period:3,enabled:true},{type:'DBL5_GUARD_PLUS',period:3,enabled:true}]} onClose={()=>{}} onIndicatorsChange={changed}/>);
+    expect(screen.getByText('DBL-5-防守线')).toBeInTheDocument();
+    expect(screen.getByText('DBL-5-防守线+急拉线-1115')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'急拉线-1115'}});
-    fireEvent.click(screen.getByText(name(IMPULSE_1115_CHART_ID)));
+    fireEvent.click(screen.getByText('DBL-5-急拉线-1115'));
     expect(changed.mock.lastCall?.[0].map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5','DBL5_GUARD_PLUS',IMPULSE_1115_CHART_ID]);
+    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5).shortName).toBe('DBL-5-防守线');
+    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).shortName).toBe('DBL-5-防守线+急拉线-1115');
+    expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).shortName).toBe('DBL-5-急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).figures.map((figure:{key:string})=>figure.key)).toEqual(['value']);
     expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).figures.map((figure:{key:string})=>figure.key)).toEqual(['value','DBL5P_base','DBL5P_impulse']);
   });

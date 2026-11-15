@@ -7,7 +7,7 @@ import { additionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
-import { DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
+import { DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
 import type {VetoStagesDraft} from '../FishQualityVetoStagesEditor';
 afterEach(cleanup);
@@ -328,40 +328,35 @@ it('defaults the first increase metric to State S avg2, saves multiple choices p
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
 });
 
-it('selects the 5m impulse with or without the existing position and keeps each round independent', () => {
-  render(<Editor/>);
-  fireEvent.click(screen.getByLabelText('启用条件加仓'));
-  fireEvent.click(screen.getByLabelText('5 分钟急拉线'));
-  expect(screen.getByLabelText('同时启用原位置算法')).toBeChecked();
-  fireEvent.change(screen.getByLabelText('急拉线冗余 ATR'), {target:{value:'0.35'}});
-  fireEvent.change(screen.getByLabelText('急拉线 K 最小距离'), {target:{value:'2'}});
-  const saved = save();
-  expect(saved.rounds[0].impulsePosition).toEqual({version:'impulse-low-5m-v1',bufferAtr:.35,minDistancePct:2});
-  expect(saved.rounds[1].impulsePosition).toBeUndefined();
-  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
-  fireEvent.click(screen.getByLabelText('同时启用原位置算法'));
-  expect(screen.getByLabelText('加仓条件来源')).toBeDisabled();
-  expect(save().rounds[0].impulsePosition.skipNative).toBe(true);
-  tab(2);
-  expect(screen.getByLabelText('5 分钟急拉线')).not.toBeChecked();
+it('retains the retired 5m impulse only for saved rounds until explicitly removed', () => {
+  const position={version:'impulse-low-5m-v1',bufferAtr:.35,minDistancePct:2,skipNative:true} as const;
+  const initial={...defaultQualityAddition(),enabled:true,impulsePosition:position};
+  render(<Editor initial={initial}/>);
+  expect(screen.queryByLabelText('5 分钟急拉线')).toBeNull();
+  expect(screen.getByLabelText('同时启用原位置算法')).not.toBeChecked();
+  expect(save().rounds[0].impulsePosition).toEqual(position);
+  fireEvent.click(screen.getByRole('button',{name:'移除旧急拉位置'}));
+  expect(save().rounds[0].impulsePosition).toBeUndefined();
+  expect(save().rounds[1].impulsePosition).toEqual(position);
 });
 
-it('edits both acute positions independently from the guard and from other rounds',()=>{
+it('sets the guard and impulse independently with per-round ATR and minimum distance',()=>{
  render(<Editor/>);
  fireEvent.click(screen.getByLabelText('启用条件加仓'));
  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
  fireEvent.change(screen.getByLabelText('上涨期防守冗余'),{target:{value:'0.7'}});
- fireEvent.click(screen.getByLabelText('急拉线-1115'));
- fireEvent.click(screen.getByLabelText('5 分钟急拉线'));
- fireEvent.change(screen.getByLabelText('急拉线-1115 K 最小距离'),{target:{value:'1.8'}});
- fireEvent.change(screen.getByLabelText('急拉线 K 最小距离'),{target:{value:'2.5'}});
+ fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
+ expect(screen.queryByLabelText('5 分钟急拉线')).toBeNull();
+ expect(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR')).toHaveValue(.5);
+ fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR'),{target:{value:'1.25'}});
+ fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 最小距离'),{target:{value:'1.8'}});
  expect(screen.getByTestId('addition-impulse-positions')).not.toHaveTextContent('防守线版本');
  const saved=save();
  expect(saved.rounds[0]).toMatchObject({
   structure:{definition:{DBL5_config:{guard_trend_atr:.7}}},
-  impulse1115Position:{version:IMPULSE_1115_POSITION_VERSION,minDistancePct:1.8},
-  impulsePosition:{version:'impulse-low-5m-v1',minDistancePct:2.5},
+  impulse1115Position:{version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:1.25,minDistancePct:1.8},
  });
+ expect(saved.rounds[0].impulsePosition).toBeUndefined();
  expect(saved.rounds[1].impulse1115Position).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
  fireEvent.click(screen.getByLabelText('同时启用原位置算法'));
@@ -371,19 +366,31 @@ it('edits both acute positions independently from the guard and from other round
  expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('严格低于本次 K');
 });
 
+it('keeps saved 1115 v1 until its ATR setting is changed',()=>{
+ const initial:QualityAdditionRule={...defaultQualityAddition(),enabled:true,source:'structure',structure:defaultStructureAddition(),
+  impulse1115Position:{version:IMPULSE_1115_POSITION_VERSION,minDistancePct:1.8}};
+ render(<Editor initial={initial}/>);
+ const buffer=screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR');
+ expect(buffer).toHaveValue(.5);
+ expect(save().impulse1115Position).toEqual(initial.impulse1115Position);
+ fireEvent.change(buffer,{target:{value:'0'}});
+ expect(save().impulse1115Position).toEqual({version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:0,minDistancePct:1.8});
+ expect(save().rounds[1].impulse1115Position).toEqual(initial.impulse1115Position);
+});
+
 it('keeps a saved combined 1115 position until the draft is explicitly changed',()=>{
  const legacy={...defaultQualityAddition(),enabled:true,source:'structure',structure:{
   ...defaultStructureAddition(),kSource:'guard',guardPlusVersion:DBL5_GUARD_PLUS_VERSION,
  }} satisfies QualityAdditionRule;
  render(<Editor initial={legacy}/>);
- expect(screen.getByLabelText('急拉线-1115')).toBeDisabled();
+ expect(screen.getByLabelText('DBL-5-急拉线-1115')).toBeDisabled();
  expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
  expect(save().impulse1115Position).toBeUndefined();
  expect(screen.getByLabelText('加仓防守算法')).toHaveValue(DBL5_GUARD_PLUS_VERSION);
  fireEvent.change(screen.getByLabelText('加仓防守算法'),{target:{value:''}});
- fireEvent.click(screen.getByLabelText('急拉线-1115'));
+ fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
  expect(save().structure.guardPlusVersion).toBeUndefined();
- expect(save().impulse1115Position.version).toBe(IMPULSE_1115_POSITION_VERSION);
+ expect(save().impulse1115Position.version).toBe(IMPULSE_1115_CONFIGURABLE_K_VERSION);
  expect(legacy.structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
 });
 
@@ -394,9 +401,9 @@ it('offers the existing combined 1115 version for new drafts',()=>{
  const mode=screen.getByLabelText('加仓防守算法');
  fireEvent.change(mode,{target:{value:DBL5_GUARD_PLUS_VERSION}});
  expect(save().rounds[0].structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
- expect(screen.getByLabelText('急拉线-1115')).toBeDisabled();
+ expect(screen.getByLabelText('DBL-5-急拉线-1115')).toBeDisabled();
  fireEvent.change(mode,{target:{value:''}});
- fireEvent.click(screen.getByLabelText('急拉线-1115'));
+ fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
  expect((mode as HTMLSelectElement).selectedOptions[0].value).toBe('');
  expect(Array.from((mode as HTMLSelectElement).options).find(option=>option.value===DBL5_GUARD_PLUS_VERSION)?.disabled).toBe(true);
  expect(save().rounds[0].structure.guardPlusVersion).toBeUndefined();
@@ -406,10 +413,10 @@ it('selects the winning position for F and retains the chosen floor version on r
   render(<Editor/>);
   fireEvent.click(screen.getByLabelText('启用条件加仓'));
   fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
-  fireEvent.click(screen.getByLabelText('5 分钟急拉线'));
+  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
   fireEvent.click(screen.getByLabelText('防守线保本底线'));
   expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v2');
-  expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('急拉线触发时盘中碰到本次 K');
+  expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('严格低于本次 K');
   const rule=save() as QualityAdditionRule;
   expect(rule.breakevenFloor).toEqual({enabled:true,atr:.25,version:'breakeven-floor-v2'});
   expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);

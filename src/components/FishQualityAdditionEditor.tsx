@@ -2,7 +2,7 @@ import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
-import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
 import {FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
 import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
@@ -103,7 +103,8 @@ const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=f
  const custom=rule.source==='custom',conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);
  const common={stricterPct:String(rule.stricterPct),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage),entryVetoes:vetoDraftOf(rule.entryVetoes),
   impulse:rule.impulsePosition?{bufferAtr:String(rule.impulsePosition.bufferAtr),minDistancePct:String(rule.impulsePosition.minDistancePct??''),skipNative:rule.impulsePosition.skipNative}:undefined,
-  impulse1115:rule.impulse1115Position?{minDistancePct:String(rule.impulse1115Position.minDistancePct??''),skipNative:rule.impulse1115Position.skipNative}:undefined,
+  impulse1115:rule.impulse1115Position?{minDistancePct:String(rule.impulse1115Position.minDistancePct??''),skipNative:rule.impulse1115Position.skipNative,
+   ...(rule.impulse1115Position.version===IMPULSE_1115_CONFIGURABLE_K_VERSION?{bufferAtr:String(rule.impulse1115Position.bufferAtr)}:{})}:undefined,
   increaseMetrics:(rule.indicatorIncrease?.metrics ?? []).map(saved => ({choice:saved.snapshot.featureId+':'+saved.metric,time:additionMetricTime(saved.snapshot),saved:structuredClone(saved)})),
   entryDistanceAtr:rule.entryDistanceAtr!=null?String(rule.entryDistanceAtr):'',gainBasis:rule.gainBasis==='average'?'average' as const:'cost-line' as const,
   // 旧的「原探测算法再次命中」轮次：打开时把它作为「方向」里的探测算法条件找回来（保存后才写入）
@@ -127,7 +128,9 @@ function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef
    bufferAtr:d.impulse.bufferAtr.trim()?Number(d.impulse.bufferAtr):NaN,
    ...(d.impulse.minDistancePct.trim()?{minDistancePct:Number(d.impulse.minDistancePct)}:{}),
    ...(d.impulse.skipNative?{skipNative:true}:{})};
- if(d.impulse1115)rule.impulse1115Position={version:IMPULSE_1115_POSITION_VERSION,
+ if(d.impulse1115)rule.impulse1115Position={
+   ...(d.impulse1115.bufferAtr===undefined?{version:IMPULSE_1115_POSITION_VERSION}:{
+    version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:d.impulse1115.bufferAtr.trim()?Number(d.impulse1115.bufferAtr):NaN}),
    ...(d.impulse1115.minDistancePct.trim()?{minDistancePct:Number(d.impulse1115.minDistancePct)}:{}),
    ...(d.impulse1115.skipNative?{skipNative:true}:{})};
  if(d.source==='structure'){
@@ -272,6 +275,8 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const box=d.source==='structure';
  const nativeActive=!d.impulse?.skipNative&&!d.impulse1115?.skipNative;
  const legacy1115=box&&d.structure.kSource==='guard'&&!!d.structure.guardPlusVersion;
+ const nativePositionName=box&&d.structure.kSource==='guard'?
+  (legacy1115?DBL5_GUARD_PLUS_DISPLAY_NAME:DBL5_GUARD_DISPLAY_NAME):'箱体／指标位置';
  const setPositions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive)=>{
   patch({impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115?true:undefined},
    impulse1115:impulse1115&&{...impulse1115,skipNative:native?undefined:true}});
@@ -281,7 +286,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const legacyStopNote=[
   usesGuard?(d.impulse?'防守线触发时按 5 分钟收盘确认（上涨期 1 根、震荡期 2 根）；急拉线触发时盘中碰到本次 K 即卖出。':'原版：5 分钟收盘跌破 K 即卖出（上涨期 1 根、震荡期连续 2 根；影线不算）。'):
    nativeActive||d.impulse?'价格盘中碰到本次加仓的 K 即卖出全部持仓。':'',
-  d.impulse1115?'急拉线-1115 成交后，一根 5 分钟 K 线收盘严格低于本次 K 即确认卖出。':'',
+  d.impulse1115?`${IMPULSE_1115_DISPLAY_NAME} 成交后，一根 5 分钟 K 线收盘严格低于本次 K 即确认卖出。`:'',
  ].join('');
  return <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/[0.03] p-3" data-testid="quality-addition-editor">
   <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">③ 加仓细节</h4><FishQualityInfo label="加仓细节说明">
@@ -399,11 +404,12 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </InfoBlock>
   </div>}>
    <div className="space-y-2 text-[11px]">
-    <div className="space-y-2 rounded border border-border/60 p-2">
+    <div className="grid items-start gap-2 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" data-testid="addition-position-choices">
+    <div className="min-w-0 space-y-2 rounded border border-border/60 p-2">
     <label className="inline-flex items-center gap-2 font-medium">
       <input type="checkbox" aria-label="同时启用原位置算法" checked={nativeActive} disabled={!d.enabled||!d.impulse&&!d.impulse1115}
         onChange={e=>setPositions(d.impulse,d.impulse1115,e.target.checked)}/>
-      箱体／指标位置
+      {nativePositionName}
     </label>
    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
     <span className="text-muted-foreground">位置算法</span>
@@ -451,17 +457,22 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
               patch({structure});
             }
           }}>
-          <option value="">仅使用所选箱体防守线</option>
-          <option value={DBL5_GUARD_PLUS_VERSION} disabled={!!d.impulse||!!d.impulse1115}>{DBL5_GUARD_PLUS_LABEL}</option>
+          <option value="">{DBL5_GUARD_DISPLAY_NAME}</option>
+          <option value={DBL5_GUARD_PLUS_VERSION} disabled={!!d.impulse||!!d.impulse1115}>{DBL5_GUARD_PLUS_DISPLAY_NAME}</option>
         </select>
         {legacy1115&&<GuardPlusEvidence/>}
       </div></>}
     <span className="text-muted-foreground">最小距离</span>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div></>}
    </div></div>
-   <FishQualityImpulsePositions impulse={d.impulse} impulse1115={d.impulse1115} legacy1115={legacy1115}
-     inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={setPositions}/>
-   {(d.impulse||d.impulse1115)&&<p className="text-muted-foreground">同一轮只成交一次。同分钟按箱体／指标位置、5 分钟急拉线、急拉线-1115 的顺序评估。</p>}
+   <FishQualityImpulsePositions impulse1115={d.impulse1115} legacy1115={legacy1115}
+     inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={position=>setPositions(d.impulse,position)}/>
+   </div>
+   {d.impulse&&<div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+    <span>本轮沿用已保存的旧急拉位置。</span>
+    <button type="button" className="underline" disabled={!d.enabled} onClick={()=>setPositions(undefined,d.impulse1115)}>移除旧急拉位置</button>
+   </div>}
+   {nativeActive&&d.impulse1115&&<p className="text-muted-foreground">同一轮只成交一次。同分钟先评估「{nativePositionName}」，再评估「{IMPULSE_1115_DISPLAY_NAME}」。</p>}
    </div>
   </Part>
 

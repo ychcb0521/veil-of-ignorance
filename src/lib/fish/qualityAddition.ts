@@ -4,7 +4,7 @@ export const ADDITION_INDICATOR_INCREASE_VERSION='addition-indicator-increase-v1
 import { activeAdditionVetoes, additionVetoIdentity, validateAdditionVetoes } from './qualityAdditionVeto';
 import type { QualityBuyFilter } from './quality';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
-import { IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
+import { IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION, isImpulse1115PositionVersion } from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger} from './qualityHoldingLedger';
 import {validateStructureAddition,structureAdditionIdentity,structureAdditionLabel,type StructureAdditionRule,type StructureAdditionEvidence} from './qualityAdditionStructure';
 export type AdditionIncreaseMetric = Pick<QualityBuyFilter, 'label' | 'metric' | 'snapshot'>;
@@ -27,11 +27,13 @@ export interface ImpulseAdditionPosition {
   minDistancePct?: number;
   skipNative?: true;
 }
-export interface Impulse1115Position {
-  version: typeof IMPULSE_1115_POSITION_VERSION;
+export type Impulse1115Position = {
   minDistancePct?: number;
   skipNative?: true;
-}
+} & (
+  | { version: typeof IMPULSE_1115_POSITION_VERSION }
+  | { version: typeof IMPULSE_1115_CONFIGURABLE_K_VERSION; bufferAtr: number }
+);
 export const additionUsesNativePosition = (rule: Pick<QualityAdditionRule,'impulsePosition'|'impulse1115Position'>) =>
   !rule.impulsePosition?.skipNative && !rule.impulse1115Position?.skipNative;
 
@@ -225,10 +227,12 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
     impulse.skipNative!=null&&impulse.skipNative!==true||
     impulse.minDistancePct!=null&&(!Number.isFinite(impulse.minDistancePct)||impulse.minDistancePct<=0||impulse.minDistancePct>=50)))
     throw Error('急拉线参数无效，冗余须为 0–20 ATR，最小距离须大于 0 且小于 50%');
-  if(impulse1115&&(rule.quantityMode!=='calculator'||impulse1115.version!==IMPULSE_1115_POSITION_VERSION||
+  if(impulse1115&&(rule.quantityMode!=='calculator'||!isImpulse1115PositionVersion(impulse1115.version)||
     impulse1115.skipNative!=null&&impulse1115.skipNative!==true||
     impulse1115.minDistancePct!=null&&(!Number.isFinite(impulse1115.minDistancePct)||impulse1115.minDistancePct<=0||impulse1115.minDistancePct>=50)))
-    throw Error('急拉线-1115 的最小距离须大于 0 且小于 50%');
+    throw Error(`${IMPULSE_1115_DISPLAY_NAME} 的最小距离须大于 0 且小于 50%`);
+  if(impulse1115?.version===IMPULSE_1115_CONFIGURABLE_K_VERSION&&(!Number.isFinite(impulse1115.bufferAtr)||impulse1115.bufferAtr<0))
+    throw Error(`${IMPULSE_1115_DISPLAY_NAME} 的 K 冗余须为不小于 0 的有限 ATR 倍数`);
   const nativeActive=additionUsesNativePosition(rule);
   if(rule.source==='structure'&&nativeActive){validateStructureAddition(rule.structure);if(rule.quantityMode!=='calculator')throw Error('箱体加仓须使用按平衡公式定量');}
   if(rule.quantityMode){if(rule.quantityMode==='fixed'&&(!(rule.quantity!>0)||!Number.isFinite(rule.quantity)))throw new Error('加仓数量须为大于 0 的有限数字');}

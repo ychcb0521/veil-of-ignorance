@@ -16,7 +16,7 @@ import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
-import {IMPULSE_1115_POSITION_VERSION,type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
+import {IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, isImpulse1115PositionVersion, type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
 type Position='native'|'impulse'|'impulse1115';
@@ -210,7 +210,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  interface SupportDrop {at:number;support:number;atr:number;evidence:import('./qualityAdditionStructure').StructureAdditionEvidence;basis:number}
  /** 最近一次加仓所依据的箱体支撑（或减仓后的新支撑）在 (from, until) 内首次下移 ≥ minDropAtr×ATR 的 5 分钟收盘。 */
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
-  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||evidence.algorithmVersion===IMPULSE_1115_POSITION_VERSION)return;
+  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion))return;
   const previousRound=o.roundRules?.[fills.length-1];
   const winningAlternative=last.lane==='attack'&&(evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
@@ -367,9 +367,24 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const atrAt=Math.floor(hit.at/STEP)*STEP,atr=await readAtr(hit.at);
   if(!(atr!>0)||!Number.isFinite(atr))throw Error('缺少加仓时已收盘的5分钟ATR读数');
   const {supportOffsetAtr}=qualityAdditionAtrSettings(round);
-  const boxK=hit.structureEvidence?structureAdditionK(hit.structureEvidence,atr!):undefined;
+  const impulse1115=isImpulse1115PositionVersion(hit.structureEvidence?.algorithmVersion) ? round.impulse1115Position : undefined;
+  const earlyImpulse=hit.structureEvidence?.guardPlus?.early_impulse_event;
+  let kAtr=atr!;
+  if(hit.structureEvidence&&earlyImpulse&&impulse1115?.version===IMPULSE_1115_CONFIGURABLE_K_VERSION){
+   kAtr=earlyImpulse.frozen_atr;
+   hit.structureEvidence={...hit.structureEvidence,algorithmVersion:impulse1115.version,
+    basePrice:earlyImpulse.impulse_origin_low,bufferUnit:'atr',buffer:impulse1115.bufferAtr,
+    parameters:{detection:hit.structureEvidence.parameters,bufferAtr:impulse1115.bufferAtr,referenceAtr:kAtr}};
+   hit.featureId=impulse1115.version;
+   hit.label=`${IMPULSE_1115_DISPLAY_NAME} · 首次急拉`;
+  }
+  const boxK=hit.structureEvidence?structureAdditionK(hit.structureEvidence,kAtr):undefined;
+  if(boxK&&hit.structureEvidence?.algorithmVersion===IMPULSE_1115_CONFIGURABLE_K_VERSION){
+   hit.structureEvidence={...hit.structureEvidence,supportPrice:boxK.k,guardPrice:boxK.k};
+   hit.reading=boxK.k;
+  }
   // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
-  const minDistancePct=hit.structureEvidence?.algorithmVersion===IMPULSE_1115_POSITION_VERSION?round.impulse1115Position?.minDistancePct:
+  const minDistancePct=impulse1115?impulse1115.minDistancePct:
     hit.structureEvidence?.algorithm==='impulse5m'?round.impulsePosition?.minDistancePct:round.structure?.minDistancePct;
   const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,minDistancePct):boxK;
   const sellK=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!;

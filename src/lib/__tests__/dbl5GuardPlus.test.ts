@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {computeDbl5} from '../dbl5m';
-import {DBL5_GUARD_PLUS_VERSION,Dbl5GuardPlusEngine,IMPULSE_1115_POSITION_VERSION} from '../dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_VERSION,Dbl5GuardPlusEngine,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_POSITION_VERSION} from '../dbl5GuardPlus';
 import {compileFeatureFormula,DBL5_DEF,DBL5_GUARD_PLUS_DEF,evaluateOnBars} from '../deepDig/features';
 import {createStructureAdditionReader,defaultStructureAddition,structureAdditionK,type StructureAdditionRule} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
@@ -214,6 +214,19 @@ describe('DBL-5防守线+急拉-1115',()=>{
   }});
   const splitAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',alternative:{candidates:[],impulse1115Position:independent}}]});
   expect(splitAttack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:k}});
+  const configurable={version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:.25,skipNative:true} as const;
+  const early=split.fills[0].structureEvidence!.guardPlus!.early_impulse_event!;
+  const adjustedK=Math.floor((early.impulse_origin_low-.25*early.frozen_atr)*100)/100;
+  const adjustable=await findCalculatorAdditions({...options,impulse1115Position:configurable});
+  expect(adjustable.fills[0]).toMatchObject({at,sizing:{support:adjustedK},structureEvidence:{
+   algorithmVersion:IMPULSE_1115_CONFIGURABLE_K_VERSION,basePrice:early.impulse_origin_low,buffer:.25,k:adjustedK,
+   parameters:{referenceAtr:early.frozen_atr},
+  }});
+  expect(adjustable.fills[0].quantity).toBeCloseTo((adjustedK-99)/(101.4-adjustedK));
+  const adjustableAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',alternative:{candidates:[],impulse1115Position:configurable}}]});
+  expect(adjustableAttack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:adjustedK}});
+  const widened=await findCalculatorAdditions({...options,impulse1115Position:{...configurable,minDistancePct:2}});
+  expect(widened.fills[0].structureEvidence).toMatchObject({k:99.37,widenedFrom:adjustedK,minDistancePct:2});
   const calm=async(_row:TradeSignal,from:number,to:number)=>[...warm(),bar(20,100,100.2,99.95,100)].filter(row=>row.openTime>=from&&row.openTime<to);
   const notAnImpulse=createStructureAdditionReader({...options,load:Object.assign(calm,{turingInitialization:{version:'turing-origin-v1' as const,startMs:START}})});
   expect(await notAnImpulse({...defaultStructureAddition(),trigger:'confirm',kSource:'guard'},entry,at,[])).toMatchObject({at:START+20*STEP});

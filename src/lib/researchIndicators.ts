@@ -1,7 +1,7 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5GuardVersion} from '@/lib/dbl5m';
-import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_NUMERIC,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_RENDER,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_DISPLAY_NAME,DBL5_GUARD_PLUS_DISPLAY_NAME,DBL5_GUARD_PLUS_NUMERIC,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_RENDER,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_DISPLAY_NAME} from '@/lib/dbl5GuardPlus';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
 import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
@@ -26,14 +26,14 @@ export const IMPULSE_1115_CHART_ID = 'DBL5_IMPULSE_1115';
 export const IMPULSE_1115_CHART_DESCRIPTION = '只用已收盘的 5 分钟 K 线。确认时标出起涨低点，有效期间显示急拉参考，失效、到期或行情缺口时断线。';
 export const IMPULSE_1115_CHART: ResearchIndicator = {
   id:IMPULSE_1115_CHART_ID,featureId:DBL5_GUARD_PLUS_VERSION,core:'DBL5P_impulse',
-  short:IMPULSE_1115_POSITION_LABEL,name:IMPULSE_1115_POSITION_LABEL+'｜独立图表指标',
+  short:IMPULSE_1115_DISPLAY_NAME,name:IMPULSE_1115_DISPLAY_NAME,
   period:3,parameter:'急拉确认',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,
 };
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
-  {id:'DBL5',featureId:DBL5_ID,core:'DBL5',short:'DBL-5',name:'DBL-5｜达瓦斯箱体下轨',period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'),...DBL5_RENDER_FIELDS]},
-  {id:'DBL5_GUARD_PLUS',featureId:DBL5_GUARD_PLUS_VERSION,core:'DBL5P',short:DBL5_GUARD_PLUS_LABEL,name:DBL5_GUARD_PLUS_LABEL,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_GUARD_PLUS_NUMERIC.slice(1),...DBL5_GUARD_PLUS_RENDER,'_DBL5_guard_segment']},
+  {id:'DBL5',featureId:DBL5_ID,core:'DBL5',short:DBL5_GUARD_DISPLAY_NAME,name:DBL5_GUARD_DISPLAY_NAME,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'),...DBL5_RENDER_FIELDS]},
+  {id:'DBL5_GUARD_PLUS',featureId:DBL5_GUARD_PLUS_VERSION,core:'DBL5P',short:DBL5_GUARD_PLUS_DISPLAY_NAME,name:DBL5_GUARD_PLUS_DISPLAY_NAME,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:[...DBL5_GUARD_PLUS_NUMERIC.slice(1),...DBL5_GUARD_PLUS_RENDER,'_DBL5_guard_segment']},
   ...[{id:'DBL5_DISTANCE',featureId:'darvas_5m_distance_bps',core:'DBL5_distance_bps',short:'DBL·距离',name:'DBL-5｜距下轨基点'},{id:'DBL5_WIDTH',featureId:'darvas_5m_width_bps',core:'DBL5_width_bps',short:'DBL·箱宽',name:'DBL-5｜箱宽基点'},{id:'DBL5_AGE',featureId:'darvas_5m_age_minutes',core:'DBL5_age_minutes',short:'DBL·年龄',name:'DBL-5｜确认年龄'}].map(d=>({...d,period:3,parameter:'确认参数（定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,components:[...DBL5_FIELDS.filter(n=>n!=='DBL5'&&n!=='DBL5_upper'),...DBL5_RENDER_FIELDS]})),
   {id:'SBS5M',featureId:SBS5M_ID,core:'SBS5M',short:'SBS-5M',name:'台阶箱体支撑',period:6,parameter:'有效期（定义配置）',parameterUnit:'h',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,components:SBS5M_FIELDS.filter(n=>n!=='SBS5M')},
   {id:'SBS5M_QUALITY',featureId:'sbs_5m_quality',core:'SBS5M_support_quality',short:'SBS·证据',name:'台阶箱体支撑｜证据分',period:6,parameter:'有效期（定义配置）',neutral:0,min:0,max:100,seller:false,marketEvidence:true,rawOnly:true},
