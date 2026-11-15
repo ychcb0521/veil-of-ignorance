@@ -739,13 +739,18 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const loadMonitorArchive=useCallback(async(archive:QualityMonitorArchive, updateDirectory=true)=>{
     const base=current.current,owner=account.current,epoch=generation.current;
     if(isPermanentlyDeletedMonitorEntry(base.monitorLibrary,archive.id))throw Error('这份归档已永久删除');
-    const body=await loadQualityMonitorArchive(owner,archive,base);
-    if(updateDirectory&&!archive.templateDirectory&&body.sellPlans?.length&&generation.current===epoch&&account.current===owner){
-      const group=createQualityTemplateDirectory(base).groupPlans(body.sellPlans);
+    let resultCount:number|undefined;
+    const body=await loadQualityMonitorArchive(owner,archive,base,count=>{resultCount=count;});
+    if(updateDirectory&&generation.current===epoch&&account.current===owner){
+      const group=!archive.templateDirectory&&body.sellPlans?.length?createQualityTemplateDirectory(base).groupPlans(body.sellPlans):undefined;
       change(study=>{
         const library=study.monitorLibrary;
-        if(!library?.archives?.some(item=>item.id===archive.id&&!item.templateDirectory))return study;
-        return {...study,monitorLibrary:{...library,archives:library.archives.map(item=>item.id===archive.id?{...item,templateDirectory:group}:item)}};
+        const currentEntry=library?.archives?.find(item=>item.id===archive.id);
+        if(!currentEntry||!library)return study;
+        const missingCount=!Number.isFinite(currentEntry.resultCount)&&resultCount!==undefined;
+        const missingGroup=!currentEntry.templateDirectory&&!!group;
+        if(!missingCount&&!missingGroup)return study;
+        return {...study,monitorLibrary:{...library,archives:library.archives!.map(item=>item===currentEntry?{...item,...(missingGroup?{templateDirectory:group}:{}),...(missingCount?{resultCount}:{})}:item)}};
       });
     }
     return body;

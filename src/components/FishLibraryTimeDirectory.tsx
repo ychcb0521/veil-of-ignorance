@@ -1,3 +1,4 @@
+import {createQualityTemplateTable,type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ChevronDown,Database,Download,MoreHorizontal,Copy,Trash2,Undo2,Pencil} from 'lucide-react';
 import {FishDirectorySettingsButton,type DirectorySettingsEntry} from './FishDirectorySettingsButton';
@@ -7,7 +8,7 @@ import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle,DialogTr
 import {DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuItem} from './ui/dropdown-menu';
 import {FishQualityInfo,qualityRowItem} from './FishQualityModule';
 import {formatUTC8} from '@/lib/timeFormat';
-import type {FishQualityStudy} from '@/lib/fish/quality';
+import type {FishQualityStudy,QualityResult} from '@/lib/fish/quality';
 import {combineDirectoryStudies} from '@/lib/fish/qualityDirectorySelection';
 
 export interface FishDirectoryItem {
@@ -16,6 +17,8 @@ export interface FishDirectoryItem {
   templateGroup?:QualityTemplateDirectoryGroup;
   settings?:()=>ReactNode|Promise<ReactNode>;
   purgeable?: boolean;
+  preview?:()=>FishQualityStudy|Promise<FishQualityStudy>;
+  campaignPath?:(result:QualityResult)=>string|undefined;
   details?:ReactNode|((close:()=>void)=>ReactNode);
   study:()=>FishQualityStudy|Promise<FishQualityStudy>;
 }
@@ -29,19 +32,64 @@ export function FishDeferredDetails({summary,className,children}:{summary:string
   </details>;
 }
 
+export type FishTemplateRenderer=(table:QualityTemplateTable,close:()=>void)=>ReactNode;
+function FishTemplateDirectoryTable({members,renderTemplate,close}:{members:FishDirectoryItem[];renderTemplate:FishTemplateRenderer;close:()=>void}) {
+  const [attempt,setAttempt]=useState(0);
+  const [result,setResult]=useState<{table:QualityTemplateTable;errors:number}>();
+  const [progress,setProgress]=useState(0);
+  const currentMembers=useRef(members);currentMembers.current=members;
+  const version=useMemo(()=>JSON.stringify(members.map(member=>member.id)),[members]);
+  const latest=useRef(members);
+  useEffect(()=>{
+    let active=true;
+    const entries=currentMembers.current;
+    setResult(undefined);setProgress(0);
+    void (async()=>{
+      const table=createQualityTemplateTable();
+      let errors=0,done=0;
+      for(const member of entries){
+        if(!active)return;
+        try{
+          const input=await (member.preview??member.study)();
+          if(!active)return;
+          table.append(input,member.campaignPath);
+        }catch{errors++;}
+        done++;
+        // Give the browser a chance to handle input and paint before the next batch.
+        if(done%8===0){
+          if(active)setProgress(done);
+          await new Promise<void>(resolve=>setTimeout(resolve,0));
+        }
+      }
+      if(active)setResult({table:table.finish(),errors});
+    })();
+    return()=>{active=false;};
+  },[version,attempt]);
+  useEffect(()=>{
+    const previous=latest.current;latest.current=members;
+    if(previous.length===members.length&&previous.every((item,i)=>item.id===members[i].id)&&previous.some((item,i)=>item.revision!==members[i].revision))setAttempt(n=>n+1);
+  },[members]);
+  if(!result)return <p role="status" className="px-4 py-3 text-xs text-muted-foreground">正在读取模板记录… {progress}/{members.length}</p>;
+  return <>
+    {!!result.errors&&<p role="alert" className="px-4 py-3 text-xs text-destructive">{result.errors} 项未能读取，已读取的记录如下。 <button type="button" className="underline" onClick={()=>setAttempt(n=>n+1)}>重试读取</button></p>}
+    {result.table.rows.length?renderTemplate(result.table,close):<p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的记录。</p>}
+  </>;
+}
+
 export interface FishDirectoryRequest {key:number;selectedId?:string;selectedIds?:string[]}
 export interface FishDirectoryPicker {
   triggerLabel: string;
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
   loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(handleExport:()=>void,canExport:boolean)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
   onDeleteRecords?:(id:string)=>void;
   onPurgeDirectory?:(ids:readonly string[])=>Promise<{removed:readonly string[];retained:readonly string[]}>;
+  renderTemplate?:FishTemplateRenderer;
   renderStudy?:(study:FishQualityStudy, close?: () => void)=>ReactNode;
   onCopyStudy?:(study:FishQualityStudy,sourceRoundId?:string)=>Promise<boolean>;
   onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;empty:string;kind?:'time'|'algorithm'|'template';onOpenChange?:(open:boolean)=>void;
@@ -52,6 +100,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [loadAttempt,setLoadAttempt]=useState(0);
   const [checkedIds,setCheckedIds]=useState<string[]>([]);
   const [purgeMode,setPurgeMode]=useState(false),[confirmPurge,setConfirmPurge]=useState(false),[purgeMessage,setPurgeMessage]=useState('');
+  const [manage,setManage]=useState(false),[activeTemplate,setActiveTemplate]=useState('');
+  const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode;
   const [expandedGroups,setExpandedGroups]=useState<Record<string,boolean>>({});
   const [editingId,setEditingId]=useState(''),[draftName,setDraftName]=useState('');
   const selectionEpoch=useRef(0);
@@ -59,7 +109,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const items = useMemo(() => open ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,itemsSource]);
   const selected=items.find(item=>item.id===selectedId),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
-  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
+  useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
   useEffect(()=>{
     if(!open){setLoaded(undefined);return;}if(!selectedId)return;
     const item=itemRef.current;if(!item)return;
@@ -123,13 +173,13 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   };
   const copy=async()=>{
     if(!snapshot||!onCopyStudy||busy||loading||loadError)return;setBusy(selectedId);setError('');
-    try{if(!await onCopyStudy(snapshot,selected?.sourceRoundId))throw Error('副本未载入，当前总表仍保留，请重试');setOpen(false);onOpenChange?.(false);}
+    try{if(!await onCopyStudy(snapshot,selected?.sourceRoundId))throw Error('副本未载入，当前总表仍保留，请重试');changeOpen(false);}
     catch(e){setError(e instanceof Error?e.message:'复制失败');}finally{setBusy('');}
   };
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
     selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
-    if(!value){setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    if(!value){setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError;
   const handleExport=()=>{
@@ -179,9 +229,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       </DialogHeader>
       <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
       <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
+        {kind==='template'&&renderTemplate&&!picker&&!purgeMode&&<button type="button" className={action} disabled={!!busy||loading} onClick={()=>{
+          setManage(!manage);setSelectedId('');setCheckedIds([]);setActiveTemplate('');
+        }}>{manage?'返回模板汇总':'管理轮次与归档'}</button>}
         {onPurgeDirectory&&!picker&&<div className="flex flex-wrap items-center gap-2 text-xs">
           <button type="button" disabled={!!busy||loading} className={action} onClick={()=>{
-            setPurgeMode(!purgeMode);setCheckedIds([]);setConfirmPurge(false);setError('');setPurgeMessage('');
+            setPurgeMode(!purgeMode);setActiveTemplate('');setCheckedIds([]);setConfirmPurge(false);setError('');setPurgeMessage('');
           }}>{purgeMode?'退出批量删除':'批量删除'}</button>
           {purgeMode&&<>
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" aria-label="全选可删除目录"
@@ -199,7 +252,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           <button type="button" className={action} disabled={!!busy} onClick={()=>setConfirmPurge(false)}>取消</button>
         </div>}
         {purgeMessage&&<p role="status" className="text-xs text-muted-foreground">{purgeMessage}</p>}
-        {onSelectDirectory&&<div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2 text-[11px]">
+        {onSelectDirectory&&!templateView&&!purgeMode&&<div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2 text-[11px]">
           <label className="inline-flex items-center gap-2"><input type="checkbox" aria-label={'全选'+name+'可见目录'} ref={el=>{if(el)el.indeterminate=checked.length>0&&checked.length<selectable.length;}} disabled={loading||!!loadError||!!busy||!selectable.length} checked={!!selectable.length&&checked.length===selectable.length} onChange={e=>setCheckedIds(e.target.checked?selectable.map(item=>item.id):[])}/>全选可见目录</label>
           <button type="button" className={action} disabled={loading||!!loadError||!!busy||!checkedIds.length} onClick={()=>setCheckedIds([])}>清空选择</button>
           <span className="text-muted-foreground">可选一个或多个目录</span>
@@ -210,12 +263,13 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{empty}</p>}
         {kind==='template'?grouping.map(({group,items:members},index)=>{
           const containsSelection=members.some(item=>item.id===selectedId);
-          const expanded=containsSelection||(expandedGroups[group.id]??index===0);
+          const expanded=templateView?activeTemplate===group.id:containsSelection||(expandedGroups[group.id]??index===0);
           const checkedCount=members.filter(item=>checkedSet.has(item.id)).length;
           return <section key={group.id} className="rounded-lg border border-border/60" data-testid={prefix+'-template-group'}>
             <div className="flex items-center rounded-lg bg-muted/40 pr-2">
             <button type="button" aria-expanded={expanded} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs hover:bg-muted/60"
               onClick={()=>{
+                if(templateView){setActiveTemplate(expanded?'':group.id);return;}
                 if(expanded&&containsSelection)setSelectedId('');
                 setExpandedGroups(previous=>({...previous,[group.id]:!expanded}));
               }}>
@@ -225,7 +279,9 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             </button>
             <FishDirectorySettingsButton name={group.title} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
             </div>
-            {expanded&&<div className="space-y-2 p-2">{members.map(renderItem)}</div>}
+            {expanded&&(templateView&&renderTemplate?<div className="min-w-0" data-testid={prefix+'-template-content'}>
+              <FishTemplateDirectoryTable key={group.id} members={members} renderTemplate={renderTemplate} close={()=>changeOpen(false)}/>
+            </div>:<div className="space-y-2 p-2">{members.map(renderItem)}</div>)}
           </section>;
         }):visible.map(renderItem)}
       </div>

@@ -1,16 +1,22 @@
+import {serializeAccountBlob} from '@/lib/accountBlobCodec';
+import {qualityCampaignPath} from '@/lib/campaignSections';
+import {hasQualityCampaign, isRetainedQualityRun} from './qualityCampaignArchive';
+import {monitorCampaignUnavailable, qualityMonitorCampaignPath} from './qualityMonitorCampaign';
+import {setTemplateCampaignPath} from './qualityTemplateTable';
 import {renameLibraryDirectoryEdit} from './libraryDirectoryEdits';
 import {createQualityTemplateDirectory} from './qualityTemplateDirectory';
-import {newQualityStudy,qualityDisplayRows,qualityComparisonRows,qualityResultKey,qualityFilterReadingKey,type FishQualityStudy,type QualitySample,type QualityGroup} from './quality';
-import {archiveQualityMonitorStudy,qualityMonitorRoundRecordIds,type QualityMonitorRound} from './qualityMonitorLibrary';
+import {newQualityStudy,qualityDisplayRows,qualityComparisonRows,qualityResultKey,qualityFilterReadingKey,type FishQualityStudy,type QualitySample,type QualityGroup,type QualityResult} from './quality';
+import {archiveQualityMonitorStudy,qualityMonitorRoundRecordIds,type QualityMonitorRound,type QualityMonitorRecord} from './qualityMonitorLibrary';
 import {librarySignalIdentity} from './libraryRounds';
 import {shortFishHash} from './algorithm';
 import {qualityOrigins} from './qualitySources';
 import {mergeQualityPlanTemplates} from './qualityPlanTemplates';
 import {preserveSourceDeletions} from './libraryDeletion';
 /** Older rounds only retain record references. Reconstruct their available frozen fields, never recompute a price or score. */
-export function monitorRoundStudy(study:FishQualityStudy,round:QualityMonitorRound):FishQualityStudy{
+export function monitorRoundStudy(study:FishQualityStudy,round:QualityMonitorRound, directoryRecords?:readonly QualityMonitorRecord[]):FishQualityStudy{
  const l=study.monitorLibrary;if(!l)return newQualityStudy(round.startedAt);
- const ids=new Set(qualityMonitorRoundRecordIds(l,round)),settings=new Map(l.settings.map(s=>[s.id,s])),records=l.records.filter(r=>ids.has(r.id)&&settings.has(r.settingId));
+ const settings=new Map(l.settings.map(s=>[s.id,s]));
+ const records=directoryRecords??(()=>{const ids=new Set(qualityMonitorRoundRecordIds(l,round));return l.records.filter(r=>ids.has(r.id)&&settings.has(r.settingId));})();
  const out:FishQualityStudy={...newQualityStudy(round.startedAt),independentFilters:true,groups:[],sellPlans:[],buyFilters:[],filterReadings:[],entryReadings:[],postExitReadings:[]},samples=new Map<string,QualitySample>(),plans=new Map<string,QualityGroup>();
  const identity=(source:QualitySample['source'],entry:number|null)=>JSON.stringify([librarySignalIdentity(source),entry]);
  for(const r of records){const setting=settings.get(r.settingId)!,planId='archive-'+setting.id;
@@ -24,7 +30,11 @@ export function monitorRoundStudy(study:FishQualityStudy,round:QualityMonitorRou
  for(const s of out.samples){const snapshots=out.groups.filter(g=>s.groups.includes(g.id)).map(g=>g.snapshot);if(snapshots.length)s.source={...s.source,fish:{...snapshots[0],algorithms:snapshots}};}
  const rows=new Map(qualityComparisonRows(out).map(s=>[identity(s.source,s.enteredAt),s]));
  for(const r of records){const row=rows.get(identity(r.source,r.enteredAt))!,plan=plans.get(r.settingId)!;
-  if(r.result)out.results.push({...structuredClone(r.result),sampleId:row.id,groupId:plan.id,key:qualityResultKey(row,plan,0)});
+  if(r.result){
+   const result={...structuredClone(r.result),sampleId:row.id,groupId:plan.id,key:qualityResultKey(row,plan,0)};
+   if(!monitorCampaignUnavailable(r,settings.get(r.settingId)!))setTemplateCampaignPath(result,qualityMonitorCampaignPath(r.id));
+   out.results.push(result);
+  }
   for(const [i,f] of (plan.buyFilters??[]).entries()){const reading=r.readings[i];if(reading)out.filterReadings!.push({...structuredClone(reading),key:qualityFilterReadingKey(row,f)});}
  }
  return out;
@@ -59,4 +69,29 @@ export function renameLibraryDirectory(study:FishQualityStudy,id:string,name:str
  const library=study.monitorLibrary??{version:1 as const,importedLegacy:false,settings:[],records:[],rounds:[]};
  const directoryEdits=renameLibraryDirectoryEdit(library.directoryEdits,id,name,at);
  return directoryEdits===library.directoryEdits?study:{...study,monitorLibrary:{...library,directoryEdits}};
+}
+
+/** Archived results may link only to the same persisted trade, never to a later rerun sharing a key. */
+export function archivedMonitorCampaignLookup(study:FishQualityStudy){
+  const saved=new Map<string,QualityResult>(study.campaignRuns?.filter(run=>!run.supersededBy&&isRetainedQualityRun(run)).map(run=>[run.result.key,run.result]));
+  const settings=new Map(study.monitorLibrary?.settings.map(setting=>[setting.id,setting]));
+  let records:Map<string,QualityMonitorRecord[]>|undefined;
+  return (result:QualityResult)=>{
+    if(!hasQualityCampaign(result))return;
+    const retained=saved.get(result.key);
+    if(retained&&serializeAccountBlob(retained)===serializeAccountBlob(result))return qualityCampaignPath(result.key,'sell');
+    if(!records){
+      records=new Map();
+      for(const record of study.monitorLibrary?.records??[]){
+        if(!record.result)continue;
+        const key=record.result.key, list=records.get(key);
+        if(list)list.push(record);else records.set(key,[record]);
+      }
+    }
+    const matches=records.get(result.key)?.filter(record=>{
+      const setting=settings.get(record.settingId);
+      return setting&&!monitorCampaignUnavailable(record,setting)&&serializeAccountBlob(record.result)===serializeAccountBlob(result);
+    });
+    if(matches?.length===1)return qualityMonitorCampaignPath(matches[0].id);
+  };
 }

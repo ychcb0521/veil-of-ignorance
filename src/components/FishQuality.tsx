@@ -1,3 +1,5 @@
+import {FishLibrary} from './FishLibrary';
+import {templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
@@ -293,8 +295,9 @@ function ResultCell({ plan, result, onClick, section, onOpenCampaign }: { plan: 
   const stageTitle=result?.activeSellStage?`第 ${result.activeSellStage.afterAdditions} 次加仓后：${result.activeSellStage.label} ${result.activeSellStage.rule.direction} ${result.activeSellStage.rule.threshold}`:'';
   const summary=[`收益率 ${pct(result?.returnPct)}`,`相对涨幅：${gain.value==null?gain.reason:gain.reason}`,`盈亏比：${payoff.reason}`,...(additions.length?[`共加仓 ${additions.reduce((n,a)=>n+a.quantity,0).toPrecision(7)} 枚 · 均价 ${result?.averageEntryPrice?.toPrecision(7)}`]:[]),...(stageTitle?[stageTitle]:[]),...(result?.additionVetoes?.length?[`否决加仓 ${result.additionVetoes.length} 次：${result.additionVetoes.map(v=>`${new Date(v.at+8*3600000).toISOString().slice(5,16).replace('T',' ')} 第 ${v.round} 次 · ${ADDITION_VETO_LABELS[v.kind as AdditionEntryVetoKind]??v.kind}（${v.reading}）`).join('；')}`]:[]),...(result?.additionReductions?.length?[`支撑线下移 ${result.additionReductions.length} 次：${result.additionReductions.map(c=>`${new Date(c.at+8*3600000).toISOString().slice(5,16).replace('T',' ')} 支撑 ${+c.previousSupport.toPrecision(8)}→${+c.newSupport.toPrecision(8)} · K ${+c.previousK.toPrecision(8)}→${+c.newK.toPrecision(8)} · ${c.fraction>0?`减仓 ${+(c.fraction*100).toFixed(2)}% @ ${+c.price.toPrecision(8)}（落袋 ${c.realizedPnl.toFixed(2)}）`:'无需减仓'}`).join('；')}`]:[])].join('\n');
   const content = <><span className={`text-[10px] tabular-nums ${additions.length?'text-primary':'text-muted-foreground/60'}`} data-testid="quality-sell-additions">{additions.length?`${additions.length} 次`:evaluated?'0 次':'—'}</span><span className="font-mono text-[10px] tabular-nums text-muted-foreground" data-testid="quality-sell-geometric">{qualityGeometricPositionText(qualityGeometricPosition(result))}</span><span className={`font-mono tabular-nums ${signed(gain.value)}`} data-testid="quality-sell-relative-gain">{qualityRelativeGainText(gain.value)}</span><span className={`font-mono tabular-nums ${signed(payoff.value)}`} data-testid="quality-sell-payoff">{qualityPayoffRatioText(payoff.value)}</span></>;
-  if (!archiveView && result && hasQualityCampaign(result)) {
-    const href = qualityCampaignPath(result.key, section), title = `${summary}\n打开交易战役`;
+  const href = result && hasQualityCampaign(result) ? archiveView ? templateCampaignPath(result) : qualityCampaignPath(result.key, section) : undefined;
+  if (href) {
+    const title = `${summary}\n打开交易战役`;
     return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title={title}>{content}</Link> : <a href={href} className={className} title={title}>{content}</a>;
   }
   if (result?.status === 'error') {
@@ -341,7 +344,7 @@ function MergedEntryCells({ entries, phase, planId, plan, expand }: { entries: {
   </>;
 }
 
-function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQualityState; close: () => void }) {
+function RowDetail({ row, state, close, templateTable }: { row?: QualitySample; state: FishQualityState; close: () => void; templateTable?:QualityTemplateTable }) {
   const study = state.study;
   return <Dialog open={!!row} onOpenChange={open => { if (!open) close(); }}><DialogContent className="max-h-[85vh] max-w-3xl overflow-auto">
     <DialogHeader><DialogTitle className="text-sm">{row?.source.symbol} · 卖出对比</DialogTitle><DialogDescription className="text-xs">信号 {row?date(qualitySignalTime(row.source)):'—'} · 买入 {row?date(qualityMonitorEntryAt(row, qualityRowMonitorTimeBasis(study, row))):'—'} · 各方案按其首仓设置独立模拟</DialogDescription></DialogHeader>
@@ -362,7 +365,7 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
       ['峰值涨幅', (r?: QualityResult) => pct(r?.peakPct)], ['最大不利涨跌', (r?: QualityResult) => pct(r?.adversePct)],
       ['静态最大回撤', (r?: QualityResult) => pct(qualityDrawdownPct(r,'static')).replace(/^\+/, '')], ['动态最大回撤', (r?: QualityResult) => pct(qualityDrawdownPct(r,'dynamic')).replace(/^\+/, '')], ['涨幅未兑现', (r?: QualityResult) => pct(r?.uncapturedPct).replace(/^\+/, '')],
       ['持仓小时', (r?: QualityResult) => r?.heldHours?.toFixed(2) ?? '—'],
-    ].map(([label, format]) => <tr key={label as string} className="border-t border-border/40"><td className={`${cell} text-muted-foreground`}>{label as string}</td>{study.sellPlans?.map(p => <td key={p.id} className={`${cell} max-w-80 whitespace-normal font-mono`}>{(format as (r?: QualityResult) => string)(qualityRowResult(study, row, p))}</td>)}</tr>)}</tbody></table></div>}
+    ].map(([label, format]) => <tr key={label as string} className="border-t border-border/40"><td className={`${cell} text-muted-foreground`}>{label as string}</td>{study.sellPlans?.map(p => <td key={p.id} className={`${cell} max-w-80 whitespace-normal font-mono`}>{(format as (r?: QualityResult) => string)(templateTable ? templateTable.results.get(row.signalId??row.id)?.get(p.id) : qualityRowResult(study, row, p))}</td>)}</tr>)}</tbody></table></div>}
   </DialogContent></Dialog>;
 }
 
@@ -384,7 +387,7 @@ function DetectorPicker({ choices, signalsOf, selected, onChange, children }: { 
     </li>; })}</ul> : <p className="px-3 py-3 text-muted-foreground">当前数据里没有默认探测算法的信号</p>}
   </PopoverContent></Popover>;
 }
-export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false }: { archiveView?:boolean;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
+export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,jumpingSignalId,tradedDayIndex,campaignDayIndex,archiveView=false, templateTable, onArchiveCampaign }: { archiveView?:boolean;templateTable?:QualityTemplateTable;onArchiveCampaign?:()=>void;state: FishQualityState; mining?: FishMiningApi; capturing?: boolean; onJump?: (source: TradeSignal) => void;onRate?:(source:TradeSignal,value:number)=>void; canJump?: (source: TradeSignal) => boolean; jumpingSignalId?: string | null; tradedDayIndex?: Set<string>; campaignDayIndex?: Set<string> }) {
   const { study, ready, running, progress, resumeMonitoring, resumeFiltering, setSourceQuality } = state;
   const workspace = archiveView ? undefined : state.workspace;
   const lockedBatch = archiveView || workspace ? null : state.lockedBatch;
@@ -441,9 +444,9 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const { samples, results, monitorTimeBasisByRow } = study;
   const allRows = useMemo(() => {
     if (!open) return NO_QUALITY_ROWS;
-    const rows = qualityDisplayRows({ samples });
+    const rows = templateTable?.rows ?? qualityDisplayRows({ samples });
     return archiveView ? rows : rows.filter(row => !isDelayedTuringReplaySample(row.source));
-  }, [samples, archiveView, open]);
+  }, [templateTable, samples, archiveView, open]);
   const screeningResults=useMemo(()=>open ? qualityScreeningResults({screeningResults:study.screeningResults,screeningRounds:study.screeningRounds},archiveView?undefined:state.preEntry?.library) : [],[study.screeningResults,study.screeningRounds,state.preEntry?.library,archiveView,open]);
   const screeningIndex=useMemo(()=>screeningResultIndex(screeningResults),[screeningResults]);
   const activeScreeningRound=state.preEntry?.running?state.preEntry.library.rounds.filter(r=>r.state==='running'&&(!workspace||!isAutomaticPreEntryRound(r))).reduce<typeof state.preEntry.library.rounds[number]|undefined>((latest,r)=>!latest||r.updatedAt>latest.updatedAt?r:latest,undefined):undefined;
@@ -473,7 +476,11 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const detectorSignals = useMemo(() => { const ids = new Map<string, Set<string>>(); for (const r of searched) if (r.detectorId) { if (!ids.has(r.detectorId)) ids.set(r.detectorId, new Set()); ids.get(r.detectorId)!.add(r.signalId ?? r.id); } return ids; }, [searched]);
   // 一项默认算法可能对应几个历史版本的组：按信号去重计数
   const signalsOf = (ids: readonly string[]) => new Set(ids.flatMap(id => [...(detectorSignals.get(id) ?? [])])).size;
-  const resultMap = useMemo(() => qualityResultMap({ results: open ? results : [] }), [open, results]);
+  const resultMap = useMemo(() => templateTable ? undefined : qualityResultMap({ results: open ? results : [] }), [open, results, templateTable]);
+  const resultFor = (row:QualitySample, plan:QualityGroup) => templateTable ? templateTable.results.get(row.signalId??row.id)?.get(plan.id) : qualityRowResult(study,row,plan,resultMap);
+  const screeningFor = (row:QualityTableRow) => templateTable ? templateTable.screening.get(row.signalId??row.id)??[] : screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId);
+  const signalViewId = (row:QualitySample) => templateTable ? row.signalId??row.id : undefined;
+  const frozenPostExit = (row:QualitySample, plan:QualityGroup) => templateTable?.postExit.get(row.signalId??row.id)?.get(plan.id);
   // 旧试验兼容绑定过滤；新工作流的过滤列与卖出结果各自显示。
   const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings;
   const signalMetrics = useMemo(()=>activeSignalMetrics(study),[study.signalMetrics,study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -482,6 +489,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const filterColumns = useMemo(() => { const columns = qualityFilterColumns(study); return qualityVariables(columns.map(c => c.filter)).flatMap(v => v.levels.map(f => columns.find(c => c.filter === f)!)); }, [study.sellPlans, study.buyFilters, study.independentFilters, study.turingStaticSettings]); // eslint-disable-line react-hooks/exhaustive-deps
   const filterReadingMap = useMemo(() => new Map((filterReadings ?? []).map(r => [r.key, r])), [filterReadings]);
   const filterStatus = useMemo(() => {
+    if(templateTable) return templateTable.filterStatus;
     const byPlan = new Map<string, Map<string, QualityFilterStatus>>();
     if (!narrowed.length) return byPlan;
     const readings = new Map((filterReadings ?? []).map(r => [r.key, r]));
@@ -492,7 +500,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       byPlan.set(plan.id, map);
     }
     return byPlan;
-  }, [narrowed, filterReadings, study.buyFilters, study.sellPlans, study.independentFilters, monitorTimeBasisByRow, study.monitorTimeBasis]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [templateTable, narrowed, filterReadings, study.buyFilters, study.sellPlans, study.independentFilters, monitorTimeBasisByRow, study.monitorTimeBasis]); // eslint-disable-line react-hooks/exhaustive-deps
   /** 这一行在这套方案下没买入（不满足 / 待判断 / 缺数据）时给出原因；买入了或没开过滤时为 undefined。 */
   const skippedBy = (plan: QualityGroup, row: QualitySample) => { const f = filterStatus.get(plan.id)?.get(row.signalId ?? row.id); return f && f.state !== 'pass' ? f : undefined; };
   const [monitorPlanId, setMonitorPlanId] = useState<string | null>(null);
@@ -501,7 +509,6 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
   const runScopeRows = useMemo(() => lockedBatch ? narrowed : narrowed.filter(r => !month || signalMonthKey(qualitySignalTime(r.source)) === month), [lockedBatch, narrowed, month]);
   const mergeCabinSignals = (lockedBatch?.groupBySignal ?? (!!workspace || origin === 'fish')) && !detectorExpanded;
   const sortedRows = useMemo(() => {
-    const map = resultMap;
     const captureTimes = new Map<string, number>();
     if (mergeCabinSignals && sort === 'mined-at') {
       for (const row of runScopeRows) {
@@ -511,7 +518,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       }
     }
     const value = (r: QualitySample): number | string | null => {
-      if(sort.startsWith('screening:')){const value=screeningCell(screeningRowResults(r,screeningIndex,screeningRoundId,screeningRunId));return sort==='screening:time'?value.time:sort==='screening:plan'?value.plan==='—'?null:value.plan:value.status==='—'?null:value.status;}
+      if(sort.startsWith('screening:')){const value=screeningCell(screeningFor(r));return sort==='screening:time'?value.time:sort==='screening:plan'?value.plan==='—'?null:value.plan:value.status==='—'?null:value.status;}
       if (sort === 'time') return qualitySignalTime(r.source);
       if (sort === 'mined-at') return mergeCabinSignals ? captureTimes.get(qualityTableSignalKey(r)) ?? null : qualityTableCaptureTime(r);
       if (sort === 'symbol') return r.source.symbol;
@@ -520,18 +527,18 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       if (sort === 'quality') return normalizeSignalQuality(r.source.quality) ?? null;
       if (sort === 'process') return isLibrary(r) ? null : r.source.fish?.cutoffMs ?? null;
       if (sort === 'detector') { const g = detectorMap.get(r.detectorId ?? ''); return g ? `${g.label}\u0000${String(g.snapshot.threshold).padStart(12, '0')}\u0000${g.metric}` : null; }
-      if (sort.startsWith('signal-value:')) { const metric=signalMetrics?.find(metric=>`signal-value:${metric.id}`===sort); return metric ? signalReadingMap.get(signalReadingKey(r,metric))?.value ?? null : null; }
+      if (sort.startsWith('signal-value:')) { const metric=signalMetrics?.find(metric=>`signal-value:${metric.id}`===sort); return metric ? signalReadingMap.get(signalReadingKey(r,metric,signalViewId(r)))?.value ?? null : null; }
       if (sort.startsWith('filter:')) { const column = filterColumns.find(c => `filter:${c.id}` === sort); return column ? qualityFilterValue(r, column.filter, filterReadingMap) : null; }
-      if(sort.startsWith('entry:')){const p=plansForSort?.find(p=>p.id===sort.slice(6));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);if(f&&f.state!=='pass')return null;const result=qualityRowResult(study,r,p,map),key=qualityEntryKey(r.source,result,p,qualityEntryParts(p)[0]),reading=key?entryReadings.get(key):undefined;return validEntryReading(reading)?reading!.value!:null;}
-      if(sort.startsWith('price-change:')){const p=plansForSort?.find(p=>p.id===sort.slice(13));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualitySalePriceChangePct(qualityRowResult(study,r,p,map));}
-      if(sort.startsWith('addition:')){const p=plansForSort?.find(p=>p.id===sort.slice(9));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualityAdditionSummary(p,qualityRowResult(study,r,p,map)).count;}
-      if(sort.startsWith('label:')){const plan=plansForSort?.find(p=>p.id===sort.slice(6));if(!plan)return null;const f=filterStatus.get(plan.id)?.get(r.signalId??r.id);return qualityDetectorLabel(plan,qualityRowResult(study,r,plan,map),!!f&&f.state!=='pass').rank;}
-      if(sort.startsWith('post-exit:')){const [,h,metric,...id]=sort.split(':');const plan=plansForSort?.find(p=>p.id===id.join(':'));if(!plan||filterStatus.get(plan.id)?.get(r.signalId??r.id)?.state&&filterStatus.get(plan.id)!.get(r.signalId??r.id)!.state!=='pass')return null;const result=qualityRowResult(study,r,plan,map),key=qualityPostExitKey(r.source,result,plan);return key?postExitValue(postExitReadings.get(key),Number(h),metric==='peak'?'peak':'drawdown2'):null;}
+      if(sort.startsWith('entry:')){const p=plansForSort?.find(p=>p.id===sort.slice(6));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);if(f&&f.state!=='pass')return null;const result=resultFor(r,p),key=qualityEntryKey(r.source,result,p,qualityEntryParts(p)[0]),reading=key?entryReadings.get(key):undefined;return validEntryReading(reading)?reading!.value!:null;}
+      if(sort.startsWith('price-change:')){const p=plansForSort?.find(p=>p.id===sort.slice(13));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualitySalePriceChangePct(resultFor(r,p));}
+      if(sort.startsWith('addition:')){const p=plansForSort?.find(p=>p.id===sort.slice(9));if(!p)return null;const f=filterStatus.get(p.id)?.get(r.signalId??r.id);return f&&f.state!=='pass'?null:qualityAdditionSummary(p,resultFor(r,p)).count;}
+      if(sort.startsWith('label:')){const plan=plansForSort?.find(p=>p.id===sort.slice(6));if(!plan)return null;const f=filterStatus.get(plan.id)?.get(r.signalId??r.id);return qualityDetectorLabel(plan,resultFor(r,plan),!!f&&f.state!=='pass').rank;}
+      if(sort.startsWith('post-exit:')){const [,h,metric,...id]=sort.split(':');const plan=plansForSort?.find(p=>p.id===id.join(':'));if(!plan||filterStatus.get(plan.id)?.get(r.signalId??r.id)?.state&&filterStatus.get(plan.id)!.get(r.signalId??r.id)!.state!=='pass')return null;const result=resultFor(r,plan),key=qualityPostExitKey(r.source,result,plan);return key?postExitValue(frozenPostExit(r,plan)??postExitReadings.get(key),Number(h),metric==='peak'?'peak':'drawdown2'):null;}
       const metric = sort.startsWith('static:') ? 'static' : sort.startsWith('peak:') ? 'peak' : sort.startsWith('mirror:') ? 'mirror' : sort.startsWith('held:') ? 'held' : sort.startsWith('relative:') ? 'relative' : sort.startsWith('payoff:') ? 'payoff' : sort.startsWith('geometric:') ? 'geometric' : 'sell';
       const plan = plansForSort?.find(p => `${metric}:${p.id}` === sort);
       // 这套方案开着买入过滤时，它没买入（不满足 / 待判断 / 缺数据）的行在它的列里算空值，排在最后
       if (!plan || filterStatus.get(plan.id)?.get(r.signalId ?? r.id)?.state !== undefined && filterStatus.get(plan.id)!.get(r.signalId ?? r.id)!.state !== 'pass') return null;
-      const res = qualityRowResult(study, r, plan, map);
+      const res = resultFor(r,plan);
       if (metric === 'held') return res && (res.status === 'closed' || res.status === 'open') && Number.isFinite(res.heldHours) ? res.heldHours! : null;
       if (metric === 'peak') return qualityPeakPct(res);
       if (metric === 'relative') return qualityRelativeGain(plan, res).value;
@@ -547,8 +554,8 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       const order = typeof a.v === 'string' ? a.v.localeCompare(String(b.v)) : a.v - (b.v as number);
       return order * (ascending ? 1 : -1) || qualitySignalTime(b.r.source) - qualitySignalTime(a.r.source) || a.r.id.localeCompare(b.r.id);
     }).map(x => x.r);
-  }, [runScopeRows, sort, ascending, detectorMap, resultMap, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, signalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals]); // eslint-disable-line react-hooks/exhaustive-deps
-  const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows, mergeCabinSignals ? 'signal' : 'entry'), [sortedRows, detectorExpanded, mergeCabinSignals]);
+  }, [runScopeRows, sort, ascending, detectorMap, resultMap, templateTable, plansForSort, monitorTimeBasisByRow, study.monitorTimeBasis, filterStatus, filterColumns, signalMetrics, signalReadingMap, filterReadingMap, postExitReadings, entryReadings,screeningIndex,screeningRoundId,screeningRunId,mergeCabinSignals]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows: QualityTableRow[] = useMemo(() => detectorExpanded ? sortedRows : collapseQualityTableRows(sortedRows, templateTable ? 'saved-entry' : mergeCabinSignals ? 'signal' : 'entry'), [sortedRows, detectorExpanded, mergeCabinSignals, templateTable]);
   // 表格为空时探测算法表头不显示：是它们滤空的，就在空状态里写明并给出清除
   const emptyByDetector = !rows.length && activeAlgorithms.length > 0 && searched.length > 0 && narrowed.length === 0;
   const monthCounts = useMemo(() => {
@@ -698,6 +705,12 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
     </FishDeferredDetails>
   </div> : <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>;
+  const renderTemplate = (table:QualityTemplateTable, close:()=>void) => <ArchivedQualityBoard study={table.study} templateTable={table}
+    onJump={onJump ? signal=>{close();onJump(signal);} : undefined} canJump={canJump} onOpenCampaign={rememberReturn}/>;
+  const renderFilterTemplate = (table:QualityTemplateTable,close:()=>void) => <FilterTemplateCabin
+    table={table} renderResults={()=>renderTemplate(table,close)}
+    onJump={onJump ? signal=>{if(!canJump||canJump(signal)){close();onJump(signal);}} : undefined}
+    tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex}/>;
   const completeScreening = state.preEntry?.library.rounds.filter(round=>round.workspaceDraft&&round.state==='complete').length ?? 0;
   const completeFiltering = study.workspaceFilterDraft?.rounds.some(round=>round.state==='complete');
   const completeMonitoring = study.workspaceMonitorDraft?.rounds.filter(round=>round.state==='complete').length ?? 0;
@@ -793,12 +806,12 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <td className={`${cell} ${wrapCell} border-t border-border/40 text-muted-foreground`} data-testid="quality-detector-cell" data-detector-id={row.detectorId ?? ''} title={row.detectorId ? `${detectorMap.get(row.detectorId)?.metric} · ${detectorMap.get(row.detectorId)?.snapshot.interval ?? '5m'} · 公式版本 ${row.detectorId}` : '导入的信号不归属探测算法'}>{!detectorExpanded && row.groups.length > 0 ? <button type="button" className="text-primary hover:underline" onClick={() => expandDetectors(true)} title="展开此列表的探测算法与各次买入记录">{row.groups.length} 个算法 · 展开</button> : row.detectorId ? <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5"><span>{detectorMap.get(row.detectorId)?.label ?? '探测算法'}</span><span className="font-mono text-muted-foreground/70">{detectorMap.get(row.detectorId)?.snapshot.direction ?? '>'} {detectorMap.get(row.detectorId)?.snapshot.threshold}</span></span> : '—'}</td></>}
           {!hideFilter && <td className={`${cell} border-t border-border/40`}>{isLibrary(row) ? <span className="text-muted-foreground/60">—</span> : <FishProcessButton signal={row.source} captures={mergeCabinSignals ? [...new Map(members.map(member => [member.source.id, member.source])).values()] : undefined}/>}</td>}
           {shownFilters.map(column => { const reading = qualityFilterCell(row, column.filter, filterReadingMap); return <td key={column.id} className={`${cell} ${wrapCell} border-l border-t border-border/40`} data-testid="quality-filter-cell" data-filter-state={reading.state} title={reading.detail}><span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5"><span className="font-mono tabular-nums">{reading.value}</span><span className={`text-[9px] ${reading.state === 'pass' ? 'text-emerald-600 dark:text-emerald-400' : reading.state === 'fail' ? 'text-destructive' : 'text-muted-foreground'}`}>{reading.status}</span></span></td>; })}
-          {shownSignalMetrics.map(metric=>{const reading=signalReadingCell(row,metric,signalReadingMap);return <td key={metric.id} className={`${cell} ${wrapCell} border-l border-t border-border/40 font-mono tabular-nums`} data-testid="quality-signal-reading-cell" data-signal-reading-value={reading.value ?? undefined} title={reading.detail}>{reading.value===null?<span className="font-sans text-muted-foreground">{reading.status}</span>:reading.text}</td>;})}
-          {showScreening&&<ScreeningCells cell={cell} results={screeningRowResults(row,screeningIndex,screeningRoundId,screeningRunId)}/>}
+          {shownSignalMetrics.map(metric=>{const reading=signalReadingCell(row,metric,signalReadingMap,signalViewId(row));return <td key={metric.id} className={`${cell} ${wrapCell} border-l border-t border-border/40 font-mono tabular-nums`} data-testid="quality-signal-reading-cell" data-signal-reading-value={reading.value ?? undefined} title={reading.detail}>{reading.value===null?<span className="font-sans text-muted-foreground">{reading.status}</span>:reading.text}</td>;})}
+          {showScreening&&<ScreeningCells cell={cell} results={screeningFor(row)}/>}
           {shownPlans.map(p => {
-            if(entries.length > 1) return <Fragment key={p.id}><MergedEntryCells entries={entries.map(member => ({result:qualityRowResult(study,member,p,resultMap),skipped:skippedBy(p,member)}))} phase={phase} planId={p.id} plan={p} expand={() => expandDetectors(true)}/><PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={entries.map(member=>({row:member,result:qualityRowResult(study,member,p,resultMap),skipped:!!skippedBy(p,member)}))} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>;
-            const f = skippedBy(p, row), skipped = f && f.state !== 'pass', result = qualityRowResult(study,row,p,resultMap);
-            return <Fragment key={p.id}><td className={`${cell} border-l border-t border-border/40`}>{skipped ? <span className="text-[9px] text-muted-foreground/60" title={f.detail}>{f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断' : '买入过滤缺数据'}</span> : filtersOn && !hasQualityExit(p) ? <span className="text-[9px] text-muted-foreground/60">待设卖出</span> : <ResultCell plan={p} result={result} section="sell" onClick={() => setDetailId(members[0].id)} onOpenCampaign={rememberReturn}/>}</td>{phase === 'sell' && <><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${!skipped && (qualityDrawdownPct(result,'static')??0)>0?'text-destructive':'text-muted-foreground'}`} data-testid="quality-static-drawdown" data-sell-plan={p.id}>{pct(skipped?null:qualityDrawdownPct(result,'static')).replace(/^\+/, '')}</td><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${signed(skipped?null:qualityPeakPct(result))}`} data-testid="quality-peak-gain" data-sell-plan={p.id} title={skipped?f.detail:'持仓价格路径的峰值涨幅，与该笔交易战役读取同一份结果'}>{pct(skipped?null:qualityPeakPct(result))}</td><QualitySalePriceChangeCell plan={p} entries={[{result,skipped}]}/><td className={`${cell} ${wrapCell} text-right border-t border-border/40`} data-testid="quality-half-mirror" data-sell-plan={p.id}><QualityHalfMirrorCell plan={p} result={result} skipped={skipped?f.detail:undefined}/></td></>}{phase === 'sell' && <td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${result?.status === 'open' ? 'text-foreground/80' : 'text-muted-foreground'}`} data-testid="quality-held-time" data-sell-plan={p.id} title={skipped ? f.detail : result?.status === 'open' ? '仍在持有：算到最近一次估值' : result?.reason}>{skipped || !(result?.status === 'closed' || result?.status === 'open') ? '—' : heldText(result.heldHours)}</td>}<PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={[{row,result,skipped:!!skipped}]} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>; })}
+            if(entries.length > 1) return <Fragment key={p.id}><MergedEntryCells entries={entries.map(member => ({result:resultFor(member,p),skipped:skippedBy(p,member)}))} phase={phase} planId={p.id} plan={p} expand={() => expandDetectors(true)}/><PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={entries.map(member=>({row:member,result:resultFor(member,p),skipped:!!skippedBy(p,member),frozenReading:frozenPostExit(member,p)}))} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>;
+            const f = skippedBy(p, row), skipped = f && f.state !== 'pass', result = resultFor(row,p);
+            return <Fragment key={p.id}><td className={`${cell} border-l border-t border-border/40`}>{skipped ? <span className="text-[9px] text-muted-foreground/60" title={f.detail}>{f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断' : '买入过滤缺数据'}</span> : filtersOn && !hasQualityExit(p) ? <span className="text-[9px] text-muted-foreground/60">待设卖出</span> : <ResultCell plan={p} result={result} section="sell" onClick={() => setDetailId(members[0].id)} onOpenCampaign={archiveView ? onArchiveCampaign : rememberReturn}/>}</td>{phase === 'sell' && <><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${!skipped && (qualityDrawdownPct(result,'static')??0)>0?'text-destructive':'text-muted-foreground'}`} data-testid="quality-static-drawdown" data-sell-plan={p.id}>{pct(skipped?null:qualityDrawdownPct(result,'static')).replace(/^\+/, '')}</td><td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${signed(skipped?null:qualityPeakPct(result))}`} data-testid="quality-peak-gain" data-sell-plan={p.id} title={skipped?f.detail:'持仓价格路径的峰值涨幅，与该笔交易战役读取同一份结果'}>{pct(skipped?null:qualityPeakPct(result))}</td><QualitySalePriceChangeCell plan={p} entries={[{result,skipped}]}/><td className={`${cell} ${wrapCell} text-right border-t border-border/40`} data-testid="quality-half-mirror" data-sell-plan={p.id}><QualityHalfMirrorCell plan={p} result={result} skipped={skipped?f.detail:undefined}/></td></>}{phase === 'sell' && <td className={`${cell} ${wrapCell} text-right border-t border-border/40 font-mono tabular-nums ${result?.status === 'open' ? 'text-foreground/80' : 'text-muted-foreground'}`} data-testid="quality-held-time" data-sell-plan={p.id} title={skipped ? f.detail : result?.status === 'open' ? '仍在持有：算到最近一次估值' : result?.reason}>{skipped || !(result?.status === 'closed' || result?.status === 'open') ? '—' : heldText(result.heldHours)}</td>}<PostExitCells plan={p} expanded={postExitOpen.has(p.id)} entries={[{row,result,skipped:!!skipped,frozenReading:frozenPostExit(row,p)}]} readings={postExitReadings} onExpand={()=>togglePostExit(p.id)}/></Fragment>; })}
           <td className={`${cell} border-t border-border/40`}><button type="button" aria-label={`跳转 ${row.source.symbol}`} disabled={jumpDisabled} aria-busy={jumping || undefined} onClick={() => onJump?.(row.source)} className="text-primary disabled:opacity-30"><ArrowRightCircle className="h-3.5 w-3.5"/></button></td>
         </tr>);
   };
@@ -888,7 +901,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '设置独立的买前过滤条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
             <FishConditionSettings title="静态过滤条件" description="读数和过滤可单独设置，也可以一起运行。"><BuyFilterEditor key={state.account} state={state} selectedCount={selectedCount} done={() => setFilterOpen(false)}/></FishConditionSettings>
           </PopoverContent></Popover>
-          <FishFilterLibrary onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
+          <FishFilterLibrary renderTemplate={renderFilterTemplate} onRename={state.renameLibraryEntry} openRequest={directoryRequests.filter} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('filter',id,snapshot,ids)} study={study} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined}/>
           {staticRunning && <FishQualityProgress
             testId="static-filter-progress"
             label={staticProgress?.waitingUntil ? '等待续跑' : readingsRunning ? '生成读数中' : '过滤进行中'}
@@ -903,7 +916,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           </FishQualityModule>
           {state.preEntry&&<FishQualityModule level="submodule" title="动态筛选" icon={Activity} testId="quality-dynamic-controls"
             trailing={<QualityResultTools kind="screening" hidden={hideScreening} onToggle={()=>toggleHidden('screening')} count={screeningResults.length} onClear={lockedBatch ? undefined : state.clearScreeningResults} disabled={!ready||!state.preEntry?.ready||!!state.archiving}/>} summary={<FishQualityInfo label="动态筛选说明"><ol className="list-decimal space-y-2 pl-4"><li>必要条件。原信号时点全部通过，或跳过本步，即可继续。未通过时可启用动态门槛逐分钟追踪。</li><li>事件准入。任一启用项触发即成为候选。首次进入本步时，已达标的指标也可触发。跳过本步时，具备资格的观察时点直接成为候选。</li><li>排除检查。从候选时点向前检查。通过或跳过本步即入选。被排除就继续找候选，沿用原截止时间。</li></ol><p>三步开关适用于新版方案。已保存方案按冻结版本运行。</p></FishQualityInfo>}>
-            <FishPreEntryMonitor openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
+            <FishPreEntryMonitor renderTemplate={renderTemplate} openRequest={directoryRequests['pre-entry']} onSelectDirectory={workspace || lockedBatch ? undefined : (id,snapshot,ids)=>chooseDirectory('pre-entry',id,snapshot,ids)} onSetHidden={state.setLibraryEntryHidden} renderStudy={renderArchive} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot)=>{const copied=await state.restoreMonitorStudy!(snapshot);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} state={state} selectedCount={selectedCount} filtersOn={state.preEntry.library.settings?state.preEntry.library.settings.plans.length>0:!workspace&&filtersOn} onJump={onJump}
               onSelected={()=>{sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('pre-entry');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}}/>
           </FishQualityModule>}
         </FishQualityModuleGroup>
@@ -926,7 +939,7 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
           <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${qualitySettingsAction} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条原始否决${p.vetoStages?.length?` · ${p.vetoStages.length} 个一票次数阶段`:''}${p.sellStages?.length?` · ${p.sellStages.length} 个卖出次数阶段`:''}${p.mirrorTakeProfit?.enabled ? ` · 镜像平衡减仓 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、条件加仓、镜像平衡减仓与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="fish-condition-settings">
             <FishConditionSettings imageExport title="持仓监测条件" description="按方案设置首仓、卖出、加仓、镜像和持仓否决"><HoldingMonitorSettings state={state} activeId={monitorPlanId} onSelect={setMonitorPlanId} done={() => setMonitorOpen(false)} selectedCount={selectedCount} outsideHint={!selectedCount ? outsideHint : null}/></FishConditionSettings>
           </PopoverContent></Popover>
-          <FishMonitorLibrary openRequest={directoryRequests.monitor} onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onPurgeDirectory={state.purgeMonitorEntries} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={renderArchive}/>
+          <FishMonitorLibrary renderTemplate={renderTemplate} openRequest={directoryRequests.monitor} onRename={state.renameLibraryEntry} study={study} loadArchive={state.loadMonitorArchive} onSetHidden={state.setMonitorEntryHidden} onPurgeDirectory={state.purgeMonitorEntries} onCopyStudy={!workspace&&!lockedBatch&&state.restoreMonitorStudy?async(snapshot,sourceRoundId)=>{const copied=await state.restoreMonitorStudy!(snapshot,sourceRoundId);if(copied){setScreeningRunId(undefined);sourceDefaulted.current=true;setDirectoryChoice(undefined);setOrigin('');setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();}return copied;}:undefined} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn} renderStudy={renderArchive}/>
           {running && <FishQualityProgress testId="holding-monitor-progress" progressLabel="持仓监测处理进度"
             label={progress?.waitingUntil ? '等待续跑' : '监测进行中'} done={progress?.done ?? 0} total={progress?.total ?? 0}
             waitingUntil={progress?.waitingUntil} detail={study.monitorTimeBasis && `监测起点：${qualityMonitorTimeLabels[study.monitorTimeBasis]}`}/>}
@@ -1047,13 +1060,15 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
       </div>
     </div>}
     {tableExport&&<div hidden aria-hidden="true" data-testid="quality-export-batch"><table ref={exportTableRef}><tbody>{tableExport.entries.slice(tableExport.offset,tableExport.offset+EXPORT_BATCH).map(({row,index})=>tableExport.render(row,index))}</tbody></table></div>}
-    <RowDetail row={allRows.find(r => r.id === detailId)} state={state} close={() => setDetailId('')}/>
+    <RowDetail row={allRows.find(r => r.id === detailId)} state={state} templateTable={templateTable} close={() => setDetailId('')}/>
   </section>;
   return <QualityArchiveContext.Provider value={archiveView}>{body}</QualityArchiveContext.Provider>;
 }
 
 /** Reuse the live table's renderer; only selection/filter/expansion state is local to the viewer. */
-export function ArchivedQualityBoard({ study, onJump, canJump, selection }: {
+export function ArchivedQualityBoard({ study, onJump, canJump, selection, templateTable, onOpenCampaign }: {
+  templateTable?: QualityTemplateTable;
+  onOpenCampaign?:()=>void;
   study: FishQualityStudy;
   onJump?: (source: TradeSignal) => void;
   canJump?: (source: TradeSignal) => boolean;
@@ -1074,5 +1089,18 @@ export function ArchivedQualityBoard({ study, onJump, canJump, selection }: {
       setPriority: noop, setScope: noop, setFilters: noop, setHoldingVetoes: noop, setSellPlans: noop,
     } satisfies FishQualityState;
   }, [study, selectedRowIds, onSelectionChange]);
-  return <FishQuality archiveView state={state} onJump={onJump} canJump={canJump}/>;
+  return <FishQuality archiveView templateTable={templateTable} onArchiveCampaign={onOpenCampaign} state={state} onJump={onJump} canJump={canJump}/>;
+}
+
+const EMPTY_SIGNAL_DAYS=new Set<string>();
+function FilterTemplateCabin({table,renderResults,onJump,tradedDayIndex=EMPTY_SIGNAL_DAYS,campaignDayIndex=EMPTY_SIGNAL_DAYS}:{
+  table:QualityTemplateTable;renderResults:()=>ReactNode;onJump?:(signal:TradeSignal)=>void;tradedDayIndex?:Set<string>;campaignDayIndex?:Set<string>;
+}){
+  const signals=useMemo(()=>[...new Map(table.study.samples.map(({source})=>[source.id,source])).values()],[table]);
+  const jump=useCallback((id:string)=>{const signal=signals.find(item=>item.id===id);if(signal)onJump?.(signal);},[signals,onJump]);
+  return <div className="space-y-2 p-3">
+    <FishLibrary embeddedCabin readOnlyRatings title="过滤记录" testId="filter-template-cabin" signals={signals} tradedDayIndex={tradedDayIndex}
+      campaignDayIndex={campaignDayIndex} jumpingSignalId={null} onJump={jump} onRate={()=>{}}/>
+    <FishDeferredDetails summary="查看过滤读数和判定" className="text-xs">{renderResults}</FishDeferredDetails>
+  </div>;
 }

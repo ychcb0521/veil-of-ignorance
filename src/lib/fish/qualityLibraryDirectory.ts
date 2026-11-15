@@ -1,6 +1,6 @@
 import {preparePreEntryTables} from './preEntryArchiveClient';
 import {newQualityStudy,qualityComparisonRows,qualityFilterReadingKey,qualityEntryIdentity,qualityMembers,qualityGroupId,type FishQualityStudy,type QualitySample} from './quality';
-import {libraryRoundRecordIds} from './libraryRounds';
+import {createLibraryRoundReader} from './libraryRounds';
 import type {QualityFilterLibrary,QualityFilterRound} from './qualityFilterLibrary';
 import {preEntrySignal,type PreEntryLibrary,type PreEntryRecord,type PreEntryRound} from './preEntryMonitor';
 import {buildQualitySheets} from './qualityExport';
@@ -8,15 +8,40 @@ import {buildXlsx} from '@/lib/xlsxWorkbook';
 import {formatUTC8} from '@/lib/timeFormat';
 import {fishSourceLabel,fishMetricLabel} from './records';
 
-export function filterDirectoryData(library:QualityFilterLibrary,round?:QualityFilterRound){
-  if(round?.filterSnapshot)return round.filterSnapshot;
-  if(round){const ids=new Set(libraryRoundRecordIds(library.rounds,round));return {settings:library.settings,records:library.records.filter(r=>ids.has(r.id))};}
-  const cache=new Map<string,string[]>(),referenced=new Set(library.rounds.flatMap(r=>libraryRoundRecordIds(library.rounds,r,cache)));
-  return {settings:library.settings,records:library.records.filter(r=>!referenced.has(r.id))};
+export function createFilterDirectoryReader(library:QualityFilterLibrary) {
+  const readIds=createLibraryRoundReader(library.rounds);
+  let index:Map<string,{record:QualityFilterLibrary['records'][number];position:number}[]>|undefined;
+  return (round?:QualityFilterRound)=>{
+    if(round?.filterSnapshot)return round.filterSnapshot;
+    if(round){
+      if(!index){
+        index=new Map();
+        library.records.forEach((record,position)=>{
+          const matches=index!.get(record.id);
+          if(matches)matches.push({record,position});else index!.set(record.id,[{record,position}]);
+        });
+      }
+      const records=[...new Set(readIds(round))].flatMap(id=>index!.get(id)??[])
+        .sort((a,b)=>a.position-b.position).map(entry=>entry.record);
+      return {settings:library.settings,records};
+    }
+    const referenced=new Set<string>();
+    const seen=new Set<string[]>();
+    for(const round of library.rounds){
+      const ids=readIds(round);
+      if(seen.has(ids))continue;
+      seen.add(ids);for(const id of ids)referenced.add(id);
+    }
+    return {settings:library.settings,records:library.records.filter(record=>!referenced.has(record.id))};
+  };
+}
+
+export function filterDirectoryData(library:QualityFilterLibrary,round?:QualityFilterRound) {
+  return createFilterDirectoryReader(library)(round);
 }
 /** Only saved inputs/readings are projected; this viewer never executes a formula. */
-export function filterDirectoryStudy(library:QualityFilterLibrary,round?:QualityFilterRound):FishQualityStudy{
-  const data=filterDirectoryData(library,round),out:FishQualityStudy={...newQualityStudy(round?.startedAt??0),independentFilters:true,buyFilters:[],filterReadings:[],sellPlans:[]};
+export function filterDirectoryStudy(library:QualityFilterLibrary,round?:QualityFilterRound,data=filterDirectoryData(library,round)):FishQualityStudy{
+  const out:FishQualityStudy={...newQualityStudy(round?.startedAt??0),independentFilters:true,buyFilters:[],filterReadings:[],sellPlans:[]};
   const snapshot = round?.filterSnapshot;
   if (snapshot?.signalMetrics?.length) {
     out.signalMetrics = structuredClone(snapshot.signalMetrics);
@@ -40,24 +65,23 @@ export function filterDirectoryStudy(library:QualityFilterLibrary,round?:Quality
   out.selectedRowIds=qualityComparisonRows(out).map(r=>r.id);return out;
 }
 export function entryDirectoryGroups(library: PreEntryLibrary) {
-  const byRound = new Map<string, PreEntryRecord[]>();
+  const byRound = new Map<string, {records:PreEntryRecord[];matched:number}>();
   for (const record of library.records) {
-    if (record.status !== 'matched') continue;
-    const records = byRound.get(record.roundId);
-    if (records) records.push(record);
-    else byRound.set(record.roundId, [record]);
+    let bucket=byRound.get(record.roundId);
+    if(!bucket){bucket={records:[],matched:0};byRound.set(record.roundId,bucket);}
+    bucket.records.push(record);
+    if(record.status==='matched')bucket.matched++;
   }
   return library.rounds.flatMap(round => {
-    const records = byRound.get(round.id) ?? [];
-    if (!records.length && !round.workspaceSaved) return [];
+    const {records,matched}=byRound.get(round.id)??{records:[],matched:0};
+    if (!matched && !round.workspaceSaved) return [];
     const status = round.state === 'running' ? '运行中' : round.state === 'paused' ? '已暂停' : '已完成';
-    return [{ round, records, label: round.workspaceSaved ? '筛选轮次' : '入选轮次', summary: `${records.length} 条记录 · ${status}` }];
+    return [{ round, records, label: round.workspaceSaved ? '筛选轮次' : '入选轮次', summary: `${matched} 条记录 · ${status}` }];
   });
 }
 
-export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound):FishQualityStudy{
+export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound, records=library.records.filter(record=>record.roundId===round.id), copy=true):FishQualityStudy{
   const out:FishQualityStudy={...newQualityStudy(round.startedAt),independentFilters:true,sellPlans:[]};
-  const records = library.records.filter(record=>record.roundId===round.id);
   for(const record of records){
     const signal=preEntrySignal(record);
     if (!signal) {
@@ -67,8 +91,12 @@ export function entryDirectoryStudy(library:PreEntryLibrary,round:PreEntryRound)
     // Keep the first-match entry semantics used by the main combination table.
     out.samples.push({id:signal.id,source:{...signal,quality:record.sample.source.quality},enteredAt:signal.timeMs,basis:'signal',importedAt:record.updatedAt,groups:[],origin:'pre-entry',origins:['pre-entry']});
   }
-  out.screeningRounds=[structuredClone(round)];
-  out.screeningResults=structuredClone(records.filter(r=>round.workspaceSaved||r.status==='matched').map(({tableClearedAt:_clear,...record})=>record));
+  out.screeningRounds=[copy?structuredClone(round):round];
+  const saved=records.filter(r=>round.workspaceSaved||r.status==='matched').map(r=>{
+    if(!r.tableClearedAt)return r;
+    const {tableClearedAt:_clear,...record}=r;return record;
+  });
+  out.screeningResults=copy?structuredClone(saved):saved;
   out.selectedRowIds=qualityComparisonRows(out).map(r=>r.id);return out;
 }
 export function downloadDirectoryTables(name:string,tables:readonly {id:string;study:FishQualityStudy}[],at=Date.now()){

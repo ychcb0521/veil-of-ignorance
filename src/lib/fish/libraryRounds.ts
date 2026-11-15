@@ -1,5 +1,5 @@
 /**
- * 挖掘库 / 过滤库共用的「轮次」与记录合并规则（监测库在 qualityMonitorLibrary 里有同样的一份）。
+ * 挖掘库 / 过滤库共用的「轮次」与记录合并规则。
  *
  * 轮次只存与上一轮的差异：base = 上一轮，added / removed = 这一轮多出 / 少了的记录；
  * 没有 base 的轮（第一轮、旧数据）存完整 recordIds。轮次一经开始就不再改动记录清单，差异链因此稳定。
@@ -14,23 +14,33 @@ export interface LibraryRecordBase { id: string; firstSavedAt: number; updatedAt
 
 /** 还原某一轮的完整记录编号（沿差异链回溯）。基准缺失时只算本轮新增的部分，不抛错。 */
 export function libraryRoundRecordIds(rounds: readonly LibraryRound[], round: LibraryRound, cache = new Map<string, string[]>()): string[] {
-  const byId = new Map(rounds.map(r => [r.id, r])), chain: LibraryRound[] = [], seen = new Set<string>();
-  let cursor: LibraryRound | undefined = round;
-  while (cursor && !cache.has(cursor.id) && !seen.has(cursor.id)) {
-    seen.add(cursor.id); chain.push(cursor);
-    cursor = cursor.recordIds || !cursor.base ? undefined : byId.get(cursor.base);
-  }
-  let ids = cursor && cache.has(cursor.id) ? cache.get(cursor.id)! : [];
-  for (const r of chain.reverse()) {
-    if (r.recordIds) ids = r.recordIds;
-    else {
-      const removed = new Set(r.removed ?? []), next = ids.filter(id => !removed.has(id)), have = new Set(next);
-      for (const id of r.added ?? []) if (!have.has(id)) { next.push(id); have.add(id); }
-      ids = next;
+  return createLibraryRoundReader(rounds,cache)(round);
+}
+
+/** Reuse one index for a batch of reads; unchanged rounds share their base's immutable list. */
+export function createLibraryRoundReader(rounds: readonly LibraryRound[], cache = new Map<string,string[]>()) {
+  let byId:Map<string,LibraryRound>|undefined;
+  return (round:LibraryRound):string[] => {
+    const found=cache.get(round.id);
+    if(found)return found;
+    const chain: LibraryRound[] = [], seen = new Set<string>();
+    let cursor: LibraryRound | undefined = round;
+    while (cursor && !cache.has(cursor.id) && !seen.has(cursor.id)) {
+      seen.add(cursor.id); chain.push(cursor);
+      cursor = cursor.recordIds || !cursor.base ? undefined : (byId??=new Map(rounds.map(r=>[r.id,r]))).get(cursor.base);
     }
-    cache.set(r.id, ids);
-  }
-  return ids;
+    let ids = cursor && cache.has(cursor.id) ? cache.get(cursor.id)! : [];
+    for (const r of chain.reverse()) {
+      if (r.recordIds) ids = r.recordIds;
+      else if(r.removed?.length||r.added?.length) {
+        const removed = new Set(r.removed ?? []), next = ids.filter(id => !removed.has(id)), have = new Set(next);
+        for (const id of r.added ?? []) if (!have.has(id)) { next.push(id); have.add(id); }
+        ids = next;
+      }
+      cache.set(r.id, ids);
+    }
+    return ids;
+  };
 }
 
 /** 新一轮：相对开始时间最晚的那轮存差异；差异比完整清单还大时存完整清单。 */

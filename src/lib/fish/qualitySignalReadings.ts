@@ -22,11 +22,11 @@ export interface QualitySignalReadingBatch {
   metric: QualitySignalMetric;
   rows: readonly QualitySample[];
 }
-export const signalReadingKey = (row: QualitySample, metric: QualitySignalMetric) =>
-  'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id, ...(metric.initialization ? [metric.initialization] : [])]));
+export const signalReadingKey = (row: QualitySample, metric: QualitySignalMetric, viewRowId?: string) =>
+  'signal-read-v1:' + shortFishHash(JSON.stringify([signalDedupKey({...row.source,timeMs:qualitySignalTime(row.source)}),metric.id, ...(viewRowId ? [viewRowId] : []), ...(metric.initialization ? [metric.initialization] : [])]));
 
-export function signalReadingCell(row: QualitySample, metric: QualitySignalMetric, readings: ReadonlyMap<string, QualityFilterReading>) {
-  const reading = readings.get(signalReadingKey(row,metric));
+export function signalReadingCell(row: QualitySample, metric: QualitySignalMetric, readings: ReadonlyMap<string, QualityFilterReading>, viewRowId?: string) {
+  const reading = readings.get(signalReadingKey(row,metric,viewRowId));
   const value = reading && !reading.error && Number.isFinite(reading.value) ? reading.value! : null;
   const status = value !== null ? '' : reading?.error ? '缺数据' : '待计算';
   const detail = [`信号时间 ${formatUTC8(qualitySignalTime(row.source))}`, reading?.at ? `读数截至 ${formatUTC8(reading.at)}` : '',

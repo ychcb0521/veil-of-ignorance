@@ -4,7 +4,7 @@ import './FishConditionSettings.css';
 import {mergeLibraryDirectoryEdits} from '@/lib/fish/libraryDirectoryEdits';
 import {newPreEntryHours} from '@/lib/fish/preEntryActivePlan';
 import {FishPreEntryProgress,latestScreeningRound} from './FishPreEntryProgress';
-import {FishDeferredDetails,FishLibraryTimeDirectory,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishDeferredDetails,FishLibraryTimeDirectory,type FishDirectoryItem,type FishTemplateRenderer,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {ScreeningDirectorySettings} from './FishLibraryFrozenSettings';
 import {FishEntryLibraryDataActions} from './FishEntryLibraryDataActions';
 import {entryDirectoryGroups,entryDirectoryStudy,downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
@@ -31,6 +31,7 @@ const stageStatus={pass:'通过',blocked:'排除',pending:'等待'} as const;
 const guardKind={first:'首次产生',rebuild:'断裂后重建',raise:'价格上移',lower:'价格下移','type-change':'实虚切换'} as const;
 const expressionText=(e:EntryMarketExpression):string=>'condition' in e?`${e.condition.label} ${e.condition.direction} ${e.condition.threshold}`: '('+e.children.map(expressionText).join(e.join==='all'?' 且 ':' 或 ')+')';
 interface FishPreEntryLibraryProps {
+  renderTemplate?:FishTemplateRenderer;
   state: FishQualityState;
   onSelected?: () => void;
   onJump?: (signal: TradeSignal) => void;
@@ -48,7 +49,7 @@ interface ScreeningSamplePicker {
 }
 
 export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, onSelectDirectory,
-  onSetHidden, renderStudy, onCopyStudy, samplePicker }: FishPreEntryLibraryProps & { samplePicker?: ScreeningSamplePicker }) {
+  onSetHidden, renderStudy, renderTemplate, onCopyStudy, samplePicker }: FishPreEntryLibraryProps & { samplePicker?: ScreeningSamplePicker }) {
   const monitor = state.preEntry;
   const archived = monitor?.savedLibrary ?? monitor?.library;
   const [localSelection, setLocalSelection] = useState<string[]>([]);
@@ -92,14 +93,14 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
   }}</FishDeferredDetails>;
   const getDirectoryItems = (): FishDirectoryItem[] => {
     const templates = createQualityTemplateDirectory(state.study);
-    return entryDirectoryGroups(archived).map(({ round, label, summary }) => ({
+    return entryDirectoryGroups(archived).map(({ round, records, label, summary }) => ({
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),
       settings: () => <ScreeningDirectorySettings round={round}/>,
-      study: () => entryDirectoryStudy(archived, round), details: close => renderEvidence(round.id, close),
+      study: () => entryDirectoryStudy(archived,round,records), preview:()=>entryDirectoryStudy(archived,round,records,false), details: close => renderEvidence(round.id, close),
     }));
   };
-  return <FishLibraryTimeDirectory picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
+  return <FishLibraryTimeDirectory renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
     onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
     description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${admittedCount} 条入选记录 · ${items.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
     dataActions={!samplePicker && <FishEntryLibraryDataActions onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)}} onImport={monitor.importLibrary}/>}
@@ -108,7 +109,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
     empty="暂无入选记录。满足全部条件后才会进入筛选库。"/>;
 }
 
-export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions,renderStudy,onCopyStudy,onSetHidden,openRequest,onSelectDirectory }: {
+export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelected, onJump, renderConditions,renderStudy,renderTemplate,onCopyStudy,onSetHidden,openRequest,onSelectDirectory }: {
   selectedCount: number; filtersOn: boolean;
   renderConditions?: (close: () => void) => ReactNode;
 } & FishPreEntryLibraryProps) {
@@ -147,7 +148,7 @@ export function FishPreEntryMonitor({ state, selectedCount, filtersOn, onSelecte
         {renderConditions?renderConditions(()=>setSettingsOpen(false)):<FishPreEntrySettings key={state.account} state={state} selectedCount={selectedCount} done={()=>setSettingsOpen(false)}/>}
       </PopoverContent>
     </Popover>
-    <FishPreEntryLibrary state={state} onSelected={onSelected} onJump={onJump} openRequest={openRequest}
+    <FishPreEntryLibrary renderTemplate={renderTemplate} state={state} onSelected={onSelected} onJump={onJump} openRequest={openRequest}
       onSelectDirectory={onSelectDirectory} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy}/>
     <FishPreEntryProgress monitor={monitor} open={resultsOpen&&!automaticResults} onOpenChange={open=>{setAutomaticResults(false);setResultsOpen(open);}}/>
     {resultsOpen&&automaticResults&&<FishPreEntryProgress automatic monitor={monitor} open onOpenChange={setResultsOpen}/>}

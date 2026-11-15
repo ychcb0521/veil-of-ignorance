@@ -144,8 +144,10 @@ export async function readOriginalQualityArchive(owner: string | null | undefine
   return body;
 }
 
-export async function loadQualityMonitorArchive(owner: string | null | undefined, archive: QualityMonitorArchive, current: Pick<FishQualityStudy, 'resolvedLegacySources' | 'deletedSources' | 'deletedReadings'>): Promise<QualityMonitorArchiveStudy> {
-  return applyArchiveSourceDeletions(await readOriginalQualityArchive(owner, archive), current);
+export async function loadQualityMonitorArchive(owner: string | null | undefined, archive: QualityMonitorArchive, current: Pick<FishQualityStudy, 'resolvedLegacySources' | 'deletedSources' | 'deletedReadings'>, onResultCount?: (count:number)=>void): Promise<QualityMonitorArchiveStudy> {
+  const body=await readOriginalQualityArchive(owner,archive);
+  onResultCount?.(body.results.length);
+  return applyArchiveSourceDeletions(body,current);
 }
 
 export async function readQualityArchiveForPurge(owner: string | undefined, archive: QualityMonitorArchive) {
@@ -206,11 +208,6 @@ export function syncStoredQualityArchiveBodies(owner: string | null | undefined,
   })();
   uploads.set(owner, task);
   return task;
-}
-
-/** 本机归档库里那份正文的运行结果数；没有正文返回 undefined。用于给早先迁移、还没记数的目录项补数。 */
-export async function readStoredQualityArchiveResultCount(owner: string | null | undefined, id: string): Promise<number | undefined> {
-  try { return (await getBody(owner, id))?.results.length; } catch { return undefined; }
 }
 
 export function __resetQualityArchiveStoreForTests(): void { stored.clear(); blobs.clear(); uploads.clear(); }

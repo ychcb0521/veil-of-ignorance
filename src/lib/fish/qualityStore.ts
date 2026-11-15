@@ -17,7 +17,7 @@ import {restorePreEntryStudy} from './preEntryArchive';
 import { compactQualityStudyForStorage } from './qualityStudyCompact';
 import { permanentlyDeletedMonitorArchiveIds } from './qualityMonitorDeletion';
 import { assertQualityArchivesDetached } from './qualityArchiveDirectory';
-import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, readStoredQualityArchiveResultCount, purgeLocalQualityArchives, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies } from './qualityArchiveStore';
+import { detachQualityArchiveBodies, qualityStudyHasInlineArchives, purgeLocalQualityArchives, stripStoredQualityArchiveBodies, syncStoredQualityArchiveBodies } from './qualityArchiveStore';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -63,7 +63,7 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
   void task.then(loaded => {
     const removed = permanentlyDeletedMonitorArchiveIds(loaded.study.monitorLibrary);
     if (removed.length) void purgeLocalQualityArchives(owner, removed).catch(() => {});
-    void backfillQualityArchiveCounts(owner, loaded.study).finally(() => syncStoredQualityArchiveBodies(owner, loaded.study));
+    void syncStoredQualityArchiveBodies(owner, loaded.study);
   }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };
   void task.then(release, release);
@@ -214,43 +214,6 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
   void task.then(ok => { if (ok) noteAccountBlobSaved(qualityAccountBlob, owner); });
   void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner, repair: copy.campaignRepair && { id: copy.campaignRepair.id, state: copy.campaignRepair.state } } })); });
   void task.finally(() => { if (writes.get(key) === task) writes.delete(key); });
-  return task;
-}
-
-/**
- * 早先迁移出去的归档目录项没记运行结果数（目录里显示「N 项运行结果」要用）：逐份读一次本机正文补上，
- * 只给缺数的目录项加这一个字段，其余原样。每页每账号一轮；补上的数下次打开生效。
- */
-const countBackfills = new Map<string, Promise<void>>();
-export function backfillQualityArchiveCounts(owner: string | undefined, study: FishQualityStudy): Promise<void> {
-  const key = keyOf(owner), missing = (study.monitorLibrary?.archives ?? []).filter(a => !a.study && !Number.isFinite(a.resultCount)).map(a => a.id);
-  if (!missing.length) return Promise.resolve();
-  const existing = countBackfills.get(key);
-  if (existing) return existing;
-  const task = (async () => {
-    const counts = new Map<string, number>();
-    for (const id of missing) { const n = await readStoredQualityArchiveResultCount(owner, id); if (n != null) counts.set(id, n); }
-    if (!counts.size) return;
-    const run = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
-      const db = await open();
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), read = store.get(key);
-          read.onsuccess = () => {
-            const saved = read.result, library = valid(saved) ? saved.monitorLibrary : undefined;
-            if (!library?.archives?.some(a => !a.study && !Number.isFinite(a.resultCount) && counts.has(a.id))) { resolve(); return; }
-            store.put({ ...saved, monitorLibrary: { ...library, archives: library.archives.map(a => !a.study && !Number.isFinite(a.resultCount) && counts.has(a.id) ? { ...a, resultCount: counts.get(a.id)! } : a) } }, key);
-          };
-          tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
-        });
-      } finally { db.close(); }
-      return true;
-    }).catch(() => true);
-    writes.set(key, run);
-    void run.finally(() => { if (writes.get(key) === run) writes.delete(key); });
-    await run;
-  })().catch(() => undefined);
-  countBackfills.set(key, task);
   return task;
 }
 

@@ -7,13 +7,14 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: vi.fn(), au
 
 /** 内存版 IndexedDB：所有库共用一个 Map（键里带账号与归档 id，不会相撞）。 */
 const disk = new Map<string, unknown>();
+const reads: string[]=[];
 let failPut: (key: string) => boolean = () => false;
 beforeEach(() => {
-  disk.clear(); localStorage.clear(); failPut = () => false;
+  disk.clear(); reads.length=0; localStorage.clear(); failPut = () => false;
   const db = { close() {}, createObjectStore() {}, transaction() {
     const tx: any = {};
     tx.objectStore = () => ({
-      get(k: string) { const req: any = {}; queueMicrotask(() => { req.result = structuredClone(disk.get(k)); req.onsuccess?.(); }); return req; },
+      get(k: string) { reads.push(k); const req: any = {}; queueMicrotask(() => { req.result = structuredClone(disk.get(k)); req.onsuccess?.(); }); return req; },
       put(v: unknown, k: string) { queueMicrotask(() => { if (failPut(k)) tx.onabort?.(); else { disk.set(k, structuredClone(v)); tx.oncomplete?.(); } }); },
     });
     return tx;
@@ -83,15 +84,25 @@ it('keeps only directory entries in memory after a restart is saved', async () =
   expect(inline(archives.stripStoredQualityArchiveBodies('someone-else', archived))).toBe(1);
 });
 
-it('records result counts on directory entries and backfills entries migrated before counts existed', async () => {
+it('leaves detached legacy bodies cold at startup and reads only the archive explicitly opened', async () => {
   const store = await import('@/lib/fish/qualityStore');
-  await store.qualityAccountBlob.write('counted', legacyStudy());
-  const slim = disk.get('fish-quality:counted') as FishQualityStudy;
-  expect(slim.monitorLibrary!.archives!.every(a => !a.study && Number.isFinite(a.resultCount))).toBe(true);
-  const uncounted = { ...slim, monitorLibrary: { ...slim.monitorLibrary!, archives: slim.monitorLibrary!.archives!.map(({ resultCount: _n, ...a }) => a) } };
-  disk.set('fish-quality:counted', uncounted);
-  await store.backfillQualityArchiveCounts('counted', uncounted);
-  expect((disk.get('fish-quality:counted') as FishQualityStudy).monitorLibrary!.archives!.map(a => a.resultCount)).toEqual(slim.monitorLibrary!.archives!.map(a => a.resultCount));
+  const {loadQualityMonitorArchive}=await import('@/lib/fish/qualityArchiveStore');
+  const account = await import('@/lib/accountBlobSync');
+  vi.spyOn(account,'hasSyncedImmutableAccountBlob').mockResolvedValue(true);
+  const legacy=legacyStudy();
+  await store.qualityAccountBlob.write('counted',legacy);
+  const slim=disk.get('fish-quality:counted') as FishQualityStudy;
+  expect(slim.monitorLibrary!.archives!.every(a=>!a.study&&Number.isFinite(a.resultCount))).toBe(true);
+  const uncounted={...slim,monitorLibrary:{...slim.monitorLibrary!,archives:slim.monitorLibrary!.archives!.map(({resultCount:_n,...a})=>a)}};
+  disk.set('fish-quality:counted',uncounted);
+  reads.length=0;
+  const {study}=await store.loadQualityStudy('counted');
+  const archiveReads=()=>reads.filter(key=>!key.startsWith('purged:')&&key.includes('\u0000monitor-archive-'));
+  expect(archiveReads()).toEqual([]);
+  const first=study.monitorLibrary!.archives![0],onCount=vi.fn();
+  expect(await loadQualityMonitorArchive('counted',first,study,onCount)).toEqual(legacy.monitorLibrary!.archives![0].study);
+  expect(archiveReads()).toEqual([expect.stringContaining(first.id)]);
+  expect(onCount).toHaveBeenCalledExactlyOnceWith(slim.monitorLibrary!.archives![0].resultCount);
 });
 
 it('uses immutable backup receipts to skip already-synced archives, without skipping one still pending', async () => {

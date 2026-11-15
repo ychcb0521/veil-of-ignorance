@@ -14,12 +14,12 @@ export function qualityTableCaptureTime(row: QualityTableRow): number | null {
   return latest;
 }
 export const qualityTableSignalKey = (row: QualitySample) => signalDedupKey(row.source);
-export function collapseQualityTableRows(rows: readonly QualitySample[], groupBy: 'entry' | 'signal' = 'entry'): QualityTableRow[] {
+export function collapseQualityTableRows(rows: readonly QualitySample[], groupBy: 'entry' | 'signal' | 'saved-entry' = 'entry'): QualityTableRow[] {
   const grouped = new Map<string, QualityTableRow>();
   for (const row of rows) {
     // The cabin groups repeated captures by signal. Other sources keep their separate buy times.
     const signalKey = qualityTableSignalKey(row);
-    const key = groupBy === 'signal' ? signalKey : `${signalKey}|${row.enteredAt ?? ''}`;
+    const key = groupBy === 'saved-entry' ? row.signalId??row.id : groupBy === 'signal' ? signalKey : `${signalKey}|${row.enteredAt ?? ''}`;
     const previous = grouped.get(key);
     if (previous) {
       previous.members!.push(row);

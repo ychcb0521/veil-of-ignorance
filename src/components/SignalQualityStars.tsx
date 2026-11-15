@@ -7,6 +7,7 @@ interface Props {
   onChange: (next: number) => void;
   /** 信号 id，仅用于 aria / testid 定位。 */
   signalId: string;
+  readOnly?:boolean;
 }
 
 /**
@@ -23,7 +24,7 @@ interface Props {
  * 信号库里每行一组星，791 行就是 3955 个按钮——每颗星每次渲染各造一个闭包，
  * 等于让「隔壁行变了」也要把这一行的五个闭包全部重建一遍。
  */
-function SignalQualityStarsImpl({ value, onChange, signalId }: Props) {
+function SignalQualityStarsImpl({ value, onChange, signalId, readOnly }: Props) {
   const current = value ?? 0;
   // onChange 可能每次渲染都是新的闭包；用 ref 兜住，处理器本身就能恒定。
   const onChangeRef = useRef(onChange);
@@ -55,9 +56,10 @@ function SignalQualityStarsImpl({ value, onChange, signalId }: Props) {
             aria-label={`${star} 星`}
             data-testid={`signal-quality-${signalId}-${star}`}
             data-star={star}
-            title={star === current ? '再点一次取消评分' : `评 ${star} 星`}
+            title={readOnly ? '已保存的评分' : star === current ? '再点一次取消评分' : `评 ${star} 星`}
+            disabled={readOnly}
             onClick={handleClick}
-            className="p-0 leading-none transition-transform hover:scale-110 active:scale-95"
+            className="p-0 leading-none transition-transform enabled:hover:scale-110 enabled:active:scale-95"
           >
             <Star
               className={`h-3 w-3 ${

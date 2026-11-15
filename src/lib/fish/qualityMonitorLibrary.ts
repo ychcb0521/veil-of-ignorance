@@ -1,3 +1,4 @@
+import {createLibraryRoundReader, libraryRoundRecordIds} from './libraryRounds';
 import {pruneDeletedMonitorEntries} from './qualityMonitorDeletion';
 import {mergeLibraryDirectoryEdits} from './libraryDirectoryEdits';
 import {createQualityTemplateDirectory, type QualityTemplateDirectoryGroup} from './qualityTemplateDirectory';
@@ -39,23 +40,7 @@ export interface QualityMonitorRound {
 }
 /** 还原某一轮的完整记录编号（沿差异链回溯到存完整清单的那一轮）。基准缺失时只算本轮新增的部分。 */
 export function qualityMonitorRoundRecordIds(library: Pick<QualityMonitorLibrary, 'rounds'>, round: QualityMonitorRound, cache = new Map<string, string[]>()): string[] {
-  const previous = cache.get(round.id);
-  if (previous) return previous;
-  const byId = new Map(library.rounds.map(r => [r.id, r]));
-  const chain: QualityMonitorRound[] = [];
-  const seen = new Set<string>();
-  let cursor: QualityMonitorRound | undefined = round;
-  while (cursor && !cache.has(cursor.id) && !seen.has(cursor.id)) {
-    seen.add(cursor.id); chain.push(cursor);
-    cursor = cursor.recordIds || !cursor.base ? undefined : byId.get(cursor.base);
-  }
-  let ids = cursor && cache.has(cursor.id) ? cache.get(cursor.id)! : [];
-  for (const r of chain.reverse()) {
-    if (r.recordIds) ids = r.recordIds;
-    else { const removed = new Set(r.removed ?? []), next = ids.filter(id => !removed.has(id)), have = new Set(next); for (const id of r.added ?? []) if (!have.has(id)) { next.push(id); have.add(id); } ids = next; }
-    cache.set(r.id, ids);
-  }
-  return ids;
+  return libraryRoundRecordIds(library.rounds,round,cache);
 }
 /** 新一轮相对上一轮（非历史快照、开始时间最晚的那轮）存差异；差异比完整清单还大时存完整清单。 */
 function encodeRound(library: QualityMonitorLibrary, ids: string[]): Pick<QualityMonitorRound, 'recordIds' | 'base' | 'added' | 'removed'> {
@@ -69,7 +54,7 @@ function encodeRound(library: QualityMonitorLibrary, ids: string[]): Pick<Qualit
 export function compactQualityMonitorRounds(study: FishQualityStudy): FishQualityStudy {
   const library = study.monitorLibrary;
   if (!library || library.rounds.filter(r => !r.legacy && r.recordIds).length < 2) return study;
-  const cache = new Map<string, string[]>(), resolved = new Map(library.rounds.map(r => [r.id, qualityMonitorRoundRecordIds(library, r, cache)]));
+  const read=createLibraryRoundReader(library.rounds), resolved=new Map(library.rounds.map(r=>[r.id,read(r)]));
   const ordered = library.rounds.filter(r => !r.legacy).sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
   const encoded = new Map<string, QualityMonitorRound>();
   ordered.forEach((round, index) => {
@@ -216,7 +201,11 @@ export function preserveQualityMonitorLibrary(saved: FishQualityStudy | undefine
   const archives=new Map((a.archives??[]).map(s=>[s.id,s]));for(const s of b.archives??[]){
     const old=archives.get(s.id);
     if(!old)archives.set(s.id,s);
-    else if(!old.templateDirectory&&s.templateDirectory)archives.set(s.id,{...old,templateDirectory:s.templateDirectory});
+    else {
+      const template=!old.templateDirectory&&s.templateDirectory;
+      const count=!Number.isFinite(old.resultCount)&&Number.isFinite(s.resultCount);
+      if(template||count)archives.set(s.id,{...old,...(template?{templateDirectory:s.templateDirectory}:{}),...(count?{resultCount:s.resultCount}:{})});
+    }
   }
   const directoryEdits=mergeLibraryDirectoryEdits(a.directoryEdits,b.directoryEdits);
   return { ...incoming, monitorLibrary: pruneDeletedMonitorEntries({ ...(Object.keys(directoryEdits).length?{directoryEdits}:{}),version: 1, importedLegacy: a.importedLegacy || b.importedLegacy, settings: [...settings.values()], records: [...records.values()], rounds: [...rounds.values()],...(archives.size?{archives:[...archives.values()]}:{}) }) };

@@ -19,9 +19,9 @@ export function PostExitHeaders({plan,expanded,toggle,sort,ascending,onSort}:{pl
   </th>;
  })}</Fragment>)}</>;
 }
-export interface PostExitEntry { row:QualitySample; result?:QualityResult; skipped?:boolean }
+export interface PostExitEntry { row:QualitySample; result?:QualityResult; skipped?:boolean; frozenReading?:QualityPostExitReading }
 export function PostExitCells({plan,entries,expanded,readings,onExpand,now=Date.now()}:{plan:QualityGroup;entries:PostExitEntry[];expanded:boolean;readings:ReadonlyMap<string,QualityPostExitReading>;onExpand:()=>void;now?:number}){
- const values=entries.map(e=>{const key=e.skipped?null:qualityPostExitKey(e.row.source,e.result,plan);return {...e,key,reading:key?readings.get(key):undefined};});
+ const values=entries.map(e=>{const key=e.skipped?null:qualityPostExitKey(e.row.source,e.result,plan);return {...e,key,reading:key?(e.frozenReading??readings.get(key)):undefined};});
  const closed=values.filter(v=>v.key),note=closed.some(v=>v.reading?.excludedExitMinute)?'盘中卖出所在分钟的高低点先后不明，已排除该分钟；从下一完整分钟观察。':'从卖出时刻起观察，价格基准为该方案实际最终卖出价。';
  if(!expanded){const ready=POST_EXIT_HOURS.filter(h=>closed.length&&closed.every(v=>postExitWindow(v.reading,h)?.status==='ready')).length;
   return <td className={`${cell} border-l border-border/40 text-muted-foreground`} data-testid="quality-post-exit-summary" data-sell-plan={plan.id}><button type="button" onClick={onExpand} className="text-left hover:text-primary" title={note}>{!closed.length?'—':`${ready}/5 窗口已就绪`}</button></td>;
