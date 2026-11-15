@@ -93,12 +93,12 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
   }}</FishDeferredDetails>;
   const getDirectoryItems = (): FishDirectoryItem[] => {
     const templates = createQualityTemplateDirectory(state.study,true);
-    return entryDirectoryGroups(archived).map(({ round, records, label, summary }) => ({
+    return templates.withHistoricalNames(entryDirectoryGroups(archived).map(({ round, records, label, summary }) => ({
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),
       settings: () => <ScreeningDirectorySettings round={round}/>,
       study: () => entryDirectoryStudy(archived,round,records), preview:()=>entryDirectoryStudy(archived,round,records,false), details: close => renderEvidence(round.id, close),
-    }));
+    })),'screen');
   };
   return <FishLibraryTimeDirectory renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
     onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}

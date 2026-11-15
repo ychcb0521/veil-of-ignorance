@@ -9,8 +9,8 @@ export interface QualityTemplateName {
   kind:QualityTemplateKind;
 }
 
-const prefixes={filter:'过滤',screen:'筛选',monitor:'监测'} as const;
-function ordinalLetters(ordinal:number):string {
+export const TEMPLATE_KIND_PREFIX={filter:'过滤',screen:'筛选',monitor:'监测'} as const;
+export function ordinalLetters(ordinal:number):string {
   let suffix='';
   while(ordinal>0){
     ordinal--;
@@ -18,6 +18,10 @@ function ordinalLetters(ordinal:number):string {
     ordinal=Math.floor(ordinal/26);
   }
   return suffix;
+}
+export function beijingTemplateDay(at:number):string|undefined{
+  const day=new Date(at+8*3600_000);
+  return at>0&&Number.isFinite(day.getTime())?day.toISOString().slice(0,10).replace(/-/g,''):undefined;
 }
 function ordered(value:unknown):unknown{
   if(Array.isArray(value))return value.map(ordered);
@@ -46,12 +50,12 @@ function build(catalog:readonly QualityPlanTemplate[]) {
   const names=new Map<string,QualityTemplateName>(), ordinals=new Map<string,number>();
   const templates=activeQualityPlanTemplates({planTemplates:catalog as QualityPlanTemplate[]});
   for(const template of [...catalog].sort((a,b)=>a.savedAt-b.savedAt||a.id.localeCompare(b.id))){
-    const kind=qualityTemplateKind(template),day=new Date(template.savedAt+8*3600_000);
-    if(!kind||!Number.isFinite(day.getTime())||!(template.savedAt>0))continue;
-    const stamp=day.toISOString().slice(0,10).replace(/-/g,''),key=kind+stamp;
+    const kind=qualityTemplateKind(template),stamp=beijingTemplateDay(template.savedAt);
+    if(!kind||!stamp)continue;
+    const key=kind+stamp;
     const ordinal=(ordinals.get(key)??0)+1;ordinals.set(key,ordinal);
     if(!template.deleted&&template.plan)names.set(template.id,{id:template.id,originalName:template.name,
-      name:prefixes[kind]+'_'+stamp+'_'+ordinalLetters(ordinal),kind});
+      name:TEMPLATE_KIND_PREFIX[kind]+'_'+stamp+'_'+ordinalLetters(ordinal),kind});
   }
   const cacheBody=new WeakMap<QualityGroup,string>(), activeByBody=new Map<string,typeof templates>();
   const signature=(plan:QualityGroup)=>{
@@ -84,7 +88,7 @@ function build(catalog:readonly QualityPlanTemplate[]) {
   function matchFilter(filters:readonly QualityBuyFilter[],metrics:readonly QualitySignalMetric[],label?:string) {
     return pick(filterByBody.get(filterBody(filters,metrics))??[],label);
   }
-  return {names,signature,matchPlan,matchFilter,
+  return {names,numberedCount:(kind:QualityTemplateKind,day:string)=>ordinals.get(kind+day)??0,signature,matchPlan,matchFilter,
     forPlan(plan:QualityGroup,kind:QualityTemplateKind='monitor',hours?:number){
       const match=matchPlan(plan,kind,hours);
       return match?names.get(match.id):undefined;

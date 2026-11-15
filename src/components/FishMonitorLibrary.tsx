@@ -36,7 +36,7 @@ export function FishMonitorLibrary({study,renderStudy,renderTemplate,onCopyStudy
     return (updateDirectory ? loadArchive(archive) : loadArchive(archive,false)) as Promise<FishQualityStudy>;
   };
   const state={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
-  return [
+  return templates.withHistoricalNames([
   ...archives.map(a=>({id:a.id,at:a.createdAt,label:a.reason==='copy'?'载入副本前归档':a.reason==='copy-source'?'监测轮次快照':'重算前完整归档',summary:qualityMonitorArchiveResultCount(a)==null?'完整快照':qualityMonitorArchiveResultCount(a)+' 项运行结果',revision:a.study??a.id,purgeable:true,templateGroup:a.templateDirectory?templates.present(a.templateDirectory,a.sourceRoundId?inheritedGroup(a.sourceRoundId):undefined):(a.study?templates.groupPlans(a.study.sellPlans??[]):(a.reason==='copy-source'&&a.sourceRoundId?inheritedGroup(a.sourceRoundId):undefined)??unknownTemplateGroup),study:()=>readArchive(a),preview:()=>readArchive(a,false),campaignPath,settings:async()=> <ArchiveDirectorySettings study={await readArchive(a,false)}/>})),
   ...rounds.filter(r=>!frozen.has(r.id)).map(r=>{
     const ids=readIds(r), summary=describe(ids);
@@ -45,7 +45,7 @@ export function FishMonitorLibrary({study,renderStudy,renderTemplate,onCopyStudy
       study:()=>monitorRoundStudy(current.current,r,recordsFor(ids)),settings:()=> <MonitorDirectorySettings settings={summary.settings} timeBasis={r.timeBasis}/>,
       note:'早期轮次仅保存记录引用，展示当前仍保存的版本。'};
   })
-  ];
+  ],'monitor');
  },[library,loadArchive,settings,study.planTemplates]);
  const records=useMemo(()=>(library?.records??[]).filter(r=>settings.has(r.settingId)),[library?.records,settings]);
  const rounds=library?.rounds??[], archives=library?.archives??[];

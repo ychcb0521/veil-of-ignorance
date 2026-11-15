@@ -292,9 +292,10 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               }}>
               <ChevronDown aria-hidden className={'h-3.5 w-3.5 '+(expanded?'rotate-180':'')}/>
               <span className="min-w-0 flex-1 break-words font-medium">{group.title}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{group.historical?'历史快照':''}</span>
               <span className="shrink-0 text-muted-foreground">{members.length} 项{checkedCount>0?' · 已选 '+checkedCount:''}</span>
             </button>
-            <FishDirectorySettingsButton name={group.title} originalName={group.originalTitle} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
+            <FishDirectorySettingsButton name={group.title} originalName={group.originalTitle} historicalAt={group.historical?.firstArchivedAt} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
             </div>
             {expanded&&(templateView&&renderTemplate?<div className="min-w-0" data-testid={prefix+'-template-content'}>
               <FishTemplateDirectoryTable key={group.id} importSelection={importSelection} members={members} renderTemplate={renderTemplate} close={()=>changeOpen(false)}/>

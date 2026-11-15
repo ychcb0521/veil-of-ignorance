@@ -32,7 +32,7 @@ export function FishFilterLibrary({study,renderStudy,renderTemplate,onCopyStudy,
   const used=new Set(legacy.records.map(record=>record.settingId));
   if(legacy.records.length)items.push({id:'filter-legacy',templateGroup:unknownTemplateGroup,at:legacy.records.reduce((at,r)=>Math.max(at,r.updatedAt),0),label:'历史记录',summary:legacy.records.length+' 条记录',revision:library,
    settings:()=> <FilterDirectorySettings settings={legacy.settings.filter(setting=>used.has(setting.id))}/>,study:()=>filterDirectoryStudy(library,undefined,legacy),details:<FilterEvidence {...legacy}/>,note:'历史记录未保存轮次，只展示已有的冻结条件与读数，不补造缺失数据。'});
-  return items;
+  return templates.withHistoricalNames(items,'filter');
  },[library,study.planTemplates]);
  return <FishLibraryTimeDirectory renderTemplate={renderTemplate} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="过滤库" prefix="filter" kind="template" items={getItems} edits={study.monitorLibrary?.directoryEdits} onSetHidden={onSetHidden} onRename={onRename} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={library?.records.length??0}
   description={`${library?.records.length??0} 条记录 · ${library?.rounds.length??0} 轮过滤`} transferMenu={actions=><FishStoredLibraryTransferMenu scope="filter" actions={actions}/>} download={()=>downloadDirectoryTables('过滤库',getItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}

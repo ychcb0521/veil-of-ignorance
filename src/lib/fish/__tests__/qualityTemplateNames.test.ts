@@ -43,3 +43,17 @@ describe('template display names',()=>{
   });
  });
 });
+
+it('keeps same-name historical snapshots separate and uses the first archived day without reading present bodies',()=>{
+ const study={planTemplates:[template('a','正式模板')]};
+ const directory=createQualityTemplateDirectory(study,true);
+ const original={...monitor,id:'archived',label:'同名',positionManagement:{version:'holding-position-management-v1' as const,leverage:3,notional:200}};
+ const distinct={...original,positionManagement:{...original.positionManagement,leverage:4}};
+ const item=(at:number,plan=original)=>({at,templateGroup:directory.groupPlans([plan]),read:()=>{throw Error('仅需目录元数据');}});
+ const items=[item(midnight+1000),item(midnight+3000,distinct),item(midnight+100)];
+ const groups=directory.withHistoricalNames(items,'monitor').map(item=>item.templateGroup);
+ expect(groups.map(group=>group.title)).toEqual(['监测_20261111_B','监测_20261111_C','监测_20261111_B']);
+ expect(groups[0]).toMatchObject({originalTitle:'同名',historical:{firstArchivedAt:midnight+100}});
+ expect(groups[0].id).not.toBe(groups[1].id);
+ expect(items[0].templateGroup.title).toBe('同名');
+});

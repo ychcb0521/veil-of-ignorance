@@ -1,3 +1,4 @@
+import {formatUTC8} from '@/lib/timeFormat';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Settings2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from './ui/dialog';
@@ -8,9 +9,10 @@ export interface DirectorySettingsEntry {
   load: () => ReactNode | Promise<ReactNode>;
 }
 
-export function FishDirectorySettingsButton({ name, originalName, entries, disabled }: {
+export function FishDirectorySettingsButton({ name, originalName, historicalAt, entries, disabled }: {
   name: string;
   originalName?: string;
+  historicalAt?: number;
   entries: DirectorySettingsEntry[];
   disabled?: boolean;
 }) {
@@ -52,6 +54,7 @@ export function FishDirectorySettingsButton({ name, originalName, entries, disab
       <header className="shrink-0 space-y-2 border-b px-4 pb-3 pt-4 pr-10 text-[11px]">
         <DialogTitle className="text-sm">模板设置 · {name}</DialogTitle>
         <DialogDescription className="text-[11px]">本轮保存的设置 · 只读</DialogDescription>
+        {historicalAt&&<p className="text-muted-foreground">历史快照 · 最早归档 {formatUTC8(historicalAt)}</p>}
         {originalName&&<p className="text-muted-foreground">原名：{originalName}</p>}
         {entries.length > 1 && <label className="flex flex-wrap items-center gap-2">查看轮次或归档
           <select value={id} onChange={event=>setSelected(event.target.value)}

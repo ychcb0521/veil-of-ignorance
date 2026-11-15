@@ -1,13 +1,15 @@
 import type { FishQualityStudy, QualityGroup } from './quality';
 import type { QualityFilterRoundSnapshot, QualityFilterSetting } from './qualityFilterLibrary';
 import type { PreEntryRound } from './preEntryMonitor';
-import {exactTemplateValue as exact,qualityTemplateNames} from './qualityTemplateNames';
+import {beijingTemplateDay,exactTemplateValue as exact,ordinalLetters,qualityTemplateNames,TEMPLATE_KIND_PREFIX} from './qualityTemplateNames';
+import type {QualityTemplateKind} from './qualityPlanTemplates';
 import { fingerprintAccountBlob } from '../accountBlobCodec';
 
 export interface QualityTemplateDirectoryGroup {
   id: string;
   title: string;
   originalTitle?: string;
+  historical?: { firstArchivedAt:number };
 }
 
 export const unknownTemplateGroup: QualityTemplateDirectoryGroup = {
@@ -30,7 +32,8 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
       const key=catalog.signature(plan);
       const match=catalog.matchPlan(plan,screening?'screen':'monitor',screening?.hours);
       const original=match?.name||plan.label||'历史方案';
-      groups.set(match ? 'tpl:' + match.id : key, {title:match?titleOf(match.id,original):original,original});
+      const unmatchedKey=numbered&&screening ? exact([key,screening.hours,screening.engine]) : key;
+      groups.set(match ? 'tpl:' + match.id : unmatchedKey, {title:match?titleOf(match.id,original):original,original});
     }
     const suffix=groups.size > 1 ? ' · 多方案' : '';
     const title = [...groups.values()].map(value=>value.title).join('、')+suffix;
@@ -64,6 +67,32 @@ export function createQualityTemplateDirectory(study: Pick<FishQualityStudy, 'pl
     if(!numbered)return group;
     return storedGroups.get(group.id)??(candidate?.id===group.id?candidate:group);
   };
-  return { groupPlans, groupFilters, present };
+  /** Display-only fallback for complete historical group identities. Never reads or groups archive bodies by name. */
+  const withHistoricalNames=<T extends {at:number;templateGroup?:QualityTemplateDirectoryGroup}>(items:readonly T[],kind:QualityTemplateKind):T[]=>{
+    if(!numbered)return [...items];
+    const firstSeen=new Map<string,{at:number;group:QualityTemplateDirectoryGroup}>();
+    const known=new Map<string,QualityTemplateDirectoryGroup>();
+    for(const item of items){
+      const group=item.templateGroup;
+      if(!group||group.id===unknownTemplateGroup.id)continue;
+      if(group.originalTitle!==undefined){known.set(group.id,group);continue;}
+      if(!beijingTemplateDay(item.at))continue;
+      const earliest=firstSeen.get(group.id);
+      if(!earliest||item.at<earliest.at)firstSeen.set(group.id,{at:item.at,group});
+    }
+    const aliases=new Map(known),days=new Map<string,number>();
+    for(const {at,group} of [...firstSeen.values()].sort((a,b)=>a.at-b.at||a.group.id.localeCompare(b.group.id))){
+      if(aliases.has(group.id))continue;
+      const day=beijingTemplateDay(at)!;
+      const ordinal=(days.get(day)??catalog.numberedCount(kind,day))+1;
+      days.set(day,ordinal);
+      aliases.set(group.id,{...group,title:TEMPLATE_KIND_PREFIX[kind]+'_'+day+'_'+ordinalLetters(ordinal),originalTitle:group.title,historical:{firstArchivedAt:at}});
+    }
+    return items.map(item=>{
+      const alias=item.templateGroup&&aliases.get(item.templateGroup.id);
+      return alias?{...item,templateGroup:alias}:item;
+    });
+  };
+  return { groupPlans, groupFilters, present, withHistoricalNames };
 
 }
