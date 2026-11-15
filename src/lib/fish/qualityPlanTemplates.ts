@@ -10,14 +10,23 @@ import { qualityExitAlgorithmLabel, qualityExitThresholdText } from './qualitySt
 import { freezeQualityPlan, planVersionChanges } from './qualityPlanVersions';
 import { hasPreBoxAdditionShape, withLegacyEngine } from './qualityLegacyEngine';
 
+export type QualityTemplateKind='filter'|'screen'|'monitor';
+
 export interface QualityPlanTemplate {
   id: string; name: string; savedAt: number; updatedAt: number;
   /** 动态筛选模板额外冻结观察时长；旧模板未记录时保留当前时长。 */
   entryHours?:number;
   /** 删除后只留墓碑，不再保存方案正文。 */
   deleted?: true; plan?: QualityGroup;
+  /** Retain the ordinal's bucket when writing a deletion tombstone. */
+  numberingKind?: QualityTemplateKind;
   /** 旧模板在 2026-11-02 版本保护上线时按当时代码补记版本清单的时间。 */
   versionsBackfilledAt?: number;
+}
+export function qualityTemplateKind(template:QualityPlanTemplate): QualityTemplateKind|undefined {
+  const plan=template.plan;
+  return !plan ? template.numberingKind : plan.staticFilter ? 'filter'
+    : template.entryHours!==undefined||plan.preEntryThreeStage||plan.preEntryConditions ? 'screen' : 'monitor';
 }
 const newTemplateId = () => `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 export const activeQualityPlanTemplates = (study: Pick<FishQualityStudy, 'planTemplates'>): (QualityPlanTemplate & { plan: QualityGroup })[] =>
@@ -43,7 +52,7 @@ export function restoreQualityPlanTemplate(study:FishQualityStudy,archived:Quali
 }
 export function deleteQualityPlanTemplate(study: FishQualityStudy, id: string, now = Date.now()): FishQualityStudy {
   if (!study.planTemplates?.some(t => t.id === id && !t.deleted)) return study;
-  return { ...study, planTemplates: study.planTemplates.map(t => t.id === id ? { id: t.id, name: t.name, savedAt: t.savedAt, updatedAt: now, deleted: true as const } : t) };
+  return { ...study, planTemplates: study.planTemplates.map(t => t.id === id ? { id: t.id, name: t.name, savedAt: t.savedAt, updatedAt: now, numberingKind:qualityTemplateKind(t), deleted: true as const } : t) };
 }
 export function renameQualityPlanTemplate(study: FishQualityStudy, id: string, name: string, now = Date.now()): FishQualityStudy {
   const trimmed = name.trim();

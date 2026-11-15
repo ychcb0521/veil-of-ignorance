@@ -1,3 +1,4 @@
+import {useQualityTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import type { FishQualityStudy, QualityBuyFilter, QualityGroup } from '@/lib/fish/quality';
 import type { QualityFilterRoundSnapshot, QualityFilterSetting } from '@/lib/fish/qualityFilterLibrary';
 import type { PreEntryRound } from '@/lib/fish/preEntryMonitor';
@@ -44,23 +45,26 @@ export function FilterDirectorySettings({ settings, snapshot }: {
 }
 
 export function ScreeningDirectorySettings({ round }: { round: PreEntryRound }) {
+  const names=useQualityTemplateNames();
   if (!round.plans?.length) return <>
     <p>筛选时限 {round.hours} 小时{round.engine && ' · '+round.engine}</p>
     <p className={missing}>历史轮次只记录了以下条件。</p>
     <FrozenFilters filters={round.filters}/>
   </>;
   return <>{round.plans.map(plan => <section className={card} key={plan.id}>
-    <FishFrozenScreeningSettings screening={{ plan, hours:round.hours, engine:round.engine }}/>
+    <FishFrozenScreeningSettings templateName={names?.forPlan(plan,'screen',round.hours)} screening={{ plan, hours:round.hours, engine:round.engine }}/>
   </section>)}</>;
 }
 
 function HoldingPlan({ plan, setting, hours }: { plan: QualityGroup; setting?: QualityMonitorSetting; hours?: number }) {
+  const alias=useQualityTemplateNames()?.forPlan(plan);
   const stored = setting ?? plan.positionManagement;
   const size = stored && Number.isFinite(stored.leverage) && stored.leverage > 0 && Number.isFinite(stored.notional) && stored.notional > 0
     ? { leverage:stored.leverage, notional:stored.notional, marginUsdt:stored.notional/stored.leverage } : undefined;
   const observeHours=setting?.observeHours??hours;
   return <section className={card}>
-    <h5 className="font-medium">{plan.label}</h5>
+    <h5 className="font-medium">{alias?.name??plan.label}</h5>
+    {alias&&<p className={missing}>原名：{alias.originalName}</p>}
     {observeHours!==undefined && <p>监测时限 {observeHours} 小时</p>}
     {!size&&<p className={missing}>原归档未单独记录仓位规模。</p>}
     {setting?.filtersKnown===false ? <p className={missing}>历史买前过滤条件未记录。</p> :

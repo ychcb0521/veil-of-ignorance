@@ -1,3 +1,4 @@
+import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import { useMemo, useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
@@ -27,6 +28,7 @@ function InstantHoldingPlanEditor({ state, plan, save }: { state: FishQualitySta
 }
 
 function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualityState; done: () => void; onEdit: (editing: boolean) => void }) {
+  const names=useQualityTemplateNames();
   const monitor = state.instantMonitor;
   const selected = monitor?.settings;
   const [id, setId] = useState(selected?.templateId ?? '');
@@ -40,6 +42,7 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
   const choice = useMemo<InstantMonitorPlanChoice | undefined>(() => id === selected?.templateId && selected
     ? { id, name: selected.name, plan: selected.plan }
     : template, [id, selected, template]);
+  const choiceName=choice&&names?.forPlan(choice.plan);
   const issue = choice && instantMonitorTemplateIssue(choice);
   const save = async (plan?: QualityGroup) => {
     if (!monitor || id && !choice || issue) return;
@@ -75,13 +78,14 @@ function HoldingTemplateSettings({ state, done, onEdit }: { state: FishQualitySt
       <select className="w-full rounded-md border bg-background px-2 py-1.5" value={id} onChange={event => setId(event.target.value)} disabled={saving}>
         <option value="">即时交易默认规则</option>
         {selected && !templates.some(value => value.id === selected.templateId) &&
-          <option value={selected.templateId} disabled>{selected.name}（已选快照）</option>}
-        {templates.map(value => <option key={value.id} value={value.id}>{value.name}</option>)}
+          <option value={selected.templateId} disabled>{names?.forPlan(selected.plan)?.name??selected.name}（已选快照）</option>}
+        {templates.map(value => <option key={value.id} value={value.id}>{names?.names.get(value.id)?.name??value.name}</option>)}
       </select>
     </label>
     <p className="text-muted-foreground">{id
       ? '按模板执行加仓、减仓和卖出。筛选鱼入选开仓时保存当时所选的模板快照。'
       : '40 USDT 保证金、5 倍。CDA 原始值低于 −10 或 DBL-5 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。'}</p>
+    {choiceName&&<p className="text-muted-foreground">原名：{choiceName.originalName}</p>}
     {choice && <p className="text-muted-foreground">首仓名义仓位 {+(size.marginUsdt * size.leverage).toPrecision(12)} USDT · {size.leverage} 倍 · 保证金 {+size.marginUsdt.toPrecision(12)} USDT</p>}
     {saveNotice && <p role="status" className="text-muted-foreground">{saveNotice}</p>}
     {(error || issue) && <p role="alert" className="text-destructive">{error || issue}</p>}

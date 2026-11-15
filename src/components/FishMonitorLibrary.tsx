@@ -15,7 +15,7 @@ export function FishMonitorLibrary({study,renderStudy,renderTemplate,onCopyStudy
  const current=useRef(study);current.current=study;
  const getItems=useCallback(():FishDirectoryItem[]=>{
   const rounds=library?.rounds??[],archives=library?.archives??[],frozen=new Set(archives.map(a=>a.sourceRoundId));
-  const templates=createQualityTemplateDirectory({planTemplates:study.planTemplates});
+  const templates=createQualityTemplateDirectory({planTemplates:study.planTemplates},true);
   const readIds=createLibraryRoundReader(rounds), byRound=new Map(rounds.map(round=>[round.id,round]));
   const catalog=new Map(library?.records.map((record,index)=>[record.id,{record,index}]));
   const summaries=new WeakMap<string[],{settings:QualityMonitorSetting[];group:ReturnType<typeof templates.groupPlans>}>();
@@ -37,7 +37,7 @@ export function FishMonitorLibrary({study,renderStudy,renderTemplate,onCopyStudy
   };
   const state={running:'运行中',complete:'已完成',paused:'已暂停',failed:'失败'} as const;
   return [
-  ...archives.map(a=>({id:a.id,at:a.createdAt,label:a.reason==='copy'?'载入副本前归档':a.reason==='copy-source'?'监测轮次快照':'重算前完整归档',summary:qualityMonitorArchiveResultCount(a)==null?'完整快照':qualityMonitorArchiveResultCount(a)+' 项运行结果',revision:a.study??a.id,purgeable:true,templateGroup:a.templateDirectory??(a.study?templates.groupPlans(a.study.sellPlans??[]):(a.reason==='copy-source'&&a.sourceRoundId?inheritedGroup(a.sourceRoundId):undefined)??unknownTemplateGroup),study:()=>readArchive(a),preview:()=>readArchive(a,false),campaignPath,settings:async()=> <ArchiveDirectorySettings study={await readArchive(a,false)}/>})),
+  ...archives.map(a=>({id:a.id,at:a.createdAt,label:a.reason==='copy'?'载入副本前归档':a.reason==='copy-source'?'监测轮次快照':'重算前完整归档',summary:qualityMonitorArchiveResultCount(a)==null?'完整快照':qualityMonitorArchiveResultCount(a)+' 项运行结果',revision:a.study??a.id,purgeable:true,templateGroup:a.templateDirectory?templates.present(a.templateDirectory,a.sourceRoundId?inheritedGroup(a.sourceRoundId):undefined):(a.study?templates.groupPlans(a.study.sellPlans??[]):(a.reason==='copy-source'&&a.sourceRoundId?inheritedGroup(a.sourceRoundId):undefined)??unknownTemplateGroup),study:()=>readArchive(a),preview:()=>readArchive(a,false),campaignPath,settings:async()=> <ArchiveDirectorySettings study={await readArchive(a,false)}/>})),
   ...rounds.filter(r=>!frozen.has(r.id)).map(r=>{
     const ids=readIds(r), summary=describe(ids);
     return {id:r.id,at:r.startedAt,label:r.legacy?'历史记录':'监测轮次',summary:ids.length+' 条记录 · '+state[r.state]+(r.timeBasis?' · '+qualityMonitorTimeLabels[r.timeBasis]:''),revision:library?.records,

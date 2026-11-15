@@ -1,3 +1,4 @@
+import {FishLibraryTransferMenu} from './FishLibraryDataMenu';
 import {FishLibraryRowExportContext,type FishLibraryRowExport,type FishLibraryExportActions} from './FishLibraryRowExport';
 import {createQualityTemplateTable,type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import {useCallback,useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
@@ -103,13 +104,14 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [purgeMode,setPurgeMode]=useState(false),[confirmPurge,setConfirmPurge]=useState(false),[purgeMessage,setPurgeMessage]=useState('');
   const [manage,setManage]=useState(false),[activeTemplate,setActiveTemplate]=useState('');
   const [importSelection,setImportSelection]=useState(false);
-  const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode;
+  const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted;
   const [selectedExport,setSelectedExport]=useState<FishLibraryRowExport>();
   const registerExport=useCallback((action:FishLibraryRowExport)=>{
     setSelectedExport(action);
     return ()=>setSelectedExport(current=>current===action?undefined:current);
   },[]);
-  const managedExports=kind==='template'&&!!transferMenu&&!picker;
+  const compactDirectory=kind==='template'&&!picker;
+  const managedExports=compactDirectory;
   const [expandedGroups,setExpandedGroups]=useState<Record<string,boolean>>({});
   const [editingId,setEditingId]=useState(''),[draftName,setDraftName]=useState('');
   const selectionEpoch=useRef(0);
@@ -132,7 +134,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const currentLoad=loaded?.id===selectedId?loaded:undefined;
   const snapshot=currentLoad?.study;
   const archiveError=currentLoad?.error;
-  const visible=useMemo(()=>items.filter(item=>showDeleted||!edits?.[item.id]?.hidden).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind]);
+  const visible=useMemo(()=>items.filter(item=>kind==='template'&&!picker ? !!edits?.[item.id]?.hidden===showDeleted : showDeleted||!edits?.[item.id]?.hidden).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,picker]);
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
   const selectable=visible.filter(item=>purgeMode ? item.purgeable : !edits?.[item.id]?.hidden);
   const checkedSet=new Set(checkedIds),checked=selectable.filter(item=>checkedSet.has(item.id));
@@ -187,7 +189,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
     selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
-    if(!value){setImportSelection(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    if(!value){setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError&&!selectedExport?.busy;
   const handleExport=()=>{
@@ -201,6 +203,18 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       finally { setBusy(''); }
     })();
   };
+  const resetDirectorySelection = () => {
+    setSelectedId('');setCheckedIds([]);setActiveTemplate('');setConfirmPurge(false);setError('');setPurgeMessage('');
+  };
+  const directoryActions = compactDirectory && (onPurgeDirectory || deleted>0) ? <>
+    {onPurgeDirectory&&<DropdownMenuItem className="text-xs" disabled={!!busy||loading||!!loadError} onSelect={()=>{
+      setPurgeMode(!purgeMode);resetDirectorySelection();
+    }}><Trash2 aria-hidden className="mr-2 h-3.5 w-3.5"/>{purgeMode?'退出批量删除':'批量删除'}</DropdownMenuItem>}
+    {deleted>0&&<DropdownMenuItem className="text-xs" disabled={!!busy||loading} onSelect={()=>{
+      setShowDeleted(!showDeleted);setManage(false);setPurgeMode(false);resetDirectorySelection();
+    }}><Undo2 aria-hidden className="mr-2 h-3.5 w-3.5"/>{showDeleted?'返回模板汇总':`已删除目录（${deleted}）`}</DropdownMenuItem>}
+  </> : undefined;
+  const exportActions={exportLibrary:handleExport,canExportLibrary:canExport,selected:selectedExport,busy:!!busy,directoryActions};
   const settingsEntry = (item: FishDirectoryItem): DirectorySettingsEntry[] => item.settings ? [{
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
   }] : [];
@@ -226,26 +240,21 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         </div>;
   return <FishLibraryRowExportContext.Provider value={managedExports?registerExport:null}><Dialog open={open} onOpenChange={changeOpen}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={picker?.triggerLabel ?? '打开'+name}><Database aria-hidden className="h-3 w-3"/>{picker?.triggerLabel ?? name}</button></DialogTrigger>
-    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
+    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="group/library-header flex flex-wrap items-center gap-1.5 pr-6">
           <DialogTitle className="text-sm">{name}</DialogTitle>{dataActions}<FishQualityInfo label={name+'说明'}>{info}</FishQualityInfo>
-          {transferMenu ? <div className="ml-auto">{transferMenu({exportLibrary:handleExport,canExportLibrary:canExport,selected:selectedExport,busy:!!busy})}</div> :
+          {transferMenu || compactDirectory ? <div className="ml-auto">{transferMenu ? transferMenu(exportActions) : <FishLibraryTransferMenu name={name} actions={exportActions}/>}</div> :
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
-        <DialogDescription className="text-[11px]">{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
+        <DialogDescription className={compactDirectory?"sr-only":"text-[11px]"}>{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
-      <h3 className="shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium">{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
+      <h3 className={compactDirectory?"sr-only":"shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium"}>{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
       <div className="space-y-3" data-testid={prefix+'-archive-directory'}>
-        {kind==='template'&&renderTemplate&&!picker&&!purgeMode&&<button type="button" className={action} disabled={!!busy||loading} onClick={()=>{
-          setManage(!manage);setSelectedId('');setCheckedIds([]);setActiveTemplate('');
-        }}>{manage?'返回模板汇总':'管理轮次与归档'}</button>}
-        {onPurgeDirectory&&!picker&&<div className="flex flex-wrap items-center gap-2 text-xs">
-          <button type="button" disabled={!!busy||loading} className={action} onClick={()=>{
-            setPurgeMode(!purgeMode);setActiveTemplate('');setCheckedIds([]);setConfirmPurge(false);setError('');setPurgeMessage('');
-          }}>{purgeMode?'退出批量删除':'批量删除'}</button>
-          {purgeMode&&<>
+        {showDeleted&&compactDirectory&&<div className="flex items-center justify-between gap-2 text-xs"><span>已删除目录（{deleted}）</span><button type="button" className={action} disabled={!!busy} onClick={()=>{setShowDeleted(false);setPurgeMode(false);resetDirectorySelection();}}>返回模板汇总</button></div>}
+        {onPurgeDirectory&&!picker&&purgeMode&&<div className="flex flex-wrap items-center gap-2 text-xs">
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" aria-label="全选可删除目录"
               ref={element=>{if(element)element.indeterminate=checked.length>0&&checked.length<selectable.length;}}
               checked={!!selectable.length&&checked.length===selectable.length}
@@ -253,7 +262,6 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               onChange={event=>setCheckedIds(event.target.checked?selectable.map(item=>item.id):[])}/>全选可删除目录</label>
             <button type="button" className={action+' text-destructive'} disabled={!checked.length||!!busy||confirmPurge}
               onClick={()=>setConfirmPurge(true)}>永久删除所选（{checked.length}）</button>
-          </>}
         </div>}
         {confirmPurge&&<div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 p-2 text-xs">
           <span>永久删除所选 {checked.length} 项？此操作不可恢复。交易战役及其依赖的数据会保留。</span>
@@ -267,9 +275,9 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
           <span className="text-muted-foreground">可选一个或多个目录</span>
           <button type="button" className={action+' ml-auto text-primary'} disabled={loading||!!loadError||!!busy||!checked.length} onClick={()=>void applySelection()}>{busy==='selection'?'正在载入…':`应用所选目录（${checked.length}）`}</button>
         </div>}
-        {!picker&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
+        {!picker&&!compactDirectory&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
         {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
-        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{empty}</p>}
+        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{showDeleted&&compactDirectory?'没有已删除的目录。':empty}</p>}
         {kind==='template'?grouping.map(({group,items:members},index)=>{
           const containsSelection=members.some(item=>item.id===selectedId);
           const expanded=templateView?activeTemplate===group.id:containsSelection||(expandedGroups[group.id]??index===0);
@@ -286,13 +294,14 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
               <span className="min-w-0 flex-1 break-words font-medium">{group.title}</span>
               <span className="shrink-0 text-muted-foreground">{members.length} 项{checkedCount>0?' · 已选 '+checkedCount:''}</span>
             </button>
-            <FishDirectorySettingsButton name={group.title} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
+            <FishDirectorySettingsButton name={group.title} originalName={group.originalTitle} entries={members.flatMap(settingsEntry)} disabled={!!busy}/>
             </div>
             {expanded&&(templateView&&renderTemplate?<div className="min-w-0" data-testid={prefix+'-template-content'}>
               <FishTemplateDirectoryTable key={group.id} importSelection={importSelection} members={members} renderTemplate={renderTemplate} close={()=>changeOpen(false)}/>
             </div>:<div className="space-y-2 p-2">{members.map(renderItem)}</div>)}
           </section>;
         }):visible.map(renderItem)}
+      </div>
       </div>
       {picker && <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-2 text-[11px]">{picker.footer(()=>changeOpen(false))}</div>}
     </DialogContent>

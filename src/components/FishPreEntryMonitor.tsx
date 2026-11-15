@@ -92,7 +92,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       </tr>;})}</tbody></table></div></>;
   }}</FishDeferredDetails>;
   const getDirectoryItems = (): FishDirectoryItem[] => {
-    const templates = createQualityTemplateDirectory(state.study);
+    const templates = createQualityTemplateDirectory(state.study,true);
     return entryDirectoryGroups(archived).map(({ round, records, label, summary }) => ({
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),

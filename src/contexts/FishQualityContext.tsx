@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {QualityTemplateNamesContext} from './QualityTemplateNamesContext';
+import {qualityTemplateNames} from '@/lib/fish/qualityTemplateNames';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useFishQuality, type FishQualityState, type QualityRunner } from '@/hooks/useFishQuality';
 import { runPageFishQuality } from '@/hooks/useFish';
@@ -43,8 +45,10 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   }, []);
   const activate = useCallback(() => setRequested(true), []);
   const location = useLocation();
+  const templates=state.study.planTemplates??state.templateCatalog;
+  const names=useMemo(()=>({owner,resolver:qualityTemplateNames({planTemplates:templates})}),[owner,templates]);
   return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
-    <InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider>
+    <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}
       {state.filterRunning && <div>过滤后台运行中 · {state.filterProgress?.done ?? 0}/{state.filterProgress?.total ?? 0}</div>}

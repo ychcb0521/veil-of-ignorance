@@ -18,7 +18,7 @@ export function FishFilterLibrary({study,renderStudy,renderTemplate,onCopyStudy,
  const library=study.filterLibrary;
  const getItems=useCallback(():FishDirectoryItem[]=>{
   if(!library)return [];
-  const templates=createQualityTemplateDirectory(study);
+  const templates=createQualityTemplateDirectory(study,true);
   const read=createFilterDirectoryReader(library);
   const items:FishDirectoryItem[]=library.rounds.map(r=>{
    const data=read(r);

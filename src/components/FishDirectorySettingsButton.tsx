@@ -8,8 +8,9 @@ export interface DirectorySettingsEntry {
   load: () => ReactNode | Promise<ReactNode>;
 }
 
-export function FishDirectorySettingsButton({ name, entries, disabled }: {
+export function FishDirectorySettingsButton({ name, originalName, entries, disabled }: {
   name: string;
+  originalName?: string;
   entries: DirectorySettingsEntry[];
   disabled?: boolean;
 }) {
@@ -51,6 +52,7 @@ export function FishDirectorySettingsButton({ name, entries, disabled }: {
       <header className="shrink-0 space-y-2 border-b px-4 pb-3 pt-4 pr-10 text-[11px]">
         <DialogTitle className="text-sm">模板设置 · {name}</DialogTitle>
         <DialogDescription className="text-[11px]">本轮保存的设置 · 只读</DialogDescription>
+        {originalName&&<p className="text-muted-foreground">原名：{originalName}</p>}
         {entries.length > 1 && <label className="flex flex-wrap items-center gap-2">查看轮次或归档
           <select value={id} onChange={event=>setSelected(event.target.value)}
             className="min-w-0 max-w-full rounded border bg-background px-2 py-1">

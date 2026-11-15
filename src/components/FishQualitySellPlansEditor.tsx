@@ -1,3 +1,5 @@
+import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
+import { qualityTemplateKind } from '@/lib/fish/qualityPlanTemplates';
 import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
 import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
 import { splitQualityBranches } from '@/lib/fish/qualitySplitBranches';
@@ -66,10 +68,15 @@ function getTemplateDetails(plan: QualityGroup) {
 }
 
 export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,purpose='sell', allowTuring=true }: {purpose?:'sell'|'entry'|'static'; allowTuring?:boolean; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void }) {
-  const templates=actions.templates.filter(({plan}) => (allowTuring || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)
-    && (plan.staticFilter ? purpose === 'static' : plan.preEntryThreeStage ? purpose === 'entry' : purpose === 'sell'));
+  const names=useQualityTemplateNames();
+  const displayName=(template:PlanTemplateActions['templates'][number])=>names?.names.get(template.id)?.name??template.name;
+  const templates=actions.templates.filter(template => {
+    const {plan}=template;
+    return (allowTuring || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)
+    && qualityTemplateKind(template)===(purpose==='static'?'filter':purpose==='entry'?'screen':'monitor');
+  });
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
-  const bases = [...plans.map(p=>({key:'plan:'+p.id,label:'方案 · '+p.label,plan:p})), ...templates.map(t=>({key:'template:'+t.id,label:'模板 · '+t.name,plan:t.plan}))].filter(x=>x.plan.addition?.enabled||x.plan.router);
+  const bases = [...plans.map(p=>({key:'plan:'+p.id,label:'方案 · '+p.label,plan:p})), ...templates.map(t=>({key:'template:'+t.id,label:'模板 · '+displayName(t),plan:t.plan}))].filter(x=>x.plan.addition?.enabled||x.plan.router);
   const [baseKey,setBaseKey] = useState('');
   const [creationError, setCreationError] = useState<{ id: string; message: string }>();
   const selectedBaseKey = baseKey || (bases.length === 1 ? bases[0].key : bases.length === 0 ? 'builtin' : '');
@@ -108,12 +115,12 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,p
       : <ul className="max-h-80 overflow-y-auto">{templates.map(t => {
         const { summary, versionChanged } = getTemplateDetails(t.plan);
         return <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
-        <div className="min-w-0 flex-1"><p className="truncate font-medium">{t.name}</p><p className="truncate text-[10px] text-muted-foreground" title={summary}>{summary}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${versionChanged ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${t.name} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{versionChanged ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
-          {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5"><PlanVersionList plan={t.plan}/></div>}</div>
-        <button type="button" disabled={versionChanged} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${t.name} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
+        <div className="min-w-0 flex-1"><p className="truncate font-medium">{displayName(t)}</p><p className="truncate text-[10px] text-muted-foreground" title={summary}>{summary}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${versionChanged ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${displayName(t)} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{versionChanged ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
+          {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5">{displayName(t)!==t.name&&<p className="mb-1 text-muted-foreground">原名：{t.name}</p>}<PlanVersionList plan={t.plan}/></div>}</div>
+        <button type="button" disabled={versionChanged} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${displayName(t)} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
         {confirm === t.id
-          ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${t.name}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>
-          : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${t.name}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}
+          ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${displayName(t)}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>
+          : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${displayName(t)}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}
       </li>;
       })}</ul>}
     <FishQualityTemplateArchive owner={actions.owner} purpose={purpose} restore={actions.restore}/>

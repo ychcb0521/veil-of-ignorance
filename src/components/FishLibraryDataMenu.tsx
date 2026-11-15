@@ -10,8 +10,8 @@ export function FishLibraryDataMenu({ name, disabled, children }: {
 }) {
   return <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <button type="button" aria-label={name + '导入导出'} title={name + '导入导出'} disabled={disabled}
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/library-header:opacity-100 group-focus-within/library-header:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-70">
+      <button type="button" aria-label={name + '更多操作'} title={name + '更多操作'} disabled={disabled}
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-60 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/library-header:opacity-100 group-focus-within/library-header:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-70">
         <MoreHorizontal aria-hidden className="h-3.5 w-3.5"/>
       </button>
     </DropdownMenuTrigger>
@@ -43,5 +43,6 @@ export function FishLibraryTransferMenu({name,actions,onBackup,onUpload,backupDi
     {onUpload&&<DropdownMenuItem className="text-xs" disabled={actions.busy||selected?.busy||uploadDisabled} onSelect={onUpload}>
       <Upload aria-hidden className="mr-2 h-3.5 w-3.5"/>上传备份（JSON）
     </DropdownMenuItem>}
+    {actions.directoryActions&&<><DropdownMenuSeparator/>{actions.directoryActions}</>}
   </FishLibraryDataMenu>;
 }

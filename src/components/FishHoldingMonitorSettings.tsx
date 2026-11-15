@@ -1,3 +1,4 @@
+import {useQualityTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import { ArrowRightCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
@@ -50,14 +51,15 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
   ready: boolean; plan: QualityGroup; draft: MonitorDraft; setDraft: (draft: MonitorDraft) => void;
   save: () => void; error: string; allDirty: boolean; count: number; hideSave?: boolean;
 }) {
+  const alias=useQualityTemplateNames()?.forPlan(plan);
   return <div className="space-y-3" data-testid="quality-monitor-editor" data-plan-id={plan.id}>
-    <div className="flex items-center gap-1.5"><p className="text-xs font-medium">持仓监测 · {plan.label}</p><FishQualityInfo label="持仓监测说明"><p>买入之后依次是：① 组合算法（上方卡片）→ ② 镜像平衡减仓 → ③ 加仓细节 → ④ 硬性终止。各项分别保存在对应方案中；切换方案保留本次填写，保存时一起保存。</p></FishQualityInfo></div>
+    <div className="flex items-center gap-1.5"><p className="text-xs font-medium">持仓监测 · {alias?.name??plan.label}</p><FishQualityInfo label="持仓监测说明"><p>买入之后依次是：① 组合算法（上方卡片）→ ② 镜像平衡减仓 → ③ 加仓细节 → ④ 硬性终止。各项分别保存在对应方案中；切换方案保留本次填写，保存时一起保存。</p></FishQualityInfo></div>
     <FishQualityMirrorEditor draft={draft.mirror} setDraft={mirror => setDraft({...draft,mirror})} additionEnabled={draft.addition.enabled} holdingLedger={draft.addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>
     <FishQualityAdditionEditor stickyRounds draft={draft.addition} setDraft={addition => setDraft({...draft,addition})} vetoStages={draft.vetoStages} setVetoStages={vetoStages=>setDraft({...draft,vetoStages})}/>
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span><FishQualityInfo label="硬性终止说明"><p>与「加仓细节 · 卖出」并列：硬性终止的任一启用条件、或某次加仓的卖出条件，任何一个先达标，都立即卖出全部仓位（含各次加仓买入的部分），不等普通卖出算法。某次加仓后另加或收紧的否决条件，在「③ 加仓细节 · 卖出」里按次设置。</p></FishQualityInfo></div>
       <FishQualityHoldingVetoEditor draft={draft.vetoes} setDraft={vetoes => setDraft({...draft,vetoes})}/>
     </section>
-    {!hideSave && <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案` : `保存到「${plan.label}」`}</button></div>}
+    {!hideSave && <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{allDirty ? `保存全部 ${count} 套方案` : `保存到「${alias?.name??plan.label}」`}</button></div>}
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
 }
@@ -189,6 +191,8 @@ export function MonitorTimePicker({ trigger, onChoose, restart = false, running 
 }
 
 export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outsideHint,instant}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number;outsideHint?:ReactNode;instant?:boolean}) {
+  const names=useQualityTemplateNames();
+  const planName=(plan:QualityGroup)=>names?.forPlan(plan)?.name??plan.label;
   const imageCapture=useSettingsImageCapture();
   const definitions=useFeatureDefinitions(),plans=state.study.sellPlans??EMPTY_PLANS;
   const [positions, setPositions] = useState<Record<string, PositionManagementDraft>>({});
@@ -225,7 +229,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
       <p className="mb-2 text-[10.5px] text-muted-foreground" data-testid="monitor-plan-draft-count">监测方案 {view.plans.length} 套 · 与上方按编号一一对应{view.dirty?' · 有待保存设置':''}</p>
       {view.plans.length>0&&<div role="tablist" aria-label="选择要设置持仓监测的卖出方案" className="mb-3 flex flex-wrap gap-1 rounded-md bg-muted/60 p-1 text-[10.5px]">{view.plans.map((p,i)=>{
         const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+[d.addition,...d.addition.otherRounds].slice(0,Math.max(1,Number(d.addition.maxRounds)||1)).filter(r=>r.sellSwitch?.enabled).length+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
-        return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>onSelect(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{p.label}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
+        return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>onSelect(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{planName(p)}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
       {!instant&&savedPlan&&hasQualityExit(savedPlan)&&<button type="button" className={button+' mb-2'} disabled={!state.ready} aria-pressed={state.study.selectedSellId===savedPlan.id} onClick={()=>state.selectSell(savedPlan.id)}>固定此方案，比较探测算法</button>}
       {active && !isLegacyQualityPlan(active) && <div className="mb-3">
@@ -241,7 +245,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
         <EditableQualityRouter plan={p} ready={state.ready} controller={controllers.current[p.id]??(controllers.current[p.id]={current:null})} onDirtyChange={setRouterDirtyFlag}/>
       </div>)}
       {active&&isLegacyQualityPlan(active)?<div className="space-y-3" data-testid="quality-monitor-legacy" data-plan-id={active.id}>
-        <p className="text-xs font-medium">持仓监测 · {active.label}</p>
+        <p className="text-xs font-medium">持仓监测 · {planName(active)}</p>
         <FishQualityMonitorSettingsView plan={active} holdingOnly/>
         <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
         {view.error&&<p role="alert" className="text-[11px] text-destructive">{view.error}</p>}
@@ -256,7 +260,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
         </div>
       </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
         allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{if(view.save())done();}}/>:<p className="pb-3 text-[11px] text-muted-foreground">暂无监测方案；新增上方算法后即可设置加仓条件。<SettingsImageButton className="ml-2"/></p>}
-      {imageCapture&&<div hidden data-settings-image-include="">{view.plans.filter(p=>p.id!==active?.id&&!p.router).map(p=><div key={p.id}><h3>持仓监测 · {p.label}</h3>{isLegacyQualityPlan(p)?<FishQualityMonitorSettingsView plan={p} holdingOnly/>:<HoldingMonitorEditor ready={false} plan={p} draft={forPlan(p)} setDraft={()=>{}} save={()=>{}} error="" allDirty={false} count={view.plans.length} hideSave/>}</div>)}</div>}
+      {imageCapture&&<div hidden data-settings-image-include="">{view.plans.filter(p=>p.id!==active?.id&&!p.router).map(p=><div key={p.id}><h3>持仓监测 · {planName(p)}</h3>{isLegacyQualityPlan(p)?<FishQualityMonitorSettingsView plan={p} holdingOnly/>:<HoldingMonitorEditor ready={false} plan={p} draft={forPlan(p)} setDraft={()=>{}} save={()=>{}} error="" allDirty={false} count={view.plans.length} hideSave/>}</div>)}</div>}
     </>;
   }}/>;
 }

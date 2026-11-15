@@ -1,3 +1,4 @@
+import type { QualityTemplateName } from '@/lib/fish/qualityTemplateNames';
 import { additionVetoLabel } from '@/lib/fish/qualityAdditionVeto';
 import { boxStopLabel } from '@/lib/fish/qualityBoxStop';
 import { preEntryConditionText } from '@/lib/fish/preEntryConditions';
@@ -30,7 +31,7 @@ function ExpressionView({ expression }: { expression: EntryMarketExpression }) {
   </div>;
 }
 
-export function FishFrozenScreeningSettings({ screening, label }: { screening?: InstantCampaignMetadata['screening']; label?: string }) {
+export function FishFrozenScreeningSettings({ screening, label, templateName }: { screening?: InstantCampaignMetadata['screening']; label?: string; templateName?: QualityTemplateName }) {
   const plan = screening?.plan;
   if (!screening || !plan) return <><p>{label}</p><p className="text-muted-foreground">{unavailable}</p></>;
   const c = plan.preEntryThreeStage, old = plan.preEntryConditions;
@@ -39,7 +40,8 @@ export function FishFrozenScreeningSettings({ screening, label }: { screening?: 
   const longDrawdown = c?.longDrawdown;
   return <>
     <div className="space-y-1">
-      <p className="font-medium">{plan.label} · 筛选时限 {screening.hours} 小时</p>
+      <p className="font-medium">{templateName?.name??plan.label} · 筛选时限 {screening.hours} 小时</p>
+      {templateName&&<p className="text-muted-foreground">原名：{templateName.originalName}</p>}
       <p className="text-muted-foreground">{screening.engine}{screening.matchedAt && ' · 首次满足 ' + formatBeijingTime(screening.matchedAt)}</p>
     </div>
     {c ? <>

@@ -1,3 +1,4 @@
+import {useCampaignTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import { Activity, Filter, Waves } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { QualityMonitorSettingsButton } from '@/components/FishQualityMonitorSettingsView';
@@ -32,6 +33,7 @@ function FishingInfo({ fishing, detectors }: { fishing?: InstantCampaignMetadata
 }
 
 export function InstantCampaignMetadataButtons({ campaign }: { campaign: TradeCampaign }) {
+  const names=useCampaignTemplateNames(campaign);
   const comparison = campaign.comparison, instant = comparison?.instant;
   if (!comparison || !instant) return null;
   const version = instant.sellEvidence?.version;
@@ -41,7 +43,7 @@ export function InstantCampaignMetadataButtons({ campaign }: { campaign: TradeCa
       <FishingInfo fishing={instant.metadata?.fishing} detectors={comparison.detectors}/>
     </MetadataButton>
     <MetadataButton label="动态筛选" icon={<Filter aria-hidden className="h-3.5 w-3.5"/>}>
-      <FishFrozenScreeningSettings screening={screening} label={comparison.monitorPlan ? undefined : comparison.planLabel}/>
+      <FishFrozenScreeningSettings screening={screening} templateName={screening?.plan?names?.forPlan(screening.plan,'screen',screening.hours):undefined} label={comparison.monitorPlan ? undefined : comparison.planLabel}/>
     </MetadataButton>
     {comparison.monitorPlan ? <QualityMonitorSettingsButton plan={comparison.monitorPlan} campaign={campaign}/> :
       <MetadataButton label="持仓监测" icon={<Activity aria-hidden className="h-3.5 w-3.5"/>}>

@@ -1,4 +1,4 @@
-import {createContext} from 'react';
+import {createContext,type ReactNode} from 'react';
 
 export interface FishLibraryRowExport {
   run:()=>void;
@@ -11,6 +11,7 @@ export interface FishLibraryExportActions {
   canExportLibrary:boolean;
   selected?:FishLibraryRowExport;
   busy:boolean;
+  directoryActions?:ReactNode;
 }
 
 /** Scope the current detail table's export to the dialog that owns it. */
