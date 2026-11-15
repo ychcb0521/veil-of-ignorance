@@ -187,6 +187,8 @@ export function useFishMining(o: {
     const startedAt = Math.max(Date.now(), (previous.round?.startedAt ?? 0) + 1);
     const configured = settings && continuousMiningSettings(settings);
     cancelScan();
+    setAnchorMs(null);
+    setProgress(null);
     if (previous.enabled && (!previous.round || (configured && (!previous.scan || configured.rules.some(rule=>Object.keys(rule.time??{}).length))))) saveMiningState({ ...previous, enabled: false });
     if (configured) saveMiningSettings(configured);
     setState({

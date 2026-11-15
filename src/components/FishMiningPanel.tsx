@@ -25,6 +25,15 @@ import { parseFishSettings } from '@/lib/fishScanner';
 import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
+
+function MiningTime({ ms, compact = false }: { ms: number; compact?: boolean }) {
+  const full = formatUTC8(ms);
+  const text = full.endsWith(':00') ? full.slice(0, 16) : full;
+  return <time dateTime={new Date(ms).toISOString()} title={`${full} 北京时间`} className="whitespace-nowrap font-mono tabular-nums">
+    {compact ? text.slice(5) : text}
+  </time>;
+}
+
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
 const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} ${r.direction ?? '>'} ${r.threshold}`;
 type MiningEditorProps = { mining: FishMiningApi; close: () => void; restart?: boolean };
@@ -198,17 +207,20 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
   const rangeComplete=s.endMs!=null&&s.cursorMs>s.endMs;
   const caughtUp = !reached && !rangeComplete && s.cursorMs > now, share = Math.min(1, s.mined / s.target);
   const retryText=s.errorKind==='configuration'?'配置需修正后重新检查':s.retryAt?`${Math.max(0,Math.ceil((s.retryAt-clock)/1000))} 秒后原地重试（${short(s.retryAt)}）`:'2 分钟后原地重试';
-  const hasStarted=!!(s.anchorsDone||s.rules.length||s.lastError);
-  const status = running && anchorMs != null ? `正在挖 ${short(anchorMs)} 这一档${progress?.total ? `（${progress.done} / ${progress.total} 个标的）` : ''}`
+  const hasStarted = !!(s.round || s.mined || s.anchorsDone || s.rules.length || s.lastError);
+  const activeAnchor = running && s.enabled && !rangeComplete && !reached && anchorMs === s.cursorMs ? anchorMs : null;
+  const displayAnchor = activeAnchor ?? s.lastAnchorMs;
+  const status = activeAnchor != null ? `正在挖 ${formatUTC8(activeAnchor)} 这一档${progress?.total ? `（${progress.done} / ${progress.total} 个标的）` : ''}`
     : rangeComplete ? '已完成所选时间区间；历史结果已保留，重新开始可设置新的起止时间'
-    : !s.enabled ? (hasStarted ? `已暂停 · 继续后从 ${short(s.cursorMs)} 这一档接着挖` : '还没开始')
     : reached ? '已达目标：可重新开始新一轮'
+    : !s.enabled ? (hasStarted ? `已暂停 · 继续后从 ${short(s.cursorMs)} 这一档接着挖` : '还没开始')
     : caughtUp ? `已追上现在，下一档 ${short(s.cursorMs)} 到点自动挖`
     : waiting && /网络|正忙|标签页|限频/.test(waiting) ? waiting
     : s.lastError ? `出错：${s.lastError}（${retryText}）`
     : waiting || `排队中：下一档 ${short(s.cursorMs)}`;
-  const statusLabel = running ? '捕捞中' : rangeComplete?'区间已完成': !s.enabled ? hasStarted ? '已暂停' : '未开始'
-    : reached ? '已达目标' : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : waiting ? (/限频/.test(waiting)?'限频等待':'等待中') : s.lastError ? '等待重试' : '排队中';
+  const statusLabel = activeAnchor != null ? '捕捞中' : rangeComplete ? '区间已完成' : reached ? '已达目标'
+    : !s.enabled ? hasStarted ? '已暂停' : '未开始'
+    : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : waiting ? (/限频/.test(waiting)?'限频等待':'等待中') : s.lastError ? '等待重试' : '排队中';
   const hasError = !!s.lastError && !running && !reached && !caughtUp && !rangeComplete;
   return <FishQualityModule title="批量捕捞" icon={Pickaxe} testId="fish-mining-panel" summary={<>
         <FishQualityInfo label="批量捕捞说明与进度">
@@ -234,6 +246,25 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
               <DialogTitle className="text-sm">批量捕捞设置</DialogTitle>
               <DialogDescription className="text-xs">保存后用于开始新一轮。继续捕捞会从上次进度接着扫描。</DialogDescription>
             </DialogHeader>
+            {(hasStarted || s.enabled) && <section aria-label="本轮捕捞进度" className="mx-4 mt-3 shrink-0 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-[11px]">
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <h3 className="font-medium">本轮进度 <span className="font-normal text-muted-foreground">· 北京时间</span></h3>
+                <p className="text-muted-foreground">已捕捞 <span className="font-mono tabular-nums text-foreground">{s.mined}/{s.target}</span> 条
+                  <span className="mx-2 text-muted-foreground/60">·</span>已扫 <span className="font-mono tabular-nums text-foreground">{s.anchorsDone}</span> 档</p>
+              </div>
+              <dl className="grid gap-x-5 gap-y-1 sm:grid-cols-2 [&>div]:flex [&>div]:items-baseline [&>div]:gap-2 [&_dt]:shrink-0 [&_dt]:text-muted-foreground">
+                <div><dt>扫描起点</dt><dd><MiningTime ms={s.startMs}/></dd></div>
+                <div><dt>扫描结束</dt><dd>{s.endMs != null ? <MiningTime ms={s.endMs}/> : '持续扫描'}</dd></div>
+                <div><dt>已扫至</dt><dd>{s.lastAnchorMs != null ? <MiningTime ms={s.lastAnchorMs}/> : '尚未完成首档'}</dd></div>
+                {activeAnchor != null
+                  ? <div><dt>正在扫</dt><dd><MiningTime ms={activeAnchor}/></dd></div>
+                  : !reached && !rangeComplete && <div><dt>下一档</dt><dd><MiningTime ms={s.cursorMs}/></dd></div>}
+                {activeAnchor != null && progress && progress.total > 0 && <div>
+                  <dt>本档标的</dt><dd><span className="font-mono tabular-nums">{progress.done}/{progress.total}</span></dd>
+                </div>}
+              </dl>
+              {hasError && <p className="mt-2 text-destructive">{status}</p>}
+            </section>}
             <MiningSettingsContent key={mining.account} mining={mining} close={()=>setProfileOpen(false)}/>
           </DialogContent>
         </Dialog>
@@ -247,7 +278,17 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           </DialogContent>
         </Dialog>
         <FishMiningLibrary openRequest={openRequest} onSelectDirectory={onSelectDirectory} directoryEdits={directoryEdits} onSetHidden={onSetHidden} renderStudy={renderStudy} onCopyStudy={onCopyStudy} account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump} onSelectInTable={onSelectInTable}/>
-        {(running||hasError||s.enabled||hasStarted)&&<span role="status" aria-label={status} title={status} className={`ml-1 inline-flex items-center gap-2 whitespace-nowrap text-[10px] ${hasError?'text-destructive':'text-muted-foreground'}`}><span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${running?'animate-pulse bg-primary':hasError?'bg-destructive':'bg-muted-foreground/40'}`}/>{statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>{running&&progress&&progress.total>0&&<span className="font-mono tabular-nums" aria-label={`本档已扫 ${progress.done} / ${progress.total} 个标的`}>{progress.done}/{progress.total}</span>}</span>}
+        {(running || hasError || s.enabled || hasStarted) && <div className="ml-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-4">
+          <span role="status" aria-label={status} title={status}
+            className={`inline-flex items-center gap-2 whitespace-nowrap ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}>
+            <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${activeAnchor != null ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>
+            {statusLabel}<span className="font-mono tabular-nums">{s.mined}/{s.target}</span>
+          </span>
+          {displayAnchor != null && <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+            <span aria-hidden className="text-muted-foreground/50">·</span>
+            {activeAnchor != null ? '正在扫' : '已扫至'} <MiningTime ms={displayAnchor} compact/>
+          </span>}
+        </div>}
 
         {hasError&&<button type="button" disabled={running} onClick={mining.retry??mining.start} className={qualityPrimaryAction}>{s.errorKind==='configuration'?'重新检查':'立即重试'}</button>}
         {s.errorKind==='configuration'&&!running&&<><a href="/journal/deep-dig" className="text-[10.5px] text-primary hover:underline">检查算法定义</a>{!s.scan&&mining.useCurrentScope&&<button type="button" onClick={mining.useCurrentScope} className="text-[10.5px] text-primary hover:underline" title="使用当前捕捞选择的交易所范围重新检查，保留已挖进度与原算法">更新为当前捕捞范围</button>}{!s.scan&&mining.resetConfiguration&&<button type="button" onClick={mining.resetConfiguration} className="text-[10.5px] text-primary hover:underline" title="使用可用的默认批量捕捞算法和当前捕捞范围，保留已挖进度与全部历史结果">恢复默认挖掘条件</button>}</>}
