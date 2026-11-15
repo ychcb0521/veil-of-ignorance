@@ -41,9 +41,9 @@ export function FishQualityTemplateArchive({ owner, purpose, restore }: {
     return () => { active = false; };
   }, [open, owner, purpose, revision]);
 
-  if (!owner || !restore) return null;
+  if (!owner) return null;
   const recover = async (row: QualityTemplateArchiveRow) => {
-    if (busy) return;
+    if (busy || !restore) return;
     setBusy(row.id);
     setError('');
     setMessage('');
@@ -78,7 +78,7 @@ export function FishQualityTemplateArchive({ owner, purpose, restore }: {
           <p className="truncate">{row.template_name}</p>
           <p className="text-[10px] text-muted-foreground">固化于 {new Date(row.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</p>
         </div>
-        <button type="button" disabled={!!busy} className="shrink-0 rounded border border-primary/25 px-2 py-1 text-primary disabled:opacity-50" aria-label={`恢复系统存档 ${row.template_name}`} onClick={() => void recover(row)}>{busy === row.id ? '恢复中…' : '恢复到模板库'}</button>
+        {restore&&<button type="button" disabled={!!busy} className="shrink-0 rounded border border-primary/25 px-2 py-1 text-primary disabled:opacity-50" aria-label={`恢复系统存档 ${row.template_name}`} onClick={() => void recover(row)}>{busy === row.id ? '恢复中…' : '恢复到模板库'}</button>}
       </li>)}</ul>
     </div>}
   </section>;

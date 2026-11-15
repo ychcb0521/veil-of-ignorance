@@ -39,6 +39,31 @@ function defaultDetectorState(): FishQualityState {
   return { ...s, study };
 }
 afterEach(cleanup);
+it('shows stored templates while holding research loads and resumes normal editing when ready', () => {
+  const s = state();
+  const template = { id:'saved-template', name:'原持仓模板', savedAt:T, updatedAt:T, plan:s.study.sellPlans![0] };
+  const restore = vi.fn(), retry = vi.fn();
+  const loading = {...s, study:newQualityStudy(), templateCatalog:[template], ready:false, savePlanTemplate:vi.fn(),
+    deletePlanTemplate:vi.fn(), restorePlanTemplate:restore, retryStudyLoad:retry };
+  const view = render(<FishQuality state={loading}/>);
+  fireEvent.click(screen.getByLabelText('持仓监测条件'));
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByRole('status')).toHaveTextContent('正在读取持仓监测方案');
+  expect(dialog.queryByText('监测方案 0 套', {exact:false})).toBeNull();
+  fireEvent.click(dialog.getByRole('button',{name:/模板库/}));
+  const picker = within(screen.getByTestId('plan-template-list'));
+  expect(picker.getByText('原持仓模板')).toBeVisible();
+  expect(picker.queryByRole('button',{name:/新建方案|删除模板|恢复系统存档/})).toBeNull();
+  fireEvent.keyDown(screen.getByTestId('plan-template-list'),{key:'Escape'});
+  view.rerender(<FishQuality state={{...loading, error:'账号研究恢复超时'}}/>);
+  expect(dialog.getByRole('alert')).toHaveTextContent('账号研究恢复超时');
+  fireEvent.click(dialog.getByRole('button',{name:'重试加载'}));
+  expect(retry).toHaveBeenCalledOnce();
+  expect(restore).not.toHaveBeenCalled();
+  expect(s.setSellPlans).not.toHaveBeenCalled();
+  view.rerender(<FishQuality state={{...loading, ready:true, study:{...s.study, planTemplates:[template]}}}/>);
+  expect(dialog.getByRole('button',{name:/从模板新建/})).toBeEnabled();
+});
 it('rates a merged signal inline, toggles the same star off, and leaves frozen archive ratings read-only',async()=>{
  const {rateQualitySource}=await import('@/lib/fish/qualitySourceRatings');
  const s=state(),plans=JSON.stringify(s.study.sellPlans),jump=vi.fn();

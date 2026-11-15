@@ -728,6 +728,21 @@ it('keeps failed account restoration unready and never persists an empty replace
  act(()=>window.dispatchEvent(new Event('pagehide')));h.unmount();expect(storage.save).not.toHaveBeenCalled();
 });
 
+it('retries a failed account load before enabling editing', async () => {
+  const study = {...newQualityStudy(), observeHours: 72};
+  storage.load.mockRejectedValueOnce(new Error('账号研究恢复超时')).mockResolvedValueOnce({study});
+  const h = renderHook(() => useFishQuality('a', [], vi.fn(async () => {})));
+  await flush();
+  expect(h.result.current.ready).toBe(false);
+  expect(storage.save).not.toHaveBeenCalled();
+  act(() => h.result.current.retryStudyLoad());
+  await flush();
+  expect(storage.load).toHaveBeenCalledTimes(2);
+  expect(h.result.current.ready).toBe(true);
+  expect(h.result.current.error).toBe('');
+  expect(h.result.current.study.observeHours).toBe(72);
+});
+
 // 【用户要求】2026-11-02 组合表「清除」：两边互不影响；监测结果先归档再清，过滤只清当前读数
 it('clears filter readings and monitor results independently without stopping the other task', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');

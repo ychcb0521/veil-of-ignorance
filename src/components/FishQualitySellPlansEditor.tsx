@@ -67,7 +67,7 @@ function getTemplateDetails(plan: QualityGroup) {
   return details;
 }
 
-export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,purpose='sell', allowTuring=true }: {purpose?:'sell'|'entry'|'static'; allowTuring?:boolean; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void }) {
+export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin, purpose='sell', allowTuring=true, browseOnly=false }: {purpose?:'sell'|'entry'|'static'; allowTuring?:boolean; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse?: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void; browseOnly?: boolean }) {
   const names=useQualityTemplateNames();
   const displayName=(template:PlanTemplateActions['templates'][number])=>names?.names.get(template.id)?.name??template.name;
   const templates=actions.templates.filter(template => {
@@ -95,10 +95,10 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,p
   };
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
   return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); setCreationError(undefined); }}><PopoverTrigger asChild>
-    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'?'从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
+    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={browseOnly?'查看已保存模板':purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'&&!browseOnly?'从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
   </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-1 text-[11px]" data-testid="plan-template-list">
     {/* 【用户要求】2026-11-04 内置模板：代码里的配方，新建时按账号当前公式生成，保存时冻结版本；不占账号模板目录 */}
-    {purpose==='sell'&&BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
+    {!browseOnly&&purpose==='sell'&&BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
       <p className="px-2 pb-0.5 pt-1 text-[10px] text-muted-foreground">内置模板 · 新建时按账号当前公式生成，保存时冻结版本</p>
       <ul>{BUILTIN_QUALITY_TEMPLATES.map(t => <li key={t.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-builtin">
         <div className="min-w-0 flex-1"><p className="font-medium">{t.name}</p><p className="text-[10px] leading-snug text-muted-foreground">{t.summary}</p>
@@ -111,19 +111,19 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin,p
         <button type="button" disabled={disabled} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => createFromBuiltin(t)}>新建</button>
       </li>)}</ul>
     </div>}
-    {!templates.length ? <p className="px-3 py-3 text-muted-foreground">还没有模板。保存当前设置后，可点「存为模板」。</p>
+    {!templates.length ? <p className="px-3 py-3 text-muted-foreground">{browseOnly?'当前还未读到账号模板，可以查看系统存档。':'还没有模板。保存当前设置后，可点「存为模板」。'}</p>
       : <ul className="max-h-80 overflow-y-auto">{templates.map(t => {
         const { summary, versionChanged } = getTemplateDetails(t.plan);
         return <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
         <div className="min-w-0 flex-1"><p className="truncate font-medium">{displayName(t)}</p><p className="truncate text-[10px] text-muted-foreground" title={summary}>{summary}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${versionChanged ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${displayName(t)} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{versionChanged ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
           {versionsOf === t.id && <div className="mt-1.5 rounded border border-border/60 bg-background p-1.5">{displayName(t)!==t.name&&<p className="mb-1 text-muted-foreground">原名：{t.name}</p>}<PlanVersionList plan={t.plan}/></div>}</div>
-        <button type="button" disabled={versionChanged} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${displayName(t)} 新建方案`} onClick={() => { onUse(t); setOpen(false); }}>新建</button>
+        {!browseOnly&&<><button type="button" disabled={versionChanged||disabled} title={versionChanged ? '模板冻结的算法版本与当前代码不同，不能新建（展开「版本已变」看哪一项）' : undefined} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用模板 ${displayName(t)} 新建方案`} onClick={() => { onUse?.(t); setOpen(false); }}>新建</button>
         {confirm === t.id
           ? <button type="button" className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-destructive" aria-label={`确认删除模板 ${displayName(t)}`} onClick={() => { actions.remove(t.id); setConfirm(''); }}>确认删除</button>
-          : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${displayName(t)}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}
+          : <button type="button" className="shrink-0 rounded p-1 text-muted-foreground/50 hover:text-destructive" aria-label={`删除模板 ${displayName(t)}`} onClick={() => setConfirm(t.id)}><Trash2 className="h-3 w-3"/></button>}</>}
       </li>;
       })}</ul>}
-    <FishQualityTemplateArchive owner={actions.owner} purpose={purpose} restore={actions.restore}/>
+    <FishQualityTemplateArchive owner={actions.owner} purpose={purpose} restore={browseOnly?undefined:actions.restore}/>
   </PopoverContent></Popover>;
 }
 export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan, onCopyPlan, templates, recoverablePlans,readOnly = false, embedded = false, onDirtyChange, purpose = 'sell', singlePlan = false }: {

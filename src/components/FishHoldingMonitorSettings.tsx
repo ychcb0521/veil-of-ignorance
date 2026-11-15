@@ -10,7 +10,7 @@ import { prepareQualityRouterDraft } from '@/lib/fish/qualityRouterDraft';
 import { isRaceRouter, raceAttackFromRound, routerNextOrdinal, routerOrdinal, routerPrefixText } from '@/lib/fish/qualityPlanRouter';
 import { FishQualityMonitorSettingsView } from './FishQualityMonitorSettingsView';
 import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
-import { FishQualitySellPlansEditor, type SellPlansDraftView } from './FishQualitySellPlansEditor';
+import { FishQualitySellPlansEditor, TemplatePicker, type SellPlansDraftView } from './FishQualitySellPlansEditor';
 import { activeQualityPlanTemplates } from '@/lib/fish/qualityPlanTemplates';
 import { validateQualitySellStages } from '@/lib/fish/qualitySellStages';
 import type { VetoStagesDraft } from './FishQualityVetoStagesEditor';
@@ -217,7 +217,21 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
     if(!changed(p)||isLegacyQualityPlan(p))return p;
     try { return {...p,...parseChangedMonitorDraft(p,forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
   });
-  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} singlePlan={instant} onSave={next => { state.setSellPlans(next); if (!instant) setPositions({}); }} onSelectPlan={onSelect} recoverablePlans={instant ? undefined : recoverableQualityPlans(state.study,readSavedQualityPlans(state.account))} templates={!instant&&state.savePlanTemplate&&state.deletePlanTemplate?{owner:state.account,restore:state.restorePlanTemplate,templates:activeQualityPlanTemplates(state.study),save:state.savePlanTemplate,remove:state.deletePlanTemplate}:undefined} onCopyPlan={(source,copy)=>{
+  const recoverablePlans=instant?undefined:recoverableQualityPlans(state.study,readSavedQualityPlans(state.account));
+  const templates=!instant&&state.savePlanTemplate&&state.deletePlanTemplate?{
+    owner:state.account,restore:state.restorePlanTemplate,
+    templates:activeQualityPlanTemplates(state.ready?state.study:{planTemplates:state.templateCatalog}),
+    save:state.savePlanTemplate,remove:state.deletePlanTemplate,
+  }:undefined;
+  if(!instant&&!state.ready) return <div className="space-y-2 text-[11px]">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      {state.error?<p role="alert" className="text-destructive">{state.error}</p>:<p role="status">正在读取持仓监测方案…</p>}
+      {templates&&<TemplatePicker actions={templates} plans={EMPTY_PLANS} disabled={false} browseOnly/>}
+    </div>
+    <p className="text-muted-foreground">账号研究就绪后可新建、编辑或找回方案。{recoverablePlans?.length? `已找到 ${recoverablePlans.length} 套保存记录。`:''}</p>
+    {state.error&&state.retryStudyLoad&&<button type="button" className={button} onClick={state.retryStudyLoad}>重试加载</button>}
+  </div>;
+  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} singlePlan={instant} onSave={next => { state.setSellPlans(next); if (!instant) setPositions({}); }} onSelectPlan={onSelect} recoverablePlans={recoverablePlans} templates={templates} onCopyPlan={(source,copy)=>{
     const position = positions[source.id];
     if (position) setPositions(current => ({ ...current, [copy.id]: { ...position } }));
     if(copy.router){copy.router=structuredClone(controllers.current[source.id]?.current?.build()??copy.router);return;}
