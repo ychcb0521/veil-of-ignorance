@@ -104,3 +104,39 @@ it('uses the same holding ledger if the impulse wins from the attack lane', asyn
   const result=await findCalculatorAdditions({...input,attackFromRound:2,roundRules:[original,{...original,alternative:attack}]});
   expect(result.fills[1]).toMatchObject({lane:'attack',ledger:{costBefore:210},sizing:{coinsBefore:2,previousSupport:105}});
 });
+
+it('sets a new sell K and sizes at the new F after the impulse replaces the guard', async () => {
+  native.at=entry+5*minute;
+  native.support=105;
+  const breakevenFloor={enabled:true,atr:.5,version:'breakeven-floor-v2'} as const;
+  const input=fixture();
+  const at=impulseAt+minute;
+  const prices=input.prices.map(bar=>bar.openTime===at?{...bar,low:109.89}:bar);
+  const result=await findCalculatorAdditions({...input,prices,breakevenFloor});
+  expect(result.fills).toHaveLength(2);
+  const [guard,impulse]=result.fills;
+  expect(guard.sizing).toMatchObject({positionK:105,floorAtr:.5});
+  expect(impulse.sizing).toMatchObject({positionK:109.9,floorAtr:.5,previousSupport:guard.sizing!.support});
+  expect(impulse.sizing!.support).toBeLessThan(109.89);
+  const f=impulse.sizing!.support;
+  expect(impulse.quantity*(impulse.price-f)).toBeCloseTo(impulse.sizing!.coinsBefore*f-impulse.ledger!.costBefore+impulse.ledger!.realizedBefore);
+  expect(result.stop).toMatchObject({at,price:109.9,support:109.9,atOpen:false});
+  const resumed=await findCalculatorAdditions({...fixture(result.fills.slice(0,1),entry+15*minute),breakevenFloor,
+    prices:prices.filter(bar=>bar.openTime>=entry+15*minute)});
+  expect(resumed).toEqual(result);
+});
+
+it('triggers the followed floor before the original guard is confirmed by a close', async () => {
+  native.at=entry+5*minute;
+  native.support=105;
+  const input=fixture();
+  const at=native.at+minute;
+  const prices=input.prices.map(bar=>bar.openTime===at?{...bar,low:104}:bar);
+  const result=await findCalculatorAdditions({...input,prices,breakevenFloor:{enabled:true,atr:.5,version:'breakeven-floor-v2'}});
+  expect(result.fills).toHaveLength(1);
+  expect(result.stop).toMatchObject({at,price:result.fills[0].sizing!.support,cause:{id:'addition-floor'}});
+  const legacy=await findCalculatorAdditions({...input,breakevenFloor:{enabled:true,atr:.5}});
+  expect(legacy.fills[0].sizing).toMatchObject({guardK:105});
+  expect(legacy.fills[1].sizing).toMatchObject({support:109.9});
+  expect(legacy.fills[1].sizing?.positionK).toBeUndefined();
+});

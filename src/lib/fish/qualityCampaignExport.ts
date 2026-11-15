@@ -8,6 +8,7 @@
  */
 import type { CampaignEvent, TradeCampaign } from '@/types/journal';
 import type { QualityAdditionFill } from './qualityAddition';
+import { additionStructureEvidenceLabel } from './qualityAdditionStructure';
 import { buildXlsx, type XlsxCell, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { qualityPlanDetailSheet } from './qualityExportDetails';
 
@@ -38,14 +39,14 @@ export function flattenPlan(value: unknown, path = ''): [string, XlsxCell][] {
 function additionRows(fills: readonly QualityAdditionFill[], entryPrice?: number, entryAt?: number): XlsxCell[][] {
   let invested = 0;
   return fills.map((f, i) => {
-    const z = f.sizing, T = f.price, S = z?.previousSupport, K = z?.support, atr = z?.atr;
+    const z = f.sizing, T = f.price, S = z?.previousSupport, K = z?.positionK ?? z?.support, atr = z?.atr;
     invested += f.notional;
     const ev = f.structureEvidence;
     return [i + 1, time(f.at), hours(entryAt, f.at), p8(T), pct(T, entryPrice),
       p8(S), p8(K), p8(atr), atr && T ? r(atr / T * 100, 4) : null,
       atr && S != null ? r((T - S) / atr, 4) : null, atr && K != null ? r((T - K) / atr, 4) : null, K != null ? r((1 - K / T) * 100, 4) : null,
       z?.requiredBufferAtr ?? null, z?.supportOffsetAtr ?? null,
-      ev ? `${ev.algorithm === 'dbl5' ? 'DBL-5' : 'SBS-5M'} · 支撑 C ${p8(ev.supportPrice)} · K 基准 ${p8(ev.basePrice)}${z?.guardK != null ? ` · 防守线 ${p8(z.guardK)}` : ''}` : '指标 · S / T / K',
+      (ev ? `${additionStructureEvidenceLabel(ev.algorithm)} · 支撑 C ${p8(ev.supportPrice)} · K 基准 ${p8(ev.basePrice)}${z?.guardK != null ? ` · 防守线 ${p8(z.guardK)}` : ''}` : '指标 · S / T / K')+(z?.positionK!=null?` · 定量 F ${p8(z.support)}`:''),
       p8(f.quantity), r(f.notional, 4), r(invested, 4), p8(z?.coinsBefore), p8(z?.realAverageBefore), r(z?.mirrorAvailableBefore, 4), r(z?.mirrorUsed, 4),
       f.priceGate ? `${f.priceGate.basis === 'real-average' ? '相对持仓均价' : '相对成本线 S'} ${p8(f.priceGate.referencePrice)}：涨 ${r(f.priceGate.gainPct)}%（要求 ≥ ${f.priceGate.thresholdPct}%）` : '',
       f.label ? `${f.label} ${f.direction} ${f.threshold}（读数 ${p8(f.reading)}）` : '',
@@ -89,8 +90,13 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
   sheets.push(sheet('未加仓与否决', ['时间', '第几次加仓', '类型', '原因', '读数', '支撑 C'],
     [...(ev?.additionSkips ?? []).map(s => ({ ...s, type: '未加仓' })), ...(ev?.additionVetoes ?? []).map(v => ({ ...v, type: '否决', support: undefined }))]
       .sort((a, b) => a.at - b.at).map(s => [time(s.at), s.round, s.type, s.label, s.reading, p8(s.support)]), ['读数']));
-  sheets.push(sheet('减仓', ['时间', '价格', '减仓比例 %', '减仓币数', '实现盈亏 USDT', '原 K', '新 K', '原支撑', '新支撑', 'ATR'],
-    (ev?.additionReductions ?? []).map(x => [time(x.at), p8(x.price), r(x.fraction * 100, 4), p8(x.quantity), r(x.realizedPnl, 4), p8(x.previousK), p8(x.newK), p8(x.previousSupport), p8(x.newSupport), p8(x.atr)])));
+  const cuts = ev?.additionReductions ?? [];
+  const hasSeparateFloor = cuts.some(x => x.newPositionK != null);
+  sheets.push(sheet('减仓', ['时间', '价格', '减仓比例 %', '减仓币数', '实现盈亏 USDT', '原 K', '新 K', '原支撑', '新支撑', 'ATR',
+    ...(hasSeparateFloor ? ['原 F', '新 F'] : [])],
+    cuts.map(x => [time(x.at), p8(x.price), r(x.fraction * 100, 4), p8(x.quantity), r(x.realizedPnl, 4),
+      p8(x.previousPositionK ?? x.previousK), p8(x.newPositionK ?? x.newK), p8(x.previousSupport), p8(x.newSupport), p8(x.atr),
+      ...(hasSeparateFloor ? [p8(x.previousPositionK == null ? undefined : x.previousK), p8(x.newPositionK == null ? undefined : x.newK)] : [])])));
   sheets.push(sheet('交易事件', ['时间', '事件', '价格', '金额 USDT', '实现盈亏 USDT', '备注'],
     events.map(e => [time(e.timestamp), EVENT_LABELS[e.event_type] ?? e.event_type, p8(e.price), r(e.size_usdt, 4), r(e.realized_pnl, 4), e.notes ?? '']), ['备注']));
   if (plan) sheets.push({ name: '方案参数（原文）', columns: [{ header: '字段路径', width: 60 }, { header: '值', width: 80 }], rows: flattenPlan(plan) });

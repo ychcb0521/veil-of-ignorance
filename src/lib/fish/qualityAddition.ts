@@ -85,7 +85,8 @@ export interface QualityAdditionRule {
 }
 export interface QualityGeometricLockRule { enabled: boolean; multiple: number; pct: number }
 export const defaultGeometricLock = (): QualityGeometricLockRule => ({ enabled: false, multiple: 10, pct: 1 });
-export interface QualityBreakevenFloorRule { enabled: boolean; atr: number }
+export const ADDITION_POSITION_FLOOR_VERSION='breakeven-floor-v2' as const;
+export interface QualityBreakevenFloorRule { enabled: boolean; atr: number; version?:typeof ADDITION_POSITION_FLOOR_VERSION }
 export const defaultBreakevenFloor = (): QualityBreakevenFloorRule => ({ enabled: false, atr: BREAKEVEN_FLOOR_DEFAULT_ATR });
 /**
  * 保本底线 F 离防守线 K 的 ATR 倍数（缺省值）。2026-11-04 按「组合算法1-8」94 笔回放定为 0.25：
@@ -115,7 +116,10 @@ export const defaultSupportReduction = (): QualitySupportReductionRule => ({ ena
 /** 一次支撑下移减仓：减掉当时持仓的 fraction；costRemoved 为按均价移出的成本，realizedPnl＝quantity×price − costRemoved。 */
 export interface QualityReductionFill { at: number; price: number; fraction: number; quantity: number; costRemoved: number; realizedPnl: number; breakeven: number; previousK: number; newK: number; previousSupport: number; newSupport: number; atr: number;
   /** 开着保本底线时：挪到的防守线 K′（newK 是它下方的保本底线 F′）。 */
-  newGuardK?: number }
+  newGuardK?: number;
+  /** V2 sell prices before and after the move. The original previousK / newK pair holds F and F′. */
+  previousPositionK?: number;
+  newPositionK?: number }
 export interface QualityDetectorPrerequisite { enabled: boolean; stricterPct: number; featureId?: string }
 export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'impulsePosition'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
 export const activeDetectorPrerequisite=(r?:Pick<QualityAdditionRoundRule,'detectorPrerequisite'|'source'>)=>r?.source!=='custom'&&r?.detectorPrerequisite?.enabled?r.detectorPrerequisite:undefined;
@@ -140,7 +144,9 @@ export interface QualityAdditionFill {
   priceGate?: {basis:'real-average'|'cost-line';referencePrice:number;thresholdPct:number;observedPrice:number;gainPct:number;confirmedAt:number};
   sizing?: {support:number;previousSupport:number;atr:number;atrAt:number;coinsBefore:number;realAverageBefore:number;baseCoins:number;mirrorCoins:number;mirrorUsed:number;mirrorAvailableBefore?:number;costBufferAtr?:number;
     /** 保本底线：防守线 K（收盘确认的那条线）与 F 离它的 ATR 倍数；此时 support＝F（加仓量与盘中止损都按 F）。 */
-    guardK?:number;floorAtr?:number;requiredBufferAtr?:number;supportOffsetAtr?:number;coverageGap?:number};
+    guardK?:number;
+    /** V2 sell K for the winning source; support then stores F for sizing. */
+    positionK?:number;floorAtr?:number;requiredBufferAtr?:number;supportOffsetAtr?:number;coverageGap?:number};
 }
 export interface QualityAdditionObservation {
   prsEvidence?:import('../prs6h').PrsRow;
@@ -187,7 +193,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...([rule,...(rule.rounds??[])].some(r=>r.gainBasis==='average')?[['gain-basis-average-v1',[rule,...(rule.rounds??[])].map(r=>r.gainBasis??null)]]:[]),
   ...(rule.geometricLock?.enabled?[['geometric-lock-v1',rule.geometricLock.multiple,rule.geometricLock.pct]]:[]),
   ...(rule.kStopVersion?[[rule.kStopVersion]]:[]),
-  ...(rule.breakevenFloor?.enabled?[['breakeven-floor-v1',rule.breakevenFloor.atr]]:[]),
+  ...(rule.breakevenFloor?.enabled?[[rule.breakevenFloor.version??'breakeven-floor-v1',rule.breakevenFloor.atr]]:[]),
   // v2（2026-11-03）：减仓后再加仓时，减仓所得不再当成额外可用利润重复计入（v1 会多加）；开了减仓的方案须重算
   ...(rule.supportReduction?.enabled?[[rule.supportReduction.version===2?'support-drop-reduction-v2':'support-drop-reduction-v1',rule.supportReduction.minDropAtr,rule.supportReduction.maxPct,...(rule.supportReduction.exitAfterDrops!=null?[['exit-after-support-drops-v1',rule.supportReduction.exitAfterDrops]]:[])]]:[]),
   // 2026-11-02 加仓否决：只有启用了否决的方案身份才变，旧结果照旧复用
@@ -226,7 +232,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   }
   validateAdditionVetoes(rule.entryVetoes);
   for(const r of [rule,...(rule.rounds??[])]){const dp=activeDetectorPrerequisite(r);if(dp&&(!Number.isFinite(dp.stricterPct)||dp.stricterPct<0||dp.stricterPct>1000))throw new Error('方向 · 探测算法：门槛提高幅度须为 0–1000%');}
-  if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}
+  if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(f.version!=null&&f.version!==ADDITION_POSITION_FLOOR_VERSION)throw Error('保本底线执行版本不可用');if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}
   if(rule.geometricLock?.enabled){const g=rule.geometricLock;if(!Number.isFinite(g.multiple)||g.multiple<=0||g.multiple>1e6)throw new Error('保住有效涨幅：几何仓位门槛须为大于 0 的数字');if(!Number.isFinite(g.pct)||g.pct<0||g.pct>100)throw new Error('保住有效涨幅：百分比须为 0–100%');}
   if(rule.supportReduction?.enabled){const r=rule.supportReduction;if(!Number.isFinite(r.minDropAtr)||r.minDropAtr<0||r.minDropAtr>20)throw new Error('支撑下移减仓：触发的下移幅度须为 0–20 倍 ATR');if(!Number.isFinite(r.maxPct)||r.maxPct<=0||r.maxPct>100)throw new Error('支撑下移减仓：单次减仓上限须为 0–100%');if(r.exitAfterDrops!=null&&(!Number.isInteger(r.exitAfterDrops)||r.exitAfterDrops<1||r.exitAfterDrops>20))throw new Error('K 连续下移全仓卖出：次数须为 1–20 的整数');}
   if(rule.quantityMode==='calculator'){

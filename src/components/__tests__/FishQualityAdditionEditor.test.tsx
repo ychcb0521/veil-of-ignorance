@@ -343,3 +343,18 @@ it('selects the 5m impulse with or without the existing position and keeps each 
   tab(2);
   expect(screen.getByLabelText('5 分钟急拉线')).not.toBeChecked();
 });
+
+it('selects the winning position for F and retains the chosen floor version on reopen', () => {
+  render(<Editor/>);
+  fireEvent.click(screen.getByLabelText('启用条件加仓'));
+  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
+  fireEvent.click(screen.getByLabelText('5 分钟急拉线'));
+  fireEvent.click(screen.getByLabelText('防守线保本底线'));
+  expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v2');
+  expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('急拉线触发时盘中碰到本次 K');
+  const rule=save() as QualityAdditionRule;
+  expect(rule.breakevenFloor).toEqual({enabled:true,atr:.25,version:'breakeven-floor-v2'});
+  expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+  fireEvent.change(screen.getByLabelText('保本底线基准'),{target:{value:'legacy'}});
+  expect(save().breakevenFloor).toEqual({enabled:true,atr:.25});
+});
