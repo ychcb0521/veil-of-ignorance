@@ -7,7 +7,7 @@ import { mcpPlugin } from "@lovable.dev/mcp-js/stacks/supabase/vite";
 export default defineConfig(() => ({
   // All worker clients use type: module. Screening keeps its frozen engines
   // lazily imported, which requires an ES worker bundle with separate chunks.
-  worker: { format: 'es' },
+  worker: { format: 'es' as const },
   server: {
     host: "::",
     port: 8080,

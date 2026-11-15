@@ -37,7 +37,7 @@ const button = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px]
  * 这套卖出方案的持仓一票否决在这里设（观察时长已于 0d3dc61c 从界面移除，不放回来）。
  */
 type MonitorDraft = { addition: ReturnType<typeof additionDraft>; mirror: ReturnType<typeof mirrorDraft>; vetoes: ReturnType<typeof holdingVetoDraft>;vetoStages:VetoStagesDraft };
-const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ addition: additionDraft(plan.addition, plan.sellStages), mirror: mirrorDraft(plan.mirrorTakeProfit ?? defaultQualityMirror()), vetoes: planHoldingVetoDraft(plan.holdingVetoes),vetoStages:{enabled:!!plan.vetoStages?.length,mode:plan.vetoStageMode??'overlay',peakBasis:plan.vetoPeakBasis??'stage',stages:(plan.vetoStages??[]).map(s=>({afterAdditions:String(s.afterAdditions),conditions:holdingVetoDraft(s.conditions)}))} });
+const monitorDraftOf = (plan: QualityGroup): MonitorDraft => ({ addition: additionDraft(plan.addition, plan.sellStages), mirror: mirrorDraft(plan.mirrorTakeProfit ?? { ...defaultQualityMirror(), enabled: false }), vetoes: planHoldingVetoDraft(plan.holdingVetoes),vetoStages:{enabled:!!plan.vetoStages?.length,mode:plan.vetoStageMode??'overlay',peakBasis:plan.vetoPeakBasis??'stage',stages:(plan.vetoStages??[]).map(s=>({afterAdditions:String(s.afterAdditions),conditions:holdingVetoDraft(s.conditions)}))} });
 const monitorBaseKey = (plan: QualityGroup) => JSON.stringify([plan.holdingVetoes,plan.mirrorTakeProfit,plan.addition,plan.sellStages,plan.vetoStages,plan.vetoStageMode,plan.vetoPeakBasis]);
 function parseMonitorDraft(draft: MonitorDraft, definitions: Parameters<typeof parseAdditionDraft>[1]) {
   const holdingVetoes = parseHoldingVetoDraft(draft.vetoes,definitions), mirrorTakeProfit = parseMirrorDraft(draft.mirror), addition = parseAdditionDraft(draft.addition,definitions), sellStages = parseAdditionSellStages(draft.addition,definitions);
@@ -62,7 +62,7 @@ function HoldingMonitorEditor({ ready, plan, draft, setDraft, save, error, allDi
   </div>;
 }
 /** Editing one section must not rebuild the frozen formulas/settings in the other sections. */
-function parseRouterMonitorDraft(plan: QualityGroup, draft: MonitorDraft, definitions: Parameters<typeof parseAdditionDraft>[1]) {
+function parseChangedMonitorDraft(plan: QualityGroup, draft: MonitorDraft, definitions: Parameters<typeof parseAdditionDraft>[1]) {
   const original = monitorDraftOf(plan), parsed = parseMonitorDraft(draft, definitions);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   if (same(draft.mirror, original.mirror)) parsed.mirrorTakeProfit = plan.mirrorTakeProfit;
@@ -149,7 +149,7 @@ function EditableQualityRouter({ plan, ready, controller, onDirtyChange }: {
         {imageCapture&&<h3 hidden data-settings-image-include="">{key==='structure'?'结构分支':'进攻分支'}</h3>}
         <FishQualitySellPlansEditor plans={branchPlans[key]} ready={ready} embedded onSave={() => {}} extraDirty={monitorDirty}
           onDirtyChange={branchDirtyCallbacks[key]}
-          prepare={plans => monitorDirty ? plans.map(p => ({ ...p, ...parseRouterMonitorDraft(original, drafts[key], definitions) })) : plans}
+          prepare={plans => monitorDirty ? plans.map(p => ({ ...p, ...parseChangedMonitorDraft(original, drafts[key], definitions) })) : plans}
           renderHolding={view => { views.current[key] = view; return <HoldingMonitorEditor ready={ready} plan={view.plans[0]} draft={drafts[key]}
             setDraft={draft => setDrafts(old => ({ ...old, [key]: draft }))} save={() => {}} error="" allDirty={false} count={1} hideSave/>; }}/>
       </div>;
@@ -211,7 +211,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
       return router===p.router?p:{...router.structure,id:p.id,label:p.label,buyFilters:p.buyFilters,frozenVersions:p.frozenVersions,router,...(positionManagement ? { positionManagement } : {})};
     }
     if(!changed(p)||isLegacyQualityPlan(p))return p;
-    try { return {...p,...parseMonitorDraft(forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
+    try { return {...p,...parseChangedMonitorDraft(p,forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
   });
   return <FishQualitySellPlansEditor plans={plans} ready={state.ready} singlePlan={instant} onSave={next => { state.setSellPlans(next); if (!instant) setPositions({}); }} onSelectPlan={onSelect} recoverablePlans={instant ? undefined : recoverableQualityPlans(state.study,readSavedQualityPlans(state.account))} templates={!instant&&state.savePlanTemplate&&state.deletePlanTemplate?{owner:state.account,restore:state.restorePlanTemplate,templates:activeQualityPlanTemplates(state.study),save:state.savePlanTemplate,remove:state.deletePlanTemplate}:undefined} onCopyPlan={(source,copy)=>{
     const position = positions[source.id];
@@ -255,14 +255,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
             trigger={<button type="button" disabled={!state.ready || !selectedCount} title={selectedCount ? '选择起点后保存方案并开始监测' : '请先在组合表中勾选本轮要监测的信号'} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存并开始监测</button>}/> }
         </div>
       </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
-        allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{
-          const saved=view.save(next=>next.map(p=>{
-            // Untouched saved/copied settings must not be rebuilt from form defaults on Save.
-            if(p.id!==active.id||isLegacyQualityPlan(p)||p.router||!changed(active))return p;
-            try { return {...p,...parseMonitorDraft(forPlan(active),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
-          }));
-          if(saved)done();
-        }}/>:<p className="pb-3 text-[11px] text-muted-foreground">暂无监测方案；新增上方算法后即可设置加仓条件。<SettingsImageButton className="ml-2"/></p>}
+        allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{if(view.save())done();}}/>:<p className="pb-3 text-[11px] text-muted-foreground">暂无监测方案；新增上方算法后即可设置加仓条件。<SettingsImageButton className="ml-2"/></p>}
       {imageCapture&&<div hidden data-settings-image-include="">{view.plans.filter(p=>p.id!==active?.id&&!p.router).map(p=><div key={p.id}><h3>持仓监测 · {p.label}</h3>{isLegacyQualityPlan(p)?<FishQualityMonitorSettingsView plan={p} holdingOnly/>:<HoldingMonitorEditor ready={false} plan={p} draft={forPlan(p)} setDraft={()=>{}} save={()=>{}} error="" allDirty={false} count={view.plans.length} hideSave/>}</div>)}</div>}
     </>;
   }}/>;

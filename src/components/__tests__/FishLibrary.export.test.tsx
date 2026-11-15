@@ -21,7 +21,7 @@ it('opens a single cabin data menu and exports all stored fish despite filters',
  openMenu();
  fireEvent.click(screen.getByRole('menuitem',{name:'导出 Excel'}));
  expect(downloadFishCabin).toHaveBeenLastCalledWith([a,b]);
- fireEvent.click(within(cabin).getByRole('button',{name:'鱼舱',exact:true}));
+ fireEvent.click(within(cabin).getByRole('button',{name:/^鱼舱$/}));
  expect(within(cabin).queryByLabelText('筛选鱼舱信号')).toBeNull();
  expect(downloadFishCabin).toHaveBeenCalledTimes(1);
  openMenu();

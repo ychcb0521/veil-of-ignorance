@@ -18,7 +18,7 @@ it('shows the frozen monitor settings with the same editors, read-only, with rou
   fireEvent.click(screen.getByRole('button', { name: '查看持仓监测设置' }));
   const view = screen.getByTestId('quality-monitor-settings-view');
   expect(within(view).getByLabelText('卖出算法 1 门槛')).toHaveValue(.45); expect(within(view).getByLabelText('卖出算法 1 门槛')).toBeDisabled();
-  expect(within(view).getByLabelText('镜像止盈卖出百分比')).toHaveValue(67); expect(within(view).getByLabelText('镜像止盈涨幅')).toHaveValue(2.5);
+  expect(within(view).getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(67); expect(within(view).getByLabelText('镜像平衡减仓涨幅')).toHaveValue(2.5);
   expect(within(view).getByLabelText('最多加仓次数')).toHaveValue(2); expect(within(view).getByLabelText('箱体支撑冗余')).toHaveValue(.1);
   expect(within(view).getByLabelText('K基准箱体')).toHaveValue('current'); expect(within(view).getByLabelText('加仓涨幅门槛')).toHaveValue(3);
   fireEvent.click(within(within(view).getByRole('tablist', { name: '选择加仓轮次' })).getByRole('tab', { name: '第 2 次' }));

@@ -5,6 +5,12 @@ const spot = 'https://api.binance.com';
 const futures = 'https://fapi.binance.com';
 const tradingPaths = new Set(['/fapi/v1/order', '/fapi/v1/leverage', '/fapi/v1/marginType']);
 export type UsdtPositionMode = 'hedge' | 'one-way';
+interface UsdtOrderReport {
+  exchangeId?: string;
+  terminal: boolean;
+  fills: UsdtFill[];
+  issue?: string;
+}
 export interface UsdtMarket {
   symbol: string;
   step: string;
@@ -167,7 +173,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
         throw Error('币安逐仓或杠杆设置与冻结方案不一致');
       }
     },
-    async order(market: UsdtMarket, mode: UsdtPositionMode, order: UsdtOrder, send: boolean) {
+    async order(market: UsdtMarket, mode: UsdtPositionMode, order: UsdtOrder, send: boolean): Promise<UsdtOrderReport | undefined> {
       const { symbol } = market;
       const position = positionSide(mode);
       let report: Json;

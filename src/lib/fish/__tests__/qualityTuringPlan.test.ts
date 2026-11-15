@@ -55,7 +55,7 @@ it('runs both static tasks from the archive origin, retains old cache keys and r
  const active = activeStandaloneBuyFilters(study)[0], signalMetric = activeSignalMetrics(study)[0];
  const load: FishReconstructionLoader = async (_row,from,to,p) => {
   expect(from).toBe(start); expect(to).toBe(time); expect(p.step).toBe(step);
-  return [100,101].map((close,index)=>({openTime:from+index*step,open:close,close,high:close,low:close,volume:1}));
+  return [100,101].map((close,index)=>({openTime:from+index*step,open:close,close,high:close,low:close,volume:1,takerBuyVolume:0}));
  };
  const filterReadings: QualityFilterReading[] = [], signalReadings: QualityFilterReading[] = [];
  const common = {study,signal:new AbortController().signal,marketStart:async()=>start,onProgress:()=>{},onResult:()=>{}};

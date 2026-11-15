@@ -123,12 +123,14 @@ it('keeps static and dynamic modules separate and opens the new three-stage sett
  expect(dynamic.getByLabelText('动态筛选条件').className).toBe(holding.getByLabelText('持仓监测条件').className);
  expect(dynamic.getByRole('button',{name:'打开筛选库'})).toBeInTheDocument();
  const toggle = dynamic.getByRole('button',{name:/^动态筛选$/});
- const screened = within(dynamic.getByTestId('fish-screened')).getByRole('button',{name:/筛选鱼/});
+ const instant = within(screen.getByTestId('quality-instant-controls'));
+ const screened = within(instant.getByTestId('fish-screened')).getByRole('button',{name:/^筛选鱼\s*0$/});
  expect(screened).toHaveAttribute('aria-expanded','false');
  fireEvent.click(toggle);
- expect(screened).not.toBeVisible();
- fireEvent.click(toggle);
+ expect(dynamic.queryByRole('button',{name:'打开筛选库'})).toBeNull();
  expect(screened).toBeVisible();
+ fireEvent.click(toggle);
+ expect(dynamic.getByRole('button',{name:'打开筛选库'})).toBeVisible();
  expect(screen.getByTestId('quality-screening-group')).toHaveAttribute('colspan','4');
  expect(screen.getAllByTestId('quality-screening-column').map(e=>e.textContent)).toEqual(['筛选方案','筛选结果','首次满足时间','排除过程']);
  fireEvent.click(dynamic.getByLabelText('动态筛选条件'));
@@ -313,7 +315,10 @@ it('filters by each retained source and keeps detector evidence on signals share
   chooseSource('library'); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(4);
   const libraryOnly=screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('ZZZUSDT'))!;expect(within(libraryOnly).getByTestId('quality-detector-cell')).toHaveTextContent('—');expect(within(libraryOnly).queryByTestId('fish-process-open')).toBeNull();
   for (const r of screen.getAllByTestId('quality-fish-row')) expect(within(r).queryByText('信号库')).toBeNull();
-  chooseSource('fish'); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  chooseSource('fish'); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  for (const row of screen.getAllByTestId('quality-fish-row')) expect(within(row).getByTestId('quality-detector-cell')).not.toHaveTextContent('—');
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
 });
 
@@ -361,7 +366,7 @@ it('keeps every row reachable in one scroll box, renders only the visible window
   box.scrollTop = 300 * 33; fireEvent.scroll(box);
   expect(screen.getByText('S299USDT')).toBeInTheDocument(); expect(screen.queryByText('S000USDT')).toBeNull();
   chooseSource('fish');
-  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号 · 已合并探测明细（筛选自 301 条信号）');
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号 · 同一信号已合并（筛选自 301 条信号）');
   expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
 });
 
@@ -584,7 +589,7 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 阈值'),{target:{value:'.4'}});fireEvent.click(within(editor).getByLabelText('启用持仓否决 3'));
  fireEvent.click(screen.getByRole('button',{name:/^保存到「状态 S 原始值」$/}));
  expect(s.setFilters).not.toHaveBeenCalled();expect(s.setObserveHours).not.toHaveBeenCalled();
- expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:s.study.sellPlans![0].id,holdingVetoes:[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})],mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50}})]));
+ expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:s.study.sellPlans![0].id,holdingVetoes:[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})],mirrorTakeProfit:undefined})]));
 });
 it('shows the effective decimal threshold for duplicate static vetoes without silently enabling a dynamic veto',async()=>{
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
@@ -596,7 +601,7 @@ it('shows the effective decimal threshold for duplicate static vetoes without si
  fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'dynamic-drawdown'}});
  expect(summary).toHaveTextContent('自由静态最大回撤 ≥ 7.7%；动态回撤 ≥ 30%');
  fireEvent.click(screen.getByRole('button',{name:'保存到「状态 S 原始值」'}));
- expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})],mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50}})]));
+ expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})],mirrorTakeProfit:undefined})]));
 });
 // 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
@@ -638,7 +643,7 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   const headers = screen.getAllByRole('columnheader').map(h => h.textContent ?? '');
   const peak = headers.findIndex(h => h.startsWith('峰值涨幅'));
   expect(headers[peak + 1]).toMatch(/^首仓涨幅/);
-  expect(headers[peak + 2]).toMatch(/^半仓镜像/);
+  expect(headers[peak + 2]).toMatch(/^镜像平衡减仓/);
   // 2026-11-01 半仓镜像后重复的「加仓次数」列已删（卖出列里已有）
   // 2026-11-02 持仓监测里的「探测标签」已删（买前过滤已有）
   expect(headers[peak + 3]).toMatch(/^持仓时间/);
@@ -688,8 +693,8 @@ it('keeps holding vetoes under 持仓监测, per sell plan', async () => {
   const monitor = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测说明' })); expect(screen.getByText('1 项监测条件')).toBeVisible();
   fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测说明' })); expect(screen.queryByText('1 项监测条件')).toBeNull();
-  fireEvent.click(within(filter).getByRole('button', { name: '买前过滤说明' })); expect(screen.getByRole('dialog', { name: '买前过滤说明' })).not.toHaveTextContent('否决');
-  fireEvent.click(within(filter).getByRole('button', { name: '买前过滤说明' }));
+  fireEvent.click(within(filter).getByRole('button', { name: '静态过滤说明' })); expect(screen.getByRole('dialog', { name: '静态过滤说明' })).not.toHaveTextContent('否决');
+  fireEvent.click(within(filter).getByRole('button', { name: '静态过滤说明' }));
   fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测条件' }));
   const tab = screen.getByRole('tab', { name: new RegExp(s.study.sellPlans![1].label) });
   fireEvent.click(tab);
@@ -842,7 +847,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
  for(const [i,value] of [[1,'2.5'],[2,'4']] as const){fireEvent.click(screen.getByLabelText(`启用持仓否决 ${i}`));fireEvent.change(screen.getByLabelText(`持仓否决 ${i} 阈值`),{target:{value}});expect(screen.getByLabelText(`持仓否决 ${i} 方向`)).toBeDisabled();}
  expect(screen.getByTestId('quality-veto-risk-summary')).toHaveTextContent('1分钟内跌幅 ≥ 2.5%；5分钟内跌幅 ≥ 4%');
  fireEvent.click(screen.getByRole('button',{name:'保存到「状态 S 原始值」'}));
- expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:[expect.objectContaining({kind:'drop-1m',threshold:2.5,enabled:true}),expect.objectContaining({kind:'drop-5m',threshold:4,enabled:true})],mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50}})]));
+ expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:[expect.objectContaining({kind:'drop-1m',threshold:2.5,enabled:true}),expect.objectContaining({kind:'drop-5m',threshold:4,enabled:true})],mirrorTakeProfit:undefined})]));
 });
 
 
@@ -905,22 +910,46 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  cleanup();render(<FishQuality state={{...s,resumeFiltering:undefined,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
 });
 
-it('offers mirror defaults and applies custom percentages atomically with holding vetoes, rejecting invalid values',()=>{
+it('offers mirror values on explicit enable and validates custom percentages before saving any settings',()=>{
  const s=state();render(<FishQuality state={s}/>);
  fireEvent.click(screen.getByLabelText('持仓监测条件'));
- expect(screen.getByLabelText('启用镜像止盈策略')).toBeChecked();
- expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(5);
- expect(screen.getByLabelText('镜像止盈卖出百分比')).toHaveValue(50);
- fireEvent.change(screen.getByLabelText('镜像止盈卖出百分比'),{target:{value:'101'}});
+ const enable=screen.getByLabelText('启用镜像平衡减仓策略');
+ expect(enable).not.toBeChecked();
+ expect(screen.getByLabelText('镜像平衡减仓涨幅')).toBeDisabled();
+ fireEvent.click(enable);
+ expect(screen.getByLabelText('镜像平衡减仓涨幅')).toHaveValue(5);
+ expect(screen.getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(50);
+ fireEvent.change(screen.getByLabelText('镜像平衡减仓卖出百分比'),{target:{value:'101'}});
  fireEvent.click(screen.getByRole('button',{name:/保存到/}));
  expect(screen.getByRole('alert')).toHaveTextContent('不超过 100%');expect(s.setHoldingVetoes).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();
- fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'8'}});
- fireEvent.change(screen.getByLabelText('镜像止盈卖出百分比'),{target:{value:'25'}});
+ fireEvent.change(screen.getByLabelText('镜像平衡减仓涨幅'),{target:{value:'8'}});
+ fireEvent.change(screen.getByLabelText('镜像平衡减仓卖出百分比'),{target:{value:'25'}});
  fireEvent.click(screen.getByRole('button',{name:/保存到/}));
- expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:[],mirrorTakeProfit:{enabled:true,gainPct:8,sellPct:25}})]));
+ expect(s.setSellPlans).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({id:'sell-state-raw',holdingVetoes:undefined,mirrorTakeProfit:{enabled:true,gainPct:8,sellPct:25}})]));
 });
 
-it('shows half-mirror execution after each peak column and sorts actual mirror price gains independently of final returns while absent fills stay last',()=>{
+it('saving an unrelated holding stop does not enable an absent mirror or rewrite the saved template', async () => {
+ const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
+ const {saveQualityPlanTemplate}=await import('@/lib/fish/qualityPlanTemplates');
+ const s=state(),original={...s.study.sellPlans![0],holdingVetoes:[makeQualityHoldingVeto('static-drawdown','>=',12)]};
+ expect(original.mirrorTakeProfit).toBeUndefined();
+ s.study=saveQualityPlanTemplate({...s.study,sellPlans:[original,...s.study.sellPlans!.slice(1)]},original,'冻结原始方案',T);
+ const savedTemplate=JSON.stringify(s.study.planTemplates);
+ render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ expect(screen.getByLabelText('启用镜像平衡减仓策略')).not.toBeChecked();
+ fireEvent.change(screen.getByLabelText('持仓否决 1 阈值'),{target:{value:'15'}});
+ fireEvent.click(screen.getByRole('button',{name:/^保存到/}));
+ expect(s.setSellPlans).toHaveBeenCalledOnce();
+ const [edited]=vi.mocked(s.setSellPlans).mock.calls[0][0];
+ expect(edited.holdingVetoes?.[0].threshold).toBe(15);
+ expect(edited.mirrorTakeProfit).toBeUndefined();
+ expect(edited.addition).toEqual(original.addition);
+ expect(edited.snapshot).toEqual(original.snapshot);
+ expect(JSON.stringify(s.study.planTemplates)).toBe(savedTemplate);
+});
+
+it('shows executed mirror reductions after each peak column and sorts actual mirror price gains independently of final returns while absent fills stay last',()=>{
  const s=state();s.study=importQualityLibrary(s.study,['FILLED','ZERO','OFF'].map(symbol=>({id:symbol,symbol,timeMs:T,timeLabel:'',fallbackZone:''})));
  const [plan]=s.study.sellPlans!;plan.mirrorTakeProfit={enabled:true,gainPct:5,sellPct:50};
  for(const row of qualityComparisonRows(s.study).filter(r=>r.origin==='library')) {
@@ -937,8 +966,8 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(2);
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[1]).toHaveTextContent('未启用');
  expect(screen.getByTestId('quality-monitor-group')).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 7));
- fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
- fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
+ fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值镜像平衡减仓实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
+ fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值镜像平衡减仓实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
 });
 
@@ -1055,10 +1084,10 @@ it('saves per-round sell veto conditions from the addition editor without starti
 
 it('copies pending combination, per-round additions, mirror and both exit stages together and keeps later edits independent',()=>{
  const s=state(),a=s.study.sellPlans![0],b=s.study.sellPlans![1];s.study.sellPlans=[{...a,label:'组合模板',rule:{metric:a.metric,direction:'<',threshold:.5},combo:{switchPct:5.1,beforeLabel:a.label,after:{label:b.label,metric:b.metric,snapshot:b.snapshot,rule:{metric:b.metric,direction:'<',threshold:.4}}}}];const before=structuredClone(s.study.sellPlans);render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
- fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'7'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'3.25'}});fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'8'}});addRoundVeto(6,'dynamic-drawdown','20');addRoundVeto(7,'dynamic-drawdown','15');roundTab(6);fireEvent.click(screen.getByLabelText('第 6 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 6 次加仓后卖出 指标门槛'),{target:{value:'.4'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 7 次'}));fireEvent.click(screen.getByLabelText('第 7 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 7 次加仓后卖出 指标门槛'),{target:{value:'.7'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 1 次'}));fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'.25'}});
- fireEvent.click(screen.getByLabelText('复制卖出算法 1'));expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByTestId('sell-plan-draft-count')).toHaveTextContent('2 套');const copyId=screen.getByTestId('sell-plan-draft-1').getAttribute('data-plan-id');expect(screen.getByTestId('quality-monitor-editor')).toHaveAttribute('data-plan-id',copyId);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(3.25);expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(8);expect(screen.getByLabelText('卖出算法 2 门槛')).toHaveValue(.25);
- fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'4.5'}});fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'9'}});roundTab(6);expect(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值')).toHaveValue(20);fireEvent.change(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值'),{target:{value:'18'}});fireEvent.change(screen.getByLabelText('卖出算法 2 门槛'),{target:{value:'.35'}});
- fireEvent.click(within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab')[0]);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(3.25);expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(8);roundTab(6);expect(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值')).toHaveValue(20);fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();const [original,copy]=vi.mocked(s.setSellPlans).mock.calls[0][0];expect(original).toMatchObject({id:a.id,rule:{threshold:.25},addition:{maxRounds:7,structure:{buffer:3.25}},mirrorTakeProfit:{gainPct:8},vetoStages:[{afterAdditions:6,conditions:[{threshold:20}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy).toMatchObject({id:copyId,label:'组合模板（副本）',rule:{threshold:.35},addition:{maxRounds:7,structure:{buffer:4.5}},mirrorTakeProfit:{gainPct:9},vetoStages:[{afterAdditions:6,conditions:[{threshold:18}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy.combo).toEqual(original.combo);expect(copy.sellStages).toEqual(original.sellStages);expect(s.study.sellPlans).toEqual(before);expect(s.start).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.change(screen.getByLabelText('最多加仓次数'),{target:{value:'7'}});fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'3.25'}});fireEvent.click(screen.getByLabelText('启用镜像平衡减仓策略'));fireEvent.change(screen.getByLabelText('镜像平衡减仓涨幅'),{target:{value:'8'}});addRoundVeto(6,'dynamic-drawdown','20');addRoundVeto(7,'dynamic-drawdown','15');roundTab(6);fireEvent.click(screen.getByLabelText('第 6 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 6 次加仓后卖出 指标门槛'),{target:{value:'.4'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 7 次'}));fireEvent.click(screen.getByLabelText('第 7 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 7 次加仓后卖出 指标门槛'),{target:{value:'.7'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 1 次'}));fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'.25'}});
+ fireEvent.click(screen.getByLabelText('复制卖出算法 1'));expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByTestId('sell-plan-draft-count')).toHaveTextContent('2 套');const copyId=screen.getByTestId('sell-plan-draft-1').getAttribute('data-plan-id');expect(screen.getByTestId('quality-monitor-editor')).toHaveAttribute('data-plan-id',copyId);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(3.25);expect(screen.getByLabelText('镜像平衡减仓涨幅')).toHaveValue(8);expect(screen.getByLabelText('卖出算法 2 门槛')).toHaveValue(.25);
+ fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'4.5'}});fireEvent.change(screen.getByLabelText('镜像平衡减仓涨幅'),{target:{value:'9'}});roundTab(6);expect(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值')).toHaveValue(20);fireEvent.change(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值'),{target:{value:'18'}});fireEvent.change(screen.getByLabelText('卖出算法 2 门槛'),{target:{value:'.35'}});
+ fireEvent.click(within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab')[0]);expect(screen.getByLabelText('箱体支撑冗余')).toHaveValue(3.25);expect(screen.getByLabelText('镜像平衡减仓涨幅')).toHaveValue(8);roundTab(6);expect(screen.getByLabelText('第 6 次加仓后 持仓否决 1 阈值')).toHaveValue(20);fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));expect(s.setSellPlans).toHaveBeenCalledOnce();const [original,copy]=vi.mocked(s.setSellPlans).mock.calls[0][0];expect(original).toMatchObject({id:a.id,rule:{threshold:.25},addition:{maxRounds:7,structure:{buffer:3.25}},mirrorTakeProfit:{gainPct:8},vetoStages:[{afterAdditions:6,conditions:[{threshold:20}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy).toMatchObject({id:copyId,label:'组合模板（副本）',rule:{threshold:.35},addition:{maxRounds:7,structure:{buffer:4.5}},mirrorTakeProfit:{gainPct:9},vetoStages:[{afterAdditions:6,conditions:[{threshold:18}]},{afterAdditions:7,conditions:[{threshold:15}]}]});expect(copy.combo).toEqual(original.combo);expect(copy.sellStages).toEqual(original.sellStages);expect(s.study.sellPlans).toEqual(before);expect(s.start).not.toHaveBeenCalled();
 });
 
 // 2026-11-02 相对涨幅后加「盈亏比」（交易战役同口径）
@@ -1150,7 +1179,7 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   expect(within(screen.getByTestId('plan-template-list')).getByText('好组合')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '用模板 好组合 新建方案' }));
   expect(screen.getByTestId('sell-plan-draft-count')).toHaveTextContent(`${count + 1} 套`);
-  expect(screen.getByLabelText('镜像止盈卖出百分比')).toHaveValue(67);
+  expect(screen.getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(67);
   fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
   const saved = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0], made = saved.at(-1)!;
   expect(made.id).not.toBe(a.id); expect(made.label).toBe('好组合');
@@ -1194,10 +1223,10 @@ it('keeps branch edits when changing advantage controls and saves the overlay to
  s.study.sellPlans=[p];s.study.selectedSellId=p.id;
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByLabelText('持仓监测条件'));
  const branch=screen.getByTestId('router-branch-structure');
- fireEvent.change(within(branch).getByLabelText('镜像止盈卖出百分比'),{target:{value:'12'}});
+ fireEvent.change(within(branch).getByLabelText('镜像平衡减仓卖出百分比'),{target:{value:'12'}});
  fireEvent.click(screen.getByLabelText('筛掉同步走弱的加仓机会'));
  fireEvent.change(screen.getByLabelText('优势状态软退出确认次数'),{target:{value:'1'}});
- expect(within(screen.getByTestId('router-branch-structure')).getByLabelText('镜像止盈卖出百分比')).toHaveValue(12);
+ expect(within(screen.getByTestId('router-branch-structure')).getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(12);
  fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();const saved=vi.mocked(s.setSellPlans).mock.calls[0][0][0];
  for(const plan of [saved,saved.router!.structure,saved.router!.attack]){
@@ -1254,7 +1283,7 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  const copyEditor=screen.getAllByTestId('quality-router-editor').at(-1)!,shared=within(copyEditor).getByTestId('router-branch-structure');
  fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).not.toHaveBeenCalled();expect(s.setSellPlans).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('请填写分支状态 S 门槛');
  fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:'.8'}});
- fireEvent.change(within(shared).getByLabelText('镜像止盈卖出百分比'),{target:{value:'23'}});
+ fireEvent.change(within(shared).getByLabelText('镜像平衡减仓卖出百分比'),{target:{value:'23'}});
  fireEvent.change(within(shared).getByLabelText('卖出算法 1 门槛'),{target:{value:'.45'}});
  const guardSwitch='启用加仓否决 距 DBL-5 防守线过远',guardAtr='距 DBL-5 防守线过远 ATR倍数';
  const editGuard=(branch:HTMLElement,atr:string)=>{
@@ -1269,7 +1298,7 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  fireEvent.change(within(attack).getByLabelText('最多加仓次数'),{target:{value:'4'}});
  editGuard(attack,'4.75');
  // Switching back keeps unfinished edits; the root action builds both branch forms without an inner save.
- fireEvent.click(within(copyEditor).getByRole('tab',{name:'结构分支'}));expect(within(shared).getByLabelText('镜像止盈卖出百分比')).toHaveValue(23);
+ fireEvent.click(within(copyEditor).getByRole('tab',{name:'结构分支'}));expect(within(shared).getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(23);
  fireEvent.click(screen.getByRole('button',{name:'保存并开始监测'}));fireEvent.click(screen.getByRole('button',{name:'基于信号时间'}));expect(s.start).toHaveBeenCalledOnce();
  const copied=s.study.sellPlans![1];expect(planVersionChanges(copied)).toEqual([]);expect(copied.router!.threshold).toBe(.8);
  expect(copied.router!.structure.rule!.threshold).toBe(.45);expect(copied.router!.attack.rule!.threshold).toBe(.45);
