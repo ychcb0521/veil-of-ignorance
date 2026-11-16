@@ -160,6 +160,8 @@ export function createUsdtCampaignReader(read: Read, clock = Date.now) {
       openingTimes.add(anchor.openedAt);
       known.set(anchor.symbol, openingTimes);
     }
+    // Execution identity checks need a fresh snapshot and must not queue behind an account archive read.
+    if (target) return scan(since, known, target);
     const key = JSON.stringify([since, target, [...known].map(([symbol, openingTimes]) => [symbol, [...openingTimes]])]);
     if (cached?.key === key && clock() - cached.data.observedAt < 4000) return Promise.resolve(cached.data);
     if (running) return running.then(() => readBatch(since, open, target), () => readBatch(since, open, target));

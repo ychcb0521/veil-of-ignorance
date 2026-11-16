@@ -143,7 +143,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       return price;
     },
     async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number,
-      managed?: 'existing-position', knownProtection?: readonly string[]) {
+      managed?: 'existing-position', knownProtection?: readonly string[], unsettledBuyId?: string) {
       const { symbol } = market;
       const [positions, regular, algo, settings, modes] = await Promise.all([
         request('GET', '/fapi/v3/positionRisk', { symbol }),
@@ -154,6 +154,8 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       ]);
       if (modes.dualSidePosition !== (mode === 'hedge')) throw Error('币安持仓模式已变化');
       if (![positions, regular, algo, settings].every(Array.isArray)) throw Error('币安仓位或挂单读数不可用');
+      if (unsettledBuyId && regular.some((order: Json) => order.clientOrderId === unsettledBuyId))
+        throw Error('币安仍有这笔买入委托在挂单中，等待完成后退出');
       if ((regular.length || algo.some((row: Json) => !knownProtection?.includes(row.clientAlgoId))) && (leverage !== 0 || managed))
         throw Error('该合约有外部挂单，需核对仓位');
       const active = positions.filter((row: Json) => Number(row.positionAmt) !== 0);

@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { createUsdtPositionControls } from '../../../../scripts/usdt-position-controls';
 import { createUsdtPositionReader, decodePositions } from '../../../../scripts/usdt-position-reader';
 import { openUsdtFollowStore } from '../../../../scripts/usdt-follow-store';
-import { createUsdtExchange } from '../../../../scripts/usdt-exchange';
+import { createUsdtExchange, UsdtApiError } from '../../../../scripts/usdt-exchange';
 import { serveUsdtFollower } from '../../../../scripts/usdt-follow-server';
 import { usdtLiveCampaignId, type UsdtLiveCampaign } from '../usdtLiveCampaign';
 import { usdtMirrorRevision } from '../usdtPositionMirror';
@@ -120,6 +120,44 @@ it('refuses a stale revision or an immediately triggered protection without post
     v.raw.updateTime += 1;
     await expect(v.controls.execute(close)).rejects.toThrow('仓位已变化');
     expect(v.request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+  } finally { v.store.close(); }
+});
+
+it.each(['confirmed', 'rejected', 'lost response'] as const)('retains the original stop until the replacement is %s', async result => {
+  const v = venue();
+  const replace = (sl: number) => v.command({ kind: 'protect', tp: null, sl, fraction: 1 });
+  const readStops = async () => (await v.controls.readDetails({ observedAt: now, positions: [v.position] }))
+    .positions[0].protectionOrders?.map(row => row.triggerPrice);
+  try {
+    await v.controls.execute(replace(.075));
+    const request = v.request.getMockImplementation()!;
+    let delayed = result === 'lost response';
+    v.request.mockImplementation(async (method, path, params) => {
+      if (method === 'POST' && path === '/fapi/v1/algoOrder') {
+        if (result === 'rejected') throw new UsdtApiError(400, -2021);
+        if (delayed) { await request(method, path, params); throw new TypeError('response lost'); }
+      }
+      if (delayed && method === 'GET' && path === '/fapi/v1/algoOrder') return undefined;
+      return request(method, path, params);
+    });
+    v.request.mockClear();
+    const confirmation = await v.controls.execute(replace(.077));
+    const actions = () => v.request.mock.calls.filter(([method]) => method !== 'GET').map(([method]) => method);
+    if (result === 'rejected') {
+      expect(confirmation.issue).toContain('-2021');
+      expect(await readStops()).toEqual(['0.075']);
+      expect(actions()).toEqual(['POST']);
+    } else {
+      if (delayed) {
+        expect(confirmation.pending).toBe(true);
+        expect(await readStops()).toEqual(['0.075', '0.077']);
+        expect(actions()).toEqual(['POST']);
+        delayed = false;
+        await v.controls.cleanup();
+      }
+      expect(await readStops()).toEqual(['0.077']);
+      expect(actions()).toEqual(['POST', 'DELETE']);
+    }
   } finally { v.store.close(); }
 });
 

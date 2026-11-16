@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createUsdtFollower } from '../../../../scripts/usdt-follow-engine';
-import { createUsdtExchange, formatQuantity, quantityUnits, type UsdtExchange } from '../../../../scripts/usdt-exchange';
+import { createUsdtExchange, formatQuantity, quantityUnits, usdtOrderId, type UsdtExchange } from '../../../../scripts/usdt-exchange';
 import { openUsdtFollowStore, type UsdtOrder } from '../../../../scripts/usdt-follow-store';
 import { serveUsdtFollower } from '../../../../scripts/usdt-follow-server';
 import type { UsdtFollowCampaign } from '../usdtFollow';
@@ -39,22 +39,42 @@ const campaign = (at: number, source: UsdtFollowCampaign['source'] = { symbol, e
 });
 function exchange() {
   let id = 0;
-  const orders = new Map<string, { id: string; order: UsdtOrder }>();
+  const orders = new Map<string, { id: string; order: UsdtOrder; at: number }>();
+  const readCampaign = vi.fn(async (anchor: { openingOrderId: string; positionSide: 'LONG' | 'BOTH' }): Promise<UsdtLiveCampaign> => {
+    const ordersForCampaign = [...orders.values()].filter(row => Number(row.id) >= Number(anchor.openingOrderId));
+    const opening = ordersForCampaign[0];
+    if (!opening) throw Error('fixture opening order missing');
+    let held = 0;
+    let closedAt: number | undefined;
+    const fills: UsdtCampaignFill[] = [];
+    for (const row of ordersForCampaign) {
+      const { side, quantity } = row.order;
+      const units = quantityUnits(quantity, market.step);
+      held += side === 'BUY' ? units : -units;
+      fills.push({ id: row.id, orderId: row.id, at: row.at, side, quantity, positionQuantity: quantity,
+        price: row.order.limitPrice ?? '4.003', action: row === opening ? 'open' : side === 'BUY' ? 'add' : 'reduce',
+        commission: .02, commissionAsset: 'USDT', realized: side === 'SELL' ? .5 : 0 });
+      if (!held) { closedAt = row.at; break; }
+    }
+    return { symbol, direction: 'long', asset: 'USDT', positionSide: anchor.positionSide, openedAt: opening.at,
+      quantity: formatQuantity(held, market.step), fills, ...(closedAt ? { closedAt } : {}) };
+  });
   return {
+    readCampaign,
     account: vi.fn(async () => ({ id: '12345', mode: 'hedge' as const })),
     market: vi.fn(async () => market),
     book: vi.fn(async () => '4.003'),
     check: vi.fn(async () => undefined),
-    order: vi.fn(async (_market, _mode, order: UsdtOrder, send: boolean) => {
-      if (send) orders.set(order.id, { id: String(++id), order });
+    order: vi.fn<UsdtExchange['order']>(async (_market, _mode, order, send) => {
+      if (send) orders.set(order.id, { id: String(++id), order, at: Date.now() });
       const saved = orders.get(order.id);
       if (!saved) return;
       return { exchangeId: saved.id, terminal: true, fills: [{
         id: saved.id, quantity: quantityUnits(order.quantity, market.step), price: Number(order.limitPrice ?? 4.003),
-        at: Date.now(), commission: .02, commissionAsset: 'USDT', realized: order.side === 'SELL' ? .5 : 0,
+        at: saved.at, commission: .02, commissionAsset: 'USDT', realized: order.side === 'SELL' ? .5 : 0,
       }] };
     }),
-  } satisfies UsdtExchange;
+  } satisfies UsdtExchange & { readCampaign: typeof readCampaign };
 }
 
 it('接手币安手动首仓后用冻结卖出条件，按实际部分成交续算，重启后平掉实际余仓', async () => {
@@ -153,7 +173,8 @@ it('continues the frozen monitor from the real quantity and realized PnL after a
 });
 
 it('按方案的 U 本位名义额下首仓，使用逐笔成交跟随镜像、加仓、手动减仓和清仓', async () => {
-  const at = Date.now(), store = makeStore(file()), venue = exchange(), runner = createUsdtFollower(store, venue, owner, 'hedge', at);
+  const at = Date.now(), store = makeStore(file()), venue = exchange();
+  const runner = createUsdtFollower(store, venue, owner, 'hedge', at, venue.readCampaign);
   const open = campaign(at);
   runner.ingest([open], at);
   await runner.tick(at);
@@ -175,6 +196,7 @@ it('按方案的 U 本位名义额下首仓，使用逐笔成交跟随镜像、�
   ]);
   expect(runner.statuses()[0]).toMatchObject({ state: 'closed', quantity: 0, realizedUsdt: 2 });
   expect(runner.statuses()[0].executions).toHaveLength(6);
+  expect(venue.readCampaign).toHaveBeenCalledTimes(5);
 });
 
 it('确认超时只按原订单号对账，重启后也只发一次', async () => {
@@ -193,8 +215,66 @@ it('确认超时只按原订单号对账，重启后也只发一次', async () =
   expect(recovered.statuses()[0]).toMatchObject({ state: 'tracking', quantity: 24.981 });
 });
 
+it('核实原首仓后，买单回报不明仍可市价只减仓，重启继续按原单号对账', async () => {
+  const at = Date.now(), name = file(), venue = exchange();
+  const original = venue.order.getMockImplementation()!;
+  const signal = campaign(at);
+  const addId = usdtOrderId(owner, signal.id, 'add-1');
+  const closeId = usdtOrderId(owner, signal.id, 'close');
+  let canReadBuy = false, sentClose = false;
+  venue.order.mockImplementation(async (...args) => {
+    const [, , order, send] = args;
+    if (order.id === addId) return canReadBuy ? { terminal: true, fills: [] } : undefined;
+    const report = await original(...args);
+    if (order.id === closeId && send) { sentClose = true; return undefined; }
+    return report;
+  });
+  const runner = createUsdtFollower(makeStore(name), venue, owner, 'one-way', at, venue.readCampaign);
+  runner.ingest([signal], at);
+  await runner.tick(at);
+  const actions: UsdtFollowCampaign['actions'] = [...signal.actions, { id: 'add-1', action: 'add', at: at + 1000, notional: 50 }];
+  runner.ingest([{ ...signal, actions }], at + 1000);
+  await runner.tick(at + 1000);
+  runner.ingest([{ ...signal, actions: [...actions, { id: 'close', action: 'close', at: at + 5000 }] }], at + 5000);
+  await runner.tick(at + 5000);
+  expect(sentClose).toBe(true);
+  expect(venue.check).toHaveBeenLastCalledWith(market, 'one-way', 24981, 4.003, false, 0, undefined, undefined, addId);
+  expect(venue.order.mock.calls.find(([, , order]) => order.id === closeId)?.[2]).toMatchObject({ side: 'SELL', quantity: '24.981' });
+  const recovered = createUsdtFollower(makeStore(name), venue, owner, 'one-way', at + 6000, venue.readCampaign);
+  await recovered.tick(at + 6000);
+  expect(venue.order.mock.calls.at(-1)?.slice(2)).toEqual([expect.objectContaining({ id: closeId }), false]);
+  expect(recovered.statuses()[0]).toMatchObject({ state: 'blocked', quantity: 0, issue: expect.stringContaining('买单回报') });
+  canReadBuy = true;
+  await recovered.tick(at + 7000);
+  expect(venue.order.mock.calls.at(-1)?.slice(2)).toEqual([expect.objectContaining({ id: addId }), false]);
+  expect(recovered.statuses()[0]).toMatchObject({ state: 'closed', quantity: 0 });
+  expect(venue.order.mock.calls.filter(([, , order, send]) => send && order.id === addId)).toHaveLength(1);
+  expect(venue.order.mock.calls.filter(([, , order, send]) => send && order.side === 'SELL')).toHaveLength(1);
+});
+
+it.each(['add', 'close'] as const)('同价同量重开后，旧战役的 %s 操作停在首仓身份核对', async kind => {
+  const at = Date.now(), venue = exchange();
+  const reader = vi.fn(async (anchor: Parameters<typeof venue.readCampaign>[0]) => {
+    const old = await venue.readCampaign(anchor);
+    return { ...old, fills: [{ ...old.fills[0], orderId: '900', id: '901' }] };
+  });
+  const runner = createUsdtFollower(makeStore(file()), venue, owner, 'hedge', at, reader);
+  const open = campaign(at);
+  runner.ingest([open], at);
+  await runner.tick(at);
+  const action: UsdtFollowCampaign['actions'][number] = kind === 'add'
+    ? { id: 'add-1', at: at + 1000, action: 'add', notional: 25 }
+    : { id: 'close', at: at + 1000, action: 'close' };
+  runner.ingest([{ ...open, actions: [...open.actions, action] }], at + 1000);
+  await runner.tick(at + 1000);
+  expect(reader).toHaveBeenCalledOnce();
+  expect(venue.order).toHaveBeenCalledOnce();
+  expect(runner.statuses()[0]).toMatchObject({ state: 'blocked', issue: expect.stringContaining('另一笔首仓') });
+});
+
 it('排除历史开仓、非币安来源和重复输入，暂停后仍处理已持仓的退出', async () => {
-  const at = Date.now(), venue = exchange(), runner = createUsdtFollower(makeStore(file()), venue, owner, 'hedge', at);
+  const at = Date.now(), venue = exchange();
+  const runner = createUsdtFollower(makeStore(file()), venue, owner, 'hedge', at, venue.readCampaign);
   runner.ingest([campaign(at - 1)], at);
   expect(runner.statuses()).toEqual([]);
   runner.ingest([{ ...campaign(at, { symbol, exchange: 'okx' }), id: 'fish-instant-other' }], at);

@@ -139,7 +139,8 @@ export function serveUsdtFollower({
   const follower = createUsdtFollower(store, exchange, owner, mode, startedAt, readManaged, managedClock,
     controls?.protectionIds, controls ? positionReader?.positions : undefined);
   const tokenDigest = digest(token);
-  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),guardPlusAdditions:1,
+  const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
+    guardPlusAdditions: 1, executionSafety: 1,
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
     ...(readManaged ? { manualMonitor: 1 } : {}), ...(controls ? { positionControls: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {

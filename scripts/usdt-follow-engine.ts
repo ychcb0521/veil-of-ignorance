@@ -5,13 +5,14 @@ import { MANAGED_MINUTE, binanceManualId, type BinanceManualAnchor, type Binance
 import type { InstantMonitorSettings } from '../src/lib/fish/instantMonitorSettings.ts';
 import type { QualityResult } from '../src/lib/fish/quality.ts';
 import { usdtLiveCampaignId, type UsdtLiveCampaign } from '../src/lib/fish/usdtLiveCampaign.ts';
-import { createManagedUsdtLedger, mergeUsdtExitFills, settleManagedUsdtDecision, verifyManagedUsdtFills } from './usdt-managed-execution.ts';
+import { createManagedUsdtLedger, matchesManualAnchor, mergeUsdtExitFills, settleManagedUsdtDecision, verifyManagedUsdtFills } from './usdt-managed-execution.ts';
 import { calculateHoldingLedgerAddition, HOLDING_LEDGER_ADDITION_VERSION } from '../src/lib/fish/qualityHoldingLedger.ts';
 import type { UsdtMirrorSnapshot } from '../src/lib/fish/usdtPositionMirror.ts';
 
 const entryAgeMs = 120_000;
 const increaseAgeMs = 120_000;
 const positionTimeout = 45_000;
+const unsettledBuyIssue = '买单回报尚未核实，继续按原订单编号对账';
 const freshIncrease = (action:UsdtFollowAction, at:number) =>
   action.action==='add'&&action.impulseFreshUntil!==undefined
     ? action.at<=at&&at<action.impulseFreshUntil
@@ -182,6 +183,13 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
 
   function reconcileExit(row: UsdtCampaignLedger, actual: UsdtLiveCampaign, market: UsdtMarket) {
     const next = structuredClone(row);
+    const pendingBuy = Object.values(next.orders).some(order => order.side === 'BUY' && !order.terminal);
+    if (pendingBuy) {
+      const known = new Set(Object.values(next.orders).flatMap(order => (order.fills ?? []).map(fill => fill.id)));
+      if (actual.fills.some(fill => fill.side === 'BUY' && !known.has(fill.id))) {
+        throw Error('币安有尚未归属的买入成交，等待核对实盘余仓');
+      }
+    }
     const fills = mergeUsdtExitFills(next, actual, market, true);
     if (!fills.length && !actual.closedAt) return false;
     const held = syncBalance(next, market);
@@ -204,17 +212,32 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
         }
       }
     }
-    next.status.state = actual.closedAt ? 'closed' : 'tracking';
-    next.status.issue = undefined;
+    next.status.state = pendingBuy ? 'blocked' : actual.closedAt ? 'closed' : 'tracking';
+    next.status.issue = pendingBuy ? unsettledBuyIssue : undefined;
     write(next);
     return true;
+  }
+
+  async function readOriginalPosition(row: UsdtCampaignLedger, market: UsdtMarket) {
+    const open = row.orders.open;
+    const first = [...(open?.fills ?? [])].sort((a, b) =>
+      a.at - b.at || a.id.length - b.id.length || a.id.localeCompare(b.id))[0];
+    const anchor = row.managed?.anchor ?? (open?.exchangeId && first ? {
+      symbol: market.symbol, positionSide: mode === 'hedge' ? 'LONG' as const : 'BOTH' as const,
+      openedAt: first.at, openingTradeId: first.id, openingOrderId: open.exchangeId,
+    } : undefined);
+    if (!anchor || !readManaged) throw Error('缺少可核对的币安首仓成交，暂缓实盘操作');
+    const actual = await readManaged(anchor);
+    if (!matchesManualAnchor(anchor, actual)) throw Error('币安仓位已换成另一笔首仓，暂缓实盘操作');
+    return actual;
   }
 
   async function step(row: UsdtCampaignLedger, now: number) {
     if (row.status.state === 'closed' || row.status.state === 'ignored') return;
     const { campaign } = row;
     const opened = row.orders.open;
-    const existing = Object.entries(row.orders).find(([,order]) => !order.terminal);
+    const outstanding = Object.entries(row.orders).filter(([,order]) => !order.terminal);
+    const existing = outstanding.find(([,order]) => order.side === 'SELL') ?? outstanding[0];
     const closing = row.managed
       ? row.managed.pending?.action.action === 'close' ? row.managed.pending.action : undefined
       : campaign.actions.find(action => action.action === 'close');
@@ -232,12 +255,22 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       return write(row);
     }
     let current = syncBalance(row, market);
+    let unsettledBuyId: string | undefined;
     if (existing) {
       const [key, order] = existing;
-      const report = await exchange.order(market, mode, order, false);
-      if (!report) throw Error('币安订单回报未齐，正在按原编号核对');
-      applyReport(row, key, market, report);
-      return;
+      const canCheckExit = closing && order.side === 'BUY' && order.limitPrice && current.held > 0;
+      const report = await exchange.order(market, mode, order, false).catch(error => {
+        if (!canCheckExit) throw error;
+        return undefined;
+      });
+      if (report) applyReport(row, key, market, report);
+      if (report?.terminal) return;
+      if (!canCheckExit) {
+        if (!report) throw Error(order.side === 'BUY' ? unsettledBuyIssue : '币安订单回报未齐，正在按原编号核对');
+        return;
+      }
+      unsettledBuyId = order.id;
+      current = syncBalance(row, market);
     }
     if (row.managed) {
       if (!readManaged) throw Error('当前执行器无法核对手动托管仓位');
@@ -270,9 +303,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       const position = snapshot.positions.find(item => item.symbol === market.symbol && item.positionSide === positionSide && item.direction === 'long');
       if (!position || quantityUnits(position.quantity, market.step) !== current.held ||
         Math.abs(Number(position.entryPrice) - current.entry) > Math.max(1e-8, current.entry * 1e-5)) {
-        const opening = opened.fills[0];
-        const actual = await readManaged({ symbol: market.symbol, positionSide, openedAt: opening.at,
-          openingTradeId: opening.id, openingOrderId: opened.exchangeId });
+        const actual = await readOriginalPosition(row, market);
         if (reconcileExit(row, actual, market)) return;
       }
     }
@@ -281,7 +312,8 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       if (!current.initial) row.status.issue ||= '首仓未成交';
       return write(row);
     }
-    let action: UsdtFollowAction | undefined = campaign.actions.find(event => !row.orders[event.id] && !row.skipped.includes(event.id));
+    let action: UsdtFollowAction | undefined = unsettledBuyId ? closing
+      : campaign.actions.find(event => !row.orders[event.id] && !row.skipped.includes(event.id));
     if (closing && current.held && action?.action !== 'close') {
       // If the position is already closing, replaying missed buys or partial exits could add risk.
       row.skipped.push(...campaign.actions.filter(event => event.action !== 'close' && !row.orders[event.id] && !row.skipped.includes(event.id)).map(event => event.id));
@@ -342,7 +374,12 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     const liveLeverage = readPositions && liveId ? store.positionLeverage(liveId)?.leverage : undefined;
     await exchange.check(market, mode, current.held, current.entry, action.action === 'open',
       side === 'BUY' ? liveLeverage ?? campaign.leverage : 0,
-      row.managed ? 'existing-position' : undefined, opened ? protectionIds?.(market.symbol) : undefined);
+      row.managed ? 'existing-position' : undefined, opened ? protectionIds?.(market.symbol) : undefined, unsettledBuyId);
+    if (action.action !== 'open') {
+      const actual = await readOriginalPosition(row, market);
+      if (row !== rows.get(campaign.id) || reconcileExit(row, actual, market)) return;
+      if (quantityUnits(actual.quantity, market.step) !== current.held) throw Error('币安首仓已核实，实际余仓仍待对账');
+    }
     const readyAt=Date.now();
     if (side === 'BUY' && (!accepting || readyAt - lastContactAt > positionTimeout || !freshIncrease(action,row.managed ? managedClock() : readyAt)
       || (row.managed ? row.managed.pending?.action.action === 'close' : row.campaign.actions.some(event => event.action === 'close')))) return;
@@ -360,7 +397,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       ...(side === 'BUY' ? { limitPrice: book } : {}) };
     row.orders[key] = order;
     row.status.state = 'waiting';
-    row.status.issue = undefined;
+    row.status.issue = unsettledBuyId ? unsettledBuyIssue : undefined;
     write(row); // Durable before POST. An ambiguous POST is only ever queried by this same ID.
     const report = await exchange.order(market, mode, order, true);
     if (!report) throw Error('币安订单回报未齐，正在按原编号核对');
@@ -377,9 +414,10 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     row.orders[key] = next;
     try {
       const held = syncBalance(row, market);
-      row.status.state = report.terminal ? held.held ? 'tracking' : held.initial ? 'closed' : 'ignored' : 'waiting';
+      const pendingBuy = Object.values(row.orders).some(order => order.side === 'BUY' && !order.terminal);
+      row.status.state = report.terminal ? pendingBuy ? 'blocked' : held.held ? 'tracking' : held.initial ? 'closed' : 'ignored' : 'waiting';
       row.status.orderId = report.exchangeId;
-      row.status.issue = report.issue ?? (report.terminal && report.fills.reduce((sum, fill) => sum + fill.quantity, 0)
+      row.status.issue = pendingBuy && report.terminal ? unsettledBuyIssue : report.issue ?? (report.terminal && report.fills.reduce((sum, fill) => sum + fill.quantity, 0)
         < quantityUnits(previous.quantity, market.step) ? '订单部分成交，余仓按币安回报跟踪' : undefined);
       settleManagedUsdtDecision(row, key, market, held);
       if (row.managed?.pending?.kind === 'close' && report.terminal && !report.fills.length) {

@@ -25,7 +25,8 @@ const percent = (value: number) => Number.isFinite(value) && value > 0 && value 
 
 type Algo = UsdtProtectionOrder & { clientId?: string };
 type Step = { method: 'POST' | 'DELETE'; path: string; params: Record<string, string>;
-  state?: 'sent' | 'done' | 'failed'; sentAt?: number; issue?: string; filledQuantity?: string; retired?: boolean };
+  replacementId?: string; state?: 'sent' | 'done' | 'failed'; sentAt?: number;
+  issue?: string; filledQuantity?: string; retired?: boolean };
 type Stored = { id: string; target: UsdtPositionTarget; fingerprint: string; steps: Step[]; checkedRevision?: string };
 type Store = ReturnType<typeof openUsdtFollowStore>;
 const isDone = (step: Step) => step.state === 'done';
@@ -133,6 +134,12 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
   };
   const matchedOrder = (row: any, step: Step) => row?.symbol === step.params.symbol && row?.side === step.params.side &&
     row?.positionSide === step.params.positionSide;
+  const protectionMatches = (row: any, step: Step) => matchedOrder(row, step) && row.clientAlgoId === step.params.clientAlgoId &&
+    (row.orderType ?? row.type) === step.params.type && Number(row.triggerPrice) === Number(step.params.triggerPrice) &&
+    row.workingType === step.params.workingType && (step.params.closePosition === 'true'
+      ? row.closePosition === true
+      : row.closePosition !== true && Number(row.quantity) === Number(step.params.quantity) &&
+        (step.params.reduceOnly !== 'true' || row.reduceOnly === true));
 
   async function accept(step: Step, response: any) {
     if (step.path === orderPath) {
@@ -146,12 +153,11 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
       }
     } else if (step.method === 'DELETE' && numberId.test(String(response?.algoId)) && String(response.algoId) === step.params.algoId) {
       step.state = 'done';
-    } else if (step.path === algoPath && matchedOrder(response, step) && response.clientAlgoId === step.params.clientAlgoId &&
-      (response.orderType ?? response.type) === step.params.type && Number(response.triggerPrice) === Number(step.params.triggerPrice)) {
-      step.state = 'done';
-      if (['CANCELED', 'EXPIRED', 'REJECTED'].includes(response.algoStatus)) {
-        step.retired = true;
-        step.issue = '币安条件单已撤销、失效或被拒绝';
+    } else if (step.path === algoPath && protectionMatches(response, step)) {
+      if (response.algoStatus === 'NEW') step.state = 'done';
+      else if (['CANCELED', 'EXPIRED', 'REJECTED', 'TRIGGERING', 'TRIGGERED', 'FINISHED'].includes(response.algoStatus)) {
+        step.state = 'failed';
+        step.issue = '币安未确认新保护单仍在挂单中';
       }
     } else if (step.path === leveragePath && response?.symbol === step.params.symbol && Number(response.leverage) === Number(step.params.leverage)) {
       step.state = 'done';
@@ -234,28 +240,50 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
             if (!(mark > 0) || ((position.direction === 'long') === (kind === 'tp') ? value <= mark : value >= mark))
               throw Error('触发价与当前币安标记价格方向不符');
             if (!market.priceTick || !quantityUnits(String(value), market.priceTick)) throw Error('触发价与币安价格步长不符');
-            for (const order of existing.filter(order => order.kind === kind)) {
-              steps.push({ method: 'DELETE', path: algoPath, params: { symbol: position.symbol, algoId: order.id } });
-            }
+            const replacementId = usdtOrderId(owner, target.campaignId, id + kind);
             steps.push({ method: 'POST', path: algoPath, params: { ...base, ...size, algoType: 'CONDITIONAL',
               type: kind === 'tp' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET', workingType: 'MARK_PRICE',
-              triggerPrice: String(value), clientAlgoId: usdtOrderId(owner, target.campaignId, id + kind) } });
+              triggerPrice: String(value), clientAlgoId: replacementId } });
+            for (const order of existing.filter(order => order.kind === kind)) {
+              steps.push({ method: 'DELETE', path: algoPath, replacementId, params: { symbol: position.symbol, algoId: order.id } });
+            }
           }
         }
       }
       row = { id, target, fingerprint, steps };
       save(row);
     }
+    await advance(row, action.kind === 'protect');
+    const pending = row.steps.some(step => step.state === 'sent');
+    return { pending, issue: row.steps.find(step => step.issue)?.issue, filledQuantity: row.steps.find(step => step.path === orderPath)?.filledQuantity };
+  }
+
+  async function advance(row: Stored, protecting: boolean, onlyReplacement = false) {
     for (const step of row.steps) {
       if (step.state === 'failed') break;
       if (step.state === 'done') continue;
       if (step.state === 'sent') {
+        if (onlyReplacement) break;
         await recover(step);
       } else {
+        if (onlyReplacement && !step.replacementId) break;
         // A resumed multi-step request must still target the original, verified current position.
         try {
-          const current = (await risk(row.target.symbol)).find(position => matchingLeg(position, row.target));
-          if (!current || usdtMirrorRevision(current) !== row.target.revision) throw Error('实盘仓位已变化，剩余操作未提交');
+          if (protecting && step.method === 'DELETE' && !step.replacementId) throw Error('旧版替换请求已停止，请重新确认止盈止损');
+          await freshTarget(row.target);
+          if (step.replacementId) {
+            const replacement = row.steps.find(candidate => candidate.params.clientAlgoId === step.replacementId);
+            const orders = await rawOrders(row.target.symbol);
+            if (!Array.isArray(orders) || !replacement || !isDone(replacement) || !orders.some(order =>
+              order.algoStatus === 'NEW' && protectionMatches(order, replacement))) {
+              throw Error('币安未确认新保护单，未发送旧单撤销请求');
+            }
+            if (!orders.some(order => String(order.algoId) === step.params.algoId)) {
+              step.state = 'done';
+              save(row);
+              continue;
+            }
+          }
         } catch (error) {
           step.state = 'failed';
           step.issue = error instanceof Error ? error.message : '无法核对当前实盘仓位';
@@ -280,8 +308,6 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
       save(row);
       if (!isDone(step)) break;
     }
-    const pending = row.steps.some(step => step.state === 'sent');
-    return { pending, issue: row.steps.find(step => step.issue)?.issue, filledQuantity: row.steps.find(step => step.path === orderPath)?.filledQuantity };
   }
 
   async function cleanup() {
@@ -290,6 +316,7 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
     for (const row of rows) {
       const awaiting = row.steps.filter(step => step.state === 'sent');
       for (const step of awaiting) await recover(step);
+      if (row.steps.some(step => step.replacementId && !step.state)) await advance(row, true, true);
       const linked = row.steps.filter(step => step.method === 'POST' && step.path === algoPath && step.state === 'done' && !step.retired);
       if (linked.length) {
         const active = await rawOrders(row.target.symbol);
