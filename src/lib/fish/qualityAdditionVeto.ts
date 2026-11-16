@@ -3,7 +3,7 @@
  * 新 C 出现也不加——ONTUSDT 第 3 次、STRKUSDT 第 2、3 次加仓都加在这类形态之后，扫损成了必然。
  * 只看加仓那一刻已收盘的 5 分钟 K 线；ATR 为 5 分钟 ATR(14)（Wilder，与加仓 K 同一序列）。任一条成立即这次不加，继续等下一个新 C。
  */
-import { DBL5_GUARD_DEFAULTS, DBL5_GUARD_VERSION, DBL5_VERSION, dbl5ConfigHash, dbl5GuardVersion, dbl5Parameters, withDbl5GuardVersion, type Dbl5Config, type Dbl5GuardVersion } from '../dbl5m';
+import { DBL5_GUARD_DEFAULTS, DBL5_GUARD_VERSION, DBL5_PROFILES, dbl5ConfigHash, dbl5GuardVersion, dbl5Parameters, withDbl5GuardVersion, type Dbl5Config, type Dbl5GuardVersion } from '../dbl5m';
 import { DBL5_MARKET_RULE_VERSION } from '../dbl5mMarketRules';
 import { DOUBLE_DROP_VERSION, doubleDropState } from './qualityDoubleDrop';
 import {ENTRY_STALL_TURN_5M_VERSION,PULLBACK_NEW_HIGH_5M_VERSION,defaultEntryStallTurn5m,validateEntryStallTurn5m} from './preEntryStallTurn5m';
@@ -12,16 +12,17 @@ export const LOWER_WICK_VETO_VERSION = 'addition-lower-wick-v1' as const;
 export const VETO_HISTORY_VERSION = 'addition-veto-history-v1' as const;
 export type AdditionEntryVetoKind = 'upper-wick' | 'lower-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop' | 'double-drop' | 'stall-turn' | 'pullback-new-high' | 'guard-distance';
 export const GUARD_DISTANCE_VETO_VERSION = 'guard-distance-veto-v1' as const;
+export const GUARD_DISTANCE_1H_VETO_VERSION='guard-distance-1h-v1' as const;
 export interface GuardDistanceConfig {
-  version: typeof GUARD_DISTANCE_VETO_VERSION;
-  boxVersion: typeof DBL5_VERSION;
+  version: typeof GUARD_DISTANCE_VETO_VERSION | typeof GUARD_DISTANCE_1H_VETO_VERSION;
+  boxVersion: typeof DBL5_PROFILES['5m'|'1h']['version'];
   guardVersion: Dbl5GuardVersion;
   parameters: Dbl5Config;
 }
-export function guardDistanceConfig(version: Dbl5GuardVersion = DBL5_GUARD_VERSION, previous?: Dbl5Config): GuardDistanceConfig {
+export function guardDistanceConfig(version: Dbl5GuardVersion = DBL5_GUARD_VERSION, previous?: Dbl5Config, timeframe:'5m'|'1h'=previous?.timeframe==='1h'?'1h':'5m'): GuardDistanceConfig {
   const { guard_trend_atr, guard_range_atr, guard_range_closes } = DBL5_GUARD_DEFAULTS;
-  const parameters = dbl5Parameters(withDbl5GuardVersion({ guard_trend_atr, guard_range_atr, guard_range_closes, ...previous }, version));
-  return { version: GUARD_DISTANCE_VETO_VERSION, boxVersion: DBL5_VERSION, guardVersion: version, parameters };
+  const parameters = dbl5Parameters(withDbl5GuardVersion({ guard_trend_atr, guard_range_atr, guard_range_closes, ...previous, ...(timeframe==='1h'?{timeframe}:{}) }, version));
+  return { version: timeframe==='1h'?GUARD_DISTANCE_1H_VETO_VERSION:GUARD_DISTANCE_VETO_VERSION, boxVersion: DBL5_PROFILES[timeframe].version, guardVersion: version, parameters };
 }
 export const isFiveMinuteShapeVeto=(v:Pick<QualityAdditionEntryVeto,'kind'>)=>v.kind==='stall-turn'||v.kind==='pullback-new-high';
 /** 持仓期间急跌：任意 minutes 分钟内跌幅 ≥ pct%（与硬性终止「N 分钟内跌幅」同口径：窗口首根开盘 → 末根收盘）。 */
@@ -98,8 +99,10 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
     if (v.kind === 'guard-distance') {
       if (v.atr == null || !Number.isFinite(v.atr) || v.atr <= 0) throw Error('距 DBL-5 防守线过远：ATR 倍数须为大于 0 的有限数字');
       const config = v.guardDistance;
-      if (v.historyHours != null || config?.version !== GUARD_DISTANCE_VETO_VERSION || config.boxVersion !== DBL5_VERSION
-        || !config.parameters || config.parameters.timeframe !== '5m'
+      const timeframe=config?.parameters?.timeframe;
+      if (v.historyHours != null || !config || (timeframe!=='5m'&&timeframe!=='1h')
+        || config.version !== (timeframe==='1h'?GUARD_DISTANCE_1H_VETO_VERSION:GUARD_DISTANCE_VETO_VERSION)
+        || config.boxVersion!==DBL5_PROFILES[timeframe].version
         || ![config.parameters.n, config.parameters.window_minutes, config.parameters.guard_trend_atr,
           config.parameters.guard_range_atr, config.parameters.guard_range_closes].every(Number.isFinite)) {
         throw Error('距 DBL-5 防守线过远：缺少可执行的冻结版本或参数');

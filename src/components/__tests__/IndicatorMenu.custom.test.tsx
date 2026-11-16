@@ -12,7 +12,7 @@ const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DBL5_GUARD_PLUS', 'DBL5_DISTANCE', 'DBL5_WIDTH', 'DBL5_AGE', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DBL5_1H', 'DBL5_GUARD_PLUS', 'DBL5_DISTANCE', 'DBL5_WIDTH', 'DBL5_AGE', 'DBL5_1H_DISTANCE', 'DBL5_1H_WIDTH', 'DBL5_1H_AGE', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
@@ -30,7 +30,7 @@ describe('自制区的十个特征值', () => {
   it('offers both 1115 components individually beside the combination and legacy DBL-5', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5',period:3,enabled:true},{type:'DBL5_GUARD_PLUS',period:3,enabled:true}]} onClose={()=>{}} onIndicatorsChange={changed}/>);
-    expect(screen.getByText('DBL-5-防守线-0')).toBeInTheDocument();
+    expect(screen.getByText('DBL-5-5mins')).toBeInTheDocument();
     expect(screen.getByText('DBL-5-防守线+急拉线-1115')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'急拉线-1115'}});
     fireEvent.click(screen.getByText('DBL-5-急拉线-1115'));
@@ -38,7 +38,7 @@ describe('自制区的十个特征值', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'防守线-1115'}});
     fireEvent.click(screen.getByText('DBL-5-防守线-1115'));
     expect(changed.mock.lastCall?.[0].map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5','DBL5_GUARD_PLUS',GUARD_1115_CHART_ID]);
-    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5).shortName).toBe('DBL-5-防守线-0');
+    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5).shortName).toBe('DBL-5-5mins');
     expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).shortName).toBe('DBL-5-防守线+急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).shortName).toBe('DBL-5-急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).figures.map((figure:{key:string})=>figure.key)).toEqual(['value']);

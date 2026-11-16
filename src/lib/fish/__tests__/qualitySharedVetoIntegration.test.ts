@@ -16,9 +16,11 @@ const def={id:'shared-audit',name:'审计价格',short:'价格',definition:'',fo
 const snapshot={featureId:def.id,definitionKey:definitionKey(def),statistic:'raw',interval:'1m',scale:1,threshold:90,direction:'>' as const,average:100,cbi2:100,startAverage:100,previousAverage:99,cutoffMs:T};
 const signal={id:'audit',symbol:'AUDITUSDT',timeMs:T,timeLabel:'',fallbackZone:'',fish:snapshot};
 const row:QualitySample={id:'audit',enteredAt:T,basis:'signal',importedAt:T,groups:[],source:signal};
-const structureBars = new Map(dblBars().map((bar,i)=>[T+(i-14)*F,{...bar,openTime:T+(i-14)*F,volume:1}]));
+const structureAt=(step:number)=>new Map(dblBars().map((bar,i)=>[T+(i-14)*step,{...bar,openTime:T+(i-14)*step,volume:1}]));
+const structureBars=structureAt(F),hourlyStructure=structureAt(60*M);
 function fixture(kind:AdditionEntryVetoKind):FishReconstructionLoader{return async(_r,from,to,p)=>Array.from({length:(to-from)/p.step},(_,i)=>{
  const at=from+i*p.step;let open=100,close=100,high=101,low=99;
+ if(p.step===60*M&&kind==='guard-distance')return hourlyStructure.get(at)??{openTime:at,open,close,high,low,volume:1,takerBuyVolume:.5,DBL5_tick_size:1};
  if(p.step===F){
   if(kind==='guard-distance')return structureBars.get(at)??{openTime:at,open,close,high,low,volume:1,takerBuyVolume:.5,DBL5_tick_size:1};
   if(kind==='volatility'){open=close=100+(Math.abs(at/F)%2);high=close+1;low=close-1;}
@@ -41,8 +43,9 @@ function fixture(kind:AdditionEntryVetoKind):FishReconstructionLoader{return asy
  if(kind==='fast-drop'&&p.step===M&&at===T-10*M){open=120;high=120;close=100;}
  return {openTime:at,open,close,high,low,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50};
 });}
-for(const lane of ['primary','attack'] as const)for(const kind of ADDITION_VETO_KINDS)it(lane+' '+kind+' vetoes the real holding addition and screening gate while preserving the saved template',async()=>{
- const rule={...ADDITION_VETO_DEFAULTS[kind],enabled:true,...(kind==='guard-distance'?{atr:.5,guardDistance:guardDistanceConfig()}:{historyHours:6})};
+const cases=[...ADDITION_VETO_KINDS.map(kind=>({kind,timeframe:'5m' as const})),{kind:'guard-distance' as const,timeframe:'1h' as const}];
+for(const lane of ['primary','attack'] as const)for(const {kind,timeframe} of cases)it(lane+' '+kind+' '+timeframe+' vetoes the real holding addition and screening gate while preserving the saved template',async()=>{
+ const rule={...ADDITION_VETO_DEFAULTS[kind],enabled:true,...(kind==='guard-distance'?{atr:.5,guardDistance:guardDistanceConfig(undefined,undefined,timeframe)}:{historyHours:6})};
  const base:QualityGroup={id:'g',label:'原始资产',metric:'raw',snapshot,execution:'intrabar-1m',mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},rule:{metric:'raw',direction:'<',threshold:0},addition:{...defaultQualityAddition(),maxRounds:1,enabled:true,source:'custom',condition:{id:'add',label:'价格',metric:'raw',direction:'>',threshold:90,enabled:true,snapshot},entryVetoes:[rule]}};
  if(lane==='attack'){const attack={source:'custom' as const,stricterPct:10,condition:base.addition!.condition,entryVetoes:[rule]};base.addition={...base.addition!,entryVetoes:[],rounds:[{...attack,condition:{...attack.condition!,threshold:1000},entryVetoes:[]}],alternativeRounds:[attack],attackFromRound:1};}
  const plan=freezeQualityPlan(base),saved=saveQualityPlanTemplate(newQualityStudy(T),plan,'资产-'+kind,T),original=JSON.stringify(saved.planTemplates),copy=qualityPlanFromTemplate({...saved.planTemplates![0],plan:saved.planTemplates![0].plan!},'独立副本');

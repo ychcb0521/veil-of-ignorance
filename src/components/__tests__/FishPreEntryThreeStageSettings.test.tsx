@@ -309,7 +309,7 @@ it('saves and restores three independent switches in a new copy, including all t
 
 it('saves and reopens the independent DBL-5 distance switch, fractional threshold and guard version',()=>{
  const f=setup(),before=structuredClone(f.plan);
- const checkbox='启用入选前否决 距 DBL-5 防守线过远',atr='距 DBL-5 防守线过远 ATR倍数',version='距 DBL-5 防守线过远 防守线版本';
+ const checkbox='启用入选前否决 距 DBL-5-5mins 防守线过远',atr='距 DBL-5-5mins 防守线过远 ATR倍数',version='距 DBL-5-5mins 防守线过远 防守线版本';
  expect(within(screen.getByTestId('three-stage-second')).getByLabelText(checkbox)).not.toBeChecked();
  fireEvent.click(screen.getByLabelText(checkbox));
  fireEvent.change(screen.getByLabelText(atr),{target:{value:'0'}});

@@ -1,7 +1,7 @@
 import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
 import {Dbl5GuardDefinition} from './Dbl5GuardDefinition';
 import {ATI6H_DEFAULTS} from '@/lib/ati6h';
-import {DBL5_ID,DBL5_DEFAULTS,dbl5GuardVersion,dbl5Parameters,withDbl5GuardVersion} from '@/lib/dbl5m';
+import {dbl5ProfileForFeature,dbl5Defaults,dbl5GuardVersion,dbl5Parameters,withDbl5GuardVersion} from '@/lib/dbl5m';
 import {Dbl5GuardVersionSelect} from '@/components/Dbl5GuardVersionSelect';
 import {SBS5M_DEFAULTS,SBS5M_PARAMETER_SPECS,sbsParameters} from '@/lib/sbs5m';
 import {prsParameters,PRS6H_DEFAULTS} from '@/lib/prs6h';
@@ -56,7 +56,7 @@ function DefinitionImageParameters({def}:{def:DeepDigFeatureDef}) {
   const saved=Object.fromEntries(Object.entries(def).filter(([key])=>/^(DBL5_|SBS5M_|PRS6H_|ATI6H_|MBI_|MBI2_)/.test(key)||['researchWindowHours','chartCore','btcFreeSourceId','retentionVersion','focusVersion'].includes(key)));
   const template=featureTemplateId(def);
   const complete={...parameters,...saved,
-    ...(template===DBL5_ID?{DBL5_config:{...DBL5_DEFAULTS,...def.DBL5_config}}:{}),
+    ...(dbl5ProfileForFeature(template)?{DBL5_config:{...dbl5Defaults(dbl5ProfileForFeature(template)?.timeframe),...def.DBL5_config}}:{}),
     ...(template==='sbs_5m'?{SBS5M_config:{...SBS5M_DEFAULTS,...def.SBS5M_config}}:{}),
     ...(template==='prs6h'?{PRS6H_config:{...PRS6H_DEFAULTS,...def.PRS6H_config}}:{}),
     ...(template==='ati6h'?{ATI6H_parameters:{...ATI6H_DEFAULTS,HALF_LIFE_HOURS:halfLifeOf(def),...def.ATI6H_parameters,WEIGHTS:{...ATI6H_DEFAULTS.WEIGHTS,...def.ATI6H_parameters?.WEIGHTS}},ATI6H_volume_mode:def.ATI6H_volume_mode??'taker',ATI6H_dependency:ati6hDependencyOf(def)}:{})};
@@ -73,15 +73,15 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
           <Pencil className="h-3 w-3" />编辑定义
         </button>
       </div>
-      {def.chartTemplate===DBL5_ID&&<DblResearchScope def={def} samples={samples} onChange={patch=>onSave({...def,...patch})}/>}
+      {dbl5ProfileForFeature(def.chartTemplate)&&<DblResearchScope def={def} samples={samples} onChange={patch=>onSave({...def,...patch})}/>}
       {def.chartTemplate==='sbs_5m'&&<SbsResearchSymbol def={def} samples={samples} onChange={v=>onSave({...def,SBS5M_research_symbol:v})}/>}
       {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.definition}</p>}
-      {featureTemplateId(def)===DBL5_ID&&<Dbl5GuardDefinition config={def.DBL5_config}/>}
+      {dbl5ProfileForFeature(featureTemplateId(def))&&<Dbl5GuardDefinition config={def.DBL5_config} timeframe={dbl5ProfileForFeature(featureTemplateId(def))?.timeframe}/>}
       <div className="grid max-w-[720px] grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
-        {def.chartTemplate===DBL5_ID?<details><summary className="cursor-pointer py-1 text-muted-foreground">输出字段与布尔事件变量</summary><FormulaEditor def={def} onSave={onSave}/></details>:<FormulaEditor def={def} onSave={onSave} />}
+        {dbl5ProfileForFeature(def.chartTemplate)?<details><summary className="cursor-pointer py-1 text-muted-foreground">输出字段与布尔事件变量</summary><FormulaEditor def={def} onSave={onSave}/></details>:<FormulaEditor def={def} onSave={onSave} />}
         <span className="pt-1 text-muted-foreground">参数</span>
-        {def.chartTemplate===DBL5_ID?<span className="py-1 text-muted-foreground">固定5m · n={def.DBL5_config?.n??3} · 几何证据 {def.DBL5_config?.window_minutes??360} 分钟</span>:def.chartTemplate==='sbs_5m'?<span className="py-1 text-muted-foreground">固定5m已收盘 · 有效期 {def.SBS5M_config?.active_box_max_age??6} 小时 · 编辑定义可调整完整结构参数</span>:<KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />}
+        {dbl5ProfileForFeature(def.chartTemplate)?<span className="py-1 text-muted-foreground">固定{dbl5ProfileForFeature(def.chartTemplate)?.timeframe} · n={def.DBL5_config?.n??3} · 几何证据 {def.DBL5_config?.window_minutes??dbl5Defaults(dbl5ProfileForFeature(def.chartTemplate)?.timeframe).window_minutes} 分钟</span>:def.chartTemplate==='sbs_5m'?<span className="py-1 text-muted-foreground">固定5m已收盘 · 有效期 {def.SBS5M_config?.active_box_max_age??6} 小时 · 编辑定义可调整完整结构参数</span>:<KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />}
         <span data-settings-image-skip="" className="pt-px text-muted-foreground">分组</span>
         <div data-settings-image-skip=""><GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" /></div>
         <span className="text-muted-foreground">显示</span>
@@ -95,7 +95,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
 function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, samples }: DefinitionPanelProps) {
   const [draft, setDraft] = useState<DeepDigFeatureDef>(def);
   const [prsText,setPrsText]=useState(()=>JSON.stringify(def.PRS6H_config??PRS6H_DEFAULTS,null,2)),[prsError,setPrsError]=useState('');
-  const [dblText,setDblText]=useState(()=>JSON.stringify(def.DBL5_config??DBL5_DEFAULTS,null,2)),[dblError,setDblError]=useState('');
+  const [dblText,setDblText]=useState(()=>JSON.stringify(def.DBL5_config??dbl5Defaults(dbl5ProfileForFeature(def.chartTemplate)?.timeframe),null,2)),[dblError,setDblError]=useState('');
   const [sbsText,setSbsText]=useState(()=>JSON.stringify(def.SBS5M_config??SBS5M_DEFAULTS,null,2)),[sbsError,setSbsError]=useState('');
   const [scaleText, setScaleText] = useState(String(def.scale));
   const [tried, setTried] = useState(false);
@@ -124,7 +124,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           <input value={draft.short} onChange={e => set('short', e.target.value)} className={cn(INPUT, 'w-[72px]')} placeholder="简称" aria-label="简称" title="简称：表头与规律里用" />
         </div>
       </div>
-      {draft.chartTemplate===DBL5_ID&&<DblResearchScope def={draft} samples={samples} onChange={patch=>setDraft(d=>({...d,...patch}))}/>}
+      {dbl5ProfileForFeature(draft.chartTemplate)&&<DblResearchScope def={draft} samples={samples} onChange={patch=>setDraft(d=>({...d,...patch}))}/>}
       {draft.chartTemplate==='sbs_5m'&&<SbsResearchSymbol def={draft} samples={samples} onChange={v=>set('SBS5M_research_symbol',v)}/>}
       {tried && !draft.name.trim() && <div className={cn('pl-[64px]', RED)}>名称不能为空</div>}
       <div className="flex gap-2">
@@ -152,20 +152,20 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
           {help && <FormulaHelp />}
         </div>
       </div>
-      {featureTemplateId(draft)===DBL5_ID&&<>
+      {dbl5ProfileForFeature(featureTemplateId(draft))&&<>
         <Dbl5GuardVersionSelect value={dbl5GuardVersion(draft.DBL5_config)} disabled={!!dblError} onChange={version=>{
           const config=withDbl5GuardVersion(draft.DBL5_config,version);
           set('DBL5_config',config);
           setDblText(JSON.stringify(config,null,2));
         }}/>
-        <Dbl5GuardDefinition config={draft.DBL5_config}/>
+        <Dbl5GuardDefinition config={draft.DBL5_config} timeframe={dbl5ProfileForFeature(featureTemplateId(draft))?.timeframe}/>
       </>}
       <div className="flex gap-2">
         <span className={label}>参数</span>
-        {draft.chartTemplate===DBL5_ID&&<details className="min-w-0 flex-1 text-xs" open><summary className="cursor-pointer">DBL-5 参数 · 研究初值</summary><textarea aria-label="DBL5 参数配置" value={dblText} rows={5} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setDblText(e.target.value);try{const p=JSON.parse(e.target.value);dbl5Parameters(p);set('DBL5_config',p);setDblError('');}catch(error){setDblError(error instanceof Error?error.message:'参数JSON无效');}}}/>{dblError&&<p role="alert" className={RED}>{dblError}</p>}<p className="mt-2 text-muted-foreground">timeframe 固定5m。n为回看及确认根数；window_minutes 为几何证据年龄，20–10080分钟且为5的倍数。须满足2n+1&lt;W；默认360分钟时n为1–35。到期从origin_time计算，触底不续期。</p></details>}
+        {dbl5ProfileForFeature(draft.chartTemplate)&&<details className="min-w-0 flex-1 text-xs" open><summary className="cursor-pointer">DBL-5 参数 · 研究初值</summary><textarea aria-label="DBL5 参数配置" value={dblText} rows={5} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setDblText(e.target.value);try{const p=JSON.parse(e.target.value);const config=dbl5Parameters(p);if(config.timeframe!==dbl5ProfileForFeature(draft.chartTemplate)?.timeframe)throw Error('周期须与所选 DBL-5 版本一致');set('DBL5_config',p);setDblError('');}catch(error){setDblError(error instanceof Error?error.message:'参数JSON无效');}}}/>{dblError&&<p role="alert" className={RED}>{dblError}</p>}<p className="mt-2 text-muted-foreground">周期固定为 {dbl5ProfileForFeature(draft.chartTemplate)?.periodLabel}。n 为回看及确认根数；window_minutes 为几何证据年龄，须为周期分钟数的整数倍，并满足 2n+1 小于窗口根数。默认窗口为 72 根。到期从origin_time计算，触底不续期。</p></details>}
         {draft.chartTemplate==='sbs_5m'&&<details className="min-w-0 flex-1 text-xs"><summary className="cursor-pointer">SBS-5M 参数（研究初值 · 固定5m）</summary><textarea aria-label="SBS5M 参数配置" value={sbsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setSbsText(e.target.value);try{const next=JSON.parse(e.target.value);sbsParameters(next);set('SBS5M_config',next);setSbsError('');}catch(error){setSbsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{sbsError&&<p role="alert" className={RED}>{sbsError}</p>}<p className="my-2 text-muted-foreground">volume_mode：quote（报价币成交额）或 base_times_close（基础币量×收盘价），不能逐根切换。有效期从 confirmed_at 计时。修改配置后需重新运行。</p><div className="max-h-56 overflow-auto rounded border border-border/50 p-2">{SBS5M_PARAMETER_SPECS.map(p=><p key={p.key} className="mb-2"><code>{p.key}</code> · {p.label} · {p.min}–{p.max} {p.unit}<br/><span className="text-muted-foreground">{p.description}</span></p>)}</div></details>}
         {draft.chartTemplate==='prs6h'&&<details className="mb-3 text-xs"><summary className="cursor-pointer">PRS-6H 参数（研究初值）</summary><textarea aria-label="PRS6H 参数配置" value={prsText} rows={12} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setPrsText(e.target.value);try{const next=JSON.parse(e.target.value);prsParameters(next);set('PRS6H_config',next);setPrsError('');}catch(error){setPrsError(error instanceof Error?error.message:'参数JSON无效');}}}/>{prsError&&<p role="alert" className={RED}>{prsError}</p>}<p className="text-muted-foreground">volumeMode 可选 quote / flow / base_close_proxy，默认 quote；模式、参数和状态检查点独立，改变参数后需重算。</p></details>}
-        {draft.chartTemplate!==DBL5_ID&&draft.chartTemplate!=='sbs_5m'&&<KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />}
+        {!dbl5ProfileForFeature(draft.chartTemplate)&&draft.chartTemplate!=='sbs_5m'&&<KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />}
       </div>
       <div className="flex gap-2">
         <span className={label}>显示</span>
@@ -192,7 +192,7 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
         <button type="button" className={cn(BTN, 'border-foreground/30 font-medium')} onClick={save} data-testid="deep-dig-def-save">保存</button>
         <button type="button" className={BTN} onClick={() => onEditingChange(false)}>取消</button>
         {onReset && modifiedFromDefault && builtin && (
-          <button type="button" className={BTN} data-testid="deep-dig-def-reset" onClick={() => { setDraft({ ...builtin }); setScaleText(String(builtin.scale)); if(builtin.chartTemplate===DBL5_ID){setDblText(JSON.stringify(builtin.DBL5_config??DBL5_DEFAULTS,null,2));setDblError('');} if(builtin.chartTemplate==='sbs_5m'){setSbsText(JSON.stringify(builtin.SBS5M_config??SBS5M_DEFAULTS,null,2));setSbsError('');} }}>
+          <button type="button" className={BTN} data-testid="deep-dig-def-reset" onClick={() => { setDraft({ ...builtin }); setScaleText(String(builtin.scale)); if(dbl5ProfileForFeature(builtin.chartTemplate)){setDblText(JSON.stringify(builtin.DBL5_config??dbl5Defaults(dbl5ProfileForFeature(builtin.chartTemplate)?.timeframe),null,2));setDblError('');} if(builtin.chartTemplate==='sbs_5m'){setSbsText(JSON.stringify(builtin.SBS5M_config??SBS5M_DEFAULTS,null,2));setSbsError('');} }}>
             <RotateCcw className="h-3 w-3" />填回默认
           </button>
         )}
@@ -603,6 +603,7 @@ function SbsResearchSymbol({def,samples,onChange}:{def:DeepDigFeatureDef;samples
 function DblResearchScope({def,samples,onChange}:{def:DeepDigFeatureDef;samples:DefinitionPanelProps['samples'];onChange:(patch:Partial<DeepDigFeatureDef>)=>void}){
  const rows=samples[def.source??'campaigns'],symbols=[...new Set((rows??[]).filter(r=>!r.excluded&&!r.unsupportedReason).map(r=>r.symbol))].sort(),[error,setError]=useState('');
  if(def.DBL5_research_symbol&&!symbols.includes(def.DBL5_research_symbol))symbols.unshift(def.DBL5_research_symbol);
+ const period=dbl5ProfileForFeature(def.chartTemplate),step=(period?.minutes??5)*60;
  const start=def.DBL5_initialization_start,value=start===undefined?'':new Date(start+8*3600000).toISOString().slice(0,16);
- return <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11.5px]"><label className="flex items-center gap-2"><span className="text-muted-foreground">研究标的</span><select aria-label="DBL5 研究标的" className={INPUT} value={def.DBL5_research_symbol??''} onChange={e=>onChange({DBL5_research_symbol:e.target.value||undefined})}><option value="">{(def.DBL5_dimension??'price')==='price'?'请选择单一品种':'全部品种'}</option>{symbols.map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label><details className="text-[10.5px] text-muted-foreground"><summary className="cursor-pointer">回放起点</summary><label className="mt-2 flex flex-wrap items-center gap-2">UTC+8<input aria-label="DBL5 回放起点" type="datetime-local" step="300" value={value} className={INPUT} onChange={e=>{const t=e.target.value?Date.parse(e.target.value+'+08:00'):undefined;if(t!==undefined&&(!Number.isSafeInteger(t)||t%300000!==0)){setError('请选择对齐5分钟的时刻');return;}setError('');onChange({DBL5_initialization_start:t});}}/></label>{error&&<p role="alert">{error}</p>}<p className="mt-1 max-w-sm">留空按本次完整计算数据起点初始化。明确起点或检查点才能复现状态；最近72根不等于全部状态历史。</p></details></div>;
+ return <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11.5px]"><label className="flex items-center gap-2"><span className="text-muted-foreground">研究标的</span><select aria-label="DBL5 研究标的" className={INPUT} value={def.DBL5_research_symbol??''} onChange={e=>onChange({DBL5_research_symbol:e.target.value||undefined})}><option value="">{(def.DBL5_dimension??'price')==='price'?'请选择单一品种':'全部品种'}</option>{symbols.map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label><details className="text-[10.5px] text-muted-foreground"><summary className="cursor-pointer">回放起点</summary><label className="mt-2 flex flex-wrap items-center gap-2">UTC+8<input aria-label="DBL5 回放起点" type="datetime-local" step={step} value={value} className={INPUT} onChange={e=>{const t=e.target.value?Date.parse(e.target.value+'+08:00'):undefined;if(t!==undefined&&(!Number.isSafeInteger(t)||t%(step*1000)!==0)){setError('请选择对齐'+(period?.periodLabel??'5 分钟')+'的时刻');return;}setError('');onChange({DBL5_initialization_start:t});}}/></label>{error&&<p role="alert">{error}</p>}<p className="mt-1 max-w-sm">留空按本次完整计算数据起点初始化。明确起点或检查点才能复现状态；最近72根不等于全部状态历史。</p></details></div>;
 }

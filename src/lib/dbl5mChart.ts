@@ -102,6 +102,7 @@ function registerGuardPlusIndicator(item:ResearchIndicator){
 export function registerDbl5Indicator(item:ResearchIndicator){
  if(item.core==='DBL5P'||item.id===GUARD_1115_CHART_ID){registerGuardPlusIndicator(item);return;}
  const price=!!item.priceOverlay;
+ const period=item.id.startsWith('DBL5_1H')||item.templateId?.startsWith('DBL5_1H')?'1h':'5m';
  const originalCombined=item.id===GUARD_PLUS_0_CHART_ID;
  registerIndicator<Record<string,number>>({name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:price?12:2,
   figures:[
@@ -194,7 +195,7 @@ export function registerDbl5Indicator(item:ResearchIndicator){
       }
     }
     const visible=indicator.result.slice(Math.max(0,visibleRange.from),Math.min(indicator.result.length,visibleRange.to));
-    if(visible.length&&!visible.some(r=>Number.isFinite(r?.value))){const last=visible.at(-1),text=last?._pending?'正在准备5m历史行情…':last?._DBL5_invalid===1?'行情或历史价格精度不可验证':last?._DBL5_warmup===1?'连续5m行情预热中':'当前可见范围暂无已确认箱体';ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText(item.short+' · '+text,8,40);}
+    if(visible.length&&!visible.some(r=>Number.isFinite(r?.value))){const last=visible.at(-1),text=last?._pending?`正在准备${period}历史行情…`:last?._DBL5_invalid===1?'行情或历史价格精度不可验证':last?._DBL5_warmup===1?`连续${period}行情预热中`:'当前可见范围暂无已确认箱体';ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText(item.short+' · '+text,8,40);}
     ctx.restore();
     if(originalCombined)drawImpulse5mReference(params,row=>({value:row.impulse5mValue,confirmedAt:row.impulse5mConfirmedAt}));
     return true;
@@ -202,7 +203,7 @@ export function registerDbl5Indicator(item:ResearchIndicator){
   createTooltipDataSource:({indicator,crosshair,defaultStyles})=>{
     // Crosshair candle at open t can only read a completed result <= t.
     const index=crosshair?.dataIndex,previous=index===undefined?indicator.result.length-1:index-1,row=indicator.result[previous],n=(v:number)=>Number.isFinite(v)?Number(v.toPrecision(12)).toString():'—';
-    const type=row?row._pending?'正在准备5m历史行情':row._DBL5_invalid===1?'行情或历史价格精度不可验证':row._DBL5_warmup===1?'连续行情预热中':row._DBL5_nested===1?'内部箱底抬高':row._DBL5_up_step===1?'完整上移':row._DBL5_same_floor===1?'同底新箱':row._DBL5_baseline===1?'基准箱':'无有效箱体':'尚无已确认结果';
+    const type=row?row._pending?`正在准备${period}历史行情`:row._DBL5_invalid===1?'行情或历史价格精度不可验证':row._DBL5_warmup===1?'连续行情预热中':row._DBL5_nested===1?'内部箱底抬高':row._DBL5_up_step===1?'完整上移':row._DBL5_same_floor===1?'同底新箱':row._DBL5_baseline===1?'基准箱':'无有效箱体':'尚无已确认结果';
     const values = [{title:price?'下轨: ':item.short+': ',value:n(row?.value)}];
     if(price) {
       const regime = Number.isFinite(row?._DBL5_guard)

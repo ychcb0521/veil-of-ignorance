@@ -46,7 +46,7 @@ function additionRows(fills: readonly QualityAdditionFill[], entryPrice?: number
       p8(S), p8(K), p8(atr), atr && T ? r(atr / T * 100, 4) : null,
       atr && S != null ? r((T - S) / atr, 4) : null, atr && K != null ? r((T - K) / atr, 4) : null, K != null ? r((1 - K / T) * 100, 4) : null,
       z?.requiredBufferAtr ?? null, z?.supportOffsetAtr ?? null,
-      (ev ? `${additionStructureEvidenceLabel(ev.algorithm)} · 支撑 C ${p8(ev.supportPrice)} · K 基准 ${p8(ev.basePrice)}${z?.guardK != null ? ` · 防守线 ${p8(z.guardK)}` : ''}` : '指标 · S / T / K')+(z?.positionK!=null?` · 定量 F ${p8(z.support)}`:''),
+      (ev ? `${additionStructureEvidenceLabel(ev)} · 支撑 C ${p8(ev.supportPrice)} · K 基准 ${p8(ev.basePrice)}${z?.guardK != null ? ` · 防守线 ${p8(z.guardK)}` : ''}` : '指标 · S / T / K')+(z?.positionK!=null?` · 定量 F ${p8(z.support)}`:''),
       p8(f.quantity), r(f.notional, 4), r(invested, 4), p8(z?.coinsBefore), p8(z?.realAverageBefore), r(z?.mirrorAvailableBefore, 4), r(z?.mirrorUsed, 4),
       f.priceGate ? `${f.priceGate.basis === 'real-average' ? '相对持仓均价' : '相对成本线 S'} ${p8(f.priceGate.referencePrice)}：涨 ${r(f.priceGate.gainPct)}%（要求 ≥ ${f.priceGate.thresholdPct}%）` : '',
       f.label ? `${f.label} ${f.direction} ${f.threshold}（读数 ${p8(f.reading)}）` : '',

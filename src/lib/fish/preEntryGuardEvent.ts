@@ -7,7 +7,6 @@ import { qualityHistoryFrom } from './qualityInitialization';
 import { validateFishBars } from './shared';
 import { stableEntryJson, type PreEntryThreeStage } from './preEntryThreeStage';
 
-const FIVE=300000;
 export interface EntryGuardEvent {
   id:string; at:number; kind:'first'|'rebuild'|'raise'|'lower'|'type-change';
   price:number; regime:'trend'|'range'; previousPrice:number|null; previousRegime:'trend'|'range'|null;
@@ -32,17 +31,18 @@ export function nativeGuardEvent(previous:Dbl5Row|undefined, row:Dbl5Row, scanSt
 type NativeGuardOptions = {row:TradeSignal;start:number;load:FishReconstructionLoader;signal:AbortSignal};
 export function createNativeGuardReader(o:NativeGuardOptions,def:DeepDigFeatureDef,availableStart?:number) {
   const plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
-  const warmStart=Math.floor(o.start/FIVE)*FIVE-Math.ceil(featureWindowMs(def)/FIVE)*FIVE;
-  const from=qualityHistoryFrom(o.load,Math.max(warmStart,Number.isFinite(availableStart)?Math.ceil(availableStart!/FIVE)*FIVE:-Infinity),FIVE);
+  const step=plan.step;
+  const warmStart=Math.floor(o.start/step)*step-Math.ceil(featureWindowMs(def)/step)*step;
+  const from=qualityHistoryFrom(o.load,Math.max(warmStart,Number.isFinite(availableStart)?Math.ceil(availableStart!/step)*step:-Infinity),step);
   if(from<0)throw Error('三阶防守线初始化历史不足');
   let cursor=from,checkpoint:Dbl5Checkpoint|undefined,previous:Dbl5Row|undefined;
   return async(at:number):Promise<{event?:EntryGuardEvent;row?:Dbl5Row;broken:boolean}>=>{
     let event:EntryGuardEvent|undefined,broken=false;
-    const cut=Math.floor(at/FIVE)*FIVE;
+    const cut=Math.floor(at/step)*step;
     while(cursor<cut){
       if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
-      const to=Math.min(cut,cursor+500*FIVE),bars=await o.load(o.row,cursor,to,plan,o.signal);
-      validateFishBars(bars,to,(to-cursor)/FIVE,FIVE);
+      const to=Math.min(cut,cursor+500*step),bars=await o.load(o.row,cursor,to,plan,o.signal);
+      validateFishBars(bars,to,(to-cursor)/step,step);
       const out=evaluateOnBars(bars,plan.compiled,{...def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:from,DBL5_initialization_id:'entry-guard:'+from,DBL5_checkpoint:checkpoint});
       const rows=out.DBL5_details;
       if(!rows||rows.length!==bars.length)throw Error('三阶防守线缺少原生结构读数');

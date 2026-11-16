@@ -987,7 +987,7 @@ export const SBS5M_DIMENSIONS:DeepDigFeatureDef[]=[
 ].map(d=>({...SBS5M_DEF,id:d.id,name:d.name,short:d.short,chartCore:d.core,SBS5M_dimension:d.dimension as DeepDigFeatureDef['SBS5M_dimension'],unit:d.unit,
  formula:'# sbs-5m-v1 · normalized dimension; no pooled absolute prices\n'+['SBS5M_support_quality','SBS5M_distance_to_support','SBS5M_step_height_atr','SBS5M_step_event_height'].filter(n=>n!==d.core).map(n=>`${n} = SBS5M_raw_${n.slice(6)}`).join('\n')+`\n${d.core} = SBS5M_raw_${d.core.slice(6)}`}));
 
-export const DBL5_DEF:DeepDigFeatureDef={id:DBL5_ID,name:'DBL-5｜达瓦斯箱体下轨',short:'DBL-5',builtin:true,chartTemplate:DBL5_ID,chartCore:'DBL5',interval:'5m',researchWindowHours:6,scale:1,unit:'价格',source:'campaigns',groupVars:2,positive:DEFAULT_POSITIVE,control:DEFAULT_CONTROL,DBL5_dimension:'price',
+export const DBL5_DEF:DeepDigFeatureDef={id:DBL5_ID,name:'DBL-5-5mins｜达瓦斯箱体下轨',short:'DBL-5-5mins',builtin:true,chartTemplate:DBL5_ID,chartCore:'DBL5',interval:'5m',researchWindowHours:6,scale:1,unit:'价格',source:'campaigns',groupVars:2,positive:DEFAULT_POSITIVE,control:DEFAULT_CONTROL,DBL5_dimension:'price',
  definition:'已收盘5分钟达瓦斯箱体工程改编，默认n=3、几何证据窗口360分钟。局部新高后独立观察箱底；上下边界等待完成才发布并冻结。相邻所选箱体分为基准、完整上移、内部箱底抬高和同底新箱。最低价严格低于当前下轨即破坏，触及不破坏；到期从局部新高依赖的最早K线计时，缺口重置。确认箱底不等于后续回踩已验证。主值有价格单位，请选单品种研究；跨品种使用基点或年龄维度。参数尚未实证拟合，不涉及真实止损、仓位或执行。',
  formula:'# dbl-5-v2 · exact tick structure, available only after full confirmation\n'+DBL5_FIELDS.filter(n=>n!=='DBL5').map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+'\nDBL5 = DBL5_raw_value'};
 // Alternate native periods for holding exits use the original formula inputs.
@@ -1011,12 +1011,21 @@ export const DBL5_GUARD_PLUS_DEF: DeepDigFeatureDef = {
     [...DBL5_GUARD_PLUS_NUMERIC.slice(1), 'DBL5P'].map(name => `${name} = ${guardPlusInput(name)}`).join('\n'),
 };
 export const DBL5_DIMENSIONS:DeepDigFeatureDef[]=[
- {id:'darvas_5m_distance_bps',name:'DBL-5｜距下轨基点',short:'DBL·距离',core:'DBL5_distance_bps',dimension:'distance',unit:'bp'},
- {id:'darvas_5m_width_bps',name:'DBL-5｜箱宽基点',short:'DBL·箱宽',core:'DBL5_width_bps',dimension:'width',unit:'bp'},
- {id:'darvas_5m_age_minutes',name:'DBL-5｜确认年龄',short:'DBL·年龄',core:'DBL5_age_minutes',dimension:'age',unit:'分钟'},
+ {id:'darvas_5m_distance_bps',name:'DBL-5-5mins｜距下轨基点',short:'DBL·距离',core:'DBL5_distance_bps',dimension:'distance',unit:'bp'},
+ {id:'darvas_5m_width_bps',name:'DBL-5-5mins｜箱宽基点',short:'DBL·箱宽',core:'DBL5_width_bps',dimension:'width',unit:'bp'},
+ {id:'darvas_5m_age_minutes',name:'DBL-5-5mins｜确认年龄',short:'DBL·年龄',core:'DBL5_age_minutes',dimension:'age',unit:'分钟'},
 ].map(d=>({...DBL5_DEF,id:d.id,name:d.name,short:d.short,chartCore:d.core,DBL5_dimension:d.dimension as DeepDigFeatureDef['DBL5_dimension'],unit:d.unit,
  formula:'# dbl-5-v2 · derived units and boolean event flags, no absolute price pooling\n'+DBL5_FIELDS.filter(n=>n!=='DBL5'&&n!=='DBL5_upper'&&n!==d.core).map(n=>`${n} = DBL5_raw_${n.slice(5)}`).join('\n')+`\n${d.core} = DBL5_raw_${d.core.slice(5)}`}));
 
+export const DBL5_HOURLY_FEATURES:readonly DeepDigFeatureDef[]=[
+  dbl5VariantDefinition('1h'),
+  ...DBL5_DIMENSIONS.map(d=>({
+    ...dbl5VariantDefinition('1h'),
+    id:d.id.replace('_5m_','_1h_'),name:d.name.replace('DBL-5-5mins','DBL-5-1h'),
+    short:d.short.replace('DBL·','DBL-5-1h·'), chartCore:d.chartCore,unit:d.unit,
+    DBL5_dimension:d.DBL5_dimension,formula:d.formula.replace(DBL5_VERSION,DBL5_PROFILES['1h'].version),
+  })),
+];
 const ORIGINAL_BUILTIN_FEATURES:readonly DeepDigFeatureDef[]=[DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, MBI2_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF, MBI2_BEAR_DEF, CTBA_12H_BEAR_DEF, ...SELLER_RETENTION_FEATURES, ATI6H_DEF, PRS6H_DEF, SBS5M_DEF, ...SBS5M_DIMENSIONS, DBL5_DEF, ...DBL5_DIMENSIONS];
 export const SELLER_FOCUS_CREATED_AT=Date.parse('2026-10-30T06:03:46Z');
 /** Clone first, then transform only the copy's temporal operators. Never refer back at evaluation time. */
@@ -1064,7 +1073,7 @@ export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEAT
     .join('\n'),
 }));
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, DBL5_GUARD_PLUS_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -1154,6 +1163,10 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
   const legacyZNames = new Set(['买方推力漂移速度 DSP·az（Z 分数）', ['买方推力的加速度', ' az（Z 分数）'].join('')]);
   const legacyZDefinition = '与买方推力漂移速度 DSP·a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。';
   return [...builtins, ...custom].map(def => {
+    if (def.id===DBL5_ID) return {...def,
+      short:def.short==='DBL-5'?DBL5_DEF.short:def.short,
+      name:def.name==='DBL-5｜达瓦斯箱体下轨'?DBL5_DEF.name:def.name,
+    };
     if (def.id === SELLER_CONTROL_DEF.id) return { ...def, short: SELLER_CONTROL_DEF.short };
     if (def.id === DRIFT_SPEED_DEF.id) return { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short };
     if (def.id === DRIFT_SPEED_Z_DEF.id) return { ...def,
@@ -1548,9 +1561,12 @@ export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive
   return {
     formula: msg(() => {
       const compiled = compileFeatureFormula(d.formula), template=featureTemplateId(d);
-      if(template===DBL5_ID||compiled.usesDbl5GuardPlus){
-        dbl5Parameters(d.DBL5_config);
-        if(d.DBL5_initialization_start!==undefined&&(!Number.isSafeInteger(d.DBL5_initialization_start)||d.DBL5_initialization_start%300000!==0))throw Error('DBL-5 回放起点须对齐5m');
+      const dbl5=dbl5ProfileForFeature(template);
+      if(dbl5||compiled.usesDbl5GuardPlus){
+        const config=dbl5Parameters(d.DBL5_config);
+        const timeframe=dbl5?.timeframe??'5m';
+        if(config.timeframe!==timeframe)throw Error('DBL-5 参数周期须与版本一致');
+        if(d.DBL5_initialization_start!==undefined&&(!Number.isSafeInteger(d.DBL5_initialization_start)||d.DBL5_initialization_start%dbl5Step(timeframe)!==0))throw Error('DBL-5 回放起点须对齐'+timeframe);
       }
       if(compiled.usesDbl5GuardPlus&&(intervalOf(d)!=='5m'||dbl5GuardVersion(d.DBL5_config)!==DBL5_GUARD_VERSION)){
         throw Error('急拉-1115 需要已收盘 5m 数据及防守线 v1 基线');

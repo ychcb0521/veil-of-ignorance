@@ -1,3 +1,4 @@
+import { dbl5ProfileForFeature } from '@/lib/dbl5m';
 /** Hidden, symbol-isolated prehistory for chart indicator warmup. Never adds visible candles. */
 import type { KLineData } from 'klinecharts';
 import { fetchResearchKlines, RESEARCH_INTERVALS, intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
@@ -34,11 +35,11 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number, n
     // Collect every selected indicator's demand in this render before fetching.
     // Otherwise each larger window forces all formulas to restart once again.
     queueMicrotask(async()=>{try{do{const target=current.desiredFrom;
-      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval,['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(namespace??''));
+      const result=await fetchResearchKlines(symbol,target,to,undefined,undefined,interval,(!!dbl5ProfileForFeature(namespace)||['ati6h','prs6h','sbs_5m'].includes(namespace??'')));
       if(entries.get(key)!==current)return;
       current.from=target;
       current.bars=result.filter(b => b.openTime < to).map(b => ({ timestamp: b.openTime,
-        ...(['ati6h','prs6h','sbs_5m','darvas_5m_lower'].includes(namespace??'')?{researchSymbol:symbol}:{}), ...(b.DBL5_prices?{DBL5_prices:b.DBL5_prices}:{}), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
+        ...((!!dbl5ProfileForFeature(namespace)||['ati6h','prs6h','sbs_5m'].includes(namespace??''))?{researchSymbol:symbol}:{}), ...(b.DBL5_prices?{DBL5_prices:b.DBL5_prices}:{}), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? Number.NaN,
         ...(b.quoteVolume != null ? { turnover: b.quoteVolume } : {}),
         ...(b.takerBuyQuoteVolume != null ? { takerBuyTurnover: b.takerBuyQuoteVolume } : {}),
       }));

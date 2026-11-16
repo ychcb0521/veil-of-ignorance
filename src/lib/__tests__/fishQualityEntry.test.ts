@@ -88,8 +88,10 @@ it('retains stored signal values through a failed retry or an old tab save and p
 it('adds versioned DBL-5 ATR distance only to signal readings and reads signed values at the original signal time', async () => {
   const choices = qualityFilterMenuChoices([],true);
   expect(choices.map(choice=>choice.label)).toEqual([
-    '距 DBL-5 防守线（ATR） · 防守线 v1',
-    '距 DBL-5 防守线（ATR） · 防守线-20261112',
+    '距 DBL-5-5mins 防守线（ATR） · 防守线 v1',
+    '距 DBL-5-5mins 防守线（ATR） · 防守线-20261112',
+    '距 DBL-5-1h 防守线（ATR） · 防守线 v1',
+    '距 DBL-5-1h 防守线（ATR） · 防守线-20261112',
   ]);
   expect(qualityFilterMenuChoices([])).toEqual([]);
   const [metric,retest] = makeQualitySignalMetrics(choices.map(choice=>choice.key),[]);

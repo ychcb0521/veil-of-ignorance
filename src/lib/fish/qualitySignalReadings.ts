@@ -3,9 +3,9 @@ import { signalDedupKey } from '@/lib/signalLibrary';
 import { shortFishHash } from './algorithm';
 import { qualitySignalTime } from './qualityAdmissionTime';
 import { readQualityMetricAt } from './qualityEntry';
-import { DBL5_DEF, definitionKey } from '../deepDig/features';
+import { definitionKey } from '../deepDig/features';
 import { dbl5GuardVersion, dbl5Parameters } from '../dbl5m';
-import { createGuardDistanceReader, guardDistanceSignalChoice } from './qualityGuardDistance';
+import { createGuardDistanceReader, guardDistanceDefinition, guardDistanceSignalChoice } from './qualityGuardDistance';
 import { qualityDefinition } from './quality';
 import type { FishQualityStudy, QualityBuyFilter, QualityFilterReading, QualityRunOptions, QualitySample } from './quality';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -57,7 +57,7 @@ export async function collectQualitySignalReadings(options: QualityRunOptions, l
         if (!Number.isFinite(time) || time <= 0) throw Error('缺少有效信号时间');
         if (Math.floor(time / 60_000) > Math.floor(now / 60_000)) throw Error('信号时刻尚未到达，不能提前读取');
         const saved = qualityDefinition(metric.snapshot).DBL5_config;
-        if (!saved || dbl5GuardVersion(saved) !== guard.version || definitionKey({...DBL5_DEF, DBL5_config:saved}) !== metric.snapshot.definitionKey) {
+        if (!saved || dbl5GuardVersion(saved) !== guard.version || saved.timeframe!==guard.timeframe || definitionKey(guardDistanceDefinition(dbl5Parameters(saved))) !== metric.snapshot.definitionKey) {
           throw Error('防守线距离的冻结版本或参数不符，请保留原读数');
         }
         const guardStart = metric.initialization ? availableStart : await options.marketStart?.(row.source.symbol);

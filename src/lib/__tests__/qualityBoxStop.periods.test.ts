@@ -128,5 +128,5 @@ it.each(DBL5_VARIANT_TIMEFRAMES)('freezes %s structure, guard and close confirma
   definition.DBL5_config=Object.fromEntries(Object.entries(definition.DBL5_config!).reverse());
   expect(planVersionChanges(restored)).toEqual([]);
   expect(plan.frozenVersions?.filter(v=>v.key.startsWith('hard-stop-box')).map(v=>v.name))
-    .toEqual([expect.stringContaining('DBL-5 防守线'),expect.stringContaining(DBL5_PROFILES[timeframe].label+' 防守线')]);
+    .toEqual([expect.stringContaining('DBL-5-5mins 防守线'),expect.stringContaining(DBL5_PROFILES[timeframe].label+' 防守线')]);
 });

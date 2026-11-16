@@ -49,7 +49,7 @@ export function InstantCampaignMetadataButtons({ campaign }: { campaign: TradeCa
       <MetadataButton label="持仓监测" icon={<Activity aria-hidden className="h-3.5 w-3.5"/>}>
         <p>{comparison.sellLabel}</p>
         <p>保证金 {instant.marginUsdt} USDT · {campaign.initial_leverage} 倍 · 名义仓位 {campaign.initial_main_size_usdt} USDT</p>
-        {(version === SCREENED_CDA_GUARD_RULE || version === SCREENED_PRICE_EXIT_RULE) && <p>DBL-5 防守线-20261112 · 5 分钟收盘确认 · 支持手动卖出</p>}
+        {(version === SCREENED_CDA_GUARD_RULE || version === SCREENED_PRICE_EXIT_RULE) && <p>DBL-5-5mins 防守线-20261112 · 5 分钟收盘确认 · 支持手动卖出</p>}
         {instant.sellEvidence && <p>本次卖出 {screenedSellReason({ at: comparison.valuedAt, evidence: instant.sellEvidence })}</p>}
         {instant.cdaValue != null && <p>CDA 确认读数 {instant.cdaValue}</p>}
       </MetadataButton>}

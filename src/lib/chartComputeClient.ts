@@ -1,3 +1,4 @@
+import { dbl5ProfileForFeature } from '@/lib/dbl5m';
 import {dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 import {Dbl5Engine} from '@/lib/dbl5m';
@@ -96,7 +97,7 @@ async function pump() {
   if (!packet || packet.byteLength < size * 8) packet = new ArrayBuffer(Math.max(8, 2 ** Math.ceil(Math.log2(Math.max(1, size)))) * 8);
   const values = new Float64Array(packet, 0, size);
   const template = featureTemplateId(r.def) ?? '';
-  const usesEvidenceVolume = ['ati6h', 'prs6h', 'sbs_5m', 'darvas_5m_lower'].includes(template);
+  const usesEvidenceVolume = !!dbl5ProfileForFeature(template)||['ati6h', 'prs6h', 'sbs_5m'].includes(template);
   const hideFormingAmounts = !!r.def.retentionSourceId || template === 'ctba' || usesEvidenceVolume;
   const hideFormingClose = hideFormingAmounts || featureUsesMbiFamily(r.def);
   const step = intervalMs(r.params.interval ?? '5m'), now = Date.now();

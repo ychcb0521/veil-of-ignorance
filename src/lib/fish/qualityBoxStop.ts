@@ -1,11 +1,11 @@
-import { evaluateOnBars, featureWindowMs, dbl5VariantDefinition, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { evaluateOnBars, featureWindowMs, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { advanceChartAtr, type ChartAtrState } from '@/lib/atr';
 import { compileFishProgram } from './algorithm';
 import { freezeStructureVersions, structureDbl5Timeframe, selectStructureGuardVersion } from './boxAlgorithmVersions';
-import { defaultStructureAddition, structureActiveBox, structureAdditionIdentity, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
+import { defaultStructureAddition, structureActiveBox, structureAdditionIdentity, selectStructureTimeframe, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { validateFishBars } from './shared';
-import { DBL5_PROFILES, dbl5Defaults, dbl5Parameters, type Dbl5Timeframe, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
+import { DBL5_PROFILES, dbl5Parameters, type Dbl5Timeframe, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
 import { sbsParameters, type SbsCheckpoint } from '@/lib/sbs5m';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -57,22 +57,16 @@ export function defaultBoxBreak(defs: readonly DeepDigFeatureDef[] = [], guardVe
 export function selectBoxStopTimeframe(rule:BoxStopRule, timeframe:Dbl5Timeframe, defs:readonly DeepDigFeatureDef[]=[]) {
   const oldTimeframe=structureDbl5Timeframe(rule.structure);
   if(rule.structure.algorithm!=='dbl5'||oldTimeframe===timeframe)return rule;
-  const definition=timeframe==='5m'?defaultStructureAddition('dbl5',defs).definition:dbl5VariantDefinition(timeframe);
-  const previous=rule.structure.definition.DBL5_config;
-  const windowBars=(previous?.window_minutes??dbl5Defaults(oldTimeframe).window_minutes)/DBL5_PROFILES[oldTimeframe].minutes;
-  const structure={
-    ...rule.structure,versions:undefined,
-    definition:{...definition,DBL5_config:{...previous,timeframe,window_minutes:windowBars*DBL5_PROFILES[timeframe].minutes}},
-  };
+  const structure=selectStructureTimeframe(rule.structure,timeframe,defs);
   const confirmation=rule.confirmation===`close-${oldTimeframe}` ? `close-${timeframe}` as const : rule.confirmation;
-  return {...rule,structure:freezeStructureVersions(structure),confirmation} satisfies BoxStopRule;
+  return {...rule,structure,confirmation} satisfies BoxStopRule;
 }
 export function boxStopAlgorithmLabel(rule:BoxStopRule) {
   return rule.structure.algorithm==='dbl5'?DBL5_PROFILES[structureDbl5Timeframe(rule.structure)].label:'SBS-5M';
 }
 export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule {
   if (!rule || ![BOX_STOP_VERSION,BOX_STOP_GUARD_REGIME_VERSION,BOX_BREAK_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
-  validateStructureAddition(rule.structure,true);
+  validateStructureAddition(rule.structure);
   const nativeConfirmation=`close-${structureDbl5Timeframe(rule.structure)}`;
   if (rule.version === BOX_STOP_GUARD_REGIME_VERSION) {
     if (rule.structure.algorithm !== 'dbl5' || rule.structure.kSource !== 'guard' || !['trend', 'range'].includes(rule.guardRegime ?? '')) {

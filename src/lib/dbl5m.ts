@@ -7,7 +7,7 @@ export const DBL5_VARIANT_TIMEFRAMES = ['1h','4h','15m'] as const;
 export type Dbl5VariantTimeframe = typeof DBL5_VARIANT_TIMEFRAMES[number];
 export type Dbl5Timeframe = '5m' | Dbl5VariantTimeframe;
 export const DBL5_PROFILES = {
-  '5m': { timeframe:'5m', id:DBL5_ID, version:DBL5_VERSION, label:'DBL-5', periodLabel:'5 分钟', minutes:5 },
+  '5m': { timeframe:'5m', id:DBL5_ID, version:DBL5_VERSION, label:'DBL-5-5mins', periodLabel:'5 分钟', minutes:5 },
   '1h': { timeframe:'1h', id:'darvas_1h_lower', version:'dbl-5-1h-v1', label:'DBL-5-1h', periodLabel:'1 小时', minutes:60 },
   '4h': { timeframe:'4h', id:'darvas_4h_lower', version:'dbl-5-4h-v1', label:'DBL-5-4h', periodLabel:'4 小时', minutes:240 },
   '15m': { timeframe:'15m', id:'darvas_15m_lower', version:'dbl-5-15m-v1', label:'DBL-5-15m', periodLabel:'15 分钟', minutes:15 },

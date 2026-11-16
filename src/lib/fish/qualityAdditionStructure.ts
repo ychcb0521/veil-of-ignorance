@@ -1,9 +1,9 @@
 import { qualityHistoryFrom } from './qualityInitialization';
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,dbl5VariantDefinition,DBL5_GUARD_PLUS_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
-import {assertStructureVersionsAvailable,CURRENT_GUARD_VERSION,structureDbl5Timeframe,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
+import {assertStructureVersionsAvailable,CURRENT_GUARD_VERSION,freezeStructureVersions,structureDbl5Timeframe,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
 import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL,IMPULSE_1115_POSITION_VERSION,dbl5GuardPlusParams,type Dbl5GuardPlusCheckpoint,type Dbl5GuardPlusRow,type Dbl5GuardPlusVersion} from '@/lib/dbl5GuardPlus';
-import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
+import {DBL5_PROFILES,dbl5Defaults,dbl5Parameters,type Dbl5Timeframe,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import {sbsParameters,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
 import {compileFishProgram} from './algorithm';
@@ -11,7 +11,7 @@ import {FishError,fishDelay,validateFishBars} from './shared';
 import type {QualityAdditionFill} from './qualityAddition';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
-const STEP=300000,MINUTE=60000;
+const MINUTE=60000;
 export interface StructureAdditionRule {
  algorithm:'dbl5'|'sbs5m';trigger:'raise'|'confirm'|'retest';kBasis:'support'|'invalidation';
  bufferUnit:'atr'|'percent';buffer:number;
@@ -38,6 +38,7 @@ export interface StructureAdditionEvidence {
  /** K 取 DBL-5 防守线时：加仓那一刻的防守线、行情状态，以及止损要连续几根 5 分钟收盘低于 K（冻结，之后不变）。 */
  guardPrice?:number;guardRegime?:'trend'|'range';guardCloses?:number;
  guardPlus?:Dbl5GuardPlusRow;
+ nativeAtr?:number;
  /** Set only when sizing accepts a fill; no subsequent candle can move this K. */
  bufferPrice?:number;k?:number;
  /** K 因「最小距离」被放宽时：原本按箱体算出的 K 与所用的最小距离 %。 */
@@ -71,7 +72,17 @@ export function defaultStructureAddition(algorithm:StructureAdditionRule['algori
  const definition=structuredClone(definitions.find(d=>d.id===builtin.id)??builtin);
  return {algorithm,trigger:'raise',kBasis:'support',bufferUnit:'atr',buffer:0,definition:{...definition,interval:'5m'}};
 }
-export function validateStructureAddition(rule?:StructureAdditionRule, allowDbl5Variants=false):asserts rule is StructureAdditionRule {
+export function selectStructureTimeframe(rule:StructureAdditionRule,timeframe:Dbl5Timeframe,defs:readonly DeepDigFeatureDef[]=[]):StructureAdditionRule {
+ const before=structureDbl5Timeframe(rule);
+ if(rule.algorithm!=='dbl5'||before===timeframe)return rule;
+ const previous=rule.definition.DBL5_config;
+ const definition=timeframe==='5m'?defaultStructureAddition('dbl5',defs).definition:dbl5VariantDefinition(timeframe);
+ const windowBars=(previous?.window_minutes??dbl5Defaults(before).window_minutes)/DBL5_PROFILES[before].minutes;
+ return freezeStructureVersions({...rule,versions:undefined,definition:{...definition,
+  DBL5_config:{...previous,timeframe,window_minutes:windowBars*DBL5_PROFILES[timeframe].minutes},
+ }});
+}
+export function validateStructureAddition(rule?:StructureAdditionRule):asserts rule is StructureAdditionRule {
  if(!rule||!['dbl5','sbs5m'].includes(rule.algorithm)||!['raise','confirm','retest'].includes(rule.trigger)||!['support','invalidation'].includes(rule.kBasis)||!['atr','percent'].includes(rule.bufferUnit))throw Error('箱体加仓算法或触发方式无效');
  if(rule.algorithm==='dbl5'&&(rule.trigger==='retest'||rule.kBasis==='invalidation'))throw Error('DBL-5 不提供独立回踩确认或算法失效线，请选择已确认下轨');
  if(rule.kSource!=null&&!['previous','current','guard'].includes(rule.kSource))throw Error('K 基准须为旧 C、新 C 或防守线');
@@ -79,7 +90,7 @@ export function validateStructureAddition(rule?:StructureAdditionRule, allowDbl5
  if(rule.guardTrendOnly!=null&&typeof rule.guardTrendOnly!=='boolean')throw Error('防守线类型须为「实线和虚线」或「只用实线」');
  if(!Number.isFinite(rule.buffer)||rule.buffer<0||rule.bufferUnit==='percent'&&rule.buffer>=100)throw Error('支撑冗余须为不小于 0 的有限数字；百分比须小于 100');
  if(rule.minDistancePct!=null&&(!Number.isFinite(rule.minDistancePct)||rule.minDistancePct<=0||rule.minDistancePct>=50))throw Error('K 最小距离须为大于 0、小于 50 的百分比');
- const def=rule.definition,timeframe=allowDbl5Variants?structureDbl5Timeframe(rule):'5m';
+ const def=rule.definition,timeframe=structureDbl5Timeframe(rule);
  const builtin=timeframe!=='5m'?dbl5VariantDefinition(timeframe):rule.algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
  if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!==builtin.interval||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
  if(rule.algorithm==='dbl5'){
@@ -102,8 +113,12 @@ export const guardTrendOnly=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendO
 /** K 基准的简称（标签、版本清单、导出共用）。 */
 export const structureKSourceLabel=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendOnly'>)=>r.kSource==='current'?'新C':r.kSource==='guard'?(guardTrendOnly(r)?'防守线（只用实线）':'防守线'):'旧C';
 export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${structureVersions(r).guard}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(guardTrendOnly(r)?['guard-trend-only-v1']:[]),...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[]),...(r.guardPlusVersion?[[r.guardPlusVersion,dbl5GuardPlusParams(r.guardPlusImpulseBufferAtr)]]:[])];
-export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
-export const additionStructureEvidenceLabel=(algorithm:StructureAdditionEvidence['algorithm'])=>algorithm==='impulse5m'?'急拉线 5m':structureAlgorithmLabel({algorithm});
+export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'> & Partial<Pick<StructureAdditionRule,'definition'>>)=>r.algorithm==='dbl5'?DBL5_PROFILES[r.definition?structureDbl5Timeframe({...r,definition:r.definition}):'5m'].label:'SBS-5M';
+export function additionStructureEvidenceLabel(evidence:Pick<StructureAdditionEvidence,'algorithm'|'algorithmVersion'>) {
+ if(evidence.algorithm==='impulse5m')return '急拉线 5m';
+ if(evidence.algorithm==='dbl5'&&evidence.algorithmVersion===DBL5_PROFILES['1h'].version)return DBL5_PROFILES['1h'].label;
+ return structureAlgorithmLabel({algorithm:evidence.algorithm});
+}
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
 export const structureAdditionLabel=(r:StructureAdditionRule)=>`${r.guardPlusVersion?DBL5_GUARD_PLUS_LABEL:structureVersionLabel(r)} · ${structureTriggerLabel(r)}${r.guardPlusVersion?'或首次急拉':''} · K＝${structureKSourceLabel(r)}${r.kBasis==='support'?'':'（失效线）'}−${r.buffer}${r.bufferUnit==='atr'?'ATR':'%'}${r.minDistancePct!=null?`（离现价 ≥ ${r.minDistancePct}%）`:''}`;
 /** Only selected, still-active confirmed structures may emit a decision. Pending boxes never qualify. */
@@ -115,7 +130,7 @@ export function structureAdditionSignal(rule:StructureAdditionRule,row:Dbl5Row|S
   const retest=rule.kSource==='guard'?r.darvas_5m_guard_retest:undefined;
   const events=retest?[retest]:r.events;
   const event=events.find(e=>allowed.includes(e.type)&&e.box_id===a.box_id&&e.at===r.at);if(!event)return;
-  return {algorithm:rule.algorithm,trigger:rule.trigger,event:retest?'GUARD_RETEST':event.type,eventId:event.id,boxId:a.box_id,episodeId:a.episode_id,at:r.at,confirmedAt:retest?retest.at:a.confirmed_at,supportPrice:a.D,upperPrice:a.U,nativeInvalidation:null,tickSize:a.tick_size,algorithmVersion:r.algorithm_version,definitionKey:definitionKey(rule.definition),parameters:r.effective_parameters,initializationStart,dataChecksum:r.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,basePrice:a.D,bufferUnit:rule.bufferUnit,buffer:rule.buffer};
+  return {algorithm:rule.algorithm,trigger:rule.trigger,event:retest?'GUARD_RETEST':event.type,eventId:event.id,boxId:a.box_id,episodeId:a.episode_id,at:r.at,confirmedAt:retest?retest.at:a.confirmed_at,supportPrice:a.D,upperPrice:a.U,nativeInvalidation:null,tickSize:a.tick_size,algorithmVersion:r.algorithm_version,definitionKey:definitionKey(rule.definition),parameters:r.effective_parameters,...(r.effective_parameters?.timeframe==='1h'&&r.darvas_5m_guard_atr!=null?{nativeAtr:r.darvas_5m_guard_atr}:{}),initializationStart,dataChecksum:r.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,basePrice:a.D,bufferUnit:rule.bufferUnit,buffer:rule.buffer};
  }
  const r=row as SbsRow,a=r.active;if(r.support_status!=='ACTIVE'||!a||r.at==null||a.confirmed_at==null)return;
  const allowed=rule.trigger==='raise'?['STEP_CONFIRMED']:rule.trigger==='confirm'?['BASELINE_CONFIRMED','STEP_CONFIRMED']:['RETEST_SUCCEEDED'];
@@ -167,7 +182,7 @@ function guardPlusEvidence(rule:StructureAdditionRule, base:Dbl5Row, plus:Dbl5Gu
 interface ReaderOptions {row:TradeSignal;entry:number;end:number;load:FishReconstructionLoader;signal:AbortSignal;liveAt?:number}
 /** Fixed entry-relative replay origin, sequential checkpoints across pages; resume replays the same origin. */
 /** 每根已收盘 5 分钟线上的支撑（箱体下轨 / 防守线），供「支撑线下移减仓」判断。 */
-export interface StructureSupportPoint {at:number;boxId:string|null;support:number|null;guard:number|null;close:number;guardPlus?:Dbl5GuardPlusRow}
+export interface StructureSupportPoint {at:number;boxId:string|null;support:number|null;guard:number|null;close:number;guardPlus?:Dbl5GuardPlusRow;nativeAtr?:number}
 /** 箱体事件没能成为加仓时机的原因：涨幅门槛未达、没有旧 C、防守线断开、只用实线时防守线是虚线。 */
 export type StructureSkip={at:number;support:number;reason:'gain'|'no-old-c'|'no-guard'|'guard-range'|'guard-retest';close?:number;referencePrice?:number;thresholdPct?:number};
 export type StructureSkipReporter=(skip:StructureSkip)=>void;
@@ -179,6 +194,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
   if(!reader){
    const def=rule.guardPlusVersion?{...DBL5_GUARD_PLUS_DEF,DBL5_config:rule.definition.DBL5_config}:rule.definition;
    const compiled=compileFeatureFormula(def.formula),plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
+   const STEP=plan.step;
    const from=qualityHistoryFrom(o.load,Math.floor(o.entry/STEP)*STEP-Math.ceil(featureWindowMs(def)/STEP)*STEP,STEP);
    if(from<0)throw Error('箱体加仓历史不足');
    let cursor=from,dbl:Dbl5Checkpoint|undefined,plusCheckpoint:Dbl5GuardPlusCheckpoint|undefined,sbs:SbsCheckpoint|undefined,lastBox:StructureActiveBox|undefined;
@@ -206,7 +222,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
       lastBox=box;
       if(row.at!=null&&row.at>o.entry){
        const guard=plus?plus.guard_plus_value:rule.algorithm==='dbl5'?(row as Dbl5Row).darvas_5m_guard??null:null;
-       supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard,close:closes.get(row.at)!,...(plus?{guardPlus:plus}:{})});
+       supportPoints.push({at:row.at,boxId:box?.boxId??null,support:box?(rule.kBasis==='invalidation'?box.invalidation:box.support):null,guard,close:closes.get(row.at)!,...(STEP===3_600_000&&(row as Dbl5Row).darvas_5m_guard_atr!=null?{nativeAtr:(row as Dbl5Row).darvas_5m_guard_atr!}:{}),...(plus?{guardPlus:plus}:{})});
       }
       if(raw&&!e&&raw.at>o.entry){
        const reason=rule.kSource!=='guard'?'no-old-c':rangeGuard?'guard-range':(row as Dbl5Row).darvas_5m_guard_waiting?'guard-retest':'no-guard';

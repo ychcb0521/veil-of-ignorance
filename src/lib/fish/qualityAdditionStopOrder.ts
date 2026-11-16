@@ -1,3 +1,4 @@
+import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {ADDITION_K_TOUCH_VERSION} from './qualityAddition';
 /**
  * 【用户要求】2026-11-02 持仓监测战役的「委托」里放进加仓所参考的支撑线 K：K 是加仓那一刻就挂上的保护整个仓位的卖出止损，
@@ -26,7 +27,7 @@ export function qualityAdditionStopOrders(leg: Pick<TradeJournal, 'quality_addit
   const evidence = campaign?.comparison?.sellEvidence, guard = fill.kStopVersion===ADDITION_K_TOUCH_VERSION?undefined:fill.structureEvidence?.guardCloses;
   const widened = fill.structureEvidence?.widenedFrom != null ? `；位置算出的 K ${fill.structureEvidence.widenedFrom} 离加仓价不足 ${fill.structureEvidence.minDistancePct}%，已放宽到此` : '';
   const label = fill.structureEvidence?.algorithm==='impulse5m' ? '急拉线 K' : fill.structureEvidence?.guardCloses ? '防守线 K' : '支撑线 K', floorText = (f?: number) => f != null ? `；保本底线 F ${+f.toPrecision(8)}：盘中碰到即按 F 卖出全部持仓（加仓量按 F 算）` : '';
-  const detail = (guard ? `5 分钟收盘连续 ${guard} 根低于 K 才卖出` : '价格碰到 K 即卖出全部持仓') + widened;
+  const detail = (guard ? `${fill.structureEvidence?.algorithmVersion===DBL5_PROFILES['1h'].version?'1 小时':'5 分钟'}收盘连续 ${guard} 根低于 K 才卖出` : '价格碰到 K 即卖出全部持仓') + widened;
   const fills = evidence?.additionFills ?? [], index = fills.findIndex(f => f.at === fill.at), next = index >= 0 ? fills[index + 1] : undefined;
   const moves = (evidence?.additionReductions ?? []).filter(r => r.at > fill.at && (!next || r.at < next.at) && r.newK > 0 && Number.isFinite(r.newK));
   const chain: Omit<AdditionStopOrder, 'status' | 'endedAt'>[] = [{ price: K, placedAt: fill.at, label, detail: detail + floorText(F), ...(F != null ? { floor: F } : {}) },

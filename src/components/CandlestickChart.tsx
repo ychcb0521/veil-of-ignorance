@@ -1396,7 +1396,7 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
-    const dblTimeline=!displayTimestampTransform?dbl5TimelineRef.current.update(data,`${rawSymbol??symbol}|${mbi2ChartMinutes}`):null;
+    const dblTimeline=!displayTimestampTransform?dbl5TimelineRef.current.update(data,`${rawSymbol??symbol}|${mbi2ChartMinutes}`,Date.now(),mbi2ChartMinutes===60?3_600_000:300_000):null;
     const explicitStart=data.find(d=>d.DBL5_initialization_start!==undefined)?.DBL5_initialization_start;
     const klineData = data.map(d => ({ ...toKLineData(d), ...(!displayTimestampTransform ? { researchSymbol: rawSymbol ?? symbol,DBL5_initialization_start:explicitStart??dblTimeline?.initializationStart,DBL5_data_version:d.DBL5_data_version??dblTimeline?.dataVersion } : {}) }));
 
@@ -2611,7 +2611,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type===CLEAN_ACCELERATION_1116_ID||ind.type===IMPULSE_5M_ID||ind.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
+                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type===CLEAN_ACCELERATION_1116_ID||ind.type===IMPULSE_5M_ID||(ind.type.startsWith('DBL5')&&!ind.type.startsWith('DBL5_1H'))||(accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')&&!accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5_1H'))||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.type.startsWith('DBL5_1H')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5_1H')?'1h':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}

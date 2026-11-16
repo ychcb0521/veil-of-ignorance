@@ -269,7 +269,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     } catch (cause) { setError(cause instanceof Error ? cause.message : `${action}算法设置无效`); return false; }
   };
   // Keep router editor keys stable while global overlay controls are edited; apply to both branches at save.
-  const preview = drafts.map(d => ({ ...baseOf(d)!, id: d.id, label: labelOf(d,baseOf(d)), ...(baseOf(d)?.advantage&&d.advantageOptions?{advantage:{...baseOf(d)!.advantage!,...d.advantageOptions}}:{}) }));
+  const preview = drafts.map(d => ({ ...baseOf(d)!, id: d.id, label: labelOf(d,baseOf(d)), ...(baseOf(d)?.advantage&&d.advantageOptions?{advantage:withQualityAdvantageOptions(baseOf(d)!,d.advantageOptions).advantage}:{}) }));
   const aliases = drafts.map(d=>{
     const base=baseOf(d);
     if(purpose!=='sell'||!base||d.label!==d.original?.label)return;
@@ -351,7 +351,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
         {sellerFields(`${action}算法 ${i+1}`, d.afterChoice, d.afterDirection, d.afterThreshold, d.afterTime, afterSnapshot,
           (afterChoice, afterDirection, afterThreshold, afterTime) => patch(d.id, { afterChoice, afterDirection, afterThreshold, afterTime }), true)}
       </div>}</fieldset>}
-    {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
+    {!embedded && baseOf(d)?.advantage && <FishQualityAdvantageSettings selection={d.advantageOptions?.structureTimeframe} rule={{...baseOf(d)!.advantage!,...d.advantageOptions}} onChange={readOnly?undefined:options=>patch(d.id,{advantageOptions:options})}/>}
     </div>;})}
     {!readOnly&&!embedded&&recoverablePlans&&<FishQualitySavedPlanRecovery plans={recoverablePlans.filter(p=>!drafts.some(d=>d.id===p.plan.id))} disabled={!ready} onRestore={restoreSavedPlan}/>}
     {!readOnly&&!embedded&&drafts.some(d=>baseOf(d)?.router)&&<p className="text-[10.5px] text-muted-foreground">拆分时一并保存当前修改、原组合和两套独立方案，不启动监测。</p>}

@@ -49,6 +49,7 @@ export interface IndicatorCatalogItem {
   /** 【用户要求】副图均线 avg(·, N)：有这一项就多一个均线时长框（小时），默认值在这里。 */
   rawOnly?:boolean;
   fixedPeriod?:boolean;
+  fixedInterval?:'1h';
   guardVersionSelect?:boolean;
   avgDefault?: number;
   avgHint?: string;
@@ -222,9 +223,9 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   { id:'CTBA',nameZh:'CTBA｜趋势买方优势',nameEn:'Covel Trend-Based Buyer Advantage',isOverlay:false,defaultPeriod:CTBA_DEFAULTS.N,color:'#0ECB81',category:'custom',periodUnit:'根',periodHint:'固定5m；N、f、s、m、λ、ε、α、β、γ 在 Deep Dig 公式开头集中配置',description:CTBA_DESCRIPTION },
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: 'rawOnly' in item&&item.rawOnly===true?`${item.short} · ${item.name}`:`${item.short} · avg_${item.core} · avg_${item.core}_2`,
-    fixedPeriod:(item.id.startsWith('SBS5M')||item.id.startsWith('DBL5')),rawOnly:'rawOnly' in item&&item.rawOnly===true,avgDefault:'rawOnly' in item&&item.rawOnly?undefined:'marketEvidence' in item?24:undefined,avgHint:'marketEvidence' in item?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined, isOverlay:'priceOverlay' in item&&item.priceOverlay===true, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
+    ...(item.id.startsWith('DBL5_1H')?{fixedInterval:'1h' as const}:{}),fixedPeriod:(item.id.startsWith('SBS5M')||item.id.startsWith('DBL5')),rawOnly:'rawOnly' in item&&item.rawOnly===true,avgDefault:'rawOnly' in item&&item.rawOnly?undefined:'marketEvidence' in item?24:undefined,avgHint:'marketEvidence' in item?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined, isOverlay:'priceOverlay' in item&&item.priceOverlay===true, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
     periodHint: 'marketEvidence' in item?'证据半衰期（小时）；原值、avg、avg₂独立副图，均值仅用于盘面展示。':`${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: 'parameterUnit' in item ? item.parameterUnit : ['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) ? '根' : 'h',
-    description:(item.id.startsWith('SBS5M')||item.id.startsWith('DBL5'))?item.id.startsWith('DBL5')?'仅5m已收盘；确认后冻结上下轨，破坏、到期或缺口时断线。参数在Deep Dig定义中设置。':'仅5m已收盘；参数在 Deep Dig 定义中设置。主值为价格；证据分、距离与台阶幅度独立显示。':item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
+    description:(item.id.startsWith('SBS5M')||item.id.startsWith('DBL5'))?item.id.startsWith('DBL5')?`仅${item.id.startsWith('DBL5_1H')?'1h':'5m'}已收盘；确认后冻结上下轨，破坏、到期或缺口时断线。参数在Deep Dig定义中设置。`:'仅5m已收盘；参数在 Deep Dig 定义中设置。主值为价格；证据分、距离与台阶幅度独立显示。':item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
   })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
@@ -376,7 +377,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
       return def ? { ...entry, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: def.definition, detail: def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : entry;
     }),
     ...researchItems.filter(item => item.id.startsWith('FEATURE_')).map(item => ({
-      id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay:item.priceOverlay??false, fixedPeriod:item.rawOnly&&(item.featureId.startsWith('sbs_5m')||item.templateId?.startsWith('DBL5')), defaultPeriod: researchDefaultPeriod(item),
+      id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay:item.priceOverlay??false, ...(item.templateId?.startsWith('DBL5_1H')?{fixedInterval:'1h' as const}:{}),fixedPeriod:item.rawOnly&&(item.featureId.startsWith('sbs_5m')||item.templateId?.startsWith('DBL5')), defaultPeriod: researchDefaultPeriod(item),
       rawOnly:item.rawOnly,avgDefault:item.rawOnly?undefined:item.marketEvidence?24:undefined,avgHint:item.marketEvidence?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined,color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit:item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h'),
       description: definitions.find(def => def.id === item.featureId)?.definition,
       guardVersionSelect:supportsDbl5GuardVersion(item),
@@ -642,7 +643,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             {item.fixedPeriod?<span className="text-[10px] text-muted-foreground"
               title={item.id===IMPULSE_5M_ID?IMPULSE_5M_VERSION:plainFiveMinute?item.description:'在 Deep Dig 的定义参数中设置'}>
-              {plainFiveMinute?'5m':'5m · 定义参数'}
+              {plainFiveMinute?'5m':`${item.fixedInterval??'5m'} · 定义参数`}
             </span>:<ParamInput
               value={active.period}
               parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}

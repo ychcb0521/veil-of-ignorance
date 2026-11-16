@@ -1,8 +1,8 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
-import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
+import {DBL5_PROFILES,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION,dbl5Defaults,dbl5GuardVersion} from '@/lib/dbl5m';
 import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_VERSION } from '@/lib/impulse5m';
-import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
 import {FishQualityImpulse5mSettings,FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
 import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
@@ -17,7 +17,8 @@ import { qualityFilterDefinitions, qualityFilterMenuChoices, makeQualityBuyFilte
 import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
 import { orderedSellStages, type QualitySellStage } from '@/lib/fish/qualitySellStages';
 import {defaultStructureAddition,guardTrendOnly,type StructureAdditionRule} from '@/lib/fish/qualityAdditionStructure';
-import {boxAlgorithmVersion,CURRENT_BOX_VERSION,CURRENT_GUARD_VERSION,freezeStructureVersions,selectStructureGuardVersion,structureVersionLabel,structureVersions} from '@/lib/fish/boxAlgorithmVersions';
+import {selectStructureTimeframe} from '@/lib/fish/qualityAdditionStructure';
+import {boxAlgorithmVersion,CURRENT_BOX_VERSION,CURRENT_GUARD_VERSION,freezeStructureVersions,selectStructureGuardVersion,structureDbl5Timeframe,structureVersionLabel,structureVersions} from '@/lib/fish/boxAlgorithmVersions';
 import {Dbl5GuardVersionSelect} from '@/components/Dbl5GuardVersionSelect';
 import {BoxAlgorithmVersionNotes} from '@/components/FishQualityPlanVersions';
 import { FishQualityInfo } from '@/components/FishQualityModule';
@@ -285,7 +286,8 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const box=d.source==='structure';
  const nativeActive=!d.impulse?.skipNative&&!d.impulse1115?.skipNative;
  const combined=box&&d.structure.kSource==='guard'&&!!d.structure.guardPlusVersion;
- const standardPositionName=box&&d.structure.algorithm==='dbl5'&&d.structure.kSource==='guard'?DBL5_GUARD_DISPLAY_NAME:'箱体／指标位置';
+ const period=structureDbl5Timeframe(d.structure),profile=DBL5_PROFILES[period];
+ const standardPositionName=box&&d.structure.algorithm==='dbl5'&&d.structure.kSource==='guard'?profile.label:'箱体／指标位置';
  const nativePositionName=combined?DBL5_GUARD_PLUS_DISPLAY_NAME:standardPositionName;
  const positions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive):Pick<AdditionDraft,'impulse'|'impulse1115'>=>({
   impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115?true:undefined},
@@ -294,7 +296,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const selectNativePosition=(useCombined:boolean,checked:boolean)=>{
   const selection=positions(d.impulse,d.impulse1115,checked);
   if(useCombined&&checked){
-   const original=d.structure.algorithm==='dbl5'?d.structure:defaultStructureAddition('dbl5',defs);
+   const original=d.structure.algorithm==='dbl5'?selectStructureTimeframe(d.structure,'5m',defs):defaultStructureAddition('dbl5',defs);
    const structure=selectStructureGuardVersion({...original,kSource:'guard'},CURRENT_GUARD_VERSION);
    patch({...selection,source:'structure',structure:{...structure,guardPlusVersion:structure.guardPlusVersion??DBL5_GUARD_PLUS_VERSION}});
   }else if(combined){
@@ -478,13 +480,22 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     </PositionSetting></>}
     {nativeActive&&box&&<>
     <PositionSetting label={<>箱体算法 <FishQualityInfo label="箱体算法版本说明"><BoxAlgorithmVersionNotes/></FishQualityInfo><span className="font-mono text-[10px] text-primary" data-testid="addition-box-version" title="保存时冻结的版本">{structureVersionLabel(d.structure)}</span></>}>
-    <select aria-label="箱体加仓算法" className={field+' h-7 w-full'} disabled={!d.enabled||combined} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:e.target.value==='sbs5m'&&d.structure.kSource==='guard'?'previous':d.structure.kSource}})}><option value="dbl5">{boxAlgorithmVersion(CURRENT_BOX_VERSION.dbl5)!.label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select>
+    <select aria-label="箱体加仓算法" className={field+' h-7 w-full'} disabled={!d.enabled||combined} value={period==='1h'?'1h':d.structure.algorithm} onChange={e=>{
+      const next=e.target.value;
+      if(d.structure.algorithm==='dbl5'&&next!=='sbs5m'){
+        patch({structure:selectStructureTimeframe(d.structure,next==='1h'?'1h':'5m',defs)});
+        return;
+      }
+      const structure={...defaultStructureAddition(next==='sbs5m'?'sbs5m':'dbl5',defs),
+        kSource:next==='sbs5m'&&d.structure.kSource==='guard'?'previous' as const:d.structure.kSource};
+      patch({structure:next==='1h'?selectStructureTimeframe(structure,'1h',defs):structure});
+    }}><option value="dbl5">{DBL5_PROFILES['5m'].label} · 达瓦斯下轨</option><option value="1h">{DBL5_PROFILES['1h'].label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select>
     </PositionSetting>
     <PositionSetting label="箱体时间">
     <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
       <span>K 线周期 5m</span>
-      {d.structure.algorithm==='dbl5' ? <label>几何窗口 <input aria-label="箱体加仓几何窗口（分钟）" type="number" min="20" max="10080" step="5"
-        disabled={!d.enabled} className={cell+' w-24'} value={Number.isNaN(d.structure.definition.DBL5_config?.window_minutes) ? '' : d.structure.definition.DBL5_config?.window_minutes ?? DBL5_DEFAULTS.window_minutes}
+      {d.structure.algorithm==='dbl5' ? <label>几何窗口 <input aria-label="箱体加仓几何窗口（分钟）" type="number" min={4*profile.minutes} max={2016*profile.minutes} step={profile.minutes}
+        disabled={!d.enabled} className={cell+' w-24'} value={Number.isNaN(d.structure.definition.DBL5_config?.window_minutes) ? '' : d.structure.definition.DBL5_config?.window_minutes ?? dbl5Defaults(period).window_minutes}
         onChange={e=>{const window_minutes=e.target.valueAsNumber;patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,window_minutes}}}});}}/> 分钟</label>
         : <label>箱体形成 <input aria-label="箱体加仓形成窗口（根）" type="number" min="2" max="288" step="1" disabled={!d.enabled}
           className={cell+' w-24'} value={Number.isNaN(d.structure.definition.SBS5M_config?.box_formation_bars) ? '' : d.structure.definition.SBS5M_config?.box_formation_bars ?? SBS5M_DEFAULTS.box_formation_bars}
@@ -496,16 +507,16 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     </PositionSetting>
     <PositionSetting label={combined?'防守线 K':'K ='}>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-row">
-      <select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-32 max-w-full'} disabled={!d.enabled||combined} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION?boxAlgorithmVersion(DBL5_RETEST_GUARD_VERSION)!.label:`${boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）`}</option>}</select>
+      <select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-32 max-w-full'} disabled={!d.enabled||combined} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{dbl5GuardVersion(d.structure.definition.DBL5_config)===DBL5_RETEST_GUARD_VERSION?boxAlgorithmVersion(DBL5_RETEST_GUARD_VERSION)!.label:`${boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）`}</option>}</select>
       <span className="inline-flex items-center gap-1">−<input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={cell+' w-14'}/>{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</span>
     </div>
     </PositionSetting>
     {d.structure.kSource==='guard'&&<>
     <PositionSetting label="版本">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Dbl5GuardVersionSelect value={structureVersions(d.structure).guard??CURRENT_GUARD_VERSION} disabled={!d.enabled||combined}
+        <Dbl5GuardVersionSelect value={dbl5GuardVersion(d.structure.definition.DBL5_config)} disabled={!d.enabled||combined}
           onChange={version=>patch({structure:selectStructureGuardVersion(d.structure,version)})}/>
-        {structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION&&<span className="text-[10px] text-muted-foreground">首根低点等独立回踩确认后再判断加仓</span>}
+        {dbl5GuardVersion(d.structure.definition.DBL5_config)===DBL5_RETEST_GUARD_VERSION&&<span className="text-[10px] text-muted-foreground">首根低点等独立回踩确认后再判断加仓</span>}
       </div>
     </PositionSetting>
     <PositionSetting label={<>防守线 <FishQualityInfo label="防守线说明"><GuardLineNotes/></FishQualityInfo></>} wide>

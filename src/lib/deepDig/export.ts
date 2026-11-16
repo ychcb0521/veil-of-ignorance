@@ -1,3 +1,4 @@
+import { dbl5ProfileForFeature } from '@/lib/dbl5m';
 import { mbi2KeysOf } from '@/lib/mbi2';
 import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureParams } from '@/lib/deepDig/features';
 import { featureUsesDbl5GuardPlus, formulaVariables } from './features';
@@ -15,7 +16,7 @@ export function deepDigCsv(data: DeepDigData): string {
   const columns = [...new Set(featureUsesMbi2(data.definition)?[...mbi2KeysOf(data.definition),...names]:names)];
   const params = featureUsesMbi2(data.definition)?['MBI2_T_HOURS','MBI2_N','MBI2_Z0','MBI2_BAND','MBI2_CONFIRM']:featureUsesMbi(data.definition) ? ['MBI_N', 'MBI_Z0'] : [];
   const values=featureUsesMbi2(data.definition)?featureParams(data.definition):data.definition;
-  const dblColumns=featureTemplateId(data.definition)==='darvas_5m_lower'?['DBL5_lower','DBL5_upper','DBL5_event','DBL5_status','DBL5_available','DBL5_unit','DBL5_config','DBL5_version','DBL5_details','DBL5_checkpoint']:[];
+  const dblColumns=dbl5ProfileForFeature(featureTemplateId(data.definition))?['DBL5_lower','DBL5_upper','DBL5_event','DBL5_status','DBL5_available','DBL5_unit','DBL5_config','DBL5_version','DBL5_details','DBL5_checkpoint']:[];
   const sbsColumns=featureTemplateId(data.definition)==='sbs_5m'?['SBS5M_details','SBS5M_checkpoint','SBS5M_config','SBS5M_dimension','SBS5M_research_symbol']:[];
   const prsColumns=featureTemplateId(data.definition)==='prs6h'?['PRS6H_state','PRS6H_market_ready','PRS6H_config_hash','PRS6H_reasons','PRS6H_details','PRS6H_checkpoint']:[];
   const atiColumns=featureTemplateId(data.definition)==='ati6h'?['ATI6H_shortboard','ATI6H_data_status','ATI6H_reason_codes','ATI6H_volume_mode','ATI6H_version','ATI6H_structure_id','ATI6H_structure_status','ATI6H_nearest_resistance_type','ATI6H_breakout_cross_now','ATI6H_parameters','ATI6H_details','ATI6H_archive','ATI6H_dependency']:[];

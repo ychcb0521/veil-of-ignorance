@@ -1,4 +1,4 @@
-import {dbl5AsOf,DBL5_ID,dbl5FieldUnit,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
+import {dbl5AsOf,dbl5ProfileForFeature,dbl5FieldUnit,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import type {Dbl5GuardPlusRow,Dbl5GuardPlusCheckpoint} from '@/lib/dbl5GuardPlus';
 import {SBS5M_ID,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
@@ -141,7 +141,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { ...(featureTemplateId(def)===DBL5_ID?{DBL5_config:def.DBL5_config,DBL5_dimension:def.DBL5_dimension,DBL5_research_symbol:def.DBL5_research_symbol,DBL5_initialization_start:def.DBL5_initialization_start}:{}), ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
+  return { ...(!!dbl5ProfileForFeature(featureTemplateId(def))?{DBL5_config:def.DBL5_config,DBL5_dimension:def.DBL5_dimension,DBL5_research_symbol:def.DBL5_research_symbol,DBL5_initialization_start:def.DBL5_initialization_start}:{}), ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -197,7 +197,7 @@ export function viewForVariable(data: DeepDigData, name: string | null): DeepDig
     const x = r.vars?.[name];
     return { ...r, v: finite(x) ? x : null };
   });
-  return { ...data,...(featureTemplateId(data.definition)===DBL5_ID&&dbl5FieldUnit(name)?{definition:{...data.definition,unit:dbl5FieldUnit(name)!}}:{}), rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finite))) };
+  return { ...data,...(!!dbl5ProfileForFeature(featureTemplateId(data.definition))&&dbl5FieldUnit(name)?{definition:{...data.definition,unit:dbl5FieldUnit(name)!}}:{}), rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finite))) };
 }
 
 /** 旧数据没有波动率：推断统计的「控制波动」算不了，要先重跑描述统计。 */
@@ -248,9 +248,9 @@ export async function collectDeepDigRun(
   const groups = compileGroups(def.positive, def.control, source);
   // 【用户要求】样本可以是交易战役，也可以是信号库的信号（时间点 = 那条信号的时间）
   const allSamples = source === 'signals' ? (options.signals ?? []).map(signalSample) : report.rows.map(campaignSample);
-  const researchSymbol=featureTemplateId(def)===DBL5_ID?def.DBL5_research_symbol:featureTemplateId(def)===SBS5M_ID?def.SBS5M_research_symbol:undefined;
+  const researchSymbol=!!dbl5ProfileForFeature(featureTemplateId(def))?def.DBL5_research_symbol:featureTemplateId(def)===SBS5M_ID?def.SBS5M_research_symbol:undefined;
   const samples=researchSymbol?allSamples.filter(s=>s.symbol===researchSymbol):allSamples;
-  if(featureTemplateId(def)===DBL5_ID){
+  if(!!dbl5ProfileForFeature(featureTemplateId(def))){
     if(researchSymbol&&!samples.length)throw Error('DBL-5 所选标的没有样本，请重新选择。');
     if(((def.DBL5_dimension??'price')==='price'||[...compiled.program.inputs].some(n=>/^DBL5_raw_(value|upper)$/.test(n)))&&new Set(samples.filter(s=>!s.excluded&&!s.unsupportedReason).map(s=>s.symbol)).size>1)throw Error('DBL-5 下轨价格只按单一品种研究；跨品种请选择距离、箱宽基点或确认年龄。');
     if(def.DBL5_initialization_start!==undefined)scanHistory=samples.reduce((max,s)=>Math.max(max,(s.anchorMs??def.DBL5_initialization_start!)-def.DBL5_initialization_start!),scanHistory);
@@ -263,8 +263,8 @@ export async function collectDeepDigRun(
     // 信号不合簇：每条信号（有时间、有评级）都单独是一个事件，跟有没有交易战役无关
     cluster: source !== 'signals',
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
-    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS || featureTemplateId(def)===DBL5_ID ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory, ...(['ati6h','prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')?{strictAmounts:true}:{}) } } : {}),
-    ...(['ati6h','prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')?{prepareFeatureBars:async(symbol:string,bars:readonly import('@/lib/deepRsa/window').ResearchBar[])=>{
+    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS || !!dbl5ProfileForFeature(featureTemplateId(def)) ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory, ...((dbl5ProfileForFeature(featureTemplateId(def))||['ati6h','prs6h',SBS5M_ID].includes(featureTemplateId(def)??''))?{strictAmounts:true}:{}) } } : {}),
+    ...((dbl5ProfileForFeature(featureTemplateId(def))||['ati6h','prs6h',SBS5M_ID].includes(featureTemplateId(def)??''))?{prepareFeatureBars:async(symbol:string,bars:readonly import('@/lib/deepRsa/window').ResearchBar[])=>{
       const tick=await ati6hTickSize(symbol,options.fetchFn,options.signal);
       prsTick.set(symbol,tick);return bars.map(bar=>({...bar,ATI6H_tick_size:tick,PRS6H_tick_size:tick,DBL5_tick_size:tick}));
     }}:{}),
@@ -275,18 +275,18 @@ export async function collectDeepDigRun(
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
       const ownWindow=featureUsesMbi2(def)&&window?extractWindow(window.bars,ctx.anchorMs,featureWindowMs(def),intervalMs(intervalOf(def))):window;
-      const scopedParams=featureTemplateId(def)===DBL5_ID?{...params,DBL5_symbol:ctx.symbol,DBL5_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)===SBS5M_ID?{...params,SBS5M_symbol:ctx.symbol,SBS5M_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)==='prs6h'?{...params,PRS6H_symbol:ctx.symbol}:params;
-      const inputWindow=['prs6h',SBS5M_ID,DBL5_ID].includes(featureTemplateId(def)??'')&&window&&ctx.bars?{...window,bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)}:ownWindow;
+      const scopedParams=!!dbl5ProfileForFeature(featureTemplateId(def))?{...params,DBL5_symbol:ctx.symbol,DBL5_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)===SBS5M_ID?{...params,SBS5M_symbol:ctx.symbol,SBS5M_tick_size:prsTick.get(ctx.symbol)}:featureTemplateId(def)==='prs6h'?{...params,PRS6H_symbol:ctx.symbol}:params;
+      const inputWindow=(dbl5ProfileForFeature(featureTemplateId(def))||['prs6h',SBS5M_ID].includes(featureTemplateId(def)??''))&&window&&ctx.bars?{...window,bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)}:ownWindow;
       const { value, vars } = computeFeatureValues(inputWindow, compiled, scopedParams);
       if(mbi2Tuning&&ctx.bars)mbi2Samples.push({id:ctx.id,anchorMs:ctx.anchorMs,group:'other',bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)});
-      if(featureTemplateId(def)===DBL5_ID&&inputWindow){
+      if(!!dbl5ProfileForFeature(featureTemplateId(def))&&inputWindow){
         const out=evaluateOnBars(inputWindow.bars,compiled,scopedParams),rows=out.DBL5_details??[],row=dbl5AsOf(rows,ctx.anchorMs),checkpoint=out.DBL5_checkpoint;
         if(row&&checkpoint){
           dblDetails.set(ctx.id,{row,checkpoint,plus:out.DBL5P_details?.find(point=>point.at===row.at),plusCheckpoint:out.DBL5P_checkpoint});
           if(!compiled.usesDbl5GuardPlus)void saveDbl5Checkpoint(checkpoint);
         }
         const begin=ctx.anchorMs-(def.researchWindowHours??6)*3600000;
-        DBL5_windows[ctx.id]={checkpoint,rows:rows.filter(r=>r.at>begin),prices:inputWindow.bars.filter(b=>b.openTime+300000>begin).map(b=>({time:b.openTime+300000,close:b.close}))};
+        DBL5_windows[ctx.id]={checkpoint,rows:rows.filter(r=>r.at>begin),prices:inputWindow.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))>begin).map(b=>({time:b.openTime+intervalMs(intervalOf(def)),close:b.close}))};
         if(out.DBL5P_details)Object.assign(DBL5_windows[ctx.id],{
           guardPlusRows:out.DBL5P_details.filter(point=>point.at>begin),guardPlusCheckpoint:out.DBL5P_checkpoint,
         });
@@ -345,7 +345,7 @@ export async function collectDeepDigRun(
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });
   const finishedAt = Date.now();
   const data: DeepDigData = {
-    ...(featureTemplateId(def)===DBL5_ID?{DBL5_diagnostics}:{}),
+    ...(!!dbl5ProfileForFeature(featureTemplateId(def))?{DBL5_diagnostics}:{}),
     ...(SBS5M_evaluation.length?{SBS5M_evaluation}:{}),
     ...(PRS6H_evaluation.length?{PRS6H_evaluation}:{}),
     definition: snapshotOf(def),
@@ -383,7 +383,7 @@ export async function collectDeepDigRun(
 
 // ===================== 规律提取：按结果生成的默认文字 =====================
 
-export const fmtValue = (def: Pick<DefinitionSnapshot, 'scale'> & Partial<Pick<DefinitionSnapshot,'chartTemplate'>>, v: number | null | undefined, d = 2) => (finite(v) ? def.chartTemplate===DBL5_ID?Number((v*def.scale).toPrecision(12)).toString():(v * def.scale).toFixed(d) : '—');
+export const fmtValue = (def: Pick<DefinitionSnapshot, 'scale'> & Partial<Pick<DefinitionSnapshot,'chartTemplate'>>, v: number | null | undefined, d = 2) => (finite(v) ? dbl5ProfileForFeature(def.chartTemplate)?Number((v*def.scale).toPrecision(12)).toString():(v * def.scale).toFixed(d) : '—');
 export const pText = (p: number | null | undefined) => (!finite(p) ? '—' : p < 0.001 ? '< 0.001' : p.toFixed(3));
 /** 「p = 0.012」或「p < 0.001」。 */
 const pEq = (p: number | null | undefined) => (finite(p) && p < 0.001 ? 'p < 0.001' : `p = ${pText(p)}`);

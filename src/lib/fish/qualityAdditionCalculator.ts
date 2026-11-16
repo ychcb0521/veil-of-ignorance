@@ -1,3 +1,4 @@
+import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
 import { createAdditionIncreaseReader } from './qualityAdditionIncrease';
 import { createImpulseAdditionReader } from './qualityImpulseAddition';
@@ -18,7 +19,7 @@ import type {TradeSignal} from '@/lib/signalLibrary';
 import type {ResearchBar} from '@/lib/deepRsa/window';
 import {IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, isImpulse1115PositionVersion, type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
-interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number}
+interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number;guardTimeframe?:'1h'}
 type Position='native'|'impulse'|'impulse1115';
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'|'impulsePosition'|'impulse1115Position'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
@@ -98,13 +99,15 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   * 下一分钟开盘卖出（可能低于 K）。5 分钟桶须整段在上次加仓之后。
   */
  const findGuardStop=(support:number,closes:number,from:number):SupportStop|undefined=>{
+  const hourly=fills.at(-1)?.structureEvidence?.algorithmVersion===DBL5_PROFILES['1h'].version;
+  const step=hourly?3_600_000:STEP;
   let below=0;const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
   for(let i=first;i<bars.length;i++){
-   const b=bars[i],bucketEnd=b.openTime+MINUTE;if(bucketEnd%STEP!==0||bucketEnd-STEP<from)continue;
+   const b=bars[i],bucketEnd=b.openTime+MINUTE;if(bucketEnd%step!==0||bucketEnd-step<from)continue;
    below=b.close<support?below+1:0;if(below<closes)continue;
    const next=bars[i+1];if(!next)return;
    const exit=o.ordinaryExit;if(exit&&next.openTime===exit.at&&exit.atOpen)return;
-   return {at:next.openTime,price:next.open,support,atOpen:true,confirmCloses:closes};
+   return {at:next.openTime,price:next.open,support,atOpen:true,confirmCloses:closes,...(hourly?{guardTimeframe:'1h' as const}:{})};
   }
  };
  const findStop=(support:number|undefined,from:number):SupportStop|undefined=>{
@@ -212,7 +215,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
   const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion))return;
   const previousRound=o.roundRules?.[fills.length-1];
-  const winningAlternative=last.lane==='attack'&&(evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
+  const winningAlternative=last.lane==='attack'&&(evidence.algorithmVersion===DBL5_PROFILES['1h'].version||evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
   const lastReduction=reductions.filter(r=>r.at>last.at).at(-1),basis=lastReduction?lastReduction.newSupport:evidence.basePrice;
   for(const p of await readStructure.supports(rule,until)){
@@ -221,7 +224,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    if(evidence.guardPlus&&(p.guardPlus?.segment_id!==evidence.guardPlus.segment_id||
      evidence.guardPlus.guard_source==='IMPULSE'&&p.guardPlus?.active_impulse?.impulse_id!==evidence.guardPlus.active_impulse?.impulse_id))continue;
    const value=rule.kSource==='guard'?p.guard:p.support;if(value==null||!(value>0))continue;
-   const atr=await readAtr(p.at);if(!(atr!>0)||!Number.isFinite(atr))continue;
+   const atr=p.nativeAtr??await readAtr(p.at);if(!(atr!>0)||!Number.isFinite(atr))continue;
    if(value<basis-dropRule.minDropAtr*atr!)return {at:p.at,support:value,atr:atr!,evidence,basis};
   }
  };
@@ -369,7 +372,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const {supportOffsetAtr}=qualityAdditionAtrSettings(round);
   const impulse1115=isImpulse1115PositionVersion(hit.structureEvidence?.algorithmVersion) ? round.impulse1115Position : undefined;
   const earlyImpulse=hit.structureEvidence?.guardPlus?.early_impulse_event;
-  let kAtr=atr!;
+  let kAtr=hit.structureEvidence?.nativeAtr??atr!;
   if(hit.structureEvidence&&earlyImpulse&&impulse1115?.version===IMPULSE_1115_CONFIGURABLE_K_VERSION){
    kAtr=earlyImpulse.frozen_atr;
    hit.structureEvidence={...hit.structureEvidence,algorithmVersion:impulse1115.version,
@@ -386,12 +389,12 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
   const minDistancePct=impulse1115?impulse1115.minDistancePct:
     hit.structureEvidence?.algorithm==='impulse5m'?round.impulsePosition?.minDistancePct:round.structure?.minDistancePct;
-  const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,atr!,minDistancePct):boxK;
+  const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,hit.structureEvidence.nativeAtr??atr!,minDistancePct):boxK;
   const sellK=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!;
   const floor=o.breakevenFloor,followPosition=floor?.version===ADDITION_POSITION_FLOOR_VERSION;
   const floorRule=floor?.enabled&&(followPosition||hit.structureEvidence?.guardCloses&&selected)?floor:undefined;
   const floorK=floorRule?(hit.structureEvidence&&selected?
-   structureAdditionK({...hit.structureEvidence,...selected,basePrice:sellK,buffer:floorRule.atr,bufferUnit:'atr'},atr!)?.k??NaN:
+   structureAdditionK({...hit.structureEvidence,...selected,basePrice:sellK,buffer:floorRule.atr,bufferUnit:'atr'},hit.structureEvidence.nativeAtr??atr!)?.k??NaN:
    sellK-floorRule.atr*atr!):undefined;
   const K=floorK??sellK,S=support??o.entryPrice;after=hit.at;
   if(hit.structureEvidence&&(!selected||hit.price<=hit.structureEvidence.supportPrice||support!=null&&K<support)){const ev=hit.structureEvidence;

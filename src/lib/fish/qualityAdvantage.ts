@@ -1,9 +1,11 @@
+import { dbl5Step } from '@/lib/dbl5m';
+import { structureDbl5Timeframe } from './boxAlgorithmVersions';
 import { qualityHistoryFrom } from './qualityInitialization';
 /** Optional, versioned overlay. It never writes the sizing inputs or changes K. */
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { evaluateFishProgram, shortFishHash, type FishSnapshot } from './algorithm';
 import { qualityMetricPlan, type QualityGroup } from './quality';
-import { createStructureAdditionReader, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
+import { createStructureAdditionReader, selectStructureTimeframe, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
 import type { FishReconstructionLoader } from './reconstruction';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { validateFishBars } from './shared';
@@ -31,10 +33,12 @@ export interface QualityAdvantageState {
   at: number; seller: string; count: number; required: number;
   observation: QualityAdvantageObservation;
 }
-export type QualityAdvantageOptions = Pick<QualityAdvantageRule, 'screenWeak' | 'beforeFirst' | 'afterAddition' | 'confirmations'>;
+export type QualityAdvantageOptions = Pick<QualityAdvantageRule, 'screenWeak' | 'beforeFirst' | 'afterAddition' | 'confirmations'> & {structureTimeframe?:'5m'|'1h'};
 export function withQualityAdvantageOptions(plan: QualityGroup, options?: QualityAdvantageOptions): QualityGroup {
   if (!options || !plan.advantage) return plan;
-  return { ...plan, advantage: { ...plan.advantage, ...options }, ...(plan.router ? { router: { ...plan.router,
+  const {structureTimeframe,...values}=options;
+  const structure=structureTimeframe?selectStructureTimeframe(plan.advantage.structure,structureTimeframe):plan.advantage.structure;
+  return { ...plan, advantage: { ...plan.advantage, ...values,structure }, ...(plan.router ? { router: { ...plan.router,
     structure: withQualityAdvantageOptions(plan.router.structure, options), attack: withQualityAdvantageOptions(plan.router.attack, options) } } : {}) };
 }
 const canonical = (value: unknown) => JSON.stringify(value, (_k, v) =>
@@ -97,7 +101,8 @@ export function createQualityAdvantageReader(rule: QualityAdvantageRule, o: { ro
         // Establish the native reader without treating any event as an addition.
         await structure(rule.structure, cut, cut, []);
         const latest = (await structure.supports(rule.structure, cut)).at(-1);
-        if (latest?.at === cut) valid = latest.support != null && latest.support > 0;
+        const span=dbl5Step(structureDbl5Timeframe(rule.structure));
+        if (latest?.at === Math.floor(cut/span)*span) valid = latest.support != null && latest.support > 0;
       } catch (error) { if (o.signal.aborted) throw error; }
       result = classifyQualityAdvantage(at, visible, [...values].map(v => v * scale), valid);
     } catch (error) {

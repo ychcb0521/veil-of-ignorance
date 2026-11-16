@@ -1310,7 +1310,7 @@ it('edits a copied routed plan, saves and runs its new version, and saves it as 
  fireEvent.change(within(copyEditor).getByLabelText('分支状态 S 门槛'),{target:{value:'.8'}});
  fireEvent.change(within(shared).getByLabelText('镜像平衡减仓卖出百分比'),{target:{value:'23'}});
  fireEvent.change(within(shared).getByLabelText('卖出算法 1 门槛'),{target:{value:'.45'}});
- const guardSwitch='启用加仓否决 距 DBL-5 防守线过远',guardAtr='距 DBL-5 防守线过远 ATR倍数';
+ const guardSwitch='启用加仓否决 距 DBL-5-5mins 防守线过远',guardAtr='距 DBL-5-5mins 防守线过远 ATR倍数';
  const editGuard=(branch:HTMLElement,atr:string)=>{
   fireEvent.click(within(branch).getByRole('tab',{name:'第 3 次'}));
   expect(within(branch).getByLabelText(guardSwitch)).not.toBeChecked();

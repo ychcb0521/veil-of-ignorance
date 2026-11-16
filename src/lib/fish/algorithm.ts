@@ -1,3 +1,4 @@
+import { dbl5ProfileForFeature } from '@/lib/dbl5m';
 import {dbl5FieldUnit} from '@/lib/dbl5m';
 import {guardPlusFieldUnit,type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
 /** Fishing composes a program; all numerical evaluation stays in Deep dig's engine. */
@@ -105,7 +106,7 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   if(!Number.isFinite(settings.threshold))throw new Error('请填写有限数字阈值');
   if(!['>','<'].includes(settings.direction))throw new Error('方向只能选择 > 或 <');
   if(!(Number.isFinite(def.scale)&&def.scale>0))throw new Error('特征值显示倍率必须是有限正数');
-  const statistic=settings.statistic??'结果',scale=statistic==='结果'?def.scale:1,unit=statistic==='结果'?def.unit:guardPlusFieldUnit(statistic)??(def.chartTemplate==='darvas_5m_lower'?dbl5FieldUnit(statistic)??'原值':'原值');
+  const statistic=settings.statistic??'结果',scale=statistic==='结果'?def.scale:1,unit=statistic==='结果'?def.unit:guardPlusFieldUnit(statistic)??(dbl5ProfileForFeature(def.chartTemplate)?dbl5FieldUnit(statistic)??'原值':'原值');
   if(!fishStatistics(def).some(v=>v.name===statistic))throw new Error('所选统计量已不存在或不是序列，请重新选择');
   if(!Number.isFinite(settings.threshold/scale))throw new Error('换算后的阈值超出有效范围');
   const {H:_legacyH,...rest}=structuredClone(settings);

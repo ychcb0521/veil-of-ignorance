@@ -123,7 +123,7 @@ it('saves the K minimum distance per round and clears it when left empty',()=>{
 it('shows the box algorithm version in 位置, explains every version, and freezes it on save',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  expect(screen.getByTestId('addition-box-version')).toHaveTextContent('DBL-5 v2');
- expect([...(screen.getByLabelText('箱体加仓算法') as HTMLSelectElement).options].map(o=>o.textContent)).toEqual(['DBL-5 v2 · 达瓦斯下轨','SBS-5M v1 · 台阶支撑']);
+ expect([...(screen.getByLabelText('箱体加仓算法') as HTMLSelectElement).options].map(o=>o.textContent)).toEqual(['DBL-5-5mins · 达瓦斯下轨','DBL-5-1h · 达瓦斯下轨','SBS-5M v1 · 台阶支撑']);
  expect([...(screen.getByLabelText('K基准箱体') as HTMLSelectElement).options].map(o=>o.textContent)).toContain('防守线 v1（更结实）');
  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});expect(screen.getByTestId('addition-box-version')).toHaveTextContent('DBL-5 v2 · 防守线 v1');
  fireEvent.click(screen.getByLabelText('箱体算法版本说明'));expect(screen.getByTestId('box-algorithm-versions')).toHaveTextContent('dbl5-guard-v1');
@@ -365,7 +365,7 @@ it('sets the guard and impulse independently with per-round ATR and minimum dist
  expect(saved.rounds[0].impulsePosition).toBeUndefined();
  expect(saved.rounds[1].impulse1115Position).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
- fireEvent.click(screen.getByLabelText('DBL-5-防守线-0',{exact:true}));
+ fireEvent.click(screen.getByLabelText('DBL-5-5mins',{exact:true}));
  expect(screen.queryByLabelText('K基准箱体')).toBeNull();
  expect(screen.queryByLabelText('上涨期防守冗余')).toBeNull();
  expect(save().rounds[0].impulse1115Position.skipNative).toBe(true);
@@ -398,7 +398,7 @@ it('keeps a saved combined 1115 position until the draft is explicitly changed',
  expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
  expect(save().structure.guardPlusImpulseBufferAtr).toBeUndefined();
  expect(save().impulse1115Position).toBeUndefined();
- fireEvent.click(screen.getByLabelText('DBL-5-防守线-0',{exact:true}));
+ fireEvent.click(screen.getByLabelText('DBL-5-5mins',{exact:true}));
  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
  expect(save().structure.guardPlusVersion).toBeUndefined();
  expect(save().impulse1115Position.version).toBe(IMPULSE_1115_CONFIGURABLE_K_VERSION);
@@ -419,7 +419,7 @@ it('stores the combo’s adjustable impulse buffer separately from standalone an
  expect(parseAdditionDraft(additionDraft(combo),BUILTIN_FEATURES)).toEqual(combo);
  fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115'}));
  expect(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR')).toHaveValue(.5);
- fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线-0'}));
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-5mins'}));
  expect(save().structure.guardPlusImpulseBufferAtr).toBeUndefined();
 });
 
@@ -439,7 +439,7 @@ it('allows the combined version alongside independent 1115 and restores both cho
  });
  expect(both.rounds?.[0].impulse1115Position?.skipNative).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(both),BUILTIN_FEATURES)).toEqual(both);
- fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线-0'}));
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-5mins'}));
  expect(save().rounds[0].structure.guardPlusVersion).toBeUndefined();
  expect(split).toBeChecked();
 });

@@ -1,9 +1,9 @@
 import { algorithmMetricMenu } from './algorithmMetricMenu';
 import { guardDistanceConfig } from './qualityAdditionVeto';
-import { guardDistanceSignalChoices } from './qualityGuardDistance';
+import { guardDistanceDefinition, guardDistanceSignalChoices } from './qualityGuardDistance';
 import {BOX_STOP_KIND,BOX_BREAK_CHOICE,isBoxBreak,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
-import { compileFeatureFormula, DBL5_DEF, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { compileFeatureFormula, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researchIndicators';
 import { shortFishHash } from './algorithm';
@@ -61,7 +61,7 @@ export function makeQualitySignalMetrics(choiceKeys: readonly string[], definiti
   return choiceKeys.map(key => {
     const distance = guardDistanceSignalChoices.find(choice => choice.key === key);
     const choice = distance ?? choices.find(choice => choice.key === key);
-    const def = distance ? {...DBL5_DEF, DBL5_config:guardDistanceConfig(distance.version).parameters}
+    const def = distance ? guardDistanceDefinition(guardDistanceConfig(distance.version,undefined,distance.timeframe).parameters)
       : choice && defs.get(choice.featureId);
     if (!choice || !def) throw Error('未知的读数算法，请检查账号公式');
     const snapshot = metricSnapshot(choice, def, 0, '>');
