@@ -13,7 +13,8 @@ import { screenedFishMailLock } from './useFishScreeningAutomation';
 import { instantManualCheckpointKey, SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
 import { instantCampaignInput, instantPositionDisplay, instantPositionInput, instantPositionValuation, type InstantPositionFill, type InstantPositionInput } from '@/lib/fish/instantCampaign';
 import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
-import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
+import { publishInstantCampaigns, saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
+import { qualityAdditionFills } from '@/lib/fish/qualityAddition';
 import { INSTANT_MANUAL_EXECUTION, INSTANT_MANUAL_MINUTE, applyInstantManualFill, cancelInstantProtection, instantManualTrigger, validateInstantManualLevels, type InstantManualAction, type InstantManualExecution } from '@/lib/fish/instantManualExecution';
 import { readInstantPositionQuote } from '@/lib/fish/instantPositionQuote';
 import { validateFishBars } from '@/lib/fish/shared';
@@ -321,6 +322,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const saveTemplate = async ({ record, round }: ScreenedFishAdmission, result: QualityResult, through: number) => {
       if (hasManualIntent(record.id)) return;
+      const previous = read(record)?.monitorResult;
       const alert = result.status === 'closed' ? { ...instantMonitorSale(result), observedAt: Date.now() } : undefined;
       await save(record, { after: through, monitorResult: result, alert });
       changes.current?.postMessage('alert');
@@ -328,6 +330,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         const input = instantCampaignInput(record, round, alert, result);
         if (input) await saveInstantCampaignInput(owner, input);
         send();
+      } else if (result.mirrorFill?.at !== previous?.mirrorFill?.at
+        || qualityAdditionFills(result).length !== qualityAdditionFills(previous ?? {}).length
+        || (result.additionReductions?.length ?? 0) !== (previous?.additionReductions?.length ?? 0)) {
+        publishInstantCampaigns(owner);
       }
     };
     const saveManual = async (input: InstantPositionInput, saved: Checkpoint | undefined, state: InstantManualExecution) => {
@@ -353,6 +359,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         // The normal campaign pass also retries from this durable checkpoint.
         await saveInstantCampaignInput(owner, { ...input, sell: alert, monitorResult: checkpoint.monitorResult }).catch(() => undefined);
         send();
+      } else if (state.fills.length !== (saved?.manual?.fills.length ?? 0)) {
+        publishInstantCampaigns(owner);
       }
     };
     const scanManual = async (entry: ScreenedFishAdmission, target: number) => {
@@ -493,7 +501,10 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
                   if (result.trigger) {
                     changes.current?.postMessage('alert');
                     send();
-                  } else if (result.risk?.mirror && !previous?.risk?.mirror) changes.current?.postMessage('alert');
+                  } else if (result.risk?.mirror && !previous?.risk?.mirror) {
+                    changes.current?.postMessage('alert');
+                    publishInstantCampaigns(owner);
+                  }
                 }
               });
           })() : undefined,

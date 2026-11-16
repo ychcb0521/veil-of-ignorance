@@ -36,7 +36,7 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
     if (!owner || typeof indexedDB === 'undefined') return;
     const lifetime = new AbortController();
     const { signal } = lifetime;
-    let running = false, requested = false;
+    let running = false, requested = false, needsRetry = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const seen = new Set<string>();
     const retryAt = new Map<string, number>();
@@ -89,17 +89,21 @@ export function useInstantCampaigns(owner: string | undefined, cda: FishCdaTrack
       if (signal.aborted) return;
       if (running) { requested = true; return; }
       running = true;
+      needsRetry = false;
+      clearTimeout(retryTimer);
       const work = navigator.locks
         ? navigator.locks.request('veil-instant-campaign:' + owner, { signal }, process)
         : process();
       void work.catch(error => {
-        if (!signal.aborted) setIssue(error instanceof Error ? '即时交易 · ' + error.message : '即时交易等待重试');
+        if (!signal.aborted) {
+          needsRetry = true;
+          setIssue(error instanceof Error ? '即时交易 · ' + error.message : '即时交易等待重试');
+        }
       }).finally(() => {
         running = false;
         if (signal.aborted) return;
         if (requested) { requested = false; tick(); }
-        else if (retryAt.size || latest.current.some(input => !seen.has(input.id + ('sell' in input ? ':sold' : ':admitted')))) {
-          clearTimeout(retryTimer);
+        else if (needsRetry || retryAt.size || latest.current.some(input => !seen.has(input.id + ('sell' in input ? ':sold' : ':admitted')))) {
           retryTimer = setTimeout(tick, 30_000);
         }
       });

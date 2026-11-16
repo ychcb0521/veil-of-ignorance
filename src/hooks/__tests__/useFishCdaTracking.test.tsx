@@ -7,7 +7,7 @@ import type { ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { instantPositionInput } from '@/lib/fish/instantCampaign';
 import { readInstantPositionQuote } from '@/lib/fish/instantPositionQuote';
-import { saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
+import { publishInstantCampaigns, saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
 
 const preferences = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('@/lib/fish/fishPreferencesDb', () => ({
@@ -22,7 +22,9 @@ vi.mock('@/lib/fish/fishPreferencesDb', () => ({
 vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn(), readPageInstantCampaignCandles: vi.fn(), markPageInstantPosition: vi.fn() }));
 vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn(), readAutomaticPreEntrySales: async () => [] }));
 vi.mock('@/lib/fish/instantPositionQuote', () => ({ readInstantPositionQuote: vi.fn() }));
-vi.mock('@/lib/fish/instantCampaignStore', () => ({ saveInstantCampaignInput: vi.fn(async () => undefined) }));
+vi.mock('@/lib/fish/instantCampaignStore', () => ({
+  publishInstantCampaigns: vi.fn(), saveInstantCampaignInput: vi.fn(async () => undefined),
+}));
 afterEach(() => { localStorage.clear(); preferences.clear(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 it('watches newly admitted automatic fish after enabling, survives reload and retries only unsent mail', async () => {
@@ -143,6 +145,8 @@ it('gives a confirmed manual action priority over an unpublished automatic exit 
     expect(partial?.orders).toEqual({ tp: null, sl: 95, percentage: 50 });
     expect(partial?.fills).toHaveLength(1);
     expect(partial?.fills[0]).toMatchObject({ reason: 'take-profit', fraction: .5, price: 111 });
+    expect(publishInstantCampaigns).toHaveBeenCalledExactlyOnceWith('manual-fixture');
+    expect(saveInstantCampaignInput).not.toHaveBeenCalled();
     await act(() => view.result.current.managePosition!(position, { kind: 'close', fraction: 1 }));
     expect(view.result.current.alerts.get(record.id)?.manual?.fills.map(fill => fill.reason)).toEqual(['take-profit', 'manual']);
     expect(readPageScreenedCda).toHaveBeenCalledTimes(1);
