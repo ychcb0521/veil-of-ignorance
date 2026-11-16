@@ -19,7 +19,8 @@ import { TickerBar } from "@/components/TickerBar";
 import { ReplayDeskPanels, useReplayDeskVisibility } from "@/components/ReplayDeskPanels";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
-import { PositionMarketPreview, type PositionChartPreview } from "@/components/PositionMarketPreview";
+import { UsdtLivePositionSidebar } from "@/components/UsdtLivePositionCard";
+import { PositionMarketPreview, usePositionMarketPreview, type PositionChartPreview } from "@/components/PositionMarketPreview";
 import { SymbolSelector } from "@/components/SymbolSelector";
 import { AccountInfo } from "@/components/AccountInfo";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -236,6 +237,7 @@ const Index = () => {
   }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol, syncedOriginTime]);
 
   const [positionPreview,setPositionPreview] = useState<PositionChartPreview|null>(null);
+  const positionMarket = usePositionMarketPreview(positionPreview, interval);
   const activeReplaySymbol = positionPreview?.symbol ??
     (activeCoinState.status !== "stopped" && activeCoinState.time > 0 ? activeSymbol : null);
   const [replayDeskExpanded, setReplayDeskExpanded] = useReplayDeskVisibility(activeReplaySymbol);
@@ -1850,18 +1852,13 @@ const Index = () => {
     return changeSymbol(symbol, setActiveSymbol);
   }, [changeSymbol, setActiveSymbol]);
 
-  const handleOpenPositionChart = useCallback((symbol:string,source?:PositionChartPreview['source'])=>{
-    const target = timeMode==='isolated'?coinTimelines[symbol]:activeCoinState;
-    const binance = (!source?.exchange||source.exchange==='binance')&&source?.market!=='us_stock';
-    const hasReplay = target!=null&&target.status!=='stopped'&&target.time>0;
+  const handleOpenPositionChart = useCallback((symbol: string, source?: PositionChartPreview['source'], livePositionKey?: string) => {
+    const target = timeMode === 'isolated' ? coinTimelines[symbol] : activeCoinState;
+    const targetTime = target && target.status !== 'stopped' && target.time > 0 ? target.time : 0;
+    const replayTime = livePositionKey ? 0 : targetTime || (activeCoinState.status !== 'stopped' ? effectiveSimTime : 0);
     setReplayDeskExpanded(true);
-    if (binance&&hasReplay) {
-      void handleSymbolChange(symbol);
-    } else {
-      const at = activeCoinState.status==='stopped'||effectiveSimTime<=0 ? Date.now() : effectiveSimTime;
-      setPositionPreview({symbol,source,at});
-    }
-  },[timeMode,coinTimelines,activeCoinState,effectiveSimTime,setReplayDeskExpanded,handleSymbolChange]);
+    setPositionPreview({ symbol, source, livePositionKey, at: replayTime || Date.now(), live: !replayTime });
+  }, [timeMode, coinTimelines, activeCoinState, effectiveSimTime, setReplayDeskExpanded]);
   const selectDefaultReplaySymbol = useCallback((symbol: string) => {
     if (replayDefaultBlocked.current || activeCoinState.status !== 'stopped') return;
     const target = timeMode === 'isolated' ? coinTimelines[symbol] : undefined;
@@ -2455,11 +2452,12 @@ const Index = () => {
               onToggle={() => setReplayDeskExpanded(value => !value)}
               ticker={
                 <TickerBar
-                  symbol={activeSymbol}
-                  currentPrice={displayCurrentPrice}
-                  visibleData={displayData}
-                  pricePrecision={chartPricePrecision}
-                  effectiveSimTime={effectiveSimTime}
+                  symbol={positionPreview?.symbol ?? activeSymbol}
+                  currentPrice={positionPreview ? positionMarket.currentPrice : displayCurrentPrice}
+                  visibleData={positionPreview ? positionMarket.data : displayData}
+                  pricePrecision={positionPreview ? positionMarket.pricePrecision : chartPricePrecision}
+                  effectiveSimTime={positionPreview ? positionMarket.through : effectiveSimTime}
+                  positionTicker={positionPreview ? positionMarket.ticker : undefined}
                 />
               }
               desk={
@@ -2490,8 +2488,7 @@ const Index = () => {
                         </button>
                       )}
                       {positionPreview && <div className="absolute inset-0 z-30">
-                        <PositionMarketPreview key={positionPreview.symbol+':'+positionPreview.at} preview={positionPreview}
-                          initialInterval={interval} onClose={()=>setPositionPreview(null)}/>
+                        <PositionMarketPreview preview={positionPreview} market={positionMarket} onClose={() => setPositionPreview(null)} />
                       </div>}
                       {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
                         <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
@@ -2546,7 +2543,17 @@ const Index = () => {
                         <div className="h-full w-full min-w-0 flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
                           {/* P_gap 在上、盘口在下。两者都展开时才需要可拖拽分隔；
                               其余情形下折叠的一方缩成表头，空间全给展开的一方。 */}
-                          {!isPGapCollapsed && !isMarketDataCollapsed ? (
+                          {positionPreview ? (
+                            <PGapPanel
+                              symbol={positionPreview.symbol}
+                              currentPrice={positionMarket.currentPrice}
+                              pricePrecision={positionMarket.pricePrecision}
+                              collapsed={isPGapCollapsed}
+                              onToggleCollapsed={() => setIsPGapCollapsed(value => !value)}
+                              defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
+                              winRateSampleCount={campaignWinRate.resolvedCount}
+                            />
+                          ) : !isPGapCollapsed && !isMarketDataCollapsed ? (
                             <ResizablePanelGroup direction="vertical" className="h-full w-full">
                               <ResizablePanel defaultSize={50} minSize={25}>
                                 <PGapPanel
@@ -2628,6 +2635,7 @@ const Index = () => {
                     priceMap={displayPriceMap}
                     activeSymbol={activeSymbol}
                     onOpenPositionChart={handleOpenPositionChart}
+                    sidebarPositionKey={positionPreview?.livePositionKey}
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAdjustMargin={handleAdjustMargin}
@@ -2652,10 +2660,14 @@ const Index = () => {
           {/* Right order panel */}
           <ResizablePanel defaultSize={25} minSize={20} maxSize={30} className="flex flex-col h-full min-h-0">
             <div className="flex flex-col flex-1 h-full min-h-0 w-full min-w-[300px] overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
-              <OrderPanel
+              {positionPreview?.livePositionKey ? (
+                <div className="min-h-0 flex-1 overflow-y-auto scrollbar-pro">
+                  <UsdtLivePositionSidebar positionKey={positionPreview.livePositionKey} />
+                </div>
+              ) : <OrderPanel
                 symbol={activeSymbol}
                 currentPrice={displayCurrentPrice}
-                disabled={activeCoinState.status === "stopped" || displayCurrentPrice === 0}
+                disabled={positionPreview !== null || activeCoinState.status === "stopped" || displayCurrentPrice === 0}
                 onPlaceOrder={handlePlaceOrderForActiveSymbol}
                 pricePrecision={chartPricePrecision}
                 quantityPrecision={quantityPrecision}
@@ -2675,7 +2687,7 @@ const Index = () => {
                 onPickModeChange={setPickMode}
                 pickedPrice={pickedPrice}
                 onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
-              />
+              />}
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>

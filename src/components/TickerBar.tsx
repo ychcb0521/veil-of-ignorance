@@ -11,24 +11,33 @@ import { getSettlementAsset } from '@/lib/coinMargined';
 const FUNDING_INTERVAL_HOURS = [0, 8, 16];
 const FUNDING_RATE = 0.0001; // 0.01%
 
+export interface PositionTicker {
+  markPrice?: number;
+  indexPrice?: number;
+  fundingRate?: number;
+  nextFundingAt?: number;
+  daily?: Partial<{ high: number; low: number; volume: number; baseVolume: number; change: number; changePct: number }>;
+}
+
 interface Props {
   symbol: string;            // e.g. "BTCUSDT"
   currentPrice: number;
   visibleData: KlineData[];
   pricePrecision: number;
   effectiveSimTime: number;  // ms — used for funding countdown so it respects time travel
+  positionTicker?: PositionTicker;
 }
 
-function formatNum(n: number, decimals = 2): string {
-  if (!Number.isFinite(n)) return '--';
+function formatNum(n: number | undefined, decimals = 2): string {
+  if (n == null || !Number.isFinite(n)) return '--';
   return n.toLocaleString('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
 }
 
-function formatVolume(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return '--';
+function formatVolume(n: number | undefined): string {
+  if (n == null || !Number.isFinite(n) || n === 0) return '--';
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
@@ -44,20 +53,20 @@ function formatCountdown(ms: number): string {
   return `${h}:${m}:${s}`;
 }
 
-export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, effectiveSimTime }: Props) {
+export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, effectiveSimTime, positionTicker }: Props) {
   const { getSymbolSettlementMode } = useTradingContext();
   const settlementMode = getSymbolSettlementMode(symbol);
-  const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
+  const quoteUnitLabel = positionTicker ? (symbol.endsWith('USDC') ? 'USDC' : 'USDT') : settlementMode === 'coin' ? 'USD' : 'USDT';
   const baseCoin = getSettlementAsset(symbol);
-  const display = `${baseCoin}${quoteUnitLabel}`;
+  const display = positionTicker ? symbol : `${baseCoin}${quoteUnitLabel}`;
 
   // 24h stats derived from last ~24h of candles (works regardless of interval)
-  const stats = useMemo(() => {
+  const candleStats = useMemo(() => {
     if (visibleData.length === 0 || currentPrice <= 0) {
       return { high: 0, low: 0, volume: 0, baseVolume: 0, change: 0, changePct: 0, openPrice: 0 };
     }
     const lastTime = visibleData[visibleData.length - 1].time;
-    const cutoff = lastTime - 24 * 60 * 60 * 1000;
+    const cutoff = (positionTicker ? effectiveSimTime : lastTime) - 24 * 60 * 60_000;
     const window = visibleData.filter(c => c.time >= cutoff);
     const slice = window.length > 0 ? window : visibleData.slice(-Math.min(visibleData.length, 1440));
 
@@ -67,14 +76,15 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
     for (const c of slice) {
       if (c.high > high) high = c.high;
       if (c.low < low) low = c.low;
-      volume += c.volume * c.close;
+      volume += positionTicker ? c.quoteVolume ?? c.volume * c.close : c.volume * c.close;
       baseVolume += c.volume;
     }
     const openPrice = slice[0].open;
     const change = currentPrice - openPrice;
     const changePct = openPrice > 0 ? (change / openPrice) * 100 : 0;
     return { high, low, volume, baseVolume, change, changePct, openPrice };
-  }, [visibleData, currentPrice]);
+  }, [visibleData, currentPrice, positionTicker, effectiveSimTime]);
+  const stats = positionTicker ? positionTicker.daily ?? (visibleData.length ? candleStats : {}) : candleStats;
 
   // Funding countdown — ticks every second, but anchored on the simulated time
   const [now, setNow] = useState(() => Date.now());
@@ -83,7 +93,6 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
     return () => window.clearInterval(id);
   }, []);
 
-  const baseTime = effectiveSimTime > 0 ? effectiveSimTime + (Date.now() - now > 5_000 ? 0 : 0) : Date.now();
   const fundingMs = useMemo(() => {
     const t = effectiveSimTime > 0 ? effectiveSimTime : now;
     const d = new Date(t);
@@ -95,7 +104,7 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
     return target.getTime() - t;
   }, [effectiveSimTime, now]);
 
-  const isUp = stats.change >= 0;
+  const isUp = (stats.change ?? 0) >= 0;
   const upColor = 'text-[#0ecb81]';
   const downColor = 'text-[#f6465d]';
   const priceColor = isUp ? upColor : downColor;
@@ -120,19 +129,19 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
       </div>
 
       {/* Mark price */}
-      <Stat label="标记价格" value={formatNum(currentPrice, pricePrecision)} />
+      <Stat label="标记价格" value={formatNum(positionTicker ? positionTicker.markPrice : currentPrice, pricePrecision)} />
 
       {/* Index price (mock = current with tiny offset) */}
-      <Stat label="指数价格" value={formatNum(currentPrice * 0.9998, pricePrecision)} />
+      <Stat label="指数价格" value={formatNum(positionTicker ? positionTicker.indexPrice : currentPrice * 0.9998, pricePrecision)} />
 
       {/* Funding / countdown */}
       <div className="flex flex-col leading-tight shrink-0">
         <span className="text-[10px] text-gray-500 dark:text-[#848e9c]">资金费率 / 倒计时</span>
         <div className="flex items-center gap-1.5 font-mono tabular-nums">
           <span className="text-xs text-[#0ecb81] font-semibold">
-            {(FUNDING_RATE * 100).toFixed(4)}%
+            {positionTicker && positionTicker.fundingRate == null ? '--' : ((positionTicker?.fundingRate ?? FUNDING_RATE) * 100).toFixed(4) + '%'}
           </span>
-          <span className="text-xs text-gray-900 dark:text-[#EAECEF]">{formatCountdown(fundingMs)}</span>
+          <span className="text-xs text-gray-900 dark:text-[#EAECEF]">{positionTicker ? (positionTicker.nextFundingAt == null ? '--' : formatCountdown(positionTicker.nextFundingAt - now)) : formatCountdown(fundingMs)}</span>
         </div>
       </div>
 
@@ -142,9 +151,9 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
       {/* 24h stats */}
       <Stat
         label="24h 涨跌"
-        value={`${isUp ? '+' : ''}${formatNum(stats.change, pricePrecision)}`}
+        value={stats.change == null ? '--' : `${isUp ? '+' : ''}${formatNum(stats.change, pricePrecision)}`}
         valueClass={isUp ? upColor : downColor}
-        sub={`${isUp ? '+' : ''}${stats.changePct.toFixed(2)}%`}
+        sub={stats.changePct == null ? undefined : `${isUp ? '+' : ''}${stats.changePct.toFixed(2)}%`}
         subClass={isUp ? upColor : downColor}
       />
       {/* 【用户要求】2026-10-22 成交量 / 成交额更重要，放在最高 / 最低前面——窄屏时右侧被遮住的是最高 / 最低 */}

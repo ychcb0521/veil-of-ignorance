@@ -49,7 +49,7 @@ it('shows and clears real exchange positions in both views with one shared read 
   expect(table.getAllByRole('cell', {name:'开仓价格'}).map(cell=>cell.textContent)).toEqual(['0.0822712','0.0822712']);
   expect(table.getByText('-0.001 USDT')).toBeVisible();
   fireEvent.click(table.getAllByRole('button', {name:'BEATUSDT'})[0]);
-  expect(openChart).toHaveBeenCalledWith('BEATUSDT');
+  expect(openChart).toHaveBeenCalledWith('BEATUSDT', undefined, 'BEATUSDT:LONG');
   expect(table.queryByRole('region',{name:'币安实盘持仓'})).not.toBeInTheDocument();
   await waitFor(() => expect(table.getAllByText('开仓时间 2026-11-15 19:28:42.697')).toHaveLength(2));
   expect(fish.getAllByText('开仓 2026-11-15 19:28:42.697')).toHaveLength(2);

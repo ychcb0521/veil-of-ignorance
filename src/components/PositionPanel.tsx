@@ -74,7 +74,8 @@ interface Props {
   tradeHistory: TradeRecord[];
   priceMap: PriceMap;
   activeSymbol: string;
-  onOpenPositionChart?: (symbol:string,source?:InstantPositionFill['source'])=>void;
+  onOpenPositionChart?: (symbol: string, source?: InstantPositionFill['source'], livePositionKey?: string) => void;
+  sidebarPositionKey?: string;
   onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAdjustMargin?: (symbol: string, allocations: { positionId: string; deltaUsd: number }[]) => void;
@@ -257,7 +258,7 @@ function syntheticCardPosition(symbol: string, legs: readonly Position[]): Posit
 }
 
 export function PositionPanel({
-  positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol, onOpenPositionChart,
+  positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol, onOpenPositionChart, sidebarPositionKey,
   onClosePosition, onCancelOrder, onAdjustMargin, onApplySymbolLeverage, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
@@ -858,7 +859,8 @@ export function PositionPanel({
                 <div className="flex justify-center py-16 text-sm text-muted-foreground">{hideOtherContracts?`${activeSymbol} 暂无持仓`:'暂无持仓'}</div>:undefined}>
               {live&&livePositions.map(position=><UsdtLivePositionCard key={usdtMirrorKey(position)}
                 position={position} live={live} follow={instant?.usdtFollow}
-                onOpenChart={onOpenPositionChart?()=>onOpenPositionChart(position.symbol):undefined}/>)}
+                managementInSidebar={sidebarPositionKey === usdtMirrorKey(position)}
+                onOpenChart={onOpenPositionChart ? () => onOpenPositionChart(position.symbol, undefined, usdtMirrorKey(position)) : undefined} />)}
               {instantPositions.map(position=><InstantPositionRow key={position.id} position={position}
                 monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
                 manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status=>status.id===position.id)}

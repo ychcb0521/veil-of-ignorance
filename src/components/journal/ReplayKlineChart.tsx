@@ -26,6 +26,8 @@ interface Props {
   timezone?: string;
   /** 战役详情：保留全部 K 线，并把指定的初始时间范围缩放到铺满视口。 */
   fitAll?: boolean;
+  /** Keep all prefetched bars available when the initial view shows a shorter range. */
+  retainFullHistory?: boolean;
   /** fitAll 时首次铺满的时间范围；完整 klines 仍保留，缩小后可查看范围外数据。 */
   initialVisibleStartTime?: number | null;
   initialVisibleEndTime?: number | null;
@@ -102,6 +104,7 @@ export function ReplayKlineChart({
   viewportCenterTime = null,
   timezone,
   fitAll = false,
+  retainFullHistory = false,
   initialVisibleStartTime = null,
   initialVisibleEndTime = null,
   showLastPriceLine = true,
@@ -122,6 +125,7 @@ export function ReplayKlineChart({
     // range presets can still expand instantly from the prefetched snapshot.
     if (
       fitAll
+      && !retainFullHistory
       && typeof initialVisibleStartTime === 'number'
       && typeof initialVisibleEndTime === 'number'
     ) {
@@ -142,6 +146,7 @@ export function ReplayKlineChart({
     initialVisibleStartTime,
     intervalMs,
     normalizedKlines,
+    retainFullHistory,
     viewportCenterTime,
   ]);
 

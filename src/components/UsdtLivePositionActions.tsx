@@ -15,6 +15,9 @@ import { TpSlModal } from './TpSlModal';
 
 export interface LivePositionControls {
   market: ReactNode;
+  onClosePosition?: () => void;
+  onAdjustMargin?: () => void;
+  onProtect?: () => void;
   margin: ReactNode;
   addProtection: ReactNode;
   editProtection: ReactNode;
@@ -133,6 +136,9 @@ export function UsdtLivePositionActions({position,target,control,refresh,childre
     addProtection:<PositionProtectionButton disabled={disabled||!protectionReady} onClick={()=>open('protect')}/>,
     editProtection:<PositionEditButton label="编辑仓位止盈止损" disabled={disabled||!protectionReady} onClick={()=>open('protect')}/>,
     details,
+    onClosePosition: disabled ? undefined : () => open('close'),
+    onAdjustMargin: disabled || position.marginMode !== 'isolated' ? undefined : () => open('margin'),
+    onProtect: disabled || !protectionReady ? undefined : () => open('protect'),
     onLeverage:disabled||!position.leverage?undefined:()=>open('leverage'),
   });
 }
