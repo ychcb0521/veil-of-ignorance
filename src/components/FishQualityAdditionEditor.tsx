@@ -1,7 +1,7 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
-import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
+import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_VERSION } from '@/lib/impulse5m';
 import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
 import {FishQualityImpulse5mSettings,FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
 import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
@@ -285,7 +285,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  const box=d.source==='structure';
  const nativeActive=!d.impulse?.skipNative&&!d.impulse1115?.skipNative;
  const combined=box&&d.structure.kSource==='guard'&&!!d.structure.guardPlusVersion;
- const standardPositionName=box&&d.structure.kSource==='guard'?DBL5_GUARD_DISPLAY_NAME:'箱体／指标位置';
+ const standardPositionName=box&&d.structure.algorithm==='dbl5'&&d.structure.kSource==='guard'?DBL5_GUARD_DISPLAY_NAME:'箱体／指标位置';
  const nativePositionName=combined?DBL5_GUARD_PLUS_DISPLAY_NAME:standardPositionName;
  const positions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive):Pick<AdditionDraft,'impulse'|'impulse1115'>=>({
   impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115?true:undefined},
@@ -447,11 +447,11 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_1115_DISPLAY_NAME}</span>
      </label>
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60"
-       title={combined?'切换到防守线或先启用独立急拉，再取消组合版，即可选用 5 分钟急拉线。':undefined}>
+       title={combined?`切换到防守线或先启用独立急拉，再取消组合版，即可选用「${IMPULSE_5M_DISPLAY_NAME}」。`:undefined}>
       <input className="shrink-0" type="checkbox" checked={!!d.impulse} disabled={!d.enabled||combined}
         onChange={e=>patch(positions(e.target.checked?{bufferAtr:'0',minDistancePct:''}:undefined,d.impulse1115,
           e.target.checked?nativeActive:nativeActive||!d.impulse1115))}/>
-      <span className="min-w-0 [overflow-wrap:anywhere]">5 分钟急拉线</span>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_5M_DISPLAY_NAME}</span>
      </label>
     </div>
     <div className={`grid items-start gap-2${nativeActive&&d.impulse1115&&!combined?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
@@ -545,7 +545,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    {d.impulse&&<FishQualityImpulse5mSettings position={d.impulse} inputClass={cell+' w-20 max-w-full'}
      disabled={!d.enabled} change={position=>patch(positions(position,d.impulse1115))}/>}
    <p className="text-muted-foreground">同一轮只成交一次。{d.impulse
-     ?`同分钟依次评估${[nativeActive?nativePositionName:null,'5 分钟急拉线',d.impulse1115?IMPULSE_1115_DISPLAY_NAME:null].filter(Boolean).join('、')}。`
+     ?`同分钟依次评估${[nativeActive?nativePositionName:null,IMPULSE_5M_DISPLAY_NAME,d.impulse1115?IMPULSE_1115_DISPLAY_NAME:null].filter(Boolean).join('、')}。`
      :nativeActive&&d.impulse1115
      ?`同分钟先评估「${nativePositionName}」，再评估「${IMPULSE_1115_DISPLAY_NAME}」。`
      :'左侧两项可切换，独立急拉可单用或并选。'}</p>

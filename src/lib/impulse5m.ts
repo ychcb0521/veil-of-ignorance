@@ -1,3 +1,4 @@
+export const IMPULSE_5M_DISPLAY_NAME = 'DBL-5-急拉线-0';
 export const IMPULSE_5M_VERSION = 'impulse-low-5m-v1';
 export const IMPULSE_5M_STEP = 300_000;
 export const IMPULSE_5M_BASELINE = 24;

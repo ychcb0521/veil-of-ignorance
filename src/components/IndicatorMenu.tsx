@@ -1,6 +1,6 @@
 import { chartFeaturePeriod } from '@/lib/featureSource';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { accountResearchIndicators, GUARD_1115_CHART, GUARD_1115_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_DESCRIPTION, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
+import { accountResearchIndicators, GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_DESCRIPTION, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
 import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION, type Dbl5GuardVersion } from '@/lib/dbl5m';
 import { boxAlgorithmVersion } from '@/lib/fish/boxAlgorithmVersions';
 import { CTBA_DEFAULTS, CTBA_DESCRIPTION } from '@/lib/ctba';
@@ -26,7 +26,7 @@ import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod 
 import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
 import { SELLER_CONTROL_DEF, BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { BUILD_STAMP } from '@/lib/buildStamp';
-import { IMPULSE_5M_ID, IMPULSE_5M_VERSION } from '@/lib/impulse5mChart';
+import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_ID, IMPULSE_5M_VERSION } from '@/lib/impulse5mChart';
 
 export interface IndicatorCatalogItem {
   id: string;
@@ -73,12 +73,15 @@ function shortCustomNames(items: IndicatorCatalogItem[]): IndicatorCatalogItem[]
 }
 
 export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
-  { id: IMPULSE_5M_ID, nameZh: '急拉线', nameEn: '5m Impulse Support', isOverlay: true, defaultPeriod: 5,
+  { id: IMPULSE_5M_ID, nameZh: IMPULSE_5M_DISPLAY_NAME, nameEn: '5m Impulse Support', isOverlay: true, defaultPeriod: 5,
     color: '#a855f7', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: '5 分钟收盘确认放量突破后，在主图标出起涨低点。再次触及低点或满 60 分钟后结束。' },
   { id: IMPULSE_1115_CHART_ID, nameZh: IMPULSE_1115_CHART.short, nameEn: IMPULSE_1115_CHART.name, isOverlay: true,
     defaultPeriod: IMPULSE_1115_CHART.period, color: '#a21caf', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: IMPULSE_1115_CHART_DESCRIPTION },
+  { id: GUARD_PLUS_0_CHART_ID, nameZh: GUARD_PLUS_0_CHART.short, nameEn: GUARD_PLUS_0_CHART.name, isOverlay: true,
+    defaultPeriod: GUARD_PLUS_0_CHART.period, color: '#2563eb', category: 'custom', fixedPeriod: true, rawOnly: true, guardVersionSelect: true,
+    description: '在同一张图叠加原版防守线和原版 5 分钟急拉线。' },
   { id: GUARD_1115_CHART_ID, nameZh: GUARD_1115_CHART.short, nameEn: GUARD_1115_CHART.name, isOverlay: true,
     defaultPeriod: GUARD_1115_CHART.period, color: '#229173', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: '显示与 1115 组合指标完全相同的防守线成分。使用已收盘的 5 分钟 K 线。' },
@@ -360,7 +363,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
 
   const availableCatalog = useMemo(() => [
     ...INDICATOR_CATALOG.map(item => {
-      if (item.id===IMPULSE_1115_CHART_ID||item.id===GUARD_1115_CHART_ID) return item;
+      if (item.id===IMPULSE_1115_CHART_ID||item.id===GUARD_1115_CHART_ID||item.id===GUARD_PLUS_0_CHART_ID) return item;
       const spec = researchItems.find(spec => spec.id === item.id);
       const entry = supportsDbl5GuardVersion(spec) ? { ...item, guardVersionSelect:true } : item;
       const legacyId = item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : undefined;
@@ -583,6 +586,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   const custom = item.category === 'custom';
   const [descriptionOpen, setDescriptionOpen] = useState(false);
 
+  const plainFiveMinute = [IMPULSE_5M_ID, IMPULSE_1115_CHART_ID, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART_ID].includes(item.id);
   return (
     <div
       ref={ref}
@@ -632,7 +636,10 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         </select>}
         {active ? (
           <>
-            {item.fixedPeriod?<span className="text-[10px] text-muted-foreground" title={item.id===IMPULSE_5M_ID?IMPULSE_5M_VERSION:item.id===IMPULSE_1115_CHART_ID||item.id===GUARD_1115_CHART_ID?item.description:'在 Deep Dig 的定义参数中设置'}>{[IMPULSE_5M_ID,IMPULSE_1115_CHART_ID,GUARD_1115_CHART_ID].includes(item.id)?'5m':'5m · 定义参数'}</span>:<ParamInput
+            {item.fixedPeriod?<span className="text-[10px] text-muted-foreground"
+              title={item.id===IMPULSE_5M_ID?IMPULSE_5M_VERSION:plainFiveMinute?item.description:'在 Deep Dig 的定义参数中设置'}>
+              {plainFiveMinute?'5m':'5m · 定义参数'}
+            </span>:<ParamInput
               value={active.period}
               parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}

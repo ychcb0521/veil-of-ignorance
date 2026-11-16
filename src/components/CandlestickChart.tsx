@@ -1,5 +1,5 @@
 import {Dbl5ChartTimeline} from '@/lib/dbl5ChartTimeline';
-import { IMPULSE_5M_ID } from '@/lib/impulse5mChart';
+import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_ID } from '@/lib/impulse5mChart';
 import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
 import { mbi2MinutesOf } from '@/lib/mbi2';
 import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
@@ -122,7 +122,7 @@ const OVERLAY_INDICATOR_IDS = new Set([
 ]);
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc", [IMPULSE_5M_ID]: "急拉线" };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc", [IMPULSE_5M_ID]: IMPULSE_5M_DISPLAY_NAME };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */

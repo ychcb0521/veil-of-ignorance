@@ -5,7 +5,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
-import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators, GUARD_1115_CHART_ID, IMPULSE_1115_CHART_ID } from '@/lib/researchIndicators';
+import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART_ID } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
@@ -18,7 +18,7 @@ describe('自制区的十个特征值', () => {
   it('offers both 1115 components individually beside the combination and legacy DBL-5', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5',period:3,enabled:true},{type:'DBL5_GUARD_PLUS',period:3,enabled:true}]} onClose={()=>{}} onIndicatorsChange={changed}/>);
-    expect(screen.getByText('DBL-5-防守线')).toBeInTheDocument();
+    expect(screen.getByText('DBL-5-防守线-0')).toBeInTheDocument();
     expect(screen.getByText('DBL-5-防守线+急拉线-1115')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'急拉线-1115'}});
     fireEvent.click(screen.getByText('DBL-5-急拉线-1115'));
@@ -26,7 +26,7 @@ describe('自制区的十个特征值', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'防守线-1115'}});
     fireEvent.click(screen.getByText('DBL-5-防守线-1115'));
     expect(changed.mock.lastCall?.[0].map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5','DBL5_GUARD_PLUS',GUARD_1115_CHART_ID]);
-    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5).shortName).toBe('DBL-5-防守线');
+    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5).shortName).toBe('DBL-5-防守线-0');
     expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).shortName).toBe('DBL-5-防守线+急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).shortName).toBe('DBL-5-急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).figures.map((figure:{key:string})=>figure.key)).toEqual(['value']);
@@ -37,15 +37,23 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5', period:3, enabled:true}]} onClose={() => {}} onIndicatorsChange={changed}/>);
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: '急拉线' } });
-    fireEvent.click(screen.getByText('急拉线'));
+    fireEvent.click(screen.getByText('DBL-5-急拉线-0'));
     expect(changed.mock.lastCall?.[0]).toMatchObject([{ type: 'DBL5', enabled: true }, { type: 'IMPULSE_5M', enabled: true }]);
+    fireEvent.click(screen.getByText('DBL-5-防守线+急拉线-0'));
+    expect(changed.mock.lastCall?.[0]).toMatchObject([{ type: 'DBL5', enabled: true }, { type: GUARD_PLUS_0_CHART_ID, enabled: true }]);
     const bars = Array.from({length: 27}, (_, i) => ({timestamp: i * 300_000, open: 100, high: 100.2, low: 99.8,
       close: 100, turnover: 1000, takerBuyTurnover: 500}));
     bars[24] = {...bars[24], high: 101.35, low: 99.8, close: 101.3, turnover: 1800, takerBuyTurnover: 1100};
     bars[25] = {...bars[25], open: 101.3, high: 101.4, low: 100.5, close: 101.1};
     const calc = registered.get('IMPULSE_5M_CUSTOM').calc;
     expect(calc(bars.slice(0, 25)).at(-1)).toEqual({});
-    expect(calc(bars)[25]).toEqual({ value: 99.8, confirmedAt: bars[25].timestamp });
+    const standalone = calc(bars);
+    expect(standalone[25]).toEqual({ value: 99.8, confirmedAt: bars[25].timestamp });
+    const combined = registered.get(CUSTOM_INDICATOR_MAP[GUARD_PLUS_0_CHART_ID]);
+    expect(combined.shortName).toBe('DBL-5-防守线+急拉线-0');
+    const rows = combined.calc(bars, {calcParams: [3]});
+    expect(rows.map((row:Record<string,number>) => row.impulse5mValue)).toEqual(standalone.map((point:{value?:number}) => point.value));
+    expect(rows.map((row:Record<string,number>) => row.impulse5mConfirmedAt)).toEqual(standalone.map((point:{confirmedAt?:number}) => point.confirmedAt));
     expect(calc(bars.map(bar => ({ ...bar, timestamp: bar.timestamp * 3 }))).every(point => point.value == null)).toBe(true);
   });
   it.each([['ATI-6H','ATI6H',1,1],['PRS-6H','PRS6H',.5,100]] as const)('%s 与 CDA 一样能添加原值、avg、avg₂并独立开关',(label,id,period,max)=>{
@@ -75,7 +83,7 @@ describe('自制区的十个特征值', () => {
     expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
-    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M',IMPULSE_1115_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M',IMPULSE_1115_CHART_ID,GUARD_PLUS_0_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');

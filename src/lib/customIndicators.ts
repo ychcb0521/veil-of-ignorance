@@ -3,7 +3,7 @@ import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
 import { IMPULSE_5M_ID, IMPULSE_5M_INDICATOR, registerImpulse5mChart } from '@/lib/impulse5mChart';
 import {registerImpulse1115Chart} from '@/lib/impulse1115Chart';
 import type {Dbl5GuardVersion} from '@/lib/dbl5m';
-import {GUARD_1115_CHART, GUARD_1115_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion} from '@/lib/researchIndicators';
+import {GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion} from '@/lib/researchIndicators';
 import {registerSbsPriceIndicator} from '@/lib/sbs5mChart';
 import {PRS6H_STATES} from '@/lib/prs6h';
 import {ATI6H_COMPONENTS,ATI6H_LABELS} from '@/lib/ati6h';
@@ -1489,6 +1489,7 @@ export function registerCustomIndicators() {
   registerImpulse5mChart();
   registerImpulse1115Chart(IMPULSE_1115_CHART);
   registerDbl5Indicator(GUARD_1115_CHART);
+  registerDbl5Indicator(GUARD_PLUS_0_CHART);
   for (const item of RESEARCH_INDICATORS) {
     if(item.id.startsWith('DBL5')){registerDbl5Indicator(item);continue;}
     if('priceOverlay' in item&&item.priceOverlay){registerSbsPriceIndicator(item);continue;}
@@ -1563,6 +1564,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   [IMPULSE_5M_ID]: IMPULSE_5M_INDICATOR,
   [IMPULSE_1115_CHART_ID]: researchKcName(IMPULSE_1115_CHART_ID),
   [GUARD_1115_CHART_ID]: researchKcName(GUARD_1115_CHART_ID),
+  [GUARD_PLUS_0_CHART_ID]: researchKcName(GUARD_PLUS_0_CHART_ID),
   // Built-in klinecharts indicators (verified in klinecharts 9.8.12 ESM)
   MA: 'MA', EMA: 'EMA', SMA: 'SMA',
   BOLL: 'BOLL', SAR: 'SAR',

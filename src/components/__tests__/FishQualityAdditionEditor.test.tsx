@@ -332,7 +332,7 @@ it('restores the original 5m impulse settings and lets the user select it again'
   const position={version:'impulse-low-5m-v1',bufferAtr:.35,minDistancePct:2,skipNative:true} as const;
   const initial={...defaultQualityAddition(),enabled:true,impulsePosition:position};
   render(<Editor initial={initial}/>);
-  const five=screen.getByLabelText('5 分钟急拉线',{exact:true});
+  const five=screen.getByLabelText('DBL-5-急拉线-0',{exact:true});
   expect(five).toBeChecked();
   expect(screen.getByLabelText('急拉线冗余 ATR')).toHaveValue(.35);
   expect(screen.getByLabelText('箱体／指标位置')).not.toBeChecked();
@@ -352,7 +352,7 @@ it('sets the guard and impulse independently with per-round ATR and minimum dist
  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
  fireEvent.change(screen.getByLabelText('上涨期防守冗余'),{target:{value:'0.7'}});
  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
- expect(screen.getByLabelText('5 分钟急拉线',{exact:true})).not.toBeChecked();
+ expect(screen.getByLabelText('DBL-5-急拉线-0',{exact:true})).not.toBeChecked();
  expect(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR')).toHaveValue(.5);
  fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR'),{target:{value:'1.25'}});
  fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 最小距离'),{target:{value:'1.8'}});
@@ -365,7 +365,7 @@ it('sets the guard and impulse independently with per-round ATR and minimum dist
  expect(saved.rounds[0].impulsePosition).toBeUndefined();
  expect(saved.rounds[1].impulse1115Position).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
- fireEvent.click(screen.getByLabelText('DBL-5-防守线',{exact:true}));
+ fireEvent.click(screen.getByLabelText('DBL-5-防守线-0',{exact:true}));
  expect(screen.queryByLabelText('K基准箱体')).toBeNull();
  expect(screen.queryByLabelText('上涨期防守冗余')).toBeNull();
  expect(save().rounds[0].impulse1115Position.skipNative).toBe(true);
@@ -398,7 +398,7 @@ it('keeps a saved combined 1115 position until the draft is explicitly changed',
  expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
  expect(save().structure.guardPlusImpulseBufferAtr).toBeUndefined();
  expect(save().impulse1115Position).toBeUndefined();
- fireEvent.click(screen.getByLabelText('DBL-5-防守线',{exact:true}));
+ fireEvent.click(screen.getByLabelText('DBL-5-防守线-0',{exact:true}));
  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
  expect(save().structure.guardPlusVersion).toBeUndefined();
  expect(save().impulse1115Position.version).toBe(IMPULSE_1115_CONFIGURABLE_K_VERSION);
@@ -419,7 +419,7 @@ it('stores the combo’s adjustable impulse buffer separately from standalone an
  expect(parseAdditionDraft(additionDraft(combo),BUILTIN_FEATURES)).toEqual(combo);
  fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115'}));
  expect(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR')).toHaveValue(.5);
- fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线'}));
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线-0'}));
  expect(save().structure.guardPlusImpulseBufferAtr).toBeUndefined();
 });
 
@@ -439,7 +439,7 @@ it('allows the combined version alongside independent 1115 and restores both cho
  });
  expect(both.rounds?.[0].impulse1115Position?.skipNative).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(both),BUILTIN_FEATURES)).toEqual(both);
- fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线'}));
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线-0'}));
  expect(save().rounds[0].structure.guardPlusVersion).toBeUndefined();
  expect(split).toBeChecked();
 });
