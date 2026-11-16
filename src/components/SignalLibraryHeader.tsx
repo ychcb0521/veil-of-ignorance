@@ -2,6 +2,8 @@ import type { SignalSortKey } from '@/lib/signalLibrary';
 
 export const SIGNAL_LIBRARY_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128px)_minmax(0,160px)_36px_74px_minmax(0,1fr)_20px_20px_20px] items-center gap-2';
 
+export const ENTRY_PERIOD_SIGNAL_GRID = 'grid grid-cols-[minmax(0,148px)_128px_136px_minmax(0,160px)_36px_74px_minmax(0,1fr)_20px_20px_20px] items-center gap-2';
+
 export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128px)_minmax(0,160px)_36px_74px_minmax(200px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Fish tables size the algorithm column from every row, including virtualized rows. */
@@ -24,13 +26,14 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
   showProcess?: boolean;
   sortKey: SignalSortKey | undefined; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
 }) {
-  return <div data-testid="signal-library-header" className={`${showCda ? SIGNAL_LIBRARY_SCREENED_GRID : algorithmSort ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
+  return <div data-testid="signal-library-header" className={`${showCda ? SIGNAL_LIBRARY_SCREENED_GRID : algorithmSort ? SIGNAL_LIBRARY_FISH_GRID : showEntryPeriod ? ENTRY_PERIOD_SIGNAL_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
     <span className={`relative grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1 ${selection?'pl-4':''}`}>
       {selection&&<input type="checkbox" className="absolute left-0 h-3 w-3" aria-label="全选当前筛选的鱼" checked={selection.checked} onChange={selection.toggle}/>}
       <span aria-hidden/>
       <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => onSort('symbol')} />
     </span>
     <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => onSort('time')} />
+    {showEntryPeriod && <SortHeader label="进场期结束时间" active={sortKey === 'entryEnd'} dir={sortDir} onClick={() => onSort('entryEnd')} />}
     {algorithmSort && (caughtAtSort
       ? <SortHeader label="捕捞时间" active={caughtAtSort.active} dir={sortDir} onClick={caughtAtSort.onClick} />
       : <span title={showScreeningTime ? "动态筛选首次满足的时间（北京时间）" : "实际捕获这条鱼的时间（北京时间）"}>{showScreeningTime ? "首次满足时间" : "捕捞时间"}</span>)}

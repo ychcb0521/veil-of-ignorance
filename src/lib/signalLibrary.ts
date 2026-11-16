@@ -15,7 +15,7 @@
  */
 
 import { stockCode } from './signalMarket';
-import type { StoredEntryPeriodMarket, EntryPeriodMark } from './entryPeriodSignals';
+import type { EntryPeriodMetadata } from './entryPeriodSignals';
 import { isTuringCupSymbol, turingCupSymbol } from './turingCupSymbol';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
@@ -25,7 +25,7 @@ import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
   /** Independent entry-period history preserves the workbook name and classification. */
-  entryPeriod?: { market: StoredEntryPeriodMarket; mark: EntryPeriodMark };
+  entryPeriod?: EntryPeriodMetadata;
   /** Missing market keeps the existing crypto identity. */
   market?: 'us_stock';
   /** Exchange metadata's underlying/security code; never used to infer market. */
@@ -313,7 +313,7 @@ export function mergeSignals(existing: TradeSignal[], incoming: TradeSignal[]): 
   return merged;
 }
 
-export type SignalSortKey = 'symbol' | 'time' | 'quality';
+export type SignalSortKey = 'symbol' | 'time' | 'quality' | 'entryEnd';
 
 /**
  * 按列排序。三列各有各的次序语义：
@@ -335,6 +335,15 @@ export function sortSignalsBy(
   if (key === 'time') return sortSignalsByTime(list, dir);
 
   const sign = dir === 'asc' ? 1 : -1;
+  if (key === 'entryEnd') {
+    return [...list].sort((a, b) => {
+      const endA = a.entryPeriod?.endTimeMs, endB = b.entryPeriod?.endTimeMs;
+      if (endA === endB) return b.timeMs - a.timeMs;
+      if (endA === undefined) return 1;
+      if (endB === undefined) return -1;
+      return (endA - endB) * sign;
+    });
+  }
   return [...list].sort((a, b) => {
     const qa = normalizeSignalQuality(a.quality);
     const qb = normalizeSignalQuality(b.quality);

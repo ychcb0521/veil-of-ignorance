@@ -29,11 +29,11 @@ import {
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { entryPeriodMarketLabel } from '@/lib/entryPeriodSignals';
+import { entryPeriodEndLabel, entryPeriodMarketLabel } from '@/lib/entryPeriodSignals';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
 import { screenedSellReason, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
-import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID, SIGNAL_LIBRARY_SCREENED_GRID } from '@/components/SignalLibraryHeader';
+import { ENTRY_PERIOD_SIGNAL_GRID, SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID, SIGNAL_LIBRARY_SCREENED_GRID } from '@/components/SignalLibraryHeader';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { turingCupTicker } from '@/lib/turingCupSymbol';
@@ -256,7 +256,7 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      data-testid="signal-library-row" className={`relative group ${showCda ? SIGNAL_LIBRARY_SCREENED_GRID : algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
+      data-testid="signal-library-row" className={`relative group ${showCda ? SIGNAL_LIBRARY_SCREENED_GRID : algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : entryPeriod ? ENTRY_PERIOD_SIGNAL_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
@@ -264,7 +264,7 @@ function SignalLibraryRowImpl({
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
-        className={`${showCda ? 'col-span-7' : algorithmTypes ? 'col-span-6' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
+        className={`${showCda ? 'col-span-7' : algorithmTypes ? 'col-span-6' : entryPeriod ? 'col-span-5' : 'col-span-4'} grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
         title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -293,6 +293,9 @@ function SignalLibraryRowImpl({
             />
           )}
         </span>
+        {entryPeriod && <span data-testid="entry-period-end-time" className="truncate font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">
+          {entryPeriodEndLabel(entryPeriod.endTimeMs) || '—'}
+        </span>}
         {algorithmTypes && <span className="whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-caught-at">
           {caughtAt != null && caughtAt > 0 ? formatBeijingTime(new Date(caughtAt).getTime()) : '—'}
         </span>}

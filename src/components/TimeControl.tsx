@@ -18,14 +18,14 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { latestInstantReplaySymbol } from '@/lib/fish/latestScreenedReplaySymbol';
 import { useLatestInstantReplay } from '@/hooks/useLatestInstantReplay';
 import {
-  type TradeSignal,
+  type TradeSignal, type SignalSortKey,
   parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
   normalizeSignalQuality, setSignalQuality, signalChartSymbol,signalDedupKey,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { useSignalLibrary } from '@/hooks/useSignalLibrary';
-import { ENTRY_PERIOD_SIGNALS_KEY, ENTRY_PERIOD_MARKETS, entryPeriodMarketGroup, entryPeriodMarketLabel, mergeEntryPeriodSignals, type EntryPeriodMarket, type EntryPeriodSignal } from '@/lib/entryPeriodSignals';
+import { ENTRY_PERIOD_SIGNALS_KEY, ENTRY_PERIOD_MARKETS, entryPeriodEndLabel, entryPeriodMarketGroup, entryPeriodMarketLabel, mergeEntryPeriodSignals, type EntryPeriodMarket } from '@/lib/entryPeriodSignals';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
@@ -258,7 +258,7 @@ export function TimeControl({
    * 排序改成**点表头**,不再用独立的下拉框:列名本来就在那儿,
    * 再放一个「标的 A→Z」的选择器等于把同一件事说两遍,而且它排不了新增的评分列。
    */
-  const [sortKey, setSortKey] = useState<'symbol' | 'time' | 'quality'>('symbol');
+  const [sortKey, setSortKey] = useState<SignalSortKey>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const toggleLibrary = (next: SignalLibraryKind) => {
     setFishOpen(false);
@@ -276,7 +276,7 @@ export function TimeControl({
     }
     setSignalLibOpen(open => next !== library || !open);
   };
-  const toggleSort = (key: 'symbol' | 'time' | 'quality') => {
+  const toggleSort = (key: SignalSortKey) => {
     if (key === sortKey) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
     setSortKey(key);
     // 各列的「顺手方向」不同:标的从 A 起,时间与评分从大的起。
@@ -506,22 +506,15 @@ export function TimeControl({
     if (!files.length || entryImportPending) return;
     setEntryImportPending(true);
     try {
-      const { readEntryPeriodWorkbook } = await import('@/lib/entryPeriodWorkbook');
-      const incoming: EntryPeriodSignal[] = [];
-      for (const file of files) {
-        try {
-          const parsed = await readEntryPeriodWorkbook(file);
-          for (const signal of parsed) incoming.push(signal);
-        } catch (error) {
-          throw new Error(file.name + ' · ' + (error as Error).message);
-        }
-      }
+      const { readEntryPeriodWorkbooks } = await import('@/lib/entryPeriodWorkbook');
+      const incoming = await readEntryPeriodWorkbooks(files);
       if (!incoming.length) { toast.error('没有找到标记为「进1」或「进1(逼近)」的记录'); return; }
       const previous = entrySignalsRef.current;
       const merged = mergeEntryPeriodSignals(previous, incoming);
       const added = merged.length - previous.length;
       setEntrySignals(current => mergeEntryPeriodSignals(current, incoming));
-      toast.success('已导入 ' + added + ' 条信号', { description: '库内共 ' + merged.length + ' 条，跳过重复 ' + (incoming.length - added) + ' 条' });
+      const filled = previous.reduce((count, row, index) => count + Number(row !== merged[index]), 0);
+      toast.success('已导入 ' + added + ' 条信号', { description: '库内共 ' + merged.length + ' 条，补齐 ' + filled + ' 条结束时间' });
     } catch (error) {
       toast.error('进场期信号导入失败', { description: (error as Error).message });
     } finally {
@@ -593,10 +586,11 @@ export function TimeControl({
       const { buildXlsx } = await import('@/lib/xlsxWorkbook');
       blob = buildXlsx([{
         name: '数据',
-        columns: ['日期', '币种', '进退场周期', '市场'].map(header => ({ header, width: 18 })),
+        columns: ['日期', '币种', '进退场周期', '市场', '进场期结束时间'].map(header => ({ header, width: 20 })),
         rows: signals.map(signal => [
           signal.timeLabel.slice(0, 10), signal.symbol, signal.entryPeriod?.mark,
           signal.entryPeriod ? entryPeriodMarketLabel(signal.entryPeriod.market) : undefined,
+          entryPeriodEndLabel(signal.entryPeriod?.endTimeMs),
         ]),
       }]);
       fileName = '进场期信号库-' + stamp + '.xlsx';
@@ -906,7 +900,7 @@ export function TimeControl({
                 <input type="file" aria-label="上传进场期 Excel" accept=".xlsx" multiple disabled={entryImportPending}
                   onChange={handleEntryPeriodFiles} className="sr-only" />
               </label>
-              <span>可多选文件 · 取「数据」页的「进1」「进1(逼近)」· 北京时间 16:00</span>
+              <span>可多选连续原表 · 「进1」入库，「退1」确认结束 · 北京时间 16:00</span>
               {signals.length > 0 && <button type="button" disabled={entryImportPending}
                 className="ml-auto rounded px-2 py-1 text-destructive hover:bg-destructive/10" onClick={handleClearSignals}>清空</button>}
             </div>

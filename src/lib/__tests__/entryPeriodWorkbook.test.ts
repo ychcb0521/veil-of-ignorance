@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildXlsxBytes } from '@/lib/xlsxWorkbook';
-import { readEntryPeriodWorkbook } from '@/lib/entryPeriodWorkbook';
+import { readEntryPeriodWorkbook, readEntryPeriodWorkbooks } from '@/lib/entryPeriodWorkbook';
 import { ENTRY_PERIOD_MARKETS, entryPeriodMarketGroup, entryPeriodMarketLabel, mergeEntryPeriodSignals } from '@/lib/entryPeriodSignals';
-import { setSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
+import { setSignalQuality, signalChartSymbol, sortSignalsBy } from '@/lib/signalLibrary';
 
-const columns = ['日期', '币种', '进退场周期', '市场'].map(header => ({ header }));
+const columns = ['日期', '币种', '进退场周期', '市场', '进场期结束时间'].map(header => ({ header }));
 const workbook = (rows: (string | number)[][], sheet = '数据') => {
   const buffer = Uint8Array.from(buildXlsxBytes([{ name: sheet, columns, rows }])).buffer;
   return { arrayBuffer: async () => buffer } as File;
@@ -60,6 +60,43 @@ describe('进场期信号库', () => {
       'Crypto', 'Crypto', '其他', '其他', '其他', '其他',
     ]);
     expect(rows.map(signalChartSymbol)).toEqual(['BTCUSDT', 'BTCUSDT', null, null, null, null]);
+  });
+
+  it('按日期跨文件匹配同一轮首退，遇到退2或新一轮进1就停止查找', async () => {
+    const rows = await readEntryPeriodWorkbooks([
+      workbook([
+        ['2025-04-21', 'BTC', '进1', ''],
+        ['2025-04-18', 'BTC', '进1', ''],
+        ['2025-04-11', 'BTC', '进1', ''],
+        ['2025-04-12', 'ETH', '进1', ''],
+        ['2025-04-13', 'BTC', '进2', ''],
+        ['2025-04-16', 'ETH', '进5', ''],
+        ['2025-04-24', 'ETH', '进3', ''],
+      ]),
+      workbook([
+        ['2025-04-27', 'BTC', '退1', ''],
+        ['2025-04-15', 'BTC', '退1(逼近)', ''],
+        ['2025-04-24', 'BTC', '退2', ''],
+        ['2025-04-25', 'ETH', '退1', ''],
+      ]),
+    ]);
+    expect(rows.map(row => [row.symbol, row.timeLabel, row.entryPeriod.endTimeMs])).toEqual([
+      ['BTC', '2025-04-11 16:00', Date.parse('2025-04-15T08:00:00Z')],
+      ['ETH', '2025-04-12 16:00', undefined],
+      ['BTC', '2025-04-18 16:00', undefined],
+      ['BTC', '2025-04-21 16:00', undefined],
+    ]);
+    expect(sortSignalsBy(rows, 'entryEnd')[0]).toBe(rows[0]);
+  });
+
+  it('回导结束时间可补齐已有信号，重复导入保留评分和原结束时间', async () => {
+    const original = await readEntryPeriodWorkbook(workbook([['2025-04-11', 'BTC', '进1', '']]));
+    const rated = setSignalQuality(original, original[0].id, 5);
+    const incoming = await readEntryPeriodWorkbook(workbook([['2025-04-11', 'BTC', '进1', '', '2025-04-15 16:00']]));
+    const merged = mergeEntryPeriodSignals(rated, incoming);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ quality: 5, entryPeriod: { endTimeMs: Date.parse('2025-04-15T08:00:00Z') } });
+    expect(mergeEntryPeriodSignals(merged, incoming)).toBe(merged);
   });
 
   it('报告缺少「数据」页和无效首日日期', async () => {

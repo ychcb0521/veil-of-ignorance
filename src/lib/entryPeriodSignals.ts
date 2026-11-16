@@ -1,4 +1,5 @@
 import type { TradeSignal } from './signalLibrary';
+import { formatUTC8 } from './timeFormat';
 
 export const ENTRY_PERIOD_SIGNALS_KEY = 'entry_period_signals_v1';
 export const ENTRY_PERIOD_MARKETS = {
@@ -21,7 +22,19 @@ export function entryPeriodMarketLabel(market: StoredEntryPeriodMarket): string 
 }
 
 export type EntryPeriodMark = '进1' | '进1(逼近)';
-export type EntryPeriodSignal = TradeSignal & { entryPeriod: { market: StoredEntryPeriodMarket; mark: EntryPeriodMark } };
+export type EntryPeriodMetadata = { market: StoredEntryPeriodMarket; mark: EntryPeriodMark; endTimeMs?: number };
+export type EntryPeriodSignal = TradeSignal & { entryPeriod: EntryPeriodMetadata };
+
+export function entryPeriodTime(date: string): number | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  const midnight = Date.parse(date + 'T00:00:00Z');
+  if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== date) return undefined;
+  return midnight + 8 * 3_600_000;
+}
+
+export function entryPeriodEndLabel(endTimeMs?: number): string {
+  return endTimeMs && Number.isFinite(endTimeMs) ? formatUTC8(endTimeMs).slice(0, 16) : '';
+}
 
 const marketByName = new Map<string, StoredEntryPeriodMarket>();
 const knownMarkets: Partial<Record<StoredEntryPeriodMarket, string>> = {
@@ -59,9 +72,8 @@ export function createEntryPeriodSignal(
   rawSymbol: string, date: string, mark: EntryPeriodMark, marketLabel?: string,
 ): EntryPeriodSignal | undefined {
   const symbol = rawSymbol.trim();
-  if (!symbol || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
-  const midnight = Date.parse(date + 'T00:00:00Z');
-  if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== date) return undefined;
+  const timeMs = entryPeriodTime(date);
+  if (!symbol || timeMs === undefined) return undefined;
   const market = readMarket(symbol, marketLabel);
   const ticker = symbol.toUpperCase().replace('/', '');
   const binanceSymbol = market === 'crypto' && /^[A-Z0-9]+$/.test(ticker)
@@ -70,7 +82,7 @@ export function createEntryPeriodSignal(
   return {
     id: 'entry-period:' + encodeURIComponent(symbol.normalize('NFKC').toUpperCase()) + ':' + date,
     symbol,
-    timeMs: midnight + 8 * 3_600_000,
+    timeMs,
     timeLabel: date + ' 16:00',
     fallbackZone: '',
     binanceSymbol,
@@ -79,11 +91,16 @@ export function createEntryPeriodSignal(
 }
 
 export function mergeEntryPeriodSignals(existing: TradeSignal[], incoming: readonly EntryPeriodSignal[]): TradeSignal[] {
-  const ids = new Set(existing.map(signal => signal.id));
-  const additions = incoming.filter(signal => {
-    if (ids.has(signal.id)) return false;
-    ids.add(signal.id);
-    return true;
+  const byId = new Map(incoming.map(signal => [signal.id, signal]));
+  let changed = false;
+  const updated = existing.map(signal => {
+    const endTimeMs = byId.get(signal.id)?.entryPeriod.endTimeMs;
+    byId.delete(signal.id);
+    if (signal.entryPeriod && signal.entryPeriod.endTimeMs === undefined && endTimeMs !== undefined) {
+      changed = true;
+      return { ...signal, entryPeriod: { ...signal.entryPeriod, endTimeMs } };
+    }
+    return signal;
   });
-  return additions.length ? [...existing, ...additions] : existing;
+  return changed || byId.size ? [...updated, ...byId.values()] : existing;
 }
