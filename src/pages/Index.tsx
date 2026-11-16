@@ -16,6 +16,7 @@ import { MarketDataPanel, type MarketDataTab } from "@/components/MarketDataPane
 import { PGapPanel } from "@/components/PGapPanel";
 import { useCampaignWinRate } from "@/hooks/useCampaignWinRate";
 import { TickerBar } from "@/components/TickerBar";
+import { ReplayDeskPanels, useReplayDeskVisibility } from "@/components/ReplayDeskPanels";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
 import { SymbolSelector } from "@/components/SymbolSelector";
@@ -232,6 +233,9 @@ const Index = () => {
       return { status: "stopped" as const, time: 0, speed: 1, originTime: null as number | null };
     return { status: ct.status, time: ct.time, speed: ct.speed, originTime: ct.originTime };
   }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol, syncedOriginTime]);
+
+  const activeReplaySymbol = activeCoinState.status !== "stopped" && activeCoinState.time > 0 ? activeSymbol : null;
+  const [replayDeskExpanded, setReplayDeskExpanded] = useReplayDeskVisibility(activeReplaySymbol);
 
   // Effective time for data filtering
   const effectiveSimTime = useMemo(() => {
@@ -1869,6 +1873,7 @@ const Index = () => {
   const handleStart = useCallback(
     async (timestamp: number) => {
       replayDefaultBlocked.current = true;
+      setReplayDeskExpanded(true);
       const data = await initLoad(activeSymbol, interval, timestamp, { reverse: timeDirection === -1 });
       // 取数期间用户又切了标的 / 周期：以后一次操作为准，这次静默放弃，不报「数据获取失败」。
       if (data === SUPERSEDED_INIT_LOAD) return;
@@ -1918,7 +1923,7 @@ const Index = () => {
         toast.error("数据获取失败", { description: "请检查时间范围和交易对" });
       }
     },
-    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setActiveSymbol, setReverseCapTime, profile, forkReplayTimeline],
+    [activeSymbol, interval, iMs, initLoad, sim, timeMode, timeDirection, setActiveSymbol, setReverseCapTime, profile, forkReplayTimeline, setReplayDeskExpanded],
   );
 
   // ===== Signal-library jump: switch symbol + start time machine atomically =====
@@ -1980,7 +1985,8 @@ const Index = () => {
         }
       }
 
-      // 取数成功后才切换标的、周期和方向。
+      // 取数成功后才切换标的、周期和方向，并打开盘面。
+      setReplayDeskExpanded(true);
       if (jumpInterval !== interval) setIntervalVal(jumpInterval);
       if (direction !== timeDirection) {
         setTimeDirection(direction);
@@ -2038,7 +2044,7 @@ const Index = () => {
     },
     [
       activeSymbol, interval, initLoad, sim, timeMode, timeDirection, setTimeDirection, setIntervalVal, setReverseCapTime,
-      setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime, forkReplayTimeline,
+      setActiveSymbol, setPriceMap, setCoinTimelines, setSyncedOriginTime, forkReplayTimeline, setReplayDeskExpanded,
     ],
   );
 
@@ -2424,180 +2430,172 @@ const Index = () => {
         <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
           {/* Left main area (chart + orderbook + positions) */}
           <ResizablePanel defaultSize={75} minSize={60}>
-            <ResizablePanelGroup direction="vertical" className="h-full w-full">
-              {/* Top: Ticker + Chart + OrderBook */}
-              <ResizablePanel defaultSize={70} minSize={50}>
-                <div className="h-full w-full flex flex-col min-h-0">
-                  {/* Ticker bar (fixed strip, not resizable) */}
-                  <TickerBar
-                    symbol={activeSymbol}
-                    currentPrice={displayCurrentPrice}
-                    visibleData={displayData}
-                    pricePrecision={chartPricePrecision}
-                    effectiveSimTime={effectiveSimTime}
-                  />
+            <ReplayDeskPanels
+              expanded={replayDeskExpanded}
+              onToggle={() => setReplayDeskExpanded(value => !value)}
+              ticker={
+                <TickerBar
+                  symbol={activeSymbol}
+                  currentPrice={displayCurrentPrice}
+                  visibleData={displayData}
+                  pricePrecision={chartPricePrecision}
+                  effectiveSimTime={effectiveSimTime}
+                />
+              }
+              desk={
+                <ResizablePanelGroup
+                  key={isOrderBookOpen ? "ob-open" : "ob-closed"}
+                  direction="horizontal"
+                  className="h-full w-full"
+                >
+                  <ResizablePanel defaultSize={isOrderBookOpen ? 75 : 100} minSize={50}>
+                    <div className="h-full w-full relative overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
+                      {!isOrderBookOpen && (
+                        <button
+                          type="button"
+                          onClick={() => setIsOrderBookOpen(true)}
+                          title="显示订单簿"
+                          className="absolute top-2 right-2 z-20 flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-white/90 dark:bg-[#1e2329]/90 border border-gray-200 dark:border-[#2b3139] text-gray-600 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white shadow-sm cursor-pointer transition-colors"
+                        >
+                          <svg
+                            className="w-3 h-3"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          >
+                            <path d="M2 3h8M2 6h8M2 9h8" strokeLinecap="round" />
+                          </svg>
+                          订单簿
+                        </button>
+                      )}
+                      {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
+                        <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
+                          <div className="text-center space-y-3">
+                            <div className="text-5xl">⏰</div>
+                            <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">
+                              输入历史时间并点击「启动」开始复盘模拟
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-[#848e9c]">
+                              K线按真实时间 1:1 流速推进 · 绝不暴露未来数据
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <MultiChartLayout
+                          mainData={displayData}
+                          mainDataLoading={loading}
+                          mainDataError={error}
+                          onReloadMainData={() => {
+                            const clock = getLiveSimTime(activeSymbol);
+                            if (clock > 0) void initLoad(activeSymbol, interval, clock, { reverse: timeDirection === -1 });
+                          }}
+                          mainSymbol={activeSymbol.replace("USDT", "/USDT")}
+                          rawSymbol={activeSymbol}
+                          onLoadOlder={timeDirection === -1 ? loadNewerVoid : loadOlder}
+                          loadingOlder={loadingOlder}
+                          tradeHistory={timeDirection === -1 ? EMPTY_TRADE_HISTORY : tradeHistory}
+                          displayTimestampTransform={reverseAxisTransform}
+                          isRunning={activeCoinState.status !== "stopped"}
+                          currentSimulatedTime={effectiveSimTime}
+                          mainInterval={interval}
+                          onMainIntervalChange={handleIntervalChange}
+                          speed={activeCoinState.speed}
+                          onSetSpeed={handleSetSpeed}
+                          pricePrecision={chartPricePrecision}
+                          quantityPrecision={quantityPrecision}
+                          pendingOrders={activeSymbolOrders}
+                          onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
+                          chartApiRef={chartApiRef}
+                          onCrosshairPriceChange={pickMode ? handleCrosshairPriceChange : undefined}
+                          pickMode={pickMode}
+                          onPricePicked={handlePricePicked}
+                        />
+                      )}
+                    </div>
+                  </ResizablePanel>
 
-                  {/* Chart vs OrderBook (horizontal resizable) */}
-                  <div className="flex-1 min-h-0 min-w-0">
-                    <ResizablePanelGroup
-                      key={isOrderBookOpen ? "ob-open" : "ob-closed"}
-                      direction="horizontal"
-                      className="h-full w-full"
-                    >
-                      <ResizablePanel defaultSize={isOrderBookOpen ? 75 : 100} minSize={50}>
-                        <div className="h-full w-full relative overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
-                          {!isOrderBookOpen && (
-                            <button
-                              type="button"
-                              onClick={() => setIsOrderBookOpen(true)}
-                              title="显示订单簿"
-                              className="absolute top-2 right-2 z-20 flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-white/90 dark:bg-[#1e2329]/90 border border-gray-200 dark:border-[#2b3139] text-gray-600 dark:text-[#848e9c] hover:text-gray-900 dark:hover:text-white shadow-sm cursor-pointer transition-colors"
-                            >
-                              <svg
-                                className="w-3 h-3"
-                                viewBox="0 0 12 12"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                              >
-                                <path d="M2 3h8M2 6h8M2 9h8" strokeLinecap="round" />
-                              </svg>
-                              订单簿
-                            </button>
-                          )}
-                          {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
-                            <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
-                              <div className="text-center space-y-3">
-                                <div className="text-5xl">⏰</div>
-                                <p className="text-sm text-gray-600 dark:text-[#B7BDC6]">
-                                  输入历史时间并点击「启动」开始复盘模拟
-                                </p>
-                                <p className="text-xs text-gray-500 dark:text-[#848e9c]">
-                                  K线按真实时间 1:1 流速推进 · 绝不暴露未来数据
-                                </p>
-                              </div>
-                            </div>
+                  {isOrderBookOpen && (
+                    <>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
+                        <div className="h-full w-full min-w-0 flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
+                          {/* P_gap 在上、盘口在下。两者都展开时才需要可拖拽分隔；
+                              其余情形下折叠的一方缩成表头，空间全给展开的一方。 */}
+                          {!isPGapCollapsed && !isMarketDataCollapsed ? (
+                            <ResizablePanelGroup direction="vertical" className="h-full w-full">
+                              <ResizablePanel defaultSize={50} minSize={25}>
+                                <PGapPanel
+                                  currentPrice={displayCurrentPrice}
+                                  pricePrecision={chartPricePrecision}
+                                  collapsed={false}
+                                  onToggleCollapsed={() => setIsPGapCollapsed(true)}
+                                  defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
+                                  winRateSampleCount={campaignWinRate.resolvedCount}
+                                  longEntryPrice={activeLongEntry.price}
+                                  longPositionCount={activeLongEntry.count}
+                                  longRiskAnchorPrice={activeLongRiskAnchor}
+                                  symbol={activeSymbol}
+                                />
+                              </ResizablePanel>
+                              <ResizableHandle
+                                withHandle
+                                className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize"
+                              />
+                              <ResizablePanel defaultSize={50} minSize={22}>
+                                <MarketDataPanel
+                                  symbol={activeSymbol}
+                                  currentPrice={displayCurrentPrice}
+                                  pricePrecision={chartPricePrecision}
+                                  tab={marketDataTab}
+                                  onTabChange={setMarketDataTab}
+                                  collapsed={false}
+                                  onToggleCollapsed={() => setIsMarketDataCollapsed(true)}
+                                  onClose={() => setIsOrderBookOpen(false)}
+                                />
+                              </ResizablePanel>
+                            </ResizablePanelGroup>
                           ) : (
-                            <MultiChartLayout
-                              mainData={displayData}
-                              mainDataLoading={loading}
-                              mainDataError={error}
-                              onReloadMainData={() => {
-                                const clock = getLiveSimTime(activeSymbol);
-                                if (clock > 0) void initLoad(activeSymbol, interval, clock, { reverse: timeDirection === -1 });
-                              }}
-                              mainSymbol={activeSymbol.replace("USDT", "/USDT")}
-                              rawSymbol={activeSymbol}
-                              onLoadOlder={timeDirection === -1 ? loadNewerVoid : loadOlder}
-                              loadingOlder={loadingOlder}
-                              tradeHistory={timeDirection === -1 ? EMPTY_TRADE_HISTORY : tradeHistory}
-                              displayTimestampTransform={reverseAxisTransform}
-                              isRunning={activeCoinState.status !== "stopped"}
-                              currentSimulatedTime={effectiveSimTime}
-                              mainInterval={interval}
-                              onMainIntervalChange={handleIntervalChange}
-                              speed={activeCoinState.speed}
-                              onSetSpeed={handleSetSpeed}
-                              pricePrecision={chartPricePrecision}
-                              quantityPrecision={quantityPrecision}
-                              pendingOrders={activeSymbolOrders}
-                              onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
-                              chartApiRef={chartApiRef}
-                              onCrosshairPriceChange={pickMode ? handleCrosshairPriceChange : undefined}
-                              pickMode={pickMode}
-                              onPricePicked={handlePricePicked}
-                            />
+                            <>
+                              <div className={isPGapCollapsed ? "flex-none" : "flex-1 min-h-0"}>
+                                <PGapPanel
+                                  currentPrice={displayCurrentPrice}
+                                  pricePrecision={chartPricePrecision}
+                                  collapsed={isPGapCollapsed}
+                                  onToggleCollapsed={() => setIsPGapCollapsed((v) => !v)}
+                                  defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
+                                  winRateSampleCount={campaignWinRate.resolvedCount}
+                                  longEntryPrice={activeLongEntry.price}
+                                  longPositionCount={activeLongEntry.count}
+                                  longRiskAnchorPrice={activeLongRiskAnchor}
+                                  symbol={activeSymbol}
+                                />
+                              </div>
+                              <div
+                                className={`border-t border-gray-200 dark:border-[#2b3139] ${
+                                  isMarketDataCollapsed ? "flex-none" : "flex-1 min-h-0"
+                                }`}
+                              >
+                                <MarketDataPanel
+                                  symbol={activeSymbol}
+                                  currentPrice={displayCurrentPrice}
+                                  pricePrecision={chartPricePrecision}
+                                  tab={marketDataTab}
+                                  onTabChange={setMarketDataTab}
+                                  collapsed={isMarketDataCollapsed}
+                                  onToggleCollapsed={() => setIsMarketDataCollapsed((v) => !v)}
+                                  onClose={() => setIsOrderBookOpen(false)}
+                                />
+                              </div>
+                            </>
                           )}
                         </div>
                       </ResizablePanel>
-
-                      {isOrderBookOpen && (
-                        <>
-                          <ResizableHandle withHandle />
-                          <ResizablePanel defaultSize={25} minSize={15} maxSize={35}>
-                            <div className="h-full w-full min-w-0 flex flex-col bg-white dark:bg-[#1e2329] min-h-0 overflow-hidden">
-                              {/* P_gap 在上、盘口在下。两者都展开时才需要可拖拽分隔；
-                                  其余情形下折叠的一方缩成表头，空间全给展开的一方。 */}
-                              {!isPGapCollapsed && !isMarketDataCollapsed ? (
-                                <ResizablePanelGroup direction="vertical" className="h-full w-full">
-                                  <ResizablePanel defaultSize={50} minSize={25}>
-                                    <PGapPanel
-                                      currentPrice={displayCurrentPrice}
-                                      pricePrecision={chartPricePrecision}
-                                      collapsed={false}
-                                      onToggleCollapsed={() => setIsPGapCollapsed(true)}
-                                      defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
-                                      winRateSampleCount={campaignWinRate.resolvedCount}
-                                      longEntryPrice={activeLongEntry.price}
-                                      longPositionCount={activeLongEntry.count}
-                                      longRiskAnchorPrice={activeLongRiskAnchor}
-                                      symbol={activeSymbol}
-                                    />
-                                  </ResizablePanel>
-                                  <ResizableHandle
-                                    withHandle
-                                    className="!h-[2px] bg-gray-200 dark:bg-[#2b3139] hover:bg-gray-300 dark:hover:bg-[#474d57] transition-colors cursor-row-resize"
-                                  />
-                                  <ResizablePanel defaultSize={50} minSize={22}>
-                                    <MarketDataPanel
-                                      symbol={activeSymbol}
-                                      currentPrice={displayCurrentPrice}
-                                      pricePrecision={chartPricePrecision}
-                                      tab={marketDataTab}
-                                      onTabChange={setMarketDataTab}
-                                      collapsed={false}
-                                      onToggleCollapsed={() => setIsMarketDataCollapsed(true)}
-                                      onClose={() => setIsOrderBookOpen(false)}
-                                    />
-                                  </ResizablePanel>
-                                </ResizablePanelGroup>
-                              ) : (
-                                <>
-                                  <div className={isPGapCollapsed ? "flex-none" : "flex-1 min-h-0"}>
-                                    <PGapPanel
-                                      currentPrice={displayCurrentPrice}
-                                      pricePrecision={chartPricePrecision}
-                                      collapsed={isPGapCollapsed}
-                                      onToggleCollapsed={() => setIsPGapCollapsed((v) => !v)}
-                                      defaultWinRatePct={campaignWinRate.winRate == null ? null : campaignWinRate.winRate * 100}
-                                      winRateSampleCount={campaignWinRate.resolvedCount}
-                                      longEntryPrice={activeLongEntry.price}
-                                      longPositionCount={activeLongEntry.count}
-                                      longRiskAnchorPrice={activeLongRiskAnchor}
-                                      symbol={activeSymbol}
-                                    />
-                                  </div>
-                                  <div
-                                    className={`border-t border-gray-200 dark:border-[#2b3139] ${
-                                      isMarketDataCollapsed ? "flex-none" : "flex-1 min-h-0"
-                                    }`}
-                                  >
-                                    <MarketDataPanel
-                                      symbol={activeSymbol}
-                                      currentPrice={displayCurrentPrice}
-                                      pricePrecision={chartPricePrecision}
-                                      tab={marketDataTab}
-                                      onTabChange={setMarketDataTab}
-                                      collapsed={isMarketDataCollapsed}
-                                      onToggleCollapsed={() => setIsMarketDataCollapsed((v) => !v)}
-                                      onClose={() => setIsOrderBookOpen(false)}
-                                    />
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </ResizablePanel>
-                        </>
-                      )}
-                    </ResizablePanelGroup>
-                  </div>
-                </div>
-              </ResizablePanel>
-
-              <ResizableHandle withHandle />
-
-              {/* Bottom: Positions panel */}
-              <ResizablePanel defaultSize={30} minSize={15}>
+                    </>
+                  )}
+                </ResizablePanelGroup>
+              }
+              positions={
                 <div className="h-full w-full bg-gray-50 dark:bg-[#0b0e11] flex flex-col overflow-hidden min-h-0">
                   <PositionPanel
                     positionsMap={positionsMap}
@@ -2620,8 +2618,8 @@ const Index = () => {
                     onCloseAllPositions={handleCloseAllPositions}
                   />
                 </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
+              }
+            />
           </ResizablePanel>
 
           <ResizableHandle withHandle />
