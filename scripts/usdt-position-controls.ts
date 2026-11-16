@@ -30,6 +30,8 @@ type Step = { method: 'POST' | 'DELETE'; path: string; params: Record<string, st
 type Stored = { id: string; target: UsdtPositionTarget; fingerprint: string; steps: Step[]; checkedRevision?: string };
 type Store = ReturnType<typeof openUsdtFollowStore>;
 const isDone = (step: Step) => step.state === 'done';
+const isTrackedProtection = (step: Step) => step.method === 'POST' && step.path === algoPath && !step.retired
+  && (step.state === 'sent' || step.state === 'done');
 
 function parseCommand(value: UsdtPositionControlRequest, now: number) {
   const { id, target, action } = value ?? {};
@@ -255,7 +257,13 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
     }
     await advance(row, action.kind === 'protect');
     const pending = row.steps.some(step => step.state === 'sent');
-    return { pending, issue: row.steps.find(step => step.issue)?.issue, filledQuantity: row.steps.find(step => step.path === orderPath)?.filledQuantity };
+    const filledQuantity = row.steps.find(step => step.path === orderPath)?.filledQuantity;
+    let issue = row.steps.find(step => step.issue)?.issue;
+    if (action.kind === 'close' && !pending && Number(filledQuantity) > 0) {
+      try { await cleanup(target.symbol); }
+      catch { issue ||= '平仓成交已收到，原仓位的条件单等待核对'; }
+    }
+    return { pending, issue, filledQuantity };
   }
 
   async function advance(row: Stored, protecting: boolean, onlyReplacement = false) {
@@ -310,14 +318,14 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
     }
   }
 
-  async function cleanup() {
+  async function cleanup(symbol?: string) {
     const rows = store.pendingPositionControls<Stored>();
-    if (!rows.length) return;
     for (const row of rows) {
+      if (symbol && row.target.symbol !== symbol) continue;
       const awaiting = row.steps.filter(step => step.state === 'sent');
       for (const step of awaiting) await recover(step);
       if (row.steps.some(step => step.replacementId && !step.state)) await advance(row, true, true);
-      const linked = row.steps.filter(step => step.method === 'POST' && step.path === algoPath && step.state === 'done' && !step.retired);
+      const linked = row.steps.filter(step => isTrackedProtection(step) && step.state === 'done');
       if (linked.length) {
         const active = await rawOrders(row.target.symbol);
         if (!Array.isArray(active)) continue;
@@ -326,12 +334,16 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
         if (present.length) {
           const position = (await risk(row.target.symbol)).find(item => matchingLeg(item, row.target));
           const revision = position && usdtMirrorRevision(position);
-          if (!revision || revision !== (row.checkedRevision ?? row.target.revision)) {
+          if (symbol || !revision || revision !== (row.checkedRevision ?? row.target.revision)) {
             const campaign = await activeCampaign(row.target);
             if (campaign?.closedAt) {
               for (const step of present) {
+                if (!active.some(order => protectionMatches(order, step))) continue;
                 const result = await request('DELETE', algoPath, { clientAlgoId: step.params.clientAlgoId });
-                if (result.clientAlgoId === step.params.clientAlgoId) step.retired = true;
+                if (result?.clientAlgoId === step.params.clientAlgoId && String(result.code) === '200') {
+                  step.retired = true;
+                  save(row);
+                }
               }
               invalidate();
             } else if (campaign && revision) row.checkedRevision = revision;
@@ -342,8 +354,15 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
     }
   }
 
-  const protectionIds = (symbol: string) => store.pendingPositionControls<Stored>().flatMap(row => row.target.symbol === symbol ?
-    row.steps.filter(step => step.method === 'POST' && step.path === algoPath && step.state === 'done' && !step.retired)
+  async function beforeOpening(symbol: string) {
+    await cleanup(symbol);
+    if (store.pendingPositionControls<Stored>().some(row => row.target.symbol === symbol && row.steps.some(isTrackedProtection)))
+      throw Error('原实盘仓位的条件单待核对，暂缓新开仓');
+  }
+
+  const protectionIds = (symbol: string, campaignId: string) => store.pendingPositionControls<Stored>().flatMap(row =>
+    row.target.symbol === symbol && row.target.campaignId === campaignId ?
+    row.steps.filter(step => isTrackedProtection(step) && step.state === 'done')
       .map(step => step.params.clientAlgoId) : []);
-  return { execute, cleanup, readDetails, protectionIds, hasPending: () => store.pendingPositionControls<Stored>().length > 0 };
+  return { execute, cleanup, beforeOpening, readDetails, protectionIds, hasPending: () => store.pendingPositionControls<Stored>().length > 0 };
 }

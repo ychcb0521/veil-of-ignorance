@@ -8,7 +8,7 @@ import { createUsdtFollower } from '../../../../scripts/usdt-follow-engine';
 import { createUsdtExchange, formatQuantity, quantityUnits, usdtOrderId, type UsdtExchange } from '../../../../scripts/usdt-exchange';
 import { openUsdtFollowStore, type UsdtOrder } from '../../../../scripts/usdt-follow-store';
 import { serveUsdtFollower } from '../../../../scripts/usdt-follow-server';
-import type { UsdtFollowCampaign } from '../usdtFollow';
+import { usdtFollowCampaigns, type UsdtFollowCampaign } from '../usdtFollow';
 import { binanceManualId } from '../binanceManualMonitor';
 import { binanceManualSeed, binanceManualSample, binanceManualAdvance } from '../binanceManualStrategy';
 import type { UsdtCampaignFill, UsdtLiveCampaign } from '../usdtLiveCampaign';
@@ -17,6 +17,8 @@ import { evaluateInstantMonitor } from '../instantMonitorExecution';
 import { makeQualitySellPlan } from '../qualitySellPlans';
 import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
 import { freezeQualityPlan } from '../qualityPlanVersions';
+import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
+import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 
 const symbol = 'NIGHTUSDT', market = { symbol, step: '0.001', min: 1, max: 100000, minNotional: 5 };
 const owner = 'fixture-user';
@@ -35,7 +37,79 @@ afterEach(() => {
 process.once('exit', () => rmSync(directory, { recursive: true, force: true }));
 const campaign = (at: number, source: UsdtFollowCampaign['source'] = { symbol, exchange: 'binance' }): UsdtFollowCampaign => ({
   id: 'fish-instant-fixture', source, admittedAt: at, notional: 100, leverage: 5,
+  liveEntry: { version: 1, capturedAt: at, templateId: 'fixture', notional: 100, leverage: 5 },
   actions: [{ id: 'open', at, action: 'open' }],
+});
+
+it('rejects an old resume after a newer pause and validates the body before resuming', async () => {
+  const store = makeStore(file()), venue = exchange(), allowedOrigin = 'https://fixture.test', token = 'a'.repeat(64);
+  const server = serveUsdtFollower({ owner, token, exchange: venue, store, mode: 'hedge',
+    startedAt: Date.now(), allowedOrigin, port: 0 });
+  await once(server, 'listening');
+  const send = (body: Record<string, unknown>) => fetch('http://127.0.0.1:' + (server.address() as { port: number }).port + '/api/usdt-follow/safe', {
+    method: 'POST', headers: { Origin: allowedOrigin, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, campaigns: [], ...body }),
+  });
+  try {
+    const first = await (await send({ command: 'status' })).json();
+    expect(first.executionSafety).toBe(2);
+    const resume = { command: 'resume', controlRevision: first.controlRevision };
+    expect((await send(resume)).ok).toBe(true);
+    const paused = await (await send({ command: 'pause' })).json();
+    expect(paused.paused).toBe(true);
+    expect((await send({ ...resume, controlRevision: paused.controlRevision, campaigns: null })).status).toBe(400);
+    const stale = await send(resume);
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ paused: true, staleControl: true, controlRevision: paused.controlRevision });
+    expect(store.paused()).toBe(true);
+    expect(store.controlRevision()).toBe(paused.controlRevision);
+    expect(venue.order).not.toHaveBeenCalled();
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+it('keeps simulated and pre-pause captures from opening real orders after resume', async () => {
+  const at = Date.now(), store = makeStore(file()), venue = exchange();
+  const runner = createUsdtFollower(store, venue, owner, 'hedge', at);
+  runner.ingest([campaign(at)], at);
+  runner.pauseNewOrders();
+  runner.resumeNewOrders(at + 1000);
+  const fresh = campaign(at + 1001);
+  runner.ingest([
+    { ...fresh, id: 'paper-old', liveEntry: undefined },
+    { ...fresh, id: 'stale-capture', liveEntry: { ...fresh.liveEntry!, capturedAt: at } },
+    { ...fresh, id: 'missing-size', notional: 200 },
+  ], at + 1001);
+  await runner.tick(at + 1001);
+  expect(venue.order).not.toHaveBeenCalled();
+  runner.ingest([{ ...fresh, id: 'valid-live' }], at + 1001);
+  await runner.tick(at + 1001);
+  expect(venue.order).toHaveBeenCalledTimes(1);
+  expect(venue.order.mock.calls[0][2].side).toBe('BUY');
+});
+
+it('requires both realtime capture provenance and a sized, valid frozen template for live entry', () => {
+  const at = Date.now(), source = { id: 'fixture', symbol, exchange: 'binance' as const, timeMs: at, timeLabel: '', fallbackZone: '' };
+  const record: PreEntryRecord = { id: 'entry', roundId: 'round', status: 'matched', startTime: at, cursor: at,
+    matchedAt: at, updatedAt: at, readings: [], sample: { id: source.id, source, basis: 'signal', groups: [],
+      enteredAt: at, importedAt: at } };
+  const round: PreEntryRound = { id: record.roundId, startedAt: at, updatedAt: at, state: 'complete',
+    instantTrading: true, hours: 1, filters: [] };
+  const rows = (round: PreEntryRound) => usdtFollowCampaigns({
+    admitted: [{ record, round }], alerts: new Map(), enabled: false, active: 0,
+    awaitingMail: 0, error: '', saving: false, setEnabled: async () => {},
+  });
+  expect(rows({ ...round, liveCapturedAt: at })[0]).toMatchObject({ notional: 200 });
+  expect(rows({ ...round, liveCapturedAt: at })[0].liveEntry).toBeUndefined();
+  const plan = freezeQualityPlan({ ...makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, []),
+    positionManagement: { version: QUALITY_POSITION_MANAGEMENT_VERSION, leverage: 7, notional: 333 } });
+  const instantMonitor = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'frozen-plan', name: 'fixture', plan };
+  expect(rows({ ...round, instantMonitor })[0].liveEntry).toBeUndefined();
+  expect(rows({ ...round, liveCapturedAt: at, instantMonitor })[0].liveEntry)
+    .toMatchObject({ capturedAt: at, notional: 333, leverage: 7, templateId: 'frozen-plan' });
+  const altered = { ...instantMonitor, plan: { ...plan, positionManagement: { ...plan.positionManagement!, notional: 400 } } };
+  expect(rows({ ...round, liveCapturedAt: at, instantMonitor: altered })[0].liveEntry).toBeUndefined();
 });
 function exchange() {
   let id = 0;

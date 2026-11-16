@@ -19,6 +19,7 @@ import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryA
 import { fishRail } from './FishSection';
 import { Popover, PopoverTrigger } from './ui/popover';
 import { Dialog } from './ui/dialog';
+import { USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
 
 function InstantHoldingPlanEditor({ state, plan, save, templateName }: { state: FishQualityState; plan: QualityGroup; save: (plan: QualityGroup) => Promise<void>;templateName?:QualityTemplateName }) {
   const study = useMemo(() => ({ version: 1 as const, startedAt: 0, entryMode: 'signal' as const, observeHours: 0, tracking: false,
@@ -116,21 +117,24 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const automatic = state.automaticScreening, cda = state.cdaTracking;
   const settingsDialog = settingsView === 'before' || settingsView === 'after';
   const closeSettings = () => setSettingsView(null);
-  const screening = !!state.preEntry?.automaticRunning && !automatic?.paused;
+  const pending = automatic?.pending ?? 0;
+  const screeningPending = automatic?.screeningPending ?? (pending > 0 && !!(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length);
+  const needsSettings = pending > 0 && !screeningPending;
+  const screening = !automatic?.paused && (!!state.preEntry?.automaticRunning || screeningPending);
   const realPositions = follow?.connected && !live?.issue ? live?.snapshot?.positions : undefined;
   const liveHolding = !!realPositions?.length;
   const following = realPositions?.some(position => position.direction === 'long' && follow?.statuses.some(status =>
     status.state === 'tracking' && (status.market ?? status.symbol.replace(/\//g, '')) === position.symbol &&
     Number(position.quantity) === status.quantity));
   const holding = liveHolding || !!instant?.positions.length;
+  const verifiedExecutor = follow?.executionSafety === USDT_EXECUTION_SAFETY;
   const { label: stage, icon: StageIcon } = holding ? { label: '持仓中', icon: BriefcaseBusiness }
     : screening ? { label: '筛选中', icon: Filter }
+    : automatic?.paused && pending > 0 ? { label: '筛选已暂停', icon: Pause }
     : capturing ? { label: '捕捞中', icon: Pickaxe } : { label: '等待中', icon: Clock3 };
-  const pending = automatic?.pending ?? 0;
   const followStatus = follow?.connected
-    ? follow.paused ? '已暂停开仓和加仓' : '本机实盘跟随中'
+    ? follow.paused ? '已暂停开仓和加仓' : verifiedExecutor ? '本机实盘跟随中' : '本机执行端待更新'
     : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
-  const needsSettings = pending > 0 && !(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length;
   const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={<div className={fishRail + ' mt-2 space-y-1'}>
     {children}{follow && <FishUsdtPositions key={follow.owner} follow={follow} live={live}/>}
@@ -138,7 +142,8 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
       {needsSettings && <span>请先保存买前设置</span>}
-      {screening && !holding && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
+      {screening && holding && <span role="status" className={qualityRowItem}><Filter aria-hidden className="h-3 w-3"/>筛选中</span>}
+      {state.preEntry?.automaticRunning && screening && <progress aria-label="筛选鱼进度" className="h-1 w-16 accent-primary"/>}
       {(cda?.error || cda?.campaignIssue) && <span role="alert" className="text-destructive">{cda.error || cda.campaignIssue}</span>}
       {screeningIssue && <span role="alert" className="text-destructive">{screeningIssue}</span>}
       {live?.archiveIssue && <span role="status">实盘战役 · {live.archiveIssue}</span>}
@@ -178,9 +183,9 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
         {settingsView === 'live' && follow && <div ref={focusSettings} tabIndex={-1} className="space-y-3 text-xs outline-none">
           <p className="font-medium">币安 U 本位实盘</p>
           <p role="status" className="text-muted-foreground">{follow.connected
-            ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : follow.manualMonitor === 1
-              ? '已连接。按买后模板管理新即时交易和已接手的币安手动多仓。'
-              : '已连接。本机跟随开启后的新即时交易。'
+            ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : verifiedExecutor
+              ? '实时新鱼入选后按冻结的买后模板开仓。币安手动仓位须逐笔确认托管。'
+              : '本机执行端待更新。新版页面暂缓发送实盘开仓和加仓，已有仓位可继续减仓和平仓。'
             : follow.issue || '在 Windows 启动执行端，将它生成的配对码填在这里。'}</p>
           <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>
           <form className="flex items-center gap-2" onSubmit={async event => {
@@ -197,7 +202,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
             <button type="submit" disabled={!pairCode || pairSaving} className="rounded border px-2 py-1.5 disabled:opacity-40">{pairSaving ? '保存中…' : '连接'}</button>
           </form>
           {pairIssue && <p role="alert" className="text-destructive">{pairIssue}</p>}
-          {follow.connected && <button type="button" className="rounded border px-2 py-1.5" onClick={follow.paused ? follow.resume : follow.pause}>
+          {follow.connected && <button type="button" className="rounded border px-2 py-1.5 disabled:opacity-40" disabled={follow.paused && !verifiedExecutor} onClick={follow.paused ? follow.resume : follow.pause}>
             {follow.paused ? '恢复开仓和加仓' : '暂停开仓和加仓'}
           </button>}
         </div>}

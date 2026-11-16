@@ -43,6 +43,7 @@ export interface PreEntryRound {
   hours: number; state: 'running' | 'paused' | 'complete';
   automatic?: boolean;
   instantTrading?: true;
+  liveCapturedAt?: number;
   instantMonitor?: import('./instantMonitorSettings').InstantMonitorSettings;
   workspaceDraft?: true;
   workspaceSaved?: true;

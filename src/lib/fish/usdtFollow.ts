@@ -3,6 +3,9 @@ import { instantPositionInput } from './instantCampaign';
 import { qualityAdditionFills } from './qualityAddition';
 import type { FishCdaTracking, ScreenedFishAdmission } from '@/hooks/useFishCdaTracking';
 import type { QualityGroup } from './quality';
+import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from './instantMonitorSettings';
+import { isLegacyQualityPlan } from './qualityLegacyEngine';
+import { validUsdtLiveEntry, type UsdtLiveEntry } from './usdtLiveEntry';
 
 export type UsdtFollowAction =
   | { id: string; at: number; action: 'open' | 'close' }
@@ -14,6 +17,7 @@ export interface UsdtFollowCampaign {
   admittedAt: number;
   notional: number;
   leverage: number;
+  liveEntry?: UsdtLiveEntry;
   requiresGuardPlus?: true;
   actions: UsdtFollowAction[];
 }
@@ -50,6 +54,17 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   const manual = sale?.manual ?? tracking.manualPositions?.get(record.id);
   const mirror = monitor?.mirrorFill ?? sale?.mirror ?? tracking.mirrorFills?.get(record.id);
   const size = instantMonitorSize(input.monitor);
+  const frozen = input.monitor, sizing = frozen?.plan.positionManagement;
+  let liveEntry: UsdtLiveEntry | undefined;
+  if (round.instantTrading && round.liveCapturedAt !== undefined && frozen?.version === INSTANT_TEMPLATE_MONITOR &&
+    sizing && !isLegacyQualityPlan(frozen.plan)) {
+    try {
+      if (!instantMonitorTemplateIssue({ id: frozen.templateId, name: frozen.name, plan: frozen.plan })) {
+        liveEntry = { version: 1, capturedAt: round.liveCapturedAt, templateId: frozen.templateId,
+          notional: sizing.notional, leverage: sizing.leverage };
+      }
+    } catch { /* Invalid historical template data cannot authorize a live entry. */ }
+  }
   const actions: UsdtFollowAction[] = [{ id: 'open', at: input.buyAt, action: 'open' }];
   if (mirror) actions.push({ id: 'mirror', at: mirror.at, ...(mirror.fraction === 1
     ? { action: 'close' as const } : { action: 'mirror' as const, fraction: mirror.fraction, atOpen: mirror.atOpen }) });
@@ -72,9 +87,10 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   const priority = { open: 0, 'support-reduction': 2, add: 3, mirror: 4, 'manual-reduction': 5, close: 6 };
   const order = (action: UsdtFollowAction) => action.action === 'mirror' && action.atOpen ? 1 : priority[action.action];
   actions.sort((a, b) => a.at - b.at || order(a) - order(b));
-  return { id: input.id, source: input.source, admittedAt: record.updatedAt,
+  const campaign: UsdtFollowCampaign = { id: input.id, source: input.source, admittedAt: record.updatedAt,
     notional: 'notional' in size ? Number(size.notional) : size.marginUsdt * size.leverage, leverage: size.leverage, actions,
     ...(usesGuardPlus(input.monitor?.plan)?{requiresGuardPlus:true}:{}) };
+  return validUsdtLiveEntry({ ...campaign, liveEntry }) ? { ...campaign, liveEntry } : campaign;
 }
 
 export function currentUsdtFollowCampaign(campaign:UsdtFollowCampaign, supportsGuardPlus:boolean, now:number):UsdtFollowCampaign|undefined {

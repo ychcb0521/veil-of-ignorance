@@ -86,7 +86,7 @@ export async function readPageInstantCampaignCandles(source: import('@/lib/fish/
   return pageScanner.readInstantCampaignCandles(source, interval, from, to, signal);
 }
 
-export function useFish(userId: string | undefined, options: { onNewFish?: (fish: TradeSignal) => void } = {}) {
+export function useFish(userId: string | undefined, options: { onNewFish?: (fish: TradeSignal, liveCapturedAt?: number) => void } = {}) {
   const onNewFish = useRef(options.onNewFish); onNewFish.current = options.onNewFish;
   const [signals, setSignals] = useState(loadFishSignals);
   const signalsRef = useRef(signals); signalsRef.current = signals;
@@ -145,7 +145,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
   }, [userId,reconcile]);
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const hitRateBusy = useRef(false);
-  const startWithProgress = useCallback(async (settings: FishScanSettings = {}) => {
+  const startWithProgress = useCallback(async (settings: FishScanSettings = {}, liveCapture = false) => {
     if (controller.current || hitRateBusy.current) return;
     // 持续挖掘让路：先打断这一档，等取数器空出来（这一档之后原地重扫）
     if (mineController.current) { mineController.current.abort(); await minePromise.current?.catch(() => undefined); if (controller.current || hitRateBusy.current) return; }
@@ -181,7 +181,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
               const caught = next.find(source => fishDedupKey(source) === key);
               if (caught) {
                 knownSignals.add(identity);
-                onNewFish.current?.(caught);
+                onNewFish.current?.(caught, liveCapture && settings.anchorMs == null ? at : undefined);
               }
             }
             commit(next);
@@ -198,7 +198,9 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     } finally { if (controller.current === mine) {controller.current = null;liveRef.current=null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(combinationRef.current,settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
     } }
   }, [commit,persist]);
-  const start = useCallback(async (settings?: FishScanSettings) => { await startWithProgress(settings); }, [startWithProgress]);
+  const start = useCallback(async (settings?: FishScanSettings, liveCapture?: boolean) => {
+    await startWithProgress(settings, liveCapture);
+  }, [startWithProgress]);
   const estimate=useCallback(async(settings:FishScanSettings,signal:AbortSignal)=>{
     scanner.current??=pageScanner??=new FishScanner();
     return typeof scanner.current.estimateMarkets==='function'?scanner.current.estimateMarkets(settings,signal):null;

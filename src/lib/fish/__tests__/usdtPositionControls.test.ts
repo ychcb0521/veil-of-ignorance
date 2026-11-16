@@ -54,7 +54,7 @@ function venue({ short = false } = {}) {
     if (method === 'DELETE' && path.endsWith('/algoOrder')) {
       const [key, order] = [...conditional.entries()].find(([id, row]) => id === params.algoId || row.clientAlgoId === params.clientAlgoId)!;
       conditional.delete(key);
-      return order;
+      return { algoId: key, clientAlgoId: order.clientAlgoId, code: '200', msg: 'success' };
     }
     throw Error('Unexpected exchange path or method');
   });
@@ -120,6 +120,36 @@ it('refuses a stale revision or an immediately triggered protection without post
     v.raw.updateTime += 1;
     await expect(v.controls.execute(close)).rejects.toThrow('仓位已变化');
     expect(v.request.mock.calls.every(([method]) => method === 'GET')).toBe(true);
+  } finally { v.store.close(); }
+});
+
+it('cleans the original protection immediately after a confirmed full close and gates reopening on a failed cancellation', async () => {
+  const v = venue();
+  const request = v.request.getMockImplementation()!;
+  let noCancel = true;
+  try {
+    await v.controls.execute(v.command({ kind: 'protect', tp: null, sl: .075, fraction: 1 }));
+    const clientAlgoId = v.request.mock.calls.find(([method]) => method === 'POST')![2]!.clientAlgoId;
+    await request('POST', '/fapi/v1/algoOrder', { symbol, clientAlgoId: 'foreign' });
+    v.request.mockImplementation(async (method, path, params) => {
+      if (method === 'DELETE' && noCancel) throw new TypeError('connection interrupted');
+      const result = await request(method, path, params);
+      if (method === 'POST' && path === '/fapi/v1/order') {
+        v.actual.closedAt = now;
+        v.actual.quantity = '0';
+        v.raw.positionAmt = '0';
+      }
+      return result;
+    });
+    await expect(v.controls.execute(v.command({ kind: 'close', fraction: 1 }))).resolves.toMatchObject({
+      filledQuantity: '100', pending: false, issue: expect.stringContaining('条件单'),
+    });
+    expect(v.request).toHaveBeenCalledWith('DELETE', '/fapi/v1/algoOrder', { clientAlgoId });
+    await expect(v.controls.beforeOpening(symbol)).rejects.toThrow('connection interrupted');
+    noCancel = false;
+    await expect(v.controls.beforeOpening(symbol)).resolves.toBeUndefined();
+    expect(await request('GET', '/fapi/v1/openAlgoOrders')).toEqual([expect.objectContaining({ clientAlgoId: 'foreign' })]);
+    expect(v.controls.hasPending()).toBe(false);
   } finally { v.store.close(); }
 });
 

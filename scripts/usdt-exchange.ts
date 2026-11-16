@@ -143,7 +143,7 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       return price;
     },
     async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number,
-      managed?: 'existing-position', knownProtection?: readonly string[], unsettledBuyId?: string) {
+      managed?: 'existing-position', knownProtection?: readonly string[], unsettledBuyId?: string, confirmOpening?: () => void) {
       const { symbol } = market;
       const [positions, regular, algo, settings, modes] = await Promise.all([
         request('GET', '/fapi/v3/positionRisk', { symbol }),
@@ -170,10 +170,12 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       if (!config) throw Error('币安合约配置不可用');
       if (opening) {
         if (config.marginType !== 'ISOLATED') {
+          confirmOpening?.();
           try { await request('POST', '/fapi/v1/marginType', { symbol, marginType: 'ISOLATED' }); }
           catch (error) { if (!(error instanceof UsdtApiError) || error.code !== -4046) throw error; }
         }
         if (Number(config.leverage) !== leverage) {
+          confirmOpening?.();
           const result = await request('POST', '/fapi/v1/leverage', { symbol, leverage: String(leverage) });
           if (result.symbol !== symbol || Number(result.leverage) !== leverage) throw Error('币安未确认方案杠杆');
         }

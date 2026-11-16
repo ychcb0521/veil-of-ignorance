@@ -8,8 +8,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { currentUsdtFollowCampaign, usdtFollowCampaigns, type UsdtFollowStatus } from '@/lib/fish/usdtFollow';
+import { USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
 
 const endpoint = 'http://127.0.0.1:47321/api/usdt-follow';
+const executionEndpoint = 'http://127.0.0.1:47321' + USDT_EXECUTION_PATH;
 const key = (owner: string) => 'veil.usdt-follow-pairing.v1:' + owner;
 const pairingCode = /^[0-9a-f]{64}$/;
 
@@ -32,6 +34,8 @@ interface FollowState {
   guardPlusAdditions?: 1;
   manualMonitor?: 1;
   positionControls?: 1;
+  executionSafety?: number;
+  controlRevision?: number;
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -45,7 +49,8 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   const latest = useRef(campaigns);
   latest.current = campaigns;
   const wake = useRef<() => void>();
-  const commandPending = useRef<'pause' | 'resume'>();
+  const commandPending = useRef<{ kind: 'pause' | 'resume'; revision?: number }>();
+  const control = useRef<{ executionSafety?: number; controlRevision?: number }>({});
   const pairingChannel = useRef<BroadcastChannel>();
   const pairingWrite = useRef(0);
   useEffect(() => {
@@ -84,41 +89,78 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     let supportsGuardPlus = false;
     let known = new Set<string>();
     let lastResponse = '';
+    let connectedOnce = false;
+    let legacyPaused = false;
+    let legacyMirror: FollowState | undefined;
+    let lastLegacyProbe = 0;
+    control.current = {};
     commandPending.current = undefined;
     const tick = () => {
       if (lifetime.signal.aborted) return;
       if (running) { pending = true; return; }
       running = true;
-      const command = commandPending.current ?? 'sync';
+      const pendingCommand = commandPending.current;
+      const command = pendingCommand?.kind ?? (connectedOnce ? 'sync' : 'status');
       const now=Date.now();
       const current = latest.current
-        .filter(row => known.has(row.id) || row.admittedAt >= startedAt && now - row.admittedAt <= 120_000)
-        .flatMap(row=>{const campaign=currentUsdtFollowCampaign(row,supportsGuardPlus,now);return campaign?[campaign]:[];});
+        .filter(row => known.has(row.id) || control.current.executionSafety === USDT_EXECUTION_SAFETY
+          && row.liveEntry && row.admittedAt >= startedAt && now - row.admittedAt <= 120_000)
+        .flatMap(row => {
+          const campaign = currentUsdtFollowCampaign(row, supportsGuardPlus, now);
+          if (!campaign) return [];
+          return [control.current.executionSafety === USDT_EXECUTION_SAFETY ? campaign
+            : { ...campaign, actions: campaign.actions.filter(action => action.action !== 'add') }];
+        });
       void (async () => {
         try {
-          const response = await fetch(endpoint, {
+          const target = command === 'sync' || pendingCommand?.revision !== undefined ? executionEndpoint : endpoint;
+          const send = (kind: typeof command, entries: typeof current) => fetch(target, {
             method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
             credentials: 'omit', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(6000)]),
-            body: JSON.stringify({ owner, command, campaigns: current.slice(-250) }),
+            body: JSON.stringify({ owner, command: kind, campaigns: entries,
+              ...(pendingCommand?.revision === undefined ? {} : { controlRevision: pendingCommand.revision }) }),
           });
-          const payload = await response.json();
-          if (!response.ok) throw Error(typeof payload.error === 'string' ? payload.error : '本机执行端拒绝连接');
+          let response = await send(command, command === 'sync' ? current.slice(-250) : []);
+          let payload = await response.json();
+          if (command === 'status' && response.status === 400 && payload.error === '未知的实盘指令') {
+            if (!legacyMirror || now - lastLegacyProbe >= 15_000) {
+              response = await fetch(endpoint, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                credentials: 'omit', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(25_000)]),
+                body: JSON.stringify({ owner, command: 'positions', withDetails: true }),
+              });
+              payload = await response.json();
+              if (!response.ok || !Array.isArray(payload.positions)) throw Error(payload.error || '本机币安持仓暂不可读');
+              lastLegacyProbe = now;
+              legacyMirror = { ...disconnected, connected: true, positionMirror: 1, campaignMirror: 1,
+                ...(payload.positions.some((row: UsdtMirrorPosition) => row.protectionOrders !== undefined || row.protectionIssue)
+                  ? { positionControls: 1 } : {}) };
+            }
+            payload = { ...legacyMirror, paused: legacyPaused };
+            response = new Response(null, { status: 200 });
+          }
+          const stale = response.status === 409 && payload.staleControl === true;
+          if (!response.ok && !stale) throw Error(typeof payload.error === 'string' ? payload.error : '本机执行端拒绝连接');
           if (payload.connected !== true || !Array.isArray(payload.statuses)) throw Error('本机执行端回报无效');
           if (lifetime.signal.aborted) return;
+          connectedOnce = payload.executionSafety === USDT_EXECUTION_SAFETY;
+          if (pendingCommand?.kind === 'pause' && !connectedOnce) legacyPaused = true;
+          control.current = { executionSafety: payload.executionSafety, controlRevision: payload.controlRevision };
           startedAt = payload.startedAt;
           const capabilityChanged=supportsGuardPlus!==(payload.guardPlusAdditions===1);
           supportsGuardPlus=payload.guardPlusAdditions===1;
           if(capabilityChanged)pending=true;
           known = new Set(payload.statuses.filter((row: UsdtFollowStatus) => !['ignored', 'closed'].includes(row.state)).map((row: UsdtFollowStatus) => row.id));
-          if (commandPending.current === command) commandPending.current = undefined;
+          if (commandPending.current === pendingCommand) commandPending.current = undefined;
           const wire = JSON.stringify(payload);
           if (wire !== lastResponse) {
             lastResponse = wire;
             setState({ owner, data: payload as FollowState });
           }
-          setIssue('');
+          setIssue(stale ? payload.error : '');
         } catch (error) {
           if (lifetime.signal.aborted) return;
+          connectedOnce = false;
           lastResponse = '';
           setState(previous => !previous.data.connected ? previous : { owner, data: { ...previous.data, connected: false } });
           setIssue(error instanceof TypeError || error instanceof DOMException ? '本机 U 本位执行端未连通' : error instanceof Error ? error.message : '本机执行端未连通');
@@ -151,11 +193,18 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     setPairing({ owner, token });
     if (pairingChannel.current === channel) channel?.postMessage('saved');
   }, [owner]);
-  const pause = useCallback(() => { commandPending.current = 'pause'; wake.current?.(); }, []);
-  const resume = useCallback(() => { commandPending.current = 'resume'; wake.current?.(); }, []);
-  const readMirror = useCallback(async <T,>(content:Record<string,unknown>, signal:AbortSignal, timeout:number):Promise<T> => {
+  const pause = useCallback(() => {
+    commandPending.current = { kind: 'pause', revision: control.current.controlRevision };
+    wake.current?.();
+  }, []);
+  const resume = useCallback(() => {
+    if (control.current.executionSafety !== USDT_EXECUTION_SAFETY || !Number.isSafeInteger(control.current.controlRevision)) return;
+    commandPending.current = { kind: 'resume', revision: control.current.controlRevision };
+    wake.current?.();
+  }, []);
+  const readMirror = useCallback(async <T,>(content:Record<string,unknown>, signal:AbortSignal, timeout:number, safe = false):Promise<T> => {
     if (!owner || !token) throw Error('请先连接本机 U 本位执行端');
-    const response = await fetch(endpoint, {
+    const response = await fetch(safe ? executionEndpoint : endpoint, {
       method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token },
       credentials:'omit', redirect:'error', signal:AbortSignal.any([signal,AbortSignal.timeout(timeout)]),
       body:JSON.stringify({...content,owner}),
@@ -182,10 +231,11 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   }, [readMirror]);
   const readManualMonitor = useCallback((signal: AbortSignal) =>
     readMirror<BinanceManualState>({ command: 'manual-monitor-status' }, signal, 10_000), [readMirror]);
-  const adoptManualMonitor = useCallback((anchor: BinanceManualAnchor, monitor: InstantMonitorSettings, signal: AbortSignal) =>
-    readMirror({ command: 'manual-monitor-adopt', anchor, monitor }, signal, 60_000), [readMirror]);
+  const adoptManualMonitor = useCallback((anchor: BinanceManualAnchor, monitor: InstantMonitorSettings, controlRevision: number, signal: AbortSignal) =>
+    readMirror({ command: 'manual-monitor-adopt', anchor, monitor, confirmed: true,
+      controlRevision }, signal, 60_000, true), [readMirror]);
   const advanceManualMonitor = useCallback((id: string, revision: number, checkpoint: QualityResult, decision: BinanceManualDecision | undefined, signal: AbortSignal) =>
-    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision }, signal, 15_000), [readMirror]);
+    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision }, signal, 15_000, true), [readMirror]);
   const controlPosition = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
     readMirror<UsdtPositionControlResult>({ command: 'position-control', request }, signal, 70_000), [readMirror]);
   const data = state.owner === owner ? state.data : disconnected;

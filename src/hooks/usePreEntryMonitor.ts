@@ -227,7 +227,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       finish();
     }
   }, [commit, persistence, owner]);
-  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings, instantTrading?: true) => {
+  const start = useCallback(async (study: FishQualityStudy, hours: number, automaticId?: string, recover = false, onMatch?: (match: AutomaticScreeningMatch) => void, automaticSettings?: PreEntrySettings, instantTrading?: true, liveCapturedAt?: number) => {
     const settings = automaticSettings ?? current.current.settings;
     const lane = automaticId ? lanes.current.automatic : lanes.current.manual;
     const reportError = automaticId ? setAutomaticError : setError;
@@ -282,7 +282,7 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     if (!plans.length || !threeStage&&!filters.length || !samples.length) { reportError('请设置筛选条件，并勾选要监测的信号'); return; }
     if (!Number.isFinite(hours) || hours < 0 || hours > 8784) { reportError('监测时长须为 0～8784 小时'); return; }
     const at = Date.now(), id = automaticId ?? `pre-entry-${crypto.randomUUID()}`;
-    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? instantTrading ? { instantTrading } : { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
+    const round: PreEntryRound = { id, startedAt: at, updatedAt: at, filters: structuredClone(filters), hours, state: 'running', engine: threeStage?(plans.some(p=>p.preEntryThreeStage?.version===PRE_ENTRY_THREE_STAGE_VERSION)?PRE_ENTRY_THREE_STAGE_VERSION:plans[0].preEntryThreeStage!.version):PRE_ENTRY_CONDITIONS_VERSION, plans: structuredClone(plans.map(freezeQualityPlan)), ...(automaticId ? instantTrading ? { instantTrading, liveCapturedAt } : { automatic: true } : workspaceMode ? {workspaceDraft:true as const} : {}) };
     const records: PreEntryRecord[] = samples.flatMap((sample, i) => plans.map(plan => {
       const startTime = usesSignalTimeGate(round.engine) ? qualitySignalTime(sample.source) : sample.enteredAt ?? sample.source.timeMs;
       return { id: `${id}:${i}:${plan.id}`, roundId: id, planId: plan.id, sample: structuredClone(sample),
@@ -374,8 +374,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     }
   },[commit,owner]);
   return { library, savedLibrary, saveWorkspaceScreening, savingWorkspaceDraft, ready, running, automaticRunning, automaticError, error, progress, start, resume, restart, configure, useSavedSettings,importLibrary,clearTableResults,
-    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void, settings?: PreEntrySettings, instantTrading?: true) =>
-      start(study, newPreEntryHours((settings ?? current.current.settings)?.hours), id, recover, onMatch, settings, instantTrading),
+    startAutomatic: (id: string, study: FishQualityStudy, recover: boolean, onMatch?: (match: AutomaticScreeningMatch) => void, settings?: PreEntrySettings, instantTrading?: true, liveCapturedAt?: number) =>
+      start(study, newPreEntryHours((settings ?? current.current.settings)?.hours), id, recover, onMatch, settings, instantTrading, liveCapturedAt),
     pauseAutomatic: () => lanes.current.automatic.controller?.abort(),
     pause: () => lanes.current.manual.controller?.abort(), retry: () => setReload(n => n + 1) };
 }

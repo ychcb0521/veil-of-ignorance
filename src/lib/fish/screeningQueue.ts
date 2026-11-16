@@ -10,6 +10,7 @@ export const screeningQueueJobKey = (prefix: string, key: string) =>
 const diskPrefix = (prefix: string) => 'idb:' + prefix;
 
 export interface ScreeningJob {
+  liveCapturedAt?: number;
   key: string;
   id: string;
   source: TradeSignal;

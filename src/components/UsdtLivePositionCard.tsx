@@ -1,5 +1,7 @@
 import { Link, useInRouterContext } from 'react-router-dom';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
@@ -7,6 +9,9 @@ import {
   type UsdtMirrorPosition,
 } from '@/lib/fish/usdtPositionMirror';
 import { usdtLiveCampaignId } from '@/lib/fish/usdtLiveCampaign';
+import { USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
+import type { BinanceManualAnchor } from '@/lib/fish/binanceManualMonitor';
+import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import type { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import type { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
@@ -41,6 +46,35 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
   const campaignPath = campaignId && '/journal/campaigns/' + encodeURIComponent(campaignId) + '?section=instant';
   const managed = live.management?.positions.find(({ position: row }) => row.anchor.symbol === position.symbol &&
     row.anchor.positionSide === position.positionSide && row.anchor.openedAt === openedAt);
+  const [consent, setConsent] = useState<{ owner: string; campaignId: string; anchor: BinanceManualAnchor; template: InstantMonitorSettings; revision: number }>();
+  const [adopting, setAdopting] = useState(false);
+  const [adoptIssue, setAdoptIssue] = useState('');
+  const opening = campaign?.fills[0], template = live.management?.template;
+  const offer = follow?.connected && !follow.paused && follow.executionSafety === USDT_EXECUTION_SAFETY &&
+    follow.controlRevision !== undefined && template && !managed && !live.issue && campaignId && campaign &&
+    !campaign.followId && campaign.asset === 'USDT' && position.direction === 'long' && position.positionSide !== 'SHORT' &&
+    opening?.action === 'open' && campaign.fills.every(fill => fill.action === 'open')
+    ? { owner: follow.owner, campaignId, template, revision: follow.controlRevision, anchor: {
+      symbol: position.symbol, positionSide: position.positionSide, openedAt: campaign.openedAt,
+      openingOrderId: opening.orderId, openingTradeId: opening.id,
+    } } : undefined;
+  const askToAdopt = () => {
+    setAdoptIssue('');
+    setConsent(offer);
+  };
+  const consentCurrent = consent && offer && consent.owner === offer.owner &&
+    consent.campaignId === offer.campaignId && consent.revision === offer.revision;
+  const confirmAdoption = async () => {
+    if (!consent || !consentCurrent || !live.management || adopting) return;
+    setAdopting(true);
+    setAdoptIssue('');
+    try {
+      await live.management.adopt(consent.anchor, consent.template, consent.revision);
+      setConsent(undefined);
+    } catch (error) {
+      setAdoptIssue(error instanceof Error ? error.message : '策略托管待核对');
+    } finally { setAdopting(false); }
+  };
   const pnl = Number(position.unrealizedPnl);
   const initialMargin = Number(position.positionInitialMargin);
   const isolatedBalance = Number(position.isolatedWallet) + pnl;
@@ -84,6 +118,7 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
         {managed&&<span className={managed.status.state==='blocked'?'text-destructive':'text-primary'}>
           {managed.status.state==='blocked'?'托管待核对':managed.position.pending?'等待成交回报':'策略托管中'}
         </span>}
+        {offer && <button type="button" className="text-primary hover:underline" onClick={askToAdopt}>启用策略托管</button>}
       </div>
       {follow?.connected&&!follow.positionControls&&<span title="更新 Windows 本机执行端后可操作实盘平仓和止盈止损。" className="text-[10px] text-muted-foreground">执行端待更新</span>}
       {actions?.details}
@@ -114,6 +149,7 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
         {mode === '逐仓' && <Button type="button" size="sm" variant="outline" disabled={!actions?.onAdjustMargin} onClick={actions?.onAdjustMargin}>调整保证金</Button>}
         <Button type="button" size="sm" variant="outline" disabled={!actions?.onProtect} onClick={actions?.onProtect}>止盈止损</Button>
         <Button type="button" size="sm" variant="destructive" disabled={!actions?.onClosePosition} onClick={actions?.onClosePosition}>市价平仓</Button>
+        {offer && <Button type="button" size="sm" variant="outline" onClick={askToAdopt}>启用策略托管</Button>}
       </div>
       {live.issue && <p role="status" className="text-xs text-muted-foreground">{live.issue}</p>}
       {!actions && <p className="text-xs text-muted-foreground">当前执行端尚未接通仓位管理</p>}
@@ -121,13 +157,26 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
     </section>
   );
   const render = sidebar ? renderSidebar : renderRow;
-  return !managementInSidebar && follow?.positionControls === 1 && follow.controlPosition
+  return <>{!managementInSidebar && follow?.positionControls === 1 && follow.controlPosition
     ? <UsdtLivePositionActions position={position} control={follow.controlPosition} refresh={live.retryPositions}
         target={campaignId&&openedAt&&!live.issue?{campaignId,openedAt,symbol:position.symbol,
           direction:position.direction,positionSide:position.positionSide,revision:usdtMirrorRevision(position)}:undefined}>
         {render}
       </UsdtLivePositionActions>
-    : render();
+    : render()}
+    <Dialog open={!!consent} onOpenChange={open => { if (!open && !adopting) setConsent(undefined); }}>
+      {consent && <DialogContent>
+        <DialogHeader>
+          <DialogTitle>启用 {consent.anchor.symbol} 实盘策略托管</DialogTitle>
+          <DialogDescription>此笔仓位将冻结使用「{consent.template.name}」。策略可对这笔币安实盘仓位自动加仓、减仓或平仓。</DialogDescription>
+        </DialogHeader>
+        {(adoptIssue || !consentCurrent) && <p role="alert" className="text-sm text-destructive">{adoptIssue || '当前仓位或实盘跟随状态已变化，请关闭后重新核对。'}</p>}
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={adopting} onClick={() => setConsent(undefined)}>取消</Button>
+          <Button type="button" disabled={!consentCurrent || adopting} onClick={() => void confirmAdoption()}>{adopting ? '核对中…' : '确认托管这笔仓位'}</Button>
+        </DialogFooter>
+      </DialogContent>}
+    </Dialog></>;
 }
 
 export function UsdtLivePositionSidebar({ positionKey, onOpenChart }: { positionKey: string; onOpenChart?: () => void }) {

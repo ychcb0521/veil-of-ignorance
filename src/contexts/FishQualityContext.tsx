@@ -24,7 +24,7 @@ type InstantPositionsView = Pick<ReturnType<typeof useFishCdaTracking>, 'monitor
 };
 export const InstantPositionsContext = createContext<InstantPositionsView | null>(null);
 export const useScreenedInstantPositions = () => useContext(InstantPositionsContext);
-const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => void; activate: () => void; enqueue: (signal: TradeSignal) => void; notify: ReturnType<typeof useFishNotify> } | null>(null);
+const FishQualityContext = createContext<{ state: FishQualityState; sources: (fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => void; activate: () => void; enqueue: ReturnType<typeof useFishScreeningAutomation>['enqueue']; notify: ReturnType<typeof useFishNotify> } | null>(null);
 
 /** Owned by the authenticated app shell, outside the route boundary and collapsible panels. */
 export function FishQualityProvider({ owner, children, run = runPageFishQuality }: { owner?: string; children: ReactNode; run?: QualityRunner }) {

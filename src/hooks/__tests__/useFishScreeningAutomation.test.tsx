@@ -42,10 +42,12 @@ it('queues a capture once, waits for a durable match, and retries only the unsen
   act(() => { view.result.current.enqueue(signal('OKUSDT')); view.result.current.enqueue(signal('OKUSDT')); view.result.current.enqueue(signal('BADUSDT')); });
   await wait();
   expect(monitor.startAutomatic).not.toHaveBeenCalled();
+  expect(view.result.current.screeningPending).toBe(true);
   monitor.running = false;
   await wait(4000);
   expect(monitor.startAutomatic.mock.calls.map(([,source]) => source.symbol)).toEqual(['OKUSDT', 'BADUSDT']);
   expect(send).not.toHaveBeenCalled();
+  expect(view.result.current.screeningPending).toBe(true);
   const [id, source] = monitor.startAutomatic.mock.calls[0];
   writeResult(id, source, 'matched');
   await wait();
@@ -59,6 +61,7 @@ it('queues a capture once, waits for a durable match, and retries only the unsen
   expect(send.mock.calls[1][2]).toEqual(['b@example.test']);
   expect(view.result.current.pending).toBe(0);
   expect(view.result.current.awaitingMail).toBe(0);
+  expect(view.result.current.screeningPending).toBe(false);
   act(() => view.result.current.enqueue(source));
   await wait(2500);
   expect(send).toHaveBeenCalledTimes(2);

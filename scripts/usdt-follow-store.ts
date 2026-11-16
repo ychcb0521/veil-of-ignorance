@@ -53,10 +53,22 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
   const saveControl = db.prepare('INSERT INTO position_controls VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, pending=excluded.pending');
   const readSetting = db.prepare('SELECT value FROM settings WHERE key=?');
   const saveSetting = db.prepare('INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+  const controlRevision = () => Number(readSetting.get('follow-control-revision')?.value ?? 0);
   return {
     paused: () => db.prepare("SELECT 1 FROM settings WHERE key='paused'").get() != null,
-    pause: () => { db.prepare("INSERT OR IGNORE INTO settings VALUES ('paused','1')").run(); },
-    resume: () => { db.prepare("DELETE FROM settings WHERE key='paused'").run(); },
+    controlRevision,
+    setPaused(paused: boolean) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (paused) saveSetting.run('paused', '1');
+        else db.prepare("DELETE FROM settings WHERE key='paused'").run();
+        saveSetting.run('follow-control-revision', String(controlRevision() + 1));
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     readAll: () => [...read.all(), ...readManaged.all()].map(row => JSON.parse(String(row.payload)) as UsdtCampaignLedger),
     save: (row: UsdtCampaignLedger) => { (row.managed ? saveManaged : save).run(row.campaign.id, JSON.stringify(row)); },
     getPositionControl<T>(id: string): T | undefined {

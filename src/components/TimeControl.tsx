@@ -179,7 +179,9 @@ export function TimeControl({
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>(() => readFishAccountSettings()?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
   useEffect(() => { setFishSelection(fishAccountSettings?.selection ?? { exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false }); }, [fishAccountSettings, user?.id]);
   const { enqueue, notify: fishNotify } = useFishCaptureAutomation();
-  const fish = useFish(user?.id, { onNewFish: enqueue });
+  const fish = useFish(user?.id, { onNewFish: (signal, liveCapturedAt) => {
+    enqueue(signal, status === 'stopped' ? liveCapturedAt : undefined);
+  } });
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
   const [entrySignals, setEntrySignals] = usePersistedState(ENTRY_PERIOD_SIGNALS_KEY, EMPTY_SIGNALS);
   const [entrySyncStatus, setEntrySyncStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -257,7 +259,8 @@ export function TimeControl({
   const reconstruction = turing ? turingReconstruction : onlineReconstruction;
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = onlineReconstruction.running || turingReconstruction.running;
-  const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.startWithProgress, busy: () => fish.busy() || reconstructionRunning.current });
+  const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection,
+    start: settings => fish.startWithProgress(settings, status === 'stopped'), busy: () => fish.busy() || reconstructionRunning.current });
   const fishWasOpen = useRef(false);
   useEffect(() => {
     if (fishOpen && !fishWasOpen.current) {
@@ -837,7 +840,7 @@ export function TimeControl({
         )}
       </div>
 
-      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} onCardsChange={onlineReconstruction.onCardsChange} reconstructionRunning={onlineReconstruction.running} librarySignals={onlineSignals} onSuggest={fish.suggest} onTestHitRate={fish.testHitRate} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+      <div ref={fishHostRef} data-testid="fish-viewport" className={fishOpen?'relative z-30 flex min-h-0 flex-col bg-card':undefined} style={{height:fishHeight}}>{fishOpen && <ModuleErrorBoundary label="渔" backgroundTasks><FishBulkDeletionProvider state={fishQuality} removeFish={fish.removeMany}><FishPanel fillHeight quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} onCardsChange={onlineReconstruction.onCardsChange} reconstructionRunning={onlineReconstruction.running} librarySignals={onlineSignals} onSuggest={fish.suggest} onTestHitRate={fish.testHitRate} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings, status === 'stopped'); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
         onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onRateQuality={handleRateQualitySource} onImportCabin={fish.importCabin} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} qualityJumpPending={pendingJump?.fromQuality} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} /></FishBulkDeletionProvider></ModuleErrorBoundary>}</div>
 
       {/* 信号库折叠面板 */}

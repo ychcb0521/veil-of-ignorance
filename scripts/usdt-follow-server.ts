@@ -16,6 +16,7 @@ import type { QualityResult } from '../src/lib/fish/quality.ts';
 import { matchesManualAnchor } from './usdt-managed-execution.ts';
 import { createUsdtPositionControls } from './usdt-position-controls.ts';
 import type { UsdtRequest } from './usdt-exchange.ts';
+import { USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY, validUsdtLiveEntry } from '../src/lib/fish/usdtLiveEntry.ts';
 
 const origin = 'https://veil-of-ignorance-ten.vercel.app';
 const dashPort = 47321;
@@ -57,6 +58,7 @@ function parseCampaigns(value: unknown, now: number): UsdtFollowCampaign[] {
       || (row.source.exchange != null && typeof row.source.exchange !== 'string')
       || (row.source.market != null && typeof row.source.market !== 'string')
       || !safeTime(row.admittedAt) || !validPositive(row.notional) || !Number.isInteger(row.leverage) || row.leverage < 1 || row.leverage > 125
+      || row.liveEntry !== undefined && !validUsdtLiveEntry(row)
       || !Array.isArray(row.actions) || row.actions.length < 1 || row.actions.length > 250
       || row.actions[0]?.id !== 'open' || row.actions[0].action !== 'open') throw Error('即时交易战役格式无效');
     const ids = new Set<string>();
@@ -137,17 +139,17 @@ export function serveUsdtFollower({
   const controls = positionRequest && positionReader && campaignReader ?
     createUsdtPositionControls(positionRequest, store, owner, exchange.market, campaignReader, positionReader.invalidate, managedClock) : undefined;
   const follower = createUsdtFollower(store, exchange, owner, mode, startedAt, readManaged, managedClock,
-    controls?.protectionIds, controls ? positionReader?.positions : undefined);
+    controls?.protectionIds, controls ? positionReader?.positions : undefined, controls);
   const tokenDigest = digest(token);
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
-    guardPlusAdditions: 1, executionSafety: 1,
+    guardPlusAdditions: 1, executionSafety: USDT_EXECUTION_SAFETY, controlRevision: store.controlRevision(),
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
     ...(readManaged ? { manualMonitor: 1 } : {}), ...(controls ? { positionControls: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
           req.headers.host !== '127.0.0.1:' + (server.address() as { port: number }).port ||
-          req.url !== '/api/usdt-follow') {
+          (req.url !== '/api/usdt-follow' && req.url !== USDT_EXECUTION_PATH)) {
         json(res, 403, { error: '本机执行端只接受配对页面' });
         return;
       }
@@ -165,6 +167,7 @@ export function serveUsdtFollower({
       }
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
+      if (content.command === 'status') return json(res, 200, snapshot());
       if (content.command === 'position-control') {
         if (!controls) return json(res, 501, { error: '请更新 Windows 本机执行端以操作币安实盘仓位' });
         return json(res, 200, await follower.runPositionControl(() => controls.execute(content.request)));
@@ -174,7 +177,10 @@ export function serveUsdtFollower({
           return json(res, 200, { observedAt: managedClock(), positions: follower.managed() });
         }
         if (content.command === 'manual-monitor-adopt') {
-          const position = await follower.adopt(manualAnchor(content.anchor, managedClock()), manualMonitor(content.monitor));
+          if (content.confirmed !== true || content.controlRevision !== store.controlRevision())
+            throw Error('请按当前实盘状态逐笔确认策略托管');
+          const position = await follower.runPositionControl(() =>
+            follower.adopt(manualAnchor(content.anchor, managedClock()), manualMonitor(content.monitor), content.controlRevision));
           return json(res, 200, { position });
         }
         if (content.command === 'manual-monitor-update') {
@@ -205,10 +211,17 @@ export function serveUsdtFollower({
         const state = await positionReader.history(content.symbol, content.positionSide, content.revision);
         return json(res, 200, state);
       }
-      if (content.command === 'pause') follower.pauseNewOrders();
-      else if (content.command === 'resume') follower.resumeNewOrders();
-      else if (content.command !== 'sync') throw Error('未知的实盘指令');
-      follower.ingest(parseCampaigns(content.campaigns, Date.now()));
+      if (content.command !== 'sync' && content.command !== 'pause' && content.command !== 'resume') throw Error('未知的实盘指令');
+      const campaigns = parseCampaigns(content.campaigns, Date.now());
+      if (content.command !== 'sync') {
+        const legacyPause = content.command === 'pause' && content.controlRevision === undefined;
+        if ((!legacyPause && campaigns.length) ||
+          (content.command === 'resume' && content.controlRevision !== store.controlRevision())) {
+          return json(res, 409, { ...snapshot(), staleControl: true, error: '实盘跟随状态已变化，请核对后重新操作' });
+        }
+        if (content.command === 'pause') follower.pauseNewOrders();
+        else follower.resumeNewOrders();
+      } else follower.ingest(campaigns);
       json(res, 200, snapshot());
       void follower.tick();
     };

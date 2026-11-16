@@ -115,7 +115,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     return persist(job.key, value);
   }, [queue, publish, persist]);
 
-  const enqueue = useCallback((source: TradeSignal) => {
+  const enqueue = useCallback((source: TradeSignal, liveCapturedAt?: number) => {
     if (!owner) return;
     const identity = encodeURIComponent(signalDedupKey(source));
     const legacyKey = prefix + 'job:' + identity;
@@ -123,7 +123,8 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     const monitor = current.current.monitor;
     const settings = readAutomaticScreeningSettings(owner) ?? (monitor?.ready ? monitor.library.settings : undefined);
     const job: Job = { key: instantKey, id: 'pre-entry-auto-' + identity, source, nextCheckAt: 0,
-      settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined, instantTrading: true };
+      settings: selectedPreEntryPlan(settings?.plans) ? settings : undefined, instantTrading: true,
+      ...(liveCapturedAt !== undefined ? { liveCapturedAt } : {}) };
     const add = async () => {
       if (queue.entries.has(legacyKey) || queue.entries.has(instantKey)) return;
       if (readLocalScreeningValue(legacyKey) || readLocalScreeningValue(instantKey)) return;
@@ -314,7 +315,7 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
           if (!isScreeningJob(latest) || lifetime.signal.aborted) return;
           matchedWrite = save({ ...latest, matched: true });
           void matchedWrite.then(() => mail(job, match));
-        }, settings, job.instantTrading);
+        }, settings, job.instantTrading, job.liveCapturedAt);
         if (lifetime.signal.aborted) return;
         setAttemptIssues(issues => issues.scan ? { ...issues, scan: '' } : issues);
         if (matchedWrite) { await matchedWrite; return true; }
@@ -369,7 +370,13 @@ export function useFishScreeningAutomation(owner: string | undefined, ready: boo
     const complete = new Set(monitor.library.rounds.filter(round => round.state === 'complete').map(round => round.id));
     return new Set(monitor.library.records.filter(record => record.status === 'matched' && complete.has(record.roundId)).map(record => record.roundId));
   }, [jobs.length, monitor?.library]);
-  const awaitingMail = jobs.filter(job => job.matched || matchedIds?.has(job.id)).length;
-  const pending = jobs.length - awaitingMail;
-  return { enqueue, paused, setAutoPaused, pending, awaitingMail: jobs.length - pending, storageIssue, attemptIssue: attemptIssues.scan || attemptIssues.mail, settings, saveSettings };
+  const pendingJobs = jobs.filter(job => !job.matched && !matchedIds?.has(job.id));
+  const fallback = selectedPreEntryPlan((settings ?? monitor?.library.settings)?.plans);
+  const pendingIds = pendingJobs.length && !fallback ? new Set(pendingJobs.map(job => job.id)) : undefined;
+  const screeningPending = pendingJobs.length > 0 && (!!fallback
+    || pendingJobs.some(job => selectedPreEntryPlan(job.settings?.plans))
+    || !!pendingIds && !!monitor?.library.records.some(record => pendingIds.has(record.roundId)));
+  const pending = pendingJobs.length;
+  return { enqueue, paused, setAutoPaused, pending, screeningPending, awaitingMail: jobs.length - pending, storageIssue,
+    attemptIssue: attemptIssues.scan || attemptIssues.mail, settings, saveSettings };
 }
