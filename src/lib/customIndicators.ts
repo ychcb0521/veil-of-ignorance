@@ -1,6 +1,7 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
 import { IMPULSE_5M_ID, IMPULSE_5M_INDICATOR, registerImpulse5mChart } from '@/lib/impulse5mChart';
+import {CLEAN_ACCELERATION_1116_ID,CLEAN_ACCELERATION_1116_INDICATOR,registerCleanAcceleration1116Chart} from '@/lib/cleanAcceleration1116Chart';
 import {registerImpulse1115Chart} from '@/lib/impulse1115Chart';
 import type {Dbl5GuardVersion} from '@/lib/dbl5m';
 import {GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion} from '@/lib/researchIndicators';
@@ -1486,6 +1487,7 @@ export function registerCustomIndicators() {
   }
 
   // One source of truth: the account's Deep dig formula, including both named averages.
+  registerCleanAcceleration1116Chart();
   registerImpulse5mChart();
   registerImpulse1115Chart(IMPULSE_1115_CHART);
   registerDbl5Indicator(GUARD_1115_CHART);
@@ -1561,6 +1563,7 @@ export function registerCustomIndicators() {
  * Returns null if no mapping exists (will use fallback).
  */
 export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
+  [CLEAN_ACCELERATION_1116_ID]: CLEAN_ACCELERATION_1116_INDICATOR,
   [IMPULSE_5M_ID]: IMPULSE_5M_INDICATOR,
   [IMPULSE_1115_CHART_ID]: researchKcName(IMPULSE_1115_CHART_ID),
   [GUARD_1115_CHART_ID]: researchKcName(GUARD_1115_CHART_ID),

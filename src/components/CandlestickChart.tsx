@@ -1,4 +1,5 @@
 import {Dbl5ChartTimeline} from '@/lib/dbl5ChartTimeline';
+import { CLEAN_ACCELERATION_1116_ID, CLEAN_ACCELERATION_1116_NAME } from '@/lib/cleanAcceleration1116Chart';
 import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_ID } from '@/lib/impulse5mChart';
 import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
 import { mbi2MinutesOf } from '@/lib/mbi2';
@@ -119,10 +120,11 @@ const OVERLAY_INDICATOR_IDS = new Set([
   "VWAP",
   "DSP",
   IMPULSE_5M_ID,
+  CLEAN_ACCELERATION_1116_ID,
 ]);
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc", [IMPULSE_5M_ID]: IMPULSE_5M_DISPLAY_NAME };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc", [IMPULSE_5M_ID]: IMPULSE_5M_DISPLAY_NAME, [CLEAN_ACCELERATION_1116_ID]: CLEAN_ACCELERATION_1116_NAME };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
@@ -1381,7 +1383,7 @@ function CandlestickChartComponent({
 
     const currentOldest = data[0].time;
     const lastCandle = klineData[klineData.length - 1];
-    const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
+    const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}|${data[data.length - 1].cba2Closed}`;
     // Analysis windows are static snapshots and can be replaced with corrected
     // historical candles while retaining the same first/last candle. Hash every
     // timestamp so that replacement cannot be mistaken for a last-bar update,
@@ -2232,7 +2234,7 @@ function CandlestickChartComponent({
     const currentActive = new Set<string>();
 
     for (const ind of indicators) {
-      if (!ind.enabled) continue;
+      if (!ind.enabled || (ind.type === CLEAN_ACCELERATION_1116_ID && displayTimestampTransform)) continue;
       if (ind.type.startsWith('FEATURE_') && !accountResearchIndicators(featureDefinitions).some(item => item.id === ind.type)) continue;
       const rawVisible = !customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false;
       if (rawVisible && !COMPANION_ONLY.has(ind.type)) currentActive.add(ind.type);
@@ -2326,7 +2328,7 @@ function CandlestickChartComponent({
       closeButtons.push(button);
     }
     return () => { closeButtons.forEach(button => button.remove()); };
-  }, [indicators, featureDefinitions, setIndicators, scheduleViewportReflow]);
+  }, [indicators, featureDefinitions, setIndicators, scheduleViewportReflow, displayTimestampTransform]);
 
   // Pane colors sampled from the supplied Binance light/dark references.
   // Neutral surfaces and clear gutters carry the hierarchy; charts keep their colors.
@@ -2582,7 +2584,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type===IMPULSE_5M_ID||ind.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
+                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type===CLEAN_ACCELERATION_1116_ID||ind.type===IMPULSE_5M_ID||ind.type.startsWith('DBL5')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
@@ -2625,7 +2627,8 @@ function areChartPropsEqual(prev: Props, next: Props) {
       (prevLast?.high ?? 0) === (nextLast?.high ?? 0) &&
       (prevLast?.low ?? 0) === (nextLast?.low ?? 0) &&
       (prevLast?.close ?? 0) === (nextLast?.close ?? 0) &&
-      (prevLast?.volume ?? 0) === (nextLast?.volume ?? 0);
+      (prevLast?.volume ?? 0) === (nextLast?.volume ?? 0) &&
+      prevLast?.cba2Closed === nextLast?.cba2Closed;
 
   return (
     sameDataShape &&

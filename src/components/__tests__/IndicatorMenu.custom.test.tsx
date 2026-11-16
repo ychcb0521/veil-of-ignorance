@@ -1,3 +1,4 @@
+import {CLEAN_ACCELERATION_1116_ID,CLEAN_ACCELERATION_1116_NAME} from '@/lib/cleanAcceleration1116Chart';
 import { SELLER_RETENTION_SPECS } from '@/lib/sellerRetention';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
@@ -15,6 +16,17 @@ const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DB
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
+  it('lets the user add the 1116 acceleration line as an independent 5m overlay', () => {
+    const changed = vi.fn();
+    render(<IndicatorMenu open indicators={[]} onClose={()=>{}} onIndicatorsChange={changed}/>);
+    fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), {target:{value:'纯净加速'}});
+    const group = screen.getByRole('region', {name:'上涨形态'});
+    fireEvent.click(within(group).getByText(CLEAN_ACCELERATION_1116_NAME));
+    expect(changed.mock.lastCall?.[0]).toMatchObject([{type:CLEAN_ACCELERATION_1116_ID,period:5,enabled:true}]);
+    const indicator = registered.get(CUSTOM_INDICATOR_MAP[CLEAN_ACCELERATION_1116_ID]);
+    expect(indicator.shortName).toBe(CLEAN_ACCELERATION_1116_NAME);
+    expect(indicator.figures.map((figure:{key:string})=>figure.key)).toEqual(['value']);
+  });
   it('offers both 1115 components individually beside the combination and legacy DBL-5', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5',period:3,enabled:true},{type:'DBL5_GUARD_PLUS',period:3,enabled:true}]} onClose={()=>{}} onIndicatorsChange={changed}/>);
@@ -83,7 +95,7 @@ describe('自制区的十个特征值', () => {
     expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
-    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M',IMPULSE_1115_CHART_ID,GUARD_PLUS_0_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual([CLEAN_ACCELERATION_1116_ID,'IMPULSE_5M',IMPULSE_1115_CHART_ID,GUARD_PLUS_0_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');

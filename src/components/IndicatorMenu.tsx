@@ -26,6 +26,7 @@ import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod 
 import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
 import { SELLER_CONTROL_DEF, BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { BUILD_STAMP } from '@/lib/buildStamp';
+import {CLEAN_ACCELERATION_1116_COLOR,CLEAN_ACCELERATION_1116_DESCRIPTION,CLEAN_ACCELERATION_1116_ID,CLEAN_ACCELERATION_1116_NAME} from '@/lib/cleanAcceleration1116Chart';
 import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_ID, IMPULSE_5M_VERSION } from '@/lib/impulse5mChart';
 
 export interface IndicatorCatalogItem {
@@ -73,6 +74,9 @@ function shortCustomNames(items: IndicatorCatalogItem[]): IndicatorCatalogItem[]
 }
 
 export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
+  { id: CLEAN_ACCELERATION_1116_ID, nameZh: CLEAN_ACCELERATION_1116_NAME, nameEn: 'Clean Acceleration 1116',
+    isOverlay: true, defaultPeriod: 5, color: CLEAN_ACCELERATION_1116_COLOR, category: 'custom', fixedPeriod: true, rawOnly: true,
+    description: CLEAN_ACCELERATION_1116_DESCRIPTION },
   { id: IMPULSE_5M_ID, nameZh: IMPULSE_5M_DISPLAY_NAME, nameEn: '5m Impulse Support', isOverlay: true, defaultPeriod: 5,
     color: '#a855f7', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: '5 分钟收盘确认放量突破后，在主图标出起涨低点。再次触及低点或满 60 分钟后结束。' },
@@ -586,7 +590,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   const custom = item.category === 'custom';
   const [descriptionOpen, setDescriptionOpen] = useState(false);
 
-  const plainFiveMinute = [IMPULSE_5M_ID, IMPULSE_1115_CHART_ID, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART_ID].includes(item.id);
+  const plainFiveMinute = [CLEAN_ACCELERATION_1116_ID, IMPULSE_5M_ID, IMPULSE_1115_CHART_ID, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART_ID].includes(item.id);
   return (
     <div
       ref={ref}
