@@ -42,6 +42,12 @@ export function entryPeriodEndLabel(endTimeMs?: number): string {
   return endTimeMs && Number.isFinite(endTimeMs) ? formatUTC8(endTimeMs).slice(0, 16) : '';
 }
 
+export function entryPeriodDurationDays(startTimeMs: number, endTimeMs?: number): number | undefined {
+  if (endTimeMs === undefined) return undefined;
+  const elapsed = endTimeMs - startTimeMs;
+  return Number.isFinite(elapsed) && elapsed > 0 ? elapsed / 86_400_000 : undefined;
+}
+
 const marketByName = new Map<string, StoredEntryPeriodMarket>();
 const knownMarkets: Partial<Record<StoredEntryPeriodMarket, string>> = {
   crypto: 'A AAVE ADA AVAX BGB BNB BTC CRV DOGE EOS ETH FARTCOIN HYPE KAITO LDO LINK LTC ONDO PEPE PUMP SEI SOL SUI UNI VIRTUAL WLD ZEC 币市流动性',

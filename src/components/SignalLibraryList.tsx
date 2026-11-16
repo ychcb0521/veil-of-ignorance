@@ -29,7 +29,7 @@ import {
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { entryPeriodEndLabel, entryPeriodMarketLabel } from '@/lib/entryPeriodSignals';
+import { entryPeriodDurationDays, entryPeriodEndLabel, entryPeriodMarketLabel } from '@/lib/entryPeriodSignals';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
 import { screenedSellReason, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
@@ -203,6 +203,7 @@ interface RowProps {
   showMatch?: boolean;
   market?: 'us_stock';
   entryPeriod?: TradeSignal['entryPeriod'];
+  entryDurationDays?: number;
   exchange?: FishExchange;
   chartUnavailable?: boolean;
   extraTitle?: string;
@@ -241,7 +242,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, entryPeriod, turingReplaySample,
+  id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, entryPeriod, entryDurationDays, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
@@ -282,7 +283,6 @@ function SignalLibraryRowImpl({
         {/* 时间：定宽等宽字体，纵向严格成列 */}
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{timeLabel}</span>
-          {entryPeriod?.startInferred && <span className="shrink-0 text-[9px] text-primary" aria-label="进场时间倒推">倒推</span>}
           {hasDayCampaign && (
             // 低调标注：当日该标的已有战役。小圆点而非文字/勾号，
             // 扫视时不抢注意力，需要时 hover 才给出说明。
@@ -294,9 +294,8 @@ function SignalLibraryRowImpl({
             />
           )}
         </span>
-        {entryPeriod && <span data-testid="entry-period-end-time" className="flex min-w-0 items-center gap-1 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">
-          <span className="truncate">{entryPeriodEndLabel(entryPeriod.endTimeMs) || '—'}</span>
-          {entryPeriod.endInferred && <span className="shrink-0 text-[9px] text-primary" aria-label="结束时间倒推">倒推</span>}
+        {entryPeriod && <span data-testid="entry-period-end-time" className="truncate font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">
+          {entryPeriodEndLabel(entryPeriod.endTimeMs) || '—'}
         </span>}
         {algorithmTypes && <span className="whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-caught-at">
           {caughtAt != null && caughtAt > 0 ? formatBeijingTime(new Date(caughtAt).getTime()) : '—'}
@@ -309,9 +308,11 @@ function SignalLibraryRowImpl({
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
         {algorithmTypes
           ? <span className="whitespace-nowrap font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
-          : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
-              {entryPeriod ? entryPeriod.mark : fallbackZone ? `兜底 ${fallbackZone}` : turingReplaySample ? '回放样本' : ''}
-            </span>}
+          : entryPeriod
+            ? <span data-testid="entry-period-duration" className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{entryDurationDays ?? '—'}</span>
+            : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
+                {fallbackZone ? `兜底 ${fallbackZone}` : turingReplaySample ? '回放样本' : ''}
+              </span>}
         <span className="min-w-0">{(entryPeriod || market === 'us_stock') && <span className="rounded bg-primary/10 px-1 py-px text-[9px] text-primary">{entryPeriod ? entryPeriodMarketLabel(entryPeriod.market) : '美股'}</span>}</span>
       </button>
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
@@ -622,6 +623,7 @@ function SignalLibraryListImpl({
         exchange={sig.exchange}
         market={sig.market}
         entryPeriod={sig.entryPeriod}
+        entryDurationDays={entryPeriodDurationDays(sig.timeMs, sig.entryPeriod?.endTimeMs)}
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
         caughtAt={rowAlgorithmTypes ? (showScreeningTime ? sig.preEntryMonitor?.matchedAt : sig.caughtAt) : undefined}

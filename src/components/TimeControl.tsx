@@ -279,8 +279,8 @@ export function TimeControl({
   const toggleSort = (key: SignalSortKey) => {
     if (key === sortKey) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
     setSortKey(key);
-    // 各列的「顺手方向」不同:标的从 A 起,时间与评分从大的起。
-    setSortDir(key === 'symbol' ? 'asc' : 'desc');
+    // 文本和分类按默认顺序，数值和时间从大的起。
+    setSortDir(key === 'symbol' || key === 'entryMarket' ? 'asc' : 'desc');
   };
 
   /**
@@ -902,7 +902,7 @@ export function TimeControl({
                 <input type="file" aria-label="上传进场期 Excel" accept=".xlsx" multiple disabled={entryImportPending}
                   onChange={handleEntryPeriodFiles} className="sr-only" />
               </label>
-              <span>可多选连续原表 · 缺首日时按周期序号倒推 · 北京时间 16:00</span>
+              <span>可多选连续原表 · 按周期序号补齐缺失首日 · 北京时间 16:00</span>
               {signals.length > 0 && <button type="button" disabled={entryImportPending}
                 className="ml-auto rounded px-2 py-1 text-destructive hover:bg-destructive/10" onClick={handleClearSignals}>清空</button>}
             </div>

@@ -15,7 +15,7 @@
  */
 
 import { stockCode } from './signalMarket';
-import type { EntryPeriodMetadata } from './entryPeriodSignals';
+import { ENTRY_PERIOD_MARKETS, entryPeriodDurationDays, entryPeriodMarketGroup, type EntryPeriodMetadata } from './entryPeriodSignals';
 import { isTuringCupSymbol, turingCupSymbol } from './turingCupSymbol';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
@@ -313,10 +313,10 @@ export function mergeSignals(existing: TradeSignal[], incoming: TradeSignal[]): 
   return merged;
 }
 
-export type SignalSortKey = 'symbol' | 'time' | 'quality' | 'entryEnd';
+export type SignalSortKey = 'symbol' | 'time' | 'quality' | 'entryEnd' | 'entryDuration' | 'entryMarket';
 
 /**
- * 按列排序。三列各有各的次序语义：
+ * 按列排序。常用列的次序：
  *   symbol   字母序；同标的再按时间升序（同一个币会出现在很多天）
  *   time     时间序
  *   quality  评分；**未评分永远排在最后**，不论升降——
@@ -335,13 +335,22 @@ export function sortSignalsBy(
   if (key === 'time') return sortSignalsByTime(list, dir);
 
   const sign = dir === 'asc' ? 1 : -1;
-  if (key === 'entryEnd') {
+  if (key === 'entryMarket') {
+    const markets = Object.keys(ENTRY_PERIOD_MARKETS);
+    const rank = (row: TradeSignal) => markets.indexOf(entryPeriodMarketGroup(row.entryPeriod?.market));
+    return [...list].sort((a, b) => (rank(a) - rank(b)) * sign
+      || b.timeMs - a.timeMs || a.symbol.localeCompare(b.symbol));
+  }
+  if (key === 'entryEnd' || key === 'entryDuration') {
+    const value = (row: TradeSignal) => key === 'entryEnd'
+      ? row.entryPeriod?.endTimeMs
+      : entryPeriodDurationDays(row.timeMs, row.entryPeriod?.endTimeMs);
     return [...list].sort((a, b) => {
-      const endA = a.entryPeriod?.endTimeMs, endB = b.entryPeriod?.endTimeMs;
-      if (endA === endB) return b.timeMs - a.timeMs;
-      if (endA === undefined) return 1;
-      if (endB === undefined) return -1;
-      return (endA - endB) * sign;
+      const aValue = value(a), bValue = value(b);
+      if (aValue === bValue) return b.timeMs - a.timeMs;
+      if (aValue === undefined) return 1;
+      if (bValue === undefined) return -1;
+      return (aValue - bValue) * sign;
     });
   }
   return [...list].sort((a, b) => {
