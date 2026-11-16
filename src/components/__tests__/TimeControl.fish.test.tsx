@@ -13,11 +13,12 @@ import { saveFishPreference } from '@/lib/fish/preferences';
 import { InstantPositionsContext } from '@/contexts/FishQualityContext';
 import type { InstantPositionFill } from '@/lib/fish/instantCampaign';
 
-const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn(), recentArchive: vi.fn() }));
 vi.mock('@/lib/fishScanner', async original => ({ ...await original<typeof import('@/lib/fishScanner')>(), FishScanner: class { scan = mocks.scan; isBusy = () => false; } }));
 vi.mock('@/lib/simStateSync', () => ({ queueSimStatePush: mocks.push }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'fish-owner' } }) }));
 vi.mock('@/contexts/TradingContext', () => ({ useTradingContext: () => ({ tradeHistory: [], positionsMap: {}, priceMap: {}, getEffectiveTime: () => 0, getTimelineId: () => null }) }));
+vi.mock('@/hooks/useLatestInstantReplay', () => ({ useLatestInstantReplay: mocks.recentArchive }));
 vi.mock('@/lib/journalApi', () => ({ listAllCampaigns: vi.fn(async () => []) }));
 vi.mock('@/components/journal/PreTradeSnapshotDialog', () => ({ PreTradeSnapshotDialog: () => null }));
 vi.mock('@/lib/signalJumpDiagnostics', async original => ({ ...await original<typeof import('@/lib/signalJumpDiagnostics')>(), preflightSignalJumpIssues: vi.fn(async () => new Map()) }));
@@ -27,6 +28,7 @@ function control(jump = vi.fn(async () => ({ ok: true as const }))) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
+  mocks.recentArchive.mockReturnValue(undefined);
   // 这些用例验证手动捕捞流程；自动默认值和调度另由 useFishAutoScan 测试覆盖。
   saveFishAuto({mode:'manual',hours:1,lastRunAt:Date.now()});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY,'[]');
@@ -85,6 +87,16 @@ it('keeps a manually entered replay time when a screened fish arrives later', ()
   expect(selectDefault).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '启动' }));
   expect(start).toHaveBeenCalledWith(Date.parse('2026-10-19T09:10:11+08:00'));
+});
+
+it('defaults to the newest closed instant trade over an older open position', () => {
+  mocks.recentArchive.mockReturnValue({ symbol: 'CLOSEDUSDT', at: SCREENED_AT + 60_000 });
+  const selectDefault = vi.fn();
+  render(<InstantPositionsContext.Provider value={{ positions: [screenedPosition('OLDERUSDT', SCREENED_AT)] }}>
+    <TimeControl {...control().props} status="stopped" currentSimulatedTime={0} onSelectDefaultReplaySymbol={selectDefault}/>
+  </InstantPositionsContext.Provider>);
+  expect(selectDefault).toHaveBeenLastCalledWith('CLOSEDUSDT');
+  expect(mocks.recentArchive).toHaveBeenCalledWith('fish-owner', true);
 });
 
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {

@@ -4,6 +4,7 @@ import { runAccountSyncRequest } from '@/lib/accountSyncTransport';
 import { readFishPreferenceEntries, readFishPreferences, updateFishPreference } from './fishPreferencesDb';
 import { publishInstantCampaigns } from './instantCampaignStore';
 import { isUsdtLiveCampaignId, usdtLiveCampaignId, type UsdtLiveCampaign } from './usdtLiveCampaign';
+import { binanceReplayEntry, laterInstantReplayEntry, type InstantReplayEntry } from './latestScreenedReplaySymbol';
 
 const CLOUD = 'idb:usdt-live-campaign-v1/';
 const prefix = (owner: string) => CLOUD + encodeURIComponent(owner) + '/';
@@ -26,6 +27,29 @@ function decodeSaved(value: unknown): Saved | undefined {
 
 export const readUsdtCampaigns = async (owner: string, include?: (saved: Saved) => boolean) =>
   (await readFishPreferenceEntries<Saved>(prefix(owner), include)).map(([, saved]) => saved);
+
+export async function readLatestLocalUsdtReplay(owner: string) {
+  let latest: InstantReplayEntry | undefined;
+  await readUsdtCampaigns(owner, saved => {
+    const campaign = saved?.campaign;
+    latest = laterInstantReplayEntry(latest, binanceReplayEntry(campaign?.symbol, campaign?.openedAt));
+    return false;
+  });
+  return latest;
+}
+
+export async function readLatestCloudUsdtReplay(owner: string, signal: AbortSignal) {
+  const { data, error } = await table().select('symbol:value->campaign->symbol,openedAt:value->campaign->openedAt')
+    .eq('user_id', owner).gte('key', CLOUD_START).lt('key', CLOUD_END)
+    .order('value->campaign->>openedAt', { ascending: false, nullsFirst: false }).limit(4).setHeader(INSTANT_CAMPAIGN_HEADER, '1')
+    .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8000)]));
+  if (error) throw Error(error.message);
+  let latest: InstantReplayEntry | undefined;
+  for (const row of (data ?? []) as { symbol: string; openedAt: number }[]) {
+    latest = laterInstantReplayEntry(latest, binanceReplayEntry(row.symbol, row.openedAt));
+  }
+  return latest;
+}
 
 async function saveUsdtCampaign(owner: string, incoming: Saved, notify = true) {
   const key = localKey(owner, usdtLiveCampaignId(incoming.campaign));
