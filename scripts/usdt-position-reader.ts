@@ -22,6 +22,9 @@ const quantityText = (value: bigint) => {
 const day = 24 * 60 * 60 * 1000;
 const pageSize = 1000;
 
+// Binance can publish the position revision one millisecond after its fill.
+export const positionTradeCaughtUp = (fillAt: number, positionUpdatedAt: number) => fillAt >= positionUpdatedAt - 1;
+
 export function decodePositions(value: unknown): UsdtMirrorPosition[] {
   if (!Array.isArray(value)) throw Error('币安 U 本位持仓回报无效');
   const positions = new Map<string, UsdtMirrorPosition>();
@@ -128,7 +131,7 @@ export function createUsdtPositionReader(read: Read, clock = Date.now) {
     } catch (error) {
       return {fills:[],issue:error instanceof Error ? error.message : '无法读取实际成交'};
     }
-    if (history.openedAt && position.updatedAt && history.fills[history.fills.length-1].at < position.updatedAt) {
+    if (history.openedAt && position.updatedAt && !positionTradeCaughtUp(history.fills.at(-1)!.at, position.updatedAt)) {
       return {fills:[],issue:'成交记录尚无法与当前仓位核对，请稍后重试'};
     }
     const current = decodePositions(await read('GET','/fapi/v3/positionRisk',{symbol:position.symbol})).find(row=>row.positionSide===position.positionSide);

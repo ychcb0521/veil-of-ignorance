@@ -2,12 +2,14 @@ import { useLayoutEffect, useState, type ReactNode } from 'react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { usdtMirrorKey } from '@/lib/fish/usdtPositionMirror';
 import type { PositionChartPreview } from './PositionMarketPreview';
-import { UsdtLivePositionSidebar } from './UsdtLivePositionCard';
+import { UsdtLivePositionSidebar, usdtLivePositionTarget } from './UsdtLivePositionCard';
+import { UsdtLiveOrderTicket } from './UsdtLiveOrderTicket';
 
 type DeskMode = 'live' | 'simulation';
 
-export function TradingDeskActionPanel({ preview, replayActive, onManagePosition, onOpenChart, onClosePreview, children }: {
+export function TradingDeskActionPanel({ preview, activeSymbol, replayActive, onManagePosition, onOpenChart, onClosePreview, children }: {
   preview: PositionChartPreview | null;
+  activeSymbol?: string;
   replayActive: boolean;
   onManagePosition: (key: string | undefined) => void;
   onOpenChart: (symbol: string, livePositionKey: string) => void;
@@ -26,6 +28,10 @@ export function TradingDeskActionPanel({ preview, replayActive, onManagePosition
   const mode = hasLivePanel && (override?.scope === scope ? override.mode : defaultMode) === 'live' ? 'live' : 'simulation';
   const positionKey = previewKey ?? (positions.length === 1 ? usdtMirrorKey(positions[0]) : undefined);
   const selected = positions.find(position => usdtMirrorKey(position) === positionKey);
+  const ticketSymbol = (selected?.symbol ?? preview?.symbol ?? activeSymbol)?.replace(/\//g,'').toUpperCase();
+  const ticket = follow?.orderDesk === 1 && live && ticketSymbol && /^[A-Z0-9]{2,24}USDT$/.test(ticketSymbol) ?
+    <UsdtLiveOrderTicket key={follow.owner+':'+ticketSymbol} symbol={ticketSymbol} follow={follow} issue={live.issue}
+      refresh={live.retryPositions} legs={positions.filter(row=>row.symbol===ticketSymbol).map(position=>({position,target:usdtLivePositionTarget(position,live)}))}/> : null;
 
   // Only the panel which owns the selected position exposes its execution controls.
   const managedKey = mode === 'live' && selected ? positionKey : undefined;
@@ -63,9 +69,10 @@ export function TradingDeskActionPanel({ preview, replayActive, onManagePosition
           </option>)}
         </select>
       </div>}
+      {ticket}
       {positionKey ? <UsdtLivePositionSidebar positionKey={positionKey}
         onOpenChart={!previewKey && selected ? () => onOpenChart(selected.symbol, positionKey) : undefined} />
-        : <p role="status" className="p-4 text-xs text-muted-foreground">
+        : !ticket && <p role="status" className="p-4 text-xs text-muted-foreground">
           {positions.length > 1 ? '请选择要管理的仓位。' : live?.issue ?? '当前没有币安实盘持仓。'}
         </p>}
     </div> : children}

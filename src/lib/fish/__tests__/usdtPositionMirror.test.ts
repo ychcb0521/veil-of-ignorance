@@ -41,6 +41,13 @@ it('uses only the new-side quantity on a reversal and sorts same-millisecond fil
  const hedge=await reader.history(symbol,'SHORT',usdtMirrorRevision(positions[1]));
  expect(hedge.fills).toMatchObject([{at:first,id:'11',side:'SELL',action:'open'}]);
 });
+it.each([1, 2])('checks the current position when the position feed is %s ms ahead of its fill', async gap => {
+  const reader=createUsdtPositionReader(venue([raw('0.75','BOTH',reduce+gap)],fills),()=>now);
+  const [position]=(await reader.positions()).positions;
+  const history=await reader.history(symbol,'BOTH',usdtMirrorRevision(position));
+  if(gap===1)expect(history.openedAt).toBe(first);
+  else expect(history).toMatchObject({fills:[],issue:expect.stringContaining('无法与当前仓位核对')});
+});
 it('does not invent an opening timestamp with incomplete trades or a position that changed while being read',async()=>{
  const noHistory=createUsdtPositionReader(venue([raw()],[fills[0]]),()=>now);
  const pending=(await noHistory.positions()).positions[0];

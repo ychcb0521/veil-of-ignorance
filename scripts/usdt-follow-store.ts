@@ -37,6 +37,7 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
     db.exec('CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS managed_campaigns (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS position_controls (id TEXT PRIMARY KEY, payload TEXT NOT NULL, pending INTEGER NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS desk_orders (id TEXT PRIMARY KEY, payload TEXT NOT NULL, pending INTEGER NOT NULL)');
     db.prepare('INSERT OR IGNORE INTO connection VALUES (1, ?, ?)').run(account, owner);
     const connection = db.prepare('SELECT account, owner FROM connection WHERE id=1').get();
     if (connection?.account !== account || connection.owner !== owner) throw Error('本机实盘账本绑定了另一个账户');
@@ -51,6 +52,9 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
   const getControl = db.prepare('SELECT payload FROM position_controls WHERE id=?');
   const listControls = db.prepare('SELECT payload FROM position_controls WHERE pending=1 ORDER BY rowid');
   const saveControl = db.prepare('INSERT INTO position_controls VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, pending=excluded.pending');
+  const getDesk = db.prepare('SELECT payload FROM desk_orders WHERE id=?');
+  const listDesk = db.prepare('SELECT payload FROM desk_orders WHERE pending=1');
+  const saveDesk = db.prepare('INSERT INTO desk_orders VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, pending=excluded.pending');
   const readSetting = db.prepare('SELECT value FROM settings WHERE key=?');
   const saveSetting = db.prepare('INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
   const controlRevision = () => Number(readSetting.get('follow-control-revision')?.value ?? 0);
@@ -77,6 +81,12 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
     },
     pendingPositionControls<T>(): T[] { return listControls.all().map(row => JSON.parse(String(row.payload))); },
     savePositionControl(id: string, value: unknown, pending: boolean) { saveControl.run(id, JSON.stringify(value), Number(pending)); },
+    getDeskOrder<T>(id: string): T | undefined {
+      const row = getDesk.get(id);
+      return row && JSON.parse(String(row.payload));
+    },
+    pendingDeskOrders<T>(): T[] { return listDesk.all().map(row => JSON.parse(String(row.payload))); },
+    saveDeskOrder(id: string, value: unknown, pending: boolean) { saveDesk.run(id, JSON.stringify(value), Number(pending)); },
     positionLeverage(id: string): { leverage: number; at: number } | undefined {
       const row = readSetting.get('position-leverage:' + id);
       return row && JSON.parse(String(row.value));

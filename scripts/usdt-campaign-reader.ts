@@ -1,6 +1,6 @@
 import type { UsdtCampaignBatch, UsdtCampaignFill, UsdtLiveCampaign } from '../src/lib/fish/usdtLiveCampaign.ts';
 import type { UsdtMirrorPosition, UsdtMirrorSide } from '../src/lib/fish/usdtPositionMirror.ts';
-import { decodePositions } from './usdt-position-reader.ts';
+import { decodePositions, positionTradeCaughtUp } from './usdt-position-reader.ts';
 
 type Read = (method: 'GET', path: string, params?: Record<string, string>) => Promise<unknown>;
 const DAY = 86_400_000;
@@ -137,7 +137,8 @@ export function createUsdtCampaignReader(read: Read, clock = Date.now) {
         from = prior;
       }
       if (before()) incomplete = true;
-      if (current.some(pos => pos.updatedAt >= from && !trades.some(trade => trade.positionSide === pos.positionSide && trade.at >= pos.updatedAt)))
+      if (current.some(pos => pos.updatedAt >= from && !trades.some(trade =>
+        trade.positionSide === pos.positionSide && positionTradeCaughtUp(trade.at, pos.updatedAt))))
         throw Error('币安最新成交还未返回，正在重新核对');
       campaigns.push(...reconstructUsdtCampaigns(symbol, current, unique())
         .filter(row => !row.closedAt || row.closedAt >= start || openingTimes?.has(row.openedAt)));

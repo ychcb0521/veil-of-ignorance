@@ -23,10 +23,30 @@ import {UsdtLivePositionActions,type LivePositionControls} from './UsdtLivePosit
 
 const positive = (value: string | undefined) => value != null && Number(value) > 0 ? usdtPositionDecimal(value) : undefined;
 const campaignLinkClass = 'text-muted-foreground hover:text-foreground hover:underline';
+type LiveView = ReturnType<typeof useUsdtLiveTrading> & { management?: ReturnType<typeof useBinanceManualMonitor> };
+
+function liveCampaignFor(position: UsdtMirrorPosition, live: LiveView) {
+  const history = live.histories.get(usdtMirrorRevision(position));
+  const campaign = live.openCampaigns?.find(row => row.symbol === position.symbol && row.positionSide === position.positionSide &&
+    row.direction === position.direction && usdtPositionDecimal(row.quantity) === usdtPositionDecimal(position.quantity) &&
+    (history?.openedAt ? row.openedAt === history.openedAt : (row.fills.at(-1)?.at ?? 0) >= position.updatedAt - 1));
+  return {history,campaign};
+}
+
+export function usdtLivePositionTarget(position: UsdtMirrorPosition, live: LiveView) {
+  if (live.issue) return;
+  const {history,campaign} = liveCampaignFor(position,live);
+  const opening = history?.fills[0];
+  const fills = opening?.action === 'open' && opening.at === history?.openedAt ? [opening] : campaign?.fills;
+  const openedAt = history?.openedAt ?? campaign?.openedAt;
+  if (!fills?.length || !openedAt) return;
+  return { symbol:position.symbol, positionSide:position.positionSide, direction:position.direction, openedAt,
+    campaignId:usdtLiveCampaignId({...position,fills}), revision:usdtMirrorRevision(position) };
+}
 
 export function UsdtLivePositionCard({ position, live, follow, onOpenChart, sidebar = false, managementInSidebar = false }: {
   position: UsdtMirrorPosition;
-  live: ReturnType<typeof useUsdtLiveTrading> & { management?: ReturnType<typeof useBinanceManualMonitor> };
+  live: LiveView;
   follow?: ReturnType<typeof useUsdtFollow>;
   onOpenChart?: () => void;
   sidebar?: boolean;
@@ -36,11 +56,7 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
   const asset = usdtSettlementAsset(position.symbol);
   const unit = usdtPositionQuantityUnit(position.symbol);
   const quantity = usdtPositionDecimal(position.quantity);
-  const history = live.histories.get(usdtMirrorRevision(position));
-  const campaign = live.openCampaigns?.find(row => row.symbol === position.symbol &&
-    row.positionSide === position.positionSide && row.direction === position.direction &&
-    usdtPositionDecimal(row.quantity) === quantity &&
-    (history?.openedAt ? row.openedAt === history.openedAt : (row.fills.at(-1)?.at ?? 0) >= position.updatedAt));
+  const {history,campaign} = liveCampaignFor(position,live);
   const openedAt = history?.openedAt ?? campaign?.openedAt;
   const campaignId = campaign && usdtLiveCampaignId(campaign);
   const campaignPath = campaignId && '/journal/campaigns/' + encodeURIComponent(campaignId) + '?section=instant';
@@ -159,8 +175,8 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
   const render = sidebar ? renderSidebar : renderRow;
   return <>{!managementInSidebar && follow?.positionControls === 1 && follow.controlPosition
     ? <UsdtLivePositionActions position={position} control={follow.controlPosition} refresh={live.retryPositions}
-        target={campaignId&&openedAt&&!live.issue?{campaignId,openedAt,symbol:position.symbol,
-          direction:position.direction,positionSide:position.positionSide,revision:usdtMirrorRevision(position)}:undefined}>
+        target={usdtLivePositionTarget(position,live)}
+        targetIssue={live.issue || history?.issue}>
         {render}
       </UsdtLivePositionActions>
     : render()}

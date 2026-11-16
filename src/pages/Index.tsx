@@ -2663,6 +2663,7 @@ const Index = () => {
             <div className="flex flex-col flex-1 h-full min-h-0 w-full min-w-[300px] overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
               <TradingDeskActionPanel
                 preview={positionPreview}
+                activeSymbol={activeSymbol}
                 replayActive={activeCoinState.status !== "stopped"}
                 onManagePosition={setManagedLivePositionKey}
                 onOpenChart={(symbol, key) => handleOpenPositionChart(symbol, undefined, key)}

@@ -4,6 +4,7 @@ import type { BinanceManualAnchor, BinanceManualDecision, BinanceManualState } f
 import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import type { QualityResult } from '@/lib/fish/quality';
 import type { UsdtPositionControlRequest, UsdtPositionControlResult } from '@/lib/fish/usdtPositionControls';
+import type { UsdtDeskOpenRequest, UsdtDeskQuote } from '@/lib/fish/usdtOrderDesk';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
@@ -34,6 +35,7 @@ interface FollowState {
   guardPlusAdditions?: 1;
   manualMonitor?: 1;
   positionControls?: 1;
+  orderDesk?: 1;
   executionSafety?: number;
   controlRevision?: number;
 }
@@ -238,7 +240,13 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision }, signal, 15_000, true), [readMirror]);
   const controlPosition = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
     readMirror<UsdtPositionControlResult>({ command: 'position-control', request }, signal, 70_000), [readMirror]);
+  const readDeskQuote = useCallback((symbol: string, signal: AbortSignal) =>
+    readMirror<UsdtDeskQuote>({command:'desk-info',symbol},signal,25_000,true),[readMirror]);
+  const deskOpen = useCallback((request: UsdtDeskOpenRequest, signal: AbortSignal) =>
+    readMirror<UsdtPositionControlResult>({command:'desk-open',request},signal,60_000,true),[readMirror]);
+  const deskClose = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
+    readMirror<UsdtPositionControlResult>({command:'desk-close',request},signal,70_000,true),[readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
   return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
-    readManualMonitor, adoptManualMonitor, advanceManualMonitor, controlPosition };
+    readManualMonitor, adoptManualMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
 }

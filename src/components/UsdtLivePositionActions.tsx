@@ -25,9 +25,10 @@ export interface LivePositionControls {
   onLeverage?: () => void;
 }
 
-export function UsdtLivePositionActions({position,target,control,refresh,children}: {
+export function UsdtLivePositionActions({position,target,targetIssue,control,refresh,children}: {
   position: UsdtMirrorPosition;
   target?: UsdtPositionTarget;
+  targetIssue?: string;
   control: ReturnType<typeof useUsdtFollow>['controlPosition'];
   refresh: () => void;
   children: (controls:LivePositionControls)=>ReactNode;
@@ -98,7 +99,10 @@ export function UsdtLivePositionActions({position,target,control,refresh,childre
       {position.protectionIssue && <span role="status" className="text-muted-foreground">{position.protectionIssue}</span>}
       </PopoverContent>
     </Popover> : null}
-    {!target && <p role="status" className="block text-[10px] text-muted-foreground">正在核对实盘首仓成交</p>}
+    {!target && <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span role="status">{targetIssue || '正在核对实盘首仓成交'}</span>
+      <button type="button" className="shrink-0 text-primary" onClick={refresh}>重新核对</button>
+    </div>}
     {(issue || pending) && <div className="flex flex-wrap items-center gap-1 text-[10px]">
       <span role="status" className="text-muted-foreground">{issue}</span>
       {pending && <button type="button" disabled={busy} onClick={() => void submit(pending.action)} className="text-primary">核对实盘回报</button>}

@@ -2,6 +2,7 @@ import { decodePositions } from './usdt-position-reader.ts';
 import { formatQuantity, quantityUnits, UsdtApiError, usdtOrderId, type UsdtMarket, type UsdtRequest } from './usdt-exchange.ts';
 import type { openUsdtFollowStore } from './usdt-follow-store.ts';
 import type { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
+import { deskOrderParameters, validDeskOrder } from './usdt-order-desk.ts';
 import { isUsdtLiveCampaignId, usdtLiveCampaignId } from '../src/lib/fish/usdtLiveCampaign.ts';
 import { usdtMirrorRevision, usdtPositionDecimal, type UsdtMirrorPosition, type UsdtMirrorSnapshot } from '../src/lib/fish/usdtPositionMirror.ts';
 import type {
@@ -41,7 +42,7 @@ function parseCommand(value: UsdtPositionControlRequest, now: number) {
     typeof target.revision !== 'string' || target.revision.length > 300 || !isUsdtLiveCampaignId(target.campaignId) ||
     !action) throw Error('币安实盘操作参数无效');
   switch (action.kind) {
-    case 'close': if (percent(action.fraction)) return value; break;
+    case 'close': if (percent(action.fraction) && (action.order === undefined || validDeskOrder(action.order))) return value; break;
     case 'protect':
       if (percent(action.fraction) && (action.tp !== null || action.sl !== null) &&
         [action.tp, action.sl].every(price => price === null || Number.isFinite(price) && price > 0)) return value;
@@ -88,7 +89,7 @@ const definitelyRejected = (error: unknown) => error instanceof UsdtApiError && 
 
 export function createUsdtPositionControls(request: UsdtRequest, store: Store, owner: string,
   readMarket: (symbol: string) => Promise<UsdtMarket | undefined>, readCampaigns: ReturnType<typeof createUsdtCampaignReader>,
-  invalidate: () => void, clock = Date.now) {
+  invalidate: () => void, clock = Date.now, readBook?: (symbol: string, side: 'BUY' | 'SELL') => Promise<string>) {
   const rawOrders = (symbol: string) => request('GET', openAlgoPath, { symbol });
   const risk = async (symbol: string) => decodePositions(await request('GET', riskPath, { symbol }));
   const activeCampaign = async (target: UsdtPositionTarget) => (await readCampaigns(Math.max(1, target.openedAt - 1000),
@@ -129,7 +130,7 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
 
   const save = (row: Stored) => {
     store.savePositionControl(row.id, row, row.steps.some(step =>
-      step.state === 'sent' || step.path === algoPath && step.method === 'POST' && step.state === 'done' && !step.retired));
+      isTrackedProtection(step) || trackedLimit(step) || step.state === 'sent'));
     const leverage = row.steps.find(step => step.path === leveragePath && isDone(step));
     if (leverage?.sentAt !== undefined)
       store.savePositionLeverage(row.target.campaignId, { leverage: Number(leverage.params.leverage), at: leverage.sentAt });
@@ -148,6 +149,8 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
       if (!matchedOrder(response, step) || response.clientOrderId !== step.params.newClientOrderId ||
         !positiveDecimal.test(String(response.executedQty)) || Number(response.executedQty) > Number(step.params.quantity)) return;
       step.filledQuantity = String(response.executedQty);
+      if (step.params.type === 'LIMIT' && ['NEW','PARTIALLY_FILLED'].includes(response.status) &&
+        ['GTC','GTX'].includes(step.params.timeInForce)) step.state = 'done';
       if (['FILLED', 'CANCELED', 'EXPIRED', 'EXPIRED_IN_MATCH', 'REJECTED'].includes(response.status)) {
         step.state = 'done';
         if (Number(step.filledQuantity) !== Number(step.params.quantity))
@@ -197,6 +200,9 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
     }
   }
 
+  const trackedLimit = (step: Step) => step.path === orderPath && step.params.type === 'LIMIT' &&
+    ['GTC','GTX'].includes(step.params.timeInForce) && isDone(step) && !step.retired;
+
   async function execute(value: UsdtPositionControlRequest): Promise<UsdtPositionControlResult> {
     const { id, target, action } = parseCommand(value, clock());
     const fingerprint = JSON.stringify([target, action]);
@@ -229,9 +235,16 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
         const market = await readMarket(position.symbol);
         if (!market) throw Error('无法核对币安 USDT 永续交易规格');
         if (action.kind === 'close') {
-          steps.push({ method: 'POST', path: orderPath, params: { ...base, ...reduce,
-            quantity: quantityFor(position.quantity, action.fraction, market), type: 'MARKET',
-            newOrderRespType: 'RESULT', newClientOrderId: usdtOrderId(owner, target.campaignId, id) } });
+          const side = closingSide(position);
+          const wire = await deskOrderParameters(action.order ?? {type:'market'}, market, side,
+            usdtOrderId(owner, target.campaignId, id), Number(position.markPrice), () => {
+              if (!readBook) throw Error('盘口价格读取不可用');
+              return readBook(position.symbol, side);
+            });
+          const spec = wire.params.type === 'LIMIT' ? { ...market, marketStep:market.step } : market;
+          const params = Object.fromEntries(Object.entries(wire.params).filter(([, value]) => typeof value === 'string')) as Record<string,string>;
+          steps.push({ method:'POST', path:wire.path, params:{ ...base, ...reduce, ...params,
+            quantity:quantityFor(position.quantity, action.fraction, spec) } });
         } else {
           const size = action.fraction === 1 ? { closePosition: 'true' } :
             { quantity: quantityFor(position.quantity, action.fraction, market), ...reduce };
@@ -263,7 +276,7 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
       try { await cleanup(target.symbol); }
       catch { issue ||= '平仓成交已收到，原仓位的条件单等待核对'; }
     }
-    return { pending, issue, filledQuantity };
+    return { pending, issue, filledQuantity: Number(filledQuantity) > 0 ? filledQuantity : undefined };
   }
 
   async function advance(row: Stored, protecting: boolean, onlyReplacement = false) {
@@ -326,6 +339,21 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
       for (const step of awaiting) await recover(step);
       if (row.steps.some(step => step.replacementId && !step.state)) await advance(row, true, true);
       const linked = row.steps.filter(step => isTrackedProtection(step) && step.state === 'done');
+      const limits = row.steps.filter(trackedLimit);
+      if (limits.length) {
+        const orders = await request('GET','/fapi/v1/openOrders',{symbol:row.target.symbol});
+        if (!Array.isArray(orders)) throw Error('币安限价挂单暂不可读');
+        const active = limits.filter(step => orders.some(order => order.clientOrderId === step.params.newClientOrderId));
+        for (const step of limits.filter(step => !active.includes(step))) step.retired = true;
+        if (active.length && (await activeCampaign(row.target))?.closedAt) {
+          for (const step of active) {
+            const order = orders.find(order => order.clientOrderId === step.params.newClientOrderId);
+            if (!matchedOrder(order,step)) continue;
+            const canceled = await request('DELETE',orderPath,{symbol:row.target.symbol,origClientOrderId:step.params.newClientOrderId});
+            if (canceled?.status === 'CANCELED' && canceled.clientOrderId === step.params.newClientOrderId) step.retired = true;
+          }
+        }
+      }
       if (linked.length) {
         const active = await rawOrders(row.target.symbol);
         if (!Array.isArray(active)) continue;
@@ -356,8 +384,9 @@ export function createUsdtPositionControls(request: UsdtRequest, store: Store, o
 
   async function beforeOpening(symbol: string) {
     await cleanup(symbol);
-    if (store.pendingPositionControls<Stored>().some(row => row.target.symbol === symbol && row.steps.some(isTrackedProtection)))
-      throw Error('原实盘仓位的条件单待核对，暂缓新开仓');
+    if (store.pendingPositionControls<Stored>().some(row => row.target.symbol === symbol &&
+      row.steps.some(step => isTrackedProtection(step) || trackedLimit(step) || step.path === orderPath && step.state === 'sent')))
+      throw Error('原实盘仓位的平仓或保护委托待核对，暂缓新开仓');
   }
 
   const protectionIds = (symbol: string, campaignId: string) => store.pendingPositionControls<Stored>().flatMap(row =>

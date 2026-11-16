@@ -1,4 +1,5 @@
 import type { UsdtMirrorPosition } from './usdtPositionMirror';
+import type { UsdtDeskOrderSpec } from './usdtOrderDesk';
 
 export interface UsdtPositionTarget extends Pick<UsdtMirrorPosition, 'symbol' | 'positionSide' | 'direction'> {
   revision: string;
@@ -15,7 +16,7 @@ export interface UsdtProtectionOrder {
 }
 
 export type UsdtPositionAction =
-  | { kind: 'close'; fraction: number }
+  | { kind: 'close'; fraction: number; order?: UsdtDeskOrderSpec }
   | { kind: 'protect'; tp: number | null; sl: number | null; fraction: number }
   | { kind: 'cancel'; orderId: string }
   | { kind: 'leverage'; leverage: number }

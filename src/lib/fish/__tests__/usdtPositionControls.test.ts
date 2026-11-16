@@ -123,6 +123,19 @@ it('refuses a stale revision or an immediately triggered protection without post
   } finally { v.store.close(); }
 });
 
+it('routes a limit close to the selected leg as a reducing limit and a conditional close as a separate order',async()=>{
+  const v=venue();
+  try {
+    await v.controls.execute(v.command({kind:'close',fraction:.5,order:{type:'limit',price:'0.081',timeInForce:'GTC'}}));
+    await v.controls.execute(v.command({kind:'close',fraction:1,order:{type:'conditional',triggerPrice:'0.075'}}));
+    const posts=v.request.mock.calls.filter(([method])=>method==='POST');
+    expect(posts).toEqual([
+      ['POST','/fapi/v1/order',expect.objectContaining({positionSide:'BOTH',side:'SELL',type:'LIMIT',reduceOnly:'true',quantity:'50',price:'0.081'})],
+      ['POST','/fapi/v1/algoOrder',expect.objectContaining({positionSide:'BOTH',side:'SELL',type:'STOP_MARKET',reduceOnly:'true',quantity:'100',triggerPrice:'0.075'})],
+    ]);
+  }finally{v.store.close();}
+});
+
 it('cleans the original protection immediately after a confirmed full close and gates reopening on a failed cancellation', async () => {
   const v = venue();
   const request = v.request.getMockImplementation()!;

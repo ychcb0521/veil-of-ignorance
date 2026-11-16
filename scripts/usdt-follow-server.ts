@@ -15,6 +15,7 @@ import type { InstantMonitorSettings } from '../src/lib/fish/instantMonitorSetti
 import type { QualityResult } from '../src/lib/fish/quality.ts';
 import { matchesManualAnchor } from './usdt-managed-execution.ts';
 import { createUsdtPositionControls } from './usdt-position-controls.ts';
+import { createUsdtOrderDesk } from './usdt-order-desk.ts';
 import type { UsdtRequest } from './usdt-exchange.ts';
 import { USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY, validUsdtLiveEntry } from '../src/lib/fish/usdtLiveEntry.ts';
 
@@ -137,14 +138,20 @@ export function serveUsdtFollower({
     return actual;
   } : undefined;
   const controls = positionRequest && positionReader && campaignReader ?
-    createUsdtPositionControls(positionRequest, store, owner, exchange.market, campaignReader, positionReader.invalidate, managedClock) : undefined;
+    createUsdtPositionControls(positionRequest, store, owner, exchange.market, campaignReader, positionReader.invalidate, managedClock, exchange.book) : undefined;
   const follower = createUsdtFollower(store, exchange, owner, mode, startedAt, readManaged, managedClock,
     controls?.protectionIds, controls ? positionReader?.positions : undefined, controls);
+  const desk = controls && positionRequest && createUsdtOrderDesk(positionRequest, exchange, store, owner, mode, async symbol => {
+    if (follower.statuses().some(row => (row.market ?? row.symbol) === symbol && !['closed','ignored'].includes(row.state)))
+      throw Error('该合约存在策略跟随的仓位或待核对委托，请先处理原仓位');
+    await controls.beforeOpening(symbol);
+  }, managedClock);
   const tokenDigest = digest(token);
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
     guardPlusAdditions: 1, executionSafety: USDT_EXECUTION_SAFETY, controlRevision: store.controlRevision(),
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
-    ...(readManaged ? { manualMonitor: 1 } : {}), ...(controls ? { positionControls: 1 } : {}) });
+    ...(readManaged ? { manualMonitor: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
+    ...(desk ? { orderDesk: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
@@ -168,6 +175,13 @@ export function serveUsdtFollower({
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
       if (content.command === 'status') return json(res, 200, snapshot());
+      if (req.url === USDT_EXECUTION_PATH && desk) {
+        if (content.command === 'desk-info') return json(res, 200, await desk.info(content.symbol));
+        if (content.command === 'desk-open')
+          return json(res, 200, await follower.runPositionControl(() => desk.execute(content.request)));
+        if (content.command === 'desk-close' && content.request?.action?.kind === 'close' && content.request.action.order)
+          return json(res, 200, await follower.runPositionControl(() => controls!.execute(content.request)));
+      }
       if (content.command === 'position-control') {
         if (!controls) return json(res, 501, { error: '请更新 Windows 本机执行端以操作币安实盘仓位' });
         return json(res, 200, await follower.runPositionControl(() => controls.execute(content.request)));

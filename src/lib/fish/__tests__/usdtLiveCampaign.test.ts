@@ -64,3 +64,12 @@ it('keeps the original campaign identity through partial exits and splits a one-
   expect(closed[0].fills.at(-1)).toMatchObject({ id: '13', positionQuantity: '60', realized: .006 });
   expect(closed[1]).toMatchObject({ direction: 'short', quantity:'20', fills: [{ id: '13', positionQuantity: '20', realized: 0 }] });
 });
+it('agrees with the position reader when the exchange timestamps differ by one millisecond', async () => {
+  const read = vi.fn(async (_method: string, path: string) => path.endsWith('positionRisk')
+    ? [{ symbol:'BEATUSDT', positionSide:'LONG', positionAmt:'100', entryPrice:buy.price, markPrice:buy.price,
+         updateTime:at+1, unRealizedProfit:'0' }]
+    : [{ ...buy, symbol:'BEATUSDT', time:at, qty:buy.quantity, realizedPnl:'0', commission:String(buy.commission) }]);
+  const scan=createUsdtCampaignReader(read,()=>at+60_000);
+  const {campaigns}=await scan(at-1000, [], 'BEATUSDT');
+  expect(campaigns[0]).toMatchObject({openedAt:at,quantity:'100',direction:'long'});
+});

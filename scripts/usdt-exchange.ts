@@ -57,7 +57,7 @@ export function createUsdtRequest(credentials: { apiKey: string; secret: Buffer 
   const send = async (method: Parameters<UsdtRequest>[0], path: string, params: Record<string, string>) => {
     const base = path.startsWith('/fapi/') ? futures : spot;
     if (!/^\/(?:fapi|sapi|api)\/v\d+\/(?:[a-zA-Z]+\/)*[a-zA-Z0-9]+$/.test(path)
-      || method === 'POST' && !tradingPaths.has(path) || method === 'DELETE' && path !== '/fapi/v1/algoOrder')
+      || method === 'POST' && !tradingPaths.has(path) || method === 'DELETE' && path !== '/fapi/v1/algoOrder' && path !== '/fapi/v1/order')
       throw Error('币安签名请求路径无效');
     const signal = AbortSignal.timeout(10_000);
     let clock = clocks.get(base);
@@ -114,6 +114,17 @@ export async function readUsdtMarket(symbol: string, fetcher: typeof fetch = fet
   const max = Math.floor(Math.min(Number(lot.maxQty), Number(marketLot.maxQty)) / Number(step) + 1e-9);
   if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || max < min) throw Error('合约市价单数量范围不可用');
   return { symbol, step, min, max, minNotional, marketStep: marketLot?.stepSize, priceTick: price?.tickSize };
+}
+
+export async function readUsdtMark(symbol: string, fetcher: typeof fetch = fetch): Promise<string> {
+  const query = new URLSearchParams({symbol});
+  const reply = await fetcher(futures + '/fapi/v1/premiumIndex?' + query,
+    {signal:AbortSignal.timeout(8000),redirect:'error'});
+  if (!reply.ok) throw new UsdtApiError(reply.status);
+  const mark = await reply.json();
+  if (mark.symbol !== symbol || typeof mark.markPrice !== 'string' || !quantityText.test(mark.markPrice) ||
+    !Number.isFinite(Number(mark.markPrice)) || Number(mark.markPrice) <= 0) throw Error('币安标记价格无效');
+  return mark.markPrice;
 }
 
 export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch = fetch) {
