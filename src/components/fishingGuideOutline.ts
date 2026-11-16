@@ -11,7 +11,8 @@ const anchors: Record<string, string> = {
   '3.3.4':'s3-fish-quality', '3.3.4.1':'fq-mining', '3.3.4.2':'fq-pre-entry',
   '3.3.4.2.1':'fq-static', '3.3.4.2.2':'fq-screening', '3.3.4.3':'fq-monitor',
   '3.3.4.3.2':'fq-monitor-conditions', '3.3.4.3.3':'fq-additions',
-  '3.3.4.4':'fq-table', '3.3.4.4.3':'fq-rating', '3.3.4.4.4':'fq-export', '3.3.5':'fish-notes',
+  '3.3.4.4':'fq-table', '3.3.4.4.3':'fq-rating', '3.3.4.4.4':'fq-export',
+  '3.3.4.5':'fq-instant-trading', '3.3.5':'fish-notes',
 };
 export function fishingChapter(label: string) {
   const number = label.match(/^(\d+(?:\.\d+)*)\s/)?.[1];
