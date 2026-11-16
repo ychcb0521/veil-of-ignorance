@@ -106,6 +106,7 @@ export interface QualitySample {
   signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
+  instantMonitorSwitches?: import('./instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
   boxMarketRepair?: typeof BOX_MARKET_REPAIR_VERSION;
   initialization?: NonNullable<FishReconstructionLoader['turingInitialization']>;
   advantageState?: QualityAdvantageState;
@@ -754,7 +755,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           const readings = evaluateFishProgram(bars, plan).average;
           for (let i = 0; i < bars.length; i++) {
             const at = bars[i].openTime + plan.step;
-            if (at <= entry || at <= cursor || at > end) continue;
+            if (at <= entry || at <= cursor || at > end || prior?.instantMonitorSwitches && at < since) continue;
             const reading = readings[i] * scale;
             if (!Number.isFinite(reading)) { if (qualityInitializationPending(load, readings, i)) continue; throw new Error('卖出指标存在缺失读数，不能越过缺口判断成交'); }
             if (indicatorRule.direction === '<' ? reading < indicatorRule.threshold : reading > indicatorRule.threshold) { trigger = { at, reading }; break; }
@@ -867,11 +868,12 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
     return { ...base,...(boxStopStates?{boxStopStates}:{}),...(vetoPath?{vetoPath}:{}),...(additionVetoes?.length?{additionVetoes}:{}),...(additionSkips?.length?{additionSkips}:{}),...(additionSkipsFrom!=null?{additionSkipsFrom}:{}),...(additionReductions?.length&&additionFills.length?{additionReductions}:{}),...(sellStageBoundary?{sellStageBoundary:true}:{}), status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       ...(additionGuardPlus&&additionGuardPlus.at<=finalTime?{additionGuardPlus}:{}),
       ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
-      ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
+      ...(position&&(additionFill||trackLedger) ? {additionFill,...(group.addition?.quantityMode==='calculator'||prior?.instantMonitorSwitches?{additionFills}:{}),totalInvested:position.totalInvested,averageEntryPrice:position.averageEntryPrice,remainingQuantity:position.remainingQuantity,remainingCost:position.remainingCost,
         initialNotional,mirrorRealizedPnl:position.mirrorPnl,remainingPnl:group.addition?.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?position.remainingPnl+position.reductionPnl:position.remainingPnl,realizedPnl:position.realizedPnl,
         remainingFraction:closed?0:position.remainingQuantity/position.totalQuantity} : {}),
       ...(additionNote?{additionNote}:{}),...(savedAdvantage?{advantageState:savedAdvantage}:{}),
-      ...(group.positionManagement ? { initialNotional } : {}),
+      ...(group.positionManagement || prior?.instantMonitorSwitches ? { initialNotional } : {}),
+      ...(prior?.instantMonitorSwitches ? { instantMonitorSwitches: prior.instantMonitorSwitches } : {}),
       returnPct, pnl: position?.totalPnl ?? breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: !sellStageBoundary&&(closed || end >= limit && !trigger),

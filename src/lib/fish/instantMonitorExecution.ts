@@ -33,7 +33,9 @@ export async function evaluateInstantMonitor(sample: QualitySample, monitor: Ins
   }
   const initialized = plan.initialization ? withTuringInitialization(tradeLoad, sample.source.symbol, marketStart ?? NaN) : tradeLoad;
   const { marginUsdt, leverage } = instantMonitorSize(monitor);
-  const notional = sample.binanceEntry ? sample.binanceEntry.quantity * sample.binanceEntry.price : plan.positionManagement?.notional ?? marginUsdt * leverage;
+  if (previous?.instantMonitorSwitches && end < previous.endTime!) return previous;
+  const notional = previous?.instantMonitorSwitches ? previous.initialNotional! : sample.binanceEntry
+    ? sample.binanceEntry.quantity * sample.binanceEntry.price : plan.positionManagement?.notional ?? marginUsdt * leverage;
   const result = await evaluateQualitySampleWithMarketRepair(sample, plan, 0, end, initialized, signal, previous, notional,liveAt);
   return initialized.turingInitialization ? { ...result, initialization: initialized.turingInitialization } : result;
 }

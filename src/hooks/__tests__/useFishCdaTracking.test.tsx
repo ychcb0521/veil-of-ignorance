@@ -1,13 +1,19 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useFishCdaTracking } from '../useFishCdaTracking';
-import { readPageScreenedCda, readPageInstantCampaignCandles, markPageInstantPosition } from '../useFish';
+import { readPageScreenedCda, readPageInstantCampaignCandles, markPageInstantPosition, readPageInstantMonitor } from '../useFish';
 import { readAutomaticPreEntryCheckpoint } from '@/lib/fish/preEntryPersistence';
 import type { ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
 import type { PreEntryLibrary, PreEntryRecord, PreEntryRound } from '@/lib/fish/preEntryMonitor';
 import { instantPositionInput } from '@/lib/fish/instantCampaign';
 import { readInstantPositionQuote } from '@/lib/fish/instantPositionQuote';
 import { publishInstantCampaigns, saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
+import { INSTANT_TEMPLATE_MONITOR } from '@/lib/fish/instantMonitorSettings';
+import { makeQualitySellPlan } from '@/lib/fish/qualitySellPlans';
+import { STATIC_DRAWDOWN_SELL_CHOICE } from '@/lib/fish/qualityStaticDrawdownSell';
+import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
+import { instantManualCheckpointKey, instantMonitorCheckpointKey, SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
+import { qualityResultKey, type QualityResult } from '@/lib/fish/quality';
 
 const preferences = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('@/lib/fish/fishPreferencesDb', () => ({
@@ -19,13 +25,58 @@ vi.mock('@/lib/fish/fishPreferencesDb', () => ({
     for (const [key, value] of entries) preferences.set(key, structuredClone(value));
   },
 }));
-vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn(), readPageInstantCampaignCandles: vi.fn(), markPageInstantPosition: vi.fn() }));
+vi.mock('../useFish', () => ({ readPageScreenedCda: vi.fn(), readPageInstantCampaignCandles: vi.fn(), markPageInstantPosition: vi.fn(), readPageInstantMonitor: vi.fn() }));
 vi.mock('@/lib/fish/preEntryPersistence', () => ({ readAutomaticPreEntryCheckpoint: vi.fn(), readAutomaticPreEntrySales: async () => [] }));
 vi.mock('@/lib/fish/instantPositionQuote', () => ({ readInstantPositionQuote: vi.fn() }));
 vi.mock('@/lib/fish/instantCampaignStore', () => ({
   publishInstantCampaigns: vi.fn(), saveInstantCampaignInput: vi.fn(async () => undefined),
 }));
 afterEach(() => { localStorage.clear(); preferences.clear(); vi.useRealTimers(); vi.resetAllMocks(); });
+
+it('stores the switch for one screened fish, reads it after reload, and only evaluates the new template from its boundary', async () => {
+  const minute = 60_000, start = Date.UTC(2026, 10, 16, 10), owner = 'fixture-switch';
+  vi.useFakeTimers({ now: start + 2 * minute + 1000 });
+  const makeMonitor = (id: string, threshold: number) => ({ version: INSTANT_TEMPLATE_MONITOR, templateId: id, name: id,
+    plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', threshold, [])) });
+  const monitor = makeMonitor('original', 5), target = makeMonitor('selected', 3);
+  const source = { id: 'TEST', symbol: 'TESTUSDT', timeMs: start, timeLabel: '', fallbackZone: '' };
+  const sample = { id: 's', source, basis: 'signal' as const, groups: [], enteredAt: start, importedAt: start };
+  const record: PreEntryRecord = { id: 'fish', roundId: 'round', matchedAt: start, updatedAt: start, status: 'matched',
+    startTime: start, cursor: start, readings: [], sample };
+  const round: PreEntryRound = { id: record.roundId, startedAt: start, updatedAt: start, hours: 1, state: 'complete', automatic: true, filters: [], instantMonitor: monitor };
+  const library: PreEntryLibrary = { version: 1, records: [record], rounds: [round] };
+  const base: QualityResult = { key: qualityResultKey(sample, monitor.plan, 0), sampleId: sample.id, groupId: monitor.plan.id,
+    evaluatedAt: Date.now(), status: 'open', entryTime: start, endTime: start + 2 * minute, entryPrice: 100, endPrice: 101 };
+  const key = SCREENED_POSITION_KEY + owner + ':' + record.id;
+  preferences.set(key, { after: base.endTime, monitorResult: base });
+  vi.mocked(readPageInstantMonitor).mockImplementation(async (_sample, _monitor, _entry, through, _signal, prior) => ({ ...prior!, endTime: through }));
+  const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_name: string, _options: unknown, perform: (lock: object) => unknown) => perform({}) } });
+  const notify = { config: { enabled: false, emails: [] } } as never;
+  const mount = () => renderHook(() => useFishCdaTracking(owner, library, true, notify, true));
+  let view = mount();
+  try {
+    await act(async () => {});
+    await act(() => view.result.current.switchMonitor!(record.id, target, 0));
+    const effectiveAt = start + 3 * minute;
+    expect(preferences.get(instantManualCheckpointKey(key))).toMatchObject({ alert: { at: Date.now() }, delivered: true });
+    expect(preferences.get(instantMonitorCheckpointKey(key))).toMatchObject({ after: effectiveAt, monitorResult: { entryPrice: 100,
+      instantMonitorSwitches: [{ from: monitor, to: target, effectiveAt }] } });
+    expect(view.result.current.alerts.size).toBe(0);
+    view.unmount();
+    view = mount();
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(2 * minute + 2000));
+    expect(readPageInstantMonitor).toHaveBeenLastCalledWith(sample, target, start, start + 4 * minute, expect.any(AbortSignal),
+      expect.objectContaining({ endTime: effectiveAt }));
+    expect(preferences.get(instantMonitorCheckpointKey(key))).toMatchObject({ after: start + 4 * minute });
+    expect(round.instantMonitor).toEqual(monitor);
+  } finally {
+    view.unmount();
+    if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
+    else Reflect.deleteProperty(navigator, 'locks');
+  }
+});
 
 it('watches newly admitted automatic fish after enabling, survives reload and retries only unsent mail', async () => {
   const T=Date.UTC(2026,10,12), M=60000;

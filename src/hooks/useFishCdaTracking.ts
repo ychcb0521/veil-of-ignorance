@@ -10,9 +10,12 @@ import { freezeScreenedCda, SCREENED_CDA_STEP, SCREENED_CDA_GUARD_RULE, SCREENED
 import { readFishPreferences, readFishPreferenceEntries, writeFishPreference, writeFishPreferences } from '@/lib/fish/fishPreferencesDb';
 import { markPageInstantPosition, readPageInstantCampaignCandles, readPageInstantMonitor, readPageScreenedCda } from './useFish';
 import { screenedFishMailLock } from './useFishScreeningAutomation';
-import { instantManualCheckpointKey, SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
+import { instantManualCheckpointKey, instantMonitorCheckpointKey, SCREENED_POSITION_KEY } from '@/lib/fish/instantPositionProgress';
 import { instantCampaignInput, instantPositionDisplay, instantPositionInput, instantPositionValuation, type InstantPositionFill, type InstantPositionInput } from '@/lib/fish/instantCampaign';
-import { instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
+import { instantMonitorSample, instantMonitorSize } from '@/lib/fish/instantMonitorExecution';
+import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
+import { rebaseInstantMonitor } from '@/lib/fish/instantMonitorSwitch';
+import { isLegacyQualityPlan } from '@/lib/fish/qualityLegacyEngine';
 import { publishInstantCampaigns, saveInstantCampaignInput } from '@/lib/fish/instantCampaignStore';
 import { qualityAdditionFills } from '@/lib/fish/qualityAddition';
 import { INSTANT_MANUAL_EXECUTION, INSTANT_MANUAL_MINUTE, applyInstantManualFill, cancelInstantProtection, instantManualTrigger, validateInstantManualLevels, type InstantManualAction, type InstantManualExecution } from '@/lib/fish/instantManualExecution';
@@ -54,6 +57,7 @@ export interface FishCdaTracking {
   manualPositions?: ReadonlyMap<string, InstantManualExecution>;
   mirrorFills?: ReadonlyMap<string, NonNullable<ScreenedPriceProgress['mirror']>>;
   monitorResults?: ReadonlyMap<string, QualityResult>;
+  switchMonitor?: (recordId: string, monitor: InstantMonitorSettings, revision: number) => Promise<void>;
   error: string;
   saving: boolean;
   setEnabled: (enabled: boolean) => Promise<void>;
@@ -87,8 +91,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const [refreshVersion, refreshCheckpoints] = useState(0);
   const checkpoints = useRef(new Map<string, Checkpoint>());
   const readCheckpoints = useCallback(async (keys: string[]) => {
-    const rows = await readFishPreferences<Checkpoint>([...keys, ...keys.map(instantManualCheckpointKey)]);
-    return keys.map((key, index) => rows[keys.length + index] ?? rows[index] ?? readLocal<Checkpoint>(key));
+    const rows = await readFishPreferences<Checkpoint>([...keys, ...keys.map(instantManualCheckpointKey), ...keys.map(instantMonitorCheckpointKey)]);
+    return keys.map((key, index) => rows[2 * keys.length + index] ?? rows[keys.length + index] ?? rows[index] ?? readLocal<Checkpoint>(key));
   }, []);
   const changes = useRef<BroadcastChannel>();
   const setEnabled = useCallback(async (enabled: boolean) => {
@@ -124,6 +128,11 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
   const wake = useRef<() => void>();
   const setPoll = useRef<(enabled: boolean) => void>();
   const manual = useRef<(input: InstantPositionFill, action: InstantManualAction) => Promise<void>>();
+  const switchCurrent = useRef<NonNullable<FishCdaTracking['switchMonitor']>>();
+  const switchMonitor = useCallback<NonNullable<FishCdaTracking['switchMonitor']>>(async (...args) => {
+    if (!switchCurrent.current) throw Error('即时交易正在初始化，请稍后再试');
+    await switchCurrent.current(...args);
+  }, []);
   const managePosition = useCallback(async (input: InstantPositionFill, action: InstantManualAction) => {
     if (!manual.current) throw Error('即时交易正在初始化，请稍后再试');
     await manual.current(input, action);
@@ -165,13 +174,15 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     if (!owner || typeof indexedDB === 'undefined') return;
     let active = true;
     void (async () => {
-      const [stored, overridden] = await Promise.all([
+      const [stored, overridden, switched] = await Promise.all([
         readFishPreferenceEntries<Checkpoint>(jobPrefix, saved => !!saved?.alert),
         readFishPreferenceEntries<Checkpoint>(instantManualCheckpointKey(jobPrefix)),
+        readFishPreferenceEntries<Checkpoint>(instantMonitorCheckpointKey(jobPrefix)),
       ]);
-      const sales = new Map(stored);
-      for (const [suffix, saved] of overridden) {
-        if (saved.alert) sales.set(suffix, saved);
+      const sales = new Map(stored.filter(([, saved]) => validScreenedSale(saved.alert)));
+      const overrides = new Map([...overridden, ...switched]);
+      for (const [suffix, saved] of overrides) {
+        if (validScreenedSale(saved.alert)) sales.set(suffix, saved);
         else sales.delete(suffix);
       }
       // Existing browser checkpoints from before IndexedDB are read without rewriting.
@@ -181,7 +192,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           if (!key?.startsWith(jobPrefix)) continue;
           const suffix = key.slice(jobPrefix.length);
           const saved = readLocal<Checkpoint>(key);
-          if (!sales.has(suffix) && saved?.alert) sales.set(suffix, saved);
+          if (!sales.has(suffix) && !overrides.has(suffix) && saved && validScreenedSale(saved.alert)) sales.set(suffix, saved);
         }
       } catch { /* The IndexedDB sales remain available. */ }
       if (!active || !sales.size) return;
@@ -213,7 +224,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       keys.forEach((key, i) => {
         const saved = rows[i];
         const existing = checkpoints.current.get(key);
-        if (saved && (!existing || !existing.alert && (!!saved.alert || !!saved.manual || saved.after > existing.after))) checkpoints.current.set(key, saved);
+        if (saved && (!existing || !existing.alert && (!!saved.alert || !!saved.manual || saved.after >= existing.after))) checkpoints.current.set(key, saved);
       });
       setRevision(value => value + 1);
       wake.current?.();
@@ -252,10 +263,11 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     };
     const save = async (record: PreEntryRecord, value: Checkpoint) => {
       const key = keyOf(record);
-      await writeFishPreference(value.manual ? instantManualCheckpointKey(key) : key, value);
+      const switched = !!value.monitorResult?.instantMonitorSwitches;
+      await writeFishPreference(switched ? instantMonitorCheckpointKey(key) : value.manual ? instantManualCheckpointKey(key) : key, value);
       checkpoints.current.set(key, value);
       // Keep receipts visible to a concurrently open 630 page using a legacy watch.
-      if (!value.manual && readLocal<Settings>(configKey)) {
+      if (!value.manual && !switched && readLocal<Settings>(configKey)) {
         try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* IndexedDB is the durable source. */ }
       }
       setRevision(revision => revision + 1);
@@ -315,7 +327,8 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
           : cursor(entry.record, checkpoint) < target);
     };
     const checkTemplate = async ({ record, round }: ScreenedFishAdmission, target: number, checkpoint?: Checkpoint) => {
-      const result = await readPageInstantMonitor(record.sample, round.instantMonitor!, record.matchedAt!, target, lifetime.signal, checkpoint?.monitorResult);
+      const monitor = checkpoint?.monitorResult?.instantMonitorSwitches?.at(-1)?.to ?? round.instantMonitor!;
+      const result = await readPageInstantMonitor(record.sample, monitor, record.matchedAt!, target, lifetime.signal, checkpoint?.monitorResult);
       if (lifetime.signal.aborted) throw Error('持仓监测已取消');
       if (result.status === 'error') throw Error(result.reason || '持仓监测行情待重试');
       return result;
@@ -344,7 +357,9 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         evidence: { version: INSTANT_MANUAL_EXECUTION, reason: last.reason, priceAt: last.priceAt },
       } : undefined;
       const checkpoint = { ...saved, after: saved?.after ?? state.through, manual: state, alert };
-      if (saved?.manual) {
+      if (saved?.monitorResult?.instantMonitorSwitches) {
+        await writeFishPreference(instantMonitorCheckpointKey(key), checkpoint);
+      } else if (saved?.manual) {
         await writeFishPreference(instantManualCheckpointKey(key), checkpoint);
       } else {
         // Older tabs stop scanning upon seeing an alert. Deliberately omit the
@@ -516,6 +531,46 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
         }
       }).finally(() => { scanning = false; });
     };
+    switchCurrent.current = async (recordId, monitor, revision) => {
+      if (!autoPositions || !navigator.locks) throw Error('请在支持跨标签页并发保护的浏览器中切换');
+      await navigator.locks.request(configKey + ':scan', { signal: lifetime.signal }, async () => {
+        const entry = current.current.entries.find(item => item.record.id === recordId);
+        if (!entry) throw Error('找不到正在持有的筛选鱼');
+        const { record, round } = entry;
+        if (round.liveCapturedAt != null) throw Error('该筛选鱼有实盘跟随资格，请在币安实盘持仓中管理');
+        if (!round.instantMonitor || isLegacyQualityPlan(round.instantMonitor.plan)) throw Error('该持仓的原方案暂不支持接续');
+        await refresh([record]);
+        const saved = read(record);
+        if (!saved?.monitorResult || saved.alert || saved.manual || hasManualIntent(recordId)) throw Error('持仓已卖出、等待首仓核对或正在手动管理');
+        const history = saved.monitorResult.instantMonitorSwitches ?? [];
+        if (history.length !== revision) throw Error('持仓方案已在别处切换，请重新选择');
+        const from = history.at(-1)?.to ?? round.instantMonitor;
+        if (from.templateId === monitor.templateId) throw Error('当前持仓已使用此模板');
+        const closedMinute = () => Math.floor((Date.now() - CLOSE_GRACE_MS) / INSTANT_MANUAL_MINUTE) * INSTANT_MANUAL_MINUTE;
+        const target = closedMinute();
+        if (saved.after > target) throw Error('上一次切换等待生效，请稍后再试');
+        const result = saved.after === target ? saved.monitorResult : await checkTemplate(entry, target, saved);
+        if (result.status === 'closed') {
+          await saveTemplate(entry, result, result.endTime!);
+          throw Error('原方案已触发卖出');
+        }
+        if (result.endTime !== target || target !== closedMinute() || lifetime.signal.aborted || hasManualIntent(recordId)) throw Error('最新行情或手动操作等待核对，请稍后再试');
+        const { marginUsdt, leverage } = instantMonitorSize(round.instantMonitor);
+        const sample = instantMonitorSample(record.sample, record.matchedAt!);
+        const at = Date.now();
+        const next = rebaseInstantMonitor(sample, result, result.initialNotional ?? marginUsdt * leverage, from, monitor, at);
+        const key = keyOf(record);
+        const checkpoint = { ...saved, after: next.endTime!, monitorResult: next };
+        // Old tabs see a stopped watch without sale evidence. The switched watch has its own checkpoint.
+        const paused: Checkpoint = { after: checkpoint.after, alert: { at }, delivered: true };
+        await writeFishPreferences([[key, paused], [instantManualCheckpointKey(key), paused], [instantMonitorCheckpointKey(key), checkpoint]]);
+        checkpoints.current.set(key, checkpoint);
+        setRevision(value => value + 1);
+        changes.current?.postMessage('alert');
+        publishInstantCampaigns(owner);
+      });
+      wake.current?.();
+    };
     manual.current = async (input, action) => {
       if (manualPending.has(input.recordId)) throw Error('这笔仓位正在处理，请稍后再试');
       manualPending.add(input.recordId);
@@ -607,6 +662,7 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
       lifetime.abort();
       wake.current = undefined;
       manual.current = undefined;
+      switchCurrent.current = undefined;
       setPoll.current?.(false);
       setPoll.current = undefined;
       window.removeEventListener('online', tick);
@@ -666,5 +722,5 @@ export function useFishCdaTracking(owner: string | undefined, library: PreEntryL
     }
     return results;
   }, [admitted, jobPrefix, revision]);
-  return { enabled: !!activeSettings, managePosition, manualPositions, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasPendingSaleMail: !!owner && savedSales?.owner === owner && savedSales.pendingMail, active: counts.active, awaitingMail: counts.awaitingMail };
+  return { enabled: !!activeSettings, managePosition, switchMonitor, manualPositions, mirrorFills, monitorResults, saving, error: error || mailIssue || '', setEnabled, alerts, admitted, localSales, hasPendingSaleMail: !!owner && savedSales?.owner === owner && savedSales.pendingMail, active: counts.active, awaitingMail: counts.awaitingMail };
 }

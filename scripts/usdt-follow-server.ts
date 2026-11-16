@@ -150,7 +150,7 @@ export function serveUsdtFollower({
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
     guardPlusAdditions: 1, executionSafety: USDT_EXECUTION_SAFETY, controlRevision: store.controlRevision(),
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
-    ...(readManaged ? { manualMonitor: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
+    ...(readManaged ? { manualMonitor: 1, monitorSwitch: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
     ...(desk ? { orderDesk: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
@@ -197,9 +197,15 @@ export function serveUsdtFollower({
             follower.adopt(manualAnchor(content.anchor, managedClock()), manualMonitor(content.monitor), content.controlRevision));
           return json(res, 200, { position });
         }
+        if (content.command === 'manual-monitor-switch' && req.url === USDT_EXECUTION_PATH) {
+          if (content.confirmed !== true || typeof content.id !== 'string' || !Number.isSafeInteger(content.planEpoch) || content.planEpoch < 0)
+            throw Error('请逐笔确认实盘持仓方案切换');
+          const position = await follower.runPositionControl(() => follower.switchManaged(content.id, content.planEpoch, manualMonitor(content.monitor)));
+          return json(res, 200, { position });
+        }
         if (content.command === 'manual-monitor-update') {
           if (typeof content.id !== 'string' || !Number.isSafeInteger(content.revision) || !content.checkpoint) throw Error('手动托管进度无效');
-          follower.updateManaged(content.id, content.revision, content.checkpoint as QualityResult, content.decision as BinanceManualDecision | undefined);
+          follower.updateManaged(content.id, content.revision, content.checkpoint as QualityResult, content.decision as BinanceManualDecision | undefined, content.planEpoch);
           json(res, 200, { ok: true });
           void follower.tick();
           return;

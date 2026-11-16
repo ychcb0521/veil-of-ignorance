@@ -404,6 +404,7 @@ export interface TradeCampaign {
     holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;totalInvested?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     liveUsdt?: import('@/lib/fish/usdtLiveCampaign').UsdtLiveCampaign;
     instant?: {
+      switches?: import('@/lib/fish/instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
       metadata?: import('@/lib/fish/instantCampaignMetadata').InstantCampaignMetadata;
       source: Pick<import('@/lib/signalLibrary').TradeSignal, 'id' | 'symbol' | 'timeMs' | 'market' | 'exchange' | 'underlying' | 'binanceSymbol'>;
       cdaValue?: number;

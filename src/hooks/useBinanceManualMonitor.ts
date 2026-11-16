@@ -9,7 +9,7 @@ import type { useUsdtLiveTrading } from './useUsdtLiveTrading';
 import { USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
 
 export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>, live: ReturnType<typeof useUsdtLiveTrading>, settings?: InstantMonitorSettings) {
-  const { owner, connected, manualMonitor, paused, executionSafety, readManualMonitor, adoptManualMonitor, advanceManualMonitor } = follow;
+  const { owner, connected, manualMonitor, monitorSwitch, paused, executionSafety, readManualMonitor, adoptManualMonitor, switchManualMonitor, advanceManualMonitor } = follow;
   const input = useRef({ live, executionSafety });
   input.current = { live, executionSafety };
   const wake = useRef<() => void>();
@@ -22,6 +22,11 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
     await adoptManualMonitor(anchor, monitor, revision, AbortSignal.timeout(65_000));
     wake.current?.();
   }, [connected, paused, executionSafety, adoptManualMonitor]);
+  const switchMonitor = useCallback(async (id: string, epoch: number, monitor: InstantMonitorSettings) => {
+    if (!connected || monitorSwitch !== 1 || executionSafety !== USDT_EXECUTION_SAFETY) throw Error('请连接支持方案切换的本机执行端');
+    await switchManualMonitor(id, epoch, monitor, AbortSignal.timeout(65_000));
+    wake.current?.();
+  }, [connected, monitorSwitch, executionSafety, switchManualMonitor]);
   useEffect(() => {
     if (!owner || !connected || manualMonitor !== 1) { setView(undefined); return; }
     const lifetime = new AbortController();
@@ -45,14 +50,15 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
           const sample = binanceManualSample(position);
           const base = binanceManualSeed(position, sample);
           const end = Math.floor((state.observedAt - MANAGED_CLOSE_GRACE) / MANAGED_MINUTE) * MANAGED_MINUTE;
-          if (end <= base.endTime! || (evaluated.get(id) ?? 0) >= end) continue;
+          const evaluationKey = id + ':' + (position.planEpoch ?? 0);
+          if (end <= base.endTime! || (evaluated.get(evaluationKey) ?? 0) >= end) continue;
           try {
             const result = await readPageInstantMonitor(sample, position.monitor, position.anchor.openedAt, end, signal, base, state.observedAt);
             if (signal.aborted) return;
             const next = binanceManualAdvance(position, base, result);
             if (next?.decision?.kind === 'add' && input.current.executionSafety !== USDT_EXECUTION_SAFETY) continue;
-            if (next) await advanceManualMonitor(id, position.revision, next.checkpoint, next.decision, signal);
-            if (result.status !== 'waiting' && (result.endTime ?? 0) >= end - MANAGED_MINUTE) evaluated.set(id, end);
+            if (next) await advanceManualMonitor(id, position.revision, next.checkpoint, next.decision, signal, position.planEpoch);
+            if (result.status !== 'waiting' && (result.endTime ?? 0) >= end - MANAGED_MINUTE) evaluated.set(evaluationKey, end);
           } catch (error) {
             issues.push(position.anchor.symbol + ' · ' + (error instanceof Error ? error.message : '持仓策略等待数据'));
           }
@@ -80,6 +86,6 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
   return connected && manualMonitor === 1 ? {
     positions: view?.owner === owner ? view?.positions ?? [] : [],
     issue: view?.owner === owner ? view?.issue : undefined,
-    template: settings, adopt,
+    template: settings, adopt, switchMonitor: monitorSwitch === 1 ? switchMonitor : undefined,
   } : undefined;
 }

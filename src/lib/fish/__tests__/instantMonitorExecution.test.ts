@@ -12,6 +12,8 @@ import { qualityCampaignStaticRisk } from '../qualityCampaignRisk';
 import { makeQualitySellPlan } from '../qualitySellPlans';
 import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
 import { INSTANT_MANUAL_EXECUTION } from '../instantManualExecution';
+import { rebaseInstantMonitor } from '../instantMonitorSwitch';
+import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
 import type { FishReconstructionLoader } from '../reconstruction';
 
@@ -44,6 +46,31 @@ const load: FishReconstructionLoader = async (_source, from, end, plan) => Array
     volume: 1, takerBuyVolume: .5 };
 });
 const signal = new AbortController().signal;
+
+it('resumes a different template from the switch boundary, keeping the old fills, sizing and campaign snapshots', async () => {
+  const open = await evaluateInstantMonitor(sample, monitor, entry + m, load, signal);
+  const target = { ...monitor, templateId: 'target', name: '接手方案', plan: freezeQualityPlan({
+    ...template, id: 'target', frozenVersions: undefined,
+    positionManagement: { version: QUALITY_POSITION_MANAGEMENT_VERSION, leverage: 10, notional: 800 },
+    holdingVetoes: [{ ...template.holdingVetoes![0], threshold: 2 }],
+  }) };
+  const before = structuredClone(monitor);
+  const newBefore = structuredClone(target);
+  const at = entry + m + 1;
+  const resume = rebaseInstantMonitor(sample, open, 200, monitor, target, at);
+  expect(resume).toMatchObject({ entryPrice: 100, initialNotional: 200, endTime: entry + 2*m, mirrorFill: open.mirrorFill,
+    instantMonitorSwitches: [{ at, effectiveAt: entry + 2*m, from: before, to: newBefore }] });
+  expect(await evaluateInstantMonitor(sample, target, entry + m, load, signal, resume)).toEqual(resume);
+  const result = await evaluateInstantMonitor(sample, target, entry + 3*m, load, signal, resume);
+  expect(result).toMatchObject({ status: 'closed', endTime: entry + 2*m, endPrice: 98,
+    pnl: expect.closeTo(0), initialNotional: 200, mirrorFill: open.mirrorFill, instantMonitorSwitches: resume.instantMonitorSwitches });
+  const frozen = await freezeInstantCampaign(instantCampaignInput(record, round, instantMonitorSale(result), result)!, load, signal);
+  const { campaign } = buildInstantCampaignData('account', frozen);
+  expect(campaign).toMatchObject({ initial_main_size_usdt: 200, initial_leverage: 5,
+    comparison: { monitorTemplateId: 'target', instant: { switches: resume.instantMonitorSwitches } } });
+  expect(monitor).toEqual(before);
+  expect(target).toEqual(newBefore);
+});
 
 it('freezes the original template, applies its mirror and stop to the 200 USDT simulation, and projects a complete campaign', async () => {
   const before = structuredClone(template);

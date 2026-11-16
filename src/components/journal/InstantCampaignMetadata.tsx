@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import type { TradeCampaign } from '@/types/journal';
 import { FishFrozenScreeningSettings } from '@/components/FishFrozenScreeningSettings';
 import type { InstantCampaignMetadata } from '@/lib/fish/instantCampaignMetadata';
+import { formatUTC8 } from '@/lib/timeFormat';
 import { SCREENED_CDA_GUARD_RULE, SCREENED_PRICE_EXIT_RULE, screenedSellReason } from '@/lib/fish/screenedCda';
 
 const triggerStyle = 'inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground';
@@ -53,5 +54,10 @@ export function InstantCampaignMetadataButtons({ campaign }: { campaign: TradeCa
         {instant.sellEvidence && <p>本次卖出 {screenedSellReason({ at: comparison.valuedAt, evidence: instant.sellEvidence })}</p>}
         {instant.cdaValue != null && <p>CDA 确认读数 {instant.cdaValue}</p>}
       </MetadataButton>}
+    {!!instant.switches?.length && <MetadataButton label="方案切换记录" icon={<Activity aria-hidden className="h-3.5 w-3.5"/>}>
+      <ul className="space-y-1">{instant.switches.map(({ effectiveAt, from, to }) => <li key={effectiveAt}>
+        {formatUTC8(effectiveAt)} · {from.name} → {to.name}
+      </li>)}</ul>
+    </MetadataButton>}
   </div>;
 }

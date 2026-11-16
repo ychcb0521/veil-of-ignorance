@@ -24,6 +24,7 @@ export interface BinanceManualPosition {
   entryPrice: number;
   entryQuantity: number;
   revision: number;
+  planEpoch?: number;
   checkpoint?: QualityResult;
   exchangeReduction?: { at: number; quantity: number; entryPrice: number; realized: number };
   pending?: BinanceManualDecision;
@@ -49,3 +50,18 @@ export type BinanceManualDecision = {
 
 export const binanceManualId = (anchor: BinanceManualAnchor) =>
   ['fish-instant-live', anchor.symbol, anchor.positionSide, 'long', anchor.openingTradeId, anchor.openingOrderId].join('-');
+
+export function initialBinanceManualCheckpoint(position: BinanceManualPosition, key = ''): QualityResult {
+  if (position.checkpoint) return position.checkpoint;
+  const { entryPrice, entryQuantity, armedAt, monitor, exchangeReduction } = position;
+  const entryTime = Math.ceil(position.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
+  const remainingQuantity = exchangeReduction?.quantity ?? entryQuantity;
+  const averageEntryPrice = exchangeReduction?.entryPrice ?? entryPrice;
+  return {
+    status: 'open', key, sampleId: binanceManualId(position.anchor), groupId: monitor.plan.id,
+    evaluatedAt: armedAt, entryPrice, entryTime, endPrice: entryPrice,
+    endTime: Math.max(entryTime, Math.ceil(Math.max(armedAt, exchangeReduction?.at ?? 0) / MANAGED_MINUTE) * MANAGED_MINUTE),
+    initialNotional: entryPrice * entryQuantity, remainingQuantity, remainingCost: averageEntryPrice * remainingQuantity,
+    averageEntryPrice, realizedPnl: exchangeReduction?.realized ?? 0,
+  };
+}

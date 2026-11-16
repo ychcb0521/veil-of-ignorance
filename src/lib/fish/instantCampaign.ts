@@ -305,8 +305,10 @@ function instantCampaignDetectorSummary(position: InstantPositionFill): Campaign
 function buildTemplateInstantCampaignData(owner: string, position: InstantPositionFill, result: QualityResult, evidence: {
   recordedAt: number; drawdown: number | null; staticDrawdown: number | null; sell?: ScreenedCdaTrigger;
 }): QualityCampaignData {
-  const { id, source, buyAt, marginUsdt, leverage, monitor, recordId, metadata } = position;
-  const notional = monitor?.plan.positionManagement?.notional ?? marginUsdt * leverage;
+  const { id, source, buyAt, marginUsdt, leverage, recordId, metadata } = position;
+  const switches = result.instantMonitorSwitches;
+  const monitor = switches?.at(-1)?.to ?? position.monitor;
+  const notional = switches?.length ? result.initialNotional! : monitor?.plan.positionManagement?.notional ?? marginUsdt * leverage;
   const sample: QualitySample = { id: recordId, source: { ...source, timeLabel: '', fallbackZone: '' },
     groups: [], enteredAt: buyAt, basis: 'signal', importedAt: buyAt };
   const data = buildQualityCampaignData(owner, { sample, plan: monitor!.plan, result,
@@ -316,7 +318,7 @@ function buildTemplateInstantCampaignData(owner: string, position: InstantPositi
     title: source.symbol + ' · ' + monitor!.name,
     comparison: { ...comparison, section: 'instant', planLabel: monitor!.name, monitorTemplateId:monitor!.templateId,
       ...(comparison.holdingMetrics ? { holdingMetrics: { ...comparison.holdingMetrics, returnPct: result.status === 'closed' ? (result.pnl ?? 0) / marginUsdt * 100 : null } } : {}),
-      instant: { source, marginUsdt, metadata, sellEvidence: evidence.sell?.evidence, mirrorFill: result.mirrorFill,
+      instant: { source, marginUsdt, metadata, sellEvidence: evidence.sell?.evidence, mirrorFill: result.mirrorFill, switches,
         drawdown: evidence.drawdown, staticDrawdown: evidence.staticDrawdown },
     } } };
 }

@@ -7,18 +7,23 @@ import type { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { usdtMirrorKey, usdtMirrorRevision, usdtPositionDecimal, usdtPositionQuantityUnit, usdtPositionValue, usdtSettlementAsset, type UsdtMirrorHistory, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
 import { fishSubHeading } from './FishSection';
+import { binanceManualId } from '@/lib/fish/binanceManualMonitor';
+import type { InstantMonitorPlanChoice } from '@/lib/fish/instantMonitorSettings';
+import { InstantMonitorSwitchDialog, type InstantMonitorSwitchTarget } from './InstantMonitorSwitchDialog';
 
 const time = (at:number) => formatUTC8(at)+'.'+String(at%1000).padStart(3,'0');
 const actionNames = {open:'开仓',add:'加仓',reduce:'减仓'} as const;
 type Follow = ReturnType<typeof useUsdtFollow>;
 type Live = ReturnType<typeof useUsdtLiveTrading> & { management?: ReturnType<typeof useBinanceManualMonitor> };
 
-export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? []}:{
+export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? [], monitorTemplates}:{
   live: Live;
   positions?: readonly UsdtMirrorPosition[];
+  monitorTemplates?: readonly InstantMonitorPlanChoice[];
 }) {
   const { snapshot, issue, histories } = live;
   const names=useQualityTemplateNames();
+  const [target, setTarget] = useState<InstantMonitorSwitchTarget>();
   return <div className="space-y-2 rounded-md border border-border/60 bg-card/60 px-2.5 pb-2.5 pt-1.5 text-[10px]">
     <div className="flex flex-wrap items-center justify-between gap-1.5 text-muted-foreground">
       <span>{snapshot ? '同步于 ' + formatUTC8(snapshot.observedAt) + '（北京）' : '北京时间'}</span>
@@ -35,6 +40,7 @@ export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? 
         row.anchor.positionSide === position.positionSide && row.anchor.openedAt === evidence?.openedAt);
       const asset = usdtSettlementAsset(position.symbol), unit = usdtPositionQuantityUnit(position.symbol);
       const pnl = Number(position.unrealizedPnl);
+      const update = live.management?.switchMonitor;
       return <PositionDetails key={usdtMirrorKey(position)} evidence={evidence} asset={asset} unit={unit}>
         <summary className="cursor-pointer list-none rounded-md px-2 py-1.5 hover:bg-muted/50 focus-visible:outline focus-visible:outline-1 [&::-webkit-details-marker]:hidden">
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -57,8 +63,15 @@ export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? 
             {managed && <span>持仓模板 {names?.forMonitor(managed.position.monitor.plan,managed.position.monitor.templateId)?.name??managed.position.monitor.name}{managed.status.issue ? ' · ' + managed.status.issue : ''}</span>}
           </span>
         </summary>
+        {monitorTemplates && managed && update && <div className="hidden group-open:block px-3 pb-2">
+          <button type="button" disabled={!!issue || managed.status.state !== 'tracking' || !!managed.position.pending}
+            className="rounded border px-2 py-1 text-primary hover:bg-muted disabled:opacity-50"
+            onClick={() => setTarget({ symbol: position.symbol, current: managed.position.monitor, live: true,
+              submit: monitor => update(binanceManualId(managed.position.anchor), managed.position.planEpoch ?? 0, monitor) })}>切换持仓监测方案</button>
+        </div>}
       </PositionDetails>;
     })}
+    {target && monitorTemplates && <InstantMonitorSwitchDialog target={target} templates={monitorTemplates} close={() => setTarget(undefined)}/>}
   </div>;
 }
 
@@ -88,7 +101,7 @@ function PositionFills({evidence,asset,unit}:{evidence?:UsdtMirrorHistory;asset:
       onClick={()=>setCount(value=>value+100)}>显示后续成交（已显示 {count}/{evidence.fills.length}）</button>}
   </div>;
 }
-export function FishUsdtPositions({follow,live}:{follow:Follow;live?:Live}) {
+export function FishUsdtPositions({follow,live,monitorTemplates}:{follow:Follow;live?:Live;monitorTemplates?:readonly InstantMonitorPlanChoice[]}) {
   const count=follow.connected?live?.snapshot?.positions.length??0:0;
   const hasPosition=count>0;
   const [open,setOpen]=useState(hasPosition);
@@ -101,7 +114,7 @@ export function FishUsdtPositions({follow,live}:{follow:Follow;live?:Live}) {
     <div id={id} hidden={!open}>
       {open && (follow.connected && follow.positionMirror === 1 && live ?
         <>
-          <UsdtPositionRows live={live}/>
+          <UsdtPositionRows live={live} monitorTemplates={monitorTemplates}/>
           {!follow.campaignMirror && <p className="px-2 pb-1 text-[10px] text-muted-foreground">更新本机执行端后可同步实盘战役。</p>}
         </> :
         <p role="status" className="px-2 pb-2 text-[10px] text-muted-foreground">{follow.connected?'请更新 Windows 本机执行端，再同步持仓。':follow.issue||'请先连接本机 U 本位执行端。'}</p>)}

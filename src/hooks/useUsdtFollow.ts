@@ -34,6 +34,7 @@ interface FollowState {
   campaignMirror?: 1;
   guardPlusAdditions?: 1;
   manualMonitor?: 1;
+  monitorSwitch?: 1;
   positionControls?: 1;
   orderDesk?: 1;
   executionSafety?: number;
@@ -236,8 +237,10 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   const adoptManualMonitor = useCallback((anchor: BinanceManualAnchor, monitor: InstantMonitorSettings, controlRevision: number, signal: AbortSignal) =>
     readMirror({ command: 'manual-monitor-adopt', anchor, monitor, confirmed: true,
       controlRevision }, signal, 60_000, true), [readMirror]);
-  const advanceManualMonitor = useCallback((id: string, revision: number, checkpoint: QualityResult, decision: BinanceManualDecision | undefined, signal: AbortSignal) =>
-    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision }, signal, 15_000, true), [readMirror]);
+  const switchManualMonitor = useCallback((id: string, planEpoch: number, monitor: InstantMonitorSettings, signal: AbortSignal) =>
+    readMirror({ command: 'manual-monitor-switch', id, planEpoch, monitor, confirmed: true }, signal, 60_000, true), [readMirror]);
+  const advanceManualMonitor = useCallback((id: string, revision: number, checkpoint: QualityResult, decision: BinanceManualDecision | undefined, signal: AbortSignal, planEpoch?: number) =>
+    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision, planEpoch }, signal, 15_000, true), [readMirror]);
   const controlPosition = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
     readMirror<UsdtPositionControlResult>({ command: 'position-control', request }, signal, 70_000), [readMirror]);
   const readDeskQuote = useCallback((symbol: string, signal: AbortSignal) =>
@@ -248,5 +251,5 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     readMirror<UsdtPositionControlResult>({command:'desk-close',request},signal,70_000,true),[readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
   return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
-    readManualMonitor, adoptManualMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
+    readManualMonitor, adoptManualMonitor, switchManualMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
 }

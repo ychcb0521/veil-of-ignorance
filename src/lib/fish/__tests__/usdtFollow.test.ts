@@ -220,6 +220,35 @@ it('接手币安手动首仓后用冻结卖出条件，按实际部分成交续�
   expect(resumed.managed()).toHaveLength(0);
 });
 
+it('switches a confirmed live campaign without sending orders and refuses updates from an older plan', async () => {
+  const minute = 60_000, clock = Math.floor(Date.now() / minute) * minute + 15_000;
+  const anchor = { symbol, positionSide: 'LONG' as const, openedAt: clock - 30_000, openingOrderId: '500', openingTradeId: '501' };
+  const actual: UsdtLiveCampaign = { symbol, positionSide: 'LONG', direction: 'long', asset: 'USDT', openedAt: anchor.openedAt,
+    quantity: '10.000', fills: [{ id: '501', orderId: '500', side: 'BUY', at: anchor.openedAt, quantity: '10.000',
+      positionQuantity: '10.000', price: '4.000', action: 'open', commission: .01, commissionAsset: 'USDT', realized: 0 }] };
+  const read = vi.fn(async () => structuredClone(actual));
+  const venue = exchange(), name = file();
+  const runner = createUsdtFollower(makeStore(name), venue, owner, 'hedge', clock, read, () => clock);
+  const monitor = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'before', name: '原方案',
+    plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 5, [])) };
+  const target = { ...monitor, templateId: 'after', name: '新方案', plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, [])) };
+  await runner.adopt(anchor, monitor);
+  const id = binanceManualId(anchor);
+  const switched = await runner.runPositionControl(() => runner.switchManaged(id, 0, target));
+  const through = Math.ceil(clock / minute) * minute;
+  expect(switched).toMatchObject({ monitor: target, planEpoch: 1, checkpoint: { endTime: through, initialNotional: 40,
+    instantMonitorSwitches: [{ from: monitor, to: target, effectiveAt: through }] } });
+  const replayed = runner.updateManaged(id, switched.revision, switched.checkpoint!);
+  expect(replayed.revision).toBe(switched.revision);
+  await expect(runner.switchManaged(id, 0, monitor)).rejects.toThrow('已在别处切换');
+  actual.quantity = '11';
+  await expect(runner.switchManaged(id, 1, monitor)).rejects.toThrow('数量已变化');
+  expect(runner.managed()[0].position.monitor).toEqual(target);
+  expect(createUsdtFollower(makeStore(name), venue, owner, 'hedge', clock, read, () => clock).managedArchive(id))
+    .toMatchObject({ monitor: target, switches: [{ from: monitor, to: target }] });
+  expect(venue.order).not.toHaveBeenCalled();
+});
+
 it('continues the frozen monitor from the real quantity and realized PnL after an exchange reduction', async () => {
   const at = Date.now(), anchor = { symbol, positionSide: 'LONG' as const, openedAt: at - 50_123,
     openingOrderId: '200', openingTradeId: '201' };

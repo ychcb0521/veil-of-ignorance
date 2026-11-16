@@ -18,7 +18,10 @@ export interface UsdtLiveCampaign {
   quantity: string;
   fills: UsdtCampaignFill[];
   followId?: string;
-  management?: Pick<BinanceManualPosition, 'version' | 'monitor' | 'armedAt'> & { exitReason?: string };
+  management?: Pick<BinanceManualPosition, 'version' | 'monitor' | 'armedAt'> & {
+    exitReason?: string;
+    switches?: import('./instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
+  };
 }
 
 export interface UsdtCampaignBatch {

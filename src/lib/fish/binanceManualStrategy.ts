@@ -1,6 +1,6 @@
 import { qualityAdditionFills } from './qualityAddition';
 import { qualityResultKey, type QualityResult, type QualitySample } from './quality';
-import { MANAGED_MINUTE, binanceManualId, type BinanceManualDecision, type BinanceManualPosition } from './binanceManualMonitor';
+import { MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualDecision, type BinanceManualPosition } from './binanceManualMonitor';
 
 export function binanceManualSample(position: BinanceManualPosition): QualitySample {
   const { anchor, entryPrice, entryQuantity, version } = position;
@@ -11,18 +11,9 @@ export function binanceManualSample(position: BinanceManualPosition): QualitySam
 }
 
 export function binanceManualSeed(position: BinanceManualPosition, sample: QualitySample): QualityResult {
-  if (position.checkpoint) return position.checkpoint;
-  const { entryPrice, entryQuantity, armedAt, monitor, exchangeReduction } = position;
-  const entryTime = Math.ceil(position.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
-  const remainingQuantity = exchangeReduction?.quantity ?? entryQuantity;
-  const averageEntryPrice = exchangeReduction?.entryPrice ?? entryPrice;
-  return {
-    status: 'open', key: qualityResultKey(sample, monitor.plan, 0), sampleId: sample.id, groupId: monitor.plan.id,
-    evaluatedAt: armedAt, entryPrice, entryTime, endPrice: entryPrice,
-    endTime: Math.max(entryTime, Math.ceil(Math.max(armedAt, exchangeReduction?.at ?? 0) / MANAGED_MINUTE) * MANAGED_MINUTE),
-    initialNotional: entryPrice * entryQuantity, remainingQuantity, remainingCost: averageEntryPrice * remainingQuantity,
-    averageEntryPrice, realizedPnl: exchangeReduction?.realized ?? 0,
-  };
+  const key = qualityResultKey(sample, position.monitor.plan, 0);
+  const checkpoint = initialBinanceManualCheckpoint(position, key);
+  return position.planEpoch == null ? checkpoint : { ...checkpoint, key };
 }
 
 /** Collect only the first new strategy action. The following decision uses its actual fill. */

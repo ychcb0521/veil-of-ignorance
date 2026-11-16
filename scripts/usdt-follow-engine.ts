@@ -1,14 +1,15 @@
 import { usdtOrderId, formatQuantity, quantityUnits, type UsdtExchange, type UsdtMarket, type UsdtPositionMode } from './usdt-exchange.ts';
 import { openUsdtFollowStore, type UsdtCampaignLedger, type UsdtOrder } from './usdt-follow-store.ts';
 import type { UsdtFollowAction, UsdtFollowCampaign } from '../src/lib/fish/usdtFollow.ts';
-import { MANAGED_MINUTE, binanceManualId, type BinanceManualAnchor, type BinanceManualDecision } from '../src/lib/fish/binanceManualMonitor.ts';
+import { MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualAnchor, type BinanceManualDecision } from '../src/lib/fish/binanceManualMonitor.ts';
 import type { InstantMonitorSettings } from '../src/lib/fish/instantMonitorSettings.ts';
 import type { QualityResult } from '../src/lib/fish/quality.ts';
 import { usdtLiveCampaignId, type UsdtLiveCampaign } from '../src/lib/fish/usdtLiveCampaign.ts';
 import { createManagedUsdtLedger, matchesManualAnchor, mergeUsdtExitFills, settleManagedUsdtDecision, verifyManagedUsdtFills } from './usdt-managed-execution.ts';
-import { calculateHoldingLedgerAddition, HOLDING_LEDGER_ADDITION_VERSION } from '../src/lib/fish/qualityHoldingLedger.ts';
+import { calculateHoldingLedgerAddition, HOLDING_LEDGER_ADDITION_VERSION, replayQualityHoldingLedger } from '../src/lib/fish/qualityHoldingLedger.ts';
 import type { UsdtMirrorSnapshot } from '../src/lib/fish/usdtPositionMirror.ts';
 import { validUsdtLiveEntry } from '../src/lib/fish/usdtLiveEntry.ts';
+import { rebaseInstantMonitorCheckpoint } from '../src/lib/fish/instantMonitorSwitchCheckpoint.ts';
 
 const entryAgeMs = 120_000;
 const increaseAgeMs = 120_000;
@@ -137,10 +138,41 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     return row.managed;
   }
 
-  function updateManaged(id: string, revision: number, checkpoint: QualityResult, decision?: BinanceManualDecision) {
+  async function switchManaged(id: string, epoch: number, monitor: InstantMonitorSettings) {
+    const current = rows.get(id);
+    if (!current?.managed || current.status.state !== 'tracking' || !readManaged) throw Error('只可切换对账完成的实盘托管持仓');
+    const row = structuredClone(current);
+    const managed = row.managed!;
+    if ((managed.planEpoch ?? 0) !== epoch) throw Error('持仓方案已在别处切换，请重新选择');
+    if (managed.monitor.templateId === monitor.templateId) throw Error('当前持仓已使用此模板');
+    if (managed.pending || Object.values(row.orders).some(order => !order.terminal)) throw Error('正在核对实盘委托，请等成交回报');
+    const [actual, market] = await Promise.all([readManaged(managed.anchor), readMarket(managed.anchor.symbol)]);
+    if (!market || verifyManagedUsdtFills(row, actual, market)) throw Error('实盘仓位已平仓或等待对账');
+    const held = balance(row);
+    if (!held.held || quantityUnits(actual.quantity, market.step) !== held.held) throw Error('实盘仓位数量已变化，请等待对账');
+    await exchange.check(market, mode, held.held, held.entry, false, 0, 'existing-position', protectionIds?.(market.symbol, id));
+    if (rows.get(id) !== current) throw Error('仓位正在同步，请重新确认切换');
+    const checkpoint = initialBinanceManualCheckpoint(managed);
+    const initialNotional = managed.entryPrice * managed.entryQuantity;
+    const expected = replayQualityHoldingLedger({ notional: initialNotional, entryPrice: managed.entryPrice, entryAt: checkpoint.entryTime!,
+      additions: checkpoint.additionFills ?? (checkpoint.additionFill ? [checkpoint.additionFill] : []),
+      mirror: checkpoint.mirrorFill, reductions: checkpoint.additionReductions, details: false });
+    if (Math.abs(expected.held - Number(formatQuantity(held.held, market.step))) > Math.max(1e-9, expected.held * 1e-12)
+      || Math.abs(expected.cost / expected.held - held.entry) > Math.max(1e-8, held.entry * 1e-5)) {
+      throw Error('策略成交与币安余仓的数量或均价不一致，请先核对');
+    }
+    managed.checkpoint = rebaseInstantMonitorCheckpoint(checkpoint, initialNotional, managed.monitor, monitor, managedClock());
+    managed.monitor = monitor;
+    managed.planEpoch = epoch + 1;
+    managed.revision++;
+    write(row);
+    return managed;
+  }
+
+  function updateManaged(id: string, revision: number, checkpoint: QualityResult, decision?: BinanceManualDecision, planEpoch?: number) {
     const current = rows.get(id);
     if (!current?.managed || current.status.state === 'closed') throw Error('找不到仍在持有的手动托管仓位');
-    if (current.managed.revision !== revision || current.managed.pending) return current.managed;
+    if (current.managed.revision !== revision || current.managed.pending || current.managed.planEpoch !== planEpoch) return current.managed;
     if (current.status.state !== 'tracking') throw Error('币安实盘仓位等待对账');
     const row = structuredClone(current);
     const managed = row.managed!;
@@ -174,7 +206,9 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       managed.pending = decision;
       row.campaign.actions.push(action);
     }
-    managed.checkpoint = checkpoint;
+    managed.checkpoint = managed.planEpoch == null ? checkpoint : {
+      ...checkpoint, instantMonitorSwitches: managed.checkpoint!.instantMonitorSwitches,
+    };
     managed.revision++;
     lastContactAt = Date.now();
     write(row);
@@ -448,7 +482,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
   }
 
   return {
-    ingest, adopt, updateManaged,
+    ingest, adopt, switchManaged, updateManaged,
     async runPositionControl<T>(run: () => Promise<T>) {
       if (manual) throw Error('另一笔实盘操作正在进行，请稍后重试');
       manual = true;
@@ -462,6 +496,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     managedArchive: (id: string) => {
       const managed = rows.get(id)?.managed;
       return managed && { version: managed.version, monitor: managed.monitor, armedAt: managed.armedAt,
+        ...(managed.checkpoint?.instantMonitorSwitches ? { switches: managed.checkpoint.instantMonitorSwitches } : {}),
         ...(managed.checkpoint?.status === 'closed' ? { exitReason: managed.checkpoint.reason } : {}) };
     },
     pauseNewOrders: () => { store.setPaused(true); accepting = false; },

@@ -26,7 +26,7 @@ import {
   memo, useCallback, useEffect, useLayoutEffect, useRef, useState,
   type FocusEvent, type ReactNode,
 } from 'react';
-import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2, Settings2 as MonitorSwitchIcon } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { entryPeriodDurationDays, entryPeriodEndLabel, entryPeriodMarketLabel } from '@/lib/entryPeriodSignals';
@@ -229,6 +229,7 @@ interface RowProps {
   disabled: boolean;
   onJump: (id: string) => void;
   onDelete?: (id: string) => void;
+  onSwitchMonitor?: (id: string) => void;
   onRate: (id: string, next: number) => void;
   /** 行内任一控件拿到焦点时报上自己的 id，列表据此把这一行钉在 DOM 里。 */
   onFocusRow: (id: string) => void;
@@ -244,7 +245,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, entryPeriod, entryDurationDays, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
+  onJump, onDelete, onSwitchMonitor, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   // 【用户要求】2026-10-21「鱼那里的数据…不能轻易删除」：× 紧挨着跳转箭头，容易点错——鱼要再点一次「确认删除」
@@ -351,7 +352,9 @@ function SignalLibraryRowImpl({
           ? <Loader2 className="h-4 w-4 animate-spin" />
           : <ArrowRightCircle className="h-4 w-4" />}
       </button>
-      {!onDelete ? <span aria-hidden/> : armed
+      {onSwitchMonitor ? <button type="button" aria-label={`切换 ${symbol} 持仓监测方案`} title="切换持仓监测方案"
+        className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+        onClick={() => onSwitchMonitor(id)}><MonitorSwitchIcon className="h-3.5 w-3.5" aria-hidden/></button> : !onDelete ? <span aria-hidden/> : armed
         // 最后一列只有 × 那么宽：确认按钮从 × 的位置向左浮出，盖住跳转箭头（第二下不会误点成跳转）
         ? <span className="relative h-5 w-5 shrink-0"><button onClick={handleDelete} onBlur={() => setArmed(false)} autoFocus className="absolute right-0 top-0 z-10 h-5 whitespace-nowrap rounded bg-destructive px-1.5 text-[10.5px] font-medium text-destructive-foreground shadow-sm hover:bg-destructive/90" aria-label={`确认删除 ${symbol}`}>确认删除</button></span>
         : <button
@@ -369,6 +372,8 @@ export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 
 export interface SignalScrollPosition { top: number; anchorId?: string; index?: number; offset?: number }
 interface Props {
+  switchableMonitorIds?: ReadonlySet<string>;
+  onSwitchMonitor?: (id: string) => void;
   selectedIds?:ReadonlySet<string>;onSelect?:(id:string)=>void;
   restoreScroll?: SignalScrollPosition;
   onScrollPositionChange?: (position: SignalScrollPosition) => void;
@@ -418,7 +423,7 @@ const sameView = (a: ListView, b: ListView) => (
 );
 
 function SignalLibraryListImpl({
-  rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect,
+  rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey, selectedIds,onSelect, switchableMonitorIds, onSwitchMonitor,
   restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, showScreeningTime = false, cdaAlerts, rowAlgorithmTypes, rowProcessSignals, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -638,6 +643,7 @@ function SignalLibraryListImpl({
         jumping={jumpingSignalId === sig.id}
         disabled={anyJumping}
         onJump={onJump}
+        onSwitchMonitor={switchableMonitorIds?.has(sig.id) ? onSwitchMonitor : undefined}
         onDelete={onDelete}
         onRate={onRate}
         onFocusRow={handleRowFocus} selected={selectedIds?.has(sig.id)} onSelect={onSelect}

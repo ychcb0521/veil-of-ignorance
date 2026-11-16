@@ -137,7 +137,8 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
     : follow?.issue ? '实盘跟随未连通' : '实盘跟随连接中';
   const screeningIssue = state.preEntry?.automaticError || automatic?.attemptIssue;
   return <FishQualityModule title="即时交易" icon={Zap} testId="quality-instant-controls" subsection={<div className={fishRail + ' mt-2 space-y-1'}>
-    {children}{follow && <FishUsdtPositions key={follow.owner} follow={follow} live={live}/>}
+    {children}{follow && <FishUsdtPositions key={follow.owner} follow={follow} live={live}
+      monitorTemplates={activeQualityPlanTemplates({ planTemplates: state.study.planTemplates ?? state.templateCatalog })}/>}
   </div>}
     summary={<FishQualityInfo label="即时交易说明"><p>自动筛选捕捞信号，入选后建立模拟持仓，最终平仓后归入交易战役的「即时交易」。</p></FishQualityInfo>}
     status={automatic && <>
