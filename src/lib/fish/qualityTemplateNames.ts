@@ -93,6 +93,12 @@ function build(catalog:readonly QualityPlanTemplate[]) {
       const match=matchPlan(plan,kind,hours);
       return match?names.get(match.id):undefined;
     },
+    forMonitor(plan:QualityGroup,templateId?:string){
+      const source=templateId?names.get(templateId):undefined;
+      if(source?.kind==='monitor')return source;
+      const match=matchPlan(plan,'monitor');
+      return match?names.get(match.id):undefined;
+    },
     forFilter(filters:readonly QualityBuyFilter[],metrics:readonly QualitySignalMetric[],label?:string){
       const match=matchFilter(filters,metrics,label);
       return match?names.get(match.id):undefined;
@@ -103,7 +109,7 @@ function build(catalog:readonly QualityPlanTemplate[]) {
 export function campaignTemplateAlias(campaign:Pick<import('@/types/journal').TradeCampaign,'comparison'>, names?:ReturnType<typeof qualityTemplateNames>) {
   const comparison=campaign.comparison;
   if(!names||!comparison)return;
-  if(comparison.monitorPlan)return names.forPlan(comparison.monitorPlan);
+  if(comparison.monitorPlan)return names.forMonitor(comparison.monitorPlan,comparison.monitorTemplateId);
   const screening=comparison.instant?.metadata?.screening;
   return screening?.plan?names.forPlan(screening.plan,'screen',screening.hours):undefined;
 }

@@ -7,7 +7,26 @@ import { makeQualitySellPlan, replaceQualitySellPlans } from '@/lib/fish/quality
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { buildFusionTemplatePlan } from '@/lib/fish/qualityBuiltinTemplates';
 import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
+import { QualityTemplateNamesContext } from '@/contexts/QualityTemplateNamesContext';
+import { qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
 afterEach(() => { cleanup(); localStorage.clear(); });
+it('shows the same template name in the editor and monitor detail without saving the alias to the plan',()=>{
+ const plan={...initial()[0],label:'20261114-3A'},savedAt=Date.parse('2026-11-14T08:00:00+08:00'),save=vi.fn();
+ const resolver=qualityTemplateNames({planTemplates:[{id:'t',name:plan.label,plan,savedAt,updatedAt:savedAt}]});
+ render(<QualityTemplateNamesContext.Provider value={{resolver}}>
+   <FishQualitySellPlansEditor plans={[plan]} ready onSave={save}
+     renderHolding={view=><span data-testid="fixture-monitor-name">{view.displayName(view.plans[0])}</span>}/>
+ </QualityTemplateNamesContext.Provider>);
+ const name=screen.getByLabelText('卖出算法 1 名称');
+ expect(name).toHaveValue('监测_20261114_A');
+ expect(screen.getByTestId('fixture-monitor-name')).toHaveTextContent('监测_20261114_A');
+ expect(screen.getByText('原名：20261114-3A')).toBeVisible();
+ fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'0.31'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
+ expect(save.mock.calls[0][0][0].label).toBe('20261114-3A');
+ fireEvent.change(name,{target:{value:'我修改的方案名'}});
+ expect(screen.getByTestId('fixture-monitor-name')).toHaveTextContent('我修改的方案名');
+});
 it('keeps the selected period for both sell stages after account definition sync',()=>{
  const before=initial().find(plan=>plan.combo)!;
  const save=vi.fn();

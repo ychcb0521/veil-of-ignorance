@@ -1,11 +1,29 @@
-import {expect, it} from 'vitest';
-import {impulse1115ChartRows, impulse1115TooltipRow} from '../impulse1115Chart';
-import {accountResearchIndicators, IMPULSE_1115_CHART_ID, researchChartSeries} from '../researchIndicators';
+import {expect, it, vi} from 'vitest';
+import {registerIndicator} from 'klinecharts';
+import {impulse1115ChartRows, impulse1115TooltipRow, registerImpulse1115Chart} from '../impulse1115Chart';
+import {accountResearchIndicators, IMPULSE_1115_CHART, IMPULSE_1115_CHART_ID, researchChartSeries} from '../researchIndicators';
 import {bar, impulse, STEP, TICK, warm} from './fixtures/dbl5GuardPlusBars';
 
 const candles = (bars: ReturnType<typeof warm>) => bars.map(row => ({
   ...row, timestamp:row.openTime, researchSymbol:'TESTUSDT', PRS6H_tick_size:TICK, cba2Closed:true,
 }));
+vi.mock('klinecharts', async original => ({
+  ...await original<typeof import('klinecharts')>(), registerIndicator:vi.fn(),
+}));
+
+it('draws the 1115 reference as segments without drawing origin dots',()=>{
+  registerImpulse1115Chart(IMPULSE_1115_CHART);
+  const spec=vi.mocked(registerIndicator).mock.calls.at(-1)![0];
+  const ctx={save:vi.fn(),restore:vi.fn(),beginPath:vi.fn(),setLineDash:vi.fn(),moveTo:vi.fn(),lineTo:vi.fn(),stroke:vi.fn(),arc:vi.fn(),fill:vi.fn()};
+  spec.draw!({ctx,visibleRange:{from:0,to:2},
+    indicator:{result:[{time:STEP,available:true,value:99,confirmedOrigin:100},{time:2*STEP,available:true,value:99}]},
+    xAxis:{convertToPixel:(i:number)=>i*5},yAxis:{convertToPixel:(price:number)=>price},
+  } as never);
+  expect(ctx.lineTo).toHaveBeenCalled();
+  expect(ctx.stroke).toHaveBeenCalledOnce();
+  expect(ctx.arc).not.toHaveBeenCalled();
+  expect(ctx.fill).not.toHaveBeenCalled();
+});
 
 it('plots only the confirmed 1115 impulse and ends its reference after a strict closing break', () => {
   const market = candles([...warm(), impulse(), bar(21,101.4,101.7,99.3,100.6),

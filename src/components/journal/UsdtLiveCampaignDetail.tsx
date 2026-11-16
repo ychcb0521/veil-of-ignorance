@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import {useQualityTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { loadQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
@@ -13,6 +14,7 @@ const action = { open: '开仓', add: '加仓', reduce: '减仓' } as const;
 
 export function UsdtLiveCampaignDetail({ id }: { id: string }) {
   const owner = useAuth().user?.id;
+  const names=useQualityTemplateNames();
   const [campaign, setCampaign] = useState<UsdtLiveCampaign>();
   const [issue, setIssue] = useState('');
   useEffect(() => {
@@ -56,7 +58,7 @@ export function UsdtLiveCampaignDetail({ id }: { id: string }) {
           {total.net !== null && <div><dt className="text-muted-foreground">扣手续费后</dt><dd className="mt-0.5 font-mono font-medium">{amount(total.net)}</dd></div>}
           <div><dt className="text-muted-foreground">开仓时间</dt><dd className="mt-0.5 font-mono">{time(campaign.openedAt)}</dd></div>
           {campaign.closedAt && <div><dt className="text-muted-foreground">平仓时间</dt><dd className="mt-0.5 font-mono">{time(campaign.closedAt)}</dd></div>}
-          {campaign.management && <div><dt className="text-muted-foreground">冻结持仓模板</dt><dd className="mt-0.5">{campaign.management.monitor.name}</dd></div>}
+          {campaign.management && <div><dt className="text-muted-foreground">冻结持仓模板</dt><dd className="mt-0.5">{names?.forMonitor(campaign.management.monitor.plan,campaign.management.monitor.templateId)?.name??campaign.management.monitor.name}</dd></div>}
           {campaign.management?.exitReason && <div><dt className="text-muted-foreground">策略平仓原因</dt><dd className="mt-0.5">{campaign.management.exitReason}</dd></div>}
         </dl>
       </header>

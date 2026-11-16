@@ -197,9 +197,11 @@ export class FishAdapter implements FishDataAdapter {
         let cursor=start;
         while(cursor<stop) {
           const end=Math.min(stop,cursor+(1000)*step);
-          const path=this.exchange==='binance'?`klines?symbol=${market.instrument}&interval=${query.interval}&startTime=${cursor}&endTime=${end-1}&limit=1000`:`candlesticks?contract=${market.instrument}&interval=${query.interval}&from=${cursor/1000}&to=${(end-step)/1000}`;
+          const limit=Math.ceil((end-cursor)/step);
+          const path=this.exchange==='binance'?`klines?symbol=${market.instrument}&interval=${query.interval}&startTime=${cursor}&endTime=${end-1}&limit=${limit}`:`candlesticks?contract=${market.instrument}&interval=${query.interval}&from=${cursor/1000}&to=${(end-step)/1000}`;
 
-          const j=await this.request(path,this.exchange==='binance'?5:1,signal);
+          const weight=this.exchange==='binance'?(limit<100?1:limit<500?2:5):1;
+          const j=await this.request(path,weight,signal);
           if(!Array.isArray(j)) throw new FishError('K线响应无效','failed');
           for(const r of j) { if(query.beforeCutoff){const time=this.exchange==='binance'?Number(r?.[0]):Number(r?.t)*1000;if(time<cursor||time>=end||time+step>cut)continue;} const parsed=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier);const b=parsed&&query.marketEvidence&&this.exchange==='binance'?{...parsed,ATI6H_quoteVolume:r[7]==null||String(r[7]).trim()===''?null:Number(r[7]),ATI6H_takerBuyQuoteVolume:r[10]==null||String(r[10]).trim()===''?null:Number(r[10])}:parsed; if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+step<=cut) collected.push(b); }
           cursor=end;

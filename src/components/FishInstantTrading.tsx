@@ -1,5 +1,6 @@
 import { FishUsdtPositions } from './FishUsdtPositions';
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
+import type {QualityTemplateName} from '@/lib/fish/qualityTemplateNames';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { BriefcaseBusiness, Clock3, Filter, Pause, Pickaxe, Play, Settings2, Zap } from 'lucide-react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
@@ -19,10 +20,10 @@ import { fishRail } from './FishSection';
 import { Popover, PopoverTrigger } from './ui/popover';
 import { Dialog } from './ui/dialog';
 
-function InstantHoldingPlanEditor({ state, plan, save }: { state: FishQualityState; plan: QualityGroup; save: (plan: QualityGroup) => Promise<void> }) {
+function InstantHoldingPlanEditor({ state, plan, save, templateName }: { state: FishQualityState; plan: QualityGroup; save: (plan: QualityGroup) => Promise<void>;templateName?:QualityTemplateName }) {
   const study = useMemo(() => ({ version: 1 as const, startedAt: 0, entryMode: 'signal' as const, observeHours: 0, tracking: false,
     groups: [], samples: [], results: [], sellPlans: [plan] }), [plan]);
-  return <HoldingMonitorSettings instant state={{ ...state, study, setSellPlans: plans => {
+  return <HoldingMonitorSettings instant templateName={templateName} state={{ ...state, study, setSellPlans: plans => {
       const next = replaceQualitySellPlans(study, plans).sellPlans?.[0];
       if (next) void save(next);
     } }} activeId={plan.id} onSelect={() => {}} done={() => {}} selectedCount={0}/>;
@@ -43,7 +44,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
   const choice = useMemo<InstantMonitorPlanChoice | undefined>(() => id === selected?.templateId && selected
     ? { id, name: selected.name, plan: selected.plan }
     : template, [id, selected, template]);
-  const choiceName=choice&&names?.forPlan(choice.plan);
+  const choiceName=choice&&names?.forMonitor(choice.plan,choice.id);
   const issue = choice && instantMonitorTemplateIssue(choice);
   const save = async (plan?: QualityGroup) => {
     if (!monitor || id && !choice || issue) return;
@@ -67,7 +68,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
     <button className="px-4 pt-3 text-xs text-primary" type="button" disabled={saving}
       onClick={() => setEditing(false)}>返回模板选择</button>
     <fieldset disabled={saving}>
-      <InstantHoldingPlanEditor state={state} plan={choice.plan} save={save}/>
+      <InstantHoldingPlanEditor state={state} plan={choice.plan} save={save} templateName={choiceName}/>
     </fieldset>
     {saveNotice && <p role="status" className="p-3 text-xs text-muted-foreground">{saveNotice}</p>}
     {error && <p role="alert" className="p-3 text-xs text-destructive">{error}</p>}
@@ -80,7 +81,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
       <select className="w-full rounded-md border bg-background px-2 py-1.5" value={id} onChange={event => setId(event.target.value)} disabled={saving}>
         <option value="">即时交易默认规则</option>
         {selected && !templates.some(value => value.id === selected.templateId) &&
-          <option value={selected.templateId} disabled>{names?.forPlan(selected.plan)?.name??selected.name}（已选快照）</option>}
+          <option value={selected.templateId} disabled>{names?.forMonitor(selected.plan,selected.templateId)?.name??selected.name}（已选快照）</option>}
         {templates.map(value => <option key={value.id} value={value.id}>{names?.names.get(value.id)?.name??value.name}</option>)}
       </select>
     </label>

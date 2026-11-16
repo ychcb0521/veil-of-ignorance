@@ -221,7 +221,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule.positionVersion!==undefined&&(rule.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION||rule.quantityMode!=='calculator'))throw Error('加仓持仓账版本不可用');
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
   const impulse=rule.impulsePosition, impulse1115=rule.impulse1115Position;
-  if(impulse&&rule.source==='structure'&&rule.structure?.guardPlusVersion)throw Error('请先移除本轮已保存的旧急拉位置，再启用 1115 组合版');
+  if(impulse&&rule.source==='structure'&&rule.structure?.guardPlusVersion)throw Error('请先取消选择「5 分钟急拉线」，再启用 1115 组合版');
   if(impulse && (rule.quantityMode!=='calculator'||impulse.version!==IMPULSE_5M_VERSION||
     !Number.isFinite(impulse.bufferAtr)||impulse.bufferAtr<0||impulse.bufferAtr>20||
     impulse.skipNative!=null&&impulse.skipNative!==true||

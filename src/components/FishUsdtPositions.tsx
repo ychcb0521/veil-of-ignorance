@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
+import {useQualityTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import { ChevronDown, ChevronRight, RefreshCw, Wallet } from 'lucide-react';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import type { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
@@ -17,6 +18,7 @@ export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? 
   positions?: readonly UsdtMirrorPosition[];
 }) {
   const { snapshot, issue, histories } = live;
+  const names=useQualityTemplateNames();
   return <div className="space-y-2 rounded-md border border-border/60 bg-card/60 px-2.5 pb-2.5 pt-1.5 text-[10px]">
     <div className="flex flex-wrap items-center justify-between gap-1.5 text-muted-foreground">
       <span>{snapshot ? '同步于 ' + formatUTC8(snapshot.observedAt) + '（北京）' : '北京时间'}</span>
@@ -52,7 +54,7 @@ export function UsdtPositionRows({live, positions = live.snapshot?.positions ?? 
             <span>均价 {position.entryPrice}</span><span>标记价 {position.markPrice}</span>
             <span>剩余成本 {usdtPositionValue(position.quantity,position.entryPrice)} {asset}</span>
             <span title={evidence?.issue}>开仓 {evidence?.openedAt?time(evidence.openedAt):evidence?'未核验':'核对中…'}</span>
-            {managed && <span>持仓模板 {managed.position.monitor.name}{managed.status.issue ? ' · ' + managed.status.issue : ''}</span>}
+            {managed && <span>持仓模板 {names?.forMonitor(managed.position.monitor.plan,managed.position.monitor.templateId)?.name??managed.position.monitor.name}{managed.status.issue ? ' · ' + managed.status.issue : ''}</span>}
           </span>
         </summary>
       </PositionDetails>;

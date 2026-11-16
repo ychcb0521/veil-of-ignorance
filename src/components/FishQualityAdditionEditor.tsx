@@ -3,7 +3,7 @@ import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
 import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
-import {FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
+import {FishQualityImpulse5mSettings,FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
 import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -429,7 +429,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </InfoBlock>
   </div>}>
    <div className="space-y-2 text-[11px]">
-    <div role="group" aria-label="本轮位置策略" className="grid grid-cols-3 items-stretch gap-2" data-testid="addition-position-choices">
+    <div role="group" aria-label="本轮位置策略" className="grid grid-cols-4 items-stretch gap-2" data-testid="addition-position-choices">
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
       <input className="shrink-0" type="checkbox" checked={nativeActive&&!combined} disabled={!d.enabled||nativeActive&&!combined&&!d.impulse&&!d.impulse1115}
         onChange={e=>selectNativePosition(false,e.target.checked)}/>
@@ -445,6 +445,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
         onChange={e=>patch(positions(d.impulse,e.target.checked?{bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}:undefined,
           e.target.checked?nativeActive:nativeActive||!d.impulse))}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_1115_DISPLAY_NAME}</span>
+     </label>
+     <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60"
+       title={combined?'切换到防守线或先启用独立急拉，再取消组合版，即可选用 5 分钟急拉线。':undefined}>
+      <input className="shrink-0" type="checkbox" checked={!!d.impulse} disabled={!d.enabled||combined}
+        onChange={e=>patch(positions(e.target.checked?{bufferAtr:'0',minDistancePct:''}:undefined,d.impulse1115,
+          e.target.checked?nativeActive:nativeActive||!d.impulse1115))}/>
+      <span className="min-w-0 [overflow-wrap:anywhere]">5 分钟急拉线</span>
      </label>
     </div>
     <div className={`grid items-start gap-2${nativeActive&&d.impulse1115&&!combined?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
@@ -535,11 +542,11 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    {d.impulse1115&&<FishQualityImpulsePositions impulse1115={d.impulse1115}
      inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={position=>patch(positions(d.impulse,position))}/>}
    </div>
-   {d.impulse&&<div className="flex flex-wrap items-center gap-2 text-muted-foreground">
-    <span>本轮沿用已保存的旧急拉位置。</span>
-    <button type="button" className="underline" disabled={!d.enabled} onClick={()=>patch(positions(undefined,d.impulse1115,nativeActive||!d.impulse1115))}>移除旧急拉位置</button>
-   </div>}
-   <p className="text-muted-foreground">同一轮只成交一次。{nativeActive&&d.impulse1115
+   {d.impulse&&<FishQualityImpulse5mSettings position={d.impulse} inputClass={cell+' w-20 max-w-full'}
+     disabled={!d.enabled} change={position=>patch(positions(position,d.impulse1115))}/>}
+   <p className="text-muted-foreground">同一轮只成交一次。{d.impulse
+     ?`同分钟依次评估${[nativeActive?nativePositionName:null,'5 分钟急拉线',d.impulse1115?IMPULSE_1115_DISPLAY_NAME:null].filter(Boolean).join('、')}。`
+     :nativeActive&&d.impulse1115
      ?`同分钟先评估「${nativePositionName}」，再评估「${IMPULSE_1115_DISPLAY_NAME}」。`
      :'左侧两项可切换，独立急拉可单用或并选。'}</p>
    </div>

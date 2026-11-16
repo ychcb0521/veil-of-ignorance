@@ -1,4 +1,5 @@
 import { useCampaignTemplateNames } from '@/contexts/QualityTemplateNamesContext';
+import type {QualityTemplateName} from '@/lib/fish/qualityTemplateNames';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import { FishQualityRouterView } from './FishQualityRouterView';
 /**
@@ -27,7 +28,7 @@ import { qualityPositionSize } from '@/lib/fish/qualityPositionManagement';
 
 const ignore = () => {};
 /** holdingOnly：只显示镜像、加仓、硬性终止与版本（持仓监测条件设置里选中旧引擎方案时用，方案卡片已在上方）。 */
-export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, showSize = true, size = qualityPositionSize(plan), savedOnly = false }: { plan: QualityGroup; holdingOnly?: boolean; showSize?: boolean; size?: ReturnType<typeof qualityPositionSize>; savedOnly?: boolean }) {
+export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, showSize = true, size = qualityPositionSize(plan), savedOnly = false, templateName }: { plan: QualityGroup; holdingOnly?: boolean; showSize?: boolean; size?: ReturnType<typeof qualityPositionSize>; savedOnly?: boolean;templateName?:QualityTemplateName }) {
   // 11-01 之前形态的方案（10-31 及更早的战役）也只可能是旧引擎算的，同样按原始参数显示
   const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
   const plans = useMemo(() => [plan], [plan]);
@@ -42,7 +43,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, show
   return <div className="space-y-3 text-[11px] [&_input]:pointer-events-none [&_select]:pointer-events-none [&_textarea]:pointer-events-none" data-testid="quality-monitor-settings-view">
     {!holdingOnly && !savedOnly && <p className="text-[10.5px] text-muted-foreground">这场战役运行时冻结的设置 · 只读</p>}
     {legacy && <LegacyEngineNote/>}
-    {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly onSave={ignore}/>}
+    {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly templateName={templateName} onSave={ignore}/>}
     {showSize && <FishQualityPositionManagement draft={positionManagementDraft(size)}/>}
     {savedOnly&&!plan.mirrorTakeProfit ? <p className="text-muted-foreground">原设置未记录镜像减仓。</p> :
       <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled} holdingLedger={addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>}
@@ -75,7 +76,7 @@ export function QualityMonitorSettingsButton({ plan, campaign }: { plan: Quality
   };
   const [open, setOpen] = useState(false), [savingForm, setSavingForm] = useState(false);
   const [name, setName] = useState(plan.label), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
-  const alias=useCampaignTemplateNames(campaign)?.forPlan(plan);
+  const alias=useCampaignTemplateNames(campaign)?.forMonitor(plan,campaign?.comparison?.monitorTemplateId);
   const templates = useCampaignQualityTemplates();
   const save = async () => {
     if (busy || !templates?.ready || !templates.save) return;
@@ -104,7 +105,7 @@ export function QualityMonitorSettingsButton({ plan, campaign }: { plan: Quality
       </form>}
       {message && <p role="status" className="text-primary">{message}</p>}
     </div>}
-    <FishQualityMonitorSettingsView plan={plan} size={campaign ? {
+    <FishQualityMonitorSettingsView plan={plan} templateName={alias} size={campaign ? {
       leverage: campaign.initial_leverage, notional: campaign.initial_main_size_usdt,
       marginUsdt: campaign.comparison?.instant?.marginUsdt ?? campaign.initial_main_size_usdt / campaign.initial_leverage,
     } : undefined}/>

@@ -5,7 +5,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
-import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators, IMPULSE_1115_CHART_ID } from '@/lib/researchIndicators';
+import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries,accountResearchIndicators, GUARD_1115_CHART_ID, IMPULSE_1115_CHART_ID } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
@@ -15,7 +15,7 @@ const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DB
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {
-  it('adds the pure 1115 chart beside DBL-5 and the original 1115 combination', () => {
+  it('offers both 1115 components individually beside the combination and legacy DBL-5', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[{type:'DBL5',period:3,enabled:true},{type:'DBL5_GUARD_PLUS',period:3,enabled:true}]} onClose={()=>{}} onIndicatorsChange={changed}/>);
     expect(screen.getByText('DBL-5-防守线')).toBeInTheDocument();
@@ -23,11 +23,15 @@ describe('自制区的十个特征值', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'急拉线-1115'}});
     fireEvent.click(screen.getByText('DBL-5-急拉线-1115'));
     expect(changed.mock.lastCall?.[0].map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5','DBL5_GUARD_PLUS',IMPULSE_1115_CHART_ID]);
+    fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'),{target:{value:'防守线-1115'}});
+    fireEvent.click(screen.getByText('DBL-5-防守线-1115'));
+    expect(changed.mock.lastCall?.[0].map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5','DBL5_GUARD_PLUS',GUARD_1115_CHART_ID]);
     expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5).shortName).toBe('DBL-5-防守线');
     expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).shortName).toBe('DBL-5-防守线+急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).shortName).toBe('DBL-5-急拉线-1115');
     expect(registered.get(CUSTOM_INDICATOR_MAP[IMPULSE_1115_CHART_ID]).figures.map((figure:{key:string})=>figure.key)).toEqual(['value']);
-    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).figures.map((figure:{key:string})=>figure.key)).toEqual(['value','DBL5P_base','DBL5P_impulse']);
+    expect(registered.get(CUSTOM_INDICATOR_MAP[GUARD_1115_CHART_ID]).figures.map((figure:{key:string})=>figure.key)).toEqual(['DBL5P_base']);
+    expect(registered.get(CUSTOM_INDICATOR_MAP.DBL5_GUARD_PLUS).figures.map((figure:{key:string})=>figure.key)).toEqual(['DBL5P_base','DBL5P_impulse','value']);
   });
   it('adds the 5m impulse line independently and draws it only after the qualifying bar closes', () => {
     const changed = vi.fn();
@@ -71,7 +75,7 @@ describe('自制区的十个特征值', () => {
     expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
-    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M',IMPULSE_1115_CHART_ID, ...ids]);
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(['IMPULSE_5M',IMPULSE_1115_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');

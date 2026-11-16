@@ -16,6 +16,8 @@ export interface FishMiningScanConfig {
   turnover: FishTurnoverSettings;
   lookbackHours: number | null;
   continuous?: true;
+  /** Explicit lookback sets the full stride; the last bounded window covers only the remainder. */
+  linkedLookback?: true;
 }
 export interface FishMiningState {
   version: 1; enabled: boolean; startMs: number; stepMs: number;
@@ -53,6 +55,8 @@ export const MINING_RANGE_LOGICAL_KEY = 'fish-mining.v3';
 export const MINING_CONFIGURED_ROUND_KEY = 'fish-mining.v4';
 // A previous client cannot run a round with indicator time overrides.
 export const MINING_TIMED_ROUND_KEY = 'fish-mining.v5';
+// Older clients cannot honor the shortened final window of a linked round.
+export const MINING_LINKED_ROUND_KEY = 'fish-mining.v6';
 export const MINING_LEASE_LOGICAL_KEY = 'fish-mining-lease.v1';
 export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
   target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], presetRevision: MINING_PRESET_REVISION, lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });

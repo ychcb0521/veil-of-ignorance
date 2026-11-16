@@ -154,7 +154,8 @@ describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () =>
     let klines = m.calls.filter(u => u.pathname.endsWith('/klines'));
     expect(klines).toHaveLength(3*Math.ceil(DEFAULT_N/1000));
     expect(klines.filter(u => u.searchParams.get('symbol') === 'BTCUSDT')).toHaveLength(Math.ceil(DEFAULT_N/1000));
-    expect(klines.every(u => u.searchParams.get('limit') === '1000')).toBe(true);
+    expect(klines.every(u => Number(u.searchParams.get('limit')) ===
+      Math.ceil((Number(u.searchParams.get('endTime')) + 1 - Number(u.searchParams.get('startTime'))) / FISH_STEP))).toBe(true);
     expect(klines.every(u => Number(u.searchParams.get('endTime')) < cut)).toBe(true);
     const n = m.calls.length;
     await scanner.scan(options(found));
@@ -163,6 +164,7 @@ describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () =>
     await scanner.scan(options(found));
     klines = m.calls.slice(before).filter(u => u.pathname.endsWith('/klines'));
     expect(klines).toHaveLength(3);
+    expect(klines.every(u => u.searchParams.get('limit') === '1')).toBe(true);
     expect(klines.every(u => Number(u.searchParams.get('startTime')) === cut && Number(u.searchParams.get('endTime')) === cut + FISH_STEP - 1)).toBe(true);
     expect(mergeSignals([], found)).toHaveLength(3);
   });

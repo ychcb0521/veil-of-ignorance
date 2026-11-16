@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import {useQualityTemplateNames} from '@/contexts/QualityTemplateNamesContext';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useInstantPositionQuote } from '@/hooks/useInstantPositionQuote';
@@ -37,6 +38,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
   entryMode: 'entry' | 'breakeven';
   onToggleEntry: () => void;
 }) {
+  const names=useQualityTemplateNames();
   const inRouter = useInRouterContext();
   const { source, buyAt, leverage } = position;
   const { symbol } = source;
@@ -102,7 +104,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
     <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-2 text-[10px] text-muted-foreground">
       <span>报价时间 {quote ? formatBeijingTime(quote.at) : '—'}</span>
       <span>已实现盈亏 {formatSignedUSDT(held.realizedPnl)} USDT</span>
-      {position.monitor && <span>持仓模板 {position.monitor.name}</span>}
+      {position.monitor && <span>持仓模板 {names?.forMonitor(position.monitor.plan,position.monitor.templateId)?.name??position.monitor.name}</span>}
       {manual && <span>手动接管</span>}
       {held.mirror && <span>镜像平衡减仓已成交 {(held.mirror.fraction * 100).toFixed(1)}%</span>}
       {held.additions.length > 0 && <span>加仓 {held.additions.length} 次</span>}

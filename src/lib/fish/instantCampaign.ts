@@ -305,7 +305,7 @@ function buildTemplateInstantCampaignData(owner: string, position: InstantPositi
   const comparison = data.campaign.comparison!;
   return { ...data, campaign: { ...data.campaign, campaign_code: 'IT-' + id.slice('fish-instant-'.length),
     title: source.symbol + ' · ' + monitor!.name,
-    comparison: { ...comparison, section: 'instant', planLabel: monitor!.name,
+    comparison: { ...comparison, section: 'instant', planLabel: monitor!.name, monitorTemplateId:monitor!.templateId,
       ...(comparison.holdingMetrics ? { holdingMetrics: { ...comparison.holdingMetrics, returnPct: result.status === 'closed' ? (result.pnl ?? 0) / marginUsdt * 100 : null } } : {}),
       detectors: detectors.map(label => ({ id: label, label })),
       instant: { source, marginUsdt, metadata, sellEvidence: evidence.sell?.evidence, mirrorFill: result.mirrorFill,

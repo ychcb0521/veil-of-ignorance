@@ -71,7 +71,7 @@ function HoldingPlan({ plan, setting, hours }: { plan: QualityGroup; setting?: Q
     {!size&&<p className={missing}>原归档未单独记录仓位规模。</p>}
     {setting?.filtersKnown===false ? <p className={missing}>历史买前过滤条件未记录。</p> :
       !!plan.buyFilters?.length && <details className="space-y-2"><summary className="cursor-pointer">买前过滤条件</summary><FrozenFilters filters={plan.buyFilters}/></details>}
-    <FishQualityMonitorSettingsView plan={plan} showSize={!!size} size={size} savedOnly/>
+    <FishQualityMonitorSettingsView plan={plan} showSize={!!size} size={size} savedOnly templateName={alias}/>
   </section>;
 }
 

@@ -178,7 +178,7 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
           <legend className="px-1 font-medium">连续扫描</legend>
           <FishNumberField label="每档回看（小时）" value={settings.scan.lookbackHours ?? NaN}
             onChange={hours => setSettings({ ...settings, scan: { ...settings.scan, lookbackHours: Number.isNaN(hours) ? null : hours } })}/>
-          <p className="text-muted-foreground">收录回看范围内起步、截止时仍达标的信号。留空时沿用算法的历史范围。</p>
+          <p className="text-muted-foreground">回看时长也是每档的推进时长。设为 1 小时，9 点扫 8–9 点，10 点接着扫 9–10 点。留空时每小时扫一档，按算法的历史范围收录。</p>
         </fieldset>
       </div>
       <fieldset className="space-y-2 rounded-md border border-border/60 px-3 pb-3">
@@ -202,16 +202,20 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
 export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump, onSelectInTable,renderStudy,onCopyStudy,directoryEdits,onSetHidden,openRequest,onSelectDirectory }: { openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;renderStudy?:(s:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>;mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean; onSelectInTable?: (signals: readonly TradeSignal[]) => boolean }) {
   const { state: s, running, anchorMs, progress, waiting } = mining;
   const [clock,setClock]=useState(Date.now),[profileOpen,setProfileOpen]=useState(false),[restartOpen,setRestartOpen]=useState(false),[runMenuOpen,setRunMenuOpen]=useState(false);
+  const [continuationTarget,setContinuationTarget]=useState('');
   useEffect(()=>{if(!s.enabled||running||!s.retryAt||s.retryAt<=Date.now())return;const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[s.enabled,s.retryAt,running]);
   const rules = s.rules.length ? s.rules : currentDefaultRules(), reached = s.mined >= s.target, now = Date.now();
   const rangeComplete=s.endMs!=null&&s.cursorMs>s.endMs;
+  const runningEnabled=s.enabled&&!rangeComplete&&!reached;
+  const nextTarget=Number(continuationTarget);
+  const validContinuationTarget=Number.isSafeInteger(nextTarget)&&nextTarget>s.mined;
   const caughtUp = !reached && !rangeComplete && s.cursorMs > now, share = Math.min(1, s.mined / s.target);
   const retryText=s.errorKind==='configuration'?'配置需修正后重新检查':s.retryAt?`${Math.max(0,Math.ceil((s.retryAt-clock)/1000))} 秒后原地重试（${short(s.retryAt)}）`:'2 分钟后原地重试';
   const hasStarted = !!(s.round || s.mined || s.anchorsDone || s.rules.length || s.lastError);
   const activeAnchor = running && s.enabled && !rangeComplete && !reached && anchorMs === s.cursorMs ? anchorMs : null;
   const status = activeAnchor != null ? `正在挖 ${formatUTC8(activeAnchor)} 这一档${progress?.total ? `（${progress.done} / ${progress.total} 个标的）` : ''}`
     : rangeComplete ? '已完成所选时间区间；历史结果已保留，重新开始可设置新的起止时间'
-    : reached ? '已达目标：可重新开始新一轮'
+    : reached ? '已达目标，本轮已停止。提高目标后可从下一档继续。'
     : !s.enabled ? (hasStarted ? `已暂停 · 继续后从 ${short(s.cursorMs)} 这一档接着挖` : '还没开始')
     : caughtUp ? `已追上现在，下一档 ${short(s.cursorMs)} 到点自动挖`
     : waiting && /网络|正忙|标签页|限频/.test(waiting) ? waiting
@@ -226,16 +230,16 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
         <FishQualityInfo label="批量捕捞说明与进度">
           <div className="space-y-2.5">
             <div className="space-y-1"><p className="font-medium">当前进度</p><p className="font-mono tabular-nums text-muted-foreground">已捕捞 {s.mined} / {s.target} 条 · 已扫 {s.anchorsDone} 档{s.lastAnchorMs != null ? ` · 扫到 ${short(s.lastAnchorMs)}` : ''}</p><p className={hasError ? 'text-destructive' : 'text-muted-foreground'}>{status}</p>{hasError&&s.retryCount?<p className="text-destructive">连续失败 {s.retryCount} 次{s.lastErrorAt?` · ${short(s.lastErrorAt)}`:''}</p>:null}{s.ruleRepairs?.length?<p className="text-muted-foreground" data-testid="mining-rule-repair">{s.ruleRepairs.at(-1)}</p>:null}</div>
-            <div className="space-y-1 border-t border-border/50 pt-2.5"><p className="font-medium">当前批量捕捞算法 · {s.scan?.combination==='and'?'交集（全部满足）':'并集（任一满足即命中）'}</p><p className="text-muted-foreground">{rules.filter(rule=>rule.enabled!==false).map(ruleText).join(' · ')}</p><p className="text-muted-foreground">从 {short(s.startMs)} {s.endMs!=null?`至 ${short(s.endMs)}`:'起'}{s.scan?.continuous ? '连续扫描' : `每 ${s.stepMs / 3_600_000} 小时一档`}</p></div>
+            <div className="space-y-1 border-t border-border/50 pt-2.5"><p className="font-medium">当前批量捕捞算法 · {s.scan?.combination==='and'?'交集（全部满足）':'并集（任一满足即命中）'}</p><p className="text-muted-foreground">{rules.filter(rule=>rule.enabled!==false).map(ruleText).join(' · ')}</p><p className="text-muted-foreground">从 {short(s.startMs)} {s.endMs!=null?`至 ${short(s.endMs)}`:'起'}，每 {s.stepMs / 3_600_000} 小时一档。</p></div>
             <div className="space-y-1.5 border-t border-border/50 pt-2.5 text-muted-foreground">{!sellFixed && <p className="text-amber-700 dark:text-amber-400">还没固定卖出方案：命中的信号会入舱并加入列表，在「持仓监测 → 条件设置」中固定一套方案后，才会按它比较各探测算法。</p>}<p>命中的信号直接进「鱼舱」（不算新鱼、不发邮件），同时加入鱼质量并自动勾选；点「开始过滤」或「开始监测」后，各自独立运行。</p><p>同一段持续的信号只记第一次能发现的那一档，以该档的历史时间模拟买入。普通捕捞运行时，批量捕捞会等到空闲再继续。</p><p>开始按钮右侧的 ▾ 中可选「重新开始」，设置起止时间后开始新一轮。捕捞库按 CDA、BSS、CBI-2 等算法家族分目录，目录使用组合表的形式。</p><a href={campaignHref} className="inline-flex items-center gap-0.5 text-primary hover:underline">在交易战役查看<ArrowUpRight aria-hidden className="h-3 w-3"/></a></div>
           </div>
         </FishQualityInfo>
       </>} progress={<div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-border/60" role="progressbar" aria-label="批量捕捞进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已捕捞 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
         <div role="group" aria-label="批量捕捞运行" className="inline-flex h-6 shrink-0 items-stretch">
-          {s.enabled
+          {runningEnabled
             ? <button type="button" onClick={mining.pause} className={qualitySplitPauseAction}><Pause className="h-3 w-3"/>暂停</button>
             : <button type="button" disabled={rangeComplete || reached} onClick={mining.start} aria-label={rangeComplete || reached ? undefined : s.anchorsDone ? '继续批量捕捞' : '开始批量捕捞'} className={qualitySplitPrimaryAction}><Play className="h-3 w-3"/>{rangeComplete?'区间已完成':reached?'已达目标':s.anchorsDone ? '继续捕捞' : '开始捕捞'}</button>}
-          <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始批量捕捞的其他方式" className={`${qualitySplitMenuAction} ${s.enabled?'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground':'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
+          <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始批量捕捞的其他方式" className={`${qualitySplitMenuAction} ${runningEnabled?'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground':'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
             <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="重新开始" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onClick={()=>{setRunMenuOpen(false);setRestartOpen(true);}}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>重新开始</span><span className="text-[10px] leading-relaxed text-muted-foreground">设置时间区间和条件，历史结果保留在捕捞库。</span></button></PopoverContent>
           </Popover>
         </div>
@@ -263,6 +267,22 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
                   <dt>本档标的</dt><dd><span className="font-mono tabular-nums">{progress.done}/{progress.total}</span></dd>
                 </div>}
               </dl>
+              {rangeComplete&&<p className="mt-2 text-muted-foreground">已完成所选时间区间。</p>}
+              {reached&&!rangeComplete&&<form className="mt-2 space-y-2 border-t border-border/50 pt-2" onSubmit={event=>{
+                event.preventDefault();
+                if(!validContinuationTarget)return;
+                mining.setTarget(nextTarget);
+                mining.start();
+                setContinuationTarget('');
+              }}>
+                <p className="text-muted-foreground">已达到本轮目标并停止。提高目标后从 <MiningTime ms={s.cursorMs}/> 接着扫。</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2">本轮新目标<input type="number" min={s.mined+1} step={1}
+                    value={continuationTarget} onChange={event=>setContinuationTarget(event.target.value)}
+                    className="h-7 w-24 rounded-md border border-border/60 bg-background px-2 font-mono"/></label>
+                  <button type="submit" disabled={!validContinuationTarget} className={qualityPrimaryAction}>提高目标并继续</button>
+                </div>
+              </form>}
               {hasError && <p className="mt-2 text-destructive">{status}</p>}
             </section>}
             <MiningSettingsContent key={mining.account} mining={mining} close={()=>setProfileOpen(false)}/>

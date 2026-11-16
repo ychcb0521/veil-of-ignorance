@@ -13,7 +13,7 @@ import { readSavedFishHitRateSettings } from './hitRateSettings';
 import { FISH_DEFAULT_LOOKBACK_HOURS, readFishLookback, validateFishLookback } from './lookback';
 import { currentDefaultRules, miningCards, readMiningState } from './mining';
 import { MINING_COMBINATION } from './defaultRules';
-import { MINING_STEP_MS, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY, type FishMiningScanConfig, type FishMiningState } from './miningState';
+import { MINING_LINKED_ROUND_KEY, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY, type FishMiningScanConfig, type FishMiningState } from './miningState';
 import { buildFishScanSettings, type FishScanSelection } from './scanPlan';
 import { FISH_MAX_ALGORITHMS, FISH_TURNOVER_FLOORS } from './shared';
 import { readCaptureTurnoverSettings, validateFishTurnoverSettings } from './turnoverSettings';
@@ -44,6 +44,7 @@ const schema = z.object({
     turnover: z.object({ enabled: z.boolean(), floors: z.array(z.object({ hours: z.number(), min: z.number() })) }),
     lookbackHours: z.number().positive().max(8784).nullable().optional(),
     continuous: z.literal(true).optional(),
+    linkedLookback: z.literal(true).optional(),
   }),
 });
 
@@ -71,7 +72,7 @@ export async function loadMiningSettings(userId: string, capture: FishScanSelect
   await hydrate([MINING_SETTINGS_KEY]);
   const saved = readMiningSettings(userId, true);
   if (saved) return saved;
-  await hydrate([MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]);
+  await hydrate([MINING_LINKED_ROUND_KEY, MINING_TIMED_ROUND_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_RANGE_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_LOGICAL_KEY]);
   return readMiningSettings(userId, true) ?? initialMiningSettings(readMiningState({ userId, persistPresetUpgrade: false }), capture);
 }
 
@@ -119,14 +120,25 @@ export function copyHitRateToMining(settings: FishMiningSettings): FishMiningSet
 }
 
 export function continuousMiningSettings(settings: FishMiningSettings): FishMiningSettings {
-  const hours = validateFishLookback(settings.scan.lookbackHours ?? FISH_DEFAULT_LOOKBACK_HOURS);
-  // User-selected anchors are minute-aligned, as are all supported candle close times.
-  const minutes = Math.max(1, Math.floor(hours * 60 + 1e-9));
-  return { ...settings, stepMs: Math.min(minutes * MINUTE_MS, MINING_STEP_MS),
-    scan: { ...settings.scan, continuous: true } };
+  const {lookbackHours}=settings.scan;
+  const stepMs=Math.round(validateFishLookback(lookbackHours??FISH_DEFAULT_LOOKBACK_HOURS)*HOUR_MS);
+  if(stepMs<MINUTE_MS)throw new Error('每档回看至少为 1 分钟');
+  return { ...settings, stepMs, scan: {
+    ...settings.scan, continuous:true, linkedLookback:lookbackHours===null?undefined:true,
+    lookbackHours:lookbackHours===null?null:stepMs/HOUR_MS,
+  }};
 }
 
-export function buildConfiguredMiningScan(settings: FishMiningSettings, defs: readonly DeepDigFeatureDef[]) {
+export function miningAnchorLookbackHours(state: FishMiningState, anchorMs: number): number | null {
+  const scan=state.scan;
+  if(!scan||scan.lookbackHours===null) return null;
+  if(scan.linkedLookback&&state.lastAnchorMs!=null&&state.lastAnchorMs<anchorMs) {
+    return Math.min(scan.lookbackHours,(anchorMs-state.lastAnchorMs)/HOUR_MS);
+  }
+  return scan.lookbackHours;
+}
+
+export function buildConfiguredMiningScan(settings: FishMiningSettings, defs: readonly DeepDigFeatureDef[], lookbackHours=settings.scan.lookbackHours) {
   if (!Number.isSafeInteger(settings.target) || settings.target <= 0) throw new Error('目标条数必须是正整数');
   if (!Number.isSafeInteger(settings.stepMs) || settings.stepMs < MINUTE_MS || settings.stepMs > 8784 * HOUR_MS) {
     throw new Error('挖掘推进设置无效，请重新开始一轮');
@@ -142,7 +154,7 @@ export function buildConfiguredMiningScan(settings: FishMiningSettings, defs: re
   if (missing) throw new Error(`挖掘算法 ${missing.featureId} 已不可用`);
   const result = buildFishScanSettings({
     cards: miningCards(enabled), defs, combination: settings.scan.combination, selection: settings.selection, time: '',
-    lookbackHours: settings.scan.lookbackHours, downwardWick, turnoverFloors: turnover.enabled ? turnover.floors : [],
+    lookbackHours, downwardWick, turnoverFloors: turnover.enabled ? turnover.floors : [],
   });
   if (!result.settings) throw new Error(result.error);
   return result.settings;

@@ -4,7 +4,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { initialMiningSettings, saveMiningSettings } from '@/lib/fish/miningSettings';
 import { useFishMining } from '@/hooks/useFishMining';
-import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
+import { MINING_START_MS, MINING_STEP_MS, MINING_STALL_MS, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_LINKED_ROUND_KEY, miningKey, saveMiningState, newMiningState, readMiningState } from '@/lib/fish/mining';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -31,9 +31,36 @@ it('scans a partial final window without changing the preceding cadence or runni
   act(() => h.result.current.restart({ startMs, endMs, target: 100, rules, settings }));
   await flush(20);
   expect(mine.mock.calls.map(([scan]) => scan.anchorMs)).toEqual([startMs, startMs + hour, startMs + 2 * hour, endMs]);
+  expect(mine.mock.calls.map(([scan]) => scan.lookbackHours)).toEqual([1, 1, 1, .5]);
   expect(readMiningState()).toMatchObject({ stepMs: hour, endMs, enabled: false, anchorsDone: 4 });
   await flush(hour);
   expect(mine).toHaveBeenCalledTimes(4);
+});
+it('starts the next hour at the exact linked cutoff and uses the same span to look back', async () => {
+  const nine = Date.parse('2026-01-01T09:00:00+08:00'), hour = 3_600_000;
+  vi.setSystemTime(nine+7_123);
+  const { h, mine } = setup();
+  const rules = currentDefaultRulesForRange(), defaults = initialMiningSettings(newMiningState(), selection);
+  const settings = { ...defaults, rules, target: 100, scan: { ...defaults.scan, lookbackHours: 1 } };
+  act(() => h.result.current.restart({startMs:nine, target:100, rules, settings}));
+  await flush(20);
+  expect(mine.mock.calls.map(([scan])=>[scan.anchorMs-scan.lookbackHours*hour,scan.anchorMs])).toEqual([[nine-hour,nine]]);
+  await flush(nine+hour-Date.now()-1);
+  expect(mine).toHaveBeenCalledTimes(1);
+  await flush(1);
+  expect(mine.mock.calls.map(([scan])=>[scan.anchorMs-scan.lookbackHours*hour,scan.anchorMs])).toEqual([[nine-hour,nine],[nine,nine+hour]]);
+});
+it('uses a linked stride longer than twelve hours with a short final window', async () => {
+  const hour=3_600_000, startMs=MINING_START_MS, endMs=startMs+60*hour;
+  vi.setSystemTime(endMs+1_000);
+  const {h,mine}=setup();
+  const rules=currentDefaultRulesForRange(), defaults=initialMiningSettings(newMiningState(),selection);
+  const settings={...defaults,rules,target:100,scan:{...defaults.scan,lookbackHours:24}};
+  act(()=>h.result.current.restart({startMs,endMs,target:100,rules,settings}));
+  await flush(20);
+  expect(mine.mock.calls.map(([scan])=>[scan.anchorMs,scan.lookbackHours])).toEqual(
+    [[startMs,24],[startMs+24*hour,24],[startMs+48*hour,24],[endMs,12]]);
+  expect(readMiningState()).toMatchObject({stepMs:24*hour,scan:{linkedLookback:true},anchorsDone:4});
 });
 const currentDefaultRulesForRange=()=>newMiningState().rules.length?newMiningState().rules:[{id:'bounded',featureId:'cbi2',statistic:'结果',threshold:'0.04'}];
 it('rejects a reversed time range before stopping or replacing the current round',async()=>{
@@ -67,7 +94,7 @@ it('freezes independently saved conditions, automatically advances by the lookba
   expect(mine.mock.calls[0][0]).toMatchObject({ exchanges: ['okx'], includeDuplicates: true, lookbackHours: 3,
     combination: 'and', turnoverFloors: [], downwardWick: settings.scan.downwardWick, algorithm: { direction: '<' } });
   expect(readMiningState()).toMatchObject({ scan: { ...settings.scan, continuous: true }, stepMs, anchorsDone: 2 });
-  expect(localStorage.getItem(miningKey(MINING_CONFIGURED_ROUND_KEY))).not.toBeNull();
+  expect(localStorage.getItem(miningKey(MINING_LINKED_ROUND_KEY))).not.toBeNull();
   act(() => h.result.current.pause());
   saveMiningSettings({ ...settings, stepMs: MINING_STEP_MS, selection, scan: { ...settings.scan, lookbackHours: 7 } });
   act(() => h.result.current.setTarget(3));

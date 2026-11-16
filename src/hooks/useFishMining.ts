@@ -20,12 +20,12 @@ import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPl
 import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/records';
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
-import { buildConfiguredMiningScan, continuousMiningSettings, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
+import { buildConfiguredMiningScan, continuousMiningSettings, miningAnchorLookbackHours, readMiningSettings, saveMiningSettings, type FishMiningSettings } from '@/lib/fish/miningSettings';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, miningKey, newMiningState, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, MINING_LINKED_ROUND_KEY, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
-const MINING_STATE_KEYS = [MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY];
+const MINING_STATE_KEYS = [MINING_LOGICAL_KEY, MINING_ROUND_LOGICAL_KEY, MINING_RANGE_LOGICAL_KEY, MINING_CONFIGURED_ROUND_KEY, MINING_TIMED_ROUND_KEY, MINING_LINKED_ROUND_KEY];
 const hasMiningWork = (s: FishMiningState) => s.enabled && s.mined < s.target && (s.endMs == null || s.cursorMs <= s.endMs);
 type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'> & { settings?: FishMiningSettings };
 export interface FishMiningApi {
@@ -107,7 +107,7 @@ export function useFishMining(o: {
     const combination = s.scan?.combination ?? MINING_COMBINATION;
     let built: ReturnType<typeof buildFishScanSettings>;
     try {
-      built = s.scan ? { settings: buildConfiguredMiningScan({ ...s, selection: scope, scan: s.scan }, latest.current.defs) } : unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
+      built = s.scan ? { settings: buildConfiguredMiningScan({ ...s, selection: scope, scan: s.scan }, latest.current.defs, miningAnchorLookbackHours(s,anchor)) } : unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
     } catch (cause) { built = { error: cause instanceof Error ? cause.message : String(cause) }; }
     if (built.error !== undefined) {
       const failed=miningFailureState(s,built.error,now,'configuration');setState(failed);setWaiting('配置需修正，修正后点「重新检查」');
@@ -195,15 +195,26 @@ export function useFishMining(o: {
     const timer = setInterval(() => void tickRef.current(), TICK_MS);
     return () => clearInterval(timer);
   }, [o.account, polling]);
+  useEffect(() => {
+    if (!polling || !state.scan?.linkedLookback) return;
+    const delay = state.cursorMs - Date.now();
+    if (delay <= 0 || delay > 2_147_483_647) return;
+    const timer = setTimeout(() => void tickRef.current(), delay);
+    return () => clearTimeout(timer);
+  }, [o.account, polling, state.cursorMs, state.scan?.linkedLookback]);
 
   const start = useCallback(() => {
     const s = load(latest.current.signalsRef.current);
     const fresh = !s.round && !s.enabled && !s.selection && !s.anchorsDone && !s.mined && !s.lastRunAt && !s.lastError;
     const saved = fresh ? readMiningSettings() : null;
     if (saved) {
-      const settings = continuousMiningSettings(saved);
-      setState({ ...s, ...structuredClone(settings), enabled: true, round: { id: crypto.randomUUID(), startedAt: Date.now() } });
-      setTimeout(() => void tickRef.current(), 0);
+      try {
+        const settings = continuousMiningSettings(saved);
+        setState({ ...s, ...structuredClone(settings), enabled: true, round: { id: crypto.randomUUID(), startedAt: Date.now() } });
+        setTimeout(() => void tickRef.current(), 0);
+      } catch (error) {
+        setWaiting(error instanceof Error ? error.message : String(error));
+      }
       return;
     }
     // 第一次开始时冻结当前默认算法与阈值
@@ -218,7 +229,8 @@ export function useFishMining(o: {
     cancelScan();
     setAnchorMs(null);
     setProgress(null);
-    if (previous.enabled && (!previous.round || (configured && (!previous.scan || configured.rules.some(rule=>Object.keys(rule.time??{}).length))))) saveMiningState({ ...previous, enabled: false });
+    if (previous.enabled && (!previous.round || (configured && (!previous.scan ||
+      configured.scan.linkedLookback&&!previous.scan.linkedLookback || configured.rules.some(rule=>Object.keys(rule.time??{}).length))))) saveMiningState({ ...previous, enabled: false });
     if (configured) saveMiningSettings(configured);
     setState({
       ...newMiningState(), enabled: true, startMs, ...(endMs!=null?{endMs}:{}), cursorMs: startMs, target,
@@ -230,7 +242,7 @@ export function useFishMining(o: {
     setTimeout(() => void tickRef.current(), 0);
   }, [cancelScan, setState]);
   const setTarget = useCallback((target: number) => {
-    if (!Number.isInteger(target) || target <= 0) return;
+    if (!Number.isSafeInteger(target) || target <= 0) return;
     setState({ ...readMiningState(), target }); setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
   const retry=useCallback(()=>{if(runningRef.current)return;start();},[start]);

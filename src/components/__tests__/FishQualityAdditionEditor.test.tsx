@@ -328,16 +328,22 @@ it('defaults the first increase metric to State S avg2, saves multiple choices p
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
 });
 
-it('retains the retired 5m impulse only for saved rounds until explicitly removed', () => {
+it('restores the original 5m impulse settings and lets the user select it again', () => {
   const position={version:'impulse-low-5m-v1',bufferAtr:.35,minDistancePct:2,skipNative:true} as const;
   const initial={...defaultQualityAddition(),enabled:true,impulsePosition:position};
   render(<Editor initial={initial}/>);
-  expect(screen.queryByLabelText('5 分钟急拉线')).toBeNull();
+  const five=screen.getByLabelText('5 分钟急拉线',{exact:true});
+  expect(five).toBeChecked();
+  expect(screen.getByLabelText('急拉线冗余 ATR')).toHaveValue(.35);
   expect(screen.getByLabelText('箱体／指标位置')).not.toBeChecked();
   expect(save().rounds[0].impulsePosition).toEqual(position);
-  fireEvent.click(screen.getByRole('button',{name:'移除旧急拉位置'}));
+  fireEvent.click(five);
   expect(save().rounds[0].impulsePosition).toBeUndefined();
   expect(save().rounds[1].impulsePosition).toEqual(position);
+  fireEvent.click(five);
+  expect(screen.getByLabelText('急拉线冗余 ATR')).toHaveValue(0);
+  fireEvent.change(screen.getByLabelText('急拉线冗余 ATR'),{target:{value:'0.4'}});
+  expect(save().rounds[0].impulsePosition).toEqual({version:'impulse-low-5m-v1',bufferAtr:.4});
 });
 
 it('sets the guard and impulse independently with per-round ATR and minimum distance',()=>{
@@ -346,7 +352,7 @@ it('sets the guard and impulse independently with per-round ATR and minimum dist
  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
  fireEvent.change(screen.getByLabelText('上涨期防守冗余'),{target:{value:'0.7'}});
  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
- expect(screen.queryByLabelText('5 分钟急拉线')).toBeNull();
+ expect(screen.getByLabelText('5 分钟急拉线',{exact:true})).not.toBeChecked();
  expect(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR')).toHaveValue(.5);
  fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR'),{target:{value:'1.25'}});
  fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 最小距离'),{target:{value:'1.8'}});

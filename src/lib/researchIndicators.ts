@@ -1,7 +1,7 @@
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {DBL5_ID,DBL5_VERSION,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5GuardVersion} from '@/lib/dbl5m';
-import {DBL5_GUARD_DISPLAY_NAME,DBL5_GUARD_PLUS_DISPLAY_NAME,DBL5_GUARD_PLUS_NUMERIC,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_RENDER,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_DISPLAY_NAME} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_DISPLAY_NAME,DBL5_GUARD_1115_DISPLAY_NAME,DBL5_GUARD_PLUS_DISPLAY_NAME,DBL5_GUARD_PLUS_NUMERIC,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_RENDER,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_DISPLAY_NAME} from '@/lib/dbl5GuardPlus';
 import {SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS} from '@/lib/sbs5m';
 import {PRS6H_ID,PRS6H_FIELDS} from '@/lib/prs6h';
 import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
@@ -23,11 +23,16 @@ import { appendResearchAverages } from '@/lib/researchAverageFormula';
 import { mbiNOf } from '@/lib/mbi';
 
 export const IMPULSE_1115_CHART_ID = 'DBL5_IMPULSE_1115';
-export const IMPULSE_1115_CHART_DESCRIPTION = '只用已收盘的 5 分钟 K 线。确认时标出起涨低点，有效期间显示急拉参考，失效、到期或行情缺口时断线。';
+export const IMPULSE_1115_CHART_DESCRIPTION = '只用已收盘的 5 分钟 K 线。有效期间显示急拉参考，确认时的起涨低点见图例，失效、到期或行情缺口时断线。';
 export const IMPULSE_1115_CHART: ResearchIndicator = {
   id:IMPULSE_1115_CHART_ID,featureId:DBL5_GUARD_PLUS_VERSION,core:'DBL5P_impulse',
   short:IMPULSE_1115_DISPLAY_NAME,name:IMPULSE_1115_DISPLAY_NAME,
   period:3,parameter:'急拉确认',neutral:0,min:0,max:0,seller:false,marketEvidence:true,rawOnly:true,priceOverlay:true,
+};
+export const GUARD_1115_CHART_ID = 'DBL5_GUARD_1115';
+export const GUARD_1115_CHART: ResearchIndicator = {
+  ...IMPULSE_1115_CHART,id:GUARD_1115_CHART_ID,core:'DBL5P_base',
+  short:DBL5_GUARD_1115_DISPLAY_NAME,name:DBL5_GUARD_1115_DISPLAY_NAME,parameter:'防守线',
 };
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
@@ -100,7 +105,7 @@ export function accountResearchIndicators(definitions: readonly DeepDigFeatureDe
   const items: ResearchIndicator[] = [...CUSTOM_RESEARCH_INDICATORS.map(item => {
     const def = definitions.find(d => d.id === item.featureId);
     return def ? researchIndicatorForFeature(def) : item;
-  }), ...definitions.filter(def => def.focusVersion || def.btcFreeSourceId || !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature), IMPULSE_1115_CHART];
+  }), ...definitions.filter(def => def.focusVersion || def.btcFreeSourceId || !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature), GUARD_1115_CHART, IMPULSE_1115_CHART];
   accountRegistryCache.set(definitions, items);
   return items;
 }

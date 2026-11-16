@@ -2,7 +2,7 @@ import {registerIndicator, type IndicatorDrawParams, type KLineData} from 'kline
 import {DBL5_STEP} from './dbl5m';
 import {accountResearchIndicators, researchChartSeries, researchKcName, type ResearchIndicator} from './researchIndicators';
 
-const COLOR = '#a21caf';
+export const IMPULSE_1115_LINE_COLOR = '#a21caf';
 
 export interface Impulse1115ChartRow {
   time: number;
@@ -47,47 +47,45 @@ export function impulse1115TooltipRow(rows: readonly Impulse1115ChartRow[], inde
   return continuous(rows[current], previous) ? previous : undefined;
 }
 
+export function drawImpulse1115Reference(
+  {ctx,visibleRange,xAxis,yAxis}:Pick<IndicatorDrawParams<Impulse1115ChartRow>,'ctx'|'visibleRange'|'xAxis'|'yAxis'>,
+  rows:readonly Impulse1115ChartRow[],
+) {
+  const from = Math.max(0, Math.floor(visibleRange.from) - 2);
+  const to = Math.min(rows.length, Math.ceil(visibleRange.to) + 1);
+  ctx.save();
+  ctx.beginPath();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = IMPULSE_1115_LINE_COLOR;
+  ctx.setLineDash([]);
+  for (let index = from; index < to; index++) {
+    const row = rows[index], previous = rows[index - 1];
+    const x = xAxis.convertToPixel(index + 1);
+    // Draw the previous published value only through a continuous, completed bar.
+    // A new value begins at this close. Gaps and forming candles never extend the line.
+    const carries = row.available && previous?.value != null && continuous(row, previous);
+    if (carries) {
+      const y = yAxis.convertToPixel(previous.value!);
+      ctx.moveTo(xAxis.convertToPixel(index), y);
+      ctx.lineTo(x, y);
+    }
+    if (row.value != null && (!carries || row.value !== previous.value)) {
+      const y = yAxis.convertToPixel(row.value);
+      ctx.moveTo(x - 1, y);
+      ctx.lineTo(x + 1, y);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 export function registerImpulse1115Chart(item: ResearchIndicator) {
   registerIndicator<Impulse1115ChartRow>({
     name: researchKcName(item.id), shortName: item.short, calcParams: [3, 0, 0],
-    figures: [{key:'value', title:'急拉参考: ', type:'line', styles:()=>({color:COLOR, size:2})}],
+    figures: [{key:'value', title:'急拉参考: ', type:'line', styles:()=>({color:IMPULSE_1115_LINE_COLOR, size:2})}],
     calc: (bars, indicator) => impulse1115ChartRows(bars, indicator.calcParams[0]),
-    draw: ({ctx, indicator, visibleRange, xAxis, yAxis}: IndicatorDrawParams<Impulse1115ChartRow>) => {
-      const rows = indicator.result;
-      const from = Math.max(0, Math.floor(visibleRange.from) - 2);
-      const to = Math.min(rows.length, Math.ceil(visibleRange.to) + 1);
-      const marks: {x: number; y: number}[] = [];
-      ctx.save();
-      ctx.beginPath();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = COLOR;
-      ctx.setLineDash([]);
-      for (let index = from; index < to; index++) {
-        const row = rows[index], previous = rows[index - 1];
-        const x = xAxis.convertToPixel(index + 1);
-        // Draw the previous published value only through a continuous, completed bar.
-        // A new value begins at this close. Gaps and forming candles never extend the line.
-        const carries = row.available && previous?.value != null && continuous(row, previous);
-        if (carries) {
-          const y = yAxis.convertToPixel(previous.value!);
-          ctx.moveTo(xAxis.convertToPixel(index), y);
-          ctx.lineTo(x, y);
-        }
-        if (row.value != null && (!carries || row.value !== previous.value)) {
-          const y = yAxis.convertToPixel(row.value);
-          ctx.moveTo(x - 1, y);
-          ctx.lineTo(x + 1, y);
-        }
-        if (row.confirmedOrigin != null) marks.push({x, y:yAxis.convertToPixel(row.confirmedOrigin)});
-      }
-      ctx.stroke();
-      ctx.fillStyle = COLOR;
-      for (const {x,y} of marks) {
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+    draw: params => {
+      drawImpulse1115Reference(params,params.indicator.result);
       return true;
     },
     createTooltipDataSource: ({indicator, crosshair, defaultStyles}) => {

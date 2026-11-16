@@ -42,6 +42,15 @@ describe('template display names',()=>{
     id:stored.id,title:'监测_20261111_B',originalTitle:'乙',savedTemplate:true,
   });
  });
+ it('uses a frozen catalog reference for customized instant-monitor snapshots',()=>{
+  const names=qualityTemplateNames({planTemplates:[template('chosen','20261114-3A'),template('other','20261114-4A')]});
+  const frozen={...monitor,label:'20261114-3A',
+    positionManagement:{version:'holding-position-management-v1' as const,leverage:3,notional:200}};
+  const comparison={section:'instant',monitorPlan:frozen,planLabel:frozen.label} as const;
+  expect(campaignTemplateAlias({comparison:comparison as never},names)).toBeUndefined();
+  expect(campaignTemplateAlias({comparison:{...comparison,monitorTemplateId:'chosen'} as never},names))
+    .toMatchObject({id:'chosen',name:'监测_20261111_A',originalName:'20261114-3A'});
+ });
 });
 
 it('keeps same-name historical snapshots separate and uses the first archived day without reading present bodies',()=>{

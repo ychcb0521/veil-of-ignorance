@@ -30,3 +30,18 @@ it('Gate缺少3m原生时以连续1m聚合OHLC、币量和USDT成交额，Bitget
  const grouped=await gate.candles({...aaa,instrument:'AAA_USDT'},cut,signal,{interval:'3m',count:10});expect(grouped).toHaveLength(10);expect(grouped[0]).toMatchObject({open:100,close:103,high:104,low:99,volume:3,quoteVolume:300});expect(grouped.at(-1)!.openTime+180000).toBe(cut);
  const requested:string[]=[],bitget=new FishAdapter('bitget',async path=>{requested.push(path);const u=new URL(path,'https://test/');expect(u.searchParams.get('granularity')).toBe('1H');const end=Number(u.searchParams.get('endTime'));return {code:'00000',data:Array.from({length:20},(_,i)=>[end-(20-i)*3600000,100,102,99,101,1,100])};});await bitget.candles(aaa,Math.floor(cut/7200000)*7200000,signal,{interval:'2h',count:10});expect(requested).toHaveLength(1);
 });
+it('uses the actual Binance request limit and weight when filling the next hourly window',async()=>{
+ const step=300_000, requests:{limit:number;weight:number}[]=[];
+ const adapter=new FishAdapter('binance',async(path,weight)=>{
+  const url=new URL(path,'https://test/'), limit=Number(url.searchParams.get('limit'));
+  const start=Number(url.searchParams.get('startTime')),end=Number(url.searchParams.get('endTime'));
+  requests.push({limit,weight});
+  return Array.from({length:Math.min(limit,Math.floor((end-start)/step)+1)},(_,i)=>
+    [start+i*step,100,101,99,100,1,start+(i+1)*step-1,100,1,.5,50,0]);
+ });
+ await adapter.candles(aaa,cut,signal,{interval:'5m',count:300});
+ const next=await adapter.candles(aaa,cut+12*step,signal,{interval:'5m',count:300});
+ expect(requests).toEqual([{limit:300,weight:2},{limit:12,weight:1}]);
+ expect(next).toHaveLength(300);
+ expect(next.at(-1)!.openTime+step).toBe(cut+12*step);
+});

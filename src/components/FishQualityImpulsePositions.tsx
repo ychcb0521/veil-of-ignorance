@@ -9,6 +9,28 @@ export interface Impulse5mDraft extends Impulse1115Draft {
   bufferAtr: string;
 }
 
+export function FishQualityImpulse5mSettings({position, disabled, inputClass, change}: {
+  position: Impulse5mDraft;
+  disabled: boolean;
+  inputClass: string;
+  change: (position: Impulse5mDraft) => void;
+}) {
+  return <fieldset className="min-w-0 space-y-2 rounded border border-border/60 p-2" disabled={disabled} aria-label="5 分钟急拉线参数">
+    <h6 className="font-medium">5 分钟急拉线参数</h6>
+    <p className="text-muted-foreground">币安 U 本位 · 5 分钟收盘确认量价突破</p>
+    <div className="flex flex-wrap gap-x-4 gap-y-2">
+      <label className="grid min-w-0 gap-1">K 取起涨低点 −
+        <span className="flex items-center gap-1"><input aria-label="急拉线冗余 ATR" className={inputClass} type="number" min="0" max="20" step="any"
+          value={position.bufferAtr} onChange={e=>change({...position,bufferAtr:e.target.value})}/>× ATR</span>
+      </label>
+      <label className="grid min-w-0 gap-1">K 离加仓价 ≥
+        <span className="flex items-center gap-1"><input aria-label="急拉线 K 最小距离" className={inputClass} type="number" min="0" max="50" step="any"
+          placeholder="不限" value={position.minDistancePct} onChange={e=>change({...position,minDistancePct:e.target.value})}/>%</span>
+      </label>
+    </div>
+  </fieldset>;
+}
+
 export function FishQualityImpulsePositions({impulse1115, disabled, inputClass, change}: {
   impulse1115: Impulse1115Draft;
   disabled: boolean;

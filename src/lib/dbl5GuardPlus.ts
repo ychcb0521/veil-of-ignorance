@@ -16,6 +16,7 @@ export function isImpulse1115PositionVersion(version: string | undefined) {
 }
 // Current chart and settings labels. The original names above also appear in frozen plan metadata.
 export const DBL5_GUARD_DISPLAY_NAME = 'DBL-5-防守线';
+export const DBL5_GUARD_1115_DISPLAY_NAME = 'DBL-5-防守线-1115';
 export const DBL5_GUARD_PLUS_DISPLAY_NAME = 'DBL-5-防守线+急拉线-1115';
 export const IMPULSE_1115_DISPLAY_NAME = 'DBL-5-急拉线-1115';
 export const DBL5_GUARD_PLUS_PARAMS = Object.freeze({

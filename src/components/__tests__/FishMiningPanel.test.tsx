@@ -87,7 +87,7 @@ it('explains the plan, starts mining and keeps the library next to settings', ()
   expect(screen.queryByRole('button', { name: '本轮条件' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '批量捕捞说明与进度' }));
   expect(screen.getByRole('dialog', { name: '批量捕捞说明与进度' })).toBeVisible();
-  expect(screen.getByText('从 2026-04-01 00:00 起每 12 小时一档')).toBeVisible();
+  expect(screen.getByText('从 2026-04-01 00:00 起，每 12 小时一档。')).toBeVisible();
   expect(screen.getByText(/CBI-2 avg₂ > 0.04 · CBA avg₂ > 8 · CBI-2 avg > 0.04 · CBA avg > 8/)).toBeVisible();
   expect(screen.getByText('已捕捞 0 / 1000 条 · 已扫 0 档')).toBeVisible();
   expect(screen.getByText(/还没固定卖出方案/)).toBeVisible();
@@ -121,7 +121,7 @@ it('shows the running anchor, reached target, caught-up and error states', () =>
   expect(screen.queryByText('已扫至')).toBeNull();
   expect(screen.queryByText(/04-01 12:00:15/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '批量捕捞说明与进度' }));
-  expect(screen.getAllByText('已达目标：可重新开始新一轮')[0]).toBeVisible();
+  expect(screen.getAllByText('已达目标，本轮已停止。提高目标后可从下一档继续。')[0]).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '批量捕捞说明与进度' }));
   expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
   expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '已捕捞 53 条，目标 50 条');
@@ -132,6 +132,22 @@ it('shows the running anchor, reached target, caught-up and error states', () =>
   expect(screen.getByRole('status')).toHaveAccessibleName('出错：网络中断（2 分钟后原地重试）');
   rerender(<FishMiningPanel mining={api({}, { enabled: false, rules, anchorsDone: 3 }) as never} sellFixed campaignHref="#"/>);
   expect(screen.getByRole('button', { name: '继续批量捕捞' })).toBeVisible();
+});
+it('shows a target stop even if the saved run was enabled and allows adding to the same round',()=>{
+  const m=api({}, {enabled:true,rules:currentDefaultRules(),target:100,mined:106,anchorsDone:13,
+    lastAnchorMs:MINING_START_MS+12*3_600_000,cursorMs:MINING_START_MS+13*3_600_000,endMs:MINING_START_MS+9*MINING_STEP_MS});
+  render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
+  expect(screen.queryByRole('button',{name:'暂停'})).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('已达目标106/100');
+  fireEvent.click(screen.getByRole('button',{name:'批量捕捞设置'}));
+  const progress=within(screen.getByRole('region',{name:'本轮捕捞进度'}));
+  expect(progress.getByText(/已达到本轮目标并停止/)).toBeVisible();
+  const resume=progress.getByRole('button',{name:'提高目标并继续'});
+  expect(resume).toBeDisabled();
+  fireEvent.change(progress.getByLabelText('本轮新目标'),{target:{value:'200'}});
+  fireEvent.click(resume);
+  expect(m.setTarget).toHaveBeenCalledWith(200);
+  expect(m.start).toHaveBeenCalledOnce();
 });
 
 it('does not display a cancelled anchor or a pending anchor as completed', () => {
