@@ -1,61 +1,63 @@
 import {describe,expect,it} from 'vitest';
-import {cleanAcceleration1116Series} from '../cleanAcceleration1116Chart';
+import {accelerationPositions,cleanAcceleration1116Signals} from '../cleanAcceleration1116Chart';
+import {accelerationMissingRange} from '@/hooks/useCleanAccelerationMinutes';
 
-const STEP = 300_000;
-const history = Array.from({length:14}, (_,i) => ({
-  timestamp:i*STEP, open:100, high:100.15, low:99.85, close:100, cba2Closed:true,
+const M=60_000;
+const history = Array.from({length:15}, (_,i) => ({
+  time:i*M,open:100,high:100.15,low:99.85,close:100,
 }));
 
-function sequence(gains: number[]) {
-  let close = 100;
-  return [...history,...gains.map((gain,i) => {
-    const open = close;
-    close += gain;
-    return {
-      timestamp:(history.length+i)*STEP, open, high:close+.04, low:open-.03, close, cba2Closed:true,
-    };
+function sequence(gains:number[]) {
+  let close=100;
+  return [...history,...gains.map((gain,i)=>{
+    const open=close;
+    close+=gain;
+    return {time:(history.length+i)*M,open,high:Math.max(open,close)+.04,low:Math.min(open,close)-.03,close};
   })];
 }
 
-describe('纯净加速时机线-1116', () => {
-  it('starts at the fourth qualifying close and steps up only through continuing acceleration', () => {
-    const bars = sequence([.28,.36,.55,.71,.92,-.2]);
-    const rows = cleanAcceleration1116Series(bars);
-    expect(rows.slice(0,17).every(row=>row.value==null)).toBe(true);
-    expect(rows[17]).toEqual({value:bars[17].low,gainAtr:expect.closeTo(1.9/.3),paceRatio:expect.closeTo(1.26/.64)});
-    expect(rows[18].value).toBe(bars[18].low);
-    expect(rows[19]).toEqual({});
+describe('纯净加速时机线-1116',()=>{
+  it('starts on the fourth qualifying 1m close',()=>{
+    const bars=sequence([.28,.36,.55,.71,.92,-.2]);
+    const signals=cleanAcceleration1116Signals(bars);
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toEqual({at:19*M,value:bars[18].low,gainAtr:expect.closeTo(1.9/.3),paceRatio:expect.closeTo(1.26/.64)});
+    expect(signals[1]).toMatchObject({at:20*M,value:bars[19].low});
   });
 
-  it('rejects a sharp single jump, steady gains, a low that breaks the staircase, and sub-ATR acceleration', () => {
-    const pullback = sequence([.28,.36,.55,.71]);
-    pullback[16] = {...pullback[16],low:pullback[15].low-.1};
-    const small = sequence([.16,.17,.2,.26]).map((bar,i)=>i<14 ? {...bar,low:99,high:100.04} : bar);
-    for (const bars of [sequence([0,0,0,2]),sequence([.5,.5,.5,.5]),pullback,small]) {
-      expect(cleanAcceleration1116Series(bars).every(row=>row.value==null)).toBe(true);
+  it('rejects one jump, steady gains, a dropped low, and gains below the ATR gate',()=>{
+    const pullback=sequence([.28,.36,.55,.71]);
+    pullback[17]={...pullback[17],low:pullback[16].low-.1};
+    const small=sequence([.16,.17,.2,.26]).map((bar,i)=>i<15?{...bar,low:99,high:100.04}:bar);
+    for(const bars of [sequence([0,0,0,2]),sequence([.5,.5,.5,.5]),pullback,small]){
+      expect(cleanAcceleration1116Signals(bars)).toEqual([]);
     }
   });
 
-  it('waits for a forming bar to close and never changes earlier rows when future candles arrive', () => {
-    const bars = sequence([.28,.36,.55,.71,.92]);
-    const throughConfirmation = bars.slice(0,18);
-    const forming = [...throughConfirmation.slice(0,-1),{...bars[17],cba2Closed:false}];
-    expect(cleanAcceleration1116Series(forming).at(-1)).toEqual({});
-    const unmarked = bars.map(bar=>({...bar,cba2Closed:undefined}));
-    expect(cleanAcceleration1116Series(unmarked.slice(0,18)).at(-1)).toEqual({});
-    const latest = cleanAcceleration1116Series(throughConfirmation).at(-1);
-    expect(latest?.value).toBe(bars[17].low);
-    expect(cleanAcceleration1116Series(unmarked)[17]).toEqual(latest);
-    expect(cleanAcceleration1116Series(bars).slice(0,18)).toEqual(cleanAcceleration1116Series(throughConfirmation));
+  it('resets at missing or invalid minute candles and ignores other sample cadences',()=>{
+    const bars=sequence([.28,.36,.55,.71,.92]);
+    expect(cleanAcceleration1116Signals(bars.filter((_,i)=>i!==9))).toEqual([]);
+    expect(cleanAcceleration1116Signals(bars.map((bar,i)=>i===9?{...bar,close:NaN}:bar))).toEqual([]);
+    expect(cleanAcceleration1116Signals(bars.map(bar=>({...bar,time:bar.time*5})))).toEqual([]);
+    const prefix={...bars[0],time:-M};
+    expect(cleanAcceleration1116Signals([prefix,...bars])).toEqual(cleanAcceleration1116Signals(bars));
   });
 
-  it('resets across gaps, validates OHLC, and only uses contiguous five-minute candles', () => {
-    const bars = sequence([.28,.36,.55,.71,.92]);
-    const gap = bars.map((bar,i)=>({...bar,timestamp:bar.timestamp+(i>=11?STEP:0)}));
-    const invalid = bars.map((bar,i)=>i===10?{...bar,close:NaN}:bar);
-    const fifteenMinute = bars.map(bar=>({...bar,timestamp:bar.timestamp*3}));
-    for (const series of [gap,invalid,fifteenMinute]) {
-      expect(cleanAcceleration1116Series(series).every(row=>row.value==null)).toBe(true);
-    }
+  it('projects the earliest 1m confirmation into its 5m candle and hides future signals after a seek',()=>{
+    const signals=cleanAcceleration1116Signals(sequence([.28,.36,.55,.71,.92,1.2]));
+    const candles=[10*M,15*M,20*M,25*M].map(timestamp=>({timestamp}));
+    const project=(through:number)=>accelerationPositions(candles,{signals,through,timezone:'Asia/Shanghai',status:'ready'});
+    expect(project(18*M)).toEqual([{}, {}, {}, {}]);
+    expect(project(19*M)).toEqual([{}, signals[0], {}, {}]);
+    expect(project(24*M)).toEqual([{}, signals[0], signals[1], {}]);
+    expect(signals[2].at).toBe(21*M);
+  });
+
+  it('fetches only the missing historical or right edge minutes',()=>{
+    const current={from:10*M,through:20*M};
+    expect(accelerationMissingRange(current,10*M,21*M)).toEqual({from:20*M,through:21*M,side:'right'});
+    expect(accelerationMissingRange(current,5*M,20*M)).toEqual({from:5*M,through:10*M,side:'left'});
+    expect(accelerationMissingRange(current,10*M,14*M)).toBeUndefined();
+    expect(accelerationMissingRange(current,60*M,65*M)).toEqual({from:60*M,through:65*M,side:'replace'});
   });
 });

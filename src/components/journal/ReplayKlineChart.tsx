@@ -1,5 +1,6 @@
 import { Component, useMemo, type ReactNode } from 'react';
 import { CandlestickChart, type AnalysisChartAnnotations, type AnalysisDraggablePriceLine, type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
+import type {AccelerationMarketSource} from '@/hooks/useCleanAccelerationMinutes';
 import type { KlineData } from '@/hooks/useBinanceData';
 import {
   normalizeReplayKlines,
@@ -13,6 +14,7 @@ interface Props {
   currentTime: number;
   intervalMs: number;
   symbol: string;
+  marketSource?: AccelerationMarketSource;
   markers?: ChartMarker[];
   priceLines?: PriceLine[];
   timeBoundPriceLines?: TimeBoundPriceLine[];
@@ -91,6 +93,7 @@ export function ReplayKlineChart({
   currentTime,
   intervalMs,
   symbol,
+  marketSource,
   markers = [],
   priceLines = [],
   timeBoundPriceLines = [],
@@ -189,6 +192,8 @@ export function ReplayKlineChart({
       data={replayData}
       symbol={symbol}
       rawSymbol={symbol}
+      accelerationClock={Math.floor(currentTime/60_000)*60_000}
+      accelerationSource={marketSource}
       pricePrecision={pricePrecision}
       quantityPrecision={3}
       analysisMode

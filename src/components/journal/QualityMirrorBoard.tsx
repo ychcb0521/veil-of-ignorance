@@ -4,9 +4,6 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { useLayoutEffect, useRef } from 'react';
 import type {KlineData} from '@/hooks/useBinanceData';
 import {QualityPriceExitAudit} from './QualityPriceExitAudit';
-import {campaignLimitedDrawdownText} from '@/lib/fish/qualityCampaignRisk';
-import {STATIC_DRAWDOWN_SELL_LABEL} from '@/lib/fish/qualityStaticDrawdownSell';
-import {FREE_STATIC_DRAWDOWN_LABEL} from '@/lib/fish/qualityVeto';
 import {instantManualReason} from '@/lib/fish/instantManualExecution';
 
 const money = (n: number | null) => n == null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(2)} USDT`;
@@ -18,15 +15,11 @@ const color = (n: number | null) => n == null || n === 0 ? '' : n > 0 ? 'text-[#
 export function QualityMirrorBoard({campaign,onHeightChange,onCompactHeightChange,klines,intervalMs}: {campaign: TradeCampaign;onHeightChange?: (height:number)=>void;onCompactHeightChange?:(height:number)=>void;klines?:readonly KlineData[];intervalMs?:number}) {
   const board = qualityMirrorBoard(campaign);
   const evidence=campaign.comparison?.sellEvidence,cause=evidence?.triggerCause;
-  const limitedDrawdown = campaignLimitedDrawdownText(campaign, true);
   const manual = campaign.comparison?.instant?.manual;
   const manualFills = manual?.fills ?? [];
-  const staticExit = cause?.kind === 'sell-static-drawdown' ? STATIC_DRAWDOWN_SELL_LABEL
-    : cause?.kind === 'static-drawdown' ? FREE_STATIC_DRAWDOWN_LABEL : undefined;
-  const showStaticStop = limitedDrawdown !== '—' || !!staticExit;
   const hasAudit=evidence?.executedAt!=null&&evidence.confirmedAt!=null&&!!cause&&(cause.kind==='box-stop'&&!!cause.boxStopEvidence||cause.kind==='drop-1m'||cause.kind==='drop-5m');
   const fill=board?.fill;
-  const ref=useRef<HTMLElement>(null), visible=!!fill||hasAudit||showStaticStop||!!manual;
+  const ref=useRef<HTMLElement>(null), visible=!!fill||hasAudit||!!manual;
   useLayoutEffect(()=>{
     const element=ref.current;
     if(!onHeightChange&&!onCompactHeightChange)return;
@@ -46,10 +39,6 @@ export function QualityMirrorBoard({campaign,onHeightChange,onCompactHeightChang
         <summary className="cursor-pointer">手动成交 {manualFills.length} 笔</summary>
         {manualFills.map((fill, i) => <p key={i}>{formatUTC8(fill.at)} · {instantManualReason(fill.reason)} · {mirrorPercentText(fill.fraction)}% @ {price(fill.price)}</p>)}
       </details>}
-    </div>}
-    {showStaticStop && <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2" data-testid="quality-chart-static-stop">
-      {limitedDrawdown !== '—' && <span>{STATIC_DRAWDOWN_SELL_LABEL} <b className="font-mono font-medium">{limitedDrawdown}</b></span>}
-      {staticExit && <span className="text-muted-foreground">{staticExit}触发 · 阈值 {cause!.threshold}%{evidence?.triggerAtOpen && ' · 跳空按开盘价成交'}</span>}
     </div>}
     {board&&fill&&<details data-testid="quality-mirror-details">
       <summary className="flex min-h-9 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-muted-foreground hover:bg-amber-500/5">

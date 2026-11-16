@@ -200,6 +200,7 @@ export function MultiChartLayout({
   // instance. A timeframe is a different data coordinate system, so remount
   // only when symbol/timeframe changes. Ordinary candle updates keep the same
   // instance and therefore preserve the user's current pan/zoom.
+  const accelerationClock = Math.floor(currentSimulatedTime/60_000)*60_000;
   const mainChartIdentity = `${rawSymbol}:${mainInterval}`;
   const updateFullscreen = useCallback((active: boolean) => {
     writeFullscreenSession(active);
@@ -300,6 +301,7 @@ export function MultiChartLayout({
             key={mainChartIdentity}
             data={mainData}
             symbol={`${mainSymbol} ${mainInterval}`}
+            accelerationClock={accelerationClock || undefined}
             viewportRevision={chartViewportRevision}
             onLoadOlder={onLoadOlder}
             loadingOlder={loadingOlder}
@@ -323,6 +325,7 @@ export function MultiChartLayout({
               key={mainChartIdentity}
               data={mainData}
               symbol={`${mainSymbol} ${mainInterval}`}
+              accelerationClock={accelerationClock || undefined}
               viewportRevision={chartViewportRevision}
               onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder}
@@ -353,6 +356,7 @@ export function MultiChartLayout({
                 key={`${rawSymbol}:${subCharts[0].interval}`}
                 data={getVisibleSubData(subCharts[0].data)}
                 symbol={`${mainSymbol} ${subCharts[0].interval}`}
+                accelerationClock={accelerationClock || undefined}
                 viewportRevision={chartViewportRevision}
                 tradeHistory={tradeHistory}
               displayTimestampTransform={displayTimestampTransform}
@@ -373,6 +377,7 @@ export function MultiChartLayout({
               key={mainChartIdentity}
               data={mainData}
               symbol={`${mainSymbol} ${mainInterval}`}
+              accelerationClock={accelerationClock || undefined}
               viewportRevision={chartViewportRevision}
               onLoadOlder={onLoadOlder}
               loadingOlder={loadingOlder}
@@ -400,6 +405,7 @@ export function MultiChartLayout({
                   key={`${rawSymbol}:${subCharts[i].interval}`}
                   data={getVisibleSubData(subCharts[i].data)}
                   symbol={`${mainSymbol} ${subCharts[i].interval}`}
+                  accelerationClock={accelerationClock || undefined}
                   viewportRevision={chartViewportRevision}
                   tradeHistory={tradeHistory}
               displayTimestampTransform={displayTimestampTransform}

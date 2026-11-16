@@ -1,8 +1,9 @@
 import {Dbl5ChartTimeline} from '@/lib/dbl5ChartTimeline';
-import { CLEAN_ACCELERATION_1116_ID, CLEAN_ACCELERATION_1116_NAME } from '@/lib/cleanAcceleration1116Chart';
+import { ACCELERATION_DISPLAY_STEP, ACCELERATION_MINUTE, ACCELERATION_WARMUP_MINUTES, CLEAN_ACCELERATION_1116_ID, CLEAN_ACCELERATION_1116_INDICATOR, CLEAN_ACCELERATION_1116_NAME } from '@/lib/cleanAcceleration1116Chart';
 import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_ID } from '@/lib/impulse5mChart';
 import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
 import { mbi2MinutesOf } from '@/lib/mbi2';
+import { useCleanAccelerationMinutes, type AccelerationMarketSource } from '@/hooks/useCleanAccelerationMinutes';
 import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
 import { registerAccountFeatureIndicators } from "@/lib/customIndicators";
 import { syncResearchIndicatorConfigs, syncMbi2ChartHours, accountResearchIndicators } from "@/lib/researchIndicators";
@@ -270,6 +271,9 @@ interface Props {
   symbol: string;
   /** Changes when the host switches viewport/layout so native panes can reflow after CSS settles. */
   viewportRevision?: string | number;
+  /** Clock that bounds closed 1m data on the 5m acceleration overlay. */
+  accelerationClock?: number;
+  accelerationSource?: AccelerationMarketSource;
   onLoadOlder?: () => void;
   loadingOlder?: boolean;
   tradeHistory?: TradeRecord[];
@@ -526,6 +530,8 @@ function CandlestickChartComponent({
   data,
   symbol,
   viewportRevision,
+  accelerationClock,
+  accelerationSource,
   onLoadOlder,
   loadingOlder,
   tradeHistory,
@@ -605,6 +611,19 @@ function CandlestickChartComponent({
   const featureDefinitions = useFeatureDefinitions();
   const mbi2ChartMinutes=mbi2MinutesOf(data.slice(-65).map(b=>b.time));
   const indicators = useMemo(() => syncMbi2ChartHours(syncResearchIndicatorConfigs(migrateResearchIndicators(savedIndicators), featureDefinitions),featureDefinitions,mbi2ChartMinutes), [savedIndicators, featureDefinitions,mbi2ChartMinutes]);
+  const fiveMinuteAcceleration = mbi2ChartMinutes===5 && !displayTimestampTransform
+    && indicators.some(item=>item.type===CLEAN_ACCELERATION_1116_ID && item.enabled);
+  const lastSampleCandle = data.at(-1);
+  const chartEnd = (lastSampleCandle?.time??0) + ACCELERATION_DISPLAY_STEP;
+  const clock = accelerationClock ?? (lastSampleCandle?.cba2Closed===false ? lastSampleCandle.time : chartEnd);
+  const accelerationThrough = Math.floor(Math.min(clock,chartEnd,Date.now())/ACCELERATION_MINUTE)*ACCELERATION_MINUTE;
+  const accelerationFrom = Math.max(0,(data[0]?.time??0)-ACCELERATION_WARMUP_MINUTES*ACCELERATION_MINUTE);
+  const accelerationInput = useCleanAccelerationMinutes(
+    fiveMinuteAcceleration&&data.length ? rawSymbol??symbol : '',
+    accelerationFrom,accelerationThrough,timezone,accelerationSource,
+  );
+  const accelerationInputRef = useRef(accelerationInput);
+  accelerationInputRef.current = accelerationInput;
   useEffect(() => {
     registerAccountFeatureIndicators(featureDefinitions);
     Object.assign(COMPANION_KC_NAME, Object.fromEntries(Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName])));
@@ -2234,7 +2253,7 @@ function CandlestickChartComponent({
     const currentActive = new Set<string>();
 
     for (const ind of indicators) {
-      if (!ind.enabled || (ind.type === CLEAN_ACCELERATION_1116_ID && displayTimestampTransform)) continue;
+      if (!ind.enabled || (ind.type === CLEAN_ACCELERATION_1116_ID && !fiveMinuteAcceleration)) continue;
       if (ind.type.startsWith('FEATURE_') && !accountResearchIndicators(featureDefinitions).some(item => item.id === ind.type)) continue;
       const rawVisible = !customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false;
       if (rawVisible && !COMPANION_ONLY.has(ind.type)) currentActive.add(ind.type);
@@ -2251,7 +2270,10 @@ function CandlestickChartComponent({
       } else if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
           const paneId = chart.createIndicator(
-            { name: kcName, calcParams: indicatorCalcParams(kcName, ind) },
+            {
+              name: kcName, calcParams: indicatorCalcParams(kcName, ind),
+              ...(ind.type===CLEAN_ACCELERATION_1116_ID ? {extendData:accelerationInputRef.current} : {}),
+            },
             isOverlay,
             isOverlay ? { id: "candle_pane" } : { height: 80 },
           );
@@ -2328,7 +2350,12 @@ function CandlestickChartComponent({
       closeButtons.push(button);
     }
     return () => { closeButtons.forEach(button => button.remove()); };
-  }, [indicators, featureDefinitions, setIndicators, scheduleViewportReflow, displayTimestampTransform]);
+  }, [indicators, featureDefinitions, setIndicators, scheduleViewportReflow, fiveMinuteAcceleration]);
+
+  useEffect(()=>{
+    if (!activeIndicatorPanes.current.has(CLEAN_ACCELERATION_1116_ID)) return;
+    chartRef.current?.overrideIndicator({name:CLEAN_ACCELERATION_1116_INDICATOR,extendData:accelerationInput});
+  },[accelerationInput]);
 
   // Pane colors sampled from the supplied Binance light/dark references.
   // Neutral surfaces and clear gutters carry the hierarchy; charts keep their colors.
@@ -2634,6 +2661,8 @@ function areChartPropsEqual(prev: Props, next: Props) {
     sameDataShape &&
     prev.symbol === next.symbol &&
     prev.viewportRevision === next.viewportRevision &&
+    prev.accelerationClock === next.accelerationClock &&
+    prev.accelerationSource === next.accelerationSource &&
     prev.loadingOlder === next.loadingOlder &&
     prev.rawSymbol === next.rawSymbol &&
     prev.pricePrecision === next.pricePrecision &&

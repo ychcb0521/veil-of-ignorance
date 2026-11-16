@@ -34,7 +34,7 @@ function fixture(options: {open?: boolean; fraction?: number; fillPrice?: number
 }
 
 describe('mirror campaign board and consistent accounting', () => {
-  it('shows the configured line and the frozen gap exit even without a mirror fill', () => {
+  it('omits the duplicated stop summary while retaining the frozen risk and actual exit', () => {
     const { campaign } = fixture({ noFill: true, exitPrice: 95 });
     const comparison = campaign.comparison!;
     comparison.monitorPlan = makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, []);
@@ -42,8 +42,9 @@ describe('mirror campaign board and consistent accounting', () => {
     Object.assign(comparison.sellEvidence!, { triggerAtOpen: true,
       triggerCause: { id: STATIC_DRAWDOWN_SELL_VERSION, kind: 'sell-static-drawdown', threshold: 3, direction: '>=' } });
     render(<QualityMirrorBoard campaign={campaign}/>);
-    expect(screen.getByTestId('quality-chart-static-stop')).toHaveTextContent('3% @ 97');
-    expect(screen.getByTestId('quality-chart-static-stop')).toHaveTextContent('跳空按开盘价成交');
+    expect(screen.queryByTestId('quality-chart-static-stop')).not.toBeInTheDocument();
+    expect(comparison.sellEvidence?.triggerCause).toMatchObject({kind:'sell-static-drawdown',threshold:3});
+    expect(comparison.sellEvidence?.triggerAtOpen).toBe(true);
     expect(campaignFrozenPricePath(campaign)).toMatchObject({ staticDrawdown: 5, drawdown: 6 });
     cleanup();
   });

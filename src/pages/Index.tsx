@@ -2493,7 +2493,7 @@ const Index = () => {
                               tradeHistory={timeDirection === -1 ? EMPTY_TRADE_HISTORY : tradeHistory}
                               displayTimestampTransform={reverseAxisTransform}
                               isRunning={activeCoinState.status !== "stopped"}
-                              currentSimulatedTime={activeCoinState.time}
+                              currentSimulatedTime={effectiveSimTime}
                               mainInterval={interval}
                               onMainIntervalChange={handleIntervalChange}
                               speed={activeCoinState.speed}
