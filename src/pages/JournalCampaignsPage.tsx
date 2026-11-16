@@ -1948,7 +1948,9 @@ const CampaignCard = memo(function CampaignCard({
               {campaign.direction === 'main_short' ? '主空' : '主多'}
             </span>
             <span className={`${CARD_CHIP} bg-muted text-[10px] font-medium text-muted-foreground`}>{campaign.symbol}</span>
-            {campaign.comparison?.category && <span data-testid="campaign-detect-category" title="探测信号类别：这条信号命中的探测算法组合" className={`${CARD_CHIP} border border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-700 dark:text-sky-300`}>{campaign.comparison.category}</span>}
+            {campaign.comparison?.category && campaign.comparison.section !== 'instant' && (
+              <span data-testid="campaign-detect-category" title="探测信号类别：这条信号命中的探测算法组合" className={`${CARD_CHIP} border border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-700 dark:text-sky-300`}>{campaign.comparison.category}</span>
+            )}
             {/* 杠杆紧跟标的，与交易所的写法一致；取值与「杠杆倍数」排序同一个口径。 */}
             {cardLeverage > 0 && (
               <span
