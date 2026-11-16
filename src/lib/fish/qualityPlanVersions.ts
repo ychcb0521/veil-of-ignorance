@@ -1,6 +1,6 @@
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
 import { expressionConditions } from './preEntryThreeStage';
-import {DBL5_1115_POSITION_RACE_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_DISPLAY_NAME,IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
+import {DBL5_1115_POSITION_RACE_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_DISPLAY_NAME,IMPULSE_1115_POSITION_LABEL,dbl5GuardPlusParams} from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
@@ -196,7 +196,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
       rules.forEach((round, index) => {
         const version=round.source==='structure'?round.structure?.guardPlusVersion:undefined;
         if(version)add(`addition-guard-plus-${lane}-${index+1}`,`第 ${index+1} 次加仓 · ${lane==='primary'?'主分支':'进攻备选'}`,DBL5_GUARD_PLUS_LABEL,
-          version+' · 参数 #'+shortFishHash(JSON.stringify([round.structure?.definition.DBL5_config,DBL5_GUARD_PLUS_PARAMS])),
+          version+' · 参数 #'+shortFishHash(JSON.stringify([round.structure?.definition.DBL5_config,dbl5GuardPlusParams(round.structure?.guardPlusImpulseBufferAtr)])),
           boxAlgorithmVersion(version)?.summary);
       });
     };

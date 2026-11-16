@@ -7,7 +7,7 @@ import { additionMetricTime } from '@/lib/fish/qualityAdditionMetric';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
 import { defaultQualityAddition, type QualityAdditionRule } from '@/lib/fish/qualityAddition';
-import { DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
+import { DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
 import type {VetoStagesDraft} from '../FishQualityVetoStagesEditor';
 afterEach(cleanup);
@@ -386,13 +386,35 @@ it('keeps a saved combined 1115 position until the draft is explicitly changed',
  const combined=screen.getByRole('checkbox',{name:'DBL-5-防守线+急拉线-1115'});
  expect(combined).toBeChecked();
  expect(screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115'})).toBeEnabled();
+ expect(screen.getByTestId('addition-defense-settings')).toHaveTextContent('防守线');
+ expect(screen.getByTestId('addition-combined-impulse-settings')).toHaveTextContent('急拉线');
+ expect(screen.getByLabelText('组合版急拉冗余 ATR')).toHaveValue(.5);
  expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
+ expect(save().structure.guardPlusImpulseBufferAtr).toBeUndefined();
  expect(save().impulse1115Position).toBeUndefined();
  fireEvent.click(screen.getByLabelText('DBL-5-防守线',{exact:true}));
  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
  expect(save().structure.guardPlusVersion).toBeUndefined();
  expect(save().impulse1115Position.version).toBe(IMPULSE_1115_CONFIGURABLE_K_VERSION);
  expect(legacy.structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
+});
+
+it('stores the combo’s adjustable impulse buffer separately from standalone and only in the edited round',()=>{
+ render(<Editor/>);
+ fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线+急拉线-1115'}));
+ fireEvent.change(screen.getByLabelText('组合版急拉冗余 ATR'),{target:{value:'1.25'}});
+ const combo=save() as QualityAdditionRule;
+ expect(combo.rounds?.[0].structure).toMatchObject({
+  guardPlusVersion:DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,guardPlusImpulseBufferAtr:1.25,
+ });
+ expect(combo.impulse1115Position).toBeUndefined();
+ expect(combo.rounds?.[1].structure?.guardPlusImpulseBufferAtr).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(combo),BUILTIN_FEATURES)).toEqual(combo);
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115'}));
+ expect(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR')).toHaveValue(.5);
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线'}));
+ expect(save().structure.guardPlusImpulseBufferAtr).toBeUndefined();
 });
 
 it('allows the combined version alongside independent 1115 and restores both choices',()=>{

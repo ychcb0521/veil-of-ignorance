@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {computeDbl5} from '../dbl5m';
-import {DBL5_GUARD_PLUS_VERSION,Dbl5GuardPlusEngine,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_POSITION_VERSION} from '../dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,DBL5_GUARD_PLUS_VERSION,Dbl5GuardPlusEngine,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_POSITION_VERSION} from '../dbl5GuardPlus';
 import {compileFeatureFormula,DBL5_DEF,DBL5_GUARD_PLUS_DEF,evaluateOnBars} from '../deepDig/features';
 import {createStructureAdditionReader,defaultStructureAddition,structureAdditionK,type StructureAdditionRule} from '../fish/qualityAdditionStructure';
 import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
@@ -52,6 +52,19 @@ describe('DBL-5防守线+急拉-1115',()=>{
   expect(next.early_impulse_event).toBeNull();
   expect(next.impulse_guard_value).toBe(99.45);
   expect(next.active_impulse).toEqual(hit.early_impulse_event);
+ });
+ it('keeps v1 outputs when no override is supplied and binds v2 checkpoints to the exact impulse buffer',()=>{
+  const adjustable=new Dbl5GuardPlusEngine({...options,impulseBufferAtr:.25});
+  const prefix=warm().map(row=>adjustable.push(row));
+  expect(prefix.map(row=>row?.base)).toEqual(replay(warm()).map(row=>row.base));
+  const checkpoint=adjustable.checkpoint();
+  expect(checkpoint).toMatchObject({algorithm_version:DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,effective_parameters:{bufferAtr:.25}});
+  expect(()=>new Dbl5GuardPlusEngine({...options,checkpoint})).toThrow('检查点');
+  expect(()=>new Dbl5GuardPlusEngine({...options,checkpoint,impulseBufferAtr:.75})).toThrow('检查点');
+  const resumed=new Dbl5GuardPlusEngine({...options,checkpoint,impulseBufferAtr:.25});
+  const actual=adjustable.push(impulse())!;
+  expect(resumed.push(impulse())).toEqual(actual);
+  expect(actual.plus.impulse_guard_value).toBeGreaterThan(events([...warm(),impulse()])[0].impulse_guard_value);
  });
  it('rejects steady bodies, recurring up gaps, pure jumps and high-volume upper wicks',()=>{
   const steady=(gap:number)=>Array.from({length:50},(_,i)=>{
@@ -217,6 +230,16 @@ describe('DBL-5防守线+急拉-1115',()=>{
   const configurable={version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:.25,skipNative:true} as const;
   const early=split.fills[0].structureEvidence!.guardPlus!.early_impulse_event!;
   const adjustedK=Math.floor((early.impulse_origin_low-.25*early.frozen_atr)*100)/100;
+  const customizedCombo:StructureAdditionRule={...rule,guardPlusVersion:DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,guardPlusImpulseBufferAtr:.25};
+  const comboMain=await findCalculatorAdditions({...options,structure:customizedCombo});
+  expect(comboMain.fills).toHaveLength(1);
+  expect(comboMain.fills[0]).toMatchObject({at,sizing:{support:adjustedK},structureEvidence:{
+   algorithmVersion:DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,event:'IMPULSE_EARLY',
+   guardPlus:{guard_source:'IMPULSE',effective_parameters:{bufferAtr:.25}},
+  }});
+  const comboAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',
+   alternative:{candidates:[],structure:customizedCombo}}]});
+  expect(comboAttack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:adjustedK}});
   const adjustable=await findCalculatorAdditions({...options,impulse1115Position:configurable});
   expect(adjustable.fills[0]).toMatchObject({at,sizing:{support:adjustedK},structureEvidence:{
    algorithmVersion:IMPULSE_1115_CONFIGURABLE_K_VERSION,basePrice:early.impulse_origin_low,buffer:.25,k:adjustedK,
@@ -237,7 +260,13 @@ describe('DBL-5防守线+急拉-1115',()=>{
   expect(widened.fills[0].structureEvidence).toMatchObject({k:99.37,widenedFrom:adjustedK,minDistancePct:2});
   const calm=async(_row:TradeSignal,from:number,to:number)=>[...warm(),bar(20,100,100.2,99.95,100)].filter(row=>row.openTime>=from&&row.openTime<to);
   const notAnImpulse=createStructureAdditionReader({...options,load:Object.assign(calm,{turingInitialization:{version:'turing-origin-v1' as const,startMs:START}})});
-  expect(await notAnImpulse({...defaultStructureAddition(),trigger:'confirm',kSource:'guard'},entry,at,[])).toMatchObject({at:START+20*STEP});
+  const native=await notAnImpulse({...defaultStructureAddition(),trigger:'confirm',kSource:'guard'},entry,at,[]);
+  expect(native).toMatchObject({at:START+20*STEP});
+  const defense=await notAnImpulse({...customizedCombo,trigger:'confirm',buffer:0},entry,at,[]);
+  expect(defense).toMatchObject({at:native?.at,structureEvidence:{
+   event:native?.structureEvidence?.event,basePrice:native?.structureEvidence?.basePrice,
+   algorithmVersion:DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,guardPlus:{guard_source:'BASE'},
+  }});
   expect(await notAnImpulse.impulse1115(entry,at,[])).toBeUndefined();
  });
  it('gates real forwarding on the executor capability and the exact next close',()=>{

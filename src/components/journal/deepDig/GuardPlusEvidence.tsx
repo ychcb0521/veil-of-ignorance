@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_PARAMS, type Dbl5GuardPlusRow, type GuardPlusEnd, type GuardPlusPhase } from '@/lib/dbl5GuardPlus';
+import { DBL5_GUARD_PLUS_LABEL, dbl5GuardPlusParams, type Dbl5GuardPlusRow, type GuardPlusEnd, type GuardPlusPhase } from '@/lib/dbl5GuardPlus';
 import { dbl5StepPath } from '@/lib/dbl5mChart';
 import type { DeepDigData } from '@/lib/deepDig/analysis';
 import type { DeepDigSeries } from '@/lib/deepDig/series';
@@ -16,9 +16,9 @@ const endLabel: Record<GuardPlusEnd, string> = {
 const sourceLabel = {BASE:'原防守线', IMPULSE:'急拉', BOTH:'两线同价', NONE:'无有效参考'};
 const value = (price: number | null | undefined) => price == null ? '—' : Number(price.toPrecision(12));
 
-export function GuardPlusEvidence({row}: {row?: Dbl5GuardPlusRow | null}) {
+export function GuardPlusEvidence({row,impulseBufferAtr}: {row?: Dbl5GuardPlusRow | null;impulseBufferAtr?:number}) {
   const hit = row?.early_impulse_event ?? row?.active_impulse ?? row?.impulse_broken_event ?? row?.impulse_expired_event;
-  const p = DBL5_GUARD_PLUS_PARAMS;
+  const p = row?.effective_parameters ?? dbl5GuardPlusParams(impulseBufferAtr);
   const outcome = row?.ended_segment?.reason ?? row?.last_impulse_end?.reason;
   return <div className="space-y-1.5 text-[11px] leading-relaxed" data-testid="guard-plus-evidence">
     <p>急拉起点参考，尚不代表回踩验证。</p>
@@ -35,7 +35,7 @@ export function GuardPlusEvidence({row}: {row?: Dbl5GuardPlusRow | null}) {
       <summary className="cursor-pointer text-muted-foreground">公式与有效参数</summary>
       <p>仅用已收盘 5m。前置 ATR({p.atrPeriod}) 冻结，参考最近最多 {p.referenceBars-1} 个正向收盘增量（下跌计 0），权重半衰期 {p.halfLifeBars} 根。</p>
       <p>前置收盘至当前位移 ≥ {p.displacementAtr} ATR，每根推进 ≥ max({p.speedAtr} ATR, {p.speedMultiple} × 常态)，净实体 ÷ 总真实波幅 ≥ {p.efficiency}，保留涨幅 ≥ {p.retention}，收盘高过开盘、前收盘及起点前三根最高价。</p>
-      <p>整理用连续 {p.pauseBars} 根的总范围 ≤ {p.pauseAtr} ATR；最多观察 {p.windowBars} 根，候选或阶段超过 {p.maxExtensionAtr} ATR 拦截。急拉参考＝窗口最低价 − {p.bufferAtr} × 前置 ATR，向下取整到报价格点。一次收盘严格跌破即失效，从起点满 {p.expiryMinutes} 分钟到期。相对成交量只提供辅助读数。</p>
+      <p>整理用连续 {p.pauseBars} 根的总范围 ≤ {p.pauseAtr} ATR；最多观察 {p.windowBars} 根，候选或阶段超过 {p.maxExtensionAtr} ATR 拦截。急拉参考＝窗口最低价 − {Number.isFinite(p.bufferAtr)?p.bufferAtr:'所设倍数'} × 前置 ATR，向下取整到报价格点。一次收盘严格跌破即失效，从起点满 {p.expiryMinutes} 分钟到期。相对成交量只提供辅助读数。</p>
       {hit && <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(hit,null,2)}</pre>}
     </details>
   </div>;

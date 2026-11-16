@@ -8,7 +8,7 @@
  *  3. src/lib/__tests__/boxAlgorithmVersions.test.ts 用固定 K 线锁住每个版本的输出；那里的期望值不能改，只能为新版本另加。
  */
 import type { StructureAdditionRule } from './qualityAdditionStructure';
-import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
+import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import { DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
 
 export type BoxAlgorithm = StructureAdditionRule['algorithm'];
@@ -59,6 +59,9 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
   { id: DBL5_1115_POSITION_RACE_VERSION, algorithm: 'dbl5', layer: 'guard', label: '组合版与独立急拉并选', since: '2026-11-16',
     summary: '无 BTC 依赖。组合版和独立急拉分别按各自已冻结的规则评估加仓。',
     rules: ['同一轮只成交一次，较早达标者优先，同分钟先评估组合版。', '使用成交位置对应的 K、最小距离与止损执行规则。'] },
+  { id: DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, algorithm: 'dbl5', layer: 'guard', label: `${DBL5_GUARD_PLUS_DISPLAY_NAME} · 可调急拉 ATR`, since: '2026-11-16',
+    summary: '无 BTC 依赖。原组合版的首次急拉判定和防守线不变，急拉参考使用自定的前置 ATR 冗余。',
+    rules: ['急拉参考＝起涨低点 − 所设倍数 × 急拉前的 5 分钟 ATR(14)，按报价步长向下取整。', '与防守线按原组合规则选取有效参考，使用该参考的 K 和收盘确认方式。'] },
 ]);
 export const CURRENT_BOX_VERSION: Readonly<Record<BoxAlgorithm, string>> = Object.freeze({ dbl5: 'dbl-5-v2', sbs5m: 'sbs-5m-v1' });
 export const CURRENT_GUARD_VERSION = 'dbl5-guard-v1';

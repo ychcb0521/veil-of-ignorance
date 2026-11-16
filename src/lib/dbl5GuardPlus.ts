@@ -4,6 +4,8 @@ import {
 } from './dbl5m';
 
 export const DBL5_GUARD_PLUS_VERSION = 'dbl5-guard-impulse-1115-v1';
+export const DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION = 'dbl5-guard-impulse-1115-v2';
+export type Dbl5GuardPlusVersion = typeof DBL5_GUARD_PLUS_VERSION | typeof DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION;
 export const DBL5_GUARD_PLUS_LABEL = 'DBL-5防守线+急拉-1115';
 export const IMPULSE_1115_POSITION_VERSION = 'holding-impulse-1115-position-v1';
 export const IMPULSE_1115_CONFIGURABLE_K_VERSION = 'holding-impulse-1115-position-v2';
@@ -23,6 +25,9 @@ export const DBL5_GUARD_PLUS_PARAMS = Object.freeze({
   maxExtensionAtr: 3, pauseBars: 2, pauseAtr: 1, bufferAtr: 0.5, expiryMinutes: 360, freshnessBars: 1,
 });
 const P = DBL5_GUARD_PLUS_PARAMS;
+type Dbl5GuardPlusParams = Readonly<Omit<typeof P, 'bufferAtr'> & {bufferAtr:number}>;
+export const dbl5GuardPlusParams = (impulseBufferAtr?: number): Dbl5GuardPlusParams =>
+  impulseBufferAtr === undefined ? P : Object.freeze({...P, bufferAtr:impulseBufferAtr});
 
 export type GuardPlusPhase = 'NO_CONTEXT' | 'READY' | 'WATCH' | 'EARLY' | 'ACTIVE' | 'OVEREXTENDED' | 'LATE' | 'BROKEN';
 export type GuardPlusSource = 'BASE' | 'IMPULSE' | 'BOTH' | 'NONE';
@@ -49,8 +54,8 @@ export interface GuardPlusImpulse {
   local_breakout_price: number;
   relative_volume_at_detection: number | null;
   volume_basis: 'base-volume' | null;
-  algorithm_version: typeof DBL5_GUARD_PLUS_VERSION;
-  effective_parameters: typeof DBL5_GUARD_PLUS_PARAMS;
+  algorithm_version: Dbl5GuardPlusVersion;
+  effective_parameters: Dbl5GuardPlusParams;
 }
 
 interface EndedLine {
@@ -90,8 +95,8 @@ export interface Dbl5GuardPlusRow {
   distance_to_guard_bps: number | null;
   reason: 'DATA_GAP' | 'DATA_INVALID' | 'PHASE_UNKNOWN' | 'INSUFFICIENT_HISTORY' | 'ATR_UNAVAILABLE' | 'NO_MOTION' | 'NO_BREAKOUT' | 'INVALID_GUARD' | null;
   available_at: number;
-  algorithm_version: typeof DBL5_GUARD_PLUS_VERSION;
-  effective_parameters: typeof DBL5_GUARD_PLUS_PARAMS;
+  algorithm_version: Dbl5GuardPlusVersion;
+  effective_parameters: Dbl5GuardPlusParams;
 }
 
 interface Candle {
@@ -132,8 +137,8 @@ interface PlusState {
 export interface Dbl5GuardPlusCheckpoint {
   checkpoint_version: 1;
   identity: string;
-  algorithm_version: typeof DBL5_GUARD_PLUS_VERSION;
-  effective_parameters: typeof DBL5_GUARD_PLUS_PARAMS;
+  algorithm_version: Dbl5GuardPlusVersion;
+  effective_parameters: Dbl5GuardPlusParams;
   base: Dbl5Checkpoint;
   state: PlusState;
 }
@@ -183,19 +188,26 @@ function selectReference(base: number | null, impulse: number | null): {price: n
 export class Dbl5GuardPlusEngine {
   readonly base: Dbl5Engine;
   private readonly identity: string;
+  private readonly version: Dbl5GuardPlusVersion;
+  private readonly parameters: Dbl5GuardPlusParams;
   private state: PlusState;
 
-  constructor(options: Omit<Dbl5Options, 'checkpoint'> & {checkpoint?: Dbl5GuardPlusCheckpoint}) {
-    const {checkpoint, ...baseOptions} = options;
+  constructor(options: Omit<Dbl5Options, 'checkpoint'> & {checkpoint?: Dbl5GuardPlusCheckpoint; impulseBufferAtr?: number}) {
+    const {checkpoint, impulseBufferAtr, ...baseOptions} = options;
+    if (impulseBufferAtr !== undefined && (!Number.isFinite(impulseBufferAtr) || impulseBufferAtr < 0)) {
+      throw Error('组合版的急拉冗余须为不小于 0 的有限 ATR 倍数');
+    }
+    this.version = impulseBufferAtr === undefined ? DBL5_GUARD_PLUS_VERSION : DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION;
+    this.parameters = dbl5GuardPlusParams(impulseBufferAtr);
     this.base = new Dbl5Engine({...baseOptions, checkpoint: checkpoint?.base});
     if (dbl5GuardVersion(this.base.config) !== DBL5_GUARD_VERSION) throw Error('急拉-1115 的基线须为防守线 v1');
     const native = this.base;
     this.identity = dbl5Hash([
-      DBL5_GUARD_PLUS_VERSION, P, native.config_hash, native.symbol, native.market, native.data_source,
+      this.version, this.parameters, native.config_hash, native.symbol, native.market, native.data_source,
       native.data_version, native.initialization_id, native.initialization_start,
     ]);
-    if (checkpoint && (checkpoint.checkpoint_version !== 1 || checkpoint.algorithm_version !== DBL5_GUARD_PLUS_VERSION ||
-      checkpoint.identity !== this.identity || dbl5Hash(checkpoint.effective_parameters) !== dbl5Hash(P))) {
+    if (checkpoint && (checkpoint.checkpoint_version !== 1 || checkpoint.algorithm_version !== this.version ||
+      checkpoint.identity !== this.identity || dbl5Hash(checkpoint.effective_parameters) !== dbl5Hash(this.parameters))) {
       throw Error('急拉-1115 检查点的数据版本、参数或初始化身份不一致');
     }
     this.state = checkpoint ? structuredClone(checkpoint.state) :
@@ -204,8 +216,8 @@ export class Dbl5GuardPlusEngine {
 
   checkpoint(): Dbl5GuardPlusCheckpoint {
     return {
-      checkpoint_version: 1, identity: this.identity, algorithm_version: DBL5_GUARD_PLUS_VERSION,
-      effective_parameters: P, base: this.base.checkpoint(), state: structuredClone(this.state),
+      checkpoint_version: 1, identity: this.identity, algorithm_version: this.version,
+      effective_parameters: this.parameters, base: this.base.checkpoint(), state: structuredClone(this.state),
     };
   }
 
@@ -330,7 +342,7 @@ export class Dbl5GuardPlusEngine {
         expired ? {at, reason:'IMPULSE_EXPIRED', impulse:expired} : previous?.last_impulse_end ?? null,
       current_phase_extension: extension, impulse_age_minutes: active ? (at - active.detected_at) / 60_000 : null,
       distance_to_guard_bps: selected.price === null ? null : (Number(close) / selected.price - 1) * 10_000,
-      reason, available_at: at, algorithm_version: DBL5_GUARD_PLUS_VERSION, effective_parameters: P,
+      reason, available_at: at, algorithm_version: this.version, effective_parameters: this.parameters,
     };
   }
 
@@ -368,7 +380,7 @@ export class Dbl5GuardPlusEngine {
         break;
       }
       const origin = Math.min(...window.map(bar => bar.low));
-      const guard = Math.floor(origin - P.bufferAtr * setup.atr);
+      const guard = Math.floor(origin - this.parameters.bufferAtr * setup.atr);
       if (guard < 1) {
         this.lock(phase, at, 'LATE');
         return {early: null, reason: 'INVALID_GUARD'};
@@ -385,7 +397,7 @@ export class Dbl5GuardPlusEngine {
         relative_speed_threshold_at_detection: measure.minimumSpeed, body_efficiency_at_detection: measure.efficiency,
         advance_retention_at_detection: measure.retention, local_breakout_price: toPrice(setup.barrier + 1),
         relative_volume_at_detection: relativeVolume, volume_basis: relativeVolume === null ? null : 'base-volume',
-        algorithm_version: DBL5_GUARD_PLUS_VERSION, effective_parameters: P,
+        algorithm_version: this.version, effective_parameters: this.parameters,
       } satisfies GuardPlusImpulse);
       this.lock(phase, at, 'EARLY');
       if (!this.state.active || early.impulse_guard_value > this.state.active.impulse_guard_value) this.state.active = early;

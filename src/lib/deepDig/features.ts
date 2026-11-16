@@ -1269,7 +1269,10 @@ export function computeFeatureValues(
 /** 在一串 K 线上逐根算公式：带回最后一句与每个起了名的变量的整条序列（会抛 FormulaError）。 */
 /** Only the two native engines read strict amounts; shared legacy formula inputs remain unchanged. */
 function nativeAmountBar(bar:ResearchBar):ResearchBar{return {...bar,...(bar.ATI6H_quoteVolume!==undefined?{quoteVolume:bar.ATI6H_quoteVolume}:{}),...(bar.ATI6H_takerBuyQuoteVolume!==undefined?{takerBuyQuoteVolume:bar.ATI6H_takerBuyQuoteVolume}:{})};}
-export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef & {DBL5P_checkpoint?: Dbl5GuardPlusCheckpoint} = {}, cache?: FormulaEvaluationCache) {
+export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef & {
+  DBL5P_checkpoint?: Dbl5GuardPlusCheckpoint;
+  DBL5P_impulseBufferAtr?: number;
+} = {}, cache?: FormulaEvaluationCache) {
   if (compiled.usesMbi || params.id === 'mbi') validateMbiParams(mbiNOf(params), mbiZ0Of(params));
   if(compiled.usesMbi2||featureUsesMbi2(params))validateMbi2Params(params,intervalMs(intervalOf(params))/60000);
   const keys = ['T','C','O','H','L','Q','B','S','E','CB'] as const;
@@ -1338,7 +1341,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
     };
     if(compiled.usesDbl5GuardPlus){
       if(params.DBL5_checkpoint&&!params.DBL5P_checkpoint)throw Error('急拉-1115 需要自己的检查点或完整顺序回放');
-      const engine=new Dbl5GuardPlusEngine({...options,checkpoint:params.DBL5P_checkpoint});
+      const engine=new Dbl5GuardPlusEngine({...options,checkpoint:params.DBL5P_checkpoint,impulseBufferAtr:params.DBL5P_impulseBufferAtr});
       const points=prepared.flatMap(bar=>{const point=engine.push(bar);return point?[point]:[];});
       DBL5_details=points.map(point=>point.base);
       DBL5P_details=points.map(point=>point.plus);

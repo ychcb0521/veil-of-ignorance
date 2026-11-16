@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { backfillPlanVersions, comparePlanVersions, freezeQualityPlan, freezeSavedPlans, planVersionChanges, qualityPlanVersions, refreezeSyncedFormulas, versionTags } from '../qualityPlanVersions';
 import { qualityPlanFromTemplate, saveQualityPlanTemplate } from '../qualityPlanTemplates';
 import { newQualityStudy, type QualityGroup } from '../quality';
-import { defaultStructureAddition } from '../qualityAdditionStructure';
-import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION } from '@/lib/dbl5GuardPlus';
+import { defaultStructureAddition, type StructureAdditionRule } from '../qualityAdditionStructure';
+import type { QualityAdditionRoundRule } from '../qualityAddition';
+import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION } from '@/lib/dbl5GuardPlus';
+import { shortFishHash } from '../algorithm';
 const snap = (key: string) => ({ featureId: 'state', featureShort: '状态', definitionKey: key, statistic: 'raw', interval: '5m', scale: 1, threshold: 0, direction: '<', average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: 0 }) as unknown as QualityGroup['snapshot'];
 const structure = { ...defaultStructureAddition('dbl5'), kSource: 'current' as const, buffer: .1 };
 const plan = { id: 'p1', label: '组合算法1', metric: 'state', snapshot: snap('formula-A'), execution: 'intrabar-1m', definitionSource: 'account', vetoFill: 'stop',
@@ -15,7 +17,7 @@ const plan = { id: 'p1', label: '组合算法1', metric: 'state', snapshot: snap
 
 describe('plan version manifest', () => {
   it('freezes parallel 1115 selection only when the combined and independent positions are both active', () => {
-    const combined = { ...structure, kSource: 'guard' as const, guardPlusVersion: DBL5_GUARD_PLUS_VERSION };
+    const combined: StructureAdditionRule = { ...structure, kSource: 'guard', guardPlusVersion: DBL5_GUARD_PLUS_VERSION };
     const saved = freezeQualityPlan({ ...plan, addition: { ...plan.addition!, structure: combined, maxRounds: 1,
       rounds: [{ source: 'structure', structure: combined, stricterPct: 10 }] } });
     const before = structuredClone(saved);
@@ -27,6 +29,24 @@ describe('plan version manifest', () => {
     expect(planVersionChanges(addIndependent)).toEqual([]);
     expect(planVersionChanges(saved)).toEqual([]);
     expect(saved).toEqual(before);
+  });
+  it('freezes the custom combo ATR while retaining the v1 parameter hash', () => {
+    const combined: StructureAdditionRule = { ...structure, kSource: 'guard', guardPlusVersion: DBL5_GUARD_PLUS_VERSION };
+    const legacy = freezeQualityPlan({ ...plan, addition: { ...plan.addition!, structure: combined, maxRounds: 1,
+      rounds: [{ source: 'structure', structure: combined, stricterPct: 10 }] } });
+    const findCombo = (group: QualityGroup) => group.frozenVersions!.find(entry => entry.key === 'addition-guard-plus-primary-1')?.version;
+    const priorHash = shortFishHash(JSON.stringify([legacy.addition!.rounds![0].structure!.definition.DBL5_config, DBL5_GUARD_PLUS_PARAMS]));
+    expect(findCombo(legacy)).toBe(DBL5_GUARD_PLUS_VERSION + ' · 参数 #' + priorHash);
+    expect(planVersionChanges(legacy)).toEqual([]);
+    const rules = legacy.addition!.rounds!.map<QualityAdditionRoundRule>(round => ({ ...round, structure: {
+      ...round.structure!, guardPlusVersion: DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, guardPlusImpulseBufferAtr: 0.75,
+    } }));
+    const customized = freezeQualityPlan({ ...legacy, addition: { ...legacy.addition!, structure: rules[0].structure, rounds: rules } });
+    expect(findCombo(customized)).toContain(DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION);
+    expect(planVersionChanges(customized)).toEqual([]);
+    const edited = structuredClone(customized);
+    edited.addition!.rounds![0].structure!.guardPlusImpulseBufferAtr = 1;
+    expect(planVersionChanges(edited).map(change => change.key)).toContain('addition-guard-plus-primary-1');
   });
   it('freezes independent history scope without rewriting the old template manifest',()=>{
     const saved=freezeQualityPlan(plan),before=structuredClone(saved),wide=freezeQualityPlan({...saved,addition:{...saved.addition!,entryVetoes:[{kind:'pullback',enabled:true,pct:10,historyHours:6}]}});

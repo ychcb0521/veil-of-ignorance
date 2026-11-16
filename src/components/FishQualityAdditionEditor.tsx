@@ -2,7 +2,7 @@ import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
-import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
 import {FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
 import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
@@ -136,7 +136,10 @@ function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef
  if(d.source==='structure'){
   rule.structure={...structuredClone(d.structure),buffer:d.structureBuffer.trim()?Number(d.structureBuffer):NaN};
   if(!guardTrendOnly(rule.structure))delete rule.structure.guardTrendOnly;
-  if(rule.structure.kSource!=='guard')delete rule.structure.guardPlusVersion;
+  if(rule.structure.kSource!=='guard'){
+   delete rule.structure.guardPlusVersion;
+   delete rule.structure.guardPlusImpulseBufferAtr;
+  }
  }
  const build=(rows:ConditionDraft[])=>rows.flatMap(row=>{
   try {
@@ -293,10 +296,11 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   if(useCombined&&checked){
    const original=d.structure.algorithm==='dbl5'?d.structure:defaultStructureAddition('dbl5',defs);
    const structure=selectStructureGuardVersion({...original,kSource:'guard'},CURRENT_GUARD_VERSION);
-   patch({...selection,source:'structure',structure:{...structure,guardPlusVersion:DBL5_GUARD_PLUS_VERSION}});
+   patch({...selection,source:'structure',structure:{...structure,guardPlusVersion:structure.guardPlusVersion??DBL5_GUARD_PLUS_VERSION}});
   }else if(combined){
    const structure={...d.structure};
    delete structure.guardPlusVersion;
+   delete structure.guardPlusImpulseBufferAtr;
    patch({...selection,structure});
   }else{
    patch(selection);
@@ -443,10 +447,13 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_1115_DISPLAY_NAME}</span>
      </label>
     </div>
-    <div className={`grid items-start gap-2${nativeActive&&d.impulse1115?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
+    <div className={`grid items-start gap-2${nativeActive&&d.impulse1115&&!combined?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
     {nativeActive&&
-    <div className="min-w-0 space-y-2 rounded border border-border/60 p-2 [container-type:inline-size]">
+    <div className="min-w-0 space-y-2 rounded border border-border/60 p-2">
    <h6 className="font-medium">{nativePositionName}参数</h6>
+   <div className={`grid items-start gap-3${combined?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
+   <div className="min-w-0 space-y-1 [container-type:inline-size]" data-testid="addition-defense-settings">
+   {combined&&<h6 className="font-medium">防守线</h6>}
    <div className="grid gap-x-3 gap-y-2 [@container(min-width:420px)]:grid-cols-2">
     <PositionSetting label="位置算法">
     <select aria-label="加仓条件来源" disabled={!d.enabled||combined} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{entryDistanceAtr:d.entryDistanceAtr||'2',supportOffsetAtr:d.supportOffsetAtr||'1.5'})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">指标 · S / T / K</option></select>
@@ -480,7 +487,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     <PositionSetting label="触发事件">
     <select aria-label="箱体加仓时机" className={field+' h-7 w-full'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select>
     </PositionSetting>
-    <PositionSetting label="K =">
+    <PositionSetting label={combined?'防守线 K':'K ='}>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-row">
       <select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-32 max-w-full'} disabled={!d.enabled||combined} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION?boxAlgorithmVersion(DBL5_RETEST_GUARD_VERSION)!.label:`${boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）`}</option>}</select>
       <span className="inline-flex items-center gap-1">−<input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={cell+' w-14'}/>{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</span>
@@ -501,11 +508,29 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       <label className="inline-flex max-w-full flex-wrap items-center gap-1">震荡期 区间底 −<span className="inline-flex items-center gap-1"><input aria-label="震荡期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_range_atr:v}}}});}} className={cell+' w-14'}/>ATR</span></label>
      </div>
     </PositionSetting></>}
-    <PositionSetting label="最小距离">
+    <PositionSetting label={combined?'两线共用 K 最小距离':'最小距离'}>
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<span className="inline-flex items-center gap-1"><input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%</span><span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div>
     </PositionSetting></>}
    </div>
-   {combined&&<GuardPlusEvidence/>}
+   </div>
+   {combined&&<section className="min-w-0 space-y-2 rounded border border-border/60 p-2" data-testid="addition-combined-impulse-settings">
+     <h6 className="font-medium">急拉线</h6>
+     <p className="text-muted-foreground">{DBL5_GUARD_PLUS_PARAMS.pauseBars} 根 K 线紧凑整理后，观察接下来最多 {DBL5_GUARD_PLUS_PARAMS.windowBars} 根内的首次急拉和收盘突破。</p>
+     <label className="grid grid-cols-1 gap-1">
+       <span className="text-muted-foreground">急拉参考冗余</span>
+       <span className="flex flex-wrap items-center gap-1">
+         <input type="number" aria-label="组合版急拉冗余 ATR" min="0" step="any" disabled={!d.enabled} className={cell+' w-24 max-w-full'}
+           value={Number.isNaN(d.structure.guardPlusImpulseBufferAtr)?'':d.structure.guardPlusImpulseBufferAtr??DBL5_GUARD_PLUS_PARAMS.bufferAtr}
+           onChange={event=>patch({structure:{...d.structure,guardPlusVersion:DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,
+            guardPlusImpulseBufferAtr:event.currentTarget.valueAsNumber}})}/>
+         × ATR
+       </span>
+     </label>
+     <p className="text-muted-foreground">急拉参考＝起涨低点 − 所设倍数 × 急拉前的 5 分钟 ATR(14)。</p>
+     <GuardPlusEvidence impulseBufferAtr={d.structure.guardPlusImpulseBufferAtr}/>
+   </section>}
+   </div>
+   {combined&&<p className="text-muted-foreground" data-testid="addition-combined-position-rule">箱体事件与首次急拉都可触发。同一时点两条参考均有效时取较高的参考，再按该参考的规则计算 K。</p>}
    </div>}
    {d.impulse1115&&<FishQualityImpulsePositions impulse1115={d.impulse1115}
      inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={position=>patch(positions(d.impulse,position))}/>}

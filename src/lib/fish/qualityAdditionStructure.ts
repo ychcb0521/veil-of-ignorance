@@ -2,7 +2,7 @@ import { qualityHistoryFrom } from './qualityInitialization';
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
 import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,DBL5_GUARD_PLUS_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {assertStructureVersionsAvailable,CURRENT_GUARD_VERSION,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
-import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL,IMPULSE_1115_POSITION_VERSION,type Dbl5GuardPlusCheckpoint,type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL,IMPULSE_1115_POSITION_VERSION,dbl5GuardPlusParams,type Dbl5GuardPlusCheckpoint,type Dbl5GuardPlusRow,type Dbl5GuardPlusVersion} from '@/lib/dbl5GuardPlus';
 import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
 import {sbsParameters,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
@@ -23,7 +23,8 @@ export interface StructureAdditionRule {
  definition:DeepDigFeatureDef;
  /** 【用户要求】2026-11-02 保存时冻结的箱体算法版本（如 dbl-5-v2、dbl5-guard-v1）；缺省按定义公式第一行认出。 */
  versions?:StructureVersions;
- guardPlusVersion?:typeof DBL5_GUARD_PLUS_VERSION;
+ guardPlusVersion?:Dbl5GuardPlusVersion;
+ guardPlusImpulseBufferAtr?:number;
  /** 【用户要求】2026-11-03 K 最小距离：K 离加仓价 T 不足这个百分比时，按 T×(1−x%) 当 K（加仓量与止损都用它）；不填＝不限。 */
  minDistancePct?:number;
 }
@@ -82,16 +83,21 @@ export function validateStructureAddition(rule?:StructureAdditionRule):asserts r
  if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!=='5m'||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
  if(rule.algorithm==='dbl5')dbl5Parameters(def.DBL5_config);else sbsParameters(def.SBS5M_config);
  assertStructureVersionsAvailable(rule);
- if(rule.guardPlusVersion!==undefined&&(rule.guardPlusVersion!==DBL5_GUARD_PLUS_VERSION||
+ const configurableImpulse=rule.guardPlusVersion===DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION;
+ if(rule.guardPlusVersion!==undefined&&((rule.guardPlusVersion!==DBL5_GUARD_PLUS_VERSION&&!configurableImpulse)||
     rule.kSource!=='guard'||rule.algorithm!=='dbl5'||structureVersions(rule).guard!==CURRENT_GUARD_VERSION)){
   throw Error('急拉-1115 仅用于 DBL-5 防守线 v1 的加仓位置');
  }
+ if(configurableImpulse&&(!Number.isFinite(rule.guardPlusImpulseBufferAtr)||rule.guardPlusImpulseBufferAtr!<0)){
+  throw Error('组合版的急拉冗余须为不小于 0 的有限 ATR 倍数');
+ }
+ if(!configurableImpulse&&rule.guardPlusImpulseBufferAtr!==undefined)throw Error('组合版急拉冗余的执行版本不匹配');
 }
 /** 只用实线：仅在 K 取防守线时生效。 */
 export const guardTrendOnly=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendOnly'>)=>r.kSource==='guard'&&r.guardTrendOnly===true;
 /** K 基准的简称（标签、版本清单、导出共用）。 */
 export const structureKSourceLabel=(r:Pick<StructureAdditionRule,'kSource'|'guardTrendOnly'>)=>r.kSource==='current'?'新C':r.kSource==='guard'?(guardTrendOnly(r)?'防守线（只用实线）':'防守线'):'旧C';
-export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${structureVersions(r).guard}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(guardTrendOnly(r)?['guard-trend-only-v1']:[]),...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[]),...(r.guardPlusVersion?[[r.guardPlusVersion,DBL5_GUARD_PLUS_PARAMS]]:[])];
+export const structureAdditionIdentity=(r:StructureAdditionRule)=>['box-addition-v1',r.kSource==='current'?'k-from-current-box-v2':r.kSource==='guard'?`k-from-${structureVersions(r).guard}`:'k-from-previous-box-v2',r.algorithm,r.trigger,r.kBasis,r.bufferUnit,r.buffer,definitionKey(r.definition),DBL5_MARKET_RULE_VERSION,...(guardTrendOnly(r)?['guard-trend-only-v1']:[]),...(r.minDistancePct!=null?[['k-min-distance-v1',r.minDistancePct]]:[]),...(r.guardPlusVersion?[[r.guardPlusVersion,dbl5GuardPlusParams(r.guardPlusImpulseBufferAtr)]]:[])];
 export const structureAlgorithmLabel=(r:Pick<StructureAdditionRule,'algorithm'>)=>r.algorithm==='dbl5'?'DBL-5':'SBS-5M';
 export const additionStructureEvidenceLabel=(algorithm:StructureAdditionEvidence['algorithm'])=>algorithm==='impulse5m'?'急拉线 5m':structureAlgorithmLabel({algorithm});
 export const structureTriggerLabel=(r:Pick<StructureAdditionRule,'trigger'>)=>r.trigger==='raise'?'支撑抬高确认':r.trigger==='confirm'?'新箱体确认':'独立回踩成功';
@@ -147,8 +153,8 @@ function guardPlusEvidence(rule:StructureAdditionRule, base:Dbl5Row, plus:Dbl5Gu
   boxId:early?eventId:raw!.boxId,episodeId:base.episode_id,at:base.at,
   confirmedAt:early?early.detected_at:raw!.confirmedAt,supportPrice:early?price:raw!.supportPrice,
   upperPrice:base.darvas_5m_upper??price,nativeInvalidation:null,tickSize:base.tick_size,
-  algorithmVersion:impulseOnly?IMPULSE_1115_POSITION_VERSION:DBL5_GUARD_PLUS_VERSION,definitionKey:definitionKey(def),
-  parameters:{base:base.effective_parameters,impulse:DBL5_GUARD_PLUS_PARAMS},initializationStart:from,
+  algorithmVersion:impulseOnly?IMPULSE_1115_POSITION_VERSION:plus.algorithm_version,definitionKey:definitionKey(def),
+  parameters:{base:base.effective_parameters,impulse:plus.effective_parameters},initializationStart:from,
   dataChecksum:base.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:rule.kBasis,
   basePrice:price,bufferUnit:rule.bufferUnit,buffer:usesImpulse?0:rule.buffer,
   guardPrice:price,guardRegime:regime,guardCloses:closes,guardPlus:plus,
@@ -179,7 +185,7 @@ export function createStructureAdditionReader(o:ReaderOptions){
     while(cursor<cut){
      if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
      const to=Math.min(cut,cursor+500*STEP),bars=await o.load(o.row,cursor,to,plan,o.signal);validateFishBars(bars,to,(to-cursor)/STEP,STEP);
-     const result=evaluateOnBars(bars,compiled,{...def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:from,DBL5_initialization_id:`holding-addition:${from}`,DBL5_checkpoint:dbl,DBL5P_checkpoint:plusCheckpoint,SBS5M_symbol:o.row.symbol,SBS5M_initialization_id:`holding-addition:${from}`,SBS5M_checkpoint:sbs});
+     const result=evaluateOnBars(bars,compiled,{...def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:from,DBL5_initialization_id:`holding-addition:${from}`,DBL5_checkpoint:dbl,DBL5P_checkpoint:plusCheckpoint,DBL5P_impulseBufferAtr:rule.guardPlusImpulseBufferAtr,SBS5M_symbol:o.row.symbol,SBS5M_initialization_id:`holding-addition:${from}`,SBS5M_checkpoint:sbs});
      plusCheckpoint=result.DBL5P_checkpoint;dbl=plusCheckpoint?undefined:result.DBL5_checkpoint;sbs=result.SBS5M_checkpoint;
      const rows=rule.algorithm==='dbl5'?result.DBL5_details!:result.SBS5M_details!;
      const closes=new Map(bars.map(b=>[b.openTime+STEP,b.close])),sources=new Map(bars.map(b=>[b.openTime+STEP,b.PRS6H_data_source??'binance-usdm']));
