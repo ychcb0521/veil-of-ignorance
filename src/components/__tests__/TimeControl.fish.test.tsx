@@ -1,4 +1,5 @@
 import { renderFishQuality as render } from '@/test/renderFishQuality';
+import { openSignalLibrary } from '@/test/openSignalLibrary';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { TimeControl } from '@/components/TimeControl';
@@ -133,7 +134,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
   it('入口与信号库互斥，评分/删除独立，无加入信号库入口，不显示快照悬停框', async () => {
     render(control());
     const fishButton = screen.getByRole('button',{name:/^渔/});
-    expect(fishButton.previousElementSibling).toHaveTextContent('图灵杯');
+    expect(fishButton.previousElementSibling).toHaveAccessibleName('信号库');
     expect(fishButton).toHaveTextContent(/^渔$/);
     fireEvent.click(fishButton);
     const panel = screen.getByTestId('fish-old');
@@ -144,7 +145,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(mocks.push).toHaveBeenLastCalledWith('fish-owner','fish_signals_v1',expect.any(Array));
     expect(within(panel).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button',{name:/^信号库/}));
+    openSignalLibrary();
     expect(screen.queryByTestId('fish-panel')).not.toBeInTheDocument();
     fireEvent.click(fishButton);
     expect(screen.queryByText('上传 / 粘贴信号')).not.toBeInTheDocument();

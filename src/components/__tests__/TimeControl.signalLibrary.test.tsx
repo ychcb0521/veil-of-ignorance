@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TimeControl } from '../TimeControl';
 import { SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
+import { openSignalLibrary as openLibrary } from '@/test/openSignalLibrary';
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u-1' } }) }));
 vi.mock('@/contexts/TradingContext', () => ({
@@ -49,7 +50,7 @@ function renderControl(onJumpToSignal?: React.ComponentProps<typeof TimeControl>
   );
 }
 
-const openLibrary = () => fireEvent.click(screen.getByTitle(/信号库：上传/));
+
 const libraryRoot = () => screen.getByTestId('signal-library-panel');
 
 beforeEach(() => {
@@ -62,7 +63,7 @@ describe('信号库展开面板', () => {
   it('keeps the 图灵杯 library separate and sends its ticker to the offline chart source', async () => {
     const jump = vi.fn(async () => ({ ok: true as const }));
     renderControl(jump);
-    fireEvent.click(screen.getByRole('button', { name: '图灵杯' }));
+    openLibrary('图灵杯');
     const turing = screen.getByTestId('turing-cup-panel');
     expect(within(turing).getByText(/图灵杯暂无信号/)).toBeInTheDocument();
     fireEvent.change(within(turing).getAllByRole('textbox').at(-1)!, {

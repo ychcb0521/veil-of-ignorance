@@ -27,6 +27,7 @@ import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { useSignalLibrary } from '@/hooks/useSignalLibrary';
 import { ENTRY_PERIOD_SIGNALS_KEY, ENTRY_PERIOD_MARKETS, entryPeriodEndLabel, entryPeriodMarketGroup, entryPeriodMarketLabel, mergeEntryPeriodSignals, type EntryPeriodMarket } from '@/lib/entryPeriodSignals';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { hydrateSimState } from '@/lib/simStateSync';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
@@ -36,6 +37,7 @@ import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
 import { ModuleErrorBoundary } from '@/components/ModuleErrorBoundary';
 import { SpeedSelector } from '@/components/SpeedSelector';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
 import {
@@ -151,6 +153,7 @@ export function TimeControl({
   const [library, setLibrary] = useState<SignalLibraryKind>('library');
   const turing = library === 'turing';
   const entryPeriod = library === 'entry-period';
+  const entryLibraryOpen = signalLibOpen && entryPeriod;
   // 【用户要求】从鱼质量点进交易战役再返回：自动展开「渔」，鱼质量回到原来的位置（见 lib/fish/qualityReturn）
   const [fishOpen, setFishOpen] = useState(() => armQualityReturn(Date.now(),user?.id));
   // 【用户要求】2026-10-26 打开「渔」时不弹「刚平了一笔 — 要现在做平仓评价吗？」，只记进消息列表
@@ -179,6 +182,31 @@ export function TimeControl({
   const fish = useFish(user?.id, { onNewFish: enqueue });
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
   const [entrySignals, setEntrySignals] = usePersistedState(ENTRY_PERIOD_SIGNALS_KEY, EMPTY_SIGNALS);
+  const [entrySyncStatus, setEntrySyncStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [entrySyncAttempt, setEntrySyncAttempt] = useState(0);
+  useEffect(() => {
+    const account = user?.id;
+    if (!entryLibraryOpen || !account) return;
+    const request = new AbortController();
+    const timeout = window.setTimeout(() => {
+      request.abort();
+      setEntrySyncStatus('error');
+    }, 12_000);
+    const finish = (status: 'ready' | 'error') => {
+      window.clearTimeout(timeout);
+      if (!request.signal.aborted) setEntrySyncStatus(status);
+    };
+    void hydrateSimState(account, [ENTRY_PERIOD_SIGNALS_KEY], request.signal).then(
+      result => finish(result.status === 'hydrated' || result.status === 'empty' ? 'ready' : 'error'),
+      () => finish('error'),
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      request.abort();
+    };
+  }, [entryLibraryOpen, entrySyncAttempt, user?.id]);
+  const entryNeedsSync = entryLibraryOpen && !!user?.id && entrySignals.length === 0 && entrySyncStatus !== 'ready';
+
   const entrySignalsRef = useRef(entrySignals);
   entrySignalsRef.current = entrySignals;
   const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_SIGNALS);
@@ -260,8 +288,14 @@ export function TimeControl({
    */
   const [sortKey, setSortKey] = useState<SignalSortKey>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const libraryMenu: { kind: SignalLibraryKind; label: string; count: number; title?: string }[] = [
+    { kind: 'entry-period', label: '进场期信号库', count: entrySignals.length },
+    { kind: 'library', label: '信号库', count: onlineSignals.length, title: '信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面' },
+    { kind: 'turing', label: '图灵杯', count: turingSignals.length, title: '图灵杯：使用导入的离线行情查看盘面和复盘' },
+  ];
   const toggleLibrary = (next: SignalLibraryKind) => {
     setFishOpen(false);
+    if (next === 'entry-period' && !entryLibraryOpen) setEntrySyncStatus('loading');
     if (next !== library) {
       setLibrary(next);
       const nextSignals = next === 'entry-period' ? entrySignals : next === 'turing' ? turingSignals : onlineSignals;
@@ -724,39 +758,26 @@ export function TimeControl({
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Time Machine</span>
         </div>
 
-        <button type="button" aria-expanded={signalLibOpen && entryPeriod} onClick={() => toggleLibrary('entry-period')}
-          className={'flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ' +
-            (signalLibOpen && entryPeriod ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent')}>
-          <Database className="w-3 h-3" />进场期信号库
-          {entrySignals.length > 0 && <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{entrySignals.length}</span>}
-          <ChevronDown className={'w-3 h-3 transition-transform ' + (signalLibOpen && entryPeriod ? 'rotate-180' : '')} />
-        </button>
-        <button
-          type="button"
-          aria-expanded={signalLibOpen && library === 'library'}
-          onClick={() => toggleLibrary('library')}
-          title="信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面"
-          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
-            signalLibOpen && library === 'library'
-              ? 'border-primary/40 bg-primary/15 text-primary'
-              : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'
-          }`}
-        >
-          <Database className="w-3 h-3" />
-          信号库
-          {onlineSignals.length > 0 && (
-            <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{onlineSignals.length}</span>
-          )}
-          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && library === 'library' ? 'rotate-180' : ''}`} />
-        </button>
-
-        <button type="button" aria-expanded={signalLibOpen && turing} onClick={() => toggleLibrary('turing')}
-          title="图灵杯：使用导入的离线行情查看盘面和复盘"
-          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${signalLibOpen && turing ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
-          <Database className="w-3 h-3" />图灵杯
-          {turingSignals.length > 0 && <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{turingSignals.length}</span>}
-          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && turing ? 'rotate-180' : ''}`} />
-        </button>
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button type="button"
+              className={`group flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
+                signalLibOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`}>
+              <Database className="w-3 h-3" />信号库
+              <ChevronDown className="w-3 h-3 transition-transform group-data-[state=open]:rotate-180" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-36">
+            {libraryMenu.map(({ kind, label, count, title }) => (
+              <DropdownMenuCheckboxItem key={kind} checked={signalLibOpen && library === kind}
+                onSelect={() => toggleLibrary(kind)} title={title} className="cursor-pointer gap-3 text-xs">
+                {label}
+                {count > 0 && <span aria-hidden="true" className="ml-auto rounded-full bg-primary/15 px-1.5 font-mono text-[10px] text-primary">{count}</span>}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); setFishOpen(o => !o); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
@@ -828,6 +849,7 @@ export function TimeControl({
               纵向才是稀缺的，这是把过剩的横向兑换成纵向的一次交易。 */}
           <div>
             <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+              <h2 className="mr-1 whitespace-nowrap text-xs font-medium">{libraryName}</h2>
               {monthOptions.length > 0 && (
                 <select
                   value={monthFilter}
@@ -857,9 +879,10 @@ export function TimeControl({
               />
               <button
                 onClick={() => setImportOpen(o => !o)}
+                disabled={entryNeedsSync}
                 aria-label={entryPeriod ? '导入进场期 Excel' : undefined}
                 title={entryPeriod ? '导入进场期 Excel' : importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
-                className={`flex h-[22px] shrink-0 items-center gap-0.5 rounded px-1.5 transition-colors ${
+                className={`flex h-[22px] shrink-0 items-center gap-0.5 rounded px-1.5 transition-colors disabled:opacity-50 ${
                   importOpen ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                 }`}
               >
@@ -894,7 +917,7 @@ export function TimeControl({
                 <span className="text-[10px] text-muted-foreground">部分信号缺少当前周期的离线 K 线</span>
               )}
             </div>
-          {importOpen && (entryPeriod ? (
+          {importOpen && !entryNeedsSync && (entryPeriod ? (
             <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
               <label className="flex items-center gap-1 rounded border border-border/60 px-2 py-1 hover:bg-accent focus-within:ring-1 focus-within:ring-ring">
                 <Upload className="h-3 w-3" />
@@ -949,7 +972,17 @@ export function TimeControl({
             </div>
             ))}
 
-            {sortedFiltered.length === 0 ? (
+            {entryNeedsSync ? (
+              <div className="flex items-center justify-center gap-2 rounded border border-dashed border-border/60 px-3 py-4 text-[11px] text-muted-foreground">
+                <span role="status">{entrySyncStatus === 'loading' ? '正在同步进场期信号…' : '暂时无法读取进场期信号'}</span>
+                {entrySyncStatus === 'error' && <button type="button"
+                  className="rounded border border-border/60 px-2 py-1 text-foreground hover:bg-accent"
+                  onClick={() => {
+                    setEntrySyncStatus('loading');
+                    setEntrySyncAttempt(attempt => attempt + 1);
+                  }}>重新同步</button>}
+              </div>
+            ) : sortedFiltered.length === 0 ? (
               <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">
                 {signals.length === 0
                   ? entryPeriod ? '暂无进场期信号。上传 Excel 即可导入。' : turing ? '图灵杯暂无信号。导入行情文件后，回放样本会出现在这里，也可以上传或粘贴信号。' : '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'

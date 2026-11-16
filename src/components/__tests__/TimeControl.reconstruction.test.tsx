@@ -1,5 +1,6 @@
 import { renderFishQuality as render } from '@/test/renderFishQuality';
 import { saveFishAuto } from '@/lib/fish/autoScan';
+import { openSignalLibrary, openSignalLibraryMenu } from '@/test/openSignalLibrary';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { TimeControl } from '@/components/TimeControl';
@@ -38,7 +39,6 @@ afterEach(cleanup);
 it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹配列不进入鱼或新鱼', async () => {
   render(<TimeControl status="paused" currentSimulatedTime={time} speed={1} onStart={() => {}} onPause={() => {}} onResume={() => {}} onStop={() => {}} onSetSpeed={() => {}} onJumpToSignal={vi.fn(async () => ({ ok: true as const }))}/>);
   expect(mocks.reconstruct).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: /^信号库/ })).toHaveTextContent('2');
   fireEvent.click(screen.getByRole('button', { name: /^渔/ }));
   expect(mocks.reconstruct).not.toHaveBeenCalled();
   const fish = within(screen.getByTestId('fish-panel'));
@@ -56,7 +56,9 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   expect(within(screen.getByTestId('fish-new-panel')).getByText('NEWUSDT')).toBeVisible();
   expect(within(screen.getByTestId('fish-old-panel')).getByText('OLDUSDT')).toBeVisible();
 
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^信号库\s*2$/ })); });
+  const libraryItem = openSignalLibraryMenu().getByRole('menuitemcheckbox', { name: '信号库' });
+  expect(libraryItem).toHaveTextContent('2');
+  await act(async () => { fireEvent.click(libraryItem); });
   const main = screen.getByTestId('signal-library-panel');
   fireEvent.click(within(main).getByTestId('library-reconstruction-start'));
   await waitFor(() => expect(mocks.reconstruct).toHaveBeenCalledTimes(1));
@@ -74,7 +76,8 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
 // 【用户要求】2026-10-19「匹配之后为何还是这样」：「匹配」下拉只选门槛口径、不计算；信号库里直接给出复原入口与进度
 it('信号库没复原过：写「尚未复原」并给出「复原」按钮，点了就算，算完匹配列有内容', async () => {
   render(<TimeControl status="paused" currentSimulatedTime={time} speed={1} onStart={() => {}} onPause={() => {}} onResume={() => {}} onStop={() => {}} onSetSpeed={() => {}} onJumpToSignal={vi.fn(async () => ({ ok: true as const }))}/>);
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^信号库/ })); });
+  openSignalLibrary();
+  await act(async () => {});
   const main = screen.getByTestId('signal-library-panel');
   expect(within(main).getByText('尚未复原')).toBeVisible();
   fireEvent.change(within(main).getByLabelText('匹配门槛'), { target: { value: 'current' } });

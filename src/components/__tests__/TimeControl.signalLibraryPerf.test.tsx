@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { renderFishQuality as render } from '@/test/renderFishQuality';
+import { openSignalLibrary, openSignalLibraryMenu } from '@/test/openSignalLibrary';
 /**
  * 信号库在**真实体量**（791 条）下的行为与代价。
  *
@@ -129,7 +130,7 @@ async function renderControl() {
 
 /** 展开信号库，并等「当日战役」索引那一次异步加载落定——否则它会在断言之后、act 之外改状态。 */
 const openLibrary = async () => {
-  fireEvent.click(screen.getByTitle(/信号库：上传/));
+  openSignalLibrary();
   await act(async () => {});
 };
 const libraryRoot = () => screen.getByTestId('signal-library-panel');
@@ -158,8 +159,10 @@ beforeEach(() => {
 describe(`信号库（${BULK_SIGNAL_COUNT} 条）`, () => {
   it('展开后只铺出窗口内的十几行', async () => {
     await renderControl();
-    await openLibrary();
-    expect(screen.getByTitle(/信号库：上传/)).toHaveTextContent(String(BULK_SIGNAL_COUNT));
+    const libraryItem = openSignalLibraryMenu().getByRole('menuitemcheckbox', { name: '信号库' });
+    expect(libraryItem).toHaveTextContent(String(BULK_SIGNAL_COUNT));
+    fireEvent.click(libraryItem);
+    await act(async () => {});
     expect(renderedRowCount()).toBe(TOP_RENDERED);
     // 791 行时的节点量级：改造前这里是两万多个元素、五千多个 SVG
     expect(scroller().querySelectorAll('*').length).toBeLessThan(1200);
