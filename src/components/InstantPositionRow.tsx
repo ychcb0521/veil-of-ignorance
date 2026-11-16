@@ -21,13 +21,17 @@ import { cardCloseLotSize } from '@/lib/marketLotSize';
 import { isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimitMode';
 import { ClosePositionModal } from './ClosePositionModal';
 import { TpSlModal } from './TpSlModal';
-import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
+import {Popover,PopoverContent,PopoverTrigger} from '@/components/ui/popover';
+import {
+  PositionContract,PositionEditButton,PositionMarketClose,PositionNumber,PositionOpenedAt,PositionPnl,
+  PositionProtectionButton,PositionProtectionPrices,PositionTableRow,
+} from './PositionTable';
 
-const linkClass = 'flex flex-1 items-center justify-center border-r border-border/50 py-2 text-xs font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground';
+const linkClass = 'text-muted-foreground hover:text-foreground hover:underline';
 
 const takeoverNotice = '确认后，这笔模拟仓位由手动操作接管。已成交的加减仓保留，原持仓监测停止下单。';
 
-export function InstantPositionRow({ position, mirror, monitor, manual, live, manage, limitMode = 'unlimited', entryMode, onToggleEntry }: {
+export function InstantPositionRow({ position, mirror, monitor, manual, live, manage, limitMode = 'unlimited', onOpenChart }: {
   position: InstantPositionFill;
   monitor?: QualityResult;
   mirror?: QualityMirrorFill;
@@ -35,8 +39,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
   live?: UsdtFollowStatus;
   manage?: (position: InstantPositionFill, action: InstantManualAction) => Promise<void>;
   limitMode?: PositionLimitMode;
-  entryMode: 'entry' | 'breakeven';
-  onToggleEntry: () => void;
+  onOpenChart?: () => void;
 }) {
   const names=useQualityTemplateNames();
   const inRouter = useInRouterContext();
@@ -78,53 +81,53 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
   const riskTitle = '模拟风险参考。持仓按止盈止损或持仓监测条件退出。';
   const campaignPath = '/journal/campaigns/' + encodeURIComponent(position.id) + '?section=instant';
   const quoteLabel = quote?.kind === 'close' ? '最近收盘价' : quoteState?.delayed ? '最近标记价格' : '标记价格';
-  return <div className={positionCardClass} data-testid="instant-position">
-    <PositionCardHeader asset={symbol.replace(/USDT$/, '')} contract="USDT 永续" long leverage={leverage} mode="逐仓" openedAt={buyAt}>
-      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">即时交易 · 模拟</span>
-      <span className="text-[10px] text-muted-foreground">{EXCHANGE_NAMES[source.exchange ?? 'binance']}</span>
-    </PositionCardHeader>
-    {live && <div data-testid="instant-usdt-follow" className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-2 text-xs text-muted-foreground">
-      <span className="font-medium text-foreground">币安 U 本位 · {live.state === 'tracking' ? '实盘持仓' : live.state === 'closed' ? '实盘已平'
-        : live.state === 'ignored' ? '未跟单' : live.state === 'waiting' ? '等待成交回报' : '待核对'}</span>
-      {live.quantity != null && <span>币安余仓 {live.quantity} {live.asset}</span>}
-      {live.orderId && <span className="font-mono">订单 {live.orderId}</span>}
-      {live.issue && <span role="status">{live.issue}</span>}
-    </div>}
-    <PositionCardPnl pnl={held.pnl} roe={held.roe}/>
-    <div className={positionDetailsClass}>
-      <DetailCell label="持仓数量" value={formatAmount(held.remainingQuantity) + ' ' + symbol.replace(/USDT$/, '')} />
-      <DetailCell label="保证金" value={formatUSDT(held.margin) + ' USDT'} />
-      <DetailCell label="保证金比率（估算）" value={ratio == null ? '—' : ratio.toFixed(2) + '%'} title={riskTitle} />
-      <EntryPriceCell mode={entryMode} onToggle={onToggleEntry}
-        entryText={formatPrice(held.averageEntryPrice, symbol)} breakevenText={breakeven == null || breakeven <= 0 ? '—' : formatPrice(breakeven, symbol)}
-        breakevenTitle="保本线按余仓成本扣除已落袋的净盈亏计算。" />
-      <DetailCell label={quoteLabel} value={quote ? formatPrice(quote.price, symbol) : '—'} />
-      <DetailCell label="强平价格（估算）" value={Number.isFinite(liq) && liq > 0 ? formatPrice(liq, symbol) : '—'} title={riskTitle} valueClassName="text-trading-red" />
-    </div>
-    <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-2 text-[10px] text-muted-foreground">
-      <span>报价时间 {quote ? formatBeijingTime(quote.at) : '—'}</span>
-      <span>已实现盈亏 {formatSignedUSDT(held.realizedPnl)} USDT</span>
-      {position.monitor && <span>持仓模板 {names?.forMonitor(position.monitor.plan,position.monitor.templateId)?.name??position.monitor.name}</span>}
-      {manual && <span>手动接管</span>}
-      {held.mirror && <span>镜像平衡减仓已成交 {(held.mirror.fraction * 100).toFixed(1)}%</span>}
-      {held.additions.length > 0 && <span>加仓 {held.additions.length} 次</span>}
-      {held.reductions.some(fill => fill.fraction > 0) && <span>减仓 {held.reductions.filter(fill => fill.fraction > 0).length} 次</span>}
-    </div>
-    {(manual || automaticTp != null) && <div className="flex flex-wrap items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
-      {manual ? <>
-        {orders?.tp != null && <span className="text-trading-green">止盈 {formatPrice(orders.tp, symbol)}</span>}
-        {orders?.sl != null && <span className="text-trading-red">止损 {formatPrice(orders.sl, symbol)}</span>}
-        {orders ? <>
-          <span className="text-muted-foreground">{orders.percentage}% 仓位</span>
-          <button type="button" disabled={busy || !manage} onClick={() => void act({ kind: 'cancel' })} className="text-muted-foreground hover:text-foreground">撤销止盈止损</button>
-        </> : <span className="text-muted-foreground">暂无止盈止损委托</span>}
-      </> : <span className="text-trading-green">镜像止盈 {formatPrice(automaticTp!, symbol)} · {target?.sellPct}%</span>}
-    </div>}
-    <div className={positionActionsClass}>
-      {inRouter ? <Link to={campaignPath} state={{ fromInstantPosition: true }} className={linkClass}>交易战役</Link> : <a href={campaignPath} className={linkClass}>交易战役</a>}
-      <ActionBtn disabled={busy || !manage} onClick={() => setModal('protect')} label="止盈/止损"/>
-      <ActionBtn danger disabled={busy || !manage} onClick={() => setModal('close')} label="平仓"/>
-    </div>
+  const tp = orders?.tp ?? (manual ? undefined : automaticTp);
+  const modify = () => setModal('protect');
+  return <PositionTableRow long testId="instant-position" cells={{
+    symbol: <PositionContract symbol={symbol} leverage={leverage} long onOpen={onOpenChart}
+      badge={<span className="text-muted-foreground" title={EXCHANGE_NAMES[source.exchange??'binance']}>即时·模拟</span>}/>,
+    quantity: <PositionNumber value={formatAmount(held.remainingQuantity)+' '+symbol.replace(/USDT$/,'')} tone="text-trading-green"/>,
+    entry: <PositionNumber value={formatPrice(held.averageEntryPrice,symbol)}/>,
+    breakeven: <PositionNumber value={breakeven==null||breakeven<=0?'—':formatPrice(breakeven,symbol)} title="余仓成本扣除已落袋的净盈亏"/>,
+    mark: <PositionNumber value={quote?formatPrice(quote.price,symbol):'—'} title={quoteLabel}/>,
+    liquidation: <PositionNumber value={Number.isFinite(liq)&&liq>0?formatPrice(liq,symbol):'—'} title={riskTitle} tone="text-trading-red"/>,
+    ratio: <PositionNumber value={ratio==null?'—':ratio.toFixed(2)+'%'} title={riskTitle}/>,
+    margin: <div><PositionNumber value={formatUSDT(held.margin)+' USDT'}/><div className="text-muted-foreground">（逐仓）</div></div>,
+    pnl: <PositionPnl pnl={held.pnl} roe={held.roe}/>,
+    close: <PositionMarketClose disabled={busy||!manage} mark={quote?formatPrice(mark,symbol):undefined}
+      quantity={formatAmount(held.remainingQuantity)} onClick={()=>setModal('close')}/>,
+    protection: <PositionProtectionPrices tp={tp==null?undefined:formatPrice(tp,symbol)} sl={orders?.sl==null?undefined:formatPrice(orders.sl,symbol)}>
+      <PositionEditButton label="编辑仓位止盈止损" disabled={busy||!manage} onClick={modify}/>
+    </PositionProtectionPrices>,
+    addProtection: <PositionProtectionButton disabled={busy||!manage} onClick={modify}/>,
+    details: <>
+      <PositionOpenedAt openedAt={buyAt}/>
+      <div className="flex items-center gap-3">
+        {inRouter?<Link to={campaignPath} state={{fromInstantPosition:true}} className={linkClass}>交易战役</Link>:<a href={campaignPath} className={linkClass}>交易战役</a>}
+        <Popover>
+          <PopoverTrigger asChild><button type="button" className={linkClass}>明细</button></PopoverTrigger>
+          <PopoverContent align="end" className="w-72 space-y-1 text-xs">
+            <p>{EXCHANGE_NAMES[source.exchange??'binance']} · 即时交易模拟</p>
+            {live&&<div data-testid="instant-usdt-follow" className="space-y-1 text-muted-foreground">
+              <p>币安 U 本位 · {live.state==='tracking'?'实盘持仓':live.state==='closed'?'实盘已平':
+                live.state==='ignored'?'未跟单':live.state==='waiting'?'等待成交回报':'待核对'}</p>
+              {live.quantity!=null&&<p>币安余仓 {live.quantity} {live.asset}</p>}
+              {live.orderId&&<p className="font-mono">订单 {live.orderId}</p>}
+              {live.issue&&<p role="status">{live.issue}</p>}
+            </div>}
+            <p>报价时间 {quote?formatBeijingTime(quote.at):'—'}</p>
+            <p>已实现盈亏 {formatSignedUSDT(held.realizedPnl)} USDT</p>
+            {position.monitor&&<p>持仓模板 {names?.forMonitor(position.monitor.plan,position.monitor.templateId)?.name??position.monitor.name}</p>}
+            {manual&&<p>手动接管</p>}
+            {held.mirror&&<p>镜像平衡减仓已成交 {(held.mirror.fraction*100).toFixed(1)}%</p>}
+            {held.additions.length>0&&<p>加仓 {held.additions.length} 次</p>}
+            {held.reductions.some(fill=>fill.fraction>0)&&<p>减仓 {held.reductions.filter(fill=>fill.fraction>0).length} 次</p>}
+            {orders&&<button type="button" disabled={busy||!manage} onClick={()=>void act({kind:'cancel'})}
+              className="text-primary hover:underline">撤销止盈止损 · {orders.percentage}% 仓位</button>}
+            {!manual&&automaticTp!=null&&<p className="text-trading-green">镜像止盈 {formatPrice(automaticTp,symbol)} · {target?.sellPct}%</p>}
+          </PopoverContent>
+        </Popover>
+      </div>
     {modal === 'close' && <ClosePositionModal open onClose={dismiss} symbol={symbol} position={display}
       currentPrice={mark || held.averageEntryPrice} pricePrecision={getPriceDecimals(mark || held.averageEntryPrice)}
       lotSizeCheck={isUnlimitedLimitMode(limitMode) ? undefined : fraction => cardCloseLotSize(symbol, [display], fraction, mark || held.averageEntryPrice)}
@@ -133,5 +136,6 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
       lotSizeCheck={isUnlimitedLimitMode(limitMode) ? undefined : (fraction, price) => cardCloseLotSize(symbol, [display], fraction, price, 'tpsl')}
       busy={busy} notice={manual ? undefined : takeoverNotice}
       onConfirm={(tp, sl, percentage) => void act({ kind: 'protect', levels: { tp, sl, percentage } })}/>}
-  </div>;
+    </>,
+  }}/>;
 }

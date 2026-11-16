@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PositionPanel } from '@/components/PositionPanel';
 import type { Position, TradeRecord } from '@/types/trading';
@@ -20,7 +20,7 @@ vi.mock('@/lib/journalApi', () => ({
 }));
 
 /**
- * 【用户要求】仓位卡上「保本线 / 开仓均价」共用一格，点一下切换，默认开仓均价；已落袋利润只算镜像止盈。
+ * 【用户要求】仓位表分别显示开仓价格和损益两平价，计算已落袋利润时只计镜像止盈。
  * 数字照 HEIUSDT 2026-06-25：开 7,000 万币 @0.161673，手动减仓 61% 落袋 +220,831.21，剩 2,730 万币。
  */
 const OPENED = Date.parse('2026-06-25T23:58:00+08:00');
@@ -57,33 +57,17 @@ function renderPanel(positions: Position[], tradeHistory: TradeRecord[], price =
   );
 }
 
-const cell = () => screen.getByTestId('position-entry-cell');
+const entry = () => screen.getByRole('cell', { name: '开仓价格' });
+const breakeven = () => screen.getByRole('cell', { name: '损益两平价' });
+const breakevenTitle = () => breakeven().querySelector('[title]')?.getAttribute('title');
 
-describe('仓位卡：保本线 / 开仓均价共用一格', () => {
-  it('默认显示开仓均价；点一下切成保本线（手动减仓做的镜像止盈也算落袋），再点切回来', () => {
+describe('仓位表：开仓价格和损益两平价', () => {
+  it('同时显示开仓均价和保本线，手动减仓做的镜像止盈也算落袋', () => {
     renderPanel([heiLong()], [reduce()]);
-    expect(cell()).toHaveAttribute('data-mode', 'entry');
-    expect(cell()).toHaveTextContent('开仓均价');
-    expect(cell()).toHaveTextContent('0.161673');
-    expect(cell().getAttribute('title')).toContain('不扣已落袋的利润');
-    expect(cell().getAttribute('aria-label')).toBe('开仓均价 0.161673，点击切换为保本线');
-    fireEvent.click(cell());
+    expect(entry()).toHaveTextContent('0.161673');
     // 0.161673 − 220,831.21 ÷ 27,300,000 = 0.153584
-    expect(cell()).toHaveAttribute('data-mode', 'breakeven');
-    expect(cell()).toHaveTextContent('保本线');
-    expect(cell()).toHaveTextContent('0.153584');
-    expect(cell()).not.toHaveTextContent('0.161673');
-    expect(cell().getAttribute('title')).toContain('镜像止盈已落袋 +220,831.21 USDT（1 刀');
-    expect(cell().getAttribute('title')).toContain('点一下切换为「开仓均价」');
-
-    fireEvent.click(cell());
-    expect(cell()).toHaveAttribute('data-mode', 'entry');
-    expect(cell()).toHaveTextContent('开仓均价');
-    expect(cell()).toHaveTextContent('0.161673');
-    expect(cell().getAttribute('title')).toContain('不扣已落袋的利润');
-    expect(cell().getAttribute('aria-label')).toBe('开仓均价 0.161673，点击切换为保本线');
-
-    expect(cell()).toHaveAttribute('data-mode', 'entry');
+    expect(breakeven()).toHaveTextContent('0.153584');
+    expect(breakevenTitle()).toContain('镜像止盈已落袋 +220,831.21 USDT（1 刀');
   });
 
   it('用镜像利润加仓之后：保本线按合并后的币数与均价重算（0.159009），真实均价是 0.164775', () => {
@@ -96,46 +80,34 @@ describe('仓位卡：保本线 / 开仓均价共用一格', () => {
       ],
     } as Partial<Position>);
     renderPanel([merged], [reduce()]);
-    expect(cell()).toHaveTextContent('0.164775');
-    fireEvent.click(cell());
-    expect(cell()).toHaveTextContent('0.159009');
-    fireEvent.click(cell());
-    expect(cell()).toHaveTextContent('0.164775');
+    expect(entry()).toHaveTextContent('0.164775');
+    expect(breakeven()).toHaveTextContent('0.159009');
   });
 
   it('没有镜像止盈落袋：保本线就是开仓均价；亏着减仓、止损打掉的、别的仓位的盈利都不算', () => {
     const { unmount } = renderPanel([heiLong()], []);
-    fireEvent.click(cell());
-    expect(cell()).toHaveTextContent('保本线');
-    expect(cell()).toHaveTextContent('0.161673');
-    expect(cell().getAttribute('title')).toContain('还没有镜像止盈落袋，保本线就是开仓均价');
+    expect(entry()).toHaveTextContent('0.161673');
+    expect(breakeven()).toHaveTextContent('0.161673');
+    expect(breakevenTitle()).toContain('还没有镜像止盈落袋，保本线就是开仓均价');
     unmount();
     renderPanel([heiLong()], [
       reduce({ id: 'loss', pnl: -50_000 }),
       reduce({ id: 'stop', pnl: 30_000, exit_method: 'sl' }),
       reduce({ id: 'other', pnl: 80_000, positionId: 'closed-position', fillId: 'closed-fill' }),
     ]);
-    expect(cell()).toHaveTextContent('0.161673');
+    expect(entry()).toHaveTextContent('0.161673');
+    expect(breakeven()).toHaveTextContent('0.161673');
   });
 
-  it('空单：保本线在均价上方；切换是面板级的，同屏每张卡一起切', () => {
+  it('空单保本线高于均价，多单保本线低于均价', () => {
     const short = heiLong({ id: 'hei-short', side: 'SHORT', fills: [{ id: 'short-fill', openTime: OPENED, entryPrice: 0.161673, units: 27_300_000 }] } as Partial<Position>);
     renderPanel([heiLong(), short], [
       reduce(),
       reduce({ id: 'short-reduce', side: 'SHORT', positionId: 'hei-short', fillId: 'short-fill', pnl: 136_500, exitPrice: 0.1566 }),
     ]);
-    const cells = screen.getAllByTestId('position-entry-cell');
-    expect(cells).toHaveLength(2);
-    for (const node of cells) expect(node).toHaveAttribute('data-mode', 'entry');
-    fireEvent.click(cells[0]);
-    const texts = cells.map(node => node.textContent ?? '');
-    expect(texts.some(text => text.includes('0.153584'))).toBe(true);   // 多：0.161673 − 0.008089
-    expect(texts.some(text => text.includes('0.166673'))).toBe(true);   // 空：0.161673 + 136,500 ÷ 27,300,000
-    fireEvent.click(cells[0]);
-    for (const node of screen.getAllByTestId('position-entry-cell')) {
-      expect(node).toHaveAttribute('data-mode', 'entry');
-      expect(node).toHaveTextContent('0.161673');
-    }
+    const values = (label: string) => screen.getAllByRole('cell', { name: label }).map(cell => cell.textContent);
+    expect(values('开仓价格')).toEqual(['0.161673', '0.161673']);
+    expect(values('损益两平价').sort()).toEqual(['0.153584', '0.166673']);
   });
 
   it('币本位（反向合约）按币算：2,845 张 × 10 USD @2.8489，镜像落袋 150 币 → 保本线 = 28,450 ÷（9,986.31 + 150）', () => {
@@ -151,12 +123,9 @@ describe('仓位卡：保本线 / 开仓均价共用一格', () => {
       positionId: 'ordi', fillId: 'ordi-fill', exit_method: 'manual',
     } as unknown as TradeRecord;
     renderPanel([coin], [cut], 2.992);
-    expect(cell()).toHaveTextContent('2.8489');
-    fireEvent.click(cell());
+    expect(entry()).toHaveTextContent('2.8489');
     const expected = 28_450 / (28_450 / 2.8489 + 150);
-    expect(cell()).toHaveTextContent(expected.toFixed(4));
-    expect(cell().getAttribute('title')).toContain('镜像止盈已落袋 +150.000000 ORDI');
-    fireEvent.click(cell());
-    expect(cell()).toHaveTextContent('2.8489');
+    expect(breakeven()).toHaveTextContent(expected.toFixed(4));
+    expect(breakevenTitle()).toContain('镜像止盈已落袋 +150.000000 ORDI');
   });
 });

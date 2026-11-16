@@ -91,8 +91,8 @@ describe('【复核 r7】合并卡的「止盈/止损」覆盖卡上每一笔', 
       vi.fn(),
       [sl('sl-1', 'pre-update'), sl('sl-2', 'tiered-add')],
     );
-    const strip = screen.getByText('止损').parentElement!;
-    expect(strip.textContent).toBe('止损0.950000');
+    const protection = screen.getByRole('cell', { name: '仓位止盈止损' });
+    expect(protection.textContent?.match(/0\.950000/g)).toEqual(['0.950000']);
   });
 
   it('只有一笔时照旧只挂一张，也不写那句说明', () => {

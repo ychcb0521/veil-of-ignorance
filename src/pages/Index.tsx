@@ -19,6 +19,7 @@ import { TickerBar } from "@/components/TickerBar";
 import { ReplayDeskPanels, useReplayDeskVisibility } from "@/components/ReplayDeskPanels";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
+import { PositionMarketPreview, type PositionChartPreview } from "@/components/PositionMarketPreview";
 import { SymbolSelector } from "@/components/SymbolSelector";
 import { AccountInfo } from "@/components/AccountInfo";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -234,7 +235,9 @@ const Index = () => {
     return { status: ct.status, time: ct.time, speed: ct.speed, originTime: ct.originTime };
   }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol, syncedOriginTime]);
 
-  const activeReplaySymbol = activeCoinState.status !== "stopped" && activeCoinState.time > 0 ? activeSymbol : null;
+  const [positionPreview,setPositionPreview] = useState<PositionChartPreview|null>(null);
+  const activeReplaySymbol = positionPreview?.symbol ??
+    (activeCoinState.status !== "stopped" && activeCoinState.time > 0 ? activeSymbol : null);
   const [replayDeskExpanded, setReplayDeskExpanded] = useReplayDeskVisibility(activeReplaySymbol);
 
   // Effective time for data filtering
@@ -1843,8 +1846,22 @@ const Index = () => {
   );
   const handleSymbolChange = useCallback((symbol: string) => {
     replayDefaultBlocked.current = true;
+    setPositionPreview(null);
     return changeSymbol(symbol, setActiveSymbol);
   }, [changeSymbol, setActiveSymbol]);
+
+  const handleOpenPositionChart = useCallback((symbol:string,source?:PositionChartPreview['source'])=>{
+    const target = timeMode==='isolated'?coinTimelines[symbol]:activeCoinState;
+    const binance = (!source?.exchange||source.exchange==='binance')&&source?.market!=='us_stock';
+    const hasReplay = target!=null&&target.status!=='stopped'&&target.time>0;
+    setReplayDeskExpanded(true);
+    if (binance&&hasReplay) {
+      void handleSymbolChange(symbol);
+    } else {
+      const at = activeCoinState.status==='stopped'||effectiveSimTime<=0 ? Date.now() : effectiveSimTime;
+      setPositionPreview({symbol,source,at});
+    }
+  },[timeMode,coinTimelines,activeCoinState,effectiveSimTime,setReplayDeskExpanded,handleSymbolChange]);
   const selectDefaultReplaySymbol = useCallback((symbol: string) => {
     if (replayDefaultBlocked.current || activeCoinState.status !== 'stopped') return;
     const target = timeMode === 'isolated' ? coinTimelines[symbol] : undefined;
@@ -1874,6 +1891,7 @@ const Index = () => {
     async (timestamp: number) => {
       replayDefaultBlocked.current = true;
       setReplayDeskExpanded(true);
+      setPositionPreview(null);
       const data = await initLoad(activeSymbol, interval, timestamp, { reverse: timeDirection === -1 });
       // 取数期间用户又切了标的 / 周期：以后一次操作为准，这次静默放弃，不报「数据获取失败」。
       if (data === SUPERSEDED_INIT_LOAD) return;
@@ -1987,6 +2005,7 @@ const Index = () => {
 
       // 取数成功后才切换标的、周期和方向，并打开盘面。
       setReplayDeskExpanded(true);
+      setPositionPreview(null);
       if (jumpInterval !== interval) setIntervalVal(jumpInterval);
       if (direction !== timeDirection) {
         setTimeDirection(direction);
@@ -2152,6 +2171,7 @@ const Index = () => {
   ]);
 
   const handleStop = useCallback(() => {
+    setPositionPreview(null);
     if (timeMode === "isolated") {
       // Stop only the active coin
       const positions = positionsMap[activeSymbol] || [];
@@ -2469,6 +2489,10 @@ const Index = () => {
                           订单簿
                         </button>
                       )}
+                      {positionPreview && <div className="absolute inset-0 z-30">
+                        <PositionMarketPreview key={positionPreview.symbol+':'+positionPreview.at} preview={positionPreview}
+                          initialInterval={interval} onClose={()=>setPositionPreview(null)}/>
+                      </div>}
                       {activeCoinState.status === "stopped" && visibleData.length === 0 ? (
                         <div className="h-full flex items-center justify-center bg-gray-50 dark:bg-[#0b0e11]">
                           <div className="text-center space-y-3">
@@ -2603,6 +2627,7 @@ const Index = () => {
                     tradeHistory={tradeHistory}
                     priceMap={displayPriceMap}
                     activeSymbol={activeSymbol}
+                    onOpenPositionChart={handleOpenPositionChart}
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAdjustMargin={handleAdjustMargin}

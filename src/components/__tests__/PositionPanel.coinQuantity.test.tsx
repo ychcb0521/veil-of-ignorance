@@ -72,7 +72,7 @@ describe('币本位持仓的持币数量', () => {
   it('拿不到价格时只显示张数，不编一个币量出来', () => {
     renderPanel(coinPosition(), 0);
     // 只看「持仓数量」这一格：卡片别处（合约名、保证金）本来就有 RAVE 字样
-    const cell = screen.getByText('持仓数量').parentElement!;
+    const cell = screen.getByRole('cell', { name: '数量' });
     expect(cell).toHaveTextContent('13291 张');
     expect(cell).not.toHaveTextContent('RAVE');
   });
@@ -83,7 +83,7 @@ describe('币本位持仓的持币数量', () => {
       contracts: undefined, contractSizeUsd: undefined, quantity: 1.5, entryPrice: 60_000,
     });
     renderPanel(uPosition, 61_000, 'BTCUSDT');
-    expect(screen.getByText('1.5000')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '数量' })).toHaveTextContent('1.5000 BTC');
     expect(screen.queryByText(/张/)).not.toBeInTheDocument();
   });
 });

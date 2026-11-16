@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import {useRef,useState,type ReactNode} from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
@@ -9,14 +9,25 @@ import type { Position } from '@/types/trading';
 import { ClosePositionModal } from './ClosePositionModal';
 import { AdjustMarginModal } from './AdjustMarginModal';
 import { LeverageModal } from './LeverageModal';
-import { ActionBtn, positionActionsClass } from './PositionCard';
+import {Popover,PopoverContent,PopoverTrigger} from '@/components/ui/popover';
+import {PositionEditButton,PositionMarketClose,PositionProtectionButton} from './PositionTable';
 import { TpSlModal } from './TpSlModal';
 
-export function UsdtLivePositionActions({ position, target, control, refresh }: {
+export interface LivePositionControls {
+  market: ReactNode;
+  margin: ReactNode;
+  addProtection: ReactNode;
+  editProtection: ReactNode;
+  details: ReactNode;
+  onLeverage?: () => void;
+}
+
+export function UsdtLivePositionActions({position,target,control,refresh,children}: {
   position: UsdtMirrorPosition;
   target?: UsdtPositionTarget;
   control: ReturnType<typeof useUsdtFollow>['controlPosition'];
   refresh: () => void;
+  children: (controls:LivePositionControls)=>ReactNode;
 }) {
   const [modal, setModal] = useState<'close' | 'protect' | 'leverage' | 'margin' | UsdtProtectionOrder>();
   const [busy, setBusy] = useState(false);
@@ -69,8 +80,11 @@ export function UsdtLivePositionActions({ position, target, control, refresh }: 
   const modalBusy = actionBusy || changedTarget;
   const modalIssue = changedTarget ? '这笔实盘仓位已变化，关闭后重新确认。' : issue;
   const disabled = !target || actionBusy;
-  return <>
-    {(position.protectionOrders?.length || position.protectionIssue) ? <div className="flex flex-wrap gap-2 px-3 pb-2 text-xs">
+  const protectionReady = !!position.protectionOrders;
+  const details = <>
+    {(position.protectionOrders?.length || position.protectionIssue) ? <Popover>
+      <PopoverTrigger asChild><button type="button" className="text-muted-foreground hover:underline">保护委托</button></PopoverTrigger>
+      <PopoverContent align="end" className="flex w-72 flex-wrap gap-2 text-xs">
       {position.protectionOrders?.map(order => <span key={order.id} className="inline-flex flex-wrap items-center gap-1.5 rounded border border-border px-2 py-1 text-muted-foreground">
         <span className={order.kind === 'tp' ? 'text-trading-green' : 'text-trading-red'}>{order.kind === 'tp' ? '止盈' : '止损'}</span>
         <span className="font-mono">{usdtPositionDecimal(order.triggerPrice)}</span>
@@ -79,18 +93,13 @@ export function UsdtLivePositionActions({ position, target, control, refresh }: 
           aria-label={'撤销' + (order.kind === 'tp' ? '止盈 ' : '止损 ') + order.triggerPrice}>撤单</button>
       </span>)}
       {position.protectionIssue && <span role="status" className="text-muted-foreground">{position.protectionIssue}</span>}
-    </div> : null}
-    {!target && <p role="status" className="px-3 pb-2 text-[10px] text-muted-foreground">正在核对实盘首仓成交</p>}
-    {(issue || pending) && <div className="flex items-center gap-2 px-3 pb-2 text-xs">
+      </PopoverContent>
+    </Popover> : null}
+    {!target && <p role="status" className="block text-[10px] text-muted-foreground">正在核对实盘首仓成交</p>}
+    {(issue || pending) && <div className="flex flex-wrap items-center gap-1 text-[10px]">
       <span role="status" className="text-muted-foreground">{issue}</span>
       {pending && <button type="button" disabled={busy} onClick={() => void submit(pending.action)} className="text-primary">核对实盘回报</button>}
     </div>}
-    <div className={positionActionsClass}>
-      <ActionBtn disabled={disabled || !position.leverage} label="杠杆" onClick={() => open('leverage')} />
-      {position.marginMode === 'isolated' && <ActionBtn disabled={disabled} label="保证金" onClick={() => open('margin')} />}
-      <ActionBtn disabled={disabled || !position.protectionOrders} label="止盈/止损" onClick={() => open('protect')} />
-      <ActionBtn disabled={disabled} label="平仓" danger onClick={() => open('close')} />
-    </div>
     {modal === 'close' && <ClosePositionModal open onClose={dismiss} symbol={symbol} position={shown}
       currentPrice={mark} pricePrecision={getPriceDecimals(mark)} quantityPrecision={Math.min(12, Math.max(4, position.quantity.split('.')[1]?.length ?? 0))}
       confirmLabel="确认实盘平仓" busy={modalBusy} notice={modalIssue || '将按选定数量提交币安实盘市价平仓。余仓以币安成交回报为准。'}
@@ -117,4 +126,13 @@ export function UsdtLivePositionActions({ position, target, control, refresh }: 
       </DialogContent>
     </Dialog>}
   </>;
+  return children({
+    market:<PositionMarketClose disabled={disabled} mark={usdtPositionDecimal(position.markPrice)}
+      quantity={usdtPositionDecimal(position.quantity)} onClick={()=>open('close')}/>,
+    margin:position.marginMode==='isolated'&&<PositionEditButton label="调整保证金" disabled={disabled} onClick={()=>open('margin')}/>,
+    addProtection:<PositionProtectionButton disabled={disabled||!protectionReady} onClick={()=>open('protect')}/>,
+    editProtection:<PositionEditButton label="编辑仓位止盈止损" disabled={disabled||!protectionReady} onClick={()=>open('protect')}/>,
+    details,
+    onLeverage:disabled||!position.leverage?undefined:()=>open('leverage'),
+  });
 }

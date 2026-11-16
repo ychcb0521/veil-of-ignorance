@@ -165,22 +165,18 @@ describe('【复核 r7】逐仓多笔卡上的「保证金比率（最高）」�
      *       分层那一笔 维持 11,500 × 2% − 75 = 155，权益 575 → 26.96%。
      * 合计口径 308.60 / 975 = 31.65% —— 那是拿旧仓位的保证金去垫，而逐仓保证金并不共用。
      */
-    const cell = screen.getByText('保证金比率（最高）').parentElement!;
+    const cell = screen.getByRole('cell', { name: '保证金比率' });
     expect(cell.textContent).toContain('38.40%');
-    expect(cell.getAttribute('title')).toContain('整组合计是 31.65%');
-    expect(cell.getAttribute('title')).toContain('与左边的「强平价格（最先）」是同一笔');
+    expect(cell.querySelector('[title]')?.getAttribute('title')).toContain('整组合计是 31.65%');
+    expect(cell.querySelector('[title]')?.getAttribute('title')).toContain('与左边的「强平价格（最先）」是同一笔');
     // 同一张卡的「强平价格（最先）」正是那一笔（旧仓位 0.954）
-    expect(screen.getByText('强平价格（最先）').parentElement!.textContent).toContain('0.954000');
+    expect(screen.getByRole('cell', { name: '强平价格' }).textContent).toContain('0.954000');
   });
 
   it('只有一笔时照旧写「保证金比率」、不带悬停', () => {
     renderPanel([usdtPos('solo', 40_000, 1)]);
-    // 表头里也有「保证金比率」四个字，取卡片上那个（带百分比读数的）
-    const cell = screen.getAllByText('保证金比率')
-      .map(el => el.parentElement!)
-      .find(el => el.textContent?.includes('%'))!;
+    const cell = screen.getByRole('cell', { name: '保证金比率' });
     expect(cell.textContent).toContain('38.40%');
-    expect(cell.getAttribute('title')).toBeNull();
-    expect(screen.queryByText('保证金比率（最高）')).toBeNull();
+    expect(cell.querySelector('[title]')).toBeNull();
   });
 });

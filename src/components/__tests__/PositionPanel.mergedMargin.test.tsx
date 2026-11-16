@@ -80,8 +80,9 @@ describe('合并持仓卡的保证金', () => {
     const own = [A, B].map(p => positionLiquidationPrice(p)!);
     expect(first).toBeCloseTo(Math.max(...own), 9);
 
-    expect(screen.getByText('强平价格（最先）')).toBeInTheDocument();
-    expect(screen.getByText(formatPrice(first, 'REDUSD'))).toBeInTheDocument();
+    const liquidation = screen.getByRole('cell', { name: '强平价格' });
+    expect(liquidation).toHaveTextContent(formatPrice(first, 'REDUSD'));
+    expect(liquidation.querySelector('[title]')).toHaveAttribute('title', expect.stringContaining('强平价格（最先）'));
     expect(screen.queryByText('0.134361')).not.toBeInTheDocument();
     // 卡上的数必须比合成价更靠近现价（更保守）
     expect(first).toBeGreaterThan(0.134361);

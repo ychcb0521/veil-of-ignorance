@@ -15,6 +15,7 @@ const position:UsdtMirrorPosition={symbol:'BEATUSDT',positionSide:'LONG',directi
 
 it('shows and clears real exchange positions in both views with one shared read of each opening', async () => {
   let positions: UsdtMirrorPosition[] = [];
+  const openChart = vi.fn();
   const readPositionHistory=vi.fn(async ()=>({openedAt:at,fills:[]}));
   const follow = {
     connected: true, positionMirror: 1 as const, readPositionHistory,
@@ -26,7 +27,7 @@ it('shows and clears real exchange positions in both views with one shared read 
     return <InstantPositionsContext.Provider value={{ positions: [], usdtFollow: follow, usdtLive: live } as never}>
       <div data-testid="fish"><FishUsdtPositions follow={follow as never} live={live}/></div>
       <div data-testid="main-positions"><PositionPanel positionsMap={{}} ordersMap={{}} tradeHistory={[]} priceMap={{}}
-        activeSymbol="EVAAUSDT" activeTab="positions" onClosePosition={vi.fn()} onCancelOrder={vi.fn()} onTabChange={vi.fn()}/></div>
+        activeSymbol="EVAAUSDT" activeTab="positions" onOpenPositionChart={openChart} onClosePosition={vi.fn()} onCancelOrder={vi.fn()} onTabChange={vi.fn()}/></div>
     </InstantPositionsContext.Provider>;
   }
   render(<Fixture/>);
@@ -44,9 +45,11 @@ it('shows and clears real exchange positions in both views with one shared read 
   expect(fish.getAllByText('均价 0.0822712')).toHaveLength(2);
   expect(table.getByText('100 BEAT')).toBeVisible();
   expect(table.getByText('21.005 BEAT')).toBeVisible();
-  expect(table.getByText('名义仓位 8.236 USDT')).toBeVisible();
-  expect(table.getAllByRole('button',{name:/开仓均价 0.0822712/})).toHaveLength(2);
-  expect(table.getByText('-0.001')).toBeVisible();
+  expect(table.getByTitle('名义仓位 8.236 USDT')).toBeVisible();
+  expect(table.getAllByRole('cell', {name:'开仓价格'}).map(cell=>cell.textContent)).toEqual(['0.0822712','0.0822712']);
+  expect(table.getByText('-0.001 USDT')).toBeVisible();
+  fireEvent.click(table.getAllByRole('button', {name:'BEATUSDT'})[0]);
+  expect(openChart).toHaveBeenCalledWith('BEATUSDT');
   expect(table.queryByRole('region',{name:'币安实盘持仓'})).not.toBeInTheDocument();
   await waitFor(() => expect(table.getAllByText('开仓时间 2026-11-15 19:28:42.697')).toHaveLength(2));
   expect(fish.getAllByText('开仓 2026-11-15 19:28:42.697')).toHaveLength(2);

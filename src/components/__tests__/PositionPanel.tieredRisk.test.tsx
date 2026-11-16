@@ -58,13 +58,9 @@ function renderPanel(positions: Position[], orders: PendingOrder[], activeTab: '
 }
 
 /** 卡片上的明细格（DetailCell：标签 div 带 truncate，下面紧跟着数值）；表头里同名的格子不算。 */
-const cellValue = (label: string) => screen.getAllByText(label)
-  .find(el => el.tagName === 'DIV' && el.classList.contains('truncate'))
-  ?.nextElementSibling?.textContent;
-/** 同一个明细格上的悬停说明（title 挂在外层 div 上）。 */
-const cellTitle = (label: string) => screen.getAllByText(label)
-  .find(el => el.tagName === 'DIV' && el.classList.contains('truncate'))
-  ?.parentElement?.getAttribute('title') ?? null;
+const cell = (label: string) => screen.getByRole('cell', { name: label });
+const cellValue = (label: string) => cell(label).textContent;
+const cellTitle = (label: string) => cell(label).querySelector('[title]')?.getAttribute('title') ?? null;
 
 describe('持仓卡：分层仓位按币安分层算维持保证金', () => {
   it('保证金比率：分层 1,550 ÷ 6,000 = 25.83%；旧仓位 240 ÷ 6,000 = 4.00%', () => {

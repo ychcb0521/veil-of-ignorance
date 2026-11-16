@@ -5,13 +5,14 @@ import { UsdtLivePositionCard } from '@/components/UsdtLivePositionCard';
 import { usdtMirrorKey } from '@/lib/fish/usdtPositionMirror';
 import { instantPositionDisplay, instantPositionValuation, type InstantPositionFill } from '@/lib/fish/instantCampaign';
 import { buildTpSlOrders } from '@/lib/tpSlOrders';
-import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
-import { usePersistedState } from '@/hooks/usePersistedState';
+import {
+  PositionContract,PositionEditButton,PositionMarketClose,PositionNumber,PositionOpenedAt,PositionPnl,
+  PositionProtectionButton,PositionProtectionPrices,PositionTable,PositionTableRow,
+} from './PositionTable';
 import type { Position, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
-import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
+import { calcUnrealizedPnl, calcLiquidationPrice, FUNDING_RATE } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Check, Loader2, Pencil } from 'lucide-react';
 import { toast, recordNotificationHistory } from '@/lib/notificationCenter';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
@@ -73,6 +74,7 @@ interface Props {
   tradeHistory: TradeRecord[];
   priceMap: PriceMap;
   activeSymbol: string;
+  onOpenPositionChart?: (symbol:string,source?:InstantPositionFill['source'])=>void;
   onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAdjustMargin?: (symbol: string, allocations: { positionId: string; deltaUsd: number }[]) => void;
@@ -255,7 +257,7 @@ function syntheticCardPosition(symbol: string, legs: readonly Position[]): Posit
 }
 
 export function PositionPanel({
-  positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
+  positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol, onOpenPositionChart,
   onClosePosition, onCancelOrder, onAdjustMargin, onApplySymbolLeverage, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
@@ -289,7 +291,7 @@ export function PositionPanel({
    * 弹窗开着时有一笔被强平，可用数量、预计盈亏与那句「N 笔」的说明都跟着变——
    * 否则用户确认的是「50%」于一个已经不存在的数。
    * 此前这里存的是单个 index，卡上多于一笔时按钮直接变成「全部平仓」、一键市价平掉两笔——
-   * 一张吃过加仓的卡因此再也不能按成数减仓（见 handleCloseGroup 的注释）。
+   * 一张吃过加仓的卡因此再也不能按成数减仓。
    */
   const [closeModal, setCloseModal] = useState<{ symbol: string; positionIds: string[] } | null>(null);
   /**
@@ -298,11 +300,6 @@ export function PositionPanel({
    */
   const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; positionIds: string[] } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
-  /**
-   * 仓位卡上「保本线 / 开仓均价」共用一格，点一下切换，默认开仓均价。
-   * 只记在这次会话里、不持久化：刷新或重开都回到开仓均价。
-   */
-  const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('entry');
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const instant = useScreenedInstantPositions();
   const instantPositions = (instant?.positions ?? []).filter(row => !hideOtherContracts || row.source.symbol === activeSymbol);
@@ -735,50 +732,6 @@ export function PositionPanel({
     { key: 'assets', label: '资产', count: 0, showCount: false },
   ];
 
-  // Column definitions for the positions table header
-  // `key` is used to bind to columnVisibility state.
-  // `hiddenByDefault` means it lives in the "隐藏栏" section of the menu and is OFF by default.
-  const POSITION_COLUMNS: { key: string; label: string; flex: string; align: string; locked?: boolean; hiddenByDefault?: boolean }[] = [
-    { key: 'symbol', label: '合约', flex: 'flex-[1.4]', align: 'text-left', locked: true },
-    { key: 'quantity', label: '数量', flex: 'flex-1', align: 'text-right' },
-    { key: 'entryPrice', label: '开仓价格', flex: 'flex-1', align: 'text-right' },
-    { key: 'breakEven', label: '损益两平价', flex: 'flex-1', align: 'text-right' },
-    { key: 'markPrice', label: '标记价格', flex: 'flex-1', align: 'text-right' },
-    { key: 'liqPrice', label: '强平价格', flex: 'flex-1', align: 'text-right' },
-    { key: 'marginRatio', label: '保证金比率', flex: 'flex-1', align: 'text-right' },
-    { key: 'margin', label: '保证金', flex: 'flex-1', align: 'text-right' },
-    { key: 'pnl', label: '盈亏 (回报率)', flex: 'flex-[1.2]', align: 'text-right' },
-    { key: 'funding', label: '预估资金费用', flex: 'flex-1', align: 'text-right' },
-    { key: 'action', label: '市价 / 限价', flex: 'flex-[1.2]', align: 'text-right' },
-    { key: 'notional', label: '仓位面值', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
-    { key: 'adl', label: '自动减仓', flex: 'flex-1', align: 'text-right', hiddenByDefault: true },
-  ];
-
-  type ColumnKey = string;
-  const [columnVisibility, setColumnVisibility] = usePersistedState<Record<string, boolean>>(
-    'position_column_visibility',
-    POSITION_COLUMNS.reduce((acc, c) => {
-      acc[c.key] = !c.hiddenByDefault;
-      return acc;
-    }, {} as Record<string, boolean>)
-  );
-  const [actionGroupExpanded, setActionGroupExpanded] = useState(true);
-  const [actionSubOptions, setActionSubOptions] = usePersistedState<Record<string, boolean>>(
-    'position_action_suboptions',
-    { marketCloseAll: true, pnlCloseAll: false }
-  );
-
-  const toggleColumn = (key: ColumnKey) => {
-    setColumnVisibility(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-  const toggleSubOption = (key: string) => {
-    setActionSubOptions(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const visibleColumns = POSITION_COLUMNS.filter(c => columnVisibility[c.key] !== false);
-  const regularColumns = POSITION_COLUMNS.filter(c => !c.hiddenByDefault);
-  const hiddenSectionColumns = POSITION_COLUMNS.filter(c => c.hiddenByDefault);
-
   const handleOpenCloseModal = (symbol: string, positionIds: string[]) => {
     setCloseModal({ symbol, positionIds });
   };
@@ -846,8 +799,8 @@ export function PositionPanel({
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden bg-white dark:bg-[#1e2329]">
       {/* ===== Tabs Bar ===== */}
-      <div className="flex justify-between items-center px-4 h-10 border-b border-gray-200 dark:border-[#2b3139] shrink-0">
-        <div className="flex space-x-6 flex-1 overflow-x-auto h-full items-center">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-gray-200 px-3 dark:border-[#2b3139]">
+        <div className="flex h-full min-w-0 flex-1 items-center gap-4 overflow-x-auto">
           {TABS.map(t => {
             const isActive = activeTab === t.key;
             const labelText = t.showCount ? `${t.label}(${t.count})` : t.label;
@@ -855,21 +808,18 @@ export function PositionPanel({
               <button
                 key={t.key}
                 onClick={() => onTabChange(t.key)}
-                className={`relative h-full text-sm font-medium whitespace-nowrap transition-colors ${
+                className={`relative shrink-0 whitespace-nowrap text-xs font-medium leading-4 transition-colors ${
                   isActive
-                    ? 'text-[#fcd535]'
+                    ? 'rounded-md bg-muted px-2.5 py-1 text-foreground'
                     : 'text-gray-500 dark:text-[#848e9c] hover:text-gray-900 dark:text-white'
                 }`}
               >
                 {labelText}
-                {isActive && (
-                  <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#fcd535]" />
-                )}
               </button>
             );
           })}
         </div>
-        <div className="flex items-center gap-3 shrink-0 pl-4">
+        <div className="flex shrink-0 items-center gap-3 pl-3">
           {activeTab === 'positions' && (
             <>
               {live && <button type="button" onClick={live.retryPositions}
@@ -882,14 +832,6 @@ export function PositionPanel({
                 />
                 <span className="text-xs text-gray-500 dark:text-[#848e9c] whitespace-nowrap">隐藏其他合约</span>
               </label>
-              {(allPositions.length > 0 || instantPositions.length > 0) && (
-                <button
-                  onClick={() => setCloseAllConfirmOpen(true)}
-                  className="px-2 py-0.5 rounded text-[10px] font-medium border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10 transition-colors active:scale-95"
-                >
-                  一键平仓
-                </button>
-              )}
             </>
           )}
           {activeTab === 'trades' && allTradedSymbols.length > 0 && (
@@ -901,135 +843,6 @@ export function PositionPanel({
               清除币种数据
             </button>
           )}
-          {/* Column settings menu — only the more icon, no theme/minimize */}
-          <div className="flex items-center text-[#848e9c] pl-2 border-l border-gray-200 dark:border-[#2b3139] ml-1">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  title="自定义表头"
-                  className="hover:text-gray-900 dark:hover:text-white cursor-pointer transition-colors p-1 rounded"
-                >
-                  <MoreVertical className="w-3.5 h-3.5" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                sideOffset={6}
-                className="w-64 bg-white dark:bg-[#1e2329] border border-gray-200 dark:border-[#2b3139] p-0 rounded-md shadow-xl overflow-hidden z-50"
-              >
-                <div className="max-h-[500px] overflow-y-auto scrollbar-thin">
-                  {regularColumns.map(col => {
-                    const isAction = col.key === 'action';
-                    return (
-                      <div key={col.key}>
-                        <div
-                          className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-[#2b3139] hover:bg-gray-50 dark:hover:bg-[#2b3139] cursor-pointer"
-                          onClick={() => !col.locked && toggleColumn(col.key)}
-                        >
-                          <div className="flex items-center min-w-0">
-                            {isAction ? (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setActionGroupExpanded(v => !v); }}
-                                className="text-gray-500 dark:text-[#848e9c] mr-1 -ml-1"
-                              >
-                                {actionGroupExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!col.locked) toggleColumn(col.key);
-                              }}
-                              disabled={col.locked}
-                              className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
-                                columnVisibility[col.key]
-                                  ? 'bg-[#fcd535] border-[#fcd535]'
-                                  : 'border-gray-400 dark:border-[#5e6673] bg-transparent'
-                              } ${col.locked ? 'opacity-60 cursor-not-allowed' : ''}`}
-                            >
-                              {columnVisibility[col.key] && (
-                                <svg viewBox="0 0 12 12" className="w-3 h-3 text-[#0b0e11]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M2.5 6.5L5 9l4.5-5.5" />
-                                </svg>
-                              )}
-                            </button>
-                            <span className="text-sm text-gray-900 dark:text-[#EAECEF] ml-3 truncate">
-                              {isAction ? '操作 (市价/限价)' : col.label}
-                            </span>
-                          </div>
-                          <GripVertical className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
-                        </div>
-                        {isAction && actionGroupExpanded && (
-                          <div className="bg-gray-50/40 dark:bg-black/20">
-                            {[
-                              { key: 'marketCloseAll', label: '市价全部平仓' },
-                              { key: 'pnlCloseAll', label: '基于盈亏的全平仓' },
-                            ].map(sub => (
-                              <div
-                                key={sub.key}
-                                onClick={() => toggleSubOption(sub.key)}
-                                className="flex items-center pl-10 pr-4 py-2.5 border-b border-gray-100 dark:border-[#2b3139] hover:bg-gray-50 dark:hover:bg-[#2b3139] cursor-pointer"
-                              >
-                                <div
-                                  className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
-                                    actionSubOptions[sub.key]
-                                      ? 'bg-[#fcd535] border-[#fcd535]'
-                                      : 'border-gray-400 dark:border-[#5e6673] bg-transparent'
-                                  }`}
-                                >
-                                  {actionSubOptions[sub.key] && (
-                                    <svg viewBox="0 0 12 12" className="w-3 h-3 text-[#0b0e11]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                      <path d="M2.5 6.5L5 9l4.5-5.5" />
-                                    </svg>
-                                  )}
-                                </div>
-                                <span className="text-sm text-gray-900 dark:text-[#EAECEF] ml-3">{sub.label}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {hiddenSectionColumns.length > 0 && (
-                    <>
-                      <div className="border-t border-gray-200 dark:border-[#2b3139]" />
-                      <div className="text-xs text-gray-500 px-4 py-2">隐藏栏</div>
-                      {hiddenSectionColumns.map(col => (
-                        <div
-                          key={col.key}
-                          onClick={() => toggleColumn(col.key)}
-                          className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-[#2b3139] hover:bg-gray-50 dark:hover:bg-[#2b3139] cursor-pointer"
-                        >
-                          <div className="flex items-center min-w-0">
-                            <div
-                              className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
-                                columnVisibility[col.key]
-                                  ? 'bg-[#fcd535] border-[#fcd535]'
-                                  : 'border-gray-400 dark:border-[#5e6673] bg-transparent'
-                              }`}
-                            >
-                              {columnVisibility[col.key] && (
-                                <svg viewBox="0 0 12 12" className="w-3 h-3 text-[#0b0e11]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M2.5 6.5L5 9l4.5-5.5" />
-                                </svg>
-                              )}
-                            </div>
-                            <span className="text-sm text-gray-900 dark:text-[#EAECEF] ml-3 truncate">{col.label}</span>
-                          </div>
-                          <GripVertical className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
         </div>
       </div>
 
@@ -1037,38 +850,21 @@ export function PositionPanel({
         {/* ===== POSITIONS — always-visible header + body ===== */}
         {activeTab === 'positions' && (
           <>
-            {/* Persistent table header */}
-            <div className="h-8 flex items-center px-4 text-xs text-gray-500 dark:text-[#848e9c] border-b border-gray-200 dark:border-[#2b3139] shrink-0 overflow-x-auto">
-              {visibleColumns.map((col) => (
-                <div key={col.key} className={`${col.flex} ${col.align} whitespace-nowrap px-2`}>
-                  {col.label}
-                </div>
-              ))}
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
-              {live?.issue && <p role="status" className="px-3 pt-2 text-xs text-muted-foreground">
-                {live.issue}{live.snapshot ? '。显示上次同步的实盘仓位。' : ''}
-              </p>}
-              {mergedPositions.length === 0 && instantPositions.length === 0 && livePositions.length === 0 ? (
-                <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
-                  <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-                    <rect x="3" y="5" width="18" height="14" rx="2" />
-                    <path d="M3 10h18" />
-                    <path d="M9 15h6" />
-                  </svg>
-                  <span>{hideOtherContracts ? `${activeSymbol} 暂无持仓` : '暂无持仓'}</span>
-                </div>
-              ) : (
-                <div className="p-3 space-y-3">
-                  {live && livePositions.map(position => <UsdtLivePositionCard key={usdtMirrorKey(position)}
-                    position={position} live={live} follow={instant?.usdtFollow} entryMode={entryCellMode}
-                    onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
-                  {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
-                    monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
-                    manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status => status.id === position.id)} manage={instant?.manage} limitMode={limitMode} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
-                  {mergedPositions.map((mg) => {
+            {live?.issue&&<p role="status" className="shrink-0 px-3 py-1.5 text-xs text-muted-foreground">
+              {live.issue}{live.snapshot?'。显示上次同步的实盘仓位。':''}
+            </p>}
+            <PositionTable onCloseAll={displayedPositions.length||instantPositions.length?()=>setCloseAllConfirmOpen(true):undefined}
+              empty={mergedPositions.length+instantPositions.length+livePositions.length===0?
+                <div className="flex justify-center py-16 text-sm text-muted-foreground">{hideOtherContracts?`${activeSymbol} 暂无持仓`:'暂无持仓'}</div>:undefined}>
+              {live&&livePositions.map(position=><UsdtLivePositionCard key={usdtMirrorKey(position)}
+                position={position} live={live} follow={instant?.usdtFollow}
+                onOpenChart={onOpenPositionChart?()=>onOpenPositionChart(position.symbol):undefined}/>)}
+              {instantPositions.map(position=><InstantPositionRow key={position.id} position={position}
+                monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
+                manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status=>status.id===position.id)}
+                manage={instant?.manage} limitMode={limitMode}
+                onOpenChart={onOpenPositionChart?()=>onOpenPositionChart(position.source.symbol,position.source):undefined}/>)}
+              {mergedPositions.map((mg) => {
                     const price = priceMap[mg.symbol] || 0;
                     const firstChild = mg.children[0]?.position;
                     const isCoinGroup = isCoinSettled(firstChild);
@@ -1218,159 +1014,59 @@ export function PositionPanel({
                  * 但规则三那一格（豁免成交旁边站着分层仓位）仍会出现两笔的卡，所以这条路必须留着。
                  * 成数怎么摊见 handleCloseConfirm。
                  */
-                const handleCloseGroup = (e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  handleOpenCloseModal(mg.symbol, mg.children.map(c => c.position.id));
+                const childIds = mg.children.map(child=>child.position.id);
+                const groupOrders = (ordersMap[mg.symbol]??[]).filter(order=>
+                  order.reduceOnly&&order.linkedPositionId&&childIds.includes(order.linkedPositionId));
+                const protectionPrices = (kind:'TP'|'SL') => {
+                  const values = groupOrders.filter(order=>order.reduceKind===kind).map(order=>formatPrice(order.stopPrice,mg.symbol));
+                  return [...new Set(values)].join(' / ')||undefined;
                 };
-
-                return (
-                  <div
-                    key={`${mg.symbol}_${mg.side}`}
-                    className={positionCardClass}
-                  >
-                    <PositionCardHeader asset={baseCoin} contract={quoteUnitLabel + ' 永续'} long={mg.side === 'LONG'}
-                      leverage={mg.leverage} mode={mg.marginMode === 'cross' ? '全仓' : '逐仓'} openedAt={mg.openedAt}>
-                      {mg.children.length > 1 && <span className="text-[9px] text-muted-foreground">{mg.children.length} 笔合并</span>}
-                    </PositionCardHeader>
-                    <PositionCardPnl pnl={totalPnl} roe={roe} />
-                    <div className={positionDetailsClass}>
-                      <DetailCell label="持仓数量" value={positionQtyLabel} title={positionQtyTitle} />
-                      <div className="min-w-0">
-                        <div className="text-[10px] text-muted-foreground truncate">保证金</div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-mono tabular-nums text-foreground">
-                            {effectiveMarginLabel}
-                          </span>
-                          {/* 合并卡也要能追加保证金。此前 children.length === 1 把「2 笔合并」的卡
-                              整个挡掉了。分组键**不含保证金模式**（只按 symbol_side），
-                              所以一个全仓腿混进来也会并成同一张卡——那种情况下这颗按钮不能出现,
-                              否则会在写到一半时被全仓那一腿顶回来。 */}
-                          {onAdjustMargin && (
-                            <button
-                              type="button"
-                              data-testid="adjust-margin"
-                              disabled={!hasIsolated}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!hasIsolated) return;
-                                setAdjustMarginModal({
-                                  symbol: mg.symbol,
-                                  // 只把逐仓腿交出去——全仓那条会被下游拒掉，
-                                  // 而拒掉发生在已经写了一半的时候。
-                                  positionIds: isolatedChildren.map(p => p.id),
-                                });
-                              }}
-                              title={hasIsolated
-                                ? (mixedWithCross
-                                  ? `调整保证金（本组 ${mg.children.length} 笔中 ${isolatedChildren.length} 笔为逐仓，仅对逐仓生效）`
-                                  : '调整保证金')
-                                : '全仓仓位共用一个保证金池，不支持单仓位追加；切换到逐仓后可用'}
-                              className={`inline-flex items-center justify-center w-4 h-4 rounded border transition-colors ${
-                                hasIsolated
-                                  ? 'border-border bg-muted/40 hover:bg-primary/20 hover:border-primary/60 text-muted-foreground hover:text-primary active:scale-95'
-                                  : 'border-border/40 bg-muted/20 text-muted-foreground/40 cursor-not-allowed'
-                              }`}
-                            >
-                              <Plus className="w-2.5 h-2.5" strokeWidth={3} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <DetailCell
-                        label={worstLegRatio != null ? '保证金比率（最高）' : '保证金比率'}
-                        value={`${marginRatio.toFixed(2)}%`}
-                        title={worstLegRatio != null
-                          ? '逐仓的保证金不在各笔之间共用，爆仓也是逐仓位判的：这里写的是这组里比率最高'
-                            + '（离强平最近）的那一笔，与左边的「强平价格（最先）」是同一笔，不是各笔的平均。'
-                            + `整组合计是 ${pooledMarginRatio.toFixed(2)}%——那个数会拿健康那一笔的浮盈去垫正在死的那一笔。`
-                            + (mixedWithCross ? '（卡上的全仓腿不计入：全仓是另一个共用的保证金池。）' : '')
-                          : undefined}
-                      />
-                      <EntryPriceCell
-                        mode={entryCellMode}
-                        onToggle={() => setEntryCellMode(mode => (mode === 'breakeven' ? 'entry' : 'breakeven'))}
-                        entryText={formatPrice(mg.weightedEntryPrice, mg.symbol)}
-                        breakevenText={breakevenPrice != null ? formatPrice(breakevenPrice, mg.symbol) : '--'}
-                        breakevenTitle={breakevenTitle}
-                      />
-                      <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
-                      <DetailCell
-                        key={`liq-${mg.totalIsolatedMargin ?? mg.totalMargin}-${mg.totalQuantity}-${mg.weightedEntryPrice}`}
-                        label={mg.children.length > 1 && mg.marginMode === 'isolated' ? '强平价格（最先）' : '强平价格'}
-                        value={isFinite(liq) ? formatPrice(liq, mg.symbol) : '--'}
-                        title={mg.children.length > 1 && mg.marginMode === 'isolated'
-                          ? '逐仓爆仓是逐仓位判的：这里写的是这组里最先被强平的那一笔的价格，不是各笔的平均。'
-                          : crossMixedRiskModels
-                            ? '这组里既有按币安分层计维持保证金的仓位，也有按旧 0.4% 的（更新前、对冲豁免或无限制模式下开的）：这个合成价把整组按旧模型算，'
-                              + '比逐笔各按自己模型加总的真实强平价偏乐观（余量显示得比实际多）。真正的判定按逐笔的模型加总，'
-                              + '同卡的「保证金比率」按全仓那一个共用的保证金池算，维持保证金已经是逐笔按各自模型加总的。'
-                            : undefined}
-                        valueClassName="text-trading-red"
-                      />
-                    </div>
-
-                    {/* TP / SL display strip — aggregated for this group's children */}
-                    {(() => {
-                      const childIds = new Set(mg.children.map(c => c.position.id));
-                      const groupOrders = (ordersMap[mg.symbol] || []).filter(
-                        o => o.reduceOnly && o.linkedPositionId && childIds.has(o.linkedPositionId)
-                      );
-                      const tps = groupOrders.filter(o => o.reduceKind === 'TP');
-                      const sls = groupOrders.filter(o => o.reduceKind === 'SL');
-                      if (tps.length === 0 && sls.length === 0) return null;
-                      /**
-                       * 同一个价只写一次：卡上按一次「止盈/止损」会给每一笔各挂一张（同价），
-                       * 两笔的卡就会出现「0.9500 / 0.9500」这种重复读数——去重之后这一条仍是「这张卡上有哪些线」。
-                       */
-                      const fmtList = (arr: typeof groupOrders) =>
-                        [...new Set(arr.map(o => formatPrice(o.stopPrice, mg.symbol)))].join(' / ');
-                      return (
-                        <div className="flex items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
-                          {tps.length > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="text-muted-foreground">止盈</span>
-                              <span className="text-trading-green">{fmtList(tps)}</span>
-                            </span>
-                          )}
-                          {sls.length > 0 && (
-                            <span className="flex items-center gap-1">
-                              <span className="text-muted-foreground">止损</span>
-                              <span className="text-trading-red">{fmtList(sls)}</span>
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* Action Buttons */}
-                    <div className={positionActionsClass}>
-                      <ActionBtn label="杠杆" onClick={(e) => {
-                        e.stopPropagation();
-                        setLeverageModal({ symbol: mg.symbol, settlement: limitSettlementOf(mg.children[0]?.position) });
-                      }} />
-                      <ActionBtn label="止盈/止损" onClick={(e) => {
-                        e.stopPropagation();
-                        // 整张卡：卡上每一笔各挂一张（同价、同成数），不再只盖 children[0]。
-                        // 弹窗里的开仓价 / 强平价与卡片同一个口径（加权开仓价、逐仓写"最先"的那一笔）。
-                        setTpslModal({
-                          symbol: mg.symbol,
-                          positionIds: mg.children.map(c => c.position.id),
-                          display: mg.children.length === 1 ? mg.children[0].position : syntheticPos,
-                          liqPrice: liq,
-                        });
-                      }} />
-                      <ActionBtn
-                        label="平仓"
-                        danger
-                        onClick={handleCloseGroup}
-                      />
-                    </div>
-                  </div>
-                );
-                  })}
-                </div>
-              )}
-            </div>
+                const modifyProtection = () => setTpslModal({
+                  symbol:mg.symbol,positionIds:childIds,display:mg.children.length===1?mg.children[0].position:syntheticPos,liqPrice:liq,
+                });
+                const marginTitle = hasIsolated
+                  ? mixedWithCross?`仅调整本组 ${isolatedChildren.length} 笔逐仓仓位`:'调整保证金'
+                  : '全仓仓位共用一个保证金池，切换到逐仓后可调整单仓保证金';
+                const liquidationTitle = mg.children.length>1&&mg.marginMode==='isolated'
+                  ? '强平价格（最先）：这组逐仓中最先被强平的一笔'
+                  : crossMixedRiskModels?'这组合计按旧模型计算，强平价偏乐观。实际判定逐笔按各自模型加总。':undefined;
+                const ratioTitle = worstLegRatio==null?undefined:
+                  `保证金比率（最高）：与左边的「强平价格（最先）」是同一笔。整组合计是 ${pooledMarginRatio.toFixed(2)}%，逐仓保证金不共用。`;
+                const isLong = mg.side==='LONG';
+                const funding = price>0 ? (isLong?-1:1)*notional*FUNDING_RATE : null;
+                return <PositionTableRow key={`${mg.symbol}_${mg.side}`} long={isLong} testId="personal-position" cells={{
+                  symbol:<PositionContract symbol={baseCoin+quoteUnitLabel} long={isLong} leverage={mg.leverage}
+                    onLeverage={()=>setLeverageModal({symbol:mg.symbol,settlement:limitSettlementOf(firstChild)})}
+                    badge={mg.children.length>1?<span className="text-muted-foreground">{mg.children.length} 笔合并</span>:undefined}/>,
+                  quantity:<PositionNumber value={isCoinGroup?positionQtyLabel:positionQtyLabel+' '+baseCoin}
+                    title={positionQtyTitle} tone={isLong?'text-trading-green':'text-trading-red'}/>,
+                  entry:<PositionNumber value={formatPrice(mg.weightedEntryPrice,mg.symbol)}/>,
+                  breakeven:<PositionNumber value={breakevenPrice==null?'—':formatPrice(breakevenPrice,mg.symbol)} title={breakevenTitle}/>,
+                  mark:<PositionNumber value={price>0?formatPrice(price,mg.symbol):'—'}/>,
+                  liquidation:<PositionNumber value={Number.isFinite(liq)?formatPrice(liq,mg.symbol):'—'}
+                    title={liquidationTitle} tone="text-trading-red"/>,
+                  ratio:<PositionNumber value={marginRatio.toFixed(2)+'%'} title={ratioTitle}/>,
+                  margin:<div className="flex items-center gap-1">
+                    <div><PositionNumber value={isCoinGroup&&totalMarginCoin>0?effectiveMarginLabel:effectiveMarginLabel+' USDT'}/>
+                      <div className="text-muted-foreground">（{mg.marginMode==='cross'?'全仓':'逐仓'}）</div></div>
+                    {onAdjustMargin&&<PositionEditButton testId="adjust-margin" label="调整保证金" title={marginTitle} disabled={!hasIsolated}
+                      onClick={()=>setAdjustMarginModal({symbol:mg.symbol,positionIds:isolatedChildren.map(p=>p.id)})}/>}
+                  </div>,
+                  pnl:<PositionPnl pnl={totalPnl} roe={roe}/>,
+                  funding:funding==null?undefined:<PositionNumber
+                    value={isCoinGroup?(funding>0?'+':'')+(funding/price).toFixed(8)+' '+baseCoin:formatSignedUSDT(funding)+' USDT'}
+                    title="按模拟费率与当前名义仓位估算下一次资金费"
+                    tone={funding<0?'text-trading-red':'text-trading-green'}/>,
+                  close:<PositionMarketClose mark={price>0?formatPrice(price,mg.symbol):undefined} quantity={isCoinGroup?String(totalUnits):formatAmount(mg.totalQuantity)}
+                    onClick={()=>handleOpenCloseModal(mg.symbol,childIds)}/>,
+                  protection:<PositionProtectionPrices tp={protectionPrices('TP')} sl={protectionPrices('SL')}>
+                    <PositionEditButton label="编辑仓位止盈止损" onClick={modifyProtection}/>
+                  </PositionProtectionPrices>,
+                  addProtection:<PositionProtectionButton onClick={modifyProtection}/>,
+                  details:<PositionOpenedAt openedAt={mg.openedAt}/>,
+                }}/>;
+              })}
+            </PositionTable>
           </>
         )}
 
@@ -2295,8 +1991,3 @@ export function PositionPanel({
 }
 
 /* ===== Sub-components ===== */
-
-/**
- * 仓位卡上「保本线 / 开仓均价」共用的那一格：点一下在两者之间切换（见 entryCellMode）。
- * 标签后面那枚小箭头说明这一格能切；悬停说明里写清两个数各是什么。
- */
