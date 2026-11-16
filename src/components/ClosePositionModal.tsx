@@ -34,6 +34,8 @@ interface Props {
   onConfirm: (percentage: number) => void | Promise<void>;
   busy?: boolean;
   notice?: string;
+  confirmLabel?: string;
+  quantityPrecision?: number;
   /**
    * 按成数（0–1）判这次市价平仓会不会超过币安单笔市价上限（lib/marketLotSize.cardCloseLotSize）。
    * 超过时按钮置灰并说明，给一个「按上限平」把数量改到上限——不替用户拆单，也不悄悄只平一部分。
@@ -44,27 +46,26 @@ interface Props {
 
 const QUICK_PERCENTAGES = [25, 50, 75, 100];
 const QTY_PRECISION = 4;
-const MIN_QTY = 1 / Math.pow(10, QTY_PRECISION);
 
-function roundQty(v: number) {
-  const f = Math.pow(10, QTY_PRECISION);
+function roundQty(v: number, precision: number) {
+  const f = Math.pow(10, precision);
   return Math.round(v * f) / f;
 }
 
-export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm, lotSizeCheck, busy, notice }: Props) {
+export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm, lotSizeCheck, busy, notice, confirmLabel, quantityPrecision = QTY_PRECISION }: Props) {
   const baseCoin = getSettlementAsset(symbol);
   const isCoinMargined = isCoinSettled(position);
   const totalUnits = getPositionUnits(position);
-  const minQty = isCoinMargined ? 1 : MIN_QTY;
+  const minQty = isCoinMargined ? 1 : 10 ** -quantityPrecision;
   const unitLabel = isCoinMargined ? '张' : baseCoin;
   const quoteUnitLabel = isCoinMargined ? 'USD' : 'USDT';
 
   const formatCloseUnits = (units: number) => (
-    isCoinMargined ? `${Math.round(units)} 张` : `${formatAmount(units, QTY_PRECISION)} ${baseCoin}`
+    isCoinMargined ? `${Math.round(units)} 张` : `${formatAmount(units, quantityPrecision)} ${baseCoin}`
   );
 
   const normalizeAmount = (v: number): number => (
-    isCoinMargined ? Math.max(0, Math.round(v)) : roundQty(v)
+    isCoinMargined ? Math.max(0, Math.round(v)) : roundQty(v, quantityPrecision)
   );
 
   // Single source of truth: absolute close amount (base coin for U-M, contracts for COIN-M)
@@ -369,7 +370,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
                 {lotFillable
                   ? `${lotRefusal.source}。市价平仓也是一笔市价单：请分几次平（每次不超过上限），`
                     + '或在持仓卡上设 100% 的止盈止损（平掉整个仓位的不受此限）。'
-                  : `${lotRefusal.source}。连最小的一笔（${isCoinMargined ? '1 张' : `${MIN_QTY} ${baseCoin}`}）都超过上限，市价平仓平不了：`
+                  : `${lotRefusal.source}。连最小的一笔（${isCoinMargined ? '1 张' : `${minQty} ${baseCoin}`}）都超过上限，市价平仓平不了：`
                     + '请在持仓卡上设 100% 的止盈止损（平掉整个仓位的不受此限），或用「一键平仓」。'}
               </span>
               {lotFillable && (
@@ -401,7 +402,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
             }`}
           >
             {/* 成数照引擎真正平掉的写：不到 1% 的不四舍五入成 1% / 0%（见 formatClosePercent） */}
-            确认平仓 ({formatClosePercent(ratio)})
+            {confirmLabel ?? '确认平仓'} ({formatClosePercent(ratio)})
           </Button>
         </DialogFooter>
       </DialogContent>

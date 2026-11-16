@@ -36,6 +36,7 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
     db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS managed_campaigns (id TEXT PRIMARY KEY, payload TEXT NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS position_controls (id TEXT PRIMARY KEY, payload TEXT NOT NULL, pending INTEGER NOT NULL)');
     db.prepare('INSERT OR IGNORE INTO connection VALUES (1, ?, ?)').run(account, owner);
     const connection = db.prepare('SELECT account, owner FROM connection WHERE id=1').get();
     if (connection?.account !== account || connection.owner !== owner) throw Error('本机实盘账本绑定了另一个账户');
@@ -47,12 +48,32 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
   const readManaged = db.prepare('SELECT payload FROM managed_campaigns ORDER BY rowid');
   const save = db.prepare('INSERT INTO campaigns VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload');
   const saveManaged = db.prepare('INSERT INTO managed_campaigns VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload');
+  const getControl = db.prepare('SELECT payload FROM position_controls WHERE id=?');
+  const listControls = db.prepare('SELECT payload FROM position_controls WHERE pending=1 ORDER BY rowid');
+  const saveControl = db.prepare('INSERT INTO position_controls VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, pending=excluded.pending');
+  const readSetting = db.prepare('SELECT value FROM settings WHERE key=?');
+  const saveSetting = db.prepare('INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
   return {
     paused: () => db.prepare("SELECT 1 FROM settings WHERE key='paused'").get() != null,
     pause: () => { db.prepare("INSERT OR IGNORE INTO settings VALUES ('paused','1')").run(); },
     resume: () => { db.prepare("DELETE FROM settings WHERE key='paused'").run(); },
     readAll: () => [...read.all(), ...readManaged.all()].map(row => JSON.parse(String(row.payload)) as UsdtCampaignLedger),
     save: (row: UsdtCampaignLedger) => { (row.managed ? saveManaged : save).run(row.campaign.id, JSON.stringify(row)); },
+    getPositionControl<T>(id: string): T | undefined {
+      const row = getControl.get(id);
+      return row && JSON.parse(String(row.payload));
+    },
+    pendingPositionControls<T>(): T[] { return listControls.all().map(row => JSON.parse(String(row.payload))); },
+    savePositionControl(id: string, value: unknown, pending: boolean) { saveControl.run(id, JSON.stringify(value), Number(pending)); },
+    positionLeverage(id: string): { leverage: number; at: number } | undefined {
+      const row = readSetting.get('position-leverage:' + id);
+      return row && JSON.parse(String(row.value));
+    },
+    savePositionLeverage(id: string, value: { leverage: number; at: number }) {
+      const key = 'position-leverage:' + id;
+      const old = readSetting.get(key);
+      if (!old || Number(JSON.parse(String(old.value)).at) < value.at) saveSetting.run(key, JSON.stringify(value));
+    },
     close: () => db.close(),
   };
 }

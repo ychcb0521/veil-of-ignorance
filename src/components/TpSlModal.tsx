@@ -16,6 +16,7 @@ interface Props {
   settlementMode?: SettlementMode;
   busy?: boolean;
   notice?: string;
+  confirmLabel?: string;
   /**
    * 这一次覆盖几笔仓位（持仓卡上的「N 笔合并」）。大于 1 时在弹窗里写明：
    * 每一笔各挂一张、同价同成数，「100%」盖住的是整张卡——用户看的开仓价是加权价、
@@ -41,6 +42,7 @@ export function TpSlModal({
   lotSizeCheck,
   busy,
   notice,
+  confirmLabel,
 }: Props) {
   const [tpPrice, setTpPrice] = useState('');
   const [slPrice, setSlPrice] = useState('');
@@ -118,6 +120,7 @@ export function TpSlModal({
             <label className="text-xs font-medium text-trading-green">止盈 (Take Profit)</label>
             <input
               type="number"
+              aria-label="止盈触发价格"
               value={tpPrice}
               onChange={e => setTpPrice(e.target.value)}
               placeholder="触发价格"
@@ -130,6 +133,7 @@ export function TpSlModal({
             <label className="text-xs font-medium text-trading-red">止损 (Stop Loss)</label>
             <input
               type="number"
+              aria-label="止损触发价格"
               value={slPrice}
               onChange={e => setSlPrice(e.target.value)}
               placeholder="触发价格"
@@ -212,7 +216,7 @@ export function TpSlModal({
             disabled={busy || (!tpPrice && !slPrice) || !validPct || pct <= 0 || lotRefusal != null}
             className="w-full py-2.5 rounded-lg bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            确认
+            {confirmLabel ?? '确认'}
           </button>
         </div>
       </div>

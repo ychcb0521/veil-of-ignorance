@@ -1,0 +1,322 @@
+import { decodePositions } from './usdt-position-reader.ts';
+import { formatQuantity, quantityUnits, UsdtApiError, usdtOrderId, type UsdtMarket, type UsdtRequest } from './usdt-exchange.ts';
+import type { openUsdtFollowStore } from './usdt-follow-store.ts';
+import type { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
+import { isUsdtLiveCampaignId, usdtLiveCampaignId } from '../src/lib/fish/usdtLiveCampaign.ts';
+import { usdtMirrorRevision, usdtPositionDecimal, type UsdtMirrorPosition, type UsdtMirrorSnapshot } from '../src/lib/fish/usdtPositionMirror.ts';
+import type {
+  UsdtPositionControlRequest, UsdtPositionControlResult, UsdtPositionTarget, UsdtProtectionOrder,
+} from '../src/lib/fish/usdtPositionControls.ts';
+
+const riskPath = '/fapi/v3/positionRisk';
+const openAlgoPath = '/fapi/v1/openAlgoOrders';
+const algoPath = '/fapi/v1/algoOrder';
+const orderPath = '/fapi/v1/order';
+const configPath = '/fapi/v1/symbolConfig';
+const leveragePath = '/fapi/v1/leverage';
+const marginPath = '/fapi/v1/positionMargin';
+const numberId = /^\d{1,25}$/;
+const marketSymbol = /^[A-Z0-9]{2,24}USDT$/;
+const positiveDecimal = /^\d{1,20}(?:\.\d{1,18})?$/;
+const closingSide = (position: Pick<UsdtPositionTarget, 'direction'>) => position.direction === 'long' ? 'SELL' : 'BUY';
+const matchingLeg = (row: UsdtMirrorPosition, target: UsdtPositionTarget) =>
+  row.symbol === target.symbol && row.positionSide === target.positionSide && row.direction === target.direction;
+const percent = (value: number) => Number.isFinite(value) && value > 0 && value <= 1;
+
+type Algo = UsdtProtectionOrder & { clientId?: string };
+type Step = { method: 'POST' | 'DELETE'; path: string; params: Record<string, string>;
+  state?: 'sent' | 'done' | 'failed'; sentAt?: number; issue?: string; filledQuantity?: string; retired?: boolean };
+type Stored = { id: string; target: UsdtPositionTarget; fingerprint: string; steps: Step[]; checkedRevision?: string };
+type Store = ReturnType<typeof openUsdtFollowStore>;
+const isDone = (step: Step) => step.state === 'done';
+
+function parseCommand(value: UsdtPositionControlRequest, now: number) {
+  const { id, target, action } = value ?? {};
+  if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id) || !target || !marketSymbol.test(target.symbol) ||
+    !['BOTH', 'LONG', 'SHORT'].includes(target.positionSide) || !['long', 'short'].includes(target.direction) ||
+    !Number.isSafeInteger(target.openedAt) || target.openedAt <= 0 || target.openedAt > now ||
+    typeof target.revision !== 'string' || target.revision.length > 300 || !isUsdtLiveCampaignId(target.campaignId) ||
+    !action) throw Error('币安实盘操作参数无效');
+  switch (action.kind) {
+    case 'close': if (percent(action.fraction)) return value; break;
+    case 'protect':
+      if (percent(action.fraction) && (action.tp !== null || action.sl !== null) &&
+        [action.tp, action.sl].every(price => price === null || Number.isFinite(price) && price > 0)) return value;
+      break;
+    case 'cancel': if (typeof action.orderId === 'string' && numberId.test(action.orderId)) return value; break;
+    case 'leverage': if (Number.isInteger(action.leverage) && action.leverage >= 1 && action.leverage <= 125) return value; break;
+    case 'margin': if (Number.isFinite(action.delta) && action.delta !== 0 && positiveDecimal.test(String(Math.abs(action.delta)))) return value; break;
+  }
+  throw Error('币安实盘操作参数无效');
+}
+
+function quantityFor(raw: string, fraction: number, market: UsdtMarket) {
+  const step = market.marketStep && Number(market.marketStep) > 0 ? market.marketStep : market.step;
+  const lots = quantityUnits(raw, market.step);
+  const factor = Number(step) / Number(market.step);
+  const marketLots = Math.min(lots, Math.floor(lots * fraction + 1e-9));
+  const quantity = formatQuantity(Math.floor(marketLots / factor + 1e-9), step);
+  const checked = quantityUnits(quantity, market.step);
+  if (checked < market.min || checked > market.max || checked > lots) throw Error('数量不符合币安市价委托上下限，请调整比例');
+  if (fraction === 1 && checked !== lots) throw Error('全部平仓的数量与币安市价步长不符，请核对余仓');
+  return quantity;
+}
+
+function protectionRows(raw: unknown, position: UsdtMirrorPosition): Algo[] {
+  if (!Array.isArray(raw)) throw Error('币安止盈止损委托暂不可读');
+  return raw.flatMap(row => {
+    const tp = row.orderType === 'TAKE_PROFIT_MARKET' || row.orderType === 'TAKE_PROFIT';
+    const sl = row.orderType === 'STOP_MARKET' || row.orderType === 'STOP';
+    if ((!tp && !sl) || row.symbol !== position.symbol || row.side !== closingSide(position) || row.positionSide !== position.positionSide ||
+      !(row.closePosition === true || row.reduceOnly === true || row.positionSide !== 'BOTH') ||
+      !numberId.test(String(row.algoId)) || !positiveDecimal.test(String(row.triggerPrice)) || Number(row.triggerPrice) <= 0) return [];
+    return [{
+      id: String(row.algoId), clientId: typeof row.clientAlgoId === 'string' ? row.clientAlgoId : undefined,
+      kind: tp ? 'tp' : 'sl', triggerPrice: String(row.triggerPrice),
+      quantity: row.closePosition === true ? undefined : String(row.quantity),
+      workingType: row.workingType === 'MARK_PRICE' ? 'MARK_PRICE' : 'CONTRACT_PRICE',
+    }];
+  });
+}
+
+const definitelyRejected = (error: unknown) => error instanceof UsdtApiError && error.status < 500 &&
+  (error.status >= 400 || error.code !== undefined) && error.status !== 408 && error.status !== 429 &&
+  ![-1000, -1001, -1006, -1007, -4116].includes(error.code ?? 0);
+
+export function createUsdtPositionControls(request: UsdtRequest, store: Store, owner: string,
+  readMarket: (symbol: string) => Promise<UsdtMarket | undefined>, readCampaigns: ReturnType<typeof createUsdtCampaignReader>,
+  invalidate: () => void, clock = Date.now) {
+  const rawOrders = (symbol: string) => request('GET', openAlgoPath, { symbol });
+  const risk = async (symbol: string) => decodePositions(await request('GET', riskPath, { symbol }));
+  const activeCampaign = async (target: UsdtPositionTarget) => (await readCampaigns(Math.max(1, target.openedAt - 1000),
+    [{ symbol: target.symbol, openedAt: target.openedAt }], target.symbol)).campaigns
+    .find(row => usdtLiveCampaignId(row) === target.campaignId);
+
+  async function freshTarget(target: UsdtPositionTarget) {
+    const evidence = await activeCampaign(target);
+    const current = (await risk(target.symbol)).find(row => matchingLeg(row, target));
+    if (!evidence || evidence.closedAt || evidence.openedAt !== target.openedAt || !current ||
+      usdtPositionDecimal(evidence.quantity) !== usdtPositionDecimal(current.quantity) || usdtMirrorRevision(current) !== target.revision)
+      throw Error('这笔实盘仓位已变化，请同步后重新确认');
+    return current;
+  }
+
+  const readDetails = async (snapshot: UsdtMirrorSnapshot) => {
+    const symbols = [...new Set(snapshot.positions.map(row => row.symbol))];
+    const details = new Map(await Promise.all(symbols.map(async symbol => {
+      const [orders, settings] = await Promise.allSettled([rawOrders(symbol), request('GET', configPath, { symbol })]);
+      return [symbol, { orders, settings }] as const;
+    })));
+    return { ...snapshot, positions: snapshot.positions.map(position => {
+      const { orders, settings } = details.get(position.symbol)!;
+      const config = settings.status === 'fulfilled' && Array.isArray(settings.value) ?
+        settings.value.find(row => row.symbol === position.symbol) : undefined;
+      const leverage = Number(config?.leverage);
+      let protectionOrders: UsdtProtectionOrder[] | undefined;
+      let protectionIssue: string | undefined;
+      try {
+        protectionOrders = protectionRows(orders.status === 'fulfilled' ? orders.value : undefined, position)
+          .map(({ clientId, ...order }) => order);
+      } catch { protectionIssue = '币安止盈止损暂未同步'; }
+      return { ...position, leverage: leverage > 0 ? leverage : position.leverage,
+        marginMode: config?.marginType === 'ISOLATED' ? 'isolated' as const : config?.marginType === 'CROSSED' || config?.marginType === 'CROSS' ?
+          'cross' as const : position.marginMode, protectionOrders, protectionIssue };
+    }) };
+  };
+
+  const save = (row: Stored) => {
+    store.savePositionControl(row.id, row, row.steps.some(step =>
+      step.state === 'sent' || step.path === algoPath && step.method === 'POST' && step.state === 'done' && !step.retired));
+    const leverage = row.steps.find(step => step.path === leveragePath && isDone(step));
+    if (leverage?.sentAt !== undefined)
+      store.savePositionLeverage(row.target.campaignId, { leverage: Number(leverage.params.leverage), at: leverage.sentAt });
+  };
+  const matchedOrder = (row: any, step: Step) => row?.symbol === step.params.symbol && row?.side === step.params.side &&
+    row?.positionSide === step.params.positionSide;
+
+  async function accept(step: Step, response: any) {
+    if (step.path === orderPath) {
+      if (!matchedOrder(response, step) || response.clientOrderId !== step.params.newClientOrderId ||
+        !positiveDecimal.test(String(response.executedQty)) || Number(response.executedQty) > Number(step.params.quantity)) return;
+      step.filledQuantity = String(response.executedQty);
+      if (['FILLED', 'CANCELED', 'EXPIRED', 'EXPIRED_IN_MATCH', 'REJECTED'].includes(response.status)) {
+        step.state = 'done';
+        if (Number(step.filledQuantity) !== Number(step.params.quantity))
+          step.issue = '币安平仓未全部成交，余仓以实际同步为准';
+      }
+    } else if (step.method === 'DELETE' && numberId.test(String(response?.algoId)) && String(response.algoId) === step.params.algoId) {
+      step.state = 'done';
+    } else if (step.path === algoPath && matchedOrder(response, step) && response.clientAlgoId === step.params.clientAlgoId &&
+      (response.orderType ?? response.type) === step.params.type && Number(response.triggerPrice) === Number(step.params.triggerPrice)) {
+      step.state = 'done';
+      if (['CANCELED', 'EXPIRED', 'REJECTED'].includes(response.algoStatus)) {
+        step.retired = true;
+        step.issue = '币安条件单已撤销、失效或被拒绝';
+      }
+    } else if (step.path === leveragePath && response?.symbol === step.params.symbol && Number(response.leverage) === Number(step.params.leverage)) {
+      step.state = 'done';
+    } else if (step.path === marginPath && Number(response?.code) === 200 && Number(response.amount) === Number(step.params.amount) &&
+      Number(response.type) === Number(step.params.type)) {
+      step.state = 'done';
+    }
+  }
+
+  async function recover(step: Step) {
+    try {
+      if (step.path === orderPath) {
+        await accept(step, await request('GET', orderPath, { symbol: step.params.symbol, origClientOrderId: step.params.newClientOrderId }));
+      } else if (step.method === 'DELETE') {
+        const orders = await rawOrders(step.params.symbol);
+        if (Array.isArray(orders) && !orders.some(row => String(row.algoId) === step.params.algoId)) step.state = 'done';
+      } else if (step.path === algoPath) {
+        await accept(step, await request('GET', algoPath, { clientAlgoId: step.params.clientAlgoId }));
+      } else if (step.path === marginPath && step.sentAt !== undefined) {
+        const rows = await request('GET', marginPath + '/history', { symbol: step.params.symbol, type: step.params.type,
+          startTime: String(step.sentAt), endTime: String(clock()), limit: '100' });
+        if (Array.isArray(rows) && rows.some(row => row.symbol === step.params.symbol && row.positionSide === step.params.positionSide &&
+          Number(row.type) === Number(step.params.type) && Math.abs(Number(row.amount)) === Number(step.params.amount) &&
+          Number(row.time) >= step.sentAt! && Number(row.time) <= step.sentAt! + 30_000)) step.state = 'done';
+      } else {
+        const rows = await request('GET', configPath, { symbol: step.params.symbol });
+        if (Array.isArray(rows)) await accept(step, rows.find(row => row.symbol === step.params.symbol));
+      }
+    } catch (error) {
+      if (error instanceof UsdtApiError && (error.code === -2011 || error.code === -2013) &&
+        step.sentAt !== undefined && clock() - step.sentAt > 60_000) {
+        step.state = 'failed';
+        step.issue = '币安查询不到原委托，已结束核对，请确认当前仓位后重新操作';
+      }
+    }
+  }
+
+  async function execute(value: UsdtPositionControlRequest): Promise<UsdtPositionControlResult> {
+    const { id, target, action } = parseCommand(value, clock());
+    const fingerprint = JSON.stringify([target, action]);
+    let row = store.getPositionControl<Stored>(id);
+    if (row && row.fingerprint !== fingerprint) throw Error('同一实盘请求编号的参数不一致');
+    if (!row) {
+      const previous = store.pendingPositionControls<Stored>().filter(item => item.target.symbol === target.symbol && item.target.positionSide === target.positionSide);
+      for (const item of previous) {
+        for (const step of item.steps.filter(step => step.state === 'sent')) await recover(step);
+        save(item);
+      }
+      if (previous.some(item => item.steps.some(step => step.state === 'sent'))) throw Error('上一笔实盘操作等待币安回报');
+      const position = await freshTarget(target);
+      const base = { symbol: position.symbol, positionSide: position.positionSide, side: closingSide(position) };
+      const reduce = position.positionSide === 'BOTH' ? { reduceOnly: 'true' } : {};
+      const steps: Step[] = [];
+      if (action.kind === 'cancel') {
+        if (!protectionRows(await rawOrders(position.symbol), position).some(order => order.id === action.orderId))
+          throw Error('这张止盈止损单已成交或已撤销');
+        steps.push({ method: 'DELETE', path: algoPath, params: { symbol: position.symbol, algoId: action.orderId } });
+      } else if (action.kind === 'leverage') {
+        steps.push({ method: 'POST', path: leveragePath, params: { symbol: position.symbol, leverage: String(action.leverage) } });
+      } else if (action.kind === 'margin') {
+        const config = await request('GET', configPath, { symbol: position.symbol });
+        if (!Array.isArray(config) || !config.some(row => row.symbol === position.symbol && row.marginType === 'ISOLATED'))
+          throw Error('只有币安逐仓仓位可以调整单独保证金');
+        steps.push({ method: 'POST', path: marginPath, params: { symbol: position.symbol, positionSide: position.positionSide,
+          amount: String(Math.abs(action.delta)), type: action.delta > 0 ? '1' : '2' } });
+      } else {
+        const market = await readMarket(position.symbol);
+        if (!market) throw Error('无法核对币安 USDT 永续交易规格');
+        if (action.kind === 'close') {
+          steps.push({ method: 'POST', path: orderPath, params: { ...base, ...reduce,
+            quantity: quantityFor(position.quantity, action.fraction, market), type: 'MARKET',
+            newOrderRespType: 'RESULT', newClientOrderId: usdtOrderId(owner, target.campaignId, id) } });
+        } else {
+          const size = action.fraction === 1 ? { closePosition: 'true' } :
+            { quantity: quantityFor(position.quantity, action.fraction, market), ...reduce };
+          const mark = Number(position.markPrice);
+          const existing = protectionRows(await rawOrders(position.symbol), position);
+          for (const [kind, value] of [['sl', action.sl], ['tp', action.tp]] as const) {
+            if (value === null) continue;
+            if (!(mark > 0) || ((position.direction === 'long') === (kind === 'tp') ? value <= mark : value >= mark))
+              throw Error('触发价与当前币安标记价格方向不符');
+            if (!market.priceTick || !quantityUnits(String(value), market.priceTick)) throw Error('触发价与币安价格步长不符');
+            for (const order of existing.filter(order => order.kind === kind)) {
+              steps.push({ method: 'DELETE', path: algoPath, params: { symbol: position.symbol, algoId: order.id } });
+            }
+            steps.push({ method: 'POST', path: algoPath, params: { ...base, ...size, algoType: 'CONDITIONAL',
+              type: kind === 'tp' ? 'TAKE_PROFIT_MARKET' : 'STOP_MARKET', workingType: 'MARK_PRICE',
+              triggerPrice: String(value), clientAlgoId: usdtOrderId(owner, target.campaignId, id + kind) } });
+          }
+        }
+      }
+      row = { id, target, fingerprint, steps };
+      save(row);
+    }
+    for (const step of row.steps) {
+      if (step.state === 'failed') break;
+      if (step.state === 'done') continue;
+      if (step.state === 'sent') {
+        await recover(step);
+      } else {
+        // A resumed multi-step request must still target the original, verified current position.
+        try {
+          const current = (await risk(row.target.symbol)).find(position => matchingLeg(position, row.target));
+          if (!current || usdtMirrorRevision(current) !== row.target.revision) throw Error('实盘仓位已变化，剩余操作未提交');
+        } catch (error) {
+          step.state = 'failed';
+          step.issue = error instanceof Error ? error.message : '无法核对当前实盘仓位';
+          save(row);
+          break;
+        }
+        step.state = 'sent';
+        step.sentAt = clock();
+        save(row);
+        try {
+          const params = step.method === 'DELETE' ? { algoId: step.params.algoId } : step.params;
+          await accept(step, await request(step.method, step.path, params));
+        }
+        catch (error) {
+          if (definitelyRejected(error)) {
+            step.state = 'failed';
+            step.issue = error instanceof Error ? error.message : '币安拒绝实盘委托';
+          } else await recover(step);
+        }
+        invalidate();
+      }
+      save(row);
+      if (!isDone(step)) break;
+    }
+    const pending = row.steps.some(step => step.state === 'sent');
+    return { pending, issue: row.steps.find(step => step.issue)?.issue, filledQuantity: row.steps.find(step => step.path === orderPath)?.filledQuantity };
+  }
+
+  async function cleanup() {
+    const rows = store.pendingPositionControls<Stored>();
+    if (!rows.length) return;
+    for (const row of rows) {
+      const awaiting = row.steps.filter(step => step.state === 'sent');
+      for (const step of awaiting) await recover(step);
+      const linked = row.steps.filter(step => step.method === 'POST' && step.path === algoPath && step.state === 'done' && !step.retired);
+      if (linked.length) {
+        const active = await rawOrders(row.target.symbol);
+        if (!Array.isArray(active)) continue;
+        const present = linked.filter(step => active.some(order => order.clientAlgoId === step.params.clientAlgoId));
+        for (const step of linked.filter(step => !present.includes(step))) step.retired = true;
+        if (present.length) {
+          const position = (await risk(row.target.symbol)).find(item => matchingLeg(item, row.target));
+          const revision = position && usdtMirrorRevision(position);
+          if (!revision || revision !== (row.checkedRevision ?? row.target.revision)) {
+            const campaign = await activeCampaign(row.target);
+            if (campaign?.closedAt) {
+              for (const step of present) {
+                const result = await request('DELETE', algoPath, { clientAlgoId: step.params.clientAlgoId });
+                if (result.clientAlgoId === step.params.clientAlgoId) step.retired = true;
+              }
+              invalidate();
+            } else if (campaign && revision) row.checkedRevision = revision;
+          }
+        }
+      }
+      save(row);
+    }
+  }
+
+  const protectionIds = (symbol: string) => store.pendingPositionControls<Stored>().flatMap(row => row.target.symbol === symbol ?
+    row.steps.filter(step => step.method === 'POST' && step.path === algoPath && step.state === 'done' && !step.retired)
+      .map(step => step.params.clientAlgoId) : []);
+  return { execute, cleanup, readDetails, protectionIds, hasPending: () => store.pendingPositionControls<Stored>().length > 0 };
+}

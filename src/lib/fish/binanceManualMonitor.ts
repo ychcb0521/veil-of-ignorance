@@ -25,6 +25,7 @@ export interface BinanceManualPosition {
   entryQuantity: number;
   revision: number;
   checkpoint?: QualityResult;
+  exchangeReduction?: { at: number; quantity: number; entryPrice: number; realized: number };
   pending?: BinanceManualDecision;
 }
 

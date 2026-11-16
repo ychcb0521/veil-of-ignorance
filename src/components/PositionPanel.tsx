@@ -1063,7 +1063,7 @@ export function PositionPanel({
               ) : (
                 <div className="p-3 space-y-3">
                   {live && livePositions.map(position => <UsdtLivePositionCard key={usdtMirrorKey(position)}
-                    position={position} live={live} entryMode={entryCellMode}
+                    position={position} live={live} follow={instant?.usdtFollow} entryMode={entryCellMode}
                     onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
                   {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
                     monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}

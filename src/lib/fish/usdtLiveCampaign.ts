@@ -27,7 +27,8 @@ export interface UsdtCampaignBatch {
   incomplete?: boolean;
 }
 
-export const usdtLiveCampaignId = (campaign: UsdtLiveCampaign) =>
+export const usdtLiveCampaignId = (campaign: Pick<UsdtLiveCampaign, 'symbol' | 'positionSide' | 'direction'> &
+  { fills: readonly Pick<UsdtCampaignFill, 'id' | 'orderId'>[] }) =>
   ['fish-instant-live', campaign.symbol, campaign.positionSide, campaign.direction, campaign.fills[0].id, campaign.fills[0].orderId].join('-');
 
 export const isUsdtLiveCampaignId = (id?: string) => /^fish-instant-live-[A-Z0-9_]+-(?:BOTH|LONG|SHORT)-(?:long|short)-\d+-\d+$/.test(id ?? '');

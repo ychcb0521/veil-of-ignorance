@@ -12,13 +12,16 @@ export function binanceManualSample(position: BinanceManualPosition): QualitySam
 
 export function binanceManualSeed(position: BinanceManualPosition, sample: QualitySample): QualityResult {
   if (position.checkpoint) return position.checkpoint;
-  const { entryPrice, entryQuantity, armedAt, monitor } = position;
+  const { entryPrice, entryQuantity, armedAt, monitor, exchangeReduction } = position;
   const entryTime = Math.ceil(position.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
+  const remainingQuantity = exchangeReduction?.quantity ?? entryQuantity;
+  const averageEntryPrice = exchangeReduction?.entryPrice ?? entryPrice;
   return {
     status: 'open', key: qualityResultKey(sample, monitor.plan, 0), sampleId: sample.id, groupId: monitor.plan.id,
-    evaluatedAt: armedAt, entryPrice, entryTime, endPrice: entryPrice, endTime: Math.max(entryTime, Math.ceil(armedAt / MANAGED_MINUTE) * MANAGED_MINUTE),
-    initialNotional: entryPrice * entryQuantity, remainingQuantity: entryQuantity, remainingCost: entryPrice * entryQuantity,
-    averageEntryPrice: entryPrice, realizedPnl: 0,
+    evaluatedAt: armedAt, entryPrice, entryTime, endPrice: entryPrice,
+    endTime: Math.max(entryTime, Math.ceil(Math.max(armedAt, exchangeReduction?.at ?? 0) / MANAGED_MINUTE) * MANAGED_MINUTE),
+    initialNotional: entryPrice * entryQuantity, remainingQuantity, remainingCost: averageEntryPrice * remainingQuantity,
+    averageEntryPrice, realizedPnl: exchangeReduction?.realized ?? 0,
   };
 }
 

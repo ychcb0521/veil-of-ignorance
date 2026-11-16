@@ -156,5 +156,5 @@ export function createUsdtPositionReader(read: Read, clock = Date.now) {
     working.set(revision,task);
     return task;
   };
-  return {positions,history};
+  return {positions,history,invalidate: () => { snapshot = undefined; }};
 }

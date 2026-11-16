@@ -74,7 +74,7 @@ it('接手币安手动首仓后用冻结卖出条件，按实际部分成交续�
   const id = binanceManualId(anchor);
   expect(managed).toMatchObject({ anchor, entryPrice: 4, entryQuantity: 10, monitor });
   expect(await runner.adopt(anchor, { ...monitor, name: '第二个浏览器传了不同模板' })).toMatchObject({ monitor });
-  expect(venue.check).toHaveBeenCalledWith(market, 'hedge', 10000, 4, false, 0, 'existing-position');
+  expect(venue.check).toHaveBeenCalledWith(market, 'hedge', 10000, 4, false, 0, 'existing-position', undefined);
   expect(venue.order).not.toHaveBeenCalled();
   const sample = binanceManualSample(managed);
   const seed = binanceManualSeed(managed, sample);
@@ -124,6 +124,32 @@ it('接手币安手动首仓后用冻结卖出条件，按实际部分成交续�
   expect(resumed.statuses()[0]).toMatchObject({ state: 'closed', quantity: 0 });
   expect(resumed.managedArchive(id)).toMatchObject({ monitor, exitReason: expect.stringContaining('回撤') });
   expect(resumed.managed()).toHaveLength(0);
+});
+
+it('continues the frozen monitor from the real quantity and realized PnL after an exchange reduction', async () => {
+  const at = Date.now(), anchor = { symbol, positionSide: 'LONG' as const, openedAt: at - 50_123,
+    openingOrderId: '200', openingTradeId: '201' };
+  const opener: UsdtCampaignFill = { id:'201', orderId:'200', side:'BUY', at:anchor.openedAt,
+    quantity:'10', positionQuantity:'10', price:'4', action:'open', commission:0, commissionAsset:'USDT', realized:0 };
+  const actual: UsdtLiveCampaign = { symbol, positionSide:'LONG', direction:'long', asset:'USDT',
+    openedAt:anchor.openedAt, quantity:'10', fills:[opener] };
+  const venue = exchange();
+  const monitor = { version:INSTANT_TEMPLATE_MONITOR, templateId:'frozen-plan', name:'原方案',
+    plan:freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 5, [])) };
+  const runner = createUsdtFollower(makeStore(file()), venue, owner, 'hedge', at,
+    async()=>structuredClone(actual), ()=>at, ()=>[], async()=>({ observedAt:at, positions:[] }));
+  await runner.adopt(anchor,monitor);
+  actual.fills.push({ ...opener, id:'203', orderId:'202', at, side:'SELL', action:'reduce',
+    quantity:'4', positionQuantity:'4', price:'4.25', realized:1 });
+  actual.quantity = '6';
+  await runner.tick(at);
+  const [{ position, status }] = runner.managed();
+  expect(status).toMatchObject({state:'tracking',quantity:6,realizedUsdt:1});
+  expect(position.monitor).toEqual(monitor);
+  expect(binanceManualSeed(position,binanceManualSample(position))).toMatchObject({
+    initialNotional:40,remainingQuantity:6,remainingCost:24,realizedPnl:1,
+  });
+  expect(venue.order).not.toHaveBeenCalled();
 });
 
 it('按方案的 U 本位名义额下首仓，使用逐笔成交跟随镜像、加仓、手动减仓和清仓', async () => {

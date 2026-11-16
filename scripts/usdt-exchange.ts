@@ -3,7 +3,7 @@ import type { UsdtFill, UsdtOrder } from './usdt-follow-store.ts';
 
 const spot = 'https://api.binance.com';
 const futures = 'https://fapi.binance.com';
-const tradingPaths = new Set(['/fapi/v1/order', '/fapi/v1/leverage', '/fapi/v1/marginType']);
+const tradingPaths = new Set(['/fapi/v1/order', '/fapi/v1/algoOrder', '/fapi/v1/leverage', '/fapi/v1/marginType', '/fapi/v1/positionMargin']);
 export type UsdtPositionMode = 'hedge' | 'one-way';
 interface UsdtOrderReport {
   exchangeId?: string;
@@ -17,9 +17,11 @@ export interface UsdtMarket {
   min: number;
   max: number;
   minNotional: number;
+  marketStep?: string;
+  priceTick?: string;
 }
 
-class UsdtApiError extends Error {
+export class UsdtApiError extends Error {
   readonly status: number;
   readonly code?: number;
   constructor(status: number, code?: number) {
@@ -49,13 +51,14 @@ export function formatQuantity(units: number, step: string) {
 }
 
 type Json = any;
-type UsdtRequest = (method: 'GET' | 'POST', path: string, params?: Record<string, string>) => Promise<Json>;
+export type UsdtRequest = (method: 'GET' | 'POST' | 'DELETE', path: string, params?: Record<string, string>) => Promise<Json>;
 export function createUsdtRequest(credentials: { apiKey: string; secret: Buffer }, fetcher: typeof fetch = fetch): UsdtRequest {
   const clocks = new Map<string, { offset: number; sampled: number }>();
-  const send = async (method: 'GET' | 'POST', path: string, params: Record<string, string>) => {
+  const send = async (method: Parameters<UsdtRequest>[0], path: string, params: Record<string, string>) => {
     const base = path.startsWith('/fapi/') ? futures : spot;
     if (!/^\/(?:fapi|sapi|api)\/v\d+\/(?:[a-zA-Z]+\/)*[a-zA-Z0-9]+$/.test(path)
-      || (method === 'POST' && !tradingPaths.has(path))) throw Error('币安签名请求路径无效');
+      || method === 'POST' && !tradingPaths.has(path) || method === 'DELETE' && path !== '/fapi/v1/algoOrder')
+      throw Error('币安签名请求路径无效');
     const signal = AbortSignal.timeout(10_000);
     let clock = clocks.get(base);
     if (!clock || Date.now() - clock.sampled >= 30_000 || Date.now() < clock.sampled) {
@@ -68,7 +71,7 @@ export function createUsdtRequest(credentials: { apiKey: string; secret: Buffer 
     }
     const query = new URLSearchParams({ ...params, recvWindow: method === 'GET' ? '12000' : '5000', timestamp: String(Date.now() + clock.offset) });
     query.set('signature', createHmac('sha256', credentials.secret).update(query.toString()).digest('hex'));
-    const response = await fetcher(base + path + (method === 'GET' ? '?' + query : ''), {
+    const response = await fetcher(base + path + (method === 'POST' ? '' : '?' + query), {
       method, redirect: 'error', signal,
       headers: { 'X-MBX-APIKEY': credentials.apiKey, ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
       ...(method === 'POST' ? { body: query.toString() } : {}),
@@ -103,13 +106,14 @@ export async function readUsdtMarket(symbol: string, fetcher: typeof fetch = fet
   const lot = contract.filters?.find((row: Json) => row.filterType === 'LOT_SIZE');
   const marketLot = contract.filters?.find((row: Json) => row.filterType === 'MARKET_LOT_SIZE');
   const minimum = contract.filters?.find((row: Json) => row.filterType === 'MIN_NOTIONAL');
+  const price = contract.filters?.find((row: Json) => row.filterType === 'PRICE_FILTER');
   const step = lot?.stepSize;
   const minNotional = Number(minimum?.notional);
   if (typeof step !== 'string' || Number(step) <= 0 || !Number.isFinite(minNotional) || minNotional < 0) throw Error('合约市价单规格不完整');
   const min = Math.max(1, Math.ceil(Math.max(Number(lot.minQty), Number(marketLot.minQty)) / Number(step) - 1e-9));
   const max = Math.floor(Math.min(Number(lot.maxQty), Number(marketLot.maxQty)) / Number(step) + 1e-9);
   if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || max < min) throw Error('合约市价单数量范围不可用');
-  return { symbol, step, min, max, minNotional };
+  return { symbol, step, min, max, minNotional, marketStep: marketLot?.stepSize, priceTick: price?.tickSize };
 }
 
 export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch = fetch) {
@@ -138,7 +142,8 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       if (quote.symbol !== symbol || !quantityText.test(price) || !Number.isFinite(Number(price)) || Number(price) <= 0) throw Error('币安盘口价格无效');
       return price;
     },
-    async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number, managed?: 'existing-position') {
+    async check(market: UsdtMarket, mode: UsdtPositionMode, held: number, entry: number, opening: boolean, leverage: number,
+      managed?: 'existing-position', knownProtection?: readonly string[]) {
       const { symbol } = market;
       const [positions, regular, algo, settings, modes] = await Promise.all([
         request('GET', '/fapi/v3/positionRisk', { symbol }),
@@ -149,7 +154,8 @@ export function createUsdtExchange(request: UsdtRequest, fetcher: typeof fetch =
       ]);
       if (modes.dualSidePosition !== (mode === 'hedge')) throw Error('币安持仓模式已变化');
       if (![positions, regular, algo, settings].every(Array.isArray)) throw Error('币安仓位或挂单读数不可用');
-      if ((regular.length || algo.length) && (leverage !== 0 || managed)) throw Error('该合约有外部挂单，需核对仓位');
+      if ((regular.length || algo.some((row: Json) => !knownProtection?.includes(row.clientAlgoId))) && (leverage !== 0 || managed))
+        throw Error('该合约有外部挂单，需核对仓位');
       const active = positions.filter((row: Json) => Number(row.positionAmt) !== 0);
       const row = active.find((item: Json) => item.symbol === symbol && item.positionSide === positionSide(mode));
       if (active.some((item: Json) => item !== row && !(managed && mode === 'hedge' && item.positionSide === 'SHORT'))

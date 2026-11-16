@@ -14,6 +14,9 @@ interface Props {
   currentLeverage: number;
   onClose: () => void;
   onConfirm: (leverage: number) => void;
+  live?: boolean;
+  busy?: boolean;
+  notice?: string;
   /**
    * @deprecated 不再读取。分层上限按该标的的持仓与挂单现算（与下单面板同一个判定），
    * 传进来的单一名义会让两边给出不同的答案。
@@ -42,6 +45,9 @@ export function LeverageModal({
   currentLeverage,
   onClose,
   onConfirm,
+  live = false,
+  busy = false,
+  notice,
   settlementMode = 'usdt',
   positions = [],
   orders = [],
@@ -52,7 +58,7 @@ export function LeverageModal({
   const unlimited = isUnlimitedLimitMode(limitMode);
   const tiers = resolveSymbolTiers(symbol, settlementMode);
   /** 滑块上限 = 这个合约第 1 档的最高杠杆（KAITOUSDT 75x、BTCUSDT 150x、BTCUSD 125x）；无限制模式一律 150x。 */
-  const maxLev = unlimited ? UNLIMITED_MAX_LEVERAGE : tiers.maxLeverage;
+  const maxLev = live ? 125 : unlimited ? UNLIMITED_MAX_LEVERAGE : tiers.maxLeverage;
   const initialLeverage = Math.max(1, Math.min(maxLev, Math.round(currentLeverage) || 1));
   const [leverage, setLeverage] = useState(initialLeverage);
   const [inputValue, setInputValue] = useState(String(initialLeverage));
@@ -75,7 +81,7 @@ export function LeverageModal({
    * 滑块只能停在上限，确认被 below-floor 拒绝——逐仓有持仓不能降杠杆，与币安一致。
    * 无限制模式没有这个下限：有持仓也能降，追加的保证金从可用余额扣（补不上由 planLeverageChange 拒绝）。
    */
-  const sliderMin = unlimited ? 1 : Math.min(minLev, maxLev);
+  const sliderMin = live || unlimited ? 1 : Math.min(minLev, maxLev);
 
   const plan = useMemo(() => planLeverageChange({
     symbol, positions: held, orders, markPrice,
@@ -183,7 +189,7 @@ export function LeverageModal({
 
           {/* 币安同位文案：滑块停在哪，就报那个杠杆下最多能持有多少（按合约分层、按合约的单位）。
               无限制模式没有分层上限：换成一行说明。 */}
-          {unlimited ? (
+          {live ? <p className="text-xs text-muted-foreground">杠杆和保证金以币安确认后的数值为准。</p> : unlimited ? (
             <div
               data-testid="leverage-unlimited-note"
               className="rounded-lg bg-secondary/50 px-3 py-2 text-[11px] text-muted-foreground"
@@ -214,7 +220,7 @@ export function LeverageModal({
           )}
 
           {/* 确认前必须看得见后果:保证金、强平价、释放额,以及被拒的原因 */}
-          {held.length > 0 && (
+          {!live && held.length > 0 && (
             <div data-testid="leverage-preview" className="rounded-lg border border-border bg-secondary/40 px-3 py-2 space-y-1 text-[10px] font-mono tabular-nums">
               {plan.legs.map(leg => (
                 <div key={leg.positionId} className="flex items-center justify-between gap-2">
@@ -272,31 +278,32 @@ export function LeverageModal({
             {orders.some(o => !o.reduceOnly) && <><br />杠杆调整将同时影响当前仓位和挂单的杠杆</>}
           </div>
 
-          {triggerRisk && (
+          {!live && triggerRisk && (
             <div data-testid="leverage-trigger-risk" className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[10px] text-amber-500 space-y-0.5">
               <div>{triggerRisk.title}</div>
               <div className="text-[9px] opacity-80">{triggerRisk.description}</div>
             </div>
           )}
 
-          {!plan.ok && plan.refusal && plan.refusal.code !== 'no-change' && (
+          {!live && !plan.ok && plan.refusal && plan.refusal.code !== 'no-change' && (
             <div data-testid="leverage-refusal" className="rounded-lg bg-trading-red/10 border border-trading-red/30 px-3 py-2 text-[10px] text-trading-red">
               {plan.refusal.message}
             </div>
           )}
 
+          {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
           {/* Confirm button */}
           <button
             data-testid="leverage-confirm"
-            disabled={!plan.ok && plan.refusal?.code !== 'no-change'}
+            disabled={busy || (!live && !plan.ok && plan.refusal?.code !== 'no-change')}
             onClick={() => onConfirm(leverage)}
             className={`w-full py-2.5 rounded-lg text-sm font-bold transition-all ${
-              !plan.ok && plan.refusal?.code !== 'no-change'
+              busy || (!live && !plan.ok && plan.refusal?.code !== 'no-change')
                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
                 : 'bg-amber-500 text-black hover:bg-amber-400 active:scale-[0.98]'
             }`}
           >
-            确认 — {leverage}x
+            {live ? '确认调整实盘杠杆' : '确认'} — {leverage}x
           </button>
         </div>
       </div>

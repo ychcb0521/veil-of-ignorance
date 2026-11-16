@@ -48,18 +48,24 @@ export function createManagedUsdtLedger(anchor: BinanceManualAnchor, monitor: In
 }
 
 /** In-flight app orders are reconciled by their original order ID before this is called. */
-export function verifyManagedUsdtFills(row: UsdtCampaignLedger, actual: UsdtLiveCampaign, market: UsdtMarket) {
-  if (!row.managed || !matchesManualAnchor(row.managed.anchor, actual)) throw Error('币安持仓已换成另一笔首仓');
+export function mergeUsdtExitFills(row: UsdtCampaignLedger, actual: UsdtLiveCampaign, market: UsdtMarket, allowPartial: boolean) {
   const present = new Set(actual.fills.map(fill => fill.id));
   const recorded = Object.values(row.orders).flatMap(order => order.fills ?? []);
   if (recorded.some(fill => !present.has(fill.id))) throw Error('币安成交回报还未同步完成');
   const known = new Set(recorded.map(fill => fill.id));
   const external = actual.fills.filter(fill => !known.has(fill.id));
-  if (external.length && !actual.closedAt) throw Error('币安仓位有新的手动加减仓，等待核对后再继续策略');
+  if (external.length && !actual.closedAt && (!allowPartial || external.some(fill => fill.action !== 'reduce' || fill.side !== 'SELL')))
+    throw Error('币安仓位有新的手动加减仓，等待核对后再继续策略');
   for (const fill of external) {
     row.orders['binance:' + fill.id] = { id: fill.id, exchangeId: fill.orderId, side: fill.side, terminal: true,
       quantity: fill.positionQuantity, fills: [actualFill(fill, market)] };
   }
+  return external;
+}
+
+export function verifyManagedUsdtFills(row: UsdtCampaignLedger, actual: UsdtLiveCampaign, market: UsdtMarket) {
+  if (!row.managed || !matchesManualAnchor(row.managed.anchor, actual)) throw Error('币安持仓已换成另一笔首仓');
+  mergeUsdtExitFills(row, actual, market, false);
   return !!actual.closedAt;
 }
 

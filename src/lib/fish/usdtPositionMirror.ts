@@ -1,3 +1,5 @@
+import type { UsdtProtectionOrder } from './usdtPositionControls';
+
 export type UsdtMirrorSide = 'BOTH' | 'LONG' | 'SHORT';
 
 export interface UsdtMirrorPosition {
@@ -17,6 +19,8 @@ export interface UsdtMirrorPosition {
   notional?: string;
   leverage?: number;
   marginMode?: 'isolated' | 'cross';
+  protectionOrders?: UsdtProtectionOrder[];
+  protectionIssue?: string;
 }
 
 export interface UsdtMirrorFill {

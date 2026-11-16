@@ -14,6 +14,8 @@ import type { BinanceManualAnchor, BinanceManualDecision } from '../src/lib/fish
 import type { InstantMonitorSettings } from '../src/lib/fish/instantMonitorSettings.ts';
 import type { QualityResult } from '../src/lib/fish/quality.ts';
 import { matchesManualAnchor } from './usdt-managed-execution.ts';
+import { createUsdtPositionControls } from './usdt-position-controls.ts';
+import type { UsdtRequest } from './usdt-exchange.ts';
 
 const origin = 'https://veil-of-ignorance-ten.vercel.app';
 const dashPort = 47321;
@@ -114,13 +116,15 @@ function manualMonitor(value: InstantMonitorSettings) {
 }
 
 export function serveUsdtFollower({
-  owner, token, exchange, store, mode, startedAt, positionReader, campaignReader, managedClock, allowedOrigin = origin, port = dashPort, statusFile,
+  owner, token, exchange, store, mode, startedAt, positionReader, campaignReader, managedClock, positionRequest,
+  allowedOrigin = origin, port = dashPort, statusFile,
 }: {
   owner: string; token: string; exchange: ReturnType<typeof createUsdtExchange>;
   store: ReturnType<typeof openUsdtFollowStore>; mode: 'hedge' | 'one-way'; startedAt: number;
   positionReader?: ReturnType<typeof createUsdtPositionReader>;
   campaignReader?: ReturnType<typeof createUsdtCampaignReader>;
   managedClock?: () => number;
+  positionRequest?: UsdtRequest;
   allowedOrigin?: string; port?: number; statusFile?: string;
 }) {
   const readManaged = campaignReader && managedClock ? async (anchor: BinanceManualAnchor) => {
@@ -130,11 +134,14 @@ export function serveUsdtFollower({
     if (!actual) throw Error('币安未返回这一笔仓位的完整成交');
     return actual;
   } : undefined;
-  const follower = createUsdtFollower(store, exchange, owner, mode, startedAt, readManaged, managedClock);
+  const controls = positionRequest && positionReader && campaignReader ?
+    createUsdtPositionControls(positionRequest, store, owner, exchange.market, campaignReader, positionReader.invalidate, managedClock) : undefined;
+  const follower = createUsdtFollower(store, exchange, owner, mode, startedAt, readManaged, managedClock,
+    controls?.protectionIds, controls ? positionReader?.positions : undefined);
   const tokenDigest = digest(token);
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),guardPlusAdditions:1,
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
-    ...(readManaged ? { manualMonitor: 1 } : {}) });
+    ...(readManaged ? { manualMonitor: 1 } : {}), ...(controls ? { positionControls: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
@@ -157,6 +164,10 @@ export function serveUsdtFollower({
       }
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
+      if (content.command === 'position-control') {
+        if (!controls) return json(res, 501, { error: '请更新 Windows 本机执行端以操作币安实盘仓位' });
+        return json(res, 200, await follower.runPositionControl(() => controls.execute(content.request)));
+      }
       if (readManaged && managedClock) {
         if (content.command === 'manual-monitor-status') {
           return json(res, 200, { observedAt: managedClock(), positions: follower.managed() });
@@ -186,9 +197,11 @@ export function serveUsdtFollower({
       }
       if (content.command === 'positions' || content.command === 'position-history') {
         if (!positionReader) return json(res, 501, { error: '请更新 Windows 本机执行端以同步币安持仓' });
-        const state = content.command === 'positions'
-          ? await positionReader.positions()
-          : await positionReader.history(content.symbol, content.positionSide, content.revision);
+        if (content.command === 'positions') {
+          const state = await positionReader.positions();
+          return json(res, 200, content.withDetails === true && controls ? await controls.readDetails(state) : state);
+        }
+        const state = await positionReader.history(content.symbol, content.positionSide, content.revision);
         return json(res, 200, state);
       }
       if (content.command === 'pause') follower.pauseNewOrders();
@@ -202,7 +215,12 @@ export function serveUsdtFollower({
       if (!res.headersSent) json(res, 400, { error: error instanceof SyntaxError ? '本机请求格式无效' : error instanceof Error ? error.message : '本机执行端拒绝请求' });
     });
   });
+  let nextCleanup = 0;
   const timer = setInterval(() => {
+    if (controls && Date.now() >= nextCleanup) {
+      nextCleanup = Date.now() + 10_000;
+      if (controls.hasPending()) void follower.runPositionControl(controls.cleanup).catch(() => undefined);
+    }
     void follower.tick();
     if (statusFile) {
       try { writeFileSync(statusFile, JSON.stringify(snapshot()), { mode: 0o600 }); } catch { /* API still has authoritative state. */ }
@@ -273,6 +291,7 @@ async function main() {
   const managedClock = () => Math.round(serverTime + performance.now() - clockMidpoint);
   const server = serveUsdtFollower({ owner: config.owner, token: config.token, exchange, store, mode: verified.mode, managedClock,
     startedAt: Date.now(), positionReader: createUsdtPositionReader(request, managedClock), campaignReader: createUsdtCampaignReader(request, managedClock),
+    positionRequest: request,
     statusFile: join(directory, 'usdt-follow-status.json') });
   server.once('listening', () => console.log('币安 U 本位执行端已就绪，等待已配对的即时交易。'));
   server.once('error', () => { console.error('本机执行端端口不可用'); process.exit(1); });

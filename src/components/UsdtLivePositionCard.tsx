@@ -6,15 +6,18 @@ import {
 } from '@/lib/fish/usdtPositionMirror';
 import { usdtLiveCampaignId } from '@/lib/fish/usdtLiveCampaign';
 import type { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
+import type { useUsdtFollow } from '@/hooks/useUsdtFollow';
 import type { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
 import { DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
+import { UsdtLivePositionActions } from './UsdtLivePositionActions';
 
 const positive = (value: string | undefined) => value != null && Number(value) > 0 ? usdtPositionDecimal(value) : undefined;
 const campaignLinkClass = 'flex-1 py-2 text-center text-xs font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground';
 
-export function UsdtLivePositionCard({ position, live, entryMode, onToggleEntry }: {
+export function UsdtLivePositionCard({ position, live, follow, entryMode, onToggleEntry }: {
   position: UsdtMirrorPosition;
   live: ReturnType<typeof useUsdtLiveTrading> & { management?: ReturnType<typeof useBinanceManualMonitor> };
+  follow?: ReturnType<typeof useUsdtFollow>;
   entryMode: 'entry' | 'breakeven';
   onToggleEntry: () => void;
 }) {
@@ -28,7 +31,8 @@ export function UsdtLivePositionCard({ position, live, entryMode, onToggleEntry 
     usdtPositionDecimal(row.quantity) === quantity &&
     (history?.openedAt ? row.openedAt === history.openedAt : (row.fills.at(-1)?.at ?? 0) >= position.updatedAt));
   const openedAt = history?.openedAt ?? campaign?.openedAt;
-  const campaignPath = campaign && '/journal/campaigns/' + encodeURIComponent(usdtLiveCampaignId(campaign)) + '?section=instant';
+  const campaignId = campaign && usdtLiveCampaignId(campaign);
+  const campaignPath = campaignId && '/journal/campaigns/' + encodeURIComponent(campaignId) + '?section=instant';
   const managed = live.management?.positions.find(({ position: row }) => row.anchor.symbol === position.symbol &&
     row.anchor.positionSide === position.positionSide && row.anchor.openedAt === openedAt);
   const pnl = Number(position.unrealizedPnl);
@@ -66,6 +70,13 @@ export function UsdtLivePositionCard({ position, live, entryMode, onToggleEntry 
     <div className="flex flex-wrap gap-x-3 px-3 pb-2 text-[10px] text-muted-foreground">
       <span className="font-mono tabular-nums">名义仓位 {notional} {asset}</span>
     </div>
+    {follow?.positionControls === 1 && follow.controlPosition && (
+      <UsdtLivePositionActions position={position} control={follow.controlPosition} refresh={live.retryPositions}
+        target={campaignId && openedAt && !live.issue ? { campaignId, openedAt, symbol: position.symbol,
+          direction: position.direction, positionSide: position.positionSide, revision: usdtMirrorRevision(position) } : undefined} />
+    )}
+    {follow?.connected && !follow.positionControls &&
+      <p className="px-3 pb-2 text-[10px] text-muted-foreground">更新 Windows 本机执行端后可操作实盘平仓和止盈止损。</p>}
     {campaignPath && <div className={positionActionsClass}>
       {inRouter
         ? <Link className={campaignLinkClass} to={campaignPath}>交易战役</Link>

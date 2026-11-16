@@ -38,12 +38,13 @@ interface Props {
   excludedCrossLegs?: number;
   /** signedDelta > 0 = add, < 0 = remove */
   onConfirm: (signedDelta: number) => void;
+  live?: { liquidationPrice?: number; busy?: boolean; notice?: string };
 }
 
 type Mode = 'add' | 'remove';
 
 export function AdjustMarginModal({
-  open, onClose, symbol, position, availableBalance, markPrice, initialMarginUsd, legs, excludedCrossLegs = 0, onConfirm,
+  open, onClose, symbol, position, availableBalance, markPrice, initialMarginUsd, legs, excludedCrossLegs = 0, onConfirm, live,
 }: Props) {
   const [mode, setMode] = useState<Mode>('add');
   const [amountStr, setAmountStr] = useState<string>('');
@@ -68,8 +69,8 @@ export function AdjustMarginModal({
   const amount = useMemo(() => {
     const n = parseFloat(amountStr);
     if (isNaN(n) || n <= 0) return 0;
-    return Math.min(n, max);
-  }, [amountStr, max]);
+    return live ? n : Math.min(n, max);
+  }, [amountStr, live, max]);
 
   // 强平价：整组里**最先**撞线的那一笔。单笔时就是它自己。
   const currentLiq = useMemo(
@@ -115,7 +116,7 @@ export function AdjustMarginModal({
     setAmountStr('');
   };
 
-  const canSubmit = amount > 0 && amount <= max + 1e-9;
+  const canSubmit = Number.isFinite(amount) && amount > 0 && (live ? !live.busy : amount <= max + 1e-9);
 
   const handleConfirm = () => {
     if (!canSubmit) return;
@@ -126,6 +127,7 @@ export function AdjustMarginModal({
      * 同一次点击上。成功与否由真正动账的那一方说。
      */
     onConfirm(signed);
+    if (live) return;
     setAmountStr('');
     onClose();
   };
@@ -156,17 +158,18 @@ export function AdjustMarginModal({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-[11px] text-muted-foreground">数量</label>
-                <div className="text-[11px] text-muted-foreground">
+                {!live && <div className="text-[11px] text-muted-foreground">
                   {mode === 'add' ? '可追加' : '可减少'}：
                   <span className="text-foreground font-mono ml-1">{formatUSDT(max)} USDT</span>
                   {isCoinMargined && max > 0 && (
                     <span className="text-muted-foreground/80 ml-1">≈ {formatCoinAmount(maxCoin, baseCoin)}</span>
                   )}
-                </div>
+                </div>}
               </div>
               <div className="relative">
                 <Input
                   type="number"
+                  aria-label="保证金调整金额"
                   inputMode="decimal"
                   min={0}
                   step="0.01"
@@ -176,18 +179,18 @@ export function AdjustMarginModal({
                   className="pr-24 font-mono tabular-nums"
                 />
                 <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button
+                  {!live && <button
                     type="button"
                     onClick={handleMax}
                     disabled={max <= 0}
                     className="px-2 py-0.5 rounded text-[10px] font-medium bg-primary/15 text-primary hover:bg-primary/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     最大
-                  </button>
+                  </button>}
                   <span className="text-[11px] text-muted-foreground pr-2">USDT{isCoinMargined ? '等值' : ''}</span>
                 </div>
               </div>
-              {mode === 'remove' && maxRemovable <= 0 && (
+              {!live && mode === 'remove' && maxRemovable <= 0 && (
                 <div className="text-[10px] text-amber-400 mt-1">
                   当前保证金已是最低初始保证金，无法继续减少
                 </div>
@@ -217,7 +220,7 @@ export function AdjustMarginModal({
                   本组另有 {excludedCrossLegs} 笔<strong>全仓</strong>仓位未计入：全仓共用一个保证金池，不支持单仓位追加。
                 </div>
               )}
-              <Row
+              {live ? <Row label="当前强平价" value={live.liquidationPrice ? formatPrice(live.liquidationPrice, symbol) : '—'} /> : <Row
                 label={legs.length > 1 ? '预估强平价（最先）' : '预估强平价'}
                 value={
                   <span className="flex items-center gap-1.5">
@@ -234,11 +237,12 @@ export function AdjustMarginModal({
                     </span>
                   </span>
                 }
-              />
+              />}
             </div>
           </TabsContent>
         </Tabs>
 
+        {live && <p role="status" className="text-xs text-muted-foreground">{live.notice || '可调整金额和强平价以币安实际回报为准。'}</p>}
         <DialogFooter className="gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
             取消
@@ -249,7 +253,7 @@ export function AdjustMarginModal({
             onClick={handleConfirm}
             className={mode === 'add' ? '' : 'bg-amber-500 hover:bg-amber-500/90 text-white'}
           >
-            确认{mode === 'add' ? '追加' : '减少'}
+            {live ? '确认实盘' : '确认'}{mode === 'add' ? '追加' : '减少'}
           </Button>
         </DialogFooter>
       </DialogContent>

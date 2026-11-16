@@ -3,6 +3,7 @@ import type { UsdtCampaignBatch, UsdtLiveCampaign } from '@/lib/fish/usdtLiveCam
 import type { BinanceManualAnchor, BinanceManualDecision, BinanceManualState } from '@/lib/fish/binanceManualMonitor';
 import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import type { QualityResult } from '@/lib/fish/quality';
+import type { UsdtPositionControlRequest, UsdtPositionControlResult } from '@/lib/fish/usdtPositionControls';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
@@ -30,6 +31,7 @@ interface FollowState {
   campaignMirror?: 1;
   guardPlusAdditions?: 1;
   manualMonitor?: 1;
+  positionControls?: 1;
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -163,7 +165,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     return payload as T;
   },[owner,token]);
   const readPositions=useCallback(async (signal:AbortSignal) => {
-    const result=await readMirror<UsdtMirrorSnapshot>({command:'positions'},signal,25000);
+    const result=await readMirror<UsdtMirrorSnapshot>({command:'positions',withDetails:true},signal,25000);
     if(!Array.isArray(result.positions)||!Number.isSafeInteger(result.observedAt)) throw Error('币安持仓回报无效');
     return result;
   },[readMirror]);
@@ -184,7 +186,9 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     readMirror({ command: 'manual-monitor-adopt', anchor, monitor }, signal, 60_000), [readMirror]);
   const advanceManualMonitor = useCallback((id: string, revision: number, checkpoint: QualityResult, decision: BinanceManualDecision | undefined, signal: AbortSignal) =>
     readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision }, signal, 15_000), [readMirror]);
+  const controlPosition = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
+    readMirror<UsdtPositionControlResult>({ command: 'position-control', request }, signal, 70_000), [readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
   return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
-    readManualMonitor, adoptManualMonitor, advanceManualMonitor };
+    readManualMonitor, adoptManualMonitor, advanceManualMonitor, controlPosition };
 }
