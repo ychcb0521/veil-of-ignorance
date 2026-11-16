@@ -6,7 +6,8 @@ import { type QualityGroup, type QualityResult } from '../quality';
 import { emptyPreEntryThreeStage, signalAnchoredPreEntryThreeStage } from '../preEntryThreeStage';
 import { instantMonitorSale, evaluateInstantMonitor, manualInstantMonitorClose } from '../instantMonitorExecution';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from '../instantMonitorSettings';
-import { buildInstantCampaignData, freezeInstantCampaign, instantCampaignInput } from '../instantCampaign';
+import { buildInstantCampaignData, buildOpenInstantCampaignData, buildSettlingInstantCampaignData, freezeInstantCampaign, instantCampaignInput } from '../instantCampaign';
+import { qualityCampaignSheets } from '../qualityCampaignExport';
 import { qualityCampaignStaticRisk } from '../qualityCampaignRisk';
 import { makeQualitySellPlan } from '../qualitySellPlans';
 import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
@@ -55,7 +56,29 @@ it('freezes the original template, applies its mirror and stop to the 200 USDT s
   const unexpectedLoad = vi.fn(async () => { throw Error('closed campaign already contains its fills'); });
   const frozen = await freezeInstantCampaign(input, unexpectedLoad, signal);
   expect(unexpectedLoad).not.toHaveBeenCalled();
+  const preserved = structuredClone(frozen);
   const data = buildInstantCampaignData('account', frozen);
+  const detectors = input.detectors.map(label => ({ id: label, label }));
+  expect(detectors).toHaveLength(2);
+  const category = input.detectors.join(' + ');
+  for (const view of [
+    data,
+    buildOpenInstantCampaignData('account', frozen, open),
+    buildSettlingInstantCampaignData('account', frozen, input)!,
+    buildInstantCampaignData('account', { ...frozen, metadata: undefined }),
+  ]) {
+    expect(view.campaign.comparison).toMatchObject({ detectors, category });
+    expect(view.campaign.notes).toContain('探测：' + input.detectors.join('；'));
+  }
+  const fallbackLabels = frozen.metadata!.fishing!.algorithms.map(algorithm => algorithm.label);
+  const metadataOnly = buildInstantCampaignData('account', { ...frozen, detectors: [] });
+  expect(metadataOnly.campaign.comparison?.category).toBe(fallbackLabels.join(' + '));
+  expect(qualityCampaignSheets(metadataOnly.campaign)[0].rows).toContainEqual(['信号类别', fallbackLabels.join(' + '), '']);
+  const missing = buildInstantCampaignData('account', { ...frozen, detectors: [], metadata: undefined });
+  expect(missing.campaign.comparison?.detectors).toEqual([]);
+  expect(missing.campaign.comparison?.category).toBeUndefined();
+  expect(missing.campaign.notes).toContain('探测：未记录');
+  expect(frozen).toEqual(preserved);
   expect(data.campaign).toMatchObject({ initial_main_size_usdt: 200, initial_leverage: 5,
     comparison: { section: 'instant', monitorPlan: before, instant: { metadata: {
       fishing: { combination: 'or', algorithms: [{ reading: 12.5 }, { reading: .95 }] },

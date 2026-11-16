@@ -11,7 +11,7 @@ import { withQualityMirrorLegs } from './qualityMirrorLegs';
 import { validateFishBars } from './shared';
 import type { ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { FishReconstructionLoader } from './reconstruction';
-import type { QualityCampaignData } from './qualityCampaignProjection';
+import type { CampaignDetectorSummary, QualityCampaignData } from './qualityCampaignProjection';
 import { isAutomaticPreEntryRound, type PreEntryRecord, type PreEntryRound } from './preEntryMonitor';
 
 import { instantCampaignMetadata, type InstantCampaignMetadata } from './instantCampaignMetadata';
@@ -293,21 +293,29 @@ export function buildInstantCampaignData(owner: string, frozen: InstantCampaignS
   return withInstantCampaignTiming(data, frozen, frozen.recordedAt);
 }
 
+function instantCampaignDetectorSummary(position: InstantPositionFill): CampaignDetectorSummary {
+  const hasLabel = (label: unknown): label is string => typeof label === 'string' && label.trim().length > 0;
+  const savedLabels = position.detectors.filter(hasLabel);
+  const labels = [...new Set(savedLabels.length
+    ? savedLabels
+    : (position.metadata?.fishing?.algorithms ?? []).map(algorithm => algorithm?.label).filter(hasLabel))];
+  return { detectors: labels.map(label => ({ id: label, label })), category: labels.join(' + ') || undefined };
+}
+
 function buildTemplateInstantCampaignData(owner: string, position: InstantPositionFill, result: QualityResult, evidence: {
   recordedAt: number; drawdown: number | null; staticDrawdown: number | null; sell?: ScreenedCdaTrigger;
 }): QualityCampaignData {
-  const { id, source, buyAt, marginUsdt, leverage, monitor, recordId, detectors, metadata } = position;
+  const { id, source, buyAt, marginUsdt, leverage, monitor, recordId, metadata } = position;
   const notional = monitor?.plan.positionManagement?.notional ?? marginUsdt * leverage;
   const sample: QualitySample = { id: recordId, source: { ...source, timeLabel: '', fallbackZone: '' },
     groups: [], enteredAt: buyAt, basis: 'signal', importedAt: buyAt };
   const data = buildQualityCampaignData(owner, { sample, plan: monitor!.plan, result,
-    detectors: [], observeHours: 0, firstEvaluatedAt: evidence.recordedAt }, 'sell', id, { notional, marginUsdt, leverage });
+    detectors: [], observeHours: 0, firstEvaluatedAt: evidence.recordedAt }, 'sell', id, { notional, marginUsdt, leverage }, instantCampaignDetectorSummary(position));
   const comparison = data.campaign.comparison!;
   return { ...data, campaign: { ...data.campaign, campaign_code: 'IT-' + id.slice('fish-instant-'.length),
     title: source.symbol + ' · ' + monitor!.name,
     comparison: { ...comparison, section: 'instant', planLabel: monitor!.name, monitorTemplateId:monitor!.templateId,
       ...(comparison.holdingMetrics ? { holdingMetrics: { ...comparison.holdingMetrics, returnPct: result.status === 'closed' ? (result.pnl ?? 0) / marginUsdt * 100 : null } } : {}),
-      detectors: detectors.map(label => ({ id: label, label })),
       instant: { source, marginUsdt, metadata, sellEvidence: evidence.sell?.evidence, mirrorFill: result.mirrorFill,
         drawdown: evidence.drawdown, staticDrawdown: evidence.staticDrawdown },
     } } };
@@ -317,7 +325,7 @@ function buildDefaultInstantCampaignData(owner: string, position: InstantPositio
   sell?: ScreenedCdaTrigger; exitPrice?: number; recordedAt: number; valuedAt: number; mirror?: QualityMirrorFill;
   peakPct: number | null; drawdown: number | null; staticDrawdown: number | null;
 }): QualityCampaignData {
-  const { id, recordId: runKey, buyAt, source, entryPrice, detectors, planLabel, marginUsdt, leverage } = position;
+  const { id, recordId: runKey, buyAt, source, entryPrice, planLabel, marginUsdt, leverage } = position;
   const { sell, recordedAt, valuedAt, mirror } = frozen;
   const { symbol } = source;
   const notional = marginUsdt * leverage;
@@ -367,8 +375,7 @@ function buildDefaultInstantCampaignData(owner: string, position: InstantPositio
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: recorded,
     comparison: {
       section: 'instant', runKey, sellKey: sell?.evidence?.version ?? (sell ? PRICE_VERSION : SCREENED_PRICE_EXIT_RULE), planLabel: planLabel ?? 'CDA 即时交易',
-      sellLabel: sellRule, detectors: detectors.map(label => ({ id: label, label })),
-      category: detectors.join(' + ') || undefined, valuedAt,
+      sellLabel: sellRule, ...instantCampaignDetectorSummary(position), valuedAt,
       holdingMetrics: { status: sell ? 'closed' : 'open', entryPrice, initialNotional: notional, totalInvested: marginUsdt, returnPct: pnl == null ? null : pnl / marginUsdt * 100, peakPct: frozen.peakPct,
         ...(mirror ? { mirrorRealizedPnl: breakdown.mirrorPnl, remainingPnl: sell ? breakdown.remainingPnl : undefined } : {}) },
       instant: { source, metadata: position.metadata, cdaValue: sell?.value, sellEvidence: sell?.evidence, marginUsdt,
