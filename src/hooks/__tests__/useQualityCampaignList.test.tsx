@@ -1,9 +1,45 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useQualityCampaignList } from '@/hooks/useQualityCampaignList';
-import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
-vi.mock('@/lib/fish/qualityCampaigns', () => ({ listQualityCampaignData: vi.fn(async () => ({ rows: [], warning: undefined, selectedSellKey: undefined })) }));
-afterEach(() => { cleanup(); vi.mocked(listQualityCampaignData).mockClear(); });
+import { listLocalInstantCampaignData, listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
+import { publishInstantCampaigns } from '@/lib/fish/instantCampaignStore';
+import { buildUsdtLiveCampaignData } from '@/lib/fish/usdtLiveCampaignProjection';
+import type { UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
+vi.mock('@/lib/fish/qualityCampaigns', () => ({
+  listQualityCampaignData: vi.fn(async () => ({ rows: [], warning: undefined, selectedSellKey: undefined })),
+  listLocalInstantCampaignData: vi.fn(async () => []),
+}));
+afterEach(() => { cleanup(); vi.mocked(listQualityCampaignData).mockClear(); vi.mocked(listLocalInstantCampaignData).mockClear(); });
+
+it('keeps a new exchange campaign through a delayed list read and closes the same card', async () => {
+  const owner = 'live-list';
+  const at = Date.UTC(2026, 10, 16, 3, 5, 0, 123);
+  const open: UsdtLiveCampaign = {
+    symbol: 'BEATUSDT', positionSide: 'LONG', direction: 'long', asset: 'USDT', openedAt: at, quantity: '100',
+    fills: [{ id: '11', orderId: '21', at, price: '0.08', side: 'BUY', quantity: '100', positionQuantity: '100',
+      action: 'open', commission: 0, realized: 0, commissionAsset: 'USDT' }],
+  };
+  const local = vi.mocked(listLocalInstantCampaignData);
+  const list = vi.mocked(listQualityCampaignData);
+  let finish!: (value: Awaited<ReturnType<typeof listQualityCampaignData>>) => void;
+  list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const h = renderHook(() => useQualityCampaignList(owner, 'instant'));
+  local.mockResolvedValueOnce([buildUsdtLiveCampaignData(owner, open)]);
+  await act(async () => publishInstantCampaigns(owner));
+  await waitFor(() => expect(h.result.current.rows[0]?.campaign.status).toBe('active'));
+  const id = h.result.current.rows[0].campaign.id;
+  await act(async () => finish({ rows: [], warning: undefined, selectedSellKey: undefined,
+    buyFilterLabel: '', repair: undefined }));
+  expect(h.result.current.rows.map(row => row.campaign.id)).toEqual([id]);
+  const closeAt = at + 60_000;
+  const closed: UsdtLiveCampaign = { ...open, closedAt: closeAt, quantity: '0', fills: [...open.fills,
+    { ...open.fills[0], id: '12', orderId: '22', at: closeAt, price: '0.09', side: 'SELL', action: 'reduce', realized: 1 }] };
+  local.mockResolvedValueOnce([buildUsdtLiveCampaignData(owner, closed)]);
+  await act(async () => publishInstantCampaigns(owner));
+  await waitFor(() => expect(h.result.current.rows.map(row => [row.campaign.id, row.campaign.closed_at])).toEqual([
+    [id, new Date(closeAt).toISOString()],
+  ]));
+});
 it('does no comparison loading for the personal board and isolates board/account switches and stale responses', async () => {
   const load = vi.mocked(listQualityCampaignData);
   // 【用户要求】2026-10-26 卖出比较与探测比较合并为「卖出与探测（控制变量法）」一个板块

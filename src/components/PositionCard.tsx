@@ -7,28 +7,31 @@ export const positionCardClass = 'rounded-lg border border-border bg-card shadow
 export const positionDetailsClass = 'grid grid-cols-3 gap-x-4 gap-y-2 px-3 pb-2.5';
 export const positionActionsClass = 'flex border-t border-border/50';
 
-export function PositionCardHeader({ asset, contract, long, leverage, mode, openedAt, children }: {
-  asset: string; contract: string; long: boolean; leverage: number; mode: string; openedAt?: number; children?: ReactNode;
+export function PositionCardHeader({ asset, contract, long, leverage, mode, openedAt, openTimeText, openTimeTitle, children }: {
+  asset: string; contract: string; long: boolean; leverage?: number; mode?: string; openedAt?: number;
+  openTimeText?: string; openTimeTitle?: string; children?: ReactNode;
 }) {
   return <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border/50">
     <span className="text-sm font-bold text-foreground font-mono">{asset}</span>
     <span className="text-xs text-muted-foreground">/ {contract}</span>
     <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${long ? 'bg-trading-green/15 text-trading-green' : 'bg-trading-red/15 text-trading-red'}`}>
-      {long ? '多' : '空'} {leverage}x {mode}
+      {[long ? '多' : '空', leverage == null ? undefined : `${leverage}x`, mode].filter(Boolean).join(' ')}
     </span>
     {children}
-    <span className="ml-auto text-[10px] text-muted-foreground tabular-nums" data-testid="position-open-time">
-      开仓时间 {formatBeijingTime(openedAt)}
+    <span className="ml-auto text-[10px] text-muted-foreground tabular-nums" data-testid="position-open-time" title={openTimeTitle}>
+      开仓时间 {openTimeText ?? formatBeijingTime(openedAt)}
     </span>
   </div>;
 }
 
-export function PositionCardPnl({ pnl, roe }: { pnl: number | null; roe: number | null }) {
+export function PositionCardPnl({ pnl, roe, pnlText, asset = 'USDT' }: {
+  pnl: number | null; roe: number | null; pnlText?: string; asset?: string;
+}) {
   const color = pnl == null ? 'text-muted-foreground' : pnl >= 0 ? 'text-trading-green' : 'text-trading-red';
   return <div className="flex items-start justify-between px-3 py-2.5">
     <div>
-      <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 (USDT)</div>
-      <div className={`text-lg font-bold font-mono tabular-nums ${color}`}>{pnl == null ? '—' : formatSignedUSDT(pnl)}</div>
+      <div className="text-[10px] text-muted-foreground mb-0.5">未实现盈亏 ({asset})</div>
+      <div className={`text-lg font-bold font-mono tabular-nums ${color}`}>{pnlText ?? (pnl == null ? '—' : formatSignedUSDT(pnl))}</div>
     </div>
     <div className="text-right">
       <div className="text-[10px] text-muted-foreground mb-0.5">ROE</div>

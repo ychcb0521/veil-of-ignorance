@@ -9,6 +9,14 @@ export interface UsdtMirrorPosition {
   markPrice: string;
   unrealizedPnl: string;
   updatedAt: number;
+  breakEvenPrice?: string;
+  liquidationPrice?: string;
+  positionInitialMargin?: string;
+  isolatedWallet?: string;
+  maintMargin?: string;
+  notional?: string;
+  leverage?: number;
+  marginMode?: 'isolated' | 'cross';
 }
 
 export interface UsdtMirrorFill {

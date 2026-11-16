@@ -7,12 +7,16 @@ import { loadQualityCampaignTrash, readQualityCampaignTrash, subscribeQualityCam
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 
 function mergeInstantCampaignCards(current: CampaignCardData[], incoming: CampaignCardData[]) {
-  const byId = new Map(current.filter(row => row.campaign.closed_at).map(row => [row.campaign.id, row]));
+  const byId = new Map(current.filter(row => row.campaign.closed_at || row.campaign.comparison?.liveUsdt)
+    .map(row => [row.campaign.id, row]));
   for (const row of incoming) {
     const previous = byId.get(row.campaign.id);
-    if (previous && (!row.campaign.closed_at || (
+    if (previous?.campaign.closed_at && (!row.campaign.closed_at || (
       row.campaign.comparison?.instant?.settlementPending && !previous.campaign.comparison?.instant?.settlementPending
     ))) continue;
+    const live = row.campaign.comparison?.liveUsdt;
+    const previousLive = previous?.campaign.comparison?.liveUsdt;
+    if (live && previousLive && live.fills.length < previousLive.fills.length) continue;
     byId.set(row.campaign.id, row);
   }
   const linked = new Set([...byId.values()].flatMap(row => row.campaign.comparison?.liveUsdt?.followId ?? []));

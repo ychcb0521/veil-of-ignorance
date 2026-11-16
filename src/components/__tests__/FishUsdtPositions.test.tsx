@@ -39,23 +39,26 @@ it('shows and clears real exchange positions in both views with one shared read 
   positions = [position, short];
   fireEvent(document, new Event('visibilitychange'));
   expect(await table.findByRole('button',{name:'仓位(2)'})).toBeVisible();
-  expect(fish.getByRole('button',{name:/币安实盘持仓/})).toHaveAttribute('aria-expanded','true');
-  for (const view of [fish, table]) {
-    expect(view.getByText('数量 100 BEAT')).toBeVisible();
-    expect(view.getByText('数量 21.005 BEAT')).toBeVisible();
-    expect(view.getByText('名义仓位 8.236 USDT')).toBeVisible();
-    expect(view.getAllByText('均价 0.0822712')).toHaveLength(2);
-  }
-  await waitFor(() => expect(screen.getAllByText('开仓 2026-11-15 19:28:42.697')).toHaveLength(4));
+  await waitFor(() => expect(fish.getByRole('button',{name:/币安实盘持仓/})).toHaveAttribute('aria-expanded','true'));
+  expect(fish.getByText('数量 100 BEAT')).toBeVisible();
+  expect(fish.getAllByText('均价 0.0822712')).toHaveLength(2);
+  expect(table.getByText('100 BEAT')).toBeVisible();
+  expect(table.getByText('21.005 BEAT')).toBeVisible();
+  expect(table.getByText('名义仓位 8.236 USDT')).toBeVisible();
+  expect(table.getAllByRole('button',{name:/开仓均价 0.0822712/})).toHaveLength(2);
+  expect(table.getByText('-0.001')).toBeVisible();
+  expect(table.queryByRole('region',{name:'币安实盘持仓'})).not.toBeInTheDocument();
+  await waitFor(() => expect(table.getAllByText('开仓时间 2026-11-15 19:28:42.697')).toHaveLength(2));
+  expect(fish.getAllByText('开仓 2026-11-15 19:28:42.697')).toHaveLength(2);
   expect(readPositionHistory).toHaveBeenCalledTimes(2);
   expect(table.queryByRole('button',{name:'一键平仓'})).not.toBeInTheDocument();
   fireEvent.click(table.getByRole('checkbox',{name:'隐藏其他合约'}));
-  expect(table.queryByText('数量 100 BEAT')).not.toBeInTheDocument();
+  expect(table.queryByText('100 BEAT')).not.toBeInTheDocument();
   expect(fish.getByText('数量 100 BEAT')).toBeVisible();
   fireEvent.click(table.getByRole('checkbox',{name:'隐藏其他合约'}));
   positions = [];
   fireEvent(document,new Event('visibilitychange'));
-  await waitFor(()=>expect(screen.queryByText('BEATUSDT')).not.toBeInTheDocument());
+  await waitFor(()=>expect(table.queryByTestId('usdt-live-position')).not.toBeInTheDocument());
   expect(table.getByRole('button',{name:'仓位(0)'})).toBeVisible();
 });
 

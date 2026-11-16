@@ -39,6 +39,14 @@ export function decodePositions(value: unknown): UsdtMirrorPosition[] {
       quantity: amount.replace(/^-/, ''), entryPrice: decimalText(row.entryPrice),
       markPrice: decimalText(row.markPrice), unrealizedPnl: decimalText(row.unRealizedProfit), updatedAt: row.updateTime,
     };
+    for (const key of ['breakEvenPrice', 'liquidationPrice', 'positionInitialMargin', 'isolatedWallet', 'maintMargin', 'notional'] as const) {
+      if (typeof row[key] === 'string' && decimal.test(row[key])) position[key] = row[key];
+    }
+    const leverage = Number(row.leverage);
+    if (Number.isSafeInteger(leverage) && leverage > 0) position.leverage = leverage;
+    if (row.marginType === 'isolated' || row.marginType === 'cross') position.marginMode = row.marginType;
+    else if (row.marginType === 'crossed') position.marginMode = 'cross';
+    else if (Number(position.isolatedWallet) > 0) position.marginMode = 'isolated';
     const key = usdtMirrorKey(position);
     if (positions.has(key)) throw Error('币安持仓回报重复');
     positions.set(key, position);

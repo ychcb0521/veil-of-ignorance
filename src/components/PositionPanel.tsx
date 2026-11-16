@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantPositionRow } from '@/components/InstantPositionRow';
-import { UsdtPositionRows } from '@/components/FishUsdtPositions';
+import { UsdtLivePositionCard } from '@/components/UsdtLivePositionCard';
+import { usdtMirrorKey } from '@/lib/fish/usdtPositionMirror';
 import { instantPositionDisplay, instantPositionValuation, type InstantPositionFill } from '@/lib/fish/instantCampaign';
 import { buildTpSlOrders } from '@/lib/tpSlOrders';
 import { ActionBtn, DetailCell, EntryPriceCell, PositionCardHeader, PositionCardPnl, positionActionsClass, positionCardClass, positionDetailsClass } from './PositionCard';
@@ -871,6 +872,8 @@ export function PositionPanel({
         <div className="flex items-center gap-3 shrink-0 pl-4">
           {activeTab === 'positions' && (
             <>
+              {live && <button type="button" onClick={live.retryPositions}
+                className="px-2 py-0.5 whitespace-nowrap text-xs text-muted-foreground hover:text-foreground">同步实盘</button>}
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
                 <Checkbox
                   checked={hideOtherContracts}
@@ -1045,6 +1048,9 @@ export function PositionPanel({
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto scrollbar-pro min-h-0">
+              {live?.issue && <p role="status" className="px-3 pt-2 text-xs text-muted-foreground">
+                {live.issue}{live.snapshot ? '。显示上次同步的实盘仓位。' : ''}
+              </p>}
               {mergedPositions.length === 0 && instantPositions.length === 0 && livePositions.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-500 dark:text-[#848e9c] text-sm gap-2">
                   <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
@@ -1056,15 +1062,9 @@ export function PositionPanel({
                 </div>
               ) : (
                 <div className="p-3 space-y-3">
-                  {live && livePositions.length > 0 && (
-                    <section aria-label="币安实盘持仓" className="space-y-1.5">
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="font-semibold">币安实盘持仓</span>
-                        {live.management?.positions.length ? <span className="text-muted-foreground">即时交易策略</span> : null}
-                      </div>
-                      <UsdtPositionRows live={live} positions={livePositions}/>
-                    </section>
-                  )}
+                  {live && livePositions.map(position => <UsdtLivePositionCard key={usdtMirrorKey(position)}
+                    position={position} live={live} entryMode={entryCellMode}
+                    onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
                   {instantPositions.map(position => <InstantPositionRow key={position.id} position={position}
                     monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
                     manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status => status.id === position.id)} manage={instant?.manage} limitMode={limitMode} entryMode={entryCellMode} onToggleEntry={() => setEntryCellMode(mode => mode === 'breakeven' ? 'entry' : 'breakeven')} />)}
