@@ -20,7 +20,7 @@ export function QualityPriceExitAudit({campaign,klines=[],intervalMs=300000}:{ca
    <span className="ml-auto">核对说明 ▾</span>
   </summary>
   <div className="mt-1 space-y-1">
-   {box?<><p>执行 K 使用本次冻结的箱体规则，包含额外冗余和 K 更新设置；图中结构线与执行 K 不一定同价。{c.label.includes('DBL-5')&&'蓝线表示盘面防守线，抬高的竖段是连线，不是价格 K 线，可能与下影线重叠。'}</p><p>{touch?(e.triggerAtOpen?'当分钟开盘已越过 K，按开盘价成交。':'分钟内触及 K，按止损价模拟成交；分钟内具体秒数不可确定。'):'按方案设置的收盘条件确认，再按下一分钟开盘价模拟成交。'}</p></>:<><p>滚动窗口 {e.barOpenAt==null?'未保存起点':formatUTC8(e.barOpenAt)} → {formatUTC8(e.confirmedAt)}：起点分钟开盘价与末尾分钟收盘价比较，每分钟检查一次，不要求与图上 5 分钟 K 线边界对齐。</p><p>图上整根 K 线可能包含触发之后的反弹；实体跌幅不能代替滚动窗口跌幅。成交按 {formatUTC8(e.executedAt)} 的分钟开盘价。</p></>}
+   {box?<><p>执行 K 使用本次冻结的箱体规则，包含额外冗余和 K 更新设置；图中结构线与执行 K 不一定同价。{c.label.includes('DBL-5 ')&&'蓝线表示盘面防守线，抬高的竖段是连线，不是价格 K 线，可能与下影线重叠。'}</p><p>{touch?(e.triggerAtOpen?'当分钟开盘已越过 K，按开盘价成交。':'分钟内触及 K，按止损价模拟成交；分钟内具体秒数不可确定。'):'按方案设置的收盘条件确认，再按下一分钟开盘价模拟成交。'}</p></>:<><p>滚动窗口 {e.barOpenAt==null?'未保存起点':formatUTC8(e.barOpenAt)} → {formatUTC8(e.confirmedAt)}：起点分钟开盘价与末尾分钟收盘价比较，每分钟检查一次，不要求与图上 5 分钟 K 线边界对齐。</p><p>图上整根 K 线可能包含触发之后的反弹；实体跌幅不能代替滚动窗口跌幅。成交按 {formatUTC8(e.executedAt)} 的分钟开盘价。</p></>}
    {candle&&<p className="font-mono">显示 K 线起点 {formatUTC8(candle.time)} · 开 {price(candle.open)} · 高 {price(candle.high)} · 低 {price(candle.low)} · 收 {price(candle.close)}。整根显示 K 线仅供核对，不用于重算历史成交。</p>}
   </div>
  </details>;

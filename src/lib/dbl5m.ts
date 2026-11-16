@@ -3,8 +3,21 @@ import type {ResearchBar} from './deepRsa/window';
 export const DBL5_ID='darvas_5m_lower';
 export const DBL5_VERSION='dbl-5-v2';
 export const DBL5_STEP=300_000;
-export interface Dbl5Config extends Dbl5GuardConfig {timeframe:'5m';n:number;window_minutes:number}
+export const DBL5_VARIANT_TIMEFRAMES = ['1h','4h','15m'] as const;
+export type Dbl5VariantTimeframe = typeof DBL5_VARIANT_TIMEFRAMES[number];
+export type Dbl5Timeframe = '5m' | Dbl5VariantTimeframe;
+export const DBL5_PROFILES = {
+  '5m': { timeframe:'5m', id:DBL5_ID, version:DBL5_VERSION, label:'DBL-5', periodLabel:'5 分钟', minutes:5 },
+  '1h': { timeframe:'1h', id:'darvas_1h_lower', version:'dbl-5-1h-v1', label:'DBL-5-1h', periodLabel:'1 小时', minutes:60 },
+  '4h': { timeframe:'4h', id:'darvas_4h_lower', version:'dbl-5-4h-v1', label:'DBL-5-4h', periodLabel:'4 小时', minutes:240 },
+  '15m': { timeframe:'15m', id:'darvas_15m_lower', version:'dbl-5-15m-v1', label:'DBL-5-15m', periodLabel:'15 分钟', minutes:15 },
+} as const;
+export const dbl5ProfileForFeature = (id?:string) => Object.values(DBL5_PROFILES).find(profile=>profile.id===id);
+export interface Dbl5Config extends Dbl5GuardConfig {timeframe:Dbl5Timeframe;n:number;window_minutes:number}
 export const DBL5_DEFAULTS:Readonly<Dbl5Config>=Object.freeze({timeframe:'5m',n:3,window_minutes:360});
+export const dbl5Defaults = (timeframe:Dbl5Timeframe='5m'):Readonly<Dbl5Config> => timeframe==='5m'
+  ? DBL5_DEFAULTS : {timeframe,n:DBL5_DEFAULTS.n,window_minutes:72*DBL5_PROFILES[timeframe].minutes};
+export const dbl5Step = (timeframe:Dbl5Timeframe='5m') => DBL5_PROFILES[timeframe].minutes*60_000;
 /**
  * 【用户要求】2026-11-02 防守线：箱体下轨把噪音当支撑（SUI 实测 24 次击穿 22 次 1 小时内收回）。
  * 箱体识别不变，另叠一条分行情状态、留足冗余、按收盘确认跌破的线。参数只在用户设置时写入配置，旧定义的配置身份不变。
@@ -30,14 +43,19 @@ export function withDbl5GuardVersion(config:Partial<Dbl5Config>|undefined,versio
 const GUARD_KEYS=['guard_trend_atr','guard_range_atr','guard_range_closes','guard_version'] as const;
 export function dbl5Parameters(input:Partial<Dbl5Config>={}):Dbl5Config {
   for(const key of Object.keys(input))if(!(key in DBL5_DEFAULTS)&&!(GUARD_KEYS as readonly string[]).includes(key))throw Error('DBL-5 未知参数：'+key);
-  const p={...DBL5_DEFAULTS,...input},W=p.window_minutes/5;
+  const timeframe=input.timeframe??'5m';
+  if(!Object.prototype.hasOwnProperty.call(DBL5_PROFILES,timeframe))throw Error('DBL-5 的周期无可用实现：'+timeframe);
+  const {minutes,label}=DBL5_PROFILES[timeframe];
+  const p={...dbl5Defaults(timeframe),...input},W=p.window_minutes/minutes;
   for(const key of ['guard_trend_atr','guard_range_atr'] as const){const v=p[key];if(v!==undefined&&(!Number.isFinite(v)||v<0||v>20))throw Error('DBL-5 防守线冗余须为 0–20 倍 ATR');}
   if(p.guard_range_closes!==undefined&&(!Number.isInteger(p.guard_range_closes)||p.guard_range_closes<1||p.guard_range_closes>12))throw Error('DBL-5 震荡期收盘确认须为 1–12 根');
   if(p.guard_version!==undefined&&p.guard_version!==DBL5_RETEST_GUARD_VERSION)throw Error('DBL-5 防守线版本无可用实现：'+p.guard_version);
-  if(p.timeframe!=='5m'||!Number.isInteger(W)||p.window_minutes<20||p.window_minutes>10080||!Number.isInteger(p.n)||p.n<1||2*p.n+1>=W)throw Error('DBL-5 需要固定5m，窗口20–10080分钟且为5的整数倍，满足 2n+1<W（默认n为1–35）');
-  if(p.guard_version===DBL5_RETEST_GUARD_VERSION){
+  if(p.timeframe!==timeframe||!Number.isInteger(W)||W<4||W>2016||!Number.isInteger(p.n)||p.n<1||2*p.n+1>=W){
+    throw Error(timeframe!=='5m'?`${label} 的窗口须为 ${4*minutes}–${2016*minutes} 分钟且为 ${minutes} 的整数倍，满足 2n+1<窗口根数`:'DBL-5 需要固定5m，窗口20–10080分钟且为5的整数倍，满足 2n+1<W（默认n为1–35）');
+  }
+  if(p.timeframe!=='5m'||p.guard_version===DBL5_RETEST_GUARD_VERSION){
     return {
-      timeframe:p.timeframe,n:p.n,window_minutes:p.window_minutes,guard_version:p.guard_version,
+      timeframe:p.timeframe,n:p.n,window_minutes:p.window_minutes,...(p.guard_version?{guard_version:p.guard_version}:{}),
       guard_trend_atr:p.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr,
       guard_range_atr:p.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr,
       guard_range_closes:p.guard_range_closes??DBL5_GUARD_DEFAULTS.guard_range_closes,
@@ -50,7 +68,10 @@ export function dbl5Hash(value:unknown):string {
   for(let i=0;i<s.length;i++)for(let j=0;j<h.length;j++)h[j]=Math.imul(h[j]^s.charCodeAt(i),0x01000193+j*2);
   return h.map(v=>(v>>>0).toString(16).padStart(8,'0')).join('');
 }
-export const dbl5ConfigHash=(p:Partial<Dbl5Config>={})=>dbl5Hash([DBL5_VERSION,dbl5Parameters(p)]);
+export function dbl5ConfigHash(input:Partial<Dbl5Config>={}):string {
+  const config=dbl5Parameters(input);
+  return dbl5Hash([DBL5_PROFILES[config.timeframe].version,config]);
+}
 /** Decimal parsing and all geometric comparisons use integers. No epsilon or nearest-tick rounding. */
 function decimal(value:string|number):{coefficient:bigint;scale:number} {
   const text=String(value).replace(/^\+?[.]/,'0.'),m=/^\+?(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
@@ -119,7 +140,7 @@ interface Dbl5GuardRetestPending {
   departed:boolean;
 }
 export interface Dbl5Checkpoint {
-  checkpoint_version:1;timeframe:'5m';feature_id:typeof DBL5_ID;algorithm_version:string;effective_parameters:Dbl5Config;config_hash:string;
+  checkpoint_version:1;timeframe:Dbl5Timeframe;feature_id:typeof DBL5_PROFILES[Dbl5Timeframe]['id'];algorithm_version:string;effective_parameters:Dbl5Config;config_hash:string;
   symbol:string;market:string;data_source:string;data_version:string;tick_size:string|null;initialization_id:string;initialization_start:number|null;first_time:number|null;
   last_time:number|null;last_signature:string|null;data_checksum:string;active:Dbl5Active|null;candidates:Dbl5Candidate[];context:Dbl5Candle[];
   confirmed_boxes:Dbl5Box[];ended:Dbl5End[];events:Dbl5Event[];last_row:Dbl5Row|null;
@@ -136,21 +157,28 @@ export class Dbl5Engine {
   active:Dbl5Active|null=null;candidates:Dbl5Candidate[]=[];context:Dbl5Candle[]=[];confirmed_boxes:Dbl5Box[]=[];ended:Dbl5End[]=[];events:Dbl5Event[]=[];last_row:Dbl5Row|null=null;guard:Dbl5GuardState=freshGuard();private current:Dbl5Candle|null=null;
   private guardRetestPending?:Dbl5GuardRetestPending;
   private eventIds=new Set<string>();
+  private readonly step: number;
+  private readonly version: string;
+  private readonly featureId: Dbl5Checkpoint['feature_id'];
   constructor(options:Dbl5Options){
     const c=options.checkpoint;this.config=dbl5Parameters(options.config??c?.effective_parameters);this.config_hash=dbl5ConfigHash(this.config);
+    this.step=dbl5Step(this.config.timeframe);
+    const {version,id}=DBL5_PROFILES[this.config.timeframe];
+    this.version=version;
+    this.featureId=id;
     this.symbol=options.symbol;this.market=options.market??c?.market??'crypto-perpetual';this.data_source=options.dataSource??c?.data_source??'binance-usdm';this.data_version=options.dataVersion??c?.data_version??'ohlc-v1';
     this.initialization_id=options.initializationId??c?.initialization_id??'explicit-sequence-v1';this.initialization_start=options.initializationStart??c?.initialization_start??null;this.asOf=options.asOf??Infinity;
     this.tick_size=options.tickSize!=null?dbl5TickRule(options.tickSize):c?.tick_size??null;
     if(!this.symbol||!this.market||!this.data_source||!this.data_version||!this.initialization_id)throw Error('DBL-5 需要明确的品种、市场、数据源、版本和初始化身份');
-    if(this.initialization_start!==null&&(!Number.isSafeInteger(this.initialization_start)||this.initialization_start%DBL5_STEP!==0))throw Error('DBL-5 初始化起点必须为5m开盘时间');
+    if(this.initialization_start!==null&&(!Number.isSafeInteger(this.initialization_start)||this.initialization_start%this.step!==0))throw Error('DBL-5 初始化起点必须为'+this.config.timeframe+'开盘时间');
     this.data_checksum=dbl5Hash(this.identity().filter((_,i)=>i!==7));
-    if(c){if(c.checkpoint_version!==1||c.timeframe!=='5m'||c.feature_id!==DBL5_ID||c.algorithm_version!==DBL5_VERSION||c.config_hash!==this.config_hash||c.symbol!==this.symbol||c.market!==this.market||c.data_source!==this.data_source||c.data_version!==this.data_version||c.tick_size!==this.tick_size||c.initialization_id!==this.initialization_id||c.initialization_start!==this.initialization_start)throw Error('DBL-5 检查点身份、精度、版本或配置不一致');
+    if(c){if(c.checkpoint_version!==1||c.timeframe!==this.config.timeframe||c.feature_id!==this.featureId||c.algorithm_version!==this.version||c.config_hash!==this.config_hash||c.symbol!==this.symbol||c.market!==this.market||c.data_source!==this.data_source||c.data_version!==this.data_version||c.tick_size!==this.tick_size||c.initialization_id!==this.initialization_id||c.initialization_start!==this.initialization_start)throw Error('DBL-5 检查点身份、精度、版本或配置不一致');
       const copy=structuredClone(c);this.first_time=copy.first_time;this.last_time=copy.last_time;this.last_signature=copy.last_signature;this.data_checksum=copy.data_checksum;this.active=copy.active;this.candidates=copy.candidates;this.context=copy.context;this.confirmed_boxes=copy.confirmed_boxes;this.ended=copy.ended;this.events=copy.events;this.last_row=copy.last_row;this.guard=copy.guard??freshGuard();this.eventIds=new Set(this.events.map(e=>e.id));
       if(this.config.guard_version===DBL5_RETEST_GUARD_VERSION)this.guardRetestPending=copy.guard_retest_pending;
     }
   }
-  private identity(){return [DBL5_ID,DBL5_VERSION,this.config_hash,this.symbol,this.market,this.data_source,this.data_version,this.tick_size,this.initialization_id,this.initialization_start];}
-  checkpoint():Dbl5Checkpoint {return structuredClone({checkpoint_version:1,timeframe:'5m',feature_id:DBL5_ID,algorithm_version:DBL5_VERSION,effective_parameters:this.config,config_hash:this.config_hash,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,tick_size:this.tick_size,initialization_id:this.initialization_id,initialization_start:this.initialization_start,first_time:this.first_time,last_time:this.last_time,last_signature:this.last_signature,data_checksum:this.data_checksum,active:this.active,candidates:this.candidates,context:this.context,confirmed_boxes:this.confirmed_boxes,ended:this.ended,events:this.events,last_row:this.last_row,guard:this.guard,...(this.guardRetestPending?{guard_retest_pending:this.guardRetestPending}:{})});}
+  private identity(){return [this.featureId,this.version,this.config_hash,this.symbol,this.market,this.data_source,this.data_version,this.tick_size,this.initialization_id,this.initialization_start];}
+  checkpoint():Dbl5Checkpoint {return structuredClone({checkpoint_version:1,timeframe:this.config.timeframe,feature_id:this.featureId,algorithm_version:this.version,effective_parameters:this.config,config_hash:this.config_hash,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,tick_size:this.tick_size,initialization_id:this.initialization_id,initialization_start:this.initialization_start,first_time:this.first_time,last_time:this.last_time,last_signature:this.last_signature,data_checksum:this.data_checksum,active:this.active,candidates:this.candidates,context:this.context,confirmed_boxes:this.confirmed_boxes,ended:this.ended,events:this.events,last_row:this.last_row,guard:this.guard,...(this.guardRetestPending?{guard_retest_pending:this.guardRetestPending}:{})});}
   private event(type:Dbl5Event['type'],at:number,box:Dbl5Box|null,episode:string|null,endedEpisode:string|null=null,double=false,reasons:string[]=[]):Dbl5Event {
     const e:Dbl5Event={id:'dbl5-event-'+dbl5Hash([this.identity(),box?.box_id,type,at,episode,reasons]),type,at,box_id:box?.box_id??null,episode_id:episode,ended_box_id:['SUPPORT_BROKEN','SUPPORT_EXPIRED','DATA_GAP','DATA_INVALID'].includes(type)?box?.box_id??null:null,ended_episode_id:endedEpisode,double_breach:double,reason_codes:reasons};
     if(!this.eventIds.has(e.id)){this.eventIds.add(e.id);this.events.push(e);}return e;
@@ -164,10 +192,10 @@ export class Dbl5Engine {
     const g=this.guard,tickPrice=(t:number|null)=>t===null||!this.tick_size||t<1?null:dbl5TickPrice(BigInt(Math.floor(t)),this.tick_size);
     const a=this.active,lower=a?BigInt(a.lower_ticks):null,upper=a?BigInt(a.upper_ticks):null;
     const dist=lower!==null&&close!==null?ratio(close-lower,lower):null,width=lower!==null&&upper!==null?ratio(upper-lower,lower):null;
-    const row:Dbl5Row={at,darvas_5m_lower:a?.D??null,darvas_5m_upper:a?.U??null,darvas_5m_available:!!a,darvas_5m_distance_bps:dist===null||!Number.isFinite(10000*dist)?null:10000*dist,darvas_5m_width_bps:width===null||!Number.isFinite(10000*width)?null:10000*width,darvas_5m_age_minutes:a?(at-a.confirmed_at)/60000:null,darvas_5m_freshness:a?2**(-(at-a.floor_anchor_time)/3600000):null,
+    const row:Dbl5Row={at,darvas_5m_lower:a?.D??null,darvas_5m_upper:a?.U??null,darvas_5m_available:!!a,darvas_5m_distance_bps:dist===null||!Number.isFinite(10000*dist)?null:10000*dist,darvas_5m_width_bps:width===null||!Number.isFinite(10000*width)?null:10000*width,darvas_5m_age_minutes:a?(at-a.confirmed_at)/60000:null,darvas_5m_freshness:a?2**(-(at-a.floor_anchor_time)/(12*this.step)):null,
       darvas_5m_event:event,darvas_5m_status:!valid?'DATA_UNAVAILABLE':a?'ACTIVE':this.context.length<this.config.n?'WARMUP':'SEARCHING',formation_type:a?.formation_type??null,
       box_id:a?.box_id??null,episode_id:a?.episode_id??null,seed_time:a?.seed_time??null,origin_time:a?.origin_time??null,floor_anchor_time:a?.floor_anchor_time??null,top_confirmed_at:a?.top_confirmed_at??null,confirmed_at:a?.confirmed_at??null,expires_at:a?.expires_at??null,
-      ended_box_id:endedBox?.box_id??null,ended_episode_id:endedEpisode,double_breach:double,data_valid:valid,data_continuous:continuous,reason_codes:reasons,algorithm_version:DBL5_VERSION,config_hash:this.config_hash,effective_parameters:{...this.config},tick_size:this.tick_size,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,data_checksum:this.data_checksum,initialization_id:this.initialization_id,initialization_start:this.initialization_start??(this.first_time===null?null:this.first_time-DBL5_STEP),
+      ended_box_id:endedBox?.box_id??null,ended_episode_id:endedEpisode,double_breach:double,data_valid:valid,data_continuous:continuous,reason_codes:reasons,algorithm_version:this.version,config_hash:this.config_hash,effective_parameters:{...this.config},tick_size:this.tick_size,symbol:this.symbol,market:this.market,data_source:this.data_source,data_version:this.data_version,data_checksum:this.data_checksum,initialization_id:this.initialization_id,initialization_start:this.initialization_start??(this.first_time===null?null:this.first_time-this.step),
       active:a?structuredClone(a):null,candidate_count:this.candidates.length,new_confirmations:confirmed.map(b=>({...b,selected:b.box_id===a?.box_id})),events,
       darvas_5m_guard:tickPrice(g.line),darvas_5m_guard_regime:g.line===null?null:g.regime,darvas_5m_guard_closes:g.line===null?null:this.guardCloses(g.regime),darvas_5m_guard_atr:g.atr===null||!this.tick_size?null:Number((g.atr*Number(this.tick_size)).toPrecision(12)),darvas_5m_guard_broken:guard.broken,darvas_5m_guard_segment:g.segment};
     if(this.guardRetestPending)row.darvas_5m_guard_waiting=true;
@@ -183,7 +211,7 @@ export class Dbl5Engine {
 
     const selection=events.find(event=>event.box_id===active.box_id&&
       (event.type==='BASELINE'||event.type==='UP_STEP'||event.type==='NESTED_HIGHER_FLOOR'||event.type==='SAME_FLOOR'));
-    if(selection&&(active.first_floor_time??active.floor_anchor_time)-active.seed_time===DBL5_STEP){
+    if(selection&&(active.first_floor_time??active.floor_anchor_time)-active.seed_time===this.step){
       const result=this.advanceGuard(candle,events.filter(event=>event!==selection));
       if(this.guard.samples>=DBL5_GUARD_DEFAULTS.atr_period&&this.guard.atr!==null){
         const floor=Number(active.lower_ticks);
@@ -236,8 +264,8 @@ export class Dbl5Engine {
   }
   push(bar:Dbl5Bar):Dbl5Row|null {
     if(bar.DBL5_closed===false||bar.PRS6H_closed===false)return null;
-    if(!Number.isSafeInteger(bar.openTime)||bar.openTime%DBL5_STEP!==0)throw Error('DBL-5 无效或未对齐的5m开盘时间');
-    const at=bar.openTime+DBL5_STEP;if(at>this.asOf||this.initialization_start!==null&&bar.openTime<this.initialization_start)return null;
+    if(!Number.isSafeInteger(bar.openTime)||bar.openTime%this.step!==0)throw Error('DBL-5 无效或未对齐的'+this.config.timeframe+'开盘时间');
+    const at=bar.openTime+this.step;if(at>this.asOf||this.initialization_start!==null&&bar.openTime<this.initialization_start)return null;
     const tick=bar.DBL5_tick_size??this.tick_size,raw=bar.DBL5_prices??bar;let tickSignature:string|null=null;try{tickSignature=tick==null?null:dbl5TickRule(tick);}catch{tickSignature=String(tick);}
     const signature=dbl5Hash([at,raw.open,raw.high,raw.low,raw.close,tickSignature]);
     if(this.last_time!==null){if(at<this.last_time)throw Error('DBL-5 乱序输入：需从有效检查点顺序回放');if(at===this.last_time){if(signature===this.last_signature)return null;throw Error('DBL-5 同时间戳内容冲突：需修订版本并回放后续状态');}}
@@ -256,7 +284,7 @@ export class Dbl5Engine {
     const h=BigInt(candle.high_ticks),l=BigInt(candle.low_ticks),close=BigInt(candle.close_ticks),events:Dbl5Event[]=[],reasons:string[]=[],confirmed:Dbl5Box[]=[];
     let primary:Dbl5EventType='NONE',endedBox:Dbl5Active|null=null,endedEpisode:string|null=null,continuous=true;
     // 1. A real bar after a gap starts fresh context; no virtual bars or carry-forward support.
-    if(this.last_time!==null&&at!==this.last_time+DBL5_STEP){endedBox=this.end(at,'DATA_GAP');endedEpisode=endedBox?.episode_id??null;this.candidates=[];this.context=[];continuous=false;primary='DATA_GAP';reasons.push('DATA_GAP');events.push(this.event('DATA_GAP',at,endedBox,endedEpisode,endedEpisode));}
+    if(this.last_time!==null&&at!==this.last_time+this.step){endedBox=this.end(at,'DATA_GAP');endedEpisode=endedBox?.episode_id??null;this.candidates=[];this.context=[];continuous=false;primary='DATA_GAP';reasons.push('DATA_GAP');events.push(this.event('DATA_GAP',at,endedBox,endedEpisode,endedEpisode));}
     this.first_time??=at;this.last_time=at;this.last_signature=signature;this.data_checksum=dbl5Hash([this.data_checksum,candle,this.tick_size]);
     // 2. Expiry precedes price breach; young pending candidates survive a main-box expiry.
     if(this.active&&at>=this.active.expires_at){endedBox=this.end(at,'EXPIRED');endedEpisode=endedBox!.episode_id;primary='SUPPORT_EXPIRED';events.push(this.event('SUPPORT_EXPIRED',at,endedBox,endedEpisode,endedEpisode));}
@@ -276,7 +304,7 @@ export class Dbl5Engine {
          if(this.config.guard_version===DBL5_RETEST_GUARD_VERSION&&(c.D_ticks===null||l<BigInt(c.D_ticks)))c.first_floor_time=at;
          c.D_ticks=String(l);c.floor_anchor_time=at;
        }
-      if(c.top_confirmed_at!==null&&c.D_ticks!==null&&c.floor_anchor_time!==null&&at-c.floor_anchor_time>=this.config.n*DBL5_STEP&&BigInt(c.U_ticks)-BigInt(c.D_ticks)>=1n){
+      if(c.top_confirmed_at!==null&&c.D_ticks!==null&&c.floor_anchor_time!==null&&at-c.floor_anchor_time>=this.config.n*this.step&&BigInt(c.U_ticks)-BigInt(c.D_ticks)>=1n){
         const box:Dbl5Box={box_id:'dbl5-box-'+dbl5Hash([this.identity(),this.first_time,c.seed_time,c.origin_time,c.U_ticks,c.D_ticks,c.floor_anchor_time,c.top_confirmed_at,at]),U:dbl5TickPrice(c.U_ticks,this.tick_size!),D:dbl5TickPrice(c.D_ticks,this.tick_size!),upper_ticks:c.U_ticks,lower_ticks:c.D_ticks,tick_size:this.tick_size!,seed_time:c.seed_time,origin_time:c.origin_time,floor_anchor_time:c.floor_anchor_time,top_confirmed_at:c.top_confirmed_at,confirmed_at:at,expires_at:c.expires_at};
          if(c.first_floor_time!==undefined)box.first_floor_time=c.first_floor_time;
          confirmed.push(Object.freeze(box));this.confirmed_boxes.push(structuredClone(box));events.push(this.event('BOX_CONFIRMED',at,box,null));
@@ -322,7 +350,7 @@ export function dbl5Numeric(row:Dbl5Row,name:string):number|null {
 /** Backward as-of only. A stale final record cannot be carried through an unobserved gap or beyond its expiry. */
 export function dbl5AsOf(rows:readonly Dbl5Row[],time:number):Dbl5Row|null {
   let lo=0,hi=rows.length-1,index=-1;while(lo<=hi){const mid=(lo+hi)>>>1;if(rows[mid].at<=time){index=mid;lo=mid+1;}else hi=mid-1;}
-  const row=rows[index];if(!row||time-row.at>=DBL5_STEP||row.expires_at!==null&&time>=row.expires_at)return null;return row;
+  const row=rows[index];if(!row||time-row.at>=dbl5Step(row.effective_parameters?.timeframe)||row.expires_at!==null&&time>=row.expires_at)return null;return row;
 }
 
 export function dbl5FieldUnit(name:string):string|undefined {

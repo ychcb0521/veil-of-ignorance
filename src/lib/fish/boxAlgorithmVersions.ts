@@ -9,7 +9,14 @@
  */
 import type { StructureAdditionRule } from './qualityAdditionStructure';
 import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
-import { DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
+import { DBL5_GUARD_DEFAULTS, DBL5_GUARD_VERSION, DBL5_PROFILES, DBL5_VARIANT_TIMEFRAMES, dbl5ProfileForFeature, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
+
+export const structureDbl5Timeframe = (rule: Pick<StructureAdditionRule, 'algorithm' | 'definition'>) =>
+  rule.algorithm === 'dbl5' ? dbl5ProfileForFeature(rule.definition?.id)?.timeframe ?? '5m' : '5m';
+function nativeGuardVersion(timeframe: ReturnType<typeof structureDbl5Timeframe>, version: Dbl5GuardVersion) {
+  if(timeframe==='5m')return version;
+  return version===DBL5_RETEST_GUARD_VERSION?`dbl5-${timeframe}-guard-retest-v1`:`dbl5-${timeframe}-guard-v1`;
+}
 
 export type BoxAlgorithm = StructureAdditionRule['algorithm'];
 export interface BoxAlgorithmVersion {
@@ -62,6 +69,20 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
   { id: DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, algorithm: 'dbl5', layer: 'guard', label: `${DBL5_GUARD_PLUS_DISPLAY_NAME} · 可调急拉 ATR`, since: '2026-11-16',
     summary: '无 BTC 依赖。原组合版的首次急拉判定和防守线不变，急拉参考使用自定的前置 ATR 冗余。',
     rules: ['急拉参考＝起涨低点 − 所设倍数 × 急拉前的 5 分钟 ATR(14)，按报价步长向下取整。', '与防守线按原组合规则选取有效参考，使用该参考的 K 和收盘确认方式。'] },
+  ...DBL5_VARIANT_TIMEFRAMES.flatMap((timeframe): BoxAlgorithmVersion[] => {
+    const {version,label,periodLabel,minutes}=DBL5_PROFILES[timeframe];
+    return [
+      { id: version, algorithm: 'dbl5', layer: 'box', label, since: '2026-11-16',
+        summary: `DBL-5 v2 的独立 ${periodLabel}版本，箱体识别、选择和失效沿用原规则。`,
+        rules: [`仅使用已收盘的 ${periodLabel} K 线，n=3，几何窗口默认 72 根（${72*minutes/60} 小时）`, '初始预热至少 288 根；新鲜度半衰期 12 根'] },
+      { id: nativeGuardVersion(timeframe,DBL5_GUARD_VERSION), algorithm: 'dbl5', layer: 'guard', label: `${timeframe} 防守线 v1`, since: '2026-11-16',
+        summary: `沿用原防守线的实线、虚线、冗余及断裂规则，使用 ${periodLabel} ATR(14) 与收盘确认。`,
+        rules: ['上涨期默认 1 根，震荡期默认连续 2 根收盘严格在线下后确认；ATR 倍数及震荡期确认根数可按原规则设置'] },
+      { id: nativeGuardVersion(timeframe,DBL5_RETEST_GUARD_VERSION), algorithm: 'dbl5', layer: 'guard', label: `${timeframe} 防守线-20261112`, since: '2026-11-16',
+        summary: `沿用防守线-20261112 的独立回踩条件。等待离开和回踩使用已收盘的 ${periodLabel} K 线。`,
+        rules: ['观察区与离开距离的 ATR 倍数沿用原版；独立回踩确认前继续检查已有防守线'] },
+    ];
+  }),
 ]);
 export const CURRENT_BOX_VERSION: Readonly<Record<BoxAlgorithm, string>> = Object.freeze({ dbl5: 'dbl-5-v2', sbs5m: 'sbs-5m-v1' });
 export const CURRENT_GUARD_VERSION = 'dbl5-guard-v1';
@@ -71,8 +92,8 @@ export interface StructureVersions { box: string; guard?: string }
 /** 方案实际用的版本：保存时冻结的优先；没冻结的旧方案按定义公式第一行（如「# dbl-5-v2」）认出。 */
 export function structureVersions(rule: Pick<StructureAdditionRule, 'algorithm' | 'kSource' | 'definition'> & { versions?: StructureVersions }): StructureVersions {
   const fromFormula = /^#\s*([a-z0-9-]+)/i.exec(String(rule.definition?.formula ?? ''))?.[1];
-  const box = rule.versions?.box ?? fromFormula ?? CURRENT_BOX_VERSION[rule.algorithm];
-  const guard = rule.kSource === 'guard' ? rule.versions?.guard ?? dbl5GuardVersion(rule.definition?.DBL5_config) : undefined;
+  const box = rule.versions?.box ?? fromFormula ?? (rule.algorithm==='dbl5'?DBL5_PROFILES[structureDbl5Timeframe(rule)].version:CURRENT_BOX_VERSION[rule.algorithm]);
+  const guard = rule.kSource === 'guard' ? rule.versions?.guard ?? nativeGuardVersion(structureDbl5Timeframe(rule), dbl5GuardVersion(rule.definition?.DBL5_config)) : undefined;
   return guard ? { box, guard } : { box };
 }
 /** 「DBL-5 v2」或「DBL-5 v2 · 防守线 v1」。 */
@@ -83,7 +104,7 @@ export function structureVersionLabel(rule: Parameters<typeof structureVersions>
 export function selectStructureGuardVersion(rule: StructureAdditionRule, version: Dbl5GuardVersion): StructureAdditionRule {
   return {
     ...rule,
-    versions: { ...structureVersions(rule), guard: version },
+    versions: { ...structureVersions(rule), guard: nativeGuardVersion(structureDbl5Timeframe(rule), version) },
     definition: { ...rule.definition, DBL5_config: withDbl5GuardVersion(rule.definition.DBL5_config, version) },
   };
 }
@@ -103,9 +124,10 @@ export function freezeStructureVersions<R extends StructureAdditionRule & { vers
 /** 代码里仍保留实现的版本；方案冻结的版本不在其中时拒绝运行，免得悄悄换成另一版逻辑。 */
 export function assertStructureVersionsAvailable(rule: Parameters<typeof structureVersions>[0]) {
   const v = structureVersions(rule), box = boxAlgorithmVersion(v.box);
-  if (!box || box.algorithm !== rule.algorithm || box.layer !== 'box' || v.box !== CURRENT_BOX_VERSION[rule.algorithm]) throw Error(`方案冻结的箱体算法版本 ${v.box} 当前没有可运行的实现，请勿改用其它版本代替`);
-  if (v.guard && v.guard !== CURRENT_GUARD_VERSION && v.guard !== DBL5_RETEST_GUARD_VERSION) throw Error(`方案冻结的防守线版本 ${v.guard} 当前没有可运行的实现，请勿改用其它版本代替`);
-  if (v.guard && v.guard !== dbl5GuardVersion(rule.definition.DBL5_config)) throw Error('方案冻结的防守线版本与实际参数不一致');
+  const expectedBox = rule.algorithm==='dbl5'?DBL5_PROFILES[structureDbl5Timeframe(rule)].version:CURRENT_BOX_VERSION[rule.algorithm];
+  if (!box || box.algorithm !== rule.algorithm || box.layer !== 'box' || v.box !== expectedBox) throw Error(`方案冻结的箱体算法版本 ${v.box} 当前没有可运行的实现，请勿改用其它版本代替`);
+  if (v.guard && v.guard !== nativeGuardVersion(structureDbl5Timeframe(rule), DBL5_GUARD_VERSION) && v.guard !== nativeGuardVersion(structureDbl5Timeframe(rule), DBL5_RETEST_GUARD_VERSION)) throw Error(`方案冻结的防守线版本 ${v.guard} 当前没有可运行的实现，请勿改用其它版本代替`);
+  if (v.guard && v.guard !== nativeGuardVersion(structureDbl5Timeframe(rule), dbl5GuardVersion(rule.definition.DBL5_config))) throw Error('方案冻结的防守线版本与实际参数不一致');
 }
 
 /** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */

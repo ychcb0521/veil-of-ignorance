@@ -1,8 +1,8 @@
-import {DBL5_ID,DBL5_VERSION,Dbl5Engine,type Dbl5Checkpoint,type Dbl5Options,type Dbl5Bar} from './dbl5m';
+import {Dbl5Engine,type Dbl5Checkpoint,type Dbl5Options,type Dbl5Bar} from './dbl5m';
 import {getUserPrefix} from './userStoragePrefix';
 const DATABASE='veil-dbl5m-state-v1',STORE='checkpoints';
-type Identity=Pick<Dbl5Checkpoint,'config_hash'|'symbol'|'market'|'timeframe'|'data_source'|'data_version'|'tick_size'|'initialization_id'|'initialization_start'>;
-export const dbl5CheckpointKey=(c:Identity)=>getUserPrefix()+JSON.stringify([DBL5_ID,DBL5_VERSION,'checkpoint-v1',c.config_hash,c.symbol,c.market,c.timeframe,c.data_source,c.data_version,c.tick_size,c.initialization_id,c.initialization_start]);
+type Identity=Pick<Dbl5Checkpoint,'feature_id'|'algorithm_version'|'config_hash'|'symbol'|'market'|'timeframe'|'data_source'|'data_version'|'tick_size'|'initialization_id'|'initialization_start'>;
+export const dbl5CheckpointKey=(c:Identity)=>getUserPrefix()+JSON.stringify([c.feature_id,c.algorithm_version,'checkpoint-v1',c.config_hash,c.symbol,c.market,c.timeframe,c.data_source,c.data_version,c.tick_size,c.initialization_id,c.initialization_start]);
 const memory=new Map<string,Dbl5Checkpoint>();
 const durable=new Map<string,string>();
 const revision=(c:Dbl5Checkpoint)=>String(c.last_time)+':'+c.data_checksum;
@@ -32,7 +32,7 @@ export async function saveDbl5Checkpoint(value:Dbl5Checkpoint):Promise<boolean>{
 }
 export async function loadDbl5Checkpoint(identity:Identity,before=Infinity):Promise<Dbl5Checkpoint|null>{
  const k=dbl5CheckpointKey(identity),value=memory.get(k)??(await disk('readonly',k)).value;
- if(!value||value.checkpoint_version!==1||value.feature_id!==DBL5_ID||value.algorithm_version!==DBL5_VERSION||(value.last_time??Infinity)>before)return null;
+ if(!value||value.checkpoint_version!==1||value.feature_id!==identity.feature_id||value.algorithm_version!==identity.algorithm_version||(value.last_time??Infinity)>before)return null;
  return structuredClone(value);
 }
 /** Durable resume requires an explicit initialization identity, rather than an arbitrary recent-six-hour seed. */

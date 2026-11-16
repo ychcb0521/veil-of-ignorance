@@ -1,11 +1,11 @@
-import { evaluateOnBars, featureWindowMs, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { evaluateOnBars, featureWindowMs, dbl5VariantDefinition, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { advanceChartAtr, type ChartAtrState } from '@/lib/atr';
 import { compileFishProgram } from './algorithm';
-import { freezeStructureVersions, selectStructureGuardVersion } from './boxAlgorithmVersions';
+import { freezeStructureVersions, structureDbl5Timeframe, selectStructureGuardVersion } from './boxAlgorithmVersions';
 import { defaultStructureAddition, structureActiveBox, structureAdditionIdentity, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { validateFishBars } from './shared';
-import { dbl5Parameters, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
+import { DBL5_PROFILES, dbl5Defaults, dbl5Parameters, type Dbl5Timeframe, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
 import { sbsParameters, type SbsCheckpoint } from '@/lib/sbs5m';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -27,7 +27,7 @@ export interface BoxStopRule {
   guardRegime?: BoxStopGuardRegime;
   structure: StructureAdditionRule;
   update: 'fixed' | 'raise-only' | 'follow';
-  confirmation: 'touch' | 'close-1m' | 'close-5m' | 'guard-break';
+  confirmation: 'touch' | 'close-1m' | `close-${Dbl5Timeframe}` | 'guard-break';
   closes: number;
 }
 export function selectBoxStopGuardRegime(rule: BoxStopRule, regime: keyof typeof BOX_STOP_GUARD_REGIMES): BoxStopRule {
@@ -54,9 +54,26 @@ export function defaultBoxBreak(defs: readonly DeepDigFeatureDef[] = [], guardVe
     closes: 1,
   });
 }
+export function selectBoxStopTimeframe(rule:BoxStopRule, timeframe:Dbl5Timeframe, defs:readonly DeepDigFeatureDef[]=[]) {
+  const oldTimeframe=structureDbl5Timeframe(rule.structure);
+  if(rule.structure.algorithm!=='dbl5'||oldTimeframe===timeframe)return rule;
+  const definition=timeframe==='5m'?defaultStructureAddition('dbl5',defs).definition:dbl5VariantDefinition(timeframe);
+  const previous=rule.structure.definition.DBL5_config;
+  const windowBars=(previous?.window_minutes??dbl5Defaults(oldTimeframe).window_minutes)/DBL5_PROFILES[oldTimeframe].minutes;
+  const structure={
+    ...rule.structure,versions:undefined,
+    definition:{...definition,DBL5_config:{...previous,timeframe,window_minutes:windowBars*DBL5_PROFILES[timeframe].minutes}},
+  };
+  const confirmation=rule.confirmation===`close-${oldTimeframe}` ? `close-${timeframe}` as const : rule.confirmation;
+  return {...rule,structure:freezeStructureVersions(structure),confirmation} satisfies BoxStopRule;
+}
+export function boxStopAlgorithmLabel(rule:BoxStopRule) {
+  return rule.structure.algorithm==='dbl5'?DBL5_PROFILES[structureDbl5Timeframe(rule.structure)].label:'SBS-5M';
+}
 export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule {
   if (!rule || ![BOX_STOP_VERSION,BOX_STOP_GUARD_REGIME_VERSION,BOX_BREAK_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
-  validateStructureAddition(rule.structure);
+  validateStructureAddition(rule.structure,true);
+  const nativeConfirmation=`close-${structureDbl5Timeframe(rule.structure)}`;
   if (rule.version === BOX_STOP_GUARD_REGIME_VERSION) {
     if (rule.structure.algorithm !== 'dbl5' || rule.structure.kSource !== 'guard' || !['trend', 'range'].includes(rule.guardRegime ?? '')) {
       throw Error('箱体硬止损的单一线型须使用 DBL-5 防守线并选择实线或虚线');
@@ -67,7 +84,7 @@ export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule
     return;
   }
   if (!['current','guard'].includes(rule.structure.kSource ?? '') || !['fixed','raise-only','follow'].includes(rule.update)
-    || !['touch','close-1m','close-5m'].includes(rule.confirmation) || !Number.isInteger(rule.closes) || rule.closes<1 || rule.closes>100) throw Error('请完善箱体硬止损的基准、更新方式与确认根数（1–100）');
+    || !['touch','close-1m',nativeConfirmation].includes(rule.confirmation) || !Number.isInteger(rule.closes) || rule.closes<1 || rule.closes>100) throw Error('请完善箱体硬止损的基准、更新方式与确认根数（1–100）');
 }
 export function boxStopIdentity(r: BoxStopRule) {
   const config = r.structure.definition.DBL5_config;
@@ -77,18 +94,19 @@ export function boxStopIdentity(r: BoxStopRule) {
     : r.structure;
   return [r.version, structureAdditionIdentity(structure), r.update, r.confirmation, r.closes, ...(r.guardRegime ? [r.guardRegime] : [])];
 }
-export const boxStopLabel = (r: BoxStopRule) => isBoxBreak(r)?'DBL-5 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出':`${r.structure.algorithm==='dbl5'?'DBL-5':'SBS-5M'} ${r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1':'5'} 分钟连续 ${r.closes} 根收盘 ≤ K`}`;
+export const boxStopLabel = (r: BoxStopRule) => isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
 
-/** Only already closed native 5m structures can place a stop for the next minute. */
+/** Only already closed native structures can place a stop for the next minute. */
 export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
   const load = o.load.boxStopMarketLoad ?? o.load;
   let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).map(v=>{
     validateBoxStop(v.boxStop);
     const rule=v.boxStop,def=rule.structure.definition,plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
-    const from=qualityHistoryFrom(o.load,Math.floor(o.entry/300000)*300000-Math.ceil(featureWindowMs(def)/300000)*300000,300000);
+    const step=plan.step;
+    const from=qualityHistoryFrom(o.load,Math.floor(o.entry/step)*step-Math.ceil(featureWindowMs(def)/step)*step,step);
     if(from<0)throw Error('箱体硬止损初始化历史不足');
-    return {v,rule,def,plan,from,cursor:from,dbl:undefined as Dbl5Checkpoint|undefined,sbs:undefined as SbsCheckpoint|undefined,atr:undefined as ChartAtrState|undefined,latestLine:undefined as {line:number;at:number}|undefined,state:{count:0,...o.previous?.[v.id]} as BoxStopState};
+    return {v,rule,def,plan,step,from,cursor:from,dbl:undefined as Dbl5Checkpoint|undefined,sbs:undefined as SbsCheckpoint|undefined,atr:undefined as ChartAtrState|undefined,latestLine:undefined as {line:number;at:number}|undefined,state:{count:0,...o.previous?.[v.id]} as BoxStopState};
   });
   const states=()=>Object.fromEntries(rules.map(r=>[r.v.id,{...r.state}]));
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
@@ -102,11 +120,11 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       // close. Touch stops still use only lines known before the minute opened.
       const nativeClose=options?.observeNativeClose&&isBoxBreak(r.rule);
       const observedAt=minute.openTime+(nativeClose?60000:0);
-      const cut=Math.floor(observedAt/300000)*300000;
+      const cut=Math.floor(observedAt/r.step)*r.step;
       while(r.cursor<cut){
         if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
-        const to=Math.min(cut,r.cursor+500*300000),bars=await load(o.row,r.cursor,to,r.plan,o.signal);
-        validateFishBars(bars,to,(to-r.cursor)/300000,300000);
+        const to=Math.min(cut,r.cursor+500*r.step),bars=await load(o.row,r.cursor,to,r.plan,o.signal);
+        validateFishBars(bars,to,(to-r.cursor)/r.step,r.step);
         const out=evaluateOnBars(bars,r.plan.compiled,{...r.def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:r.from,DBL5_initialization_id:`box-stop:${r.from}`,DBL5_checkpoint:r.dbl,SBS5M_symbol:o.row.symbol,SBS5M_initialization_id:`box-stop:${r.from}`,SBS5M_checkpoint:r.sbs});
         r.dbl=out.DBL5_checkpoint;r.sbs=out.SBS5M_checkpoint;
         const rows=r.rule.structure.algorithm==='dbl5'?out.DBL5_details:out.SBS5M_details;
@@ -114,9 +132,9 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
         rows.forEach((row,i)=>{
           if(!row.data_valid)throw Error(BOX_STOP_INVALID_DATA);
           r.atr=advanceChartAtr(r.atr,bars[i]);
-          const at=bars[i].openTime+300000;
+          const at=bars[i].openTime+r.step;
           // Older history initializes the box/ATR, never moves an already saved stop backwards.
-          if(at<Math.floor(observationSince/300000)*300000 || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
+          if(at<Math.floor(observationSince/r.step)*r.step || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
           if(isBoxBreak(r.rule)){
             // Warmup breaks are historical. An unavailable/newly absent line is not a red cross.
             if(at>observationEntry&&at>=observationSince&&(row as Dbl5Row).darvas_5m_guard_broken&&breakAt==null){breakAt=at;brokenBar=bars[i].openTime;r.state.confirmedAt=at;}
@@ -135,14 +153,14 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       }
       record(r.v.id,minute.openTime,r.state);
       if(isBoxBreak(r.rule)){
-        if(breakAt!=null)candidates.push({at:observedAt,reading:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:1,boxBreakEvidence:{version:BOX_BREAK_VERSION,event:'darvas_5m_guard_broken',confirmedAt:breakAt,sourceBarOpenTime:brokenBar!}}});
+        if(breakAt!=null)candidates.push({at:observedAt,reading:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:1,boxBreakEvidence:{version:BOX_BREAK_VERSION,event:`darvas_${structureDbl5Timeframe(r.rule.structure)}_guard_broken`,confirmedAt:breakAt,sourceBarOpenTime:brokenBar!}}});
         continue;
       }
       const line=r.state.line;if(line==null)continue;
       const cause={id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:line,boxStopEvidence:{version:r.rule.version,line,confirmedAt:r.state.confirmedAt!,confirmation:r.rule.confirmation,...(r.rule.guardRegime ? {guardRegime:r.rule.guardRegime} : {})}};
       if(r.rule.confirmation==='touch'){
         if(minute.low<=line*(1+1e-12)){const atOpen=minute.open<=line*(1+1e-12);candidates.push({at:minute.openTime,reading:atOpen?minute.open:line,fillPrice:atOpen?minute.open:line,fillPeak:minute.open,barOpenTime:minute.openTime,atOpen,cause});}
-      }else if(r.rule.confirmation==='close-1m'||(minute.openTime+60000)%300000===0){
+      }else if(r.rule.confirmation==='close-1m'||(minute.openTime+60000)%r.step===0){
         r.state.count=minute.close<=line*(1+1e-12)?r.state.count+1:0;
         record(r.v.id,minute.openTime+60000,r.state);
         if(r.state.count>=r.rule.closes)candidates.push({at:minute.openTime+60000,reading:minute.close,barOpenTime:minute.openTime,cause});

@@ -882,7 +882,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         ? `组合卖出：涨幅已达 ${group.combo.switchPct}%，按 ${group.combo.after.label} ${group.combo.after.rule.direction} ${group.combo.after.rule.threshold} 盘中复原达标，下一分钟开盘卖出`
         : `组合卖出：涨幅未达 ${group.combo.switchPct}%，按 ${group.combo.beforeLabel} ${group.rule!.direction} ${group.rule!.threshold} 盘中复原达标，下一分钟开盘卖出`)
         : closed && trigger?.cause?.kind === 'sell-static-drawdown' ? `卖出算法${trigger.stage === 'before' ? '前段' : trigger.stage === 'after' ? '后段' : ''}：${trigger.cause.label} ≥ ${trigger.cause.threshold}%；${trigger.atOpen ? '开盘跳空越线，按开盘价' : '盘中触及止损价，按止损价'}卖出全部余仓`
-        : closed && trigger?.cause?.boxBreakEvidence ? '一票否决：DBL-5 防守线断裂（红叉已确认），按下一分钟开盘价卖出全部持仓'
+        : closed && trigger?.cause?.boxBreakEvidence ? `一票否决：${trigger.cause.boxBreakEvidence.event==='darvas_5m_guard_broken'?'DBL-5':trigger.cause.label.split(' ')[0]} 防守线断裂（红叉已确认），按下一分钟开盘价卖出全部持仓`
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${['indicator','box-stop'].includes(trigger.cause.kind)?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);

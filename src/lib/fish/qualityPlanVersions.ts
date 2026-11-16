@@ -1,8 +1,9 @@
+import { INTERVAL_LABEL } from '@/lib/deepDig/features';
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
 import { expressionConditions } from './preEntryThreeStage';
 import {DBL5_1115_POSITION_RACE_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_DISPLAY_NAME,IMPULSE_1115_POSITION_LABEL,dbl5GuardPlusParams} from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
-import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
+import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopAlgorithmLabel,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
@@ -146,7 +147,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     const r = v.boxStop!, versions = structureVersions(r.structure);
     const version = join([r.version, versions.box, versions.guard, r.guardRegime && '参数 #' + shortFishHash(JSON.stringify(boxStopIdentity(r)))]);
     const summary = BOX_K_EXECUTION_VERSIONS.find(item => item.id === r.version)?.summary
-      ?? (isBoxBreak(r) ? '仅在原生 DBL-5 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂' : '独立箱体止损；只用已收盘 5 分钟结构，触价或收盘确认由用户选择');
+      ?? (isBoxBreak(r) ? `仅在原生 ${boxStopAlgorithmLabel(r)} 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂` : `独立箱体止损；只用已收盘 ${INTERVAL_LABEL[r.structure.definition.interval??'5m']}结构，触价或收盘确认由用户选择`);
     add(`hard-stop-box-${i}`, '硬性终止', boxStopLabel(r), version, summary);
   });
   const a = plan.addition;

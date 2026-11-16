@@ -1,7 +1,7 @@
 import { qualityHistoryFrom } from './qualityInitialization';
 /** Closed 5m structure events and frozen K selection for paper holding additions. */
-import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,DBL5_GUARD_PLUS_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
-import {assertStructureVersionsAvailable,CURRENT_GUARD_VERSION,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
+import {compileFeatureFormula,definitionKey,evaluateOnBars,featureWindowMs,DBL5_DEF,dbl5VariantDefinition,DBL5_GUARD_PLUS_DEF,SBS5M_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
+import {assertStructureVersionsAvailable,CURRENT_GUARD_VERSION,structureDbl5Timeframe,structureVersionLabel,structureVersions,type StructureVersions} from './boxAlgorithmVersions';
 import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_POSITION_LABEL,IMPULSE_1115_POSITION_VERSION,dbl5GuardPlusParams,type Dbl5GuardPlusCheckpoint,type Dbl5GuardPlusRow,type Dbl5GuardPlusVersion} from '@/lib/dbl5GuardPlus';
 import {dbl5Parameters,dbl5TickRule,dbl5TickPrice,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {DBL5_MARKET_RULE_VERSION,dbl5TickAt} from '@/lib/dbl5mMarketRules';
@@ -71,7 +71,7 @@ export function defaultStructureAddition(algorithm:StructureAdditionRule['algori
  const definition=structuredClone(definitions.find(d=>d.id===builtin.id)??builtin);
  return {algorithm,trigger:'raise',kBasis:'support',bufferUnit:'atr',buffer:0,definition:{...definition,interval:'5m'}};
 }
-export function validateStructureAddition(rule?:StructureAdditionRule):asserts rule is StructureAdditionRule {
+export function validateStructureAddition(rule?:StructureAdditionRule, allowDbl5Variants=false):asserts rule is StructureAdditionRule {
  if(!rule||!['dbl5','sbs5m'].includes(rule.algorithm)||!['raise','confirm','retest'].includes(rule.trigger)||!['support','invalidation'].includes(rule.kBasis)||!['atr','percent'].includes(rule.bufferUnit))throw Error('箱体加仓算法或触发方式无效');
  if(rule.algorithm==='dbl5'&&(rule.trigger==='retest'||rule.kBasis==='invalidation'))throw Error('DBL-5 不提供独立回踩确认或算法失效线，请选择已确认下轨');
  if(rule.kSource!=null&&!['previous','current','guard'].includes(rule.kSource))throw Error('K 基准须为旧 C、新 C 或防守线');
@@ -79,13 +79,17 @@ export function validateStructureAddition(rule?:StructureAdditionRule):asserts r
  if(rule.guardTrendOnly!=null&&typeof rule.guardTrendOnly!=='boolean')throw Error('防守线类型须为「实线和虚线」或「只用实线」');
  if(!Number.isFinite(rule.buffer)||rule.buffer<0||rule.bufferUnit==='percent'&&rule.buffer>=100)throw Error('支撑冗余须为不小于 0 的有限数字；百分比须小于 100');
  if(rule.minDistancePct!=null&&(!Number.isFinite(rule.minDistancePct)||rule.minDistancePct<=0||rule.minDistancePct>=50))throw Error('K 最小距离须为大于 0、小于 50 的百分比');
- const def=rule.definition,builtin=rule.algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
- if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!=='5m'||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
- if(rule.algorithm==='dbl5')dbl5Parameters(def.DBL5_config);else sbsParameters(def.SBS5M_config);
+ const def=rule.definition,timeframe=allowDbl5Variants?structureDbl5Timeframe(rule):'5m';
+ const builtin=timeframe!=='5m'?dbl5VariantDefinition(timeframe):rule.algorithm==='dbl5'?DBL5_DEF:SBS5M_DEF;
+ if(!def||def.id!==builtin.id||def.chartTemplate!==builtin.chartTemplate||def.interval!==builtin.interval||def.formula!==builtin.formula)throw Error('箱体加仓须使用原生5分钟结构定义，请重新选择算法');
+ if(rule.algorithm==='dbl5'){
+  const config=dbl5Parameters(def.DBL5_config);
+  if(config.timeframe!==builtin.interval)throw Error('DBL-5 的参数周期须与箱体版本一致');
+ }else sbsParameters(def.SBS5M_config);
  assertStructureVersionsAvailable(rule);
  const configurableImpulse=rule.guardPlusVersion===DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION;
  if(rule.guardPlusVersion!==undefined&&((rule.guardPlusVersion!==DBL5_GUARD_PLUS_VERSION&&!configurableImpulse)||
-    rule.kSource!=='guard'||rule.algorithm!=='dbl5'||structureVersions(rule).guard!==CURRENT_GUARD_VERSION)){
+    timeframe!=='5m'||rule.kSource!=='guard'||rule.algorithm!=='dbl5'||structureVersions(rule).guard!==CURRENT_GUARD_VERSION)){
   throw Error('急拉-1115 仅用于 DBL-5 防守线 v1 的加仓位置');
  }
  if(configurableImpulse&&(!Number.isFinite(rule.guardPlusImpulseBufferAtr)||rule.guardPlusImpulseBufferAtr!<0)){
