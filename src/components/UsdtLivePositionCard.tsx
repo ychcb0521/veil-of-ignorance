@@ -78,7 +78,7 @@ export function UsdtLivePositionCard({ position, live, follow, onOpenChart, side
     details:<div title={`名义仓位 ${notional} ${asset}`}>
       <PositionOpenedAt text={openTimeText} title={openedAt?'币安首笔开仓成交时间（北京）':history?.issue}/>
       <div className="flex items-center gap-2 text-[10px]">
-        {campaignPath&&(inRouter?<Link className={campaignLinkClass} to={campaignPath}>交易战役</Link>
+        {campaignPath&&(inRouter?<Link className={campaignLinkClass} to={campaignPath} state={{ fromInstantPosition: true }}>交易战役</Link>
           :<a className={campaignLinkClass} href={campaignPath}>交易战役</a>)}
         {managed&&<span className={managed.status.state==='blocked'?'text-destructive':'text-primary'}>
           {managed.status.state==='blocked'?'托管待核对':managed.position.pending?'等待成交回报':'策略托管中'}

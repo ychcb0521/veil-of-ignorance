@@ -16,6 +16,7 @@ import {
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import { getCampaignFullData } from '@/lib/journalApi';
+import { getDecisionEmotionDiaryByDate } from '@/lib/emotionDiaryApi';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import {
@@ -77,7 +78,29 @@ vi.mock('@/lib/journalApi', async () => {
       pre_entry_price: 90, pre_position_size: 1_000, post_realized_pnl: null,
     },
   ] as unknown as TradeJournal[];
+  const { buildUsdtLiveCampaignData } = await import('@/lib/fish/usdtLiveCampaignProjection');
+  const openedAt = Date.parse('2026-11-16T13:28:28.324+08:00');
+  const real = buildUsdtLiveCampaignData('user-1', {
+    symbol: 'BEATUSDT', positionSide: 'LONG', direction: 'long', asset: 'USDT', openedAt,
+    closedAt: openedAt + 75_000, quantity: '0',
+    fills: [
+      { id: '101', orderId: '501', at: openedAt, side: 'BUY', price: '0.0796400', quantity: '40', positionQuantity: '40', action: 'open', realized: 0, commission: 0.0015928, commissionAsset: 'USDT' },
+      { id: '102', orderId: '501', at: openedAt + 1, side: 'BUY', price: '0.0796400', quantity: '60', positionQuantity: '60', action: 'add', realized: 0, commission: 0.0023892, commissionAsset: 'USDT' },
+      { id: '103', orderId: '502', at: openedAt + 75_000, side: 'SELL', price: '0.0800000', quantity: '100', positionQuantity: '100', action: 'reduce', realized: 0.036, commission: 0.004, commissionAsset: 'USDT' },
+    ],
+  });
+  const simulated: TradeCampaign = {
+    ...loss.campaign,
+    id: 'fish-instant-diary-fixture',
+    comparison: {
+      section: 'instant', runKey: 'paper', sellKey: 'paper', sellLabel: '模拟', detectors: [], valuedAt: openedAt,
+      instant: { source: { id: 'sample', symbol: 'BEATUSDT', timeMs: openedAt }, marginUsdt: 10,
+        timing: { observedAt: openedAt }, drawdown: null, staticDrawdown: null },
+    },
+  };
   const detailsById: Record<string, typeof loss> = {
+    [real.campaign.id]: real,
+    [simulated.id]: { ...loss, campaign: simulated, legs: [], tradeRecords: [] },
     [loss.campaign.id]: loss,
     [active.campaign.id]: active,
     winner: { campaign: winner, legs: winnerLegs, tradeRecords: [], pendingOrders: [], reverseHedgeOrders: [] },
@@ -151,7 +174,8 @@ vi.mock('@/lib/emotionDiaryApi', () => ({
   getDecisionEmotionDiaryByDate: vi.fn(async () => null),
 }));
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
-  ReplayKlineChart: () => <div data-testid="campaign-chart" />,
+  ReplayKlineChart: ({ markers }: { markers?: Array<{ label?: string }> }) =>
+    <div data-testid="campaign-chart" data-markers={markers?.map(marker => marker.label).join(',')} />,
 }));
 vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
 vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({ CampaignWhatIfEditor: () => null }));
@@ -178,6 +202,31 @@ function renderDetail(id: string) {
     </MemoryRouter>,
   );
 }
+
+describe('即时交易沿用完整战役详情', () => {
+  it('实盘显示操作日日记、实盘盈亏、原盘面与逐笔成交', async () => {
+    renderDetail('fish-instant-live-BEATUSDT-LONG-long-101-501');
+
+    expect(await screen.findByText('币安实盘', { exact: true })).toBeInTheDocument();
+    expect(await screen.findByTestId('campaign-emotion-diary')).toHaveTextContent('2026-11-16');
+    await waitFor(() => expect(getDecisionEmotionDiaryByDate).toHaveBeenCalledWith('user-1', '2026-11-16'));
+    expect(screen.getByTestId('campaign-meta-operation-time')).toHaveTextContent('2026-11-16 13:28:28.324');
+    expect(screen.getByText('扣手续费后', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('0.028018 USDT', { exact: true })).toBeInTheDocument();
+    const fills = screen.getByRole('region', { name: '币安逐笔成交' });
+    expect(fills).toHaveTextContent('40 BEAT');
+    expect(fills).toHaveTextContent('60 BEAT');
+    expect(fills).toHaveTextContent('平仓');
+    expect(await screen.findByTestId('campaign-chart')).toHaveAttribute('data-markers', '开仓,开仓,平仓');
+  });
+
+  it('模拟战役也显示原版的操作日日记区', async () => {
+    renderDetail('fish-instant-diary-fixture');
+    expect(await screen.findByTestId('campaign-emotion-diary')).toHaveTextContent('2026-11-16');
+    await waitFor(() => expect(getDecisionEmotionDiaryByDate).toHaveBeenCalledWith('user-1', '2026-11-16'));
+    expect(screen.queryByRole('region', { name: '币安逐笔成交' })).not.toBeInTheDocument();
+  });
+});
 
 describe('战役详情页 · 状态与已实现盈亏同源', () => {
   it('页眉状态由校正后的结算推出：红色「亏损结束」配 −1756.65 USDT', async () => {

@@ -1,7 +1,8 @@
 import { useScreenedInstantPositions } from '@/contexts/FishQualityContext';
 import { InstantOpenCampaignQuote } from '@/components/journal/InstantOpenCampaignQuote';
-import { UsdtLiveCampaignDetail } from '@/components/journal/UsdtLiveCampaignDetail';
-import { isUsdtLiveCampaignId } from '@/lib/fish/usdtLiveCampaign';
+import { UsdtLiveCampaignFills, usdtCampaignFillLabel, usdtFillTime } from '@/components/journal/UsdtLiveCampaignFills';
+import { useCampaignTemplateNames } from '@/contexts/QualityTemplateNamesContext';
+import { usdtCampaignAmounts } from '@/lib/fish/usdtLiveCampaign';
 import { usdtAmountText } from '@/lib/fish/usdtPositionMirror';
 import { subscribeInstantCampaigns } from '@/lib/fish/instantCampaignStore';
 import { InstantCampaignMetadataButtons } from '@/components/journal/InstantCampaignMetadata';
@@ -344,22 +345,23 @@ function buildCampaignMetadataItems(
   objectiveOperationTime: number | null,
   metrics: readonly OverviewPanelItem[],
 ): OverviewPanelItem[] {
+  const liveUsdt = campaign.comparison?.liveUsdt;
   return [
     {
       key: 'operationTime', label: '操作时间', testId: 'campaign-meta-operation-time',
-      value: objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, campaign.comparison?.instant ? 19 : 16),
+      value: objectiveOperationTime == null ? '—' : liveUsdt ? usdtFillTime(objectiveOperationTime) : formatBeijingTime(objectiveOperationTime).slice(0, campaign.comparison?.instant ? 19 : 16),
       valueClassName: OPERATION_TIME_VALUE_CLASS,
       help: (
-        campaign.comparison?.instant
+        liveUsdt ? <p>币安首笔开仓成交的时间（北京时间）。</p> : campaign.comparison?.instant
           ? <p>新战役按程序确认模拟平仓的时刻记录（北京时间）。历史战役沿用原记录的操作时间。模拟成交和归档时间可点标题旁的图标查看。</p>
           : <><p>这场战役真实操作发生的时刻（北京时间），与列表卡片、排序用的是同一个数。</p><p>它是客观的操作时间，不是时光机里 K 线走到的模拟时间；读不出时写「—」。</p></>
       ),
     },
-    { key: 'openedAt', label: '开始', value: fmtMdHm(campaign.opened_at), help: <p>战役开始的 K 线（模拟）时间。</p> },
-    { key: 'closedAt', label: '结束', value: fmtMdHm(campaign.closed_at), help: <p>战役结束的 K 线（模拟）时间；还没结束时写「进行中」。</p> },
+    { key: 'openedAt', label: '开始', value: fmtMdHm(campaign.opened_at), help: <p>{liveUsdt ? '币安首笔开仓成交的时间。' : '战役开始的 K 线（模拟）时间。'}</p> },
+    { key: 'closedAt', label: '结束', value: fmtMdHm(campaign.closed_at), help: <p>{liveUsdt ? '币安最后一笔平仓成交的时间。' : '战役结束的 K 线（模拟）时间。'}还没结束时写「进行中」。</p> },
     {
       key: 'duration', label: '持续时间', value: fmtDuration(campaign.opened_at, campaign.closed_at),
-      help: <p>从开始到结束的时间跨度（两头都是 K 线模拟时间）；还没结束的战役，终点按现在的真实时刻算。</p>,
+      help: <p>从开始到结束的时间跨度。还没结束的战役，终点按现在的真实时刻算。</p>,
     },
     ...metrics,
   ];
@@ -643,6 +645,16 @@ function buildChartArtifacts(
     markers.push({ time: fill.at, price: fill.price, shape: 'square', color: '#2B80FF',
       label: `${instantManualReason(fill.reason)} · ${+(100 * fill.fraction).toPrecision(8)}%` });
   }
+  const realCampaign = campaign.comparison?.liveUsdt;
+  realCampaign?.fills.forEach((fill, index) => {
+    const reducing = fill.action === 'reduce';
+    const long = realCampaign.direction === 'long';
+    markers.push({
+      time: fill.at, price: Number(fill.price), shape: reducing ? 'square' : long ? 'triangle-up' : 'triangle-down',
+      color: reducing ? '#2B80FF' : long ? '#0ECB81' : '#F6465D',
+      label: usdtCampaignFillLabel(realCampaign, index),
+    });
+  });
   const mirror = qualityMirrorChartArtifacts(campaign);
   markers.push(...mirror.markers);
   verticalLines.push(...mirror.verticalLines);
@@ -943,13 +955,7 @@ function CampaignBatchBoardRenderer({
   );
 }
 
-export default function JournalCampaignDetailPage(props: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
-  const { id } = useParams<{ id: string }>();
-  if (id && isUsdtLiveCampaignId(id) && !props.batchExport) return <UsdtLiveCampaignDetail key={id} id={id}/>;
-  return <JournalCampaignDetail {...props}/>;
-}
-
-function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps }) {
+export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
   const paperCampaign = isPaperCampaignId(id);
@@ -977,6 +983,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
   const { getEffectiveTime, balance, positionsMap, priceMap } = useTradingContext();
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState<TradeCampaign | null>(null);
+  const templateNames = useCampaignTemplateNames(campaign ?? undefined);
   const campaignDisplayCode = useMemo(
     () => campaign
       ? formatCampaignDisplayCode(campaign.campaign_code, campaignAccountName, campaign.id)
@@ -1229,8 +1236,9 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
   const campaignOwnerId = campaign?.user_id ?? null;
   const instantSummary = campaign?.comparison?.instant;
   const instantOpen = instantSummary?.openPosition;
-  const instantCampaignId = campaign?.comparison?.instant ? campaign.id : undefined;
-  const watchInstant = !!instantOpen || !!campaign?.comparison?.instant?.settlementPending;
+  const liveUsdt = campaign?.comparison?.liveUsdt;
+  const instantCampaignId = campaign?.comparison?.section === 'instant' ? campaign.id : undefined;
+  const watchInstant = !!instantOpen || !!instantSummary?.settlementPending || (!!liveUsdt && !liveUsdt.closedAt);
 
   useEffect(() => {
     if (!id || id !== instantCampaignId || !campaignOwnerId || batchExport || !watchInstant) return;
@@ -1239,7 +1247,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
     let queued = false;
     let fingerprint = '';
     const reconcile = (campaign: TradeCampaign) => JSON.stringify([campaign.closed_at, campaign.updated_at,
-      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.timing, campaign.comparison?.instant?.manual, campaign.actual_evolution]);
+      campaign.comparison?.valuedAt, campaign.comparison?.instant?.openPosition, campaign.comparison?.instant?.settlementPending, campaign.comparison?.instant?.timing, campaign.comparison?.instant?.manual, campaign.comparison?.liveUsdt, campaign.actual_evolution]);
     const reload = async () => {
       if (lifetime.signal.aborted) return;
       if (running) { queued = true; return; }
@@ -1370,7 +1378,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
     if (campaign.closed_at) return campaign.closed_at;
-    if (campaign.comparison) return new Date(campaign.comparison.instant?.openPosition
+    if (campaign.comparison) return new Date(campaign.comparison.instant?.openPosition || campaign.comparison.liveUsdt
       ? Math.max(campaign.comparison.valuedAt, Math.floor(Date.now() / 60_000) * 60_000)
       : campaign.comparison.valuedAt).toISOString();
     if (batchExport) {
@@ -1386,9 +1394,11 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
     return new Date(getEffectiveTime(campaign.symbol)).toISOString();
   }, [campaign, getEffectiveTime, batchExport]);
   const objectiveOperationTime = useMemo(
-    () => campaignOperationTime(legs, tradeRecords),
-    [legs, tradeRecords],
+    () => campaignOperationTime(legs, tradeRecords, campaign ?? undefined) ?? instantSummary?.timing?.observedAt ?? null,
+    [legs, tradeRecords, campaign, instantSummary?.timing?.observedAt],
   );
+  const canAccessOperationDiary = campaign?.id === id && campaign?.user_id === viewerUserId
+    && (isOwner || campaign?.comparison?.section === 'instant');
   const campaignOperationDate = useMemo(
     () => objectiveOperationTime == null ? null : operationDateKey(objectiveOperationTime),
     [objectiveOperationTime],
@@ -1399,7 +1409,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
   );
 
   useEffect(() => {
-    if (!viewerUserId || !isOwner || !campaignOperationDate || batchExport?.options.sections.emotionDiary === false) {
+    if (!viewerUserId || !canAccessOperationDiary || !campaignOperationDate || batchExport?.options.sections.emotionDiary === false) {
       setCampaignEmotionDiary(null);
       setCampaignEmotionDiaryLoading(false);
       setBatchDiaryReady(`${id}:${campaignOperationDate}`);
@@ -1429,7 +1439,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
     return () => {
       cancelled = true;
     };
-  }, [campaignOperationDate, isOwner, viewerUserId, batchExport, id, reportBatchError]);
+  }, [campaignOperationDate, canAccessOperationDiary, viewerUserId, batchExport, id, reportBatchError]);
   /**
    * 情绪日记折叠与否。折叠态会一并带进 PNG 导出：用户把它收起来，
    * 多半就是不想让这段私人记录出现在要分享的图里。
@@ -1953,7 +1963,34 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
     settlement,
     tradeRecords,
   ]);
-  const campaignMetadataMetrics = useMemo<CampaignPnlOverviewItem[]>(() => {
+  const livePnlOverviewItems = useMemo<Array<OverviewPanelItem & { color?: string }> | undefined>(() => {
+    if (!liveUsdt) return undefined;
+    const { realized, fees, net } = usdtCampaignAmounts(liveUsdt);
+    const amount = (value: number) => usdtAmountText(value) + ' ' + liveUsdt.asset;
+    const openOrder = liveUsdt.fills[0].orderId;
+    const opening = liveUsdt.fills.filter(fill => fill.orderId === openOrder && fill.action !== 'reduce');
+    const openingSize = opening.reduce((sum, fill) => sum + Number(fill.positionQuantity), 0);
+    const openingNotional = opening.reduce((sum, fill) => sum + Number(fill.price) * Number(fill.positionQuantity), 0);
+    return [
+      { key: 'realizedPnl', label: '已实现 P&L', value: amount(realized), help: '币安逐笔成交中的已实现盈亏合计。', column: 0 },
+      { key: 'commissions', label: '手续费', value: [...fees].map(([asset, fee]) => usdtAmountText(fee) + ' ' + asset).join(' / '), help: '按币安实际扣费币种汇总。', column: 0 },
+      { key: 'netPnl', label: '扣手续费后', value: net == null ? '—' : amount(net), help: '从已实现盈亏扣除同币种手续费。', column: 0 },
+      { key: 'initialMainExposureNotional', label: '首仓名义金额', value: amount(openingNotional), help: '首个开仓委托的实际成交金额合计。', column: 1 },
+      { key: 'averageEntry', label: '首仓开仓均价', value: openingSize > 0 ? usdtAmountText(openingNotional / openingSize) : '—', help: '首个开仓委托按成交数量加权的成交价。', column: 1 },
+      { key: 'remainingQuantity', label: '余仓数量', value: liveUsdt.quantity, help: '币安成交确认后的剩余持仓数量。', column: 1 },
+    ];
+  }, [liveUsdt]);
+  const overviewItems: Array<OverviewPanelItem & { color?: string }> = livePnlOverviewItems ?? campaignPnlOverviewItems;
+  const campaignMetadataMetrics = useMemo<Array<OverviewPanelItem & { color?: string }>>(() => {
+    if (liveUsdt) {
+      const frozen = liveUsdt.management?.monitor;
+      const source = liveUsdt.management ? '币安手动开仓 · 策略托管' : liveUsdt.followId ? '系统跟单' : '币安开仓';
+      return [
+        { key: 'liveSource', label: '交易来源', value: source, help: '按实际开仓及托管记录标注。' },
+        ...(frozen ? [{ key: 'frozenMonitor', label: '冻结持仓模板', value: templateNames?.forMonitor(frozen.plan, frozen.templateId)?.name ?? frozen.name, help: '启用托管时冻结的持仓方案。' }] : []),
+        ...(liveUsdt.management?.exitReason ? [{ key: 'exitReason', label: '策略平仓原因', value: liveUsdt.management.exitReason, help: '本机执行器记下的实际平仓触发条件。' }] : []),
+      ];
+    }
     const leverage = campaign ? resolveCampaignMainLeverage(campaign, legs, tradeRecords) : null;
     const share = asymmetricRiskContribution?.meanSquareShare;
     const shareText = share == null || !Number.isFinite(share)
@@ -1973,7 +2010,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
         ),
       },
     ];
-  }, [asymmetricRiskContribution, campaign, legs, tradeRecords]);
+  }, [asymmetricRiskContribution, campaign, legs, tradeRecords, liveUsdt, templateNames]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
@@ -2687,7 +2724,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
         chartInterval: displayInterval,
         pnlOverview: {
           // rightColumn 要带上：导出图与页面一样按两栏从上往下排（左栏递进链、右栏结果与仓位）
-          items: campaignPnlOverviewItems.map(({ key, label, value, color, rightColumn, column }) => ({
+          items: overviewItems.map(({ key, label, value, color, rightColumn, column }) => ({
             key,
             label,
             value,
@@ -2905,6 +2942,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
                   {campaignDisplayCode}
                 </span>
                 <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="comparison-campaign-badge">{campaign.comparison.section === 'instant' ? '即时交易' : '持仓监测'}</span>}
+                {campaign.comparison?.section === 'instant' && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{liveUsdt ? '币安实盘' : '模拟'}</span>}
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>
@@ -2987,12 +3025,12 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
 
           <CampaignPnlOverviewPanel
             title="盈亏概览"
-            items={campaignPnlOverviewItems}
+            items={overviewItems}
           />
 
         </section>
 
-        {isOwner && campaignOperationDate && (
+        {canAccessOperationDiary && campaignOperationDate && (
           <section className="border border-border bg-card" data-testid="campaign-emotion-diary">
             <div className={`flex flex-wrap items-center gap-3 px-4 py-3 ${emotionDiaryCollapsed ? '' : 'border-b border-border'}`}>
               <button
@@ -3412,7 +3450,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
               </span>
             </div>
           </div>
-          <CampaignLegsList
+          {liveUsdt ? <UsdtLiveCampaignFills campaign={liveUsdt} /> : <CampaignLegsList
             campaign={campaign}
             initialExpectedMaxLoss={legsInitialExpectedMaxLoss}
             /* 「占比」列按战役主方向取一侧：主多看多单、主空看空单（导出 PNG 从同一个战役对象取，两处一致） */
@@ -3437,7 +3475,7 @@ function JournalCampaignDetail({ batchExport }: { batchExport?: CampaignBatchExp
             }}
             onHideReverseHedgeOrder={(order) => hideReverseHedgeOrder(order.id)}
             onDetach={paperCampaign ? undefined : setDetachTarget}
-          />
+          />}
         </section>
 
         <section ref={counterfactualSectionRef} className="bg-card border border-border rounded p-6 mb-6 space-y-4">
