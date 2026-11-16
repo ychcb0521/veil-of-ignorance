@@ -1759,7 +1759,7 @@ function statSignTone(value: number | null | undefined): string {
 
 /** 封面标题旁的标签（方向 / 标的 / 杠杆 / 仓位击穿 / 编号）统一高度与圆角。 */
 const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';
-const rowOperationTime = (row: CampaignCardData) => row.campaign.comparison?.liveUsdt?.openedAt ?? campaignOperationTime(row.legs, row.tradeRecords);
+const rowOperationTime = (row: CampaignCardData) => campaignOperationTime(row.legs, row.tradeRecords, row.campaign);
 /** 批量下载选择条里的次级按钮：与排序按钮同高同字号，平时只有淡边框。 */
 const BATCH_BAR_BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border border-border/60 bg-background/60 px-2 text-foreground/80 transition-[color,background-color,border-color] duration-150 hover:border-border hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40';
 /**

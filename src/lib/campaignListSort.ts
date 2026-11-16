@@ -174,7 +174,7 @@ export function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight
 }
 
 function campaignSortTime(row: CampaignCardData): number {
-  return campaignOperationTime(row.legs, row.tradeRecords) ?? 0;
+  return campaignOperationTime(row.legs, row.tradeRecords, row.campaign) ?? 0;
 }
 
 function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
@@ -434,7 +434,7 @@ function memoizeByRow<T extends object, V>(read: (row: T) => V): (row: T) => V {
  * compare + tieBreak 连起来，就是原来单级排序里这一项的那一整串比较，一个字不差。
  */
 export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<CampaignSortMode, CampaignSortKey<T>> {
-  const operationTime = memoizeByRow<T, number | null>(row => campaignOperationTime(row.legs, row.tradeRecords));
+  const operationTime = memoizeByRow<T, number | null>(row => campaignOperationTime(row.legs, row.tradeRecords, row.campaign));
   const operationDay = memoizeByRow<T, string | null>(row => {
     const time = operationTime(row);
     return time == null ? null : beijingDayKey(time);

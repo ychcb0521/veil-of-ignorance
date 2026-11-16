@@ -1,12 +1,24 @@
 import { expect, it, vi } from 'vitest';
 import { createUsdtCampaignReader, reconstructUsdtCampaigns, type UsdtActualTrade } from '../../../../scripts/usdt-campaign-reader';
 import { findUsdtCampaignFollow, usdtCampaignAmounts, usdtLiveCampaignId } from '../usdtLiveCampaign';
+import { buildUsdtLiveCampaignData } from '../usdtLiveCampaignProjection';
+import { buildCampaignCardData } from '@/lib/campaignListCache';
+import { sortCampaignRows } from '@/lib/campaignListSort';
+import { makeSortRow } from '@/test/fixtures/campaignSortRows';
 
 const at = Date.UTC(2026, 10, 15, 10);
 const buy: UsdtActualTrade = { id: '11', orderId: '101', side: 'BUY', at, price: '0.08328', quantity: '100',
   realized: 0, commission: .004164, commissionAsset: 'USDT', asset: 'USDT', positionSide: 'LONG' };
 const sell: UsdtActualTrade = { ...buy, id: '12', orderId: '102', side: 'SELL', at: at + 48_000, price: '0.08338',
   realized: .01, commission: .004169 };
+
+it('lists a newer exchange campaign above older simulated campaigns on the default journal sort', () => {
+  const [closed] = reconstructUsdtCampaigns('BEATUSDT', [], [buy, sell]);
+  const live = { ...buildCampaignCardData(buildUsdtLiveCampaignData('fixture', closed)),
+    arithmeticExpectancy: null, geometricExpectancy: null };
+  const paper = makeSortRow({ id: 'paper', time: new Date(at - 1000).toISOString() });
+  expect(sortCampaignRows([paper, live], []).map(row => row.campaign.id)).toEqual([live.campaign.id, 'paper']);
+});
 
 it('keeps fills of the same opening order under open and records a later order as an addition', () => {
   const first = { ...buy, quantity: '11' };

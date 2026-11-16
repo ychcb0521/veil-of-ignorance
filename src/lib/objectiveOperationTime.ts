@@ -1,4 +1,4 @@
-import type { TradeJournal } from '@/types/journal';
+import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
 function safeTimeMs(value: number | string | null | undefined): number | null {
@@ -132,7 +132,9 @@ export function journalOperationTime(
   return journalOpenOperationTime(journal);
 }
 
-export function campaignOperationTime(journals: TradeJournal[], records: TradeRecord[]): number | null {
+export function campaignOperationTime(journals: TradeJournal[], records: TradeRecord[], campaign?: Pick<TradeCampaign, 'comparison'>): number | null {
+  const exchangeOpening = safeTimeMs(campaign?.comparison?.liveUsdt?.openedAt);
+  if (exchangeOpening != null) return exchangeOpening;
   const recordLookup = buildTradeRecordLookup(records);
   let latest: number | null = null;
   for (const journal of journals) {
