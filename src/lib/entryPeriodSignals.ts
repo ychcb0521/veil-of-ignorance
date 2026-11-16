@@ -22,7 +22,13 @@ export function entryPeriodMarketLabel(market: StoredEntryPeriodMarket): string 
 }
 
 export type EntryPeriodMark = '进1' | '进1(逼近)';
-export type EntryPeriodMetadata = { market: StoredEntryPeriodMarket; mark: EntryPeriodMark; endTimeMs?: number };
+export type EntryPeriodMetadata = {
+  market: StoredEntryPeriodMarket;
+  mark: EntryPeriodMark;
+  startInferred?: true;
+  endTimeMs?: number;
+  endInferred?: true;
+};
 export type EntryPeriodSignal = TradeSignal & { entryPeriod: EntryPeriodMetadata };
 
 export function entryPeriodTime(date: string): number | undefined {
@@ -94,13 +100,25 @@ export function mergeEntryPeriodSignals(existing: TradeSignal[], incoming: reado
   const byId = new Map(incoming.map(signal => [signal.id, signal]));
   let changed = false;
   const updated = existing.map(signal => {
-    const endTimeMs = byId.get(signal.id)?.entryPeriod.endTimeMs;
+    const incomingPeriod = byId.get(signal.id)?.entryPeriod;
     byId.delete(signal.id);
-    if (signal.entryPeriod && signal.entryPeriod.endTimeMs === undefined && endTimeMs !== undefined) {
-      changed = true;
-      return { ...signal, entryPeriod: { ...signal.entryPeriod, endTimeMs } };
+    const currentPeriod = signal.entryPeriod;
+    if (!incomingPeriod || !currentPeriod) return signal;
+    const confirmStart = currentPeriod.startInferred && !incomingPeriod.startInferred;
+    const improveEnd = incomingPeriod.endTimeMs !== undefined &&
+      (currentPeriod.endTimeMs === undefined || (currentPeriod.endInferred && !incomingPeriod.endInferred));
+    if (!confirmStart && !improveEnd) return signal;
+    changed = true;
+    const entryPeriod = { ...currentPeriod };
+    if (confirmStart) {
+      entryPeriod.mark = incomingPeriod.mark;
+      delete entryPeriod.startInferred;
     }
-    return signal;
+    if (improveEnd) {
+      entryPeriod.endTimeMs = incomingPeriod.endTimeMs;
+      entryPeriod.endInferred = incomingPeriod.endInferred;
+    }
+    return { ...signal, entryPeriod };
   });
   return changed || byId.size ? [...updated, ...byId.values()] : existing;
 }

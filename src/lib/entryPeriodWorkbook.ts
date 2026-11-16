@@ -19,9 +19,20 @@ function readDate(value: string, numeric: boolean, date1904: boolean): string {
   return match ? [match[1], match[2].padStart(2, '0'), match[3].padStart(2, '0')].join('-') : '';
 }
 
-type PhaseRow = { symbol: string; timeMs: number } & (
-  { phase: 'entry'; signal: EntryPeriodSignal } | { phase: 'entry-continued'; day: number } | { phase: 'retreat-start' | 'retreat-later' }
-);
+type PhaseRow = {
+  symbol: string;
+  rawSymbol: string;
+  timeMs: number;
+  side: 'entry' | 'retreat';
+  day: number;
+  mark?: EntryPeriodSignal['entryPeriod']['mark'];
+  market?: string;
+  startInferred?: true;
+  endTimeMs?: number;
+  endInferred?: true;
+};
+
+const DAY_MS = 86_400_000;
 
 async function readPhaseRows(file: File): Promise<PhaseRow[]> {
   const readXml = openWorkbookZip(await file.arrayBuffer());
@@ -43,7 +54,7 @@ async function readPhaseRows(file: File): Promise<PhaseRow[]> {
   const strings = shared?.documentElement ? texts(shared.documentElement, 'si').map(joinedText) : [];
   const date1904 = ['1', 'true'].includes(texts(book.documentElement, 'workbookPr')[0]?.getAttribute('date1904') ?? '');
   const phases: PhaseRow[] = [];
-  let columns: { symbol: string; date: string; stage: string; market?: string; end?: string } | undefined;
+  let columns: { symbol: string; date: string; stage: string; market?: string; end?: string; startSource?: string; endSource?: string } | undefined;
   for (const row of texts(sheet.documentElement, 'row')) {
     const cells = Array.from(row.children).filter(node => node.localName === 'c');
     const values = new Map(cells.map(cell => {
@@ -55,38 +66,41 @@ async function readPhaseRows(file: File): Promise<PhaseRow[]> {
     if (!columns) {
       const headings = new Map(Array.from(values, ([column, value]) => [value.text.trim(), column]));
       const symbol = headings.get('币种'), date = headings.get('日期'), stage = headings.get('进退场周期');
-      if (symbol && date && stage) columns = { symbol, date, stage, market: headings.get('市场'), end: headings.get('进场期结束时间') };
+      if (symbol && date && stage) columns = {
+        symbol, date, stage, market: headings.get('市场'), end: headings.get('进场期结束时间'),
+        startSource: headings.get('进场时间来源'), endSource: headings.get('结束时间来源'),
+      };
       continue;
     }
     const stage = values.get(columns.stage)?.text.trim().normalize('NFKC') ?? '';
-    const mark = parseEntryPeriodMark(stage);
-    const stageDay = /^([进退])(\d+)(?:\(逼近\))?$/.exec(stage);
+    const stageDay = /^([进退])([1-9]\d*)(?:\(逼近\))?$/.exec(stage);
     if (!stageDay) continue;
     const rawSymbol = values.get(columns.symbol)?.text.trim() ?? '';
     const date = values.get(columns.date);
-    const day = date ? readDate(date.text, date.numeric, date1904) : '';
-    const timeMs = entryPeriodTime(day);
-    const sourceRow = row.getAttribute('r') ?? '?';
-    const invalidRow = () => new Error('第 ' + sourceRow + ' 行进退场记录缺少标的或日期无效');
-    if (!rawSymbol || timeMs === undefined) throw invalidRow();
-    const symbol = rawSymbol.normalize('NFKC').toUpperCase();
-    if (!mark) {
-      phases.push(stageDay[1] === '进'
-        ? { symbol, timeMs, phase: 'entry-continued', day: Number(stageDay[2]) }
-        : { symbol, timeMs, phase: stageDay[2] === '1' ? 'retreat-start' : 'retreat-later' });
-      continue;
+    const timeMs = date ? entryPeriodTime(readDate(date.text, date.numeric, date1904)) : undefined;
+    const rowNumber = row.getAttribute('r') ?? '?';
+    const day = Number(stageDay[2]);
+    if (!rawSymbol || timeMs === undefined || !Number.isSafeInteger(day)) {
+      throw new Error('第 ' + rowNumber + ' 行进退场记录缺少标的或日期、序号无效');
     }
-    const signal = createEntryPeriodSignal(rawSymbol, day, mark, columns.market ? values.get(columns.market)?.text : undefined);
-    if (!signal) throw invalidRow();
-    const end = columns.end ? values.get(columns.end) : undefined;
-    if (end?.text.trim()) {
-      const endTimeMs = entryPeriodTime(readDate(end.text, end.numeric, date1904));
-      if (endTimeMs === undefined || endTimeMs <= timeMs) {
-        throw new Error('第 ' + (row.getAttribute('r') ?? '?') + ' 行进场期结束时间无效');
+    const side = stageDay[1] === '进' ? 'entry' : 'retreat';
+    const phase: PhaseRow = { symbol: rawSymbol.normalize('NFKC').toUpperCase(), rawSymbol, timeMs, side, day };
+    if (side === 'entry') {
+      phase.mark = parseEntryPeriodMark(stage);
+      phase.market = columns.market ? values.get(columns.market)?.text : undefined;
+    }
+    if (phase.mark) {
+      if (columns.startSource && values.get(columns.startSource)?.text.trim() === '倒推') phase.startInferred = true;
+      const end = columns.end ? values.get(columns.end) : undefined;
+      if (end?.text.trim()) {
+        phase.endTimeMs = entryPeriodTime(readDate(end.text, end.numeric, date1904));
+        if (phase.endTimeMs === undefined || phase.endTimeMs <= timeMs) {
+          throw new Error('第 ' + rowNumber + ' 行进场期结束时间无效');
+        }
+        if (columns.endSource && values.get(columns.endSource)?.text.trim() === '倒推') phase.endInferred = true;
       }
-      signal.entryPeriod.endTimeMs = endTimeMs;
     }
-    phases.push({ symbol, timeMs, phase: 'entry', signal });
+    phases.push(phase);
   }
   if (!columns) throw new Error('「数据」工作表需要「币种」「日期」「进退场周期」三列');
   return phases;
@@ -105,35 +119,56 @@ export async function readEntryPeriodWorkbooks(files: readonly File[]): Promise<
       const key = row.symbol + ':' + row.timeMs;
       const previous = phases.get(key);
       if (!previous) phases.set(key, row);
-      else if (previous.phase !== row.phase ||
-        (previous.phase === 'entry-continued' && row.phase === 'entry-continued' && previous.day !== row.day)) {
+      else if (previous.side !== row.side || previous.day !== row.day) {
         throw new Error(row.symbol + ' 同一天的进退场周期冲突');
-      }
-      else if (previous.phase === 'entry' && row.phase === 'entry' && previous.signal.entryPeriod.endTimeMs === undefined) {
-        previous.signal.entryPeriod.endTimeMs = row.signal.entryPeriod.endTimeMs;
+      } else {
+        if (previous.startInferred && !row.startInferred) {
+          previous.mark = row.mark;
+          delete previous.startInferred;
+        }
+        if (row.endTimeMs !== undefined &&
+          (previous.endTimeMs === undefined || (previous.endInferred && !row.endInferred))) {
+          previous.endTimeMs = row.endTimeMs;
+          previous.endInferred = row.endInferred;
+        }
       }
     }
   }
 
-  const pending = new Map<string, { signal: EntryPeriodSignal; day: number }>();
+  const previousRows = new Map<string, PhaseRow>();
+  const pending = new Map<string, EntryPeriodSignal>();
   const signals: EntryPeriodSignal[] = [];
   for (const row of [...phases.values()].sort((a, b) => a.timeMs - b.timeMs)) {
-    if (row.phase === 'entry') {
-      pending.set(row.symbol, { signal: row.signal, day: 1 });
-      signals.push(row.signal);
+    const previous = previousRows.get(row.symbol);
+    previousRows.set(row.symbol, row);
+    const newPhase = !previous || previous.side !== row.side || row.day < previous.day || row.day === 1;
+    if (!newPhase) continue;
+
+    const firstDay = row.timeMs - (row.day - 1) * DAY_MS;
+    // A projected first day must not contradict the last observed phase.
+    const valid = Number.isFinite(new Date(firstDay).getTime()) && (!previous || firstDay > previous.timeMs);
+    if (row.side === 'entry') {
+      pending.delete(row.symbol);
+      if (!valid) continue;
+      const date = new Date(firstDay).toISOString().slice(0, 10);
+      const signal = createEntryPeriodSignal(row.rawSymbol, date, row.mark ?? '进1', row.market);
+      if (!signal) continue;
+      if (row.day > 1 || row.startInferred) signal.entryPeriod.startInferred = true;
+      if (row.endTimeMs !== undefined) signal.entryPeriod.endTimeMs = row.endTimeMs;
+      if (row.endInferred) signal.entryPeriod.endInferred = true;
+      signals.push(signal);
+      pending.set(row.symbol, signal);
       continue;
     }
+
     const current = pending.get(row.symbol);
-    if (!current) continue;
-    if (row.phase === 'entry-continued') {
-      // A lower day number is evidence of a new entry period whose first day is absent.
-      if (row.day < current.day) pending.delete(row.symbol);
-      else current.day = row.day;
-      continue;
-    }
-    if (row.phase === 'retreat-start') current.signal.entryPeriod.endTimeMs = row.timeMs;
-    // Even a later retreat day ends the matching window. Its first day was not observed.
     pending.delete(row.symbol);
+    if (!current || !valid || firstDay <= current.timeMs) continue;
+    if (row.day === 1 || current.entryPeriod.endTimeMs === undefined || current.entryPeriod.endInferred) {
+      current.entryPeriod.endTimeMs = firstDay;
+      if (row.day > 1) current.entryPeriod.endInferred = true;
+      else delete current.entryPeriod.endInferred;
+    }
   }
   return signals;
 }

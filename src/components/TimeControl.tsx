@@ -586,11 +586,13 @@ export function TimeControl({
       const { buildXlsx } = await import('@/lib/xlsxWorkbook');
       blob = buildXlsx([{
         name: '数据',
-        columns: ['日期', '币种', '进退场周期', '市场', '进场期结束时间'].map(header => ({ header, width: 20 })),
+        columns: ['日期', '币种', '进退场周期', '市场', '进场期结束时间', '进场时间来源', '结束时间来源'].map(header => ({ header, width: 20 })),
         rows: signals.map(signal => [
           signal.timeLabel.slice(0, 10), signal.symbol, signal.entryPeriod?.mark,
           signal.entryPeriod ? entryPeriodMarketLabel(signal.entryPeriod.market) : undefined,
           entryPeriodEndLabel(signal.entryPeriod?.endTimeMs),
+          signal.entryPeriod?.startInferred ? '倒推' : '原表',
+          signal.entryPeriod?.endTimeMs === undefined ? '' : signal.entryPeriod.endInferred ? '倒推' : '原表',
         ]),
       }]);
       fileName = '进场期信号库-' + stamp + '.xlsx';
@@ -900,7 +902,7 @@ export function TimeControl({
                 <input type="file" aria-label="上传进场期 Excel" accept=".xlsx" multiple disabled={entryImportPending}
                   onChange={handleEntryPeriodFiles} className="sr-only" />
               </label>
-              <span>可多选连续原表 · 「进1」入库，「退1」确认结束 · 北京时间 16:00</span>
+              <span>可多选连续原表 · 缺首日时按周期序号倒推 · 北京时间 16:00</span>
               {signals.length > 0 && <button type="button" disabled={entryImportPending}
                 className="ml-auto rounded px-2 py-1 text-destructive hover:bg-destructive/10" onClick={handleClearSignals}>清空</button>}
             </div>

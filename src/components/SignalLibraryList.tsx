@@ -282,6 +282,7 @@ function SignalLibraryRowImpl({
         {/* 时间：定宽等宽字体，纵向严格成列 */}
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{timeLabel}</span>
+          {entryPeriod?.startInferred && <span className="shrink-0 text-[9px] text-primary" aria-label="进场时间倒推">倒推</span>}
           {hasDayCampaign && (
             // 低调标注：当日该标的已有战役。小圆点而非文字/勾号，
             // 扫视时不抢注意力，需要时 hover 才给出说明。
@@ -293,8 +294,9 @@ function SignalLibraryRowImpl({
             />
           )}
         </span>
-        {entryPeriod && <span data-testid="entry-period-end-time" className="truncate font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">
-          {entryPeriodEndLabel(entryPeriod.endTimeMs) || '—'}
+        {entryPeriod && <span data-testid="entry-period-end-time" className="flex min-w-0 items-center gap-1 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">
+          <span className="truncate">{entryPeriodEndLabel(entryPeriod.endTimeMs) || '—'}</span>
+          {entryPeriod.endInferred && <span className="shrink-0 text-[9px] text-primary" aria-label="结束时间倒推">倒推</span>}
         </span>}
         {algorithmTypes && <span className="whitespace-nowrap font-mono text-[10px] leading-4 tabular-nums text-muted-foreground" data-testid="fish-caught-at">
           {caughtAt != null && caughtAt > 0 ? formatBeijingTime(new Date(caughtAt).getTime()) : '—'}
