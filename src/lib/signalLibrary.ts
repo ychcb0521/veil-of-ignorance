@@ -15,7 +15,7 @@
  */
 
 import { stockCode } from './signalMarket';
-import type { EntryPeriodMarket, EntryPeriodMark } from './entryPeriodSignals';
+import type { StoredEntryPeriodMarket, EntryPeriodMark } from './entryPeriodSignals';
 import { isTuringCupSymbol, turingCupSymbol } from './turingCupSymbol';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
@@ -25,7 +25,7 @@ import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
   /** Independent entry-period history preserves the workbook name and classification. */
-  entryPeriod?: { market: EntryPeriodMarket; mark: EntryPeriodMark };
+  entryPeriod?: { market: StoredEntryPeriodMarket; mark: EntryPeriodMark };
   /** Missing market keeps the existing crypto identity. */
   market?: 'us_stock';
   /** Exchange metadata's underlying/security code; never used to infer market. */

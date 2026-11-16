@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildXlsxBytes } from '@/lib/xlsxWorkbook';
 import { readEntryPeriodWorkbook } from '@/lib/entryPeriodWorkbook';
-import { mergeEntryPeriodSignals } from '@/lib/entryPeriodSignals';
+import { ENTRY_PERIOD_MARKETS, entryPeriodMarketGroup, entryPeriodMarketLabel, mergeEntryPeriodSignals } from '@/lib/entryPeriodSignals';
 import { setSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 
 const columns = ['日期', '币种', '进退场周期', '市场'].map(header => ({ header }));
@@ -41,6 +41,25 @@ describe('进场期信号库', () => {
     const rated = setSignalQuality(first, first[0].id, 4);
     expect(mergeEntryPeriodSignals(rated, incoming)).toBe(rated);
     expect(rated[0].quality).toBe(4);
+  });
+
+  it('按四类显示旧记录，并兼容新旧 Excel 的市场名称', async () => {
+    expect(Object.values(ENTRY_PERIOD_MARKETS)).toEqual(['Crypto', '美股', 'A股', '其他']);
+    const rows = await readEntryPeriodWorkbook(workbook([
+      ['2025-04-10', 'BTC', '进1', '币圈'],
+      ['2025-04-11', 'BTC', '进1', 'Crypto'],
+      ['2025-04-11', '黄金 OTC', '进1', '商品'],
+      ['2025-04-11', '期权波动率', '进1', '指标'],
+      ['2025-04-11', 'ETF', '进1', '待确认'],
+      ['2025-04-12', 'ETF', '进1', '其他'],
+    ]));
+    expect(rows.map(row => entryPeriodMarketGroup(row.entryPeriod.market))).toEqual([
+      'crypto', 'crypto', 'other', 'other', 'other', 'other',
+    ]);
+    expect(rows.map(row => entryPeriodMarketLabel(row.entryPeriod.market))).toEqual([
+      'Crypto', 'Crypto', '其他', '其他', '其他', '其他',
+    ]);
+    expect(rows.map(signalChartSymbol)).toEqual(['BTCUSDT', 'BTCUSDT', null, null, null, null]);
   });
 
   it('报告缺少「数据」页和无效首日日期', async () => {

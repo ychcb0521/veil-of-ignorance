@@ -25,7 +25,7 @@ import {
 } from '@/lib/signalLibrary';
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { useSignalLibrary } from '@/hooks/useSignalLibrary';
-import { ENTRY_PERIOD_SIGNALS_KEY, ENTRY_PERIOD_MARKETS, mergeEntryPeriodSignals, type EntryPeriodMarket, type EntryPeriodSignal } from '@/lib/entryPeriodSignals';
+import { ENTRY_PERIOD_SIGNALS_KEY, ENTRY_PERIOD_MARKETS, entryPeriodMarketGroup, entryPeriodMarketLabel, mergeEntryPeriodSignals, type EntryPeriodMarket, type EntryPeriodSignal } from '@/lib/entryPeriodSignals';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
@@ -447,7 +447,7 @@ export function TimeControl({
     const real = basis === signals ? null : new Map(signals.map(sig => [sig.id, sig]));
     const base = real ? sortedBasis.map(sig => real.get(sig.id) ?? sig) : sortedBasis;
     const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
-    const byMarket = marketFilter ? byMonth.filter(s => s.entryPeriod?.market === marketFilter) : byMonth;
+    const byMarket = marketFilter ? byMonth.filter(s => entryPeriodMarketGroup(s.entryPeriod?.market) === marketFilter) : byMonth;
     return q ? byMarket.filter(s => s.symbol.toUpperCase().includes(q)) : byMarket;
   }, [signals, query, monthFilter, marketFilter, sortKey, sortDir, activeFrozenQuality]);
   // 「标的@日期」索引：信号那天，这个标的动过手没有。
@@ -596,7 +596,7 @@ export function TimeControl({
         columns: ['日期', '币种', '进退场周期', '市场'].map(header => ({ header, width: 18 })),
         rows: signals.map(signal => [
           signal.timeLabel.slice(0, 10), signal.symbol, signal.entryPeriod?.mark,
-          signal.entryPeriod ? ENTRY_PERIOD_MARKETS[signal.entryPeriod.market] : undefined,
+          signal.entryPeriod ? entryPeriodMarketLabel(signal.entryPeriod.market) : undefined,
         ]),
       }]);
       fileName = '进场期信号库-' + stamp + '.xlsx';

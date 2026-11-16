@@ -2,20 +2,29 @@ import type { TradeSignal } from './signalLibrary';
 
 export const ENTRY_PERIOD_SIGNALS_KEY = 'entry_period_signals_v1';
 export const ENTRY_PERIOD_MARKETS = {
-  crypto: '币圈',
+  crypto: 'Crypto',
   us: '美股',
   cn: 'A股',
-  commodity: '商品',
-  indicator: '指标',
-  unknown: '待确认',
+  other: '其他',
 } as const;
 
 export type EntryPeriodMarket = keyof typeof ENTRY_PERIOD_MARKETS;
-export type EntryPeriodMark = '进1' | '进1(逼近)';
-export type EntryPeriodSignal = TradeSignal & { entryPeriod: { market: EntryPeriodMarket; mark: EntryPeriodMark } };
+// Persisted codes remain readable by older tabs and existing account backups.
+export type StoredEntryPeriodMarket = Exclude<EntryPeriodMarket, 'other'> | 'commodity' | 'indicator' | 'unknown';
 
-const marketByName = new Map<string, EntryPeriodMarket>();
-const knownMarkets: Partial<Record<EntryPeriodMarket, string>> = {
+export function entryPeriodMarketGroup(market: StoredEntryPeriodMarket | undefined): EntryPeriodMarket {
+  return market === 'crypto' || market === 'us' || market === 'cn' ? market : 'other';
+}
+
+export function entryPeriodMarketLabel(market: StoredEntryPeriodMarket): string {
+  return ENTRY_PERIOD_MARKETS[entryPeriodMarketGroup(market)];
+}
+
+export type EntryPeriodMark = '进1' | '进1(逼近)';
+export type EntryPeriodSignal = TradeSignal & { entryPeriod: { market: StoredEntryPeriodMarket; mark: EntryPeriodMark } };
+
+const marketByName = new Map<string, StoredEntryPeriodMarket>();
+const knownMarkets: Partial<Record<StoredEntryPeriodMarket, string>> = {
   crypto: 'A AAVE ADA AVAX BGB BNB BTC CRV DOGE EOS ETH FARTCOIN HYPE KAITO LDO LINK LTC ONDO PEPE PUMP SEI SOL SUI UNI VIRTUAL WLD ZEC 币市流动性',
   us: 'AAOI AAPL AMZN AXTI BABA CIRCLE COIN GLW GOOG HOOD MSFT MU NVDA PLTR SNDK SPCX TSLA',
   cn: 'MLCC PCB',
@@ -23,20 +32,22 @@ const knownMarkets: Partial<Record<EntryPeriodMarket, string>> = {
   commodity: 'XAG 布伦特原油',
 };
 for (const [market, names] of Object.entries(knownMarkets)) {
-  for (const name of names.split(' ')) marketByName.set(name, market as EntryPeriodMarket);
+  for (const name of names.split(' ')) marketByName.set(name, market as StoredEntryPeriodMarket);
 }
 marketByName.set('美股纳指 OTC', 'us');
 marketByName.set('黄金 OTC', 'commodity');
 
-function readMarket(symbol: string, value?: string): EntryPeriodMarket {
-  const label = value?.trim();
-  if (label) {
-    for (const [key, name] of Object.entries(ENTRY_PERIOD_MARKETS)) {
-      if (label.toLowerCase() === name.toLowerCase() || label.toLowerCase() === key) return key as EntryPeriodMarket;
-    }
-    return 'unknown';
-  }
-  return marketByName.get(symbol.toUpperCase()) ?? 'unknown';
+const importMarkets = new Map<string, StoredEntryPeriodMarket>([
+  ['crypto', 'crypto'], ['币圈', 'crypto'],
+  ['us', 'us'], ['美股', 'us'],
+  ['cn', 'cn'], ['a股', 'cn'],
+  ['commodity', 'commodity'], ['商品', 'commodity'],
+  ['indicator', 'indicator'], ['指标', 'indicator'],
+]);
+
+function readMarket(symbol: string, value?: string): StoredEntryPeriodMarket {
+  const label = value?.trim().normalize('NFKC').toLowerCase();
+  return label ? importMarkets.get(label) ?? 'unknown' : marketByName.get(symbol.toUpperCase()) ?? 'unknown';
 }
 
 export function parseEntryPeriodMark(value: string): EntryPeriodMark | undefined {
