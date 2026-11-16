@@ -4,6 +4,8 @@ import { InstantPositionsContext } from '@/contexts/FishQualityContext';
 import { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { FishUsdtPositions } from '../FishUsdtPositions';
 import { PositionPanel } from '../PositionPanel';
+import { TradingDeskActionPanel } from '../TradingDeskActionPanel';
+import type { PositionChartPreview } from '../PositionMarketPreview';
 import { usdtPositionValue, type UsdtMirrorPosition } from '@/lib/fish/usdtPositionMirror';
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'mirror-owner' } }) }));
@@ -68,4 +70,39 @@ it('shows and clears real exchange positions in both views with one shared read 
 it('keeps decimal precision when calculating quote values', () => {
   expect(usdtPositionValue('100.000','0.08236000')).toBe('8.236');
   expect(usdtPositionValue('0.000000000000000123','0.0081')).toBe('0.0000000000000000009963');
+});
+
+it('shows the single real position on the right before replay and keeps simulation selectable', () => {
+  const manage = vi.fn();
+  const open = vi.fn();
+  const closePreview = vi.fn();
+  const follow = { connected: true, positionMirror: 1 };
+  const live = { snapshot: { observedAt: at, positions: [position] }, histories: new Map(), retryPositions: vi.fn() };
+  const right = (replayActive: boolean, preview: PositionChartPreview | null = null) => (
+    <InstantPositionsContext.Provider value={{ positions: [], usdtFollow: follow, usdtLive: live } as never}>
+      <TradingDeskActionPanel preview={preview} replayActive={replayActive} onManagePosition={manage}
+        onOpenChart={open} onClosePreview={closePreview}>
+        <p>模拟面板</p>
+      </TradingDeskActionPanel>
+    </InstantPositionsContext.Provider>
+  );
+
+  const { rerender } = render(right(false));
+  const panel = screen.getByRole('region', { name: '币安实盘仓位管理' });
+  expect(panel).toHaveTextContent('100 BEAT');
+  expect(manage).toHaveBeenLastCalledWith('BEATUSDT:LONG');
+  fireEvent.click(screen.getByRole('button', { name: '查看盘面' }));
+  expect(open).toHaveBeenCalledWith('BEATUSDT', 'BEATUSDT:LONG');
+
+  rerender(right(true));
+  expect(screen.getByText('模拟面板')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '币安实盘' }));
+  expect(screen.getByRole('region', { name: '币安实盘仓位管理' })).toBeVisible();
+
+  rerender(right(true, { symbol: 'BEATUSDT', livePositionKey: 'BEATUSDT:LONG', live: true, at }));
+  fireEvent.click(screen.getByRole('button', { name: '模拟交易' }));
+  expect(closePreview).toHaveBeenCalledOnce();
+  rerender(right(true));
+  expect(screen.getByText('模拟面板')).toBeVisible();
+  expect(manage).toHaveBeenLastCalledWith(undefined);
 });

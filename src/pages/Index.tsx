@@ -19,7 +19,7 @@ import { TickerBar } from "@/components/TickerBar";
 import { ReplayDeskPanels, useReplayDeskVisibility } from "@/components/ReplayDeskPanels";
 import { OrderPanel } from "@/components/OrderPanel";
 import { PositionPanel } from "@/components/PositionPanel";
-import { UsdtLivePositionSidebar } from "@/components/UsdtLivePositionCard";
+import { TradingDeskActionPanel } from "@/components/TradingDeskActionPanel";
 import { PositionMarketPreview, usePositionMarketPreview, type PositionChartPreview } from "@/components/PositionMarketPreview";
 import { SymbolSelector } from "@/components/SymbolSelector";
 import { AccountInfo } from "@/components/AccountInfo";
@@ -237,6 +237,7 @@ const Index = () => {
   }, [timeMode, sim.status, sim.currentSimulatedTime, sim.speed, coinTimelines, activeSymbol, syncedOriginTime]);
 
   const [positionPreview,setPositionPreview] = useState<PositionChartPreview|null>(null);
+  const [managedLivePositionKey, setManagedLivePositionKey] = useState<string>();
   const positionMarket = usePositionMarketPreview(positionPreview, interval);
   const activeReplaySymbol = positionPreview?.symbol ??
     (activeCoinState.status !== "stopped" && activeCoinState.time > 0 ? activeSymbol : null);
@@ -2635,7 +2636,7 @@ const Index = () => {
                     priceMap={displayPriceMap}
                     activeSymbol={activeSymbol}
                     onOpenPositionChart={handleOpenPositionChart}
-                    sidebarPositionKey={positionPreview?.livePositionKey}
+                    sidebarPositionKey={managedLivePositionKey}
                     onClosePosition={handleClosePositionForSymbol}
                     onCancelOrder={handleCancelOrderForSymbol}
                     onAdjustMargin={handleAdjustMargin}
@@ -2660,34 +2661,38 @@ const Index = () => {
           {/* Right order panel */}
           <ResizablePanel defaultSize={25} minSize={20} maxSize={30} className="flex flex-col h-full min-h-0">
             <div className="flex flex-col flex-1 h-full min-h-0 w-full min-w-[300px] overflow-hidden bg-white dark:bg-[#1e2329] border-l border-gray-200 dark:border-[#2b3139]">
-              {positionPreview?.livePositionKey ? (
-                <div className="min-h-0 flex-1 overflow-y-auto scrollbar-pro">
-                  <UsdtLivePositionSidebar positionKey={positionPreview.livePositionKey} />
-                </div>
-              ) : <OrderPanel
-                symbol={activeSymbol}
-                currentPrice={displayCurrentPrice}
-                disabled={positionPreview !== null || activeCoinState.status === "stopped" || displayCurrentPrice === 0}
-                onPlaceOrder={handlePlaceOrderForActiveSymbol}
-                pricePrecision={chartPricePrecision}
-                quantityPrecision={quantityPrecision}
-                coolingOff={coolingOff.isActive}
-                coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
-                onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
-                panels={{ orderBook: isOrderBookOpen, pGap: !isPGapCollapsed }}
-                onPanelChange={(key, visible) => {
-                  if (key === 'orderBook') setIsOrderBookOpen(visible);
-                  // P_gap 是「收起为标题栏」而非彻底隐藏，故取反
-                  else setIsPGapCollapsed(!visible);
-                }}
-                priceProtection={priceProtection}
-                onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
-                crosshairPrice={crosshairPrice}
-                pickMode={pickMode}
-                onPickModeChange={setPickMode}
-                pickedPrice={pickedPrice}
-                onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
-              />}
+              <TradingDeskActionPanel
+                preview={positionPreview}
+                replayActive={activeCoinState.status !== "stopped"}
+                onManagePosition={setManagedLivePositionKey}
+                onOpenChart={(symbol, key) => handleOpenPositionChart(symbol, undefined, key)}
+                onClosePreview={() => setPositionPreview(null)}
+              >
+                <OrderPanel
+                  symbol={activeSymbol}
+                  currentPrice={displayCurrentPrice}
+                  disabled={positionPreview !== null || activeCoinState.status === "stopped" || displayCurrentPrice === 0}
+                  onPlaceOrder={handlePlaceOrderForActiveSymbol}
+                  pricePrecision={chartPricePrecision}
+                  quantityPrecision={quantityPrecision}
+                  coolingOff={coolingOff.isActive}
+                  coolingOffLabel={coolingOff.isActive ? coolingOff.formatRemaining() : undefined}
+                  onOpenCoolingOff={() => setCoolingOffModalOpen(true)}
+                  panels={{ orderBook: isOrderBookOpen, pGap: !isPGapCollapsed }}
+                  onPanelChange={(key, visible) => {
+                    if (key === 'orderBook') setIsOrderBookOpen(visible);
+                    // P_gap 是「收起为标题栏」而非彻底隐藏，故取反
+                    else setIsPGapCollapsed(!visible);
+                  }}
+                  priceProtection={priceProtection}
+                  onTogglePriceProtection={() => setPriceProtection((prev) => !prev)}
+                  crosshairPrice={crosshairPrice}
+                  pickMode={pickMode}
+                  onPickModeChange={setPickMode}
+                  pickedPrice={pickedPrice}
+                  onAutoPauseTimeMachine={handleAutoPauseTimeMachine}
+                />
+              </TradingDeskActionPanel>
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
