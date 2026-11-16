@@ -7,7 +7,7 @@ import {findCalculatorAdditions} from '../fish/qualityAdditionCalculator';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '../fish/qualityHoldingLedger';
 import {currentUsdtFollowCampaign,type UsdtFollowCampaign} from '../fish/usdtFollow';
 import type {FishReconstructionLoader} from '../fish/reconstruction';
-import type {QualityAdditionFill} from '../fish/qualityAddition';
+import {defaultQualityAddition,validateQualityAddition,type QualityAdditionFill} from '../fish/qualityAddition';
 import type {TradeSignal} from '../signalLibrary';
 import {bar,impulse,START,STEP,TICK,warm} from './fixtures/dbl5GuardPlusBars';
 import type {Dbl5Bar} from '../dbl5m';
@@ -225,6 +225,14 @@ describe('DBL-5防守线+急拉-1115',()=>{
   expect(adjustable.fills[0].quantity).toBeCloseTo((adjustedK-99)/(101.4-adjustedK));
   const adjustableAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',alternative:{candidates:[],impulse1115Position:configurable}}]});
   expect(adjustableAttack.fills[0]).toMatchObject({lane:'attack',at,sizing:{support:adjustedK}});
+  const parallel={version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:.25} as const;
+  expect(adjustedK).not.toBe(k);
+  expect(()=>validateQualityAddition({...defaultQualityAddition(),enabled:true,source:'structure',structure:rule,impulse1115Position:parallel})).not.toThrow();
+  const simultaneous=await findCalculatorAdditions({...options,structure:rule,impulse1115Position:parallel,maxRounds:2,repeat:true});
+  expect(simultaneous.fills).toEqual(main.fills);
+  const simultaneousAttack=await findCalculatorAdditions({...options,roundRules:[{candidates:[],unavailable:'fixture',
+   alternative:{candidates:[],structure:rule,impulse1115Position:parallel}}]});
+  expect(simultaneousAttack.fills).toEqual(attack.fills);
   const widened=await findCalculatorAdditions({...options,impulse1115Position:{...configurable,minDistancePct:2}});
   expect(widened.fills[0].structureEvidence).toMatchObject({k:99.37,widenedFrom:adjustedK,minDistancePct:2});
   const calm=async(_row:TradeSignal,from:number,to:number)=>[...warm(),bar(20,100,100.2,99.95,100)].filter(row=>row.openTime>=from&&row.openTime<to);

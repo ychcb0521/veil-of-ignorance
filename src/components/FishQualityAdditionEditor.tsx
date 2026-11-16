@@ -2,7 +2,7 @@ import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_DEFAULTS,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import { IMPULSE_5M_VERSION } from '@/lib/impulse5m';
-import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
+import {DBL5_GUARD_DISPLAY_NAME, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
 import {FishQualityImpulsePositions,type Impulse1115Draft,type Impulse5mDraft} from './FishQualityImpulsePositions';
 import {GuardPlusEvidence} from './journal/deepDig/GuardPlusEvidence';
 import { SBS5M_DEFAULTS } from '@/lib/sbs5m';
@@ -222,6 +222,12 @@ function Part({title,role,info,children,testId}:{title:string;role:string;info:R
   {children}
  </section>;
 }
+function PositionSetting({label,children,wide=false}:{label:ReactNode;children:ReactNode;wide?:boolean}){
+ return <div className={`min-w-0 space-y-1${wide?' col-span-full':''}`}>
+  <div className="flex min-h-6 flex-wrap items-center gap-1 text-muted-foreground">{label}</div>
+  {children}
+ </div>;
+}
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
 export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean}) {
  const imageCapture=useSettingsImageCapture();
@@ -257,11 +263,12 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
     metric={metric ?? choice?.metric} snapshot={snapshot} definition={choice && metricDefinitions.get(choice.featureId)}/>;
  };
  /** 特征值、变量、方向、门槛与公式时间参数。 */
- const indicator=(row:ConditionDraft,label:string,update:(change:Partial<ConditionDraft>)=>void,disabled=!d.enabled)=>{
+ const indicator=(row:ConditionDraft,label:string,update:(change:Partial<ConditionDraft>)=>void,disabled=!d.enabled,compact=false)=>{
   const feature=choices.find(c=>c.key===row.choice)?.featureId??row.choice.split(':')[0];
   const saved = row.savedStage ?? row.savedCondition;
   const select = (choice: string) => update({choice,time:undefined,savedCondition:undefined,savedStage:undefined});
-  return <div className="space-y-1.5"><div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem_5rem] gap-1.5">
+  const columns=compact?'grid-cols-2 [@container(min-width:420px)]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem_5rem]':'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem_5rem]';
+  return <div className="space-y-1.5"><div className={`grid gap-1.5 ${columns}`}>
    <select aria-label={label.replace('{x}','特征值')} disabled={disabled} value={feature} className={field} onChange={e=>select(choices.find(c=>c.featureId===e.target.value)!.key)}><option value="" disabled>选择特征值</option>{features.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select>
    <select aria-label={label.replace('{x}','指标变量')} disabled={disabled} value={row.choice} className={field} onChange={e=>select(e.target.value)}><option value="" disabled>选择变量</option>{row.choice&&!choices.some(c=>c.key===row.choice)&&<option hidden disabled value={row.choice}>已保存指标：{row.choice}</option>}{choices.filter(c=>c.featureId===feature).map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</select>
    <select aria-label={label.replace('{x}','方向')} className={field} disabled={disabled} value={row.direction} onChange={e=>update({direction:e.target.value as '<'|'>'})}><option value=">">&gt;</option><option value="<">&lt;</option></select>
@@ -274,12 +281,26 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
  </div>;
  const box=d.source==='structure';
  const nativeActive=!d.impulse?.skipNative&&!d.impulse1115?.skipNative;
- const legacy1115=box&&d.structure.kSource==='guard'&&!!d.structure.guardPlusVersion;
- const nativePositionName=box&&d.structure.kSource==='guard'?
-  (legacy1115?DBL5_GUARD_PLUS_DISPLAY_NAME:DBL5_GUARD_DISPLAY_NAME):'箱体／指标位置';
- const setPositions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive)=>{
-  patch({impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115?true:undefined},
-   impulse1115:impulse1115&&{...impulse1115,skipNative:native?undefined:true}});
+ const combined=box&&d.structure.kSource==='guard'&&!!d.structure.guardPlusVersion;
+ const standardPositionName=box&&d.structure.kSource==='guard'?DBL5_GUARD_DISPLAY_NAME:'箱体／指标位置';
+ const nativePositionName=combined?DBL5_GUARD_PLUS_DISPLAY_NAME:standardPositionName;
+ const positions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive):Pick<AdditionDraft,'impulse'|'impulse1115'>=>({
+  impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115?true:undefined},
+  impulse1115:impulse1115&&{...impulse1115,skipNative:native?undefined:true},
+ });
+ const selectNativePosition=(useCombined:boolean,checked:boolean)=>{
+  const selection=positions(d.impulse,d.impulse1115,checked);
+  if(useCombined&&checked){
+   const original=d.structure.algorithm==='dbl5'?d.structure:defaultStructureAddition('dbl5',defs);
+   const structure=selectStructureGuardVersion({...original,kSource:'guard'},CURRENT_GUARD_VERSION);
+   patch({...selection,source:'structure',structure:{...structure,guardPlusVersion:DBL5_GUARD_PLUS_VERSION}});
+  }else if(combined){
+   const structure={...d.structure};
+   delete structure.guardPlusVersion;
+   patch({...selection,structure});
+  }else{
+   patch(selection);
+  }
  };
  const usesGuard=nativeActive&&d.structure.kSource==='guard'&&d.source==='structure';
  const hasImpulse=!!(all.impulse||all.impulse1115||all.otherRounds.some(r=>r.impulse||r.impulse1115)||all.alternativeRounds?.some(r=>r.impulsePosition||r.impulse1115Position));
@@ -404,26 +425,48 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </InfoBlock>
   </div>}>
    <div className="space-y-2 text-[11px]">
-    <div className="grid items-start gap-2 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" data-testid="addition-position-choices">
-    <div className="min-w-0 space-y-2 rounded border border-border/60 p-2">
-    <label className="inline-flex items-center gap-2 font-medium">
-      <input type="checkbox" aria-label="同时启用原位置算法" checked={nativeActive} disabled={!d.enabled||!d.impulse&&!d.impulse1115}
-        onChange={e=>setPositions(d.impulse,d.impulse1115,e.target.checked)}/>
-      {nativePositionName}
-    </label>
-   <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-    <span className="text-muted-foreground">位置算法</span>
-    <select aria-label="加仓条件来源" disabled={!d.enabled||!nativeActive} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{entryDistanceAtr:d.entryDistanceAtr||'2',supportOffsetAtr:d.supportOffsetAtr||'1.5'})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">指标 · S / T / K</option></select>
+    <div role="group" aria-label="本轮位置策略" className="grid grid-cols-3 items-stretch gap-2" data-testid="addition-position-choices">
+     <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
+      <input className="shrink-0" type="checkbox" checked={nativeActive&&!combined} disabled={!d.enabled||nativeActive&&!combined&&!d.impulse&&!d.impulse1115}
+        onChange={e=>selectNativePosition(false,e.target.checked)}/>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{standardPositionName}</span>
+     </label>
+     <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
+      <input className="shrink-0" type="checkbox" checked={nativeActive&&combined} disabled={!d.enabled||!!d.impulse||nativeActive&&combined&&!d.impulse1115}
+        onChange={e=>selectNativePosition(true,e.target.checked)}/>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{DBL5_GUARD_PLUS_DISPLAY_NAME}</span>
+     </label>
+     <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
+      <input className="shrink-0" type="checkbox" checked={!!d.impulse1115} disabled={!d.enabled}
+        onChange={e=>patch(positions(d.impulse,e.target.checked?{bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}:undefined,
+          e.target.checked?nativeActive:nativeActive||!d.impulse))}/>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_1115_DISPLAY_NAME}</span>
+     </label>
+    </div>
+    <div className={`grid items-start gap-2${nativeActive&&d.impulse1115?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
+    {nativeActive&&
+    <div className="min-w-0 space-y-2 rounded border border-border/60 p-2 [container-type:inline-size]">
+   <h6 className="font-medium">{nativePositionName}参数</h6>
+   <div className="grid gap-x-3 gap-y-2 [@container(min-width:420px)]:grid-cols-2">
+    <PositionSetting label="位置算法">
+    <select aria-label="加仓条件来源" disabled={!d.enabled||combined} value={d.source} className={field+' h-7 w-full'} onChange={e=>patch({source:e.target.value as AdditionDraft['source'],choice:d.choice||choices[0]?.key||'',...(e.target.value==='structure'?{structure:defaultStructureAddition(d.structure.algorithm,defs),structureBuffer:'0'}:{entryDistanceAtr:d.entryDistanceAtr||'2',supportOffsetAtr:d.supportOffsetAtr||'1.5'})})}><option value="structure">箱体 · DBL / SBS</option><option value="custom">指标 · S / T / K</option></select>
+    </PositionSetting>
     {/* 【用户要求】2026-11-04 恢复「指标＋入场距离（S/T/K）」：指标达标、且 T 高出成本线 S 足够时加仓，K＝T−m×ATR */}
-    {nativeActive&&d.source==='custom'&&<><span className="text-muted-foreground">加仓条件</span>
-    <div data-testid="addition-sttk-trigger">{indicator(d,'加仓条件 {x}',change=>patch(change))}</div>
-    <span className="text-muted-foreground">入场距离</span>
+    {nativeActive&&d.source==='custom'&&<>
+    <PositionSetting label="加仓条件" wide>
+     <div data-testid="addition-sttk-trigger">{indicator(d,'加仓条件 {x}',change=>patch(change),!d.enabled,true)}</div>
+    </PositionSetting>
+    <PositionSetting label="入场距离">
     <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-entry-distance">T ≥ S ＋<input aria-label="入场距离ATR倍数" type="number" min="0" step="any" placeholder="不限" disabled={!d.enabled} value={d.entryDistanceAtr??''} onChange={e=>patch({entryDistanceAtr:e.target.value})} className={cell+' w-14'}/>ATR<span className="text-[10px] text-muted-foreground/70">T 加仓价 · S 成本线</span></div>
-    <span className="text-muted-foreground">K =</span>
-    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-sttk-k">T −<input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={cell+' w-14'}/>× ATR</div></>}
-    {nativeActive&&box&&<><span className="text-muted-foreground">箱体算法</span>
-    <div className="flex min-w-0 items-center gap-2"><select aria-label="箱体加仓算法" className={field+' h-7 min-w-0 flex-1'} disabled={!d.enabled} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:e.target.value==='sbs5m'&&d.structure.kSource==='guard'?'previous':d.structure.kSource}})}><option value="dbl5">{boxAlgorithmVersion(CURRENT_BOX_VERSION.dbl5)!.label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select><span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-primary" data-testid="addition-box-version" title="保存时冻结的版本">{structureVersionLabel(d.structure)}</span><FishQualityInfo label="箱体算法版本说明"><BoxAlgorithmVersionNotes/></FishQualityInfo></div>
-    <span className="text-muted-foreground">箱体时间</span>
+    </PositionSetting>
+    <PositionSetting label="K =">
+    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-sttk-k">T −<input aria-label="K回撤ATR倍数" type="number" min="0" step="any" disabled={!d.enabled} value={d.supportOffsetAtr} onChange={e=>patch({supportOffsetAtr:e.target.value})} className={cell+' w-14'}/>× ATR</div>
+    </PositionSetting></>}
+    {nativeActive&&box&&<>
+    <PositionSetting label={<>箱体算法 <FishQualityInfo label="箱体算法版本说明"><BoxAlgorithmVersionNotes/></FishQualityInfo><span className="font-mono text-[10px] text-primary" data-testid="addition-box-version" title="保存时冻结的版本">{structureVersionLabel(d.structure)}</span></>}>
+    <select aria-label="箱体加仓算法" className={field+' h-7 w-full'} disabled={!d.enabled||combined} value={d.structure.algorithm} onChange={e=>patch({structure:{...defaultStructureAddition(e.target.value as StructureAdditionRule['algorithm'],defs),kSource:e.target.value==='sbs5m'&&d.structure.kSource==='guard'?'previous':d.structure.kSource}})}><option value="dbl5">{boxAlgorithmVersion(CURRENT_BOX_VERSION.dbl5)!.label} · 达瓦斯下轨</option><option value="sbs5m">{boxAlgorithmVersion(CURRENT_BOX_VERSION.sbs5m)!.label} · 台阶支撑</option></select>
+    </PositionSetting>
+    <PositionSetting label="箱体时间">
     <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
       <span>K 线周期 5m</span>
       {d.structure.algorithm==='dbl5' ? <label>几何窗口 <input aria-label="箱体加仓几何窗口（分钟）" type="number" min="20" max="10080" step="5"
@@ -433,46 +476,47 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
           className={cell+' w-24'} value={Number.isNaN(d.structure.definition.SBS5M_config?.box_formation_bars) ? '' : d.structure.definition.SBS5M_config?.box_formation_bars ?? SBS5M_DEFAULTS.box_formation_bars}
           onChange={e=>{const box_formation_bars=e.target.valueAsNumber;patch({structure:{...d.structure,definition:{...d.structure.definition,SBS5M_config:{...d.structure.definition.SBS5M_config,box_formation_bars}}}});}}/> 根</label>}
     </div>
-    <span className="text-muted-foreground">触发事件</span>
-    <select aria-label="箱体加仓时机" className={field+' h-7 w-full'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select></>}
-    {nativeActive&&box&&<><span className="text-muted-foreground">K =</span>
-    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-row"><select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-36'} disabled={!d.enabled} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION?boxAlgorithmVersion(DBL5_RETEST_GUARD_VERSION)!.label:`${boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）`}</option>}</select>−<input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={cell+' w-14'}/>{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</div>
-    {d.structure.kSource==='guard'&&<><span className="flex items-center gap-1 text-muted-foreground">防守线<FishQualityInfo label="防守线说明"><GuardLineNotes/></FishQualityInfo></span>
-    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-guard-row"><select aria-label="防守线类型" className={field+' h-7 w-28'} disabled={!d.enabled} value={d.structure.guardTrendOnly?'trend':'both'} onChange={e=>patch({structure:{...d.structure,guardTrendOnly:e.target.value==='trend'?true:undefined}})}><option value="both">实线和虚线</option><option value="trend">只用实线</option></select><span className="px-0.5 text-muted-foreground/50">·</span>上涨期 箱底 −<input aria-label="上涨期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_trend_atr:v}}}});}} className={cell+' w-14'}/>ATR<span className="px-0.5 text-muted-foreground/50">·</span>震荡期 区间底 −<input aria-label="震荡期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_range_atr:v}}}});}} className={cell+' w-14'}/>ATR</div></>}
-    {d.structure.kSource==='guard'&&<><span className="text-muted-foreground">版本</span>
+    </PositionSetting>
+    <PositionSetting label="触发事件">
+    <select aria-label="箱体加仓时机" className={field+' h-7 w-full'} disabled={!d.enabled} value={d.structure.trigger} onChange={e=>patch({structure:{...d.structure,trigger:e.target.value as StructureAdditionRule['trigger']}})}><option value="raise">支撑抬高确认</option><option value="confirm">新箱体确认（含基准）</option>{d.structure.algorithm==='sbs5m'&&<option value="retest">独立回踩成功</option>}</select>
+    </PositionSetting>
+    <PositionSetting label="K =">
+    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-row">
+      <select aria-label="K基准箱体" title="旧C：上一箱体的支撑（多留一个箱体作冗余）；新C：本次事件刚产生的箱体支撑；防守线：DBL-5 分上涨 / 震荡留冗余、收盘确认跌破的线" className={field+' h-7 w-32 max-w-full'} disabled={!d.enabled||combined} value={d.structure.kSource??'previous'} onChange={e=>patch({structure:{...d.structure,kSource:e.target.value as NonNullable<StructureAdditionRule['kSource']>}})}><option value="previous">旧C</option><option value="current">新C</option>{d.structure.algorithm==='dbl5'&&<option value="guard">{structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION?boxAlgorithmVersion(DBL5_RETEST_GUARD_VERSION)!.label:`${boxAlgorithmVersion(CURRENT_GUARD_VERSION)!.label}（更结实）`}</option>}</select>
+      <span className="inline-flex items-center gap-1">−<input aria-label="箱体支撑冗余" type="number" min="0" step="any" disabled={!d.enabled} value={d.structureBuffer} onChange={e=>patch({structureBuffer:e.target.value,structure:{...d.structure,bufferUnit:'atr'}})} className={cell+' w-14'}/>{d.structure.bufferUnit==='percent'?'% × C':'× ATR'}</span>
+    </div>
+    </PositionSetting>
+    {d.structure.kSource==='guard'&&<>
+    <PositionSetting label="版本">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Dbl5GuardVersionSelect value={structureVersions(d.structure).guard??CURRENT_GUARD_VERSION} disabled={!d.enabled}
-          onChange={version=>{const structure=selectStructureGuardVersion(d.structure,version);delete structure.guardPlusVersion;patch({structure});}}/>
+        <Dbl5GuardVersionSelect value={structureVersions(d.structure).guard??CURRENT_GUARD_VERSION} disabled={!d.enabled||combined}
+          onChange={version=>patch({structure:selectStructureGuardVersion(d.structure,version)})}/>
         {structureVersions(d.structure).guard===DBL5_RETEST_GUARD_VERSION&&<span className="text-[10px] text-muted-foreground">首根低点等独立回踩确认后再判断加仓</span>}
-      </div></>}
-    {d.structure.kSource==='guard'&&<><span className="text-muted-foreground">急拉参考</span>
-      <div className="min-w-0 space-y-1">
-        <select aria-label="加仓防守算法" className={field+' h-7 w-full'} disabled={!d.enabled}
-          value={d.structure.guardPlusVersion??''} onChange={event=>{
-            if(event.target.value===DBL5_GUARD_PLUS_VERSION){
-              patch({structure:{...selectStructureGuardVersion(d.structure,CURRENT_GUARD_VERSION),guardPlusVersion:DBL5_GUARD_PLUS_VERSION}});
-            }else{
-              const structure={...d.structure};
-              delete structure.guardPlusVersion;
-              patch({structure});
-            }
-          }}>
-          <option value="">{DBL5_GUARD_DISPLAY_NAME}</option>
-          <option value={DBL5_GUARD_PLUS_VERSION} disabled={!!d.impulse||!!d.impulse1115}>{DBL5_GUARD_PLUS_DISPLAY_NAME}</option>
-        </select>
-        {legacy1115&&<GuardPlusEvidence/>}
-      </div></>}
-    <span className="text-muted-foreground">最小距离</span>
-    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div></>}
-   </div></div>
-   <FishQualityImpulsePositions impulse1115={d.impulse1115} legacy1115={legacy1115}
-     inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={position=>setPositions(d.impulse,position)}/>
+      </div>
+    </PositionSetting>
+    <PositionSetting label={<>防守线 <FishQualityInfo label="防守线说明"><GuardLineNotes/></FishQualityInfo></>} wide>
+     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-muted-foreground" data-testid="addition-guard-row">
+      <select aria-label="防守线类型" className={field+' h-7 w-28 max-w-full'} disabled={!d.enabled} value={d.structure.guardTrendOnly?'trend':'both'} onChange={e=>patch({structure:{...d.structure,guardTrendOnly:e.target.value==='trend'?true:undefined}})}><option value="both">实线和虚线</option><option value="trend">只用实线</option></select>
+      <label className="inline-flex max-w-full flex-wrap items-center gap-1">上涨期 箱底 −<span className="inline-flex items-center gap-1"><input aria-label="上涨期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_trend_atr:v}}}});}} className={cell+' w-14'}/>ATR</span></label>
+      <label className="inline-flex max-w-full flex-wrap items-center gap-1">震荡期 区间底 −<span className="inline-flex items-center gap-1"><input aria-label="震荡期防守冗余" type="number" min="0" step="0.1" disabled={!d.enabled} value={d.structure.definition.DBL5_config?.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr} onChange={e=>{const v=Number(e.target.value);if(e.target.value!==''&&Number.isFinite(v)&&v>=0)patch({structure:{...d.structure,definition:{...d.structure.definition,DBL5_config:{...d.structure.definition.DBL5_config,guard_range_atr:v}}}});}} className={cell+' w-14'}/>ATR</span></label>
+     </div>
+    </PositionSetting></>}
+    <PositionSetting label="最小距离">
+    <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid="addition-k-min-distance">K 离加仓价 ≥<span className="inline-flex items-center gap-1"><input aria-label="K最小距离" type="number" min="0" step="0.1" placeholder="不限" disabled={!d.enabled} value={d.structure.minDistancePct??''} onChange={e=>{const v=e.target.value.trim();patch({structure:{...d.structure,minDistancePct:v===''?undefined:Number(v)}});}} className={cell+' w-14'}/>%</span><span className="text-[10px] text-muted-foreground/70">不足按此算加仓量与止损</span></div>
+    </PositionSetting></>}
+   </div>
+   {combined&&<GuardPlusEvidence/>}
+   </div>}
+   {d.impulse1115&&<FishQualityImpulsePositions impulse1115={d.impulse1115}
+     inputClass={cell+' w-20 max-w-full'} disabled={!d.enabled} change={position=>patch(positions(d.impulse,position))}/>}
    </div>
    {d.impulse&&<div className="flex flex-wrap items-center gap-2 text-muted-foreground">
     <span>本轮沿用已保存的旧急拉位置。</span>
-    <button type="button" className="underline" disabled={!d.enabled} onClick={()=>setPositions(undefined,d.impulse1115)}>移除旧急拉位置</button>
+    <button type="button" className="underline" disabled={!d.enabled} onClick={()=>patch(positions(undefined,d.impulse1115,nativeActive||!d.impulse1115))}>移除旧急拉位置</button>
    </div>}
-   {nativeActive&&d.impulse1115&&<p className="text-muted-foreground">同一轮只成交一次。同分钟先评估「{nativePositionName}」，再评估「{IMPULSE_1115_DISPLAY_NAME}」。</p>}
+   <p className="text-muted-foreground">同一轮只成交一次。{nativeActive&&d.impulse1115
+     ?`同分钟先评估「${nativePositionName}」，再评估「${IMPULSE_1115_DISPLAY_NAME}」。`
+     :'左侧两项可切换，独立急拉可单用或并选。'}</p>
    </div>
   </Part>
 

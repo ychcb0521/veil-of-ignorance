@@ -4,6 +4,7 @@ import { backfillPlanVersions, comparePlanVersions, freezeQualityPlan, freezeSav
 import { qualityPlanFromTemplate, saveQualityPlanTemplate } from '../qualityPlanTemplates';
 import { newQualityStudy, type QualityGroup } from '../quality';
 import { defaultStructureAddition } from '../qualityAdditionStructure';
+import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION } from '@/lib/dbl5GuardPlus';
 const snap = (key: string) => ({ featureId: 'state', featureShort: '状态', definitionKey: key, statistic: 'raw', interval: '5m', scale: 1, threshold: 0, direction: '<', average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: 0 }) as unknown as QualityGroup['snapshot'];
 const structure = { ...defaultStructureAddition('dbl5'), kSource: 'current' as const, buffer: .1 };
 const plan = { id: 'p1', label: '组合算法1', metric: 'state', snapshot: snap('formula-A'), execution: 'intrabar-1m', definitionSource: 'account', vetoFill: 'stop',
@@ -13,6 +14,20 @@ const plan = { id: 'p1', label: '组合算法1', metric: 'state', snapshot: snap
   vetoStages: [{ afterAdditions: 2, conditions: [{ id: 'c', label: '1分钟内跌幅', kind: 'drop-1m', direction: '>=', threshold: 5, enabled: true }] }], vetoStageMode: 'overlay' } as unknown as QualityGroup;
 
 describe('plan version manifest', () => {
+  it('freezes parallel 1115 selection only when the combined and independent positions are both active', () => {
+    const combined = { ...structure, kSource: 'guard' as const, guardPlusVersion: DBL5_GUARD_PLUS_VERSION };
+    const saved = freezeQualityPlan({ ...plan, addition: { ...plan.addition!, structure: combined, maxRounds: 1,
+      rounds: [{ source: 'structure', structure: combined, stricterPct: 10 }] } });
+    const before = structuredClone(saved);
+    const addIndependent = freezeQualityPlan({ ...saved, addition: { ...saved.addition!,
+      rounds: saved.addition!.rounds!.map(round => ({ ...round,
+        impulse1115Position: { version: IMPULSE_1115_CONFIGURABLE_K_VERSION, bufferAtr: 0.75 } })) } });
+    expect(addIndependent.frozenVersions!.find(entry => entry.key === 'addition-impulse-1115-primary-1')?.version)
+      .toContain(DBL5_1115_POSITION_RACE_VERSION);
+    expect(planVersionChanges(addIndependent)).toEqual([]);
+    expect(planVersionChanges(saved)).toEqual([]);
+    expect(saved).toEqual(before);
+  });
   it('freezes independent history scope without rewriting the old template manifest',()=>{
     const saved=freezeQualityPlan(plan),before=structuredClone(saved),wide=freezeQualityPlan({...saved,addition:{...saved.addition!,entryVetoes:[{kind:'pullback',enabled:true,pct:10,historyHours:6}]}});
     expect(wide.frozenVersions!.find(v=>v.key==='veto-history')?.version).toContain('addition-veto-history-v1');expect(planVersionChanges(wide)).toEqual([]);

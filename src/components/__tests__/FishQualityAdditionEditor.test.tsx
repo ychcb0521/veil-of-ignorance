@@ -333,7 +333,7 @@ it('retains the retired 5m impulse only for saved rounds until explicitly remove
   const initial={...defaultQualityAddition(),enabled:true,impulsePosition:position};
   render(<Editor initial={initial}/>);
   expect(screen.queryByLabelText('5 分钟急拉线')).toBeNull();
-  expect(screen.getByLabelText('同时启用原位置算法')).not.toBeChecked();
+  expect(screen.getByLabelText('箱体／指标位置')).not.toBeChecked();
   expect(save().rounds[0].impulsePosition).toEqual(position);
   fireEvent.click(screen.getByRole('button',{name:'移除旧急拉位置'}));
   expect(save().rounds[0].impulsePosition).toBeUndefined();
@@ -359,7 +359,7 @@ it('sets the guard and impulse independently with per-round ATR and minimum dist
  expect(saved.rounds[0].impulsePosition).toBeUndefined();
  expect(saved.rounds[1].impulse1115Position).toBeUndefined();
  expect(parseAdditionDraft(additionDraft(saved),BUILTIN_FEATURES)).toEqual(saved);
- fireEvent.click(screen.getByLabelText('同时启用原位置算法'));
+ fireEvent.click(screen.getByLabelText('DBL-5-防守线',{exact:true}));
  expect(screen.queryByLabelText('K基准箱体')).toBeNull();
  expect(screen.queryByLabelText('上涨期防守冗余')).toBeNull();
  expect(save().rounds[0].impulse1115Position.skipNative).toBe(true);
@@ -383,30 +383,37 @@ it('keeps a saved combined 1115 position until the draft is explicitly changed',
   ...defaultStructureAddition(),kSource:'guard',guardPlusVersion:DBL5_GUARD_PLUS_VERSION,
  }} satisfies QualityAdditionRule;
  render(<Editor initial={legacy}/>);
- expect(screen.getByLabelText('DBL-5-急拉线-1115')).toBeDisabled();
+ const combined=screen.getByRole('checkbox',{name:'DBL-5-防守线+急拉线-1115'});
+ expect(combined).toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115'})).toBeEnabled();
  expect(save().structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
  expect(save().impulse1115Position).toBeUndefined();
- expect(screen.getByLabelText('加仓防守算法')).toHaveValue(DBL5_GUARD_PLUS_VERSION);
- fireEvent.change(screen.getByLabelText('加仓防守算法'),{target:{value:''}});
+ fireEvent.click(screen.getByLabelText('DBL-5-防守线',{exact:true}));
  fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
  expect(save().structure.guardPlusVersion).toBeUndefined();
  expect(save().impulse1115Position.version).toBe(IMPULSE_1115_CONFIGURABLE_K_VERSION);
  expect(legacy.structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
 });
 
-it('offers the existing combined 1115 version for new drafts',()=>{
+it('allows the combined version alongside independent 1115 and restores both choices',()=>{
  render(<Editor/>);
  fireEvent.click(screen.getByLabelText('启用条件加仓'));
- fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
- const mode=screen.getByLabelText('加仓防守算法');
- fireEvent.change(mode,{target:{value:DBL5_GUARD_PLUS_VERSION}});
- expect(save().rounds[0].structure.guardPlusVersion).toBe(DBL5_GUARD_PLUS_VERSION);
- expect(screen.getByLabelText('DBL-5-急拉线-1115')).toBeDisabled();
- fireEvent.change(mode,{target:{value:''}});
- fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
- expect((mode as HTMLSelectElement).selectedOptions[0].value).toBe('');
- expect(Array.from((mode as HTMLSelectElement).options).find(option=>option.value===DBL5_GUARD_PLUS_VERSION)?.disabled).toBe(true);
+ const split=screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115'});
+ const combined=screen.getByRole('checkbox',{name:'DBL-5-防守线+急拉线-1115'});
+ fireEvent.click(split);
+ fireEvent.change(screen.getByLabelText('DBL-5-急拉线-1115 K 冗余 ATR'),{target:{value:'0.9'}});
+ expect(combined).toBeEnabled();
+ fireEvent.click(combined);
+ const both=save() as QualityAdditionRule;
+ expect(both.rounds?.[0]).toMatchObject({
+  structure:{guardPlusVersion:DBL5_GUARD_PLUS_VERSION},
+  impulse1115Position:{version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:.9},
+ });
+ expect(both.rounds?.[0].impulse1115Position?.skipNative).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(both),BUILTIN_FEATURES)).toEqual(both);
+ fireEvent.click(screen.getByRole('checkbox',{name:'DBL-5-防守线'}));
  expect(save().rounds[0].structure.guardPlusVersion).toBeUndefined();
+ expect(split).toBeChecked();
 });
 
 it('selects the winning position for F and retains the chosen floor version on reopen', () => {

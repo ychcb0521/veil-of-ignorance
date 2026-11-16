@@ -1,6 +1,6 @@
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
 import { expressionConditions } from './preEntryThreeStage';
-import {DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_DISPLAY_NAME,IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
+import {DBL5_1115_POSITION_RACE_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_DISPLAY_NAME,IMPULSE_1115_POSITION_LABEL} from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
@@ -205,10 +205,12 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     for(const [lane,rules] of [['主分支',rounds],['进攻备选',a.alternativeRounds??[]]] as const){
       rules.forEach((round,index)=>{
         const position=round.impulse1115Position;
+        const race=position&&!position.skipNative&&round.source==='structure'&&round.structure?.guardPlusVersion
+          ?DBL5_1115_POSITION_RACE_VERSION:undefined;
         if(position)add(`addition-impulse-1115-${lane==='主分支'?'primary':'alternative'}-${index+1}`,
           `第 ${index+1} 次加仓 · ${lane}`,position.version===IMPULSE_1115_CONFIGURABLE_K_VERSION?IMPULSE_1115_DISPLAY_NAME:IMPULSE_1115_POSITION_LABEL,
-          join([position.version,DBL5_GUARD_PLUS_VERSION,'参数 #'+shortFishHash(JSON.stringify([position,DBL5_GUARD_PLUS_PARAMS]))]),
-          boxAlgorithmVersion(position.version)?.summary);
+          join([position.version,DBL5_GUARD_PLUS_VERSION,race,'参数 #'+shortFishHash(JSON.stringify([position,DBL5_GUARD_PLUS_PARAMS]))]),
+          join([boxAlgorithmVersion(position.version)?.summary,race&&boxAlgorithmVersion(race)?.summary]));
       });
     }
     rounds.forEach((r, i) => {

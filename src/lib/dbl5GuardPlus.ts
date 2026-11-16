@@ -7,6 +7,7 @@ export const DBL5_GUARD_PLUS_VERSION = 'dbl5-guard-impulse-1115-v1';
 export const DBL5_GUARD_PLUS_LABEL = 'DBL-5防守线+急拉-1115';
 export const IMPULSE_1115_POSITION_VERSION = 'holding-impulse-1115-position-v1';
 export const IMPULSE_1115_CONFIGURABLE_K_VERSION = 'holding-impulse-1115-position-v2';
+export const DBL5_1115_POSITION_RACE_VERSION = 'holding-dbl5-1115-position-race-v1';
 export const IMPULSE_1115_POSITION_LABEL = '急拉线-1115';
 export function isImpulse1115PositionVersion(version: string | undefined) {
   return version === IMPULSE_1115_POSITION_VERSION || version === IMPULSE_1115_CONFIGURABLE_K_VERSION;

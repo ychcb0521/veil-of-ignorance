@@ -8,7 +8,7 @@
  *  3. src/lib/__tests__/boxAlgorithmVersions.test.ts 用固定 K 线锁住每个版本的输出；那里的期望值不能改，只能为新版本另加。
  */
 import type { StructureAdditionRule } from './qualityAdditionStructure';
-import { DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
+import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import { DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
 
 export type BoxAlgorithm = StructureAdditionRule['algorithm'];
@@ -56,6 +56,9 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
   { id: IMPULSE_1115_CONFIGURABLE_K_VERSION, algorithm: 'dbl5', layer: 'guard', label: IMPULSE_1115_DISPLAY_NAME, since: '2026-11-15',
     summary: '沿用 1115 首次急拉确认，以起涨低点和可调的前置 ATR 冗余计算 K。',
     rules: ['收盘确认急拉后，冻结急拉前的 5 分钟 ATR(14)，按所设倍数从起涨低点扣减，向下取至报价步长。', 'K 最小距离、方向、否决、定量和一根 5 分钟收盘跌破 K 的规则照常生效。'] },
+  { id: DBL5_1115_POSITION_RACE_VERSION, algorithm: 'dbl5', layer: 'guard', label: '组合版与独立急拉并选', since: '2026-11-16',
+    summary: '无 BTC 依赖。组合版和独立急拉分别按各自已冻结的规则评估加仓。',
+    rules: ['同一轮只成交一次，较早达标者优先，同分钟先评估组合版。', '使用成交位置对应的 K、最小距离与止损执行规则。'] },
 ]);
 export const CURRENT_BOX_VERSION: Readonly<Record<BoxAlgorithm, string>> = Object.freeze({ dbl5: 'dbl-5-v2', sbs5m: 'sbs-5m-v1' });
 export const CURRENT_GUARD_VERSION = 'dbl5-guard-v1';
