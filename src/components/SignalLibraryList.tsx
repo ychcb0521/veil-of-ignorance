@@ -29,6 +29,7 @@ import {
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
+import { ENTRY_PERIOD_MARKETS } from '@/lib/entryPeriodSignals';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
 import { screenedSellReason, type ScreenedCdaTrigger } from '@/lib/fish/screenedCda';
@@ -201,6 +202,7 @@ interface RowProps {
   match?: SignalReconstructionMatch;
   showMatch?: boolean;
   market?: 'us_stock';
+  entryPeriod?: TradeSignal['entryPeriod'];
   exchange?: FishExchange;
   chartUnavailable?: boolean;
   extraTitle?: string;
@@ -239,7 +241,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, turingReplaySample,
+  id, symbol, timeLabel, caughtAt, showCda, cda, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market, entryPeriod, turingReplaySample,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, processCaptures, algorithmTypes, confirmDelete = false, selected, onSelect,
 }: RowProps) {
@@ -303,9 +305,9 @@ function SignalLibraryRowImpl({
         {algorithmTypes
           ? <span className="whitespace-nowrap font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
           : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
-              {fallbackZone ? `兜底 ${fallbackZone}` : turingReplaySample ? '回放样本' : ''}
+              {entryPeriod ? entryPeriod.mark : fallbackZone ? `兜底 ${fallbackZone}` : turingReplaySample ? '回放样本' : ''}
             </span>}
-        <span className="min-w-0">{market==='us_stock'&&<span className="rounded bg-primary/10 px-1 py-px text-[9px] text-primary">美股</span>}</span>
+        <span className="min-w-0">{(entryPeriod || market === 'us_stock') && <span className="rounded bg-primary/10 px-1 py-px text-[9px] text-primary">{entryPeriod ? ENTRY_PERIOD_MARKETS[entryPeriod.market] : '美股'}</span>}</span>
       </button>
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
           整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
@@ -597,6 +599,9 @@ function SignalLibraryListImpl({
       );
     }
     const sig = rows[index];
+    const indexedSignal = sig.entryPeriod
+      ? { symbol: signalChartSymbol(sig) ?? '', timeMs: sig.timeMs }
+      : sig;
     children.push(
       <SignalLibraryRow
         key={sig.id}
@@ -611,6 +616,7 @@ function SignalLibraryListImpl({
         symbol={turingCupTicker(sig.symbol)}
         exchange={sig.exchange}
         market={sig.market}
+        entryPeriod={sig.entryPeriod}
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
         caughtAt={rowAlgorithmTypes ? (showScreeningTime ? sig.preEntryMonitor?.matchedAt : sig.caughtAt) : undefined}
@@ -620,8 +626,8 @@ function SignalLibraryListImpl({
         turingReplaySample={sig.turingReplaySample}
         quality={normalizeSignalQuality(sig.quality)}
         jumpIssue={sig.jumpIssue}
-        traded={hasTradeOnSignalDay(tradedDayIndex, sig)}
-        hasDayCampaign={hasCampaignOnSignalDay(campaignDayIndex, sig)}
+        traded={hasTradeOnSignalDay(tradedDayIndex, indexedSignal)}
+        hasDayCampaign={hasCampaignOnSignalDay(campaignDayIndex, indexedSignal)}
         jumping={jumpingSignalId === sig.id}
         disabled={anyJumping}
         onJump={onJump}

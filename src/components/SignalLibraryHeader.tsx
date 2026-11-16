@@ -10,7 +10,7 @@ export const SIGNAL_LIBRARY_FISH_GRID = 'grid grid-cols-[148px_128px_128px_52px_
 export const SIGNAL_LIBRARY_SCREENED_GRID = 'grid grid-cols-[148px_128px_128px_176px_52px_var(--fish-algorithm-width,160px)_36px_74px_minmax(96px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Shared column widths and sort controls for the main library and 鱼. */
-export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, showScreeningTime = false, showCda = false, algorithmSort, algorithmCountSort, caughtAtSort, selection }: {
+export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, showScreeningTime = false, showCda = false, showEntryPeriod = false, algorithmSort, algorithmCountSort, caughtAtSort, selection }: {
   selection?:{checked:boolean;toggle:()=>void};
   /** 「渔」的鱼：兜底区换成可排序的「算法类型」。 */
   algorithmSort?: { active: boolean; onClick: () => void };
@@ -19,6 +19,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
   showMatch?: boolean;
   showScreeningTime?: boolean;
   showCda?: boolean;
+  showEntryPeriod?: boolean;
   /** 「渔」的鱼：这一列标「捕捞过程」。 */
   showProcess?: boolean;
   sortKey: SignalSortKey | undefined; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
@@ -37,7 +38,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
     {algorithmSort && (algorithmCountSort
       ? <SortHeader label="算法数量" active={algorithmCountSort.active} dir={sortDir} onClick={algorithmCountSort.onClick} />
       : <span title="实际命中的不同算法类型数量">算法数量</span>)}
-    {algorithmSort ? <SortHeader label="算法类型" active={algorithmSort.active} dir={sortDir} onClick={algorithmSort.onClick} /> : <span>兜底区</span>}
+    {algorithmSort ? <SortHeader label="算法类型" active={algorithmSort.active} dir={sortDir} onClick={algorithmSort.onClick} /> : <span>{showEntryPeriod ? '进退场周期' : '兜底区'}</span>}
     <span>市场</span>
     <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => onSort('quality')} />
     {showMatch ? <span>匹配</span> : showProcess ? <span>捕捞过程</span> : <span aria-hidden />}<span aria-hidden /><span aria-hidden /><span aria-hidden />

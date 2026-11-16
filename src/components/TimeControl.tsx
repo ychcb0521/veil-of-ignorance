@@ -20,11 +20,12 @@ import { useLatestInstantReplay } from '@/hooks/useLatestInstantReplay';
 import {
   type TradeSignal,
   parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
-  normalizeSignalQuality, signalChartSymbol,signalDedupKey,
+  normalizeSignalQuality, setSignalQuality, signalChartSymbol,signalDedupKey,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { useSignalLibrary } from '@/hooks/useSignalLibrary';
+import { ENTRY_PERIOD_SIGNALS_KEY, ENTRY_PERIOD_MARKETS, mergeEntryPeriodSignals, type EntryPeriodMarket, type EntryPeriodSignal } from '@/lib/entryPeriodSignals';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { isTuringCupSymbol, turingCupSymbol, turingCupTicker } from '@/lib/turingCupSymbol';
 import { reconstructionMatches } from '@/components/FishReconstruction';
@@ -76,7 +77,8 @@ interface Props {
 }
 
 const FISH_TIME_KEY = 'veil.fish.time';
-const EMPTY_TURING_SIGNALS: TradeSignal[] = [];
+const EMPTY_SIGNALS: TradeSignal[] = [];
+type SignalLibraryKind = 'library' | 'entry-period' | 'turing';
 
 function ReplayStartControls({ dateInput, onChange, onStart }: {
   dateInput: string | null;
@@ -146,7 +148,9 @@ export function TimeControl({
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
-  const [turing, setTuring] = useState(false);
+  const [library, setLibrary] = useState<SignalLibraryKind>('library');
+  const turing = library === 'turing';
+  const entryPeriod = library === 'entry-period';
   // 【用户要求】从鱼质量点进交易战役再返回：自动展开「渔」，鱼质量回到原来的位置（见 lib/fish/qualityReturn）
   const [fishOpen, setFishOpen] = useState(() => armQualityReturn(Date.now(),user?.id));
   // 【用户要求】2026-10-26 打开「渔」时不弹「刚平了一笔 — 要现在做平仓评价吗？」，只记进消息列表
@@ -174,20 +178,23 @@ export function TimeControl({
   const { enqueue, notify: fishNotify } = useFishCaptureAutomation();
   const fish = useFish(user?.id, { onNewFish: enqueue });
   const [onlineSignals, setOnlineSignals] = useSignalLibrary();
-  const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_TURING_SIGNALS);
+  const [entrySignals, setEntrySignals] = usePersistedState(ENTRY_PERIOD_SIGNALS_KEY, EMPTY_SIGNALS);
+  const entrySignalsRef = useRef(entrySignals);
+  entrySignalsRef.current = entrySignals;
+  const [savedTuringSignals, setSavedTuringSignals] = usePersistedState('turing_cup_signals_v1', EMPTY_SIGNALS);
   const needsTuringArchive = (turing && signalLibOpen) || fishOpen || isTuringCupSymbol(activeSymbol ?? '');
   const turingArchive = useTuringReplayArchive(user?.id, needsTuringArchive);
-  const replaySamples = useMemo(() => turingArchive.archive ? turingReplaySamples(turingArchive.archive) : EMPTY_TURING_SIGNALS, [turingArchive.archive]);
+  const replaySamples = useMemo(() => turingArchive.archive ? turingReplaySamples(turingArchive.archive) : EMPTY_SIGNALS, [turingArchive.archive]);
   const replayIds = useMemo(() => new Set(replaySamples.map(signal => signal.id)), [replaySamples]);
   const turingInputs = useMemo(() => {
     const saved = Array.isArray(savedTuringSignals) ? savedTuringSignals.filter(signal =>
       signal && typeof signal.id === 'string' && typeof signal.symbol === 'string' && isTuringCupSymbol(signal.symbol)
       && Number.isFinite(signal.timeMs) && typeof signal.timeLabel === 'string' && typeof signal.fallbackZone === 'string'
       && (!signal.turingReplaySample || replayIds.has(signal.id))
-    ) : EMPTY_TURING_SIGNALS;
+    ) : EMPTY_SIGNALS;
     return replaySamples.length ? mergeSignals(saved, replaySamples) : saved;
   }, [savedTuringSignals, replaySamples, replayIds]);
-  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, fishOpen || signalLibOpen, fishOpen);
+  const fishQuality = usePageFishQuality(fish.signals, onlineSignals, turingInputs, fishOpen || (signalLibOpen && !entryPeriod), fishOpen);
   const instant = useScreenedInstantPositions();
   const openScreenedPositions = instant?.positions;
   const openBinanceCampaigns = instant?.usdtLive?.openCampaigns;
@@ -214,8 +221,9 @@ export function TimeControl({
       return next.filter(signal => !signal.turingReplaySample || signal.quality !== undefined || signal.jumpIssue !== undefined);
     });
   }, [setSavedTuringSignals, visibleReplaySamples]);
-  const [signals, setSignals] = turing ? [turingSignals, setTuringSignals] : [onlineSignals, setOnlineSignals];
-  const libraryName = turing ? '图灵杯' : '信号库';
+  const [signals, setSignals] = entryPeriod ? [entrySignals, setEntrySignals]
+    : turing ? [turingSignals, setTuringSignals] : [onlineSignals, setOnlineSignals];
+  const libraryName = entryPeriod ? '进场期信号库' : turing ? '图灵杯' : '信号库';
   const onlineReconstruction = useFishReconstruction(user?.id, onlineSignals, fish.reconstruct);
   const turingReconstruction = useFishReconstruction(user?.id, turingSignals, fish.reconstruct, true);
   const reconstruction = turing ? turingReconstruction : onlineReconstruction;
@@ -241,6 +249,8 @@ export function TimeControl({
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
   const [importOpen, setImportOpen] = useState(() => signals.length === 0);
   const [importText, setImportText] = useState('');
+  const [entryImportPending, setEntryImportPending] = useState(false);
+  const [marketFilter, setMarketFilter] = useState<EntryPeriodMarket | ''>('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [monthFilter, setMonthFilter] = useState(''); // '' = 全部月份
@@ -250,11 +260,13 @@ export function TimeControl({
    */
   const [sortKey, setSortKey] = useState<'symbol' | 'time' | 'quality'>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const toggleLibrary = (offline: boolean) => {
+  const toggleLibrary = (next: SignalLibraryKind) => {
     setFishOpen(false);
-    if (offline !== turing) {
-      setTuring(offline);
-      setImportOpen((offline ? turingSignals : onlineSignals).length === 0);
+    if (next !== library) {
+      setLibrary(next);
+      const nextSignals = next === 'entry-period' ? entrySignals : next === 'turing' ? turingSignals : onlineSignals;
+      setImportOpen(nextSignals.length === 0);
+      setMarketFilter('');
       setImportText('');
       setImportErrors([]);
       setQuery('');
@@ -262,7 +274,7 @@ export function TimeControl({
       setSortKey('symbol');
       setSortDir('asc');
     }
-    setSignalLibOpen(open => offline !== turing || !open);
+    setSignalLibOpen(open => next !== library || !open);
   };
   const toggleSort = (key: 'symbol' | 'time' | 'quality') => {
     if (key === sortKey) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
@@ -308,6 +320,7 @@ export function TimeControl({
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
 
   const signalAuditKey = useMemo(() => {
+    if (entryPeriod) return '';
     let hash = 2166136261;
     for (const signal of signals) {
       const value = `${signal.id}|${signal.market??'crypto'}|${signal.symbol}|${signal.timeMs}`;
@@ -317,9 +330,10 @@ export function TimeControl({
       }
     }
     return `${signalJumpInterval}:${signalJumpIntervalMs}:${signals.length}:${hash >>> 0}`;
-  }, [signalJumpInterval, signalJumpIntervalMs, signals]);
+  }, [entryPeriod, signalJumpInterval, signalJumpIntervalMs, signals]);
 
   useEffect(() => {
+    if (entryPeriod) { setSignalAuditProgress(null); return; }
     const auditSignals = signalsRef.current.filter(s => !s.turingReplaySample && signalChartSymbol(s));
     if (auditSignals.length === 0) {
       if (turing) setTuringCoverageWarning(false);
@@ -377,6 +391,7 @@ export function TimeControl({
     return () => controller.abort();
   }, [
     signalAuditKey,
+    entryPeriod,
     setSignals,
     turing,
     signalJumpInterval,
@@ -410,7 +425,7 @@ export function TimeControl({
    * 刻意不看 sortedFiltered 的身份：打分和删除也会换掉那个数组，
    * 但那两种情况下把人弹回顶部只会让他丢失刚才看到哪儿了。
    */
-  const listResetKey = `${libraryName}|${sortKey}|${sortDir}|${monthFilter}|${query.trim().toUpperCase()}`;
+  const listResetKey = `${libraryName}|${sortKey}|${sortDir}|${monthFilter}|${marketFilter}|${query.trim().toUpperCase()}`;
   const listResetKeyRef = useRef(listResetKey);
   listResetKeyRef.current = listResetKey;
   // 冻结表带着记下时的口径：口径一变即作废（点表头那一帧就按新评分排，不闪旧顺序）
@@ -432,8 +447,9 @@ export function TimeControl({
     const real = basis === signals ? null : new Map(signals.map(sig => [sig.id, sig]));
     const base = real ? sortedBasis.map(sig => real.get(sig.id) ?? sig) : sortedBasis;
     const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
-    return q ? byMonth.filter(s => s.symbol.includes(q)) : byMonth;
-  }, [signals, query, monthFilter, sortKey, sortDir, activeFrozenQuality]);
+    const byMarket = marketFilter ? byMonth.filter(s => s.entryPeriod?.market === marketFilter) : byMonth;
+    return q ? byMarket.filter(s => s.symbol.toUpperCase().includes(q)) : byMarket;
+  }, [signals, query, monthFilter, marketFilter, sortKey, sortDir, activeFrozenQuality]);
   // 「标的@日期」索引：信号那天，这个标的动过手没有。
   // 这里曾经只按标的判定（做过一次 TRB，所有 TRB 信号全被标成已交易），
   // 而同一个币种会在很多个日期出现——按标的判等于把标记稀释成「这币我碰过」，
@@ -484,9 +500,50 @@ export function TimeControl({
     e.target.value = '';
   };
 
+  const handleEntryPeriodFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (!files.length || entryImportPending) return;
+    setEntryImportPending(true);
+    try {
+      const { readEntryPeriodWorkbook } = await import('@/lib/entryPeriodWorkbook');
+      const incoming: EntryPeriodSignal[] = [];
+      for (const file of files) {
+        try {
+          const parsed = await readEntryPeriodWorkbook(file);
+          for (const signal of parsed) incoming.push(signal);
+        } catch (error) {
+          throw new Error(file.name + ' · ' + (error as Error).message);
+        }
+      }
+      if (!incoming.length) { toast.error('没有找到标记为「进1」或「进1(逼近)」的记录'); return; }
+      const previous = entrySignalsRef.current;
+      const merged = mergeEntryPeriodSignals(previous, incoming);
+      const added = merged.length - previous.length;
+      setEntrySignals(current => mergeEntryPeriodSignals(current, incoming));
+      toast.success('已导入 ' + added + ' 条信号', { description: '库内共 ' + merged.length + ' 条，跳过重复 ' + (incoming.length - added) + ' 条' });
+    } catch (error) {
+      toast.error('进场期信号导入失败', { description: (error as Error).message });
+    } finally {
+      setEntryImportPending(false);
+    }
+  };
+
   const handleDeleteSignal = useCallback(
-    (id: string) => {const source=signalsRef.current.find(s=>s.id===id);if(!source)return;void (async()=>{try{await fishQuality.deleteSources?.([{source,entry:null,origin:turing?'turing':'library'}]);setSignals(prev=>prev.filter(s=>s.id!==id));}catch(e){toast.error((e as Error).message);}})();},
-    [fishQuality.deleteSources, setSignals, turing],
+    (id: string) => {
+      if (entryPeriod) { setEntrySignals(previous => previous.filter(signal => signal.id !== id)); return; }
+      const source = signalsRef.current.find(signal => signal.id === id);
+      if (!source) return;
+      void (async () => {
+        try {
+          await fishQuality.deleteSources?.([{ source, entry: null, origin: turing ? 'turing' : 'library' }]);
+          setSignals(previous => previous.filter(signal => signal.id !== id));
+        } catch (error) {
+          toast.error((error as Error).message);
+        }
+      })();
+    },
+    [entryPeriod, setEntrySignals, fishQuality.deleteSources, setSignals, turing],
   );
   /**
    * 打分。setSignals 会将这次手动修改落盘，并顺着 saveSignals 推到云端；
@@ -510,8 +567,9 @@ export function TimeControl({
       const map = prev.key === key ? prev.map : new Map<string, number | null>();
       return map.has(id) ? prev : { key, map: new Map(map).set(id, before) };
     });
+    if (entryPeriod) { setEntrySignals(previous => setSignalQuality(previous, id, next)); return; }
     const source=signalsRef.current.find(signal=>signal.id===id);if(source)handleRateQualitySource(source,next);
-  }, [handleRateQualitySource]);
+  }, [entryPeriod, setEntrySignals, handleRateQualitySource]);
   const handleClearSignals = async () => {
     try {
       if (turing && visibleReplaySamples.length) {
@@ -525,18 +583,34 @@ export function TimeControl({
     }
   };
 
-  // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。
-  const handleExportSignals = () => {
+  // 保持每个库的导出可重新导入。
+  const handleExportSignals = async () => {
     if (signals.length === 0) return;
-    const text = turing ? signals.map(signal =>
-      `${turingCupTicker(signal.symbol)}, ${formatUTC8(signal.timeMs)}, ${signal.fallbackZone}`
-    ).join('\n') + '\n' : serializeSignals(signals);
     const stamp = formatUTC8(Date.now()).replace(/[^\d]/g, '').slice(0, 12);
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    let blob: Blob;
+    let fileName: string;
+    if (entryPeriod) {
+      const { buildXlsx } = await import('@/lib/xlsxWorkbook');
+      blob = buildXlsx([{
+        name: '数据',
+        columns: ['日期', '币种', '进退场周期', '市场'].map(header => ({ header, width: 18 })),
+        rows: signals.map(signal => [
+          signal.timeLabel.slice(0, 10), signal.symbol, signal.entryPeriod?.mark,
+          signal.entryPeriod ? ENTRY_PERIOD_MARKETS[signal.entryPeriod.market] : undefined,
+        ]),
+      }]);
+      fileName = '进场期信号库-' + stamp + '.xlsx';
+    } else {
+      const text = turing ? signals.map(signal =>
+        [turingCupTicker(signal.symbol), formatUTC8(signal.timeMs), signal.fallbackZone].join(', ')
+      ).join('\n') + '\n' : serializeSignals(signals);
+      blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      fileName = (turing ? 'turing-cup' : 'signal-library') + '-' + (stamp || 'export') + '.txt';
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${turing ? 'turing-cup' : 'signal-library'}-${stamp || 'export'}.txt`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -654,13 +728,20 @@ export function TimeControl({
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Time Machine</span>
         </div>
 
+        <button type="button" aria-expanded={signalLibOpen && entryPeriod} onClick={() => toggleLibrary('entry-period')}
+          className={'flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ' +
+            (signalLibOpen && entryPeriod ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent')}>
+          <Database className="w-3 h-3" />进场期信号库
+          {entrySignals.length > 0 && <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{entrySignals.length}</span>}
+          <ChevronDown className={'w-3 h-3 transition-transform ' + (signalLibOpen && entryPeriod ? 'rotate-180' : '')} />
+        </button>
         <button
           type="button"
-          aria-expanded={signalLibOpen && !turing}
-          onClick={() => toggleLibrary(false)}
+          aria-expanded={signalLibOpen && library === 'library'}
+          onClick={() => toggleLibrary('library')}
           title="信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面"
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
-            signalLibOpen && !turing
+            signalLibOpen && library === 'library'
               ? 'border-primary/40 bg-primary/15 text-primary'
               : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'
           }`}
@@ -670,10 +751,10 @@ export function TimeControl({
           {onlineSignals.length > 0 && (
             <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{onlineSignals.length}</span>
           )}
-          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && !turing ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen && library === 'library' ? 'rotate-180' : ''}`} />
         </button>
 
-        <button type="button" aria-expanded={signalLibOpen && turing} onClick={() => toggleLibrary(true)}
+        <button type="button" aria-expanded={signalLibOpen && turing} onClick={() => toggleLibrary('turing')}
           title="图灵杯：使用导入的离线行情查看盘面和复盘"
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${signalLibOpen && turing ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
           <Database className="w-3 h-3" />图灵杯
@@ -744,7 +825,7 @@ export function TimeControl({
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
-        <div key={libraryName} data-testid={turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2">
+        <div key={libraryName} data-testid={entryPeriod ? 'entry-period-signal-library-panel' : turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2">
 
           {/* 统一工具条：筛选 + 导入 / 导出 / 预检。
               原先「只放两个 12px 图标」的独立一行已并入这里——横向本来就过剩，
@@ -764,6 +845,14 @@ export function TimeControl({
                   ))}
                 </select>
               )}
+              {entryPeriod && <select
+                aria-label="筛选市场" value={marketFilter}
+                onChange={e => setMarketFilter(e.target.value as EntryPeriodMarket | '')}
+                className="input-dark h-[22px] shrink-0 px-1.5 py-0.5 text-[11px]"
+              >
+                <option value="">全部市场</option>
+                {Object.entries(ENTRY_PERIOD_MARKETS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>}
               <input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
@@ -772,7 +861,8 @@ export function TimeControl({
               />
               <button
                 onClick={() => setImportOpen(o => !o)}
-                title={importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
+                aria-label={entryPeriod ? '导入进场期 Excel' : undefined}
+                title={entryPeriod ? '导入进场期 Excel' : importOpen ? '收起上传 / 粘贴信号' : '上传 / 粘贴信号'}
                 className={`flex h-[22px] shrink-0 items-center gap-0.5 rounded px-1.5 transition-colors ${
                   importOpen ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                 }`}
@@ -783,17 +873,18 @@ export function TimeControl({
               {signals.length > 0 && (
                 <button
                   onClick={handleExportSignals}
-                  title={`导出${libraryName}为 txt（与导入互逆，可原样再导入）`}
+                  aria-label={entryPeriod ? '导出进场期信号（Excel）' : undefined}
+                  title={entryPeriod ? '导出进场期信号（Excel）' : `导出${libraryName}为 txt（与导入互逆，可原样再导入）`}
                   className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   <Download className="h-3 w-3" />
                 </button>
               )}
-              {signals.length > 0 && (
+              {!entryPeriod && signals.length > 0 && (
                 <SignalTurnoverButton turing={turing} signals={signals} run={fish.turnover} busyReason={fish.progress?.status === 'running' || reconstructionRunning.current ? '捕捞或复原进行中，结束后再统计' : undefined} />
               )}
               {turing && user && <TuringCupReplayPanel key={user.id} accountId={user.id} source={turingArchive} />}
-              {signalAuditProgress && (
+              {!entryPeriod && signalAuditProgress && (
                 <span
                   className="flex shrink-0 items-center gap-1 font-mono text-[10px] leading-4 text-muted-foreground/70"
                   title="正在后台预检无法跳转的信号；不影响正常点击"
@@ -807,7 +898,19 @@ export function TimeControl({
                 <span className="text-[10px] text-muted-foreground">部分信号缺少当前周期的离线 K 线</span>
               )}
             </div>
-          {importOpen && (
+          {importOpen && (entryPeriod ? (
+            <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+              <label className="flex items-center gap-1 rounded border border-border/60 px-2 py-1 hover:bg-accent focus-within:ring-1 focus-within:ring-ring">
+                <Upload className="h-3 w-3" />
+                {entryImportPending ? '正在读取 Excel…' : '上传 Excel'}
+                <input type="file" aria-label="上传进场期 Excel" accept=".xlsx" multiple disabled={entryImportPending}
+                  onChange={handleEntryPeriodFiles} className="sr-only" />
+              </label>
+              <span>可多选文件 · 取「数据」页的「进1」「进1(逼近)」· 北京时间 16:00</span>
+              {signals.length > 0 && <button type="button" disabled={entryImportPending}
+                className="ml-auto rounded px-2 py-1 text-destructive hover:bg-destructive/10" onClick={handleClearSignals}>清空</button>}
+            </div>
+          ) : (
             <div className="mb-1.5">
             <div className="mb-1.5 text-[10px] text-muted-foreground">
               上传 / 粘贴信号 · 支持「<span className="font-mono text-foreground">日期时间表头 + 多行标的</span>」或「<span className="font-mono text-foreground">标的, 时间, 兜底区</span>」· 时间按 UTC+8 · {turing ? '标的需与离线行情一致' : '标的自动补 USDT'}
@@ -848,17 +951,17 @@ export function TimeControl({
               </div>
             )}
             </div>
-            )}
+            ))}
 
             {sortedFiltered.length === 0 ? (
               <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">
                 {signals.length === 0
-                  ? turing ? '图灵杯暂无信号。导入行情文件后，回放样本会出现在这里，也可以上传或粘贴信号。' : '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
+                  ? entryPeriod ? '暂无进场期信号。上传 Excel 即可导入。' : turing ? '图灵杯暂无信号。导入行情文件后，回放样本会出现在这里，也可以上传或粘贴信号。' : '还没有信号。上传或粘贴「标的 + 时间 + 兜底区」后，这里会列出（可按标的或时间排序），点开即可越过手动输入、直接跳转盘面。'
                   : '没有匹配的标的。'}
               </div>
             ) : (
               <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                {!entryPeriod && <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                   <label className="inline-flex items-center gap-1">匹配<select aria-label="匹配门槛" className="rounded border border-border/50 bg-background px-1 py-0.5" value={reconstruction.mode} onChange={e=>reconstruction.setMode(e.target.value as 'best'|'current')}><option value="best">最佳门槛</option><option value="current">各卡当前阈值</option></select></label>
                   {/* 【用户要求】2026-10-19「匹配之后为何还是这样」：「匹配」下拉只选显示哪种门槛，不会计算；
                       复原入口原先只在「渔」里，这里直接给出——没跑过 / 已过期时点「复原」，进度与不能运行的原因写在同一行 */}
@@ -870,14 +973,14 @@ export function TimeControl({
                       {reconstruction.settingsError&&<span className="text-destructive/80">{reconstruction.settingsError}（在「渔」里改）</span>}
                     </>}
                   {reconstruction.error&&!reconstruction.running&&<span className="text-destructive/80">{reconstruction.error}</span>}
-                </div>
+                </div>}
                 <div className="overflow-x-auto rounded border border-border/60"><div className="min-w-[900px]">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <SignalLibraryHeader showMatch sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SignalLibraryHeader showMatch={!entryPeriod} showEntryPeriod={entryPeriod} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 {/* 列表整块 memo 化 + 窗口化：它既不该跟着时钟重渲染，
                     也不该为了 791 条信号一次铺出两万多个节点。 */}
                 <SignalLibraryList
-                  matches={signalMatches}
+                  matches={entryPeriod ? undefined : signalMatches}
                   rows={sortedFiltered}
                   tradedDayIndex={tradedDayIndex}
                   campaignDayIndex={campaignDayIndex}

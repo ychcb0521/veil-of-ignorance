@@ -15,6 +15,7 @@
  */
 
 import { stockCode } from './signalMarket';
+import type { EntryPeriodMarket, EntryPeriodMark } from './entryPeriodSignals';
 import { isTuringCupSymbol, turingCupSymbol } from './turingCupSymbol';
 import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
@@ -23,6 +24,8 @@ import { readPersistedStateRaw, writePersistedStateRaw } from './persistedStateS
 import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
+  /** Independent entry-period history preserves the workbook name and classification. */
+  entryPeriod?: { market: EntryPeriodMarket; mark: EntryPeriodMark };
   /** Missing market keeps the existing crypto identity. */
   market?: 'us_stock';
   /** Exchange metadata's underlying/security code; never used to infer market. */
@@ -292,7 +295,8 @@ export function signalDedupKey(s: Pick<TradeSignal, 'exchange' | 'symbol' | 'tim
   if (s.market === 'us_stock') return `us:${s.exchange ?? 'binance'}:${stockCode(s)}@${s.timeMs}`;
   return `${s.exchange && s.exchange !== 'binance' ? `${s.exchange}:` : ''}${s.symbol}@${s.timeMs}`;
 }
-export function signalChartSymbol(s: Pick<TradeSignal, 'symbol' | 'market' | 'exchange' | 'binanceSymbol'>): string | null {
+export function signalChartSymbol(s: Pick<TradeSignal, 'symbol' | 'market' | 'exchange' | 'binanceSymbol' | 'entryPeriod'>): string | null {
+  if (s.entryPeriod) return s.entryPeriod.market === 'crypto' ? s.binanceSymbol ?? null : null;
   if (isTuringCupSymbol(s.symbol)) return s.symbol;
   if (s.market === 'us_stock') return null;
   return !s.exchange || s.exchange === 'binance' ? s.symbol : s.binanceSymbol ?? null;
