@@ -238,6 +238,8 @@ const Index = () => {
 
   const [positionPreview,setPositionPreview] = useState<PositionChartPreview|null>(null);
   const [managedLivePositionKey, setManagedLivePositionKey] = useState<string>();
+  const [instantCloseOpen, setInstantCloseOpen] = useState(false);
+  const [instantClosePositionId, selectInstantClosePosition] = useState<string>();
   const positionMarket = usePositionMarketPreview(positionPreview, interval);
   const activeReplaySymbol = positionPreview?.symbol ??
     (activeCoinState.status !== "stopped" && activeCoinState.time > 0 ? activeSymbol : null);
@@ -1853,11 +1855,15 @@ const Index = () => {
     return changeSymbol(symbol, setActiveSymbol);
   }, [changeSymbol, setActiveSymbol]);
 
-  const handleOpenPositionChart = useCallback((symbol: string, source?: PositionChartPreview['source'], livePositionKey?: string) => {
+  const handleOpenPositionChart = useCallback((symbol: string, source?: PositionChartPreview['source'], livePositionKey?: string, instantPositionId?: string) => {
     const target = timeMode === 'isolated' ? coinTimelines[symbol] : activeCoinState;
     const targetTime = target && target.status !== 'stopped' && target.time > 0 ? target.time : 0;
     const replayTime = livePositionKey ? 0 : targetTime || (activeCoinState.status !== 'stopped' ? effectiveSimTime : 0);
     setReplayDeskExpanded(true);
+    if (instantPositionId) {
+      selectInstantClosePosition(instantPositionId);
+      setInstantCloseOpen(true);
+    }
     setPositionPreview({ symbol, source, livePositionKey, at: replayTime || Date.now(), live: !replayTime });
   }, [timeMode, coinTimelines, activeCoinState, effectiveSimTime, setReplayDeskExpanded]);
   const selectDefaultReplaySymbol = useCallback((symbol: string) => {
@@ -2674,6 +2680,8 @@ const Index = () => {
                   currentPrice={displayCurrentPrice}
                   disabled={positionPreview !== null || activeCoinState.status === "stopped" || displayCurrentPrice === 0}
                   onPlaceOrder={handlePlaceOrderForActiveSymbol}
+                  instantClose={{ open: instantCloseOpen, setOpen: setInstantCloseOpen,
+                    positionId: instantClosePositionId, selectPosition: selectInstantClosePosition }}
                   pricePrecision={chartPricePrecision}
                   quantityPrecision={quantityPrecision}
                   coolingOff={coolingOff.isActive}

@@ -22,6 +22,7 @@ import { isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimi
 import { ClosePositionModal } from './ClosePositionModal';
 import { TpSlModal } from './TpSlModal';
 import {Popover,PopoverContent,PopoverTrigger} from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 import {
   PositionContract,PositionEditButton,PositionMarketClose,PositionNumber,PositionOpenedAt,PositionPnl,
   PositionProtectionButton,PositionProtectionPrices,PositionTableRow,
@@ -31,7 +32,7 @@ const linkClass = 'text-muted-foreground hover:text-foreground hover:underline';
 
 const takeoverNotice = '确认后，这笔模拟仓位由手动操作接管。已成交的加减仓保留，原持仓监测停止下单。';
 
-export function InstantPositionRow({ position, mirror, monitor, manual, live, manage, limitMode = 'unlimited', onOpenChart }: {
+export function InstantPositionRow({ position, mirror, monitor, manual, live, manage, limitMode = 'unlimited', onOpenChart, sidebar = false }: {
   position: InstantPositionFill;
   monitor?: QualityResult;
   mirror?: QualityMirrorFill;
@@ -40,6 +41,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
   manage?: (position: InstantPositionFill, action: InstantManualAction) => Promise<void>;
   limitMode?: PositionLimitMode;
   onOpenChart?: () => void;
+  sidebar?: boolean;
 }) {
   const names=useQualityTemplateNames();
   const inRouter = useInRouterContext();
@@ -83,6 +85,28 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
   const quoteLabel = quote?.kind === 'close' ? '最近收盘价' : quoteState?.delayed ? '最近标记价格' : '标记价格';
   const tp = orders?.tp ?? (manual ? undefined : automaticTp);
   const modify = () => setModal('protect');
+  const openClose = () => setModal('close');
+  const closeDisabled = busy || !manage || !(held.remainingQuantity > 0);
+  const closeDialog = modal === 'close' && <ClosePositionModal open onClose={dismiss} symbol={symbol} position={display}
+    currentPrice={mark || held.averageEntryPrice} pricePrecision={getPriceDecimals(mark || held.averageEntryPrice)}
+    lotSizeCheck={isUnlimitedLimitMode(limitMode) ? undefined : fraction => cardCloseLotSize(symbol, [display], fraction, mark || held.averageEntryPrice)}
+    busy={busy} notice={manual ? undefined : takeoverNotice} onConfirm={fraction => act({ kind: 'close', fraction })}/>;
+
+  if (sidebar) return <div className="space-y-3 rounded border border-border p-3">
+    <h2 className="text-sm font-semibold">{symbol} <span className="text-xs font-normal text-muted-foreground">多仓 · 逐仓 · {leverage}x</span></h2>
+    <dl className="grid grid-cols-2 gap-y-2 text-xs">
+      <dt className="text-muted-foreground">余仓数量</dt><dd className="text-right font-mono">{formatAmount(held.remainingQuantity)} {symbol.replace(/USDT$/,'')}</dd>
+      <dt className="text-muted-foreground">开仓均价</dt><dd className="text-right font-mono">{formatPrice(held.averageEntryPrice,symbol)}</dd>
+      <dt className="text-muted-foreground">{quoteLabel}</dt><dd className="text-right font-mono">{quote?formatPrice(mark,symbol):'—'}</dd>
+      <dt className="text-muted-foreground">盈亏（回报率）</dt><dd className="text-right"><PositionPnl pnl={held.pnl} roe={held.roe}/></dd>
+    </dl>
+    <Button type="button" size="sm" variant="destructive" className="w-full" disabled={closeDisabled} onClick={openClose}>
+      市价平仓
+    </Button>
+    {!manage && <p role="status" className="text-xs text-muted-foreground">仓位管理暂未就绪。</p>}
+    {closeDialog}
+  </div>;
+
   return <PositionTableRow long testId="instant-position" cells={{
     symbol: <PositionContract symbol={symbol} leverage={leverage} long onOpen={onOpenChart}
       badge={<span className="text-muted-foreground" title={EXCHANGE_NAMES[source.exchange??'binance']}>即时·模拟</span>}/>,
@@ -94,8 +118,8 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
     ratio: <PositionNumber value={ratio==null?'—':ratio.toFixed(2)+'%'} title={riskTitle}/>,
     margin: <div><PositionNumber value={formatUSDT(held.margin)+' USDT'}/><div className="text-muted-foreground">（逐仓）</div></div>,
     pnl: <PositionPnl pnl={held.pnl} roe={held.roe}/>,
-    close: <PositionMarketClose disabled={busy||!manage} mark={quote?formatPrice(mark,symbol):undefined}
-      quantity={formatAmount(held.remainingQuantity)} onClick={()=>setModal('close')}/>,
+    close: <PositionMarketClose disabled={closeDisabled} mark={quote?formatPrice(mark,symbol):undefined}
+      quantity={formatAmount(held.remainingQuantity)} onClick={openClose}/>,
     protection: <PositionProtectionPrices tp={tp==null?undefined:formatPrice(tp,symbol)} sl={orders?.sl==null?undefined:formatPrice(orders.sl,symbol)}>
       <PositionEditButton label="编辑仓位止盈止损" disabled={busy||!manage} onClick={modify}/>
     </PositionProtectionPrices>,
@@ -103,6 +127,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
     details: <>
       <PositionOpenedAt openedAt={buyAt}/>
       <div className="flex items-center gap-3">
+        {onOpenChart && <button type="button" className="text-primary hover:underline" onClick={onOpenChart}>右侧管理</button>}
         {inRouter?<Link to={campaignPath} state={{fromInstantPosition:true}} className={linkClass}>交易战役</Link>:<a href={campaignPath} className={linkClass}>交易战役</a>}
         <Popover>
           <PopoverTrigger asChild><button type="button" className={linkClass}>明细</button></PopoverTrigger>
@@ -128,10 +153,7 @@ export function InstantPositionRow({ position, mirror, monitor, manual, live, ma
           </PopoverContent>
         </Popover>
       </div>
-    {modal === 'close' && <ClosePositionModal open onClose={dismiss} symbol={symbol} position={display}
-      currentPrice={mark || held.averageEntryPrice} pricePrecision={getPriceDecimals(mark || held.averageEntryPrice)}
-      lotSizeCheck={isUnlimitedLimitMode(limitMode) ? undefined : fraction => cardCloseLotSize(symbol, [display], fraction, mark || held.averageEntryPrice)}
-      busy={busy} notice={manual ? undefined : takeoverNotice} onConfirm={fraction => act({ kind: 'close', fraction })}/>}
+    {closeDialog}
     {modal === 'protect' && <TpSlModal pos={display} symbol={symbol} markPrice={mark} liqPrice={liq} onClose={dismiss}
       lotSizeCheck={isUnlimitedLimitMode(limitMode) ? undefined : (fraction, price) => cardCloseLotSize(symbol, [display], fraction, price, 'tpsl')}
       busy={busy} notice={manual ? undefined : takeoverNotice}

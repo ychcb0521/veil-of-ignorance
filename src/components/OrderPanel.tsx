@@ -69,6 +69,7 @@ import { formatTierAmount } from '@/lib/leverageTiers';
 import { noticeLeverageClamp } from '@/lib/leverageClampNotice';
 import { LeverageTierTable } from '@/components/LeverageTierTable';
 import { lotSizeCapLabel, placementLotSize } from '@/lib/marketLotSize';
+import { InstantPositionClosePanel } from '@/components/InstantPositionClosePanel';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
@@ -87,6 +88,7 @@ interface Props {
   disabled: boolean;
   symbol: string;
   onPlaceOrder: (order: PlaceOrderParams) => void | { id: string } | null | Promise<{ id: string } | null | void>;
+  instantClose?: { open: boolean; setOpen: (open: boolean) => void; positionId?: string; selectPosition: (id: string) => void };
   coolingOff?: boolean;
   coolingOffLabel?: string;
   onOpenCoolingOff?: () => void;
@@ -128,6 +130,7 @@ const ADVANCED_ORDER_TYPES: { value: OrderType; label: string; hint: string }[] 
 
 export function OrderPanel({
   currentPrice, onPlaceOrder, disabled, symbol,
+  instantClose,
   coolingOff, coolingOffLabel, onOpenCoolingOff,
   priceProtection, onTogglePriceProtection,
   pricePrecision = 2, quantityPrecision = 3,
@@ -165,7 +168,8 @@ export function OrderPanel({
   const ratioBg = marginRatio > 80 ? 'bg-red-400' : marginRatio > 50 ? 'bg-yellow-400' : 'bg-emerald-400';
 
   // ===== Top-level state =====
-  const [actionMode, setActionMode] = useState<ActionMode>('OPEN');
+  const [legacyActionMode, setActionMode] = useState<ActionMode>('OPEN');
+  const actionMode = instantClose ? (instantClose.open ? 'CLOSE' : 'OPEN') : legacyActionMode;
   const [orderType, setOrderType] = useState<OrderType>('LIMIT');
   const marginMode = ctx.getSymbolMarginMode(symbol);
   const leverage = ctx.getSymbolLeverage(symbol);
@@ -383,15 +387,7 @@ export function OrderPanel({
    * 现在把这一张究竟是多少币算出来，直接说给用户听。
    */
   const minCoinPerContract = effectivePrice > 0 ? contractSizeUsd / effectivePrice : 0;
-  /**
-   * 开仓/平仓两档一视同仁。
-   * 我一度以为平仓档需要豁免（怕拦住尾仓平不掉），那是**基于一个错误前提**：
-   * 面板的「平仓」档根本不平仓——PlaceOrderParams 里没有 reduceOnly，
-   * actionMode 只改按钮文案，handlePlaceOrder 一律 [...existing, position] 追加**新仓位**。
-   * 真正的平仓走 PositionPanel → handleClosePosition，不经过这里。
-   * 豁免的实际后果是造出一个死按钮：effectiveQty=0 时守卫不响、按钮可点，
-   * buildOrderParams 撞上 finalQty <= 0 返回 null，点下去什么都不发生、也没有任何提示。
-   */
+  // 此处校验开仓表单。桌面即时持仓的平仓由独立视图提交给持仓管理。
   const belowMinContract = isCoinMargined && quantity.trim() !== '' && effectiveQty < 1;
   /** 取整后真正会下出去的币量——与输入不一致时必须显式告诉用户。 */
   const effectiveCoinAmount = effectivePrice > 0
@@ -401,7 +397,6 @@ export function OrderPanel({
   /**
    * 币安分层上限（-2027）：判的是**下单之后**这个合约的总敞口——持仓（多空绝对值相加）
    * + 当前委托 + 这一单，不是这一单自己。杠杆对话框与引擎下单读的是同一个判定。
-   * 面板的「平仓」档并不平仓（见 belowMinContract 的注释），所以这里没有只减仓豁免。
    */
   const symbolOrders = ctx.ordersMap?.[symbol] ?? [];
   /**
@@ -1322,7 +1317,7 @@ export function OrderPanel({
   return (
     <div className="flex flex-col h-full min-h-0 w-full min-w-[300px] bg-card text-foreground font-sans">
       {/* ============ TOP STATUS BADGES (frozen) ============ */}
-      <div className="flex-none flex items-center gap-1.5 px-3 pt-2.5 pb-2">
+      {!instantClose?.open && <div className="flex-none flex items-center gap-1.5 px-3 pt-2.5 pb-2">
         <button
           onClick={() => ctx.setSymbolMarginMode(symbol, marginMode === 'isolated' ? 'cross' : 'isolated')}
           className="px-2 py-0.5 rounded bg-secondary hover:bg-accent text-[11px] text-foreground transition-colors"
@@ -1384,15 +1379,17 @@ export function OrderPanel({
           )}
         </button>
 
-      </div>
+      </div>}
 
       {/* ============ OPEN / CLOSE PILL ============ */}
-      <div className="flex-none px-3 pb-2">
+      <div className={instantClose?.open ? 'flex-none px-3 pt-2.5 pb-2' : 'flex-none px-3 pb-2'}>
         <div className="flex bg-secondary rounded-md p-0.5">
           {(['OPEN', 'CLOSE'] as const).map(m => (
             <button
+              type="button"
               key={m}
-              onClick={() => setActionMode(m)}
+              aria-pressed={actionMode === m}
+              onClick={() => instantClose ? instantClose.setOpen(m === 'CLOSE') : setActionMode(m)}
               className={`flex-1 py-1 rounded text-[12px] font-medium transition-all ${
                 actionMode === m
                   ? 'bg-accent text-card-foreground shadow-sm'
@@ -1405,6 +1402,8 @@ export function OrderPanel({
         </div>
       </div>
 
+      {instantClose?.open ? <InstantPositionClosePanel positionId={instantClose.positionId}
+        onSelect={instantClose.selectPosition} limitMode={limitMode}/> : <>
       {/* ============ 订单类型：限价 | 市价 | <高级槽>（币安式三槽） ============ */}
       <div className="flex-none px-3 pb-1 flex items-center gap-3 text-[12px] border-b border-border">
         {PRIMARY_ORDER_TABS.map(t => {
@@ -2157,6 +2156,7 @@ export function OrderPanel({
           return result === undefined ? { id: '' } : null;
         }}
       />
+      </>}
     </div>
   );
 }

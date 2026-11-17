@@ -74,7 +74,7 @@ interface Props {
   tradeHistory: TradeRecord[];
   priceMap: PriceMap;
   activeSymbol: string;
-  onOpenPositionChart?: (symbol: string, source?: InstantPositionFill['source'], livePositionKey?: string) => void;
+  onOpenPositionChart?: (symbol: string, source?: InstantPositionFill['source'], livePositionKey?: string, instantPositionId?: string) => void;
   sidebarPositionKey?: string;
   onClosePosition: (symbol: string, index: number, percentage?: number) => void;
   onCancelOrder: (symbol: string, orderId: string) => void;
@@ -865,7 +865,7 @@ export function PositionPanel({
                 monitor={instant?.monitorResults?.get(position.recordId)} mirror={instant?.mirrorFills?.get(position.recordId)}
                 manual={instant?.manualPositions?.get(position.recordId)} live={instant?.usdtFollow?.statuses.find(status=>status.id===position.id)}
                 manage={instant?.manage} limitMode={limitMode}
-                onOpenChart={onOpenPositionChart?()=>onOpenPositionChart(position.source.symbol,position.source):undefined}/>)}
+                onOpenChart={onOpenPositionChart?()=>onOpenPositionChart(position.source.symbol,position.source,undefined,position.id):undefined}/>)}
               {mergedPositions.map((mg) => {
                     const price = priceMap[mg.symbol] || 0;
                     const firstChild = mg.children[0]?.position;
