@@ -90,7 +90,8 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
   const through = Math.max(prior.endTime ?? 0, pending.through, minuteCeiling(Math.max(...fills.map(f => f.at))));
   let checkpoint: QualityResult = { ...prior, endTime: through, pendingExit: undefined,
     remainingQuantity: Number(formatQuantity(remaining.held, market.step)), averageEntryPrice: remaining.entry,
-    remainingCost: Number(formatQuantity(remaining.held, market.step)) * remaining.entry, realizedPnl: remaining.realized };
+    remainingCost: Number(formatQuantity(remaining.held, market.step)) * remaining.entry,
+    realizedPnl: remaining.realized - (managed.followBasis?.realizedBefore ?? 0) };
   if (units > 0) {
     const quantity = Number(formatQuantity(units, market.step));
     const price = actual.reduce((sum, fill) => sum + fill.price * fill.quantity, 0) / units;
@@ -105,7 +106,7 @@ export function settleManagedUsdtDecision(row: UsdtCampaignLedger, key: string, 
         routeDecision: pending.routeDecision ?? prior.routeDecision,
         sellStageSwitches: pending.sellStageSwitches ?? prior.sellStageSwitches,
         vetoStageSwitches: pending.vetoStageSwitches ?? prior.vetoStageSwitches,
-        ...(newVetoStage?.afterAdditions === additions.length ? { vetoPath: { entry: managed.entryPrice,
+        ...(newVetoStage?.afterAdditions === (managed.followBasis?.carriedAdditions ?? 0) + additions.length ? { vetoPath: { entry: managed.entryPrice,
           peak: newVetoStage.peakBasis === 'holding' ? peak : price, minimum: price, dynamic: 0 } } : {}) };
     } else if (pending.kind === 'mirror') {
       checkpoint.mirrorFill = { ...pending.evidence, price, fraction: Math.min(1, quantity / managed.entryQuantity),

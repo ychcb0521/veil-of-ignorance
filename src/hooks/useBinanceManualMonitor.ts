@@ -7,9 +7,11 @@ import { readPageInstantMonitor } from './useFish';
 import type { useUsdtFollow } from './useUsdtFollow';
 import type { useUsdtLiveTrading } from './useUsdtLiveTrading';
 import { USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
+import { USDT_FOLLOW_MONITOR_BASIS } from '@/lib/fish/usdtFollowMonitorBasis';
 
 export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>, live: ReturnType<typeof useUsdtLiveTrading>, settings?: InstantMonitorSettings) {
-  const { owner, connected, manualMonitor, monitorSwitch, paused, executionSafety, readManualMonitor, adoptManualMonitor, switchManualMonitor, advanceManualMonitor } = follow;
+  const { owner, connected, manualMonitor, monitorSwitch, followMonitorSwitch, paused, executionSafety,
+    readManualMonitor, adoptManualMonitor, switchManualMonitor, switchFollowMonitor, advanceManualMonitor } = follow;
   const input = useRef({ live, executionSafety });
   input.current = { live, executionSafety };
   const wake = useRef<() => void>();
@@ -27,6 +29,12 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
     await switchManualMonitor(id, epoch, monitor, AbortSignal.timeout(65_000));
     wake.current?.();
   }, [connected, monitorSwitch, executionSafety, switchManualMonitor]);
+  const switchFollow = useCallback(async (id: string, anchor: BinanceManualAnchor, epoch: number, monitor: InstantMonitorSettings) => {
+    if (!connected || followMonitorSwitch !== USDT_FOLLOW_MONITOR_BASIS || executionSafety !== USDT_EXECUTION_SAFETY)
+      throw Error('请连接支持系统跟单方案切换的本机执行端');
+    await switchFollowMonitor(id, anchor, epoch, monitor, AbortSignal.timeout(65_000));
+    wake.current?.();
+  }, [connected, followMonitorSwitch, executionSafety, switchFollowMonitor]);
   useEffect(() => {
     if (!owner || !connected || manualMonitor !== 1) { setView(undefined); return; }
     const lifetime = new AbortController();
@@ -46,14 +54,14 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
         for (const { position, status } of state.positions) {
           if (signal.aborted) return;
           if (position.pending || status.state !== 'tracking') continue;
-          const id = binanceManualId(position.anchor);
+          const id = position.followBasis ? status.id : binanceManualId(position.anchor);
           const sample = binanceManualSample(position);
           const base = binanceManualSeed(position, sample);
           const end = Math.floor((state.observedAt - MANAGED_CLOSE_GRACE) / MANAGED_MINUTE) * MANAGED_MINUTE;
           const evaluationKey = id + ':' + (position.planEpoch ?? 0);
           if (end <= base.endTime! || (evaluated.get(evaluationKey) ?? 0) >= end) continue;
           try {
-            const result = await readPageInstantMonitor(sample, position.monitor, position.anchor.openedAt, end, signal, base, state.observedAt);
+            const result = await readPageInstantMonitor(sample, position.monitor, sample.enteredAt!, end, signal, base, state.observedAt);
             if (signal.aborted) return;
             const next = binanceManualAdvance(position, base, result);
             if (next?.decision?.kind === 'add' && input.current.executionSafety !== USDT_EXECUTION_SAFETY) continue;
@@ -87,5 +95,6 @@ export function useBinanceManualMonitor(follow: ReturnType<typeof useUsdtFollow>
     positions: view?.owner === owner ? view?.positions ?? [] : [],
     issue: view?.owner === owner ? view?.issue : undefined,
     template: settings, adopt, switchMonitor: monitorSwitch === 1 ? switchMonitor : undefined,
+    switchFollow: followMonitorSwitch === USDT_FOLLOW_MONITOR_BASIS ? switchFollow : undefined,
   } : undefined;
 }

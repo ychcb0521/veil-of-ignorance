@@ -41,7 +41,7 @@ interface Options extends AtrSettings {
  roundRules?:(RoundScan&{alternative?:RoundScan})[];
  /** 【用户要求】2026-11-06 结构开局：进攻备选从第几次加仓起才参与竞速（缺省 1＝每一次）。 */
  attackFromRound?:number;maxRounds?:number;minGainPct?:number;row:TradeSignal;entry:number;entryPrice:number;notional:number;end:number;since:number;
- prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;liveAt?:number;
+ prices:readonly ResearchBar[];previous:readonly QualityAdditionFill[];mirror?:QualityMirrorFill;repeat:boolean;liveAt?:number;carriedAdditions?:number;
  ordinaryExit?:{at:number;price:number;atOpen:boolean;mirror:boolean};load:FishReconstructionLoader;signal:AbortSignal;
  initialPayoffRiskPct?: number;
 }
@@ -71,6 +71,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
  const independent=o.positionVersion===HOLDING_LEDGER_ADDITION_VERSION,halfMirror=o.mirror;if(!independent&&!isPartialMirror(halfMirror))return {fills:[]};
  const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
+ const carried=o.carriedAdditions??0;
  let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const readIncrease=createAdditionIncreaseReader(o);
  let readImpulse:ReturnType<typeof createImpulseAdditionReader>|undefined;
@@ -188,7 +189,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
 
  const hasGuardPlus=!!o.structure?.guardPlusVersion||o.roundRules?.some(round=>round.structure?.guardPlusVersion||round.alternative?.structure?.guardPlusVersion);
  const done=async(stop?:SupportStop)=>{
-  const last=fills.at(-1),round=o.roundRules?.[fills.length-1];
+  const last=fills.at(-1),round=last?o.roundRules?.[carried+fills.length-1]:undefined;
   const lastRule=last?.lane==='attack'?round?.alternative?.structure:round?.structure??o.structure;
   const guardPlus=hasGuardPlus?await readStructure.latestGuardPlus(Math.min(o.end,stop?.at??o.end),lastRule):undefined;
   return {fills,stop,...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{}),...(guardPlus?{guardPlus}:{})};
@@ -214,7 +215,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  /** 最近一次加仓所依据的箱体支撑（或减仓后的新支撑）在 (from, until) 内首次下移 ≥ minDropAtr×ATR 的 5 分钟收盘。 */
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
   const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion))return;
-  const previousRound=o.roundRules?.[fills.length-1];
+  const previousRound=o.roundRules?.[carried+fills.length-1];
   const winningAlternative=last.lane==='attack'&&(evidence.algorithmVersion===DBL5_PROFILES['1h'].version||evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
   const lastReduction=reductions.filter(r=>r.at>last.at).at(-1),basis=lastReduction?lastReduction.newSupport:evidence.basePrice;
@@ -248,8 +249,9 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(scanEnd<=after)return done(stop);
   // 【用户要求】2026-11-02 支撑线下移减仓：先找下移事件；比它早的加仓照常处理，否则在下移那一刻按减仓计算器减仓
   const drop=await findSupportDrop(Math.max(after,supportAt??after),scanEnd);
-  const roundEntry=o.roundRules?.[fills.length],alternative=fills.length+1>=(o.attackFromRound??1)?roundEntry?.alternative:undefined,primaryRule=roundEntry??o;
-  const addsDone=fills.length>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
+  const completed=carried+fills.length,roundNo=completed+1;
+  const roundEntry=o.roundRules?.[completed],alternative=roundNo>=(o.attackFromRound??1)?roundEntry?.alternative:undefined,primaryRule=roundEntry??o;
+  const addsDone=completed>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
   if(addsDone||addEnd<=after){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   let round:RoundScan|Options=primaryRule;
   const soldBefore=o.notional/o.entryPrice*(halfMirror?.fraction??0);
@@ -260,7 +262,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 【用户要求】2026-11-01 涨幅门槛相对最新成本线 S（首轮为首次买入价，之后为上一次的 K），不是持仓均价、也不是首仓
   // 2026-11-04 可选「相对持仓均价」（10-31 版口径）：gainBasis＝'average'
   const basis=round.gainBasis==='average'?'real-average' as const:'cost-line' as const,referencePrice=basis==='real-average'?realAverageBefore:support??o.entryPrice;
-  const roundNo=fills.length+1,p8=(x:number)=>+x.toPrecision(8);
+  const p8=(x:number)=>+x.toPrecision(8);
   const onSkip=(x:import('./qualityAdditionStructure').StructureSkip)=>{
    if(x.reason==='guard-retest'){
     skip({at:x.at,round:roundNo,support:x.support,kind:'guard-retest',label:'等待防守线独立回踩',reading:'首根低点形成的箱底须经独立回踩确认；本次收盘尚未确认'});
@@ -346,14 +348,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(pullbackLock){
    await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,since=readAtr.series().filter(x=>x.bar.openTime>=pullbackLock!.at&&x.bar.openTime+STEP<=cut);
    if(since.some(x=>x.bar.close>=pullbackLock!.peak))pullbackLock=undefined;
-   else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:fills.length+1,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
+   else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:roundNo,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
   }
   if(round.entryVetoes?.some(v=>v.enabled)){
    if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='guard-distance')){
     await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
     const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='guard-distance'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
     const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
-    if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:fills.length+1,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
+    if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:roundNo,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
    }
    if(round.entryVetoes.some(v=>v.enabled&&(v.historyHours!=null||v.kind==='guard-distance'))){
     let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes,entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
@@ -363,7 +365,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
      const distancePending=result.pendingKind==='guard-distance';
      const detail=result.hit??{kind:distancePending?'guard-distance-pending':'history-pending',
       label:distancePending?'防守线距离待判定':'历史扫描等待',reading:result.pending!};
-     vetoed.push({at:hit.at,round:fills.length+1,...detail});after=hit.at;continue;
+     vetoed.push({at:hit.at,round:roundNo,...detail});after=hit.at;continue;
     }
    }
   }
@@ -437,7 +439,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(advantage?.grade==='U')skip({at:hit.at,round:roundNo,kind:'advantage-unavailable',label:'优势辅助数据缺失，沿用原规则',reading:advantage.reason??'缺辅助数据'});
   if(advantage)hit={...hit,advantage};
   fills.push({...hit,...(independent?{positionVersion:HOLDING_LEDGER_ADDITION_VERSION,ledger:{costBefore:cost,realizedBefore:held.realized,mirrorQuantityBefore:held.mirrorQuantity,breakevenBefore:Sb}}:{}),...(o.kStopVersion?{kStopVersion:o.kStopVersion}:{}),quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:independent?S:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:independent?0:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(floorRule?{...(followPosition?{positionK:sellK}:{guardK:sellK}),floorAtr:floorRule.atr}:{})}});
-  if(fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
+  if(carried+fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }
  return done(findPositionExit(currentK().k,Math.max(o.since,currentK().at??o.since)));
 }

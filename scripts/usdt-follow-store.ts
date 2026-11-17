@@ -28,6 +28,18 @@ export interface UsdtCampaignLedger {
   status: UsdtFollowStatus;
 }
 
+type SwitchedFollowLedger = Omit<UsdtCampaignLedger, 'managed'> & {
+  switchedMonitor: NonNullable<UsdtCampaignLedger['managed']>;
+  switchedStatus: UsdtFollowStatus;
+};
+
+function decodeLedger(payload: unknown): UsdtCampaignLedger {
+  const row = JSON.parse(String(payload)) as UsdtCampaignLedger | SwitchedFollowLedger;
+  if (!('switchedMonitor' in row)) return row;
+  const { switchedMonitor, switchedStatus, ...rest } = row;
+  return { ...rest, managed: switchedMonitor, status: switchedStatus };
+}
+
 export function openUsdtFollowStore(file: string, account: string, owner: string) {
   const db = new DatabaseSync(file);
   try {
@@ -73,8 +85,15 @@ export function openUsdtFollowStore(file: string, account: string, owner: string
         throw error;
       }
     },
-    readAll: () => [...read.all(), ...readManaged.all()].map(row => JSON.parse(String(row.payload)) as UsdtCampaignLedger),
-    save: (row: UsdtCampaignLedger) => { (row.managed ? saveManaged : save).run(row.campaign.id, JSON.stringify(row)); },
+    readAll: () => [...read.all(), ...readManaged.all()].map(row => decodeLedger(row.payload)),
+    save(row: UsdtCampaignLedger) {
+      if (row.managed?.followBasis) {
+        // Retain the campaign ID in the same table. An older executor sees an inactive row and cannot replay it.
+        const { managed, status, ...rest } = row;
+        const payload: SwitchedFollowLedger = { ...rest, status: { ...status, state: 'ignored' }, switchedMonitor: managed, switchedStatus: status };
+        save.run(row.campaign.id, JSON.stringify(payload));
+      } else (row.managed ? saveManaged : save).run(row.campaign.id, JSON.stringify(row));
+    },
     getPositionControl<T>(id: string): T | undefined {
       const row = getControl.get(id);
       return row && JSON.parse(String(row.payload));

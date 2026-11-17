@@ -3,10 +3,10 @@ import { qualityResultKey, type QualityResult, type QualitySample } from './qual
 import { MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualDecision, type BinanceManualPosition } from './binanceManualMonitor';
 
 export function binanceManualSample(position: BinanceManualPosition): QualitySample {
-  const { anchor, entryPrice, entryQuantity, version } = position;
+  const { anchor, entryPrice, entryQuantity, version, followBasis, followSample } = position;
   const id = binanceManualId(anchor);
-  return { id, source: { id, symbol: anchor.symbol, exchange: 'binance', timeMs: anchor.openedAt, timeLabel: '', fallbackZone: '' },
-    groups: [], enteredAt: anchor.openedAt, basis: 'signal', importedAt: position.armedAt,
+  return { id, source: { id, symbol: anchor.symbol, exchange: 'binance', timeMs: anchor.openedAt, timeLabel: '', fallbackZone: '', fish: followSample?.fish },
+    groups: followSample?.groups ?? [], readings: followSample?.readings, enteredAt: followBasis?.effectiveAt ?? anchor.openedAt, basis: 'signal', importedAt: position.armedAt,
     binanceEntry: { version, orderId: anchor.openingOrderId, price: entryPrice, quantity: entryQuantity } };
 }
 
@@ -27,7 +27,7 @@ export function binanceManualAdvance(position: BinanceManualPosition, prior: Qua
 
   for (const evidence of qualityAdditionFills(observed).slice(qualityAdditionFills(prior).length)) {
     const impulse = evidence.structureEvidence?.guardPlus?.early_impulse_event;
-    const transitionCount = qualityAdditionFills(prior).length + 1;
+    const transitionCount = (position.followBasis?.carriedAdditions ?? 0) + qualityAdditionFills(prior).length + 1;
     actions.push({ priority: 3, decision: { kind: 'add', evidence, through: through(evidence.at),
       action: { id, action: 'add', at: evidence.at, notional: evidence.notional,
         ...(impulse ? { impulseFreshUntil: impulse.fresh_until } : {}) },

@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createUsdtFollower } from '../../../../scripts/usdt-follow-engine';
 import { createUsdtExchange, formatQuantity, quantityUnits, usdtOrderId, type UsdtExchange } from '../../../../scripts/usdt-exchange';
@@ -19,6 +20,7 @@ import { STATIC_DRAWDOWN_SELL_CHOICE } from '../qualityStaticDrawdownSell';
 import { freezeQualityPlan } from '../qualityPlanVersions';
 import { QUALITY_POSITION_MANAGEMENT_VERSION } from '../qualityPositionManagement';
 import type { PreEntryRecord, PreEntryRound } from '../preEntryMonitor';
+import { USDT_FOLLOW_MONITOR_BASIS } from '../usdtFollowMonitorBasis';
 
 const symbol = 'NIGHTUSDT', market = { symbol, step: '0.001', min: 1, max: 100000, minNotional: 5 };
 const owner = 'fixture-user';
@@ -247,6 +249,110 @@ it('switches a confirmed live campaign without sending orders and refuses update
   expect(createUsdtFollower(makeStore(name), venue, owner, 'hedge', clock, read, () => clock).managedArchive(id))
     .toMatchObject({ monitor: target, switches: [{ from: monitor, to: target }] });
   expect(venue.order).not.toHaveBeenCalled();
+});
+
+it('takes over a followed trade in place using its Binance remainder, counts orders with fills, and ignores old signals', async () => {
+  const m = 60_000, now = Math.floor(Date.now() / m)*m + 10_000, openedAt = now - 20*m;
+  let clock = now;
+  const makeFill = (id: string, orderId: string, at: number, action: UsdtCampaignFill['action'], q: number, price: number, realized = 0): UsdtCampaignFill => ({
+    id, orderId, at, side: action === 'reduce' ? 'SELL' : 'BUY', price: String(price), quantity: String(q), positionQuantity: String(q),
+    action, commission: .01, commissionAsset: 'USDT', realized,
+  });
+  const initial = makeFill('700', '800', openedAt, 'open', 10, 4);
+  const add1 = makeFill('701', '801', openedAt + m, 'add', 2, 5);
+  const add2 = makeFill('702', '801', openedAt + m + 1, 'add', 3, 5);
+  const add3 = makeFill('703', '802', openedAt + 2*m, 'add', 5, 6);
+  const cut = makeFill('704', '804', openedAt + 4*m, 'reduce', 5, 8, 16.25);
+  const actual: UsdtLiveCampaign = { symbol, positionSide: 'LONG', direction: 'long', asset: 'USDT', openedAt, quantity: '15', fills: [initial, add1, add2, add3, cut] };
+  const anchor = { symbol, positionSide: 'LONG' as const, openedAt, openingTradeId: initial.id, openingOrderId: initial.orderId };
+  const order = (...fills: UsdtCampaignFill[]): UsdtOrder => ({ id: fills[0].orderId, exchangeId: fills[0].orderId, side: fills[0].side,
+    terminal: true, quantity: String(fills.reduce((sum, f) => sum + Number(f.quantity), 0)),
+    fills: fills.map(fill => ({ ...fill, quantity: quantityUnits(fill.quantity, market.step), price: Number(fill.price) })),
+  });
+  const storeFile = file(), store = makeStore(storeFile), venue = exchange();
+  const followed = campaign(openedAt), id = followed.id;
+  followed.actions.push({ id: 'add-1', action: 'add', at: add1.at, notional: 25 }, { id: 'add-2', action: 'add', at: add3.at, notional: 30 },
+    { id: 'add-3', action: 'add', at: openedAt + 3*m, notional: 30 }, { id: 'mirror', action: 'mirror', at: cut.at, fraction: .5 });
+  store.save({ campaign: followed, status: { id, symbol, state: 'tracking' }, skipped: ['add-3'],
+    orders: { open: order(initial), 'add-1': order(add1, add2), 'add-2': order(add3), mirror: order(cut) } });
+  const read = async () => structuredClone(actual);
+  const readPositions = async () => ({ observedAt: clock, positions: [{ symbol, positionSide: 'LONG' as const,
+    direction: 'long' as const, quantity: actual.quantity, entryPrice: '4.75', markPrice: '8', unrealizedPnl: '48.75', updatedAt: clock }] });
+  const makeRunner = (from: ReturnType<typeof makeStore>) => createUsdtFollower(from, venue, owner, 'hedge', openedAt, read, () => clock, undefined, readPositions);
+  const runner = makeRunner(store);
+  const original = { version: INSTANT_TEMPLATE_MONITOR, templateId: 'fixture', name: '跟单原方案', plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 5, [])) };
+  const target = { ...original, templateId: 'next', name: '接续方案', plan: freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE, '>=', 3, [])) };
+  await expect(runner.switchFollowMonitor(id, { ...anchor, openingTradeId: '999' }, 0, target)).rejects.toThrow('首仓编号');
+  const allowedOrigin = 'https://fixture.test', token = 'b'.repeat(64);
+  const server = serveUsdtFollower({ owner, token, exchange: venue, store, mode: 'hedge', startedAt: openedAt, allowedOrigin, port: 0,
+    positionReader: { positions: readPositions, invalidate: () => {}, history: async () => ({ fills: actual.fills, openedAt }) },
+    campaignReader: async () => ({ observedAt: clock, campaigns: [await read()] }), managedClock: () => clock,
+    positionRequest: async () => { throw Error('fixture requires no Binance requests'); } });
+  await once(server, 'listening');
+  const send = async (body: Record<string, unknown>) => fetch('http://127.0.0.1:' + (server.address() as { port: number }).port + '/api/usdt-follow/safe', {
+    method: 'POST', headers: { Origin: allowedOrigin, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, ...body }),
+  });
+  const command = { command: 'follow-monitor-switch', id, anchor, planEpoch: 0, monitor: target, original, followBasisVersion: USDT_FOLLOW_MONITOR_BASIS };
+  let switched: Awaited<ReturnType<typeof runner.switchFollowMonitor>>;
+  try {
+    expect(await (await send({ command: 'status' })).json()).toMatchObject({ followMonitorSwitch: USDT_FOLLOW_MONITOR_BASIS });
+    expect((await send(command)).status).toBe(400);
+    const response = await send({ ...command, confirmed: true });
+    const converted = await response.json();
+    expect(response.ok, JSON.stringify(converted)).toBe(true);
+    switched = converted.position;
+    expect(await (await send({ command: 'manual-monitor-status' })).json()).toMatchObject({ positions: [] });
+    expect(await (await send({ command: 'manual-monitor-status', followBasisVersion: USDT_FOLLOW_MONITOR_BASIS })).json())
+      .toMatchObject({ positions: [{ position: switched, status: { id } }] });
+    expect(await (await send({ command:'position-campaigns', since: openedAt, open: [] })).json())
+      .toMatchObject({ campaigns: [{ followId: id, management: { monitor: target } }] });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+  const effectiveAt = Math.ceil(now / m)*m;
+  const basis = { version: USDT_FOLLOW_MONITOR_BASIS, effectiveAt, carriedAdditions: 2, entryPrice: 4.75, quantity: 15, realizedBefore: 16.25 };
+  expect(switched).toMatchObject({ anchor, entryPrice: 4.75, entryQuantity: 15, planEpoch: 1, followBasis: basis,
+    checkpoint: { endTime: effectiveAt, initialNotional: 71.25, realizedPnl: 0, instantMonitorSwitches: [{ from: original, to: target, followBasis: basis }] } });
+  expect(switched.checkpoint?.additionFills).toBeUndefined();
+  const refreshed = makeRunner(makeStore(storeFile));
+  expect(refreshed.managed()).toEqual([]);
+  expect(refreshed.managed(true)[0].position).toEqual(switched);
+  refreshed.ingest([{ ...followed, actions: [...followed.actions, { id: 'close', action: 'close', at: now }] }]);
+  await refreshed.tick();
+  expect(venue.order).not.toHaveBeenCalled();
+  expect(refreshed.managedArchive(id)).toMatchObject({ monitor: target, switches: [{ from: original, to: target }] });
+  const raw = new DatabaseSync(storeFile, {readOnly:true});
+  try {
+    const saved = JSON.parse(String(raw.prepare('SELECT payload FROM campaigns WHERE id=?').get(id)?.payload));
+    expect(saved.status.state).toBe('ignored');
+    expect(saved.managed).toBeUndefined();
+  } finally { raw.close(); }
+  const sample = binanceManualSample(switched), checkpoint = binanceManualSeed(switched, sample);
+  expect(sample).toMatchObject({ enteredAt: effectiveAt, binanceEntry: { price: 4.75, quantity: 15, orderId: initial.orderId } });
+  const simulatedExit = await evaluateInstantMonitor(sample, target, effectiveAt + m, async (_source, from, to, plan) =>
+    Array.from({ length: (to - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 4.75,
+      high: 4.8, low: 4.5, close: 4.6, volume: 1, takerBuyVolume: .5 })), new AbortController().signal, checkpoint);
+  expect(simulatedExit).toMatchObject({ status: 'closed', entryPrice: 4.75, entryTime: effectiveAt, endPrice: expect.closeTo(4.6075), followBasis: basis });
+  clock = effectiveAt + m;
+  const mirror = { at: effectiveAt, price: 8, fraction: .5, gainPct: 68, atOpen: false };
+  const next = binanceManualAdvance(switched, checkpoint, { ...checkpoint, endTime: clock, mirrorFill: mirror })!;
+  expect(() => refreshed.updateManaged(id, switched.revision, next.checkpoint, next.decision, 1)).toThrow('更新网页');
+  refreshed.updateManaged(id, switched.revision, next.checkpoint, next.decision, 1, USDT_FOLLOW_MONITOR_BASIS);
+  venue.order.mockImplementationOnce(async (_market, _mode, sent, send) => {
+    expect(send).toBe(true);
+    expect(sent).toMatchObject({side:'SELL',quantity:'7.500'});
+    const fill = makeFill('705', '805', clock + 500, 'reduce', 7.5, 8, 24.375);
+    actual.fills.push(fill);
+    actual.quantity = '7.5';
+    return {exchangeId:fill.orderId,terminal:true,fills:[{...fill,quantity:7500,price:8}]};
+  });
+  await refreshed.tick();
+  expect(venue.order).toHaveBeenCalledTimes(1);
+  expect(refreshed.managed(true)[0].position.checkpoint).toMatchObject({mirrorFill:{fraction:.5},remainingQuantity:7.5,realizedPnl:24.375});
+  await expect(refreshed.switchFollowMonitor(id, anchor, 0, original)).rejects.toThrow('已在别处切换');
+  const again = await refreshed.switchFollowMonitor(id, anchor, 1, original);
+  expect(again.followBasis).toMatchObject({carriedAdditions:2,quantity:7.5,realizedBefore:40.625});
 });
 
 it('continues the frozen monitor from the real quantity and realized PnL after an exchange reduction', async () => {

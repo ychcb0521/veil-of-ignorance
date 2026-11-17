@@ -4,8 +4,9 @@ import type { InstantMonitorSettings } from './instantMonitorSettings';
 export interface InstantMonitorSwitch {
   at: number;
   effectiveAt: number;
-  from: InstantMonitorSettings;
+  from: Pick<InstantMonitorSettings, 'templateId' | 'name'> & Partial<InstantMonitorSettings>;
   to: InstantMonitorSettings;
+  followBasis?: import('./usdtFollowMonitorBasis').UsdtFollowMonitorBasis;
 }
 
 export function rebaseInstantMonitorCheckpoint(current: QualityResult, initialNotional: number,

@@ -64,6 +64,21 @@ it('uses the first fill’s K and remaining holding when the 5m impulse wins the
   expect(resumed.fills).toEqual(fills);
 });
 
+it('uses the third round with aggregate cost and no earlier realized gains after taking over two filled rounds', async () => {
+  native.at=impulseAt;
+  native.support=105;
+  const options=fixture();
+  const result=await findCalculatorAdditions({...options, entryPrice:100, notional:300, carriedAdditions:2,
+    roundRules:[{candidates:[],unavailable:'round 1'}, {candidates:[],unavailable:'round 2'}, {candidates:[],structure:options.structure}],
+    maxRounds:3,pauseAfterAdditionCount:3});
+  expect(result.fills).toHaveLength(1);
+  expect(result.fills[0]).toMatchObject({ledger:{costBefore:300,realizedBefore:0},sizing:{coinsBefore:3,previousSupport:100}});
+  expect(result.fills[0].quantity).toBeCloseTo(15/7);
+  expect(result.stageBoundary).toMatchObject({at:impulseAt});
+  const capped=await findCalculatorAdditions({...options,carriedAdditions:2});
+  expect(capped.fills).toEqual([]);
+});
+
 it('fills once with original position priority and tries the impulse if the original position cannot fill that minute', async () => {
   native.at=impulseAt;
   native.support=105;

@@ -23,6 +23,8 @@ export interface UsdtFollowCampaign {
 }
 export interface UsdtFollowStatus {
   id: string;
+  followMonitorTemplateId?: string;
+  canSwitchFollowMonitor?: boolean;
   symbol: string;
   state: 'ignored' | 'waiting' | 'blocked' | 'tracking' | 'closed';
   market?: string;

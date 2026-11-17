@@ -1,6 +1,7 @@
 import { createUsdtPositionReader } from './usdt-position-reader.ts';
 import { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
 import { findUsdtCampaignFollow, usdtLiveCampaignId } from '../src/lib/fish/usdtLiveCampaign.ts';
+import { USDT_FOLLOW_MONITOR_BASIS } from '../src/lib/fish/usdtFollowMonitorBasis.ts';
 import { execFileSync } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -151,6 +152,7 @@ export function serveUsdtFollower({
     guardPlusAdditions: 1, executionSafety: USDT_EXECUTION_SAFETY, controlRevision: store.controlRevision(),
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
     ...(readManaged ? { manualMonitor: 1, monitorSwitch: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
+    ...(readManaged && controls ? { followMonitorSwitch: USDT_FOLLOW_MONITOR_BASIS } : {}),
     ...(desk ? { orderDesk: 1 } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
@@ -188,7 +190,7 @@ export function serveUsdtFollower({
       }
       if (readManaged && managedClock) {
         if (content.command === 'manual-monitor-status') {
-          return json(res, 200, { observedAt: managedClock(), positions: follower.managed() });
+          return json(res, 200, { observedAt: managedClock(), positions: follower.managed(content.followBasisVersion === USDT_FOLLOW_MONITOR_BASIS) });
         }
         if (content.command === 'manual-monitor-adopt') {
           if (content.confirmed !== true || content.controlRevision !== store.controlRevision())
@@ -205,10 +207,20 @@ export function serveUsdtFollower({
         }
         if (content.command === 'manual-monitor-update') {
           if (typeof content.id !== 'string' || !Number.isSafeInteger(content.revision) || !content.checkpoint) throw Error('手动托管进度无效');
-          follower.updateManaged(content.id, content.revision, content.checkpoint as QualityResult, content.decision as BinanceManualDecision | undefined, content.planEpoch);
+          follower.updateManaged(content.id, content.revision, content.checkpoint as QualityResult, content.decision as BinanceManualDecision | undefined, content.planEpoch, content.followBasisVersion);
           json(res, 200, { ok: true });
           void follower.tick();
           return;
+        }
+        if (content.command === 'follow-monitor-switch' && controls && req.url === USDT_EXECUTION_PATH) {
+          if (content.confirmed !== true || content.followBasisVersion !== USDT_FOLLOW_MONITOR_BASIS || typeof content.id !== 'string'
+            || !Number.isSafeInteger(content.planEpoch) || content.planEpoch < 0) throw Error('请逐笔确认跟单持仓的新方案');
+          const anchor = manualAnchor(content.anchor, managedClock());
+          const monitor = manualMonitor(content.monitor);
+          const original = content.original && manualMonitor(content.original);
+          const position = await follower.runPositionControl(() => follower.switchFollowMonitor(content.id, anchor,
+            content.planEpoch, monitor, original, content.followSample));
+          return json(res, 200, { position });
         }
       }
       if (content.command === 'position-campaigns') {
@@ -216,10 +228,10 @@ export function serveUsdtFollower({
         const result = await campaignReader(content.since, content.open);
         const statuses = follower.statuses();
         return json(res, 200, { ...result, campaigns: result.campaigns.map(campaign => {
-          const management = follower.managedArchive(usdtLiveCampaignId(campaign));
-          if (management) return { ...campaign, management };
           const follow = findUsdtCampaignFollow(campaign, statuses);
-          return follow ? { ...campaign, followId: follow.id } : campaign;
+          const liveId = usdtLiveCampaignId(campaign);
+          const management = follower.managedArchive(follow?.id ?? liveId);
+          return { ...campaign, ...(management ? { management } : {}), ...(follow && follow.id !== liveId ? { followId: follow.id } : {}) };
         }) });
       }
       if (content.command === 'positions' || content.command === 'position-history') {

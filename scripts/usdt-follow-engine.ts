@@ -1,7 +1,7 @@
 import { usdtOrderId, formatQuantity, quantityUnits, type UsdtExchange, type UsdtMarket, type UsdtPositionMode } from './usdt-exchange.ts';
 import { openUsdtFollowStore, type UsdtCampaignLedger, type UsdtOrder } from './usdt-follow-store.ts';
 import type { UsdtFollowAction, UsdtFollowCampaign } from '../src/lib/fish/usdtFollow.ts';
-import { MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualAnchor, type BinanceManualDecision } from '../src/lib/fish/binanceManualMonitor.ts';
+import { BINANCE_MANUAL_MONITOR_VERSION, MANAGED_MINUTE, binanceManualId, initialBinanceManualCheckpoint, type BinanceManualAnchor, type BinanceManualDecision, type BinanceManualPosition } from '../src/lib/fish/binanceManualMonitor.ts';
 import type { InstantMonitorSettings } from '../src/lib/fish/instantMonitorSettings.ts';
 import type { QualityResult } from '../src/lib/fish/quality.ts';
 import { usdtLiveCampaignId, type UsdtLiveCampaign } from '../src/lib/fish/usdtLiveCampaign.ts';
@@ -10,11 +10,13 @@ import { calculateHoldingLedgerAddition, HOLDING_LEDGER_ADDITION_VERSION, replay
 import type { UsdtMirrorSnapshot } from '../src/lib/fish/usdtPositionMirror.ts';
 import { validUsdtLiveEntry } from '../src/lib/fish/usdtLiveEntry.ts';
 import { rebaseInstantMonitorCheckpoint } from '../src/lib/fish/instantMonitorSwitchCheckpoint.ts';
+import { USDT_FOLLOW_MONITOR_BASIS } from '../src/lib/fish/usdtFollowMonitorBasis.ts';
 
 const entryAgeMs = 120_000;
 const increaseAgeMs = 120_000;
 const positionTimeout = 45_000;
 const unsettledBuyIssue = '买单回报尚未核实，继续按原订单编号对账';
+const externalReductionIssue = '币安出现策略外减仓，请按实际余仓重新确认切换';
 const freshIncrease = (action:UsdtFollowAction, at:number) =>
   action.action==='add'&&action.impulseFreshUntil!==undefined
     ? action.at<=at&&at<action.impulseFreshUntil
@@ -140,7 +142,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
 
   async function switchManaged(id: string, epoch: number, monitor: InstantMonitorSettings) {
     const current = rows.get(id);
-    if (!current?.managed || current.status.state !== 'tracking' || !readManaged) throw Error('只可切换对账完成的实盘托管持仓');
+    if (!current?.managed || current.managed.followBasis || current.status.state !== 'tracking' || !readManaged) throw Error('只可切换对账完成的手动托管持仓');
     const row = structuredClone(current);
     const managed = row.managed!;
     if ((managed.planEpoch ?? 0) !== epoch) throw Error('持仓方案已在别处切换，请重新选择');
@@ -169,20 +171,83 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     return managed;
   }
 
-  function updateManaged(id: string, revision: number, checkpoint: QualityResult, decision?: BinanceManualDecision, planEpoch?: number) {
+  async function switchFollowMonitor(id: string, anchor: BinanceManualAnchor, epoch: number, monitor: InstantMonitorSettings,
+    original?: InstantMonitorSettings, followSample?: BinanceManualPosition['followSample']) {
+    const current = rows.get(id);
+    if (!current?.campaign.liveEntry || !readManaged || !readPositions ||
+      (current.status.state !== 'tracking' && current.status.issue !== externalReductionIssue) ||
+      (current.managed && !current.managed.followBasis)) throw Error('找不到可核对的系统跟单实盘仓位');
+    const previous = current.managed;
+    if ((previous?.planEpoch ?? 0) !== epoch) throw Error('持仓方案已在别处切换，请重新选择');
+    const originalId = current.campaign.liveEntry.templateId;
+    const from = previous?.monitor ?? (original?.templateId === originalId ? original : { templateId: originalId, name: '原跟单方案' });
+    if (from.templateId === monitor.templateId && current.status.issue !== externalReductionIssue) throw Error('当前持仓已使用此模板');
+    if (monitor.plan.engine || monitor.plan.initialization) throw Error('该模板须从开仓开始运行，无法接手已有持仓');
+    const unsettled = () => current.managed?.pending || Object.values(current.orders).some(order => !order.terminal) ||
+      current.campaign.actions.some(action => !current.orders[action.id] && !current.skipped.includes(action.id));
+    if (unsettled()) throw Error('原方案有委托或信号等待处理，请等成交核对完成');
+    const market = await readMarket(anchor.symbol);
+    const opening = market && openAnchor(current, market);
+    if (!market || !opening || binanceManualId(opening) !== binanceManualId(anchor) || opening.openedAt !== anchor.openedAt)
+      throw Error('实盘首仓编号已变化，请重新同步');
+    const actual = await readOriginalPosition(current, market);
+    const row = structuredClone(current);
+    mergeUsdtExitFills(row, actual, market, true);
+    const held = syncBalance(row, market);
+    if (actual.closedAt || held.held <= 0 || quantityUnits(actual.quantity, market.step) !== held.held) throw Error('实盘余仓已变化，请重新同步');
+    const position = (await readPositions()).positions.find(p => p.symbol === anchor.symbol && p.positionSide === anchor.positionSide && p.direction === 'long');
+    const entryPrice = Number(position?.entryPrice);
+    if (!position || quantityUnits(position.quantity, market.step) !== held.held || !(entryPrice > 0) || !Number.isFinite(entryPrice) ||
+      Math.abs(entryPrice - held.entry) > Math.max(1e-8, held.entry * 1e-5)) throw Error('币安余仓或成本均价暂未对齐');
+    await exchange.check(market, mode, held.held, entryPrice, false, 0, 'existing-position', protectionIds?.(market.symbol, binanceManualId(anchor)));
+    if (rows.get(id) !== current || unsettled()) throw Error('原方案出现新的待处理信号，请重新确认切换');
+    const carriedAdditions = row.campaign.actions.filter(action => action.action === 'add' && row.orders[action.id]?.fills?.length).length;
+    if (monitor.plan.router?.afterAdditions && carriedAdditions >= monitor.plan.router.afterAdditions)
+      throw Error('已越过新模板一次性分流的轮次，请选择能接续当前轮次的方案');
+    const at = managedClock();
+    const latestFill = Math.max(at, ...Object.values(row.orders).flatMap(order => (order.fills ?? []).map(fill => fill.at)));
+    const effectiveAt = Math.max(previous?.checkpoint?.endTime ?? 0, Math.ceil(latestFill / MANAGED_MINUTE) * MANAGED_MINUTE);
+    const quantity = Number(formatQuantity(held.held, market.step));
+    const followBasis = { version: USDT_FOLLOW_MONITOR_BASIS, effectiveAt, carriedAdditions, quantity, entryPrice, realizedBefore: held.realized };
+    const managed: BinanceManualPosition = { version: BINANCE_MANUAL_MONITOR_VERSION, anchor, monitor, armedAt: at,
+      entryPrice, entryQuantity: quantity, planEpoch: epoch + 1, revision: (previous?.revision ?? 0) + 1,
+      followBasis, followSample: previous?.followSample ?? followSample };
+    managed.checkpoint = { ...initialBinanceManualCheckpoint(managed), instantMonitorSwitches: [
+      ...previous?.checkpoint?.instantMonitorSwitches ?? [], { at, effectiveAt, from, to: monitor, followBasis },
+    ] };
+    row.managed = managed;
+    row.status.state = 'tracking';
+    row.status.issue = undefined;
+    write(row);
+    return managed;
+  }
+
+  function updateManaged(id: string, revision: number, checkpoint: QualityResult, decision?: BinanceManualDecision, planEpoch?: number, followBasisVersion?: string) {
     const current = rows.get(id);
     if (!current?.managed || current.status.state === 'closed') throw Error('找不到仍在持有的手动托管仓位');
     if (current.managed.revision !== revision || current.managed.pending || current.managed.planEpoch !== planEpoch) return current.managed;
+    if (current.managed.followBasis && followBasisVersion !== USDT_FOLLOW_MONITOR_BASIS) throw Error('请更新网页后继续实盘策略');
     if (current.status.state !== 'tracking') throw Error('币安实盘仓位等待对账');
     const row = structuredClone(current);
     const managed = row.managed!;
-    const entry = Math.ceil(managed.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
+    const entry = managed.followBasis?.effectiveAt ?? Math.ceil(managed.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
     const earliest = Math.max(entry, managed.checkpoint?.endTime ?? Math.ceil(managed.armedAt / MANAGED_MINUTE) * MANAGED_MINUTE);
     const now = managedClock();
     if (checkpoint.status !== 'open' || checkpoint.entryPrice !== managed.entryPrice ||
       checkpoint.entryTime !== entry || !Number.isSafeInteger(checkpoint.endTime) ||
       checkpoint.endTime! % MANAGED_MINUTE !== 0 || checkpoint.endTime! < earliest || checkpoint.endTime! > now + MANAGED_MINUTE) {
       throw Error('手动托管检查点未与同一笔成交对齐');
+    }
+    if (managed.followBasis) {
+      const prior = managed.checkpoint!;
+      const realizedReductions = (value: QualityResult) => (value.additionReductions ?? []).filter(fill => fill.fraction > 0);
+      if (checkpoint.initialNotional !== prior.initialNotional ||
+        JSON.stringify(checkpoint.additionFills ?? (checkpoint.additionFill ? [checkpoint.additionFill] : [])) !==
+          JSON.stringify(prior.additionFills ?? (prior.additionFill ? [prior.additionFill] : [])) ||
+        JSON.stringify(checkpoint.mirrorFill) !== JSON.stringify(prior.mirrorFill) ||
+        JSON.stringify(realizedReductions(checkpoint)) !== JSON.stringify(realizedReductions(prior))) {
+        throw Error('实盘策略进度与已确认的成交不一致');
+      }
     }
     if (decision) {
       const action = decision.action;
@@ -207,7 +272,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       row.campaign.actions.push(action);
     }
     managed.checkpoint = managed.planEpoch == null ? checkpoint : {
-      ...checkpoint, instantMonitorSwitches: managed.checkpoint!.instantMonitorSwitches,
+      ...checkpoint, instantMonitorSwitches: managed.checkpoint!.instantMonitorSwitches, followBasis: managed.followBasis,
     };
     managed.revision++;
     lastContactAt = Date.now();
@@ -253,20 +318,25 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
         }
       }
     }
-    next.status.state = pendingBuy ? 'blocked' : actual.closedAt ? 'closed' : 'tracking';
-    next.status.issue = pendingBuy ? unsettledBuyIssue : undefined;
+    const pausedAfterReduction = !!managed?.followBasis && !!fills.length && !actual.closedAt;
+    next.status.state = pendingBuy || pausedAfterReduction ? 'blocked' : actual.closedAt ? 'closed' : 'tracking';
+    next.status.issue = pendingBuy ? unsettledBuyIssue : pausedAfterReduction ? externalReductionIssue : undefined;
     write(next);
     return true;
   }
 
-  async function readOriginalPosition(row: UsdtCampaignLedger, market: UsdtMarket) {
+  function openAnchor(row: UsdtCampaignLedger, market: UsdtMarket) {
     const open = row.orders.open;
     const first = [...(open?.fills ?? [])].sort((a, b) =>
       a.at - b.at || a.id.length - b.id.length || a.id.localeCompare(b.id))[0];
-    const anchor = row.managed?.anchor ?? (open?.exchangeId && first ? {
+    return row.managed?.anchor ?? (open?.exchangeId && first ? {
       symbol: market.symbol, positionSide: mode === 'hedge' ? 'LONG' as const : 'BOTH' as const,
       openedAt: first.at, openingTradeId: first.id, openingOrderId: open.exchangeId,
     } : undefined);
+  }
+
+  async function readOriginalPosition(row: UsdtCampaignLedger, market: UsdtMarket) {
+    const anchor = openAnchor(row, market);
     if (!anchor || !readManaged) throw Error('缺少可核对的币安首仓成交，暂缓实盘操作');
     const actual = await readManaged(anchor);
     if (!matchesManualAnchor(anchor, actual)) throw Error('币安仓位已换成另一笔首仓，暂缓实盘操作');
@@ -331,6 +401,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       }
       current = syncBalance(row, market);
       if (!pending) {
+        if (row.status.issue === externalReductionIssue) return;
         if (row.status.state !== 'tracking' && !closing) {
           row.status.state = 'tracking';
           row.status.issue = undefined;
@@ -355,6 +426,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       return write(row);
     }
     let action: UsdtFollowAction | undefined = unsettledBuyId ? closing
+      : row.managed?.followBasis ? row.managed.pending?.action
       : campaign.actions.find(event => !row.orders[event.id] && !row.skipped.includes(event.id));
     if (closing && current.held && action?.action !== 'close') {
       // If the position is already closing, replaying missed buys or partial exits could add risk.
@@ -379,7 +451,8 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     const notional = action.action === 'open' ? campaign.notional : action.action === 'add' ? action.notional : 0;
     const stepSize = Number(market.step);
     const desired = action.action === 'close' ? current.held
-      : 'fraction' in action ? Math.floor((action.action === 'mirror' ? current.initial : current.held) * action.fraction + 1e-9)
+      : 'fraction' in action ? Math.floor((action.action === 'mirror'
+        ? row.managed?.followBasis ? Math.round(row.managed.followBasis.quantity / stepSize) : current.initial : current.held) * action.fraction + 1e-9)
       : Math.floor(notional / price / stepSize + 1e-9);
     const decision = row.managed?.pending;
     let limit = side === 'BUY' ? market.max : current.held;
@@ -388,7 +461,8 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       if (price <= support) limit = 0;
       else if (decision.evidence.positionVersion === HOLDING_LEDGER_ADDITION_VERSION) {
         const held = current.held * stepSize;
-        const budget = calculateHoldingLedgerAddition({ held, cost: held * current.entry, realized: current.realized }, price, support);
+        const budget = calculateHoldingLedgerAddition({ held, cost: held * current.entry,
+          realized: current.realized - (row.managed?.followBasis?.realizedBefore ?? 0) }, price, support);
         limit = budget.error ? 0 : Math.min(limit, Math.floor(budget.addCoins / stepSize + 1e-9));
       } else {
         // The saved legacy formula selected coin quantity at the strategy price.
@@ -482,7 +556,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
   }
 
   return {
-    ingest, adopt, switchManaged, updateManaged,
+    ingest, adopt, switchManaged, switchFollowMonitor, updateManaged,
     async runPositionControl<T>(run: () => Promise<T>) {
       if (manual) throw Error('另一笔实盘操作正在进行，请稍后重试');
       manual = true;
@@ -491,7 +565,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
         return await run();
       } finally { manual = false; }
     },
-    managed: () => [...rows.values()].filter(row => row.managed && row.status.state !== 'closed')
+    managed: (includeFollow = false) => [...rows.values()].filter(row => row.managed && row.status.state !== 'closed' && (includeFollow || !row.managed.followBasis))
       .map(row => ({ position: row.managed!, status: row.status })),
     managedArchive: (id: string) => {
       const managed = rows.get(id)?.managed;
@@ -503,7 +577,10 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
     resumeNewOrders: (now = Date.now()) => { store.setPaused(false); entryAfter = now; accepting = true; },
     get entryAfter() { return entryAfter; },
     get paused() { return !accepting; },
-    statuses: () => [...rows.values()].map(row => row.status),
+    statuses: () => [...rows.values()].map(row => row.campaign.liveEntry && (!row.managed || row.managed.followBasis)
+      ? { ...row.status, followMonitorTemplateId: row.managed?.monitor.templateId ?? row.campaign.liveEntry.templateId,
+        canSwitchFollowMonitor: !row.managed?.pending && (row.status.state === 'tracking' || row.status.issue === externalReductionIssue) }
+      : row.status),
     async tick(now = Date.now()) {
       if (active || manual) return;
       active = true;

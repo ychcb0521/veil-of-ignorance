@@ -116,7 +116,8 @@ export async function evaluateQualityRouter(r: QualityPlanRouter, run: (plan: Qu
   }
   const structure = await run(r.structure, previous?.status==='open'?{...previous,key:keyOf(r.structure)}:undefined);
   if (structure.status==='error'||structure.status==='waiting') return structure;
-  const decisive=structure.additionFills?.[r.afterAdditions-1];
+  const branchIndex=r.afterAdditions-(previous?.followBasis?.carriedAdditions??0)-1;
+  const decisive=structure.additionFills?.[branchIndex];
   if (!decisive) return {...structure,routeDecision:{branch:'structure',threshold:r.threshold}};
   const o=decisive.conditions?.find(c=>c.metric==='state');
   if (!o || !Number.isFinite(o.reading) || o.at!==decisive.at || o.barOpenTime+300000>decisive.at) throw Error(`第${routerOrdinal(r)}次结构加仓缺少此前已收盘的状态 S，未选择分支`);
@@ -124,7 +125,7 @@ export async function evaluateQualityRouter(r: QualityPlanRouter, run: (plan: Qu
   if (decision.branch==='structure') return {...structure,routeDecision:decision};
   const attack=await run(r.attack,(confirmedLiveFills||previous?.instantMonitorSwitches)&&previous?.status==='open'?{...previous,key:keyOf(r.attack)}:undefined);
   if (attack.status==='error'||attack.status==='waiting') return attack;
-  if (canonicalRouterJson(attack.additionFills?.slice(0,r.afterAdditions))!==canonicalRouterJson(structure.additionFills?.slice(0,r.afterAdditions))) throw Error('进攻分支改变了选择前的成交，已停止计算');
+  if (canonicalRouterJson(attack.additionFills?.slice(0,branchIndex+1))!==canonicalRouterJson(structure.additionFills?.slice(0,branchIndex+1))) throw Error('进攻分支改变了选择前的成交，已停止计算');
   return {...attack,routeDecision:decision};
 }
 export function routedQualityPlan(plan: QualityGroup, result: Pick<QualityResult,'routeDecision'>): QualityGroup {

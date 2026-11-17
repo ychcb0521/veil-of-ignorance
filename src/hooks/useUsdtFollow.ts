@@ -2,6 +2,8 @@ import { usdtMirrorRevision, type UsdtMirrorHistory, type UsdtMirrorPosition, ty
 import type { UsdtCampaignBatch, UsdtLiveCampaign } from '@/lib/fish/usdtLiveCampaign';
 import type { BinanceManualAnchor, BinanceManualDecision, BinanceManualState } from '@/lib/fish/binanceManualMonitor';
 import type { InstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
+import { instantPositionInput } from '@/lib/fish/instantCampaign';
+import { USDT_FOLLOW_MONITOR_BASIS } from '@/lib/fish/usdtFollowMonitorBasis';
 import type { QualityResult } from '@/lib/fish/quality';
 import type { UsdtPositionControlRequest, UsdtPositionControlResult } from '@/lib/fish/usdtPositionControls';
 import type { UsdtDeskOpenRequest, UsdtDeskQuote } from '@/lib/fish/usdtOrderDesk';
@@ -35,6 +37,7 @@ interface FollowState {
   guardPlusAdditions?: 1;
   manualMonitor?: 1;
   monitorSwitch?: 1;
+  followMonitorSwitch?: typeof USDT_FOLLOW_MONITOR_BASIS;
   positionControls?: 1;
   orderDesk?: 1;
   executionSafety?: number;
@@ -43,6 +46,8 @@ interface FollowState {
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
 export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracking) {
+  const trackingRef = useRef(tracking);
+  trackingRef.current = tracking;
   const [pairing, setPairing] = useState<{ owner?: string; token?: string }>({});
   const [state, setState] = useState<{ owner?: string; data: FollowState }>({ data: disconnected });
   const [issue, setIssue] = useState('');
@@ -233,14 +238,24 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     return batch;
   }, [readMirror]);
   const readManualMonitor = useCallback((signal: AbortSignal) =>
-    readMirror<BinanceManualState>({ command: 'manual-monitor-status' }, signal, 10_000), [readMirror]);
+    readMirror<BinanceManualState>({ command: 'manual-monitor-status', followBasisVersion: USDT_FOLLOW_MONITOR_BASIS }, signal, 10_000), [readMirror]);
   const adoptManualMonitor = useCallback((anchor: BinanceManualAnchor, monitor: InstantMonitorSettings, controlRevision: number, signal: AbortSignal) =>
     readMirror({ command: 'manual-monitor-adopt', anchor, monitor, confirmed: true,
       controlRevision }, signal, 60_000, true), [readMirror]);
   const switchManualMonitor = useCallback((id: string, planEpoch: number, monitor: InstantMonitorSettings, signal: AbortSignal) =>
     readMirror({ command: 'manual-monitor-switch', id, planEpoch, monitor, confirmed: true }, signal, 60_000, true), [readMirror]);
+  const switchFollowMonitor = useCallback((id: string, anchor: BinanceManualAnchor, planEpoch: number, monitor: InstantMonitorSettings, signal: AbortSignal) => {
+    const entry = trackingRef.current.admitted?.find(({ record, round }) => instantPositionInput(record, round)?.id === id);
+    const original = entry?.round.instantMonitor;
+    const sample = entry?.record.sample;
+    return readMirror({ command: 'follow-monitor-switch', id, anchor, planEpoch, monitor, confirmed: true,
+      followBasisVersion: USDT_FOLLOW_MONITOR_BASIS, original,
+      followSample: sample && { groups: sample.groups, readings: sample.readings, fish: sample.source.fish },
+    }, signal, 60_000, true);
+  }, [readMirror]);
   const advanceManualMonitor = useCallback((id: string, revision: number, checkpoint: QualityResult, decision: BinanceManualDecision | undefined, signal: AbortSignal, planEpoch?: number) =>
-    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision, planEpoch }, signal, 15_000, true), [readMirror]);
+    readMirror({ command: 'manual-monitor-update', id, revision, checkpoint, decision, planEpoch,
+      followBasisVersion: checkpoint.followBasis?.version }, signal, 15_000, true), [readMirror]);
   const controlPosition = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
     readMirror<UsdtPositionControlResult>({ command: 'position-control', request }, signal, 70_000), [readMirror]);
   const readDeskQuote = useCallback((symbol: string, signal: AbortSignal) =>
@@ -251,5 +266,5 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     readMirror<UsdtPositionControlResult>({command:'desk-close',request},signal,70_000,true),[readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
   return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
-    readManualMonitor, adoptManualMonitor, switchManualMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
+    readManualMonitor, adoptManualMonitor, switchManualMonitor, switchFollowMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
 }

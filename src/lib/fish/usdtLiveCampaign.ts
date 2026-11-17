@@ -36,9 +36,9 @@ export const usdtLiveCampaignId = (campaign: Pick<UsdtLiveCampaign, 'symbol' | '
 
 export const isUsdtLiveCampaignId = (id?: string) => /^fish-instant-live-[A-Z0-9_]+-(?:BOTH|LONG|SHORT)-(?:long|short)-\d+-\d+$/.test(id ?? '');
 
-export function findUsdtCampaignFollow(campaign: UsdtLiveCampaign, statuses: readonly UsdtFollowStatus[]) {
+export function findUsdtCampaignFollow(campaign: Pick<UsdtLiveCampaign, 'symbol'> & { fills: readonly Pick<UsdtCampaignFill, 'id' | 'orderId'>[] }, statuses: readonly UsdtFollowStatus[]) {
   const opening = campaign.fills[0];
-  return statuses.find(status => (status.market ?? status.symbol.replace(/\//g, '')) === campaign.symbol &&
+  return opening && statuses.find(status => (status.market ?? status.symbol.replace(/\//g, '')) === campaign.symbol &&
     status.executions?.some(execution => execution.actionId === 'open' && execution.orderId === opening.orderId &&
       execution.fills.some(fill => fill.id === opening.id)));
 }

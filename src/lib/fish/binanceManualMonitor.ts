@@ -3,6 +3,8 @@ import type { QualityResult } from './quality';
 import type { QualityAdditionFill, QualityReductionFill } from './qualityAddition';
 import type { QualityMirrorFill } from './qualityMirror';
 import type { UsdtFollowAction, UsdtFollowStatus } from './usdtFollow';
+import type { UsdtFollowMonitorBasis } from './usdtFollowMonitorBasis';
+import type { QualitySample } from './quality';
 
 export const BINANCE_MANUAL_MONITOR_VERSION = 'binance-manual-monitor-v1' as const;
 export const MANAGED_MINUTE = 60_000;
@@ -25,6 +27,8 @@ export interface BinanceManualPosition {
   entryQuantity: number;
   revision: number;
   planEpoch?: number;
+  followBasis?: UsdtFollowMonitorBasis;
+  followSample?: Pick<QualitySample, 'groups' | 'readings'> & { fish?: QualitySample['source']['fish'] };
   checkpoint?: QualityResult;
   exchangeReduction?: { at: number; quantity: number; entryPrice: number; realized: number };
   pending?: BinanceManualDecision;
@@ -54,7 +58,7 @@ export const binanceManualId = (anchor: BinanceManualAnchor) =>
 export function initialBinanceManualCheckpoint(position: BinanceManualPosition, key = ''): QualityResult {
   if (position.checkpoint) return position.checkpoint;
   const { entryPrice, entryQuantity, armedAt, monitor, exchangeReduction } = position;
-  const entryTime = Math.ceil(position.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
+  const entryTime = position.followBasis?.effectiveAt ?? Math.ceil(position.anchor.openedAt / MANAGED_MINUTE) * MANAGED_MINUTE;
   const remainingQuantity = exchangeReduction?.quantity ?? entryQuantity;
   const averageEntryPrice = exchangeReduction?.entryPrice ?? entryPrice;
   return {
@@ -62,6 +66,6 @@ export function initialBinanceManualCheckpoint(position: BinanceManualPosition, 
     evaluatedAt: armedAt, entryPrice, entryTime, endPrice: entryPrice,
     endTime: Math.max(entryTime, Math.ceil(Math.max(armedAt, exchangeReduction?.at ?? 0) / MANAGED_MINUTE) * MANAGED_MINUTE),
     initialNotional: entryPrice * entryQuantity, remainingQuantity, remainingCost: averageEntryPrice * remainingQuantity,
-    averageEntryPrice, realizedPnl: exchangeReduction?.realized ?? 0,
+    averageEntryPrice, realizedPnl: exchangeReduction?.realized ?? 0, followBasis: position.followBasis,
   };
 }

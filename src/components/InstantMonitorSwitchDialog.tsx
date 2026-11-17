@@ -7,8 +7,10 @@ import { toast } from 'sonner';
 
 export type InstantMonitorSwitchTarget = {
   symbol: string;
-  current: InstantMonitorSettings;
+  current: Pick<InstantMonitorSettings, 'name' | 'templateId'> & Partial<InstantMonitorSettings>;
   live?: boolean;
+  followed?: boolean;
+  allowCurrent?: boolean;
   submit: (monitor: InstantMonitorSettings) => Promise<void>;
 };
 
@@ -21,9 +23,10 @@ export function InstantMonitorSwitchDialog({ target, templates, close }: {
   const [id, setId] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const choices = templates.filter(template => template.id !== target.current.templateId && !instantMonitorSwitchIssue(template));
+  const choices = templates.filter(template => (target.allowCurrent || template.id !== target.current.templateId) && !instantMonitorSwitchIssue(template));
   const selected = choices.find(template => template.id === id);
-  const label = (monitor: InstantMonitorSettings) => names?.forMonitor(monitor.plan, monitor.templateId)?.name ?? monitor.name;
+  const { current } = target;
+  const currentName = (current.plan && names?.forMonitor(current.plan, current.templateId)?.name) ?? current.name;
   const submit = async () => {
     if (pending || !selected) return;
     setPending(true);
@@ -40,10 +43,10 @@ export function InstantMonitorSwitchDialog({ target, templates, close }: {
     <DialogContent className="max-w-md">
       <DialogHeader>
         <DialogTitle>切换持仓监测方案</DialogTitle>
-        <DialogDescription>{target.symbol} · {target.live ? '币安实盘托管' : '即时交易模拟'}</DialogDescription>
+        <DialogDescription>{target.symbol} · {target.followed ? '币安实盘 · 系统跟单' : target.live ? '币安实盘托管' : '即时交易模拟'}</DialogDescription>
       </DialogHeader>
       <div className="space-y-3 text-sm">
-        <p>当前方案 <span className="font-medium">{label(target.current)}</span></p>
+        <p>当前方案 <span className="font-medium">{currentName}</span></p>
         <label className="flex flex-col gap-1.5">新方案
           <select value={id} disabled={pending || !choices.length} onChange={event => { setId(event.target.value); setError(''); }}
             className="h-9 w-full rounded-md border bg-background px-2">
@@ -51,7 +54,9 @@ export function InstantMonitorSwitchDialog({ target, templates, close }: {
             {choices.map(template => <option key={template.id} value={template.id}>{names?.forMonitor(template.plan, template.id)?.name ?? template.name}</option>)}
           </select>
         </label>
-        <p className="text-xs text-muted-foreground">新方案从下一根完整的 1 分钟 K 线开始判断，并接续这笔持仓的已成交数量与加仓次数。</p>
+        <p className="text-xs text-muted-foreground">{target.followed
+          ? '新方案从下一根完整的 1 分钟 K 线开始，以币安实际余仓数量和成本均价作为首仓，接续原加仓次数。'
+          : '新方案从下一根完整的 1 分钟 K 线开始判断，并接续这笔持仓的已成交数量与加仓次数。'}</p>
         {error && <p role="alert" className="text-destructive">{error}</p>}
       </div>
       <DialogFooter>

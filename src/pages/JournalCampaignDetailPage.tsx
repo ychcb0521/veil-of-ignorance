@@ -1984,12 +1984,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const campaignMetadataMetrics = useMemo<Array<OverviewPanelItem & { color?: string }>>(() => {
     if (liveUsdt) {
       const frozen = liveUsdt.management?.monitor;
-      const source = liveUsdt.management ? '币安手动开仓 · 策略托管' : liveUsdt.followId ? '系统跟单' : '币安开仓';
+      const source = liveUsdt.followId ? '系统跟单' : liveUsdt.management ? '币安手动开仓 · 策略托管' : '币安开仓';
       return [
         { key: 'liveSource', label: '交易来源', value: source, help: '按实际开仓及托管记录标注。' },
         ...(frozen ? [{ key: 'frozenMonitor', label: '冻结持仓模板', value: templateNames?.forMonitor(frozen.plan, frozen.templateId)?.name ?? frozen.name, help: '实盘持仓当前执行的冻结方案。' }] : []),
-        ...(liveUsdt.management?.switches ?? []).map(({ at, effectiveAt, from, to }) => ({ key: 'monitorSwitch' + at,
-          label: '方案切换 ' + formatBeijingTime(effectiveAt), value: `${from.name} → ${to.name}`, help: '北京时间，切换从该分钟起生效。' })),
+        ...(liveUsdt.management?.switches ?? []).map(({ at, effectiveAt, from, to, followBasis }) => ({ key: 'monitorSwitch' + at,
+          label: '方案切换 ' + formatBeijingTime(effectiveAt), value: `${from.name} → ${to.name}`,
+          help: followBasis ? `接续 ${followBasis.carriedAdditions} 次加仓 · 新首仓 ${followBasis.quantity} 枚 @ ${followBasis.entryPrice} USDT` : '北京时间，切换从该分钟起生效。' })),
         ...(liveUsdt.management?.exitReason ? [{ key: 'exitReason', label: '策略平仓原因', value: liveUsdt.management.exitReason, help: '本机执行器记下的实际平仓触发条件。' }] : []),
       ];
     }
