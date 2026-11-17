@@ -34,7 +34,7 @@ import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, LIMITE
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
-import { BOX_MARKET_REPAIR_VERSION, BOX_STOP_INVALID_DATA, qualityBoxMarketRepair } from './qualityBoxMarketRepair';
+import { BOX_STOP_INVALID_DATA, qualityBoxMarketRepair, type BoxMarketRepairVersion } from './qualityBoxMarketRepair';
 
 import { QUALITY_NOTIONAL, qualityPositionIdentity, qualityPositionSize, type QualityPositionManagement } from './qualityPositionManagement';
 
@@ -108,7 +108,7 @@ export interface QualitySample {
 export interface QualityResult {
   followBasis?: import('./usdtFollowMonitorBasis').UsdtFollowMonitorBasis;
   instantMonitorSwitches?: import('./instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
-  boxMarketRepair?: typeof BOX_MARKET_REPAIR_VERSION;
+  boxMarketRepair?: BoxMarketRepairVersion;
   initialization?: NonNullable<FishReconstructionLoader['turingInitialization']>;
   advantageState?: QualityAdvantageState;
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
@@ -899,15 +899,15 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
 export async function evaluateQualitySampleWithMarketRepair(sample: QualitySample, group: QualityGroup, hours: number, now: number,
   load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult, initialNotional=qualityPositionSize(group).notional, liveAt?:number): Promise<QualityResult> {
   const repair = qualityBoxMarketRepair(load, sample.source.symbol);
-  if (previous?.boxMarketRepair && repair) {
-    const result = await evaluateQualitySample(sample, group, hours, now, repair, signal, previous, initialNotional,liveAt);
-    return { ...result, boxMarketRepair: BOX_MARKET_REPAIR_VERSION };
+  if (repair && previous?.boxMarketRepair === repair.version) {
+    const result = await evaluateQualitySample(sample, group, hours, now, repair.load, signal, previous, initialNotional,liveAt);
+    return { ...result, boxMarketRepair: repair.version };
   }
   const original = await evaluateQualitySample(sample, group, hours, now, load, signal, previous, initialNotional,liveAt);
   if (!repair || original.status !== 'error' || original.reason !== BOX_STOP_INVALID_DATA) return original;
-  const recovered = await evaluateQualitySample(sample, group, hours, now, repair, signal, sample.binanceEntry ? previous : undefined, initialNotional,liveAt);
+  const recovered = await evaluateQualitySample(sample, group, hours, now, repair.load, signal, sample.binanceEntry ? previous : undefined, initialNotional,liveAt);
   return recovered.status === 'open' || recovered.status === 'closed'
-    ? { ...recovered, boxMarketRepair: BOX_MARKET_REPAIR_VERSION } : original;
+    ? { ...recovered, boxMarketRepair: repair.version } : original;
 }
 
 export interface QualityProgress { done: number; total: number; current: string; waitingUntil?: number; matched?: number }

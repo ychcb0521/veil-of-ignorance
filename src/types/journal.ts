@@ -425,7 +425,7 @@ export interface TradeCampaign {
     /** Catalog lineage kept separately from the exact execution snapshot. */
     monitorTemplateId?: string;
     sellEvidence?: {
-      boxMarketRepair?: typeof import('@/lib/fish/qualityBoxMarketRepair').BOX_MARKET_REPAIR_VERSION;
+      boxMarketRepair?: import('@/lib/fish/qualityBoxMarketRepair').BoxMarketRepairVersion;
       /** Actual frozen final-sale reason; independent of the configured condition list. */
       exitReason?:string;
       activeSellStage?:QualitySellStageActivation;sellStageSwitches?:QualitySellStageActivation[];
