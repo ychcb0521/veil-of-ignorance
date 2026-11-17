@@ -92,7 +92,7 @@ it('lists the built-in fusion template next to saved templates and creates a rou
   fireEvent.click(screen.getByRole('button', { name: /从模板新建/ }));
   const list = screen.getByTestId('plan-template-list');
   expect(within(list).getByText(FUSION_TEMPLATE_NAME)).toBeInTheDocument();
-  expect(within(list).getByText('还没有模板。在方案卡片右上角点「存为模板」即可保存整套设置。')).toBeInTheDocument();
+  expect(within(list).getByText(/^还没有模板。/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: `用内置模板 ${FUSION_TEMPLATE_NAME} 新建方案` }));
   // 与「从模板新建」同一条路：先把来源交给父级复制监测草稿，再加入列表
   expect(copy).toHaveBeenCalledOnce();

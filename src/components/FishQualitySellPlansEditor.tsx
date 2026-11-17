@@ -95,9 +95,9 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin, 
     }
   };
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
-  return <Popover open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); setCreationError(undefined); }}><PopoverTrigger asChild>
+  return <Popover modal open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); setCreationError(undefined); }}><PopoverTrigger asChild>
     <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={browseOnly?'查看已保存模板':purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'&&!browseOnly?'从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
-  </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-1 text-[11px]" data-testid="plan-template-list">
+  </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain p-1 text-[11px]" aria-label="方案模板" data-testid="plan-template-list">
     {/* 【用户要求】2026-11-04 内置模板：代码里的配方，新建时按账号当前公式生成，保存时冻结版本；不占账号模板目录 */}
     {!browseOnly&&purpose==='sell'&&BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
       <p className="px-2 pb-0.5 pt-1 text-[10px] text-muted-foreground">内置模板 · 新建时按账号当前公式生成，保存时冻结版本</p>
@@ -113,7 +113,7 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin, 
       </li>)}</ul>
     </div>}
     {!templates.length ? <p className="px-3 py-3 text-muted-foreground">{browseOnly?'当前还未读到账号模板，可以查看系统存档。':'还没有模板。保存当前设置后，可点「存为模板」。'}</p>
-      : <ul className="max-h-80 overflow-y-auto">{templates.map(t => {
+      : <ul>{templates.map(t => {
         const { summary, versionChanged } = getTemplateDetails(t.plan);
         return <li key={t.id} className="group flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-item">
         <div className="min-w-0 flex-1"><p className="truncate font-medium">{displayName(t)}</p><p className="truncate text-[10px] text-muted-foreground" title={summary}>{summary}</p><p className="text-[9.5px] text-muted-foreground/70 tabular-nums">保存于 {date(t.savedAt)} · <button type="button" className={`underline-offset-2 hover:underline ${versionChanged ? 'text-destructive' : 'text-primary/80'}`} aria-expanded={versionsOf === t.id} aria-label={`模板 ${displayName(t)} 的算法版本`} onClick={() => setVersionsOf(versionsOf === t.id ? '' : t.id)}>{versionChanged ? '版本已变' : '版本'} {versionsOf === t.id ? '▴' : '▾'}</button></p>
