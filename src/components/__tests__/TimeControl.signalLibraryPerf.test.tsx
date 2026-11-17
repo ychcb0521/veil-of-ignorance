@@ -159,7 +159,7 @@ beforeEach(() => {
 describe(`信号库（${BULK_SIGNAL_COUNT} 条）`, () => {
   it('展开后只铺出窗口内的十几行', async () => {
     await renderControl();
-    const libraryItem = openSignalLibraryMenu().getByRole('menuitemcheckbox', { name: '信号库' });
+    const libraryItem = openSignalLibraryMenu().getByRole('menuitemcheckbox', { name: '潜力区信号库' });
     expect(libraryItem).toHaveTextContent(String(BULK_SIGNAL_COUNT));
     fireEvent.click(libraryItem);
     await act(async () => {});
@@ -212,6 +212,7 @@ describe(`信号库（${BULK_SIGNAL_COUNT} 条）`, () => {
     it('纯排序不写盘、不重跑跳转预检', async () => {
       preflightMode.pending = true;
       await renderControl();
+      expect(counters.audits).toBe(0);
       await openLibrary();
       await act(async () => {});
       const auditsAfterMount = counters.audits;

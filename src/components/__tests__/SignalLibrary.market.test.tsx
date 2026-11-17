@@ -1,16 +1,16 @@
 import {it,expect,vi} from 'vitest';
 import {render,screen,within,fireEvent} from '@testing-library/react';
-import {SignalLibraryHeader,SIGNAL_LIBRARY_GRID} from '@/components/SignalLibraryHeader';
+import {SignalLibraryHeader,SIGNAL_LIBRARY_GRID,SIGNAL_LIBRARY_FISH_GRID} from '@/components/SignalLibraryHeader';
 import {SignalLibraryList} from '@/components/SignalLibraryList';
 import {FishLibrary} from '@/components/FishLibrary';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const coin:TradeSignal={id:'coin',symbol:'COINUSDT',timeMs:1000,timeLabel:'2026-10-19 10:00:00',fallbackZone:'1.2 ~ 3.4'};
 const stock:TradeSignal={...coin,id:'stock',market:'us_stock',underlying:'COIN',exchange:'bitget'};
-it('信号库、鱼、新鱼同一市场列和列宽；美股跳转禁用，评分/删除仍可操作，鱼和新鱼无加入入口',()=>{
+it('信号库、鱼、新鱼均有市场列，各自的表头与数据行对齐；美股跳转禁用，评分/删除仍可操作，鱼和新鱼无加入入口',()=>{
  const onJump=vi.fn(),onDelete=vi.fn(),onRate=vi.fn(),props={tradedDayIndex:new Set<string>(),campaignDayIndex:new Set<string>(),jumpingSignalId:null,onJump,onDelete,onRate};
  render(<><section data-testid="main-library"><SignalLibraryHeader sortKey="symbol" sortDir="asc" onSort={()=>{}}/><SignalLibraryList rows={[coin,stock]} resetKey="market" {...props}/></section><FishLibrary signals={[coin,stock]} defaultOpen title="鱼" {...props}/><FishLibrary signals={[coin,stock]} defaultOpen title="新鱼" {...props}/></>);
- const headers=screen.getAllByTestId('signal-library-header');expect(headers).toHaveLength(3);headers.forEach((h,i)=>{expect(h.className).toContain(SIGNAL_LIBRARY_GRID);expect(h.children[2]).toHaveTextContent(i===0?'兜底区':'算法类型');expect(h.children[3]).toHaveTextContent('市场');});
- const rows=screen.getAllByTestId('signal-library-row');expect(rows).toHaveLength(6);for(const r of rows)expect(r.className).toContain(SIGNAL_LIBRARY_GRID);
+ const headers=screen.getAllByTestId('signal-library-header');expect(headers).toHaveLength(3);headers.forEach((h,i)=>{expect(h.className).toContain(i===0?SIGNAL_LIBRARY_GRID:SIGNAL_LIBRARY_FISH_GRID);expect(within(h).getByText(i===0?'兜底区':'算法类型')).toBeVisible();expect(within(h).getByText('市场')).toBeVisible();});
+ const rows=screen.getAllByTestId('signal-library-row');expect(rows).toHaveLength(6);rows.forEach((r,i)=>expect(r.className).toContain(i<2?SIGNAL_LIBRARY_GRID:SIGNAL_LIBRARY_FISH_GRID));
  const stocks=rows.filter(r=>within(r).queryByText('美股'));expect(stocks).toHaveLength(3);for(const r of stocks){const buttons=within(r).getAllByTitle('盘面只支持币安行情');expect(buttons).toHaveLength(2);for(const b of buttons){expect(b).toBeDisabled();fireEvent.click(b);}fireEvent.click(within(r).getByRole('radio',{name:'4 星'}));fireEvent.click(within(r).getByTitle('删除该信号'));}
  expect(onJump).not.toHaveBeenCalled();expect(onRate).toHaveBeenCalledWith('stock',4);expect(onDelete).toHaveBeenCalledWith('stock');expect(screen.queryByRole('button',{name:'加入信号库'})).not.toBeInTheDocument();
 });

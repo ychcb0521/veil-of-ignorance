@@ -11,7 +11,7 @@ import { SignalTurnoverButton } from './SignalTurnover';
 import {
   Play, Pause, Square, Clock, BookmarkX,
   Database, ChevronDown, Upload, Download, Plus, Trash2,
-  Loader2, Fish,
+  Loader2, Fish, X,
 } from 'lucide-react';
 import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -81,6 +81,11 @@ interface Props {
 const FISH_TIME_KEY = 'veil.fish.time';
 const EMPTY_SIGNALS: TradeSignal[] = [];
 type SignalLibraryKind = 'library' | 'entry-period' | 'turing';
+const SIGNAL_LIBRARY_NAMES = {
+  'entry-period': '进场期信号库',
+  library: '潜力区信号库',
+  turing: '图灵杯',
+} satisfies Record<SignalLibraryKind, string>;
 
 function ReplayStartControls({ dateInput, onChange, onStart }: {
   dateInput: string | null;
@@ -150,6 +155,22 @@ export function TimeControl({
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
+  const signalMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const signalLibraryView = useRef(0);
+  const collapseSignalLibrary = useCallback(() => {
+    signalLibraryView.current += 1;
+    setSignalLibOpen(false);
+  }, []);
+  const closeSignalLibrary = () => {
+    collapseSignalLibrary();
+    signalMenuButtonRef.current?.focus();
+  };
+  const closeSignalLibraryOnEscape = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing
+      || !event.currentTarget.contains(event.target as Node)) return;
+    event.stopPropagation();
+    closeSignalLibrary();
+  };
   const [library, setLibrary] = useState<SignalLibraryKind>('library');
   const turing = library === 'turing';
   const entryPeriod = library === 'entry-period';
@@ -253,7 +274,7 @@ export function TimeControl({
   }, [setSavedTuringSignals, visibleReplaySamples]);
   const [signals, setSignals] = entryPeriod ? [entrySignals, setEntrySignals]
     : turing ? [turingSignals, setTuringSignals] : [onlineSignals, setOnlineSignals];
-  const libraryName = entryPeriod ? '进场期信号库' : turing ? '图灵杯' : '信号库';
+  const libraryName = SIGNAL_LIBRARY_NAMES[library];
   const onlineReconstruction = useFishReconstruction(user?.id, onlineSignals, fish.reconstruct);
   const turingReconstruction = useFishReconstruction(user?.id, turingSignals, fish.reconstruct, true);
   const reconstruction = turing ? turingReconstruction : onlineReconstruction;
@@ -291,12 +312,13 @@ export function TimeControl({
    */
   const [sortKey, setSortKey] = useState<SignalSortKey>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const libraryMenu: { kind: SignalLibraryKind; label: string; count: number; title?: string }[] = [
-    { kind: 'entry-period', label: '进场期信号库', count: entrySignals.length },
-    { kind: 'library', label: '信号库', count: onlineSignals.length, title: '信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面' },
-    { kind: 'turing', label: '图灵杯', count: turingSignals.length, title: '图灵杯：使用导入的离线行情查看盘面和复盘' },
+  const libraryMenu: { kind: SignalLibraryKind; count: number; title?: string }[] = [
+    { kind: 'entry-period', count: entrySignals.length },
+    { kind: 'library', count: onlineSignals.length, title: '上传「标的 + 时间 + 兜底区」，点开标的跳转盘面' },
+    { kind: 'turing', count: turingSignals.length, title: '使用导入的离线行情查看盘面和复盘' },
   ];
   const toggleLibrary = (next: SignalLibraryKind) => {
+    signalLibraryView.current += 1;
     setFishOpen(false);
     if (next === 'entry-period' && !entryLibraryOpen) setEntrySyncStatus('loading');
     if (next !== library) {
@@ -357,7 +379,7 @@ export function TimeControl({
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
 
   const signalAuditKey = useMemo(() => {
-    if (entryPeriod) return '';
+    if (!signalLibOpen || entryPeriod) return '';
     let hash = 2166136261;
     for (const signal of signals) {
       const value = `${signal.id}|${signal.market??'crypto'}|${signal.symbol}|${signal.timeMs}`;
@@ -367,10 +389,10 @@ export function TimeControl({
       }
     }
     return `${signalJumpInterval}:${signalJumpIntervalMs}:${signals.length}:${hash >>> 0}`;
-  }, [entryPeriod, signalJumpInterval, signalJumpIntervalMs, signals]);
+  }, [signalLibOpen, entryPeriod, signalJumpInterval, signalJumpIntervalMs, signals]);
 
   useEffect(() => {
-    if (entryPeriod) { setSignalAuditProgress(null); return; }
+    if (!signalAuditKey) { setSignalAuditProgress(null); return; }
     const auditSignals = signalsRef.current.filter(s => !s.turingReplaySample && signalChartSymbol(s));
     if (auditSignals.length === 0) {
       if (turing) setTuringCoverageWarning(false);
@@ -428,7 +450,6 @@ export function TimeControl({
     return () => controller.abort();
   }, [
     signalAuditKey,
-    entryPeriod,
     setSignals,
     turing,
     signalJumpInterval,
@@ -475,6 +496,7 @@ export function TimeControl({
   }, [frozenQuality, listResetKey]);
   const activeFrozenQuality = frozenQuality.key === listResetKey && frozenQuality.map.size > 0 ? frozenQuality.map : null;
   const sortedFiltered = useMemo(() => {
+    if (!signalLibOpen) return EMPTY_SIGNALS;
     const q = query.trim().toUpperCase();
     const basis = !activeFrozenQuality ? signals : signals.map(sig => (
       activeFrozenQuality.has(sig.id) ? { ...sig, quality: activeFrozenQuality.get(sig.id) ?? undefined } : sig
@@ -486,7 +508,7 @@ export function TimeControl({
     const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
     const byMarket = marketFilter ? byMonth.filter(s => entryPeriodMarketGroup(s.entryPeriod?.market) === marketFilter) : byMonth;
     return q ? byMarket.filter(s => s.symbol.toUpperCase().includes(q)) : byMarket;
-  }, [signals, query, monthFilter, marketFilter, sortKey, sortDir, activeFrozenQuality]);
+  }, [signalLibOpen, signals, query, monthFilter, marketFilter, sortKey, sortDir, activeFrozenQuality]);
   // 「标的@日期」索引：信号那天，这个标的动过手没有。
   // 这里曾经只按标的判定（做过一次 TRB，所有 TRB 信号全被标成已交易），
   // 而同一个币种会在很多个日期出现——按标的判等于把标记稀释成「这币我碰过」，
@@ -589,6 +611,8 @@ export function TimeControl({
     if(onlineSignals.some(signal=>signalDedupKey(signal)===key))setOnlineSignals(previous=>setMatchingSourceQuality(previous,source,quality));
     if(turingSignals.some(signal=>signalDedupKey(signal)===key))setTuringSignals(previous=>setMatchingSourceQuality(previous,source,quality));
   },[commitFish,fishSourcesRef,qualityRatingsReady,saveSourceRating,onlineSignals,setOnlineSignals,turingSignals,setTuringSignals]);
+  const rateQualitySourceRef = useRef(handleRateQualitySource);
+  rateQualitySourceRef.current = handleRateQualitySource;
   const handleRateSignal = useCallback((id: string, next: number) => {
     // 记下打分前的评分：列表按它排、不跳位，直到用户点表头（见 frozenQuality）
     const before = normalizeSignalQuality(signalsRef.current.find(sig => sig.id === id)?.quality) ?? null;
@@ -598,8 +622,9 @@ export function TimeControl({
       return map.has(id) ? prev : { key, map: new Map(map).set(id, before) };
     });
     if (entryPeriod) { setEntrySignals(previous => setSignalQuality(previous, id, next)); return; }
-    const source=signalsRef.current.find(signal=>signal.id===id);if(source)handleRateQualitySource(source,next);
-  }, [entryPeriod, setEntrySignals, handleRateQualitySource]);
+    const source = signalsRef.current.find(signal => signal.id === id);
+    if (source) rateQualitySourceRef.current(source, next);
+  }, [entryPeriod, setEntrySignals]);
   const handleClearSignals = async () => {
     try {
       if (turing && visibleReplaySamples.length) {
@@ -659,10 +684,11 @@ export function TimeControl({
     if (!jumpTo) {
       changeSymbol?.(signalChartSymbol(sig)!);
       // 选定标的即进入下一阶段，信号库没有继续停留的必要——与跳转成功后一致收起
-      setSignalLibOpen(false);
+      collapseSignalLibrary();
       return;
     }
     if (pendingJumpRef.current) return;
+    const sourceView = signalLibraryView.current;
     const request = { id: sig.id, fromQuality: false };
     pendingJumpRef.current = request;
     setPendingJump(request);
@@ -677,7 +703,7 @@ export function TimeControl({
           setSignals(prev => prev.map(item =>
             item.id === sig.id ? { ...item, jumpIssue: undefined } : item));
         }
-        setSignalLibOpen(false);
+        if (signalLibraryView.current === sourceView) collapseSignalLibrary();
         return;
       }
       const issue = 'fatalIssue' in result ? result.fatalIssue : undefined;
@@ -689,7 +715,7 @@ export function TimeControl({
       pendingJumpRef.current = null;
       setPendingJump(null);
     }
-  }, [setSignals]);
+  }, [collapseSignalLibrary, setSignals]);
 
   // 手动删除走 fish.remove：记删除记号，别的设备 / 窗口的旧副本合并时不会把它带回来
   const handleDeleteFish = useCallback((id: string) => fish.remove(id), [fish.remove]);
@@ -763,7 +789,8 @@ export function TimeControl({
 
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
-            <button type="button"
+            <button type="button" ref={signalMenuButtonRef}
+              onKeyDown={signalLibOpen ? closeSignalLibraryOnEscape : undefined}
               className={`group flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
                 signalLibOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'
               }`}>
@@ -771,18 +798,18 @@ export function TimeControl({
               <ChevronDown className="w-3 h-3 transition-transform group-data-[state=open]:rotate-180" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-36">
-            {libraryMenu.map(({ kind, label, count, title }) => (
+          <DropdownMenuContent align="start" className="min-w-36 !animate-none">
+            {libraryMenu.map(({ kind, count, title }) => (
               <DropdownMenuCheckboxItem key={kind} checked={signalLibOpen && library === kind}
                 onSelect={() => toggleLibrary(kind)} title={title} className="cursor-pointer gap-3 text-xs">
-                {label}
+                {SIGNAL_LIBRARY_NAMES[kind]}
                 {count > 0 && <span aria-hidden="true" className="ml-auto rounded-full bg-primary/15 px-1.5 font-mono text-[10px] text-primary">{count}</span>}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); setFishOpen(o => !o); }}
+        <button type="button" aria-expanded={fishOpen} onClick={() => { collapseSignalLibrary(); if(!fishOpen)armQualityReturn(Date.now(),fishQuality.account); setFishOpen(o => !o); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
           <Fish className="w-3 h-3" />渔
           <ChevronDown className={`w-3 h-3 transition-transform ${fishOpen ? 'rotate-180' : ''}`} />
@@ -845,7 +872,7 @@ export function TimeControl({
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
-        <div key={libraryName} data-testid={entryPeriod ? 'entry-period-signal-library-panel' : turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2">
+        <div key={libraryName} data-testid={entryPeriod ? 'entry-period-signal-library-panel' : turing ? 'turing-cup-panel' : 'signal-library-panel'} className="mt-2 border-t border-border/60 pt-2" onKeyDown={closeSignalLibraryOnEscape}>
 
           {/* 统一工具条：筛选 + 导入 / 导出 / 预检。
               原先「只放两个 12px 图标」的独立一行已并入这里——横向本来就过剩，
@@ -919,6 +946,11 @@ export function TimeControl({
               {turing && !signalAuditProgress && turingCoverageWarning && (
                 <span className="text-[10px] text-muted-foreground">部分信号缺少当前周期的离线 K 线</span>
               )}
+              <button type="button" aria-label={`收起${libraryName}`} title={`收起${libraryName}`}
+                onClick={closeSignalLibrary}
+                className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <X aria-hidden="true" className="h-4 w-4" />
+              </button>
             </div>
           {importOpen && !entryNeedsSync && (entryPeriod ? (
             <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">

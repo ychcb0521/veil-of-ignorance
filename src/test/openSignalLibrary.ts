@@ -5,6 +5,6 @@ export function openSignalLibraryMenu() {
   return within(screen.getByRole('menu'));
 }
 
-export function openSignalLibrary(name = '信号库') {
+export function openSignalLibrary(name = '潜力区信号库') {
   fireEvent.click(openSignalLibraryMenu().getByRole('menuitemcheckbox', { name }));
 }

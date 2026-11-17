@@ -1,7 +1,7 @@
 import { renderFishQuality as render } from '@/test/renderFishQuality';
 // @vitest-environment jsdom
 import { saveFishAuto } from '@/lib/fish/autoScan';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TimeControl } from '../TimeControl';
@@ -60,6 +60,39 @@ beforeEach(() => {
 });
 
 describe('信号库展开面板', () => {
+  it.each([
+    ['进场期信号库', 'entry-period-signal-library-panel'],
+    ['潜力区信号库', 'signal-library-panel'],
+    ['图灵杯', 'turing-cup-panel'],
+  ])('可以在回放期间直接收起%s，并把焦点还给菜单', (name, panelId) => {
+    renderControl();
+    openLibrary(name);
+    const panel = screen.getByTestId(panelId);
+    const menu = screen.getByRole('button', { name: /^信号库$/ });
+    fireEvent.click(within(panel).getByRole('button', { name: `收起${name}` }));
+    expect(screen.queryByTestId(panelId)).not.toBeInTheDocument();
+    expect(menu).toHaveFocus();
+
+    openLibrary(name);
+    const search = within(screen.getByTestId(panelId)).getByPlaceholderText(/筛选标的/);
+    search.focus();
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(screen.queryByTestId(panelId)).not.toBeInTheDocument();
+    expect(menu).toHaveFocus();
+  });
+
+  it('前一个库的跳转完成时不收起后来打开的库', async () => {
+    let completeJump!: (value: { ok: true }) => void;
+    const jump = vi.fn(() => new Promise<{ ok: true }>(resolve => { completeJump = resolve; }));
+    renderControl(jump);
+    openLibrary();
+    fireEvent.click(within(libraryRoot()).getByTitle(/跳转到 ACEUSDT/));
+    expect(jump).toHaveBeenCalledWith('ACEUSDT', SIGNALS[1].timeMs);
+    openLibrary('进场期信号库');
+    await act(async () => { completeJump({ ok: true }); });
+    expect(screen.getByTestId('entry-period-signal-library-panel')).toBeInTheDocument();
+  });
+
   it('keeps the 图灵杯 library separate and sends its ticker to the offline chart source', async () => {
     const jump = vi.fn(async () => ({ ok: true as const }));
     renderControl(jump);
@@ -109,7 +142,7 @@ describe('信号库展开面板', () => {
     openLibrary();
     const lib = libraryRoot();
     expect(within(lib).getByTitle(/上传 \/ 粘贴信号/)).toBeInTheDocument();
-    expect(within(lib).getByTitle(/导出信号库/)).toBeInTheDocument();
+    expect(within(lib).getByTitle(/导出潜力区信号库/)).toBeInTheDocument();
     expect(within(lib).getByPlaceholderText(/筛选标的/)).toBeInTheDocument();
     // 排序下拉已删除，改成点表头；这条守卫跟着换成表头控件。
     expect(within(lib).getByTestId('signal-sort-标的')).toBeInTheDocument();

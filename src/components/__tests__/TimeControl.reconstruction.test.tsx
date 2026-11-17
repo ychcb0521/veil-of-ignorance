@@ -56,7 +56,7 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   expect(within(screen.getByTestId('fish-new-panel')).getByText('NEWUSDT')).toBeVisible();
   expect(within(screen.getByTestId('fish-old-panel')).getByText('OLDUSDT')).toBeVisible();
 
-  const libraryItem = openSignalLibraryMenu().getByRole('menuitemcheckbox', { name: '信号库' });
+  const libraryItem = openSignalLibraryMenu().getByRole('menuitemcheckbox', { name: '潜力区信号库' });
   expect(libraryItem).toHaveTextContent('2');
   await act(async () => { fireEvent.click(libraryItem); });
   const main = screen.getByTestId('signal-library-panel');
