@@ -223,7 +223,7 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
   if(!instant&&!state.ready) return <div className="space-y-2 text-[11px]">
     <div className="flex flex-wrap items-center justify-between gap-2">
       {state.error?<p role="alert" className="text-destructive">{state.error}</p>:<p role="status">正在读取持仓监测方案…</p>}
-      {templates&&<TemplatePicker actions={templates} plans={EMPTY_PLANS} disabled={false} browseOnly/>}
+      {templates&&<TemplatePicker actions={templates} disabled={false} browseOnly/>}
     </div>
     <p className="text-muted-foreground">账号研究就绪后可新建、编辑或找回方案。{recoverablePlans?.length? `已找到 ${recoverablePlans.length} 套保存记录。`:''}</p>
     {state.error&&state.retryStudyLoad&&<button type="button" className={button} onClick={state.retryStudyLoad}>重试加载</button>}

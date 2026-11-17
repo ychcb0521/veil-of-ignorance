@@ -15,7 +15,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BookmarkPlus, Copy, LayoutTemplate, Plus, Trash2, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { qualityPlanFromTemplate, qualityPlanTemplateSummary, type QualityPlanTemplate } from '@/lib/fish/qualityPlanTemplates';
-import { BUILTIN_QUALITY_TEMPLATES, type QualityBuiltinTemplate } from '@/lib/fish/qualityBuiltinTemplates';
 import { freezeSavedPlans,planVersionChanges } from '@/lib/fish/qualityPlanVersions';
 import { PlanVersionList } from '@/components/FishQualityPlanVersions';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
@@ -68,7 +67,7 @@ function getTemplateDetails(plan: QualityGroup) {
   return details;
 }
 
-export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin, purpose='sell', allowTuring=true, browseOnly=false }: {purpose?:'sell'|'entry'|'static'; allowTuring?:boolean; actions: PlanTemplateActions; plans: readonly QualityGroup[]; disabled: boolean; onUse?: (template: PlanTemplateActions['templates'][number]) => void; onUseBuiltin?: (template: QualityBuiltinTemplate, base?:QualityGroup) => void; browseOnly?: boolean }) {
+export function TemplatePicker({ actions, disabled, onUse, purpose='sell', allowTuring=true, browseOnly=false }: {purpose?:'sell'|'entry'|'static'; allowTuring?:boolean; actions: PlanTemplateActions; disabled: boolean; onUse?: (template: PlanTemplateActions['templates'][number]) => void; browseOnly?: boolean }) {
   const names=useQualityTemplateNames();
   const displayName=(template:PlanTemplateActions['templates'][number])=>names?.names.get(template.id)?.name??template.name;
   const templates=actions.templates.filter(template => {
@@ -77,41 +76,10 @@ export function TemplatePicker({ actions, plans, disabled, onUse, onUseBuiltin, 
     && qualityTemplateKind(template)===(purpose==='static'?'filter':purpose==='entry'?'screen':'monitor');
   });
   const [open, setOpen] = useState(false), [confirm, setConfirm] = useState(''), [versionsOf, setVersionsOf] = useState('');
-  const bases = [...plans.map(p=>({key:'plan:'+p.id,label:'方案 · '+(names?.forPlan(p)?.name??p.label),plan:p})), ...templates.map(t=>({key:'template:'+t.id,label:'模板 · '+displayName(t),plan:t.plan}))].filter(x=>x.plan.addition?.enabled||x.plan.router);
-  const [baseKey,setBaseKey] = useState('');
-  const [creationError, setCreationError] = useState<{ id: string; message: string }>();
-  const selectedBaseKey = baseKey || (bases.length === 1 ? bases[0].key : bases.length === 0 ? 'builtin' : '');
-  const base = bases.find(b=>b.key===selectedBaseKey);
-  const createFromBuiltin = (template: QualityBuiltinTemplate) => {
-    if (template.defaultBaseName && selectedBaseKey !== 'builtin' && !base) {
-      setCreationError({ id: template.id, message: '请先选择要沿用的原方案，或选择「内置原方案」直接新建。' });
-      return;
-    }
-    try {
-      onUseBuiltin?.(template, template.defaultBaseName ? base?.plan : undefined);
-      setCreationError(undefined); setOpen(false);
-    } catch (cause) {
-      setCreationError({ id: template.id, message: cause instanceof Error ? cause.message : '内置模板生成失败' });
-    }
-  };
   const date = (t: number) => new Date(t + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
-  return <Popover modal open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); setCreationError(undefined); }}><PopoverTrigger asChild>
-    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={browseOnly?'查看已保存模板':purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板，也可使用内置模板` : '可直接使用内置模板；也可在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'&&!browseOnly?'从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
+  return <Popover modal open={open} onOpenChange={next => { setOpen(next); setConfirm(''); setVersionsOf(''); }}><PopoverTrigger asChild>
+    <button type="button" disabled={disabled} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" title={browseOnly?'查看已保存模板':purpose!=='sell'?'保存整套条件，从模板新建后仍可调整':templates.length ? `已有 ${templates.length} 个账号模板` : '在方案卡片右上角点「存为模板」'}><LayoutTemplate className="h-3 w-3"/>{purpose==='sell'&&!browseOnly?'从模板新建':'模板库'}{templates.length > 0 && <span className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{templates.length}</span>}</button>
   </PopoverTrigger><PopoverContent align="end" className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain p-1 text-[11px]" aria-label="方案模板" data-testid="plan-template-list">
-    {/* 【用户要求】2026-11-04 内置模板：代码里的配方，新建时按账号当前公式生成，保存时冻结版本；不占账号模板目录 */}
-    {!browseOnly&&purpose==='sell'&&BUILTIN_QUALITY_TEMPLATES.length > 0 && <div className="mb-1 border-b border-border/60 pb-1" data-testid="plan-template-builtins">
-      <p className="px-2 pb-0.5 pt-1 text-[10px] text-muted-foreground">内置模板 · 新建时按账号当前公式生成，保存时冻结版本</p>
-      <ul>{BUILTIN_QUALITY_TEMPLATES.map(t => <li key={t.id} className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/60" data-testid="plan-template-builtin">
-        <div className="min-w-0 flex-1"><p className="font-medium">{t.name}</p><p className="text-[10px] leading-snug text-muted-foreground">{t.summary}</p>
-          {t.defaultBaseName&&<>
-            <label className="mt-2 block">沿用原方案<select aria-label="优势模板沿用原方案" value={selectedBaseKey} onChange={e=>{setBaseKey(e.target.value);setCreationError(undefined);}} className="mt-1 w-full rounded border bg-background p-1"><option value="">选择原方案或账号模板</option><option value="builtin">内置原方案 · {t.defaultBaseName}</option>{bases.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}</select></label>
-            <p className="mt-1 text-[10px] text-muted-foreground">{selectedBaseKey === 'builtin' ? '按上述内置原方案新建，保留它的全部加仓参数，再附加优势筛选与退出确认。沿用你自己的参数时，请改选对应方案。' : '完整沿用所选方案已保存的参数。也可选择内置原方案直接新建，无需提前保存账号模板。'}</p>
-          </>}
-          {creationError?.id === t.id && <p role="alert" className="mt-1 text-destructive">{creationError.message}</p>}
-        </div>
-        <button type="button" disabled={disabled} className="shrink-0 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20 disabled:opacity-40" aria-label={`用内置模板 ${t.name} 新建方案`} onClick={() => createFromBuiltin(t)}>新建</button>
-      </li>)}</ul>
-    </div>}
     {!templates.length ? <p className="px-3 py-3 text-muted-foreground">{browseOnly?'当前还未读到账号模板，可以查看系统存档。':'还没有模板。保存当前设置后，可点「存为模板」。'}</p>
       : <ul>{templates.map(t => {
         const { summary, versionChanged } = getTemplateDetails(t.plan);
@@ -209,13 +177,6 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const fromTemplate = (template: PlanTemplateActions['templates'][number]) => {
     const copyBase = qualityPlanFromTemplate(template, newQualitySellPlanId(), uniqueLabel(template.name));
     onCopyPlan?.({ ...template.plan, id: `template:${template.id}` }, copyBase);
-    change([...drafts, draftOf(copyBase)]);
-    onSelectPlan?.(copyBase.id);
-  };
-  /** 内置模板：按账号当前公式生成方案，之后与「从模板新建」同一条路（复制监测草稿、加入列表、保存时冻结版本）。 */
-  const fromBuiltin = (template: QualityBuiltinTemplate, base?:QualityGroup) => {
-    const copyBase = template.build(definitions, newQualitySellPlanId(), uniqueLabel(template.name),base);
-    onCopyPlan?.({ ...copyBase, id: `builtin:${template.id}` }, copyBase);
     change([...drafts, draftOf(copyBase)]);
     onSelectPlan?.(copyBase.id);
   };
@@ -322,7 +283,7 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   };
   return <><fieldset disabled={readOnly} className="contents"><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid={embedded ? "quality-branch-sell-plans-editor" : "quality-sell-plans-editor"}>
     <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">{renderHolding ? (purpose === 'entry' ? '① 筛选算法' : '① 组合算法') : `${action}算法`} <span className="text-muted-foreground" data-testid={embedded ? "branch-sell-plan-draft-count" : "sell-plan-draft-count"}>{drafts.length} 套</span></h4>
-      {!readOnly && !embedded && !singlePlan && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} plans={plans} disabled={!ready} onUse={fromTemplate} onUseBuiltin={fromBuiltin}/>}</>}</div>
+      {!readOnly && !embedded && !singlePlan && <><button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, purpose === 'entry' ? '>' : '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增{action}算法</button>{templates && <TemplatePicker actions={templates} disabled={!ready} onUse={fromTemplate}/>}</>}</div>
     {!readOnly && !embedded && <p className="text-[10.5px] leading-relaxed text-muted-foreground">{purpose === 'entry' ? '筛选算法与启用的确认条件在同一分钟满足，且无否决时，纳入观察并保存到入选库。' : '每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；保存后更新表格；全部调整完成后点击「开始监测」运行已勾选信号，历史轮次保留。'}</p>}
     {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无{action}算法，点击上方新增。</p>}
     {drafts.map((d, i) => {

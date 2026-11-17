@@ -235,7 +235,7 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
         {active?.initialization ? '载入常规方案' : '载入已存图灵杯方案'}
       </button>}
       {!automatic&&active&&<SaveTemplateButton index={0} ariaLabel="把当前筛选方案存为模板" defaultName={active.label} disabledReason={!state.savePlanTemplate||!state.ready?'模板尚未恢复':!monitor.ready?'筛选库尚未读取完成':!savedDraft?'请先保存当前三阶方案':undefined} onSave={name=>state.savePlanTemplate!(active.id,name)}/>}
-      <TemplatePicker purpose="entry" allowTuring={!automatic} plans={plans} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>guardAction(()=>usePlan(qualityPlanFromTemplate(template,id()),template.entryHours))}/>
+      <TemplatePicker purpose="entry" allowTuring={!automatic} disabled={!state.ready} actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}} onUse={template=>guardAction(()=>usePlan(qualityPlanFromTemplate(template,id()),template.entryHours))}/>
     </div></div>}
     {!readOnly&&!active&&!!initialSettings?.plans.some(plan=>!automatic || plan.initialization !== TURING_SCREENING_INITIALIZATION_VERSION)&&<label className="block text-[11px]">{automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'}<select aria-label={automatic ? '复制已保存的筛选方案' : '选择唯一保留的筛选方案'} className={field+' mt-1 w-full'} value="" onChange={e=>{
       const saved=initialSettings.plans.find(p=>p.id===e.target.value);

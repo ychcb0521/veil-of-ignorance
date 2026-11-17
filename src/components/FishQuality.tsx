@@ -217,7 +217,7 @@ function BuyFilterEditor({ state, done, selectedCount }: { state: FishQualitySta
         <SaveTemplateButton index={0} ariaLabel="把当前静态过滤设置存为模板" defaultName={turing ? '静态过滤 · 图灵杯专用 v1' : '静态过滤'}
           disabledReason={!state.ready || !state.savePlanTemplate ? '模板尚未恢复' : busy || dirty || !(draft.length || readingDraft.length) ? '请先保存当前静态过滤设置' : undefined}
           onSave={name=>state.savePlanTemplate!('static-filter',name)}/>
-        <TemplatePicker purpose="static" plans={[]} disabled={!state.ready || !!busy}
+        <TemplatePicker purpose="static" disabled={!state.ready || !!busy}
           actions={{owner:state.account,templates:activeQualityPlanTemplates(state.study),save:(id,name)=>state.savePlanTemplate?.(id,name),remove:id=>state.deletePlanTemplate?.(id),restore:state.restorePlanTemplate}}
           onUse={template=>{
             try { loadPlan(qualityPlanFromTemplate(template,crypto.randomUUID())); }
