@@ -1,3 +1,4 @@
+import { CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { INTERVAL_LABEL } from '@/lib/deepDig/features';
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
 import { expressionConditions } from './preEntryThreeStage';
@@ -111,6 +112,10 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     ...(screening?.sellRules??[]).flatMap(rule=>expressionConditions(rule.expression).map(condition=>condition.snapshot)),
     ...(screening?.hardVetoes??[]).map(rule=>rule.snapshot),
   ].filter((snapshot):snapshot is FishSnapshot=>!!snapshot);
+  const hourlyCda = metricSnapshots.filter(s => s.featureId === CDA_HOURLY_ID || s.definitionKey?.includes('"chart=' + CDA_HOURLY_ID + '"'));
+  if (hourlyCda.length) add('cda-hourly', '指标周期', CDA_HOURLY_LABEL,
+    join([CDA_HOURLY_ID, ...new Set(hourlyCda.map(formulaFingerprint))]),
+    '原生 1 小时 K 线，独立冻结公式、回看窗口和半衰期。');
   const periodSnapshots = metricSnapshots.filter(hasMetricPeriodOverride);
   if (periodSnapshots.length) add('indicator-period','指标周期','逐条冻结 K 线周期',
     join([INDICATOR_PERIOD_VERSION,...new Set(periodSnapshots.map(formulaFingerprint))]),
@@ -132,9 +137,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   }
   if (isStaticDrawdownSell(plan.combo?.after.rule)) add('sell-after-static', '卖出算法后段', STATIC_DRAWDOWN_SELL_LABEL,
     `${STATIC_DRAWDOWN_SELL_VERSION} · 参数 #${shortFishHash(JSON.stringify(plan.combo.after.rule))}`, '切换后的首根分钟起，按首仓买入价的固定止损线模拟成交。');
-  const closePeriod = hasMetricPeriodOverride(s) ? s.interval : undefined;
+  const closePeriod = hasMetricPeriodOverride(s) || hourlyCda.includes(s) ? s.interval : undefined;
   add('execution', '卖出执行', plan.execution === 'intrabar-1m' ? '盘中达标 · 1 分钟复原' : (closePeriod??'5 分钟')+'收盘确认', plan.execution === 'intrabar-1m' ? 'intrabar-1m-v1' : 'close-confirm',
-    plan.execution === 'intrabar-1m' ? (periodSnapshots.length ? '用 1 分钟线复原所选周期指标，盘中达标即卖' : '用 1 分钟线复原 5 分钟指标，盘中达标即卖') : '只认 '+(closePeriod??'5 分钟')+'收盘读数');
+    plan.execution === 'intrabar-1m' ? (periodSnapshots.length || hourlyCda.length ? '用 1 分钟线复原所选周期指标，盘中达标即卖' : '用 1 分钟线复原 5 分钟指标，盘中达标即卖') : '只认 '+(closePeriod??'5 分钟')+'收盘读数');
   const mirror = [...versionTags(mirrorIdentity(plan.mirrorTakeProfit)), ...versionTags(mirrorExecutionIdentity(plan))];
   if (plan.mirrorTakeProfit?.enabled) add('mirror', '镜像平衡减仓', `涨 ${plan.mirrorTakeProfit.gainPct}% 卖 ${plan.mirrorTakeProfit.sellPct}%`, join(mirror), '限价镜像止盈，只卖一次');
   if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', '沿用首仓限制静态最大回撤', plan.payoffRiskVersion,

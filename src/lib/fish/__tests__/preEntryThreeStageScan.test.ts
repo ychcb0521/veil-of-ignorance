@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { definitionKey } from '@/lib/deepDig/features';
+import { makeQualityHoldingVeto } from '../qualityFilters';
+import { CDA_HOURLY_DEF, definitionKey } from '@/lib/deepDig/features';
 import { collectPreEntryMonitor, preEntrySignal, type PreEntryRecord } from '../preEntryMonitor';
 import { emptyPreEntryThreeStage, retryPreEntryThreeStage, signalGatePreEntryThreeStage, trackedGatePreEntryThreeStage, optionalStagesPreEntryThreeStage, signalAnchoredPreEntryThreeStage, PRE_ENTRY_RETRY_VERSION, PRE_ENTRY_THREE_STAGE_V5, PRE_ENTRY_THREE_STAGE_VERSION, type EntryMarketCondition, type EntryMarketExpression } from '../preEntryThreeStage';
 import { freezeQualityPlan,freezeSavedPlans,planVersionChanges } from '../qualityPlanVersions';
@@ -584,4 +585,19 @@ it('vetoes a distant candidate and admits a later event with a valid nearby clos
  const old=structuredClone(p);
  old.preEntryThreeStage!.additionVetoes=[];
  expect(await run(old,{load})).toMatchObject({status:'matched',matchedAt:T+5*M});
+});
+
+it('blocks signal-anchored admission with the frozen hourly CDA and only uses available readings', async () => {
+  const p = gateTimePlan(), config = p.preEntryThreeStage!;
+  const variant = { ...CDA_HOURLY_DEF, formula: 'CDA = -C / 5' };
+  const veto = makeQualityHoldingVeto(variant.id + ':CDA', '<', -15, true, [variant]);
+  config.hardVetoes = [veto];
+  const load = vi.fn(loader());
+  const blocked = await run(p,{ load, hours:2/60, end:T+3*M });
+  expect(blocked.status).toBe('unmatched');
+  expect(blocked.lastVeto?.reason).toContain('CDA-1h');
+  expect(load.mock.calls.filter(([, , , plan]) => plan.def.id === variant.id).map(([, , , plan]) => plan.step))
+    .toEqual(expect.arrayContaining([60*M]));
+  config.hardVetoes = [{...veto, enabled:false}];
+  expect(await run(p,{ load, hours:2/60, end:T+3*M })).toMatchObject({status:'matched',matchedAt:T});
 });

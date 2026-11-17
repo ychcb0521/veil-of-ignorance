@@ -1,3 +1,4 @@
+import { CDA_FIVE_MINUTE_LABEL, CDA_HOURLY_ID, CDA_HOURLY_LABEL, CDA_HOURLY_RETENTION_HOURS, CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import {dbl5TickAt,DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {
   DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_NUMERIC, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_RENDER,
@@ -116,6 +117,7 @@ const FOCUS_SOURCE_CORES:Readonly<Record<string,string>>={...ORIGINAL_SELLER_COR
 const btcFreeId = (id: string) => `${id}-no-btc-v1`;
 const BTC_ADJUSTED_SELLER_IDS = ['cdi2', 'cdi2-retain'];
 export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = {
+  [CDA_HOURLY_ID]: 'CDA',
   ...ORIGINAL_SELLER_CORES,
   ...Object.fromEntries(Object.entries(ORIGINAL_SELLER_CORES).map(([id, core]) => [id + '-v2', core])),
   ...Object.fromEntries(BTC_ADJUSTED_SELLER_IDS.flatMap(id =>
@@ -166,7 +168,7 @@ export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m',
 export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
 
 export const featureTemplateId = (d: { id?: string; chartTemplate?: string }) => d.chartTemplate ?? d.id;
-export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => dbl5ProfileForFeature(featureTemplateId(d))?.timeframe ?? (['cba-2', 'ctba', 'sbs_5m'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL);
+export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => dbl5ProfileForFeature(featureTemplateId(d))?.timeframe ?? (usesHourlyCda(d) ? '1h' : ['cba-2', 'ctba', 'sbs_5m'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL);
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
 type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint; SBS5M_symbol?:string; SBS5M_tick_size?:number|null; SBS5M_data_source?:string; SBS5M_data_version?:string; SBS5M_initialization_id?:string; SBS5M_checkpoint?:SbsCheckpoint; DBL5_symbol?:string; DBL5_market?:string; DBL5_tick_size?:string|number|null; DBL5_data_source?:string; DBL5_data_version?:string; DBL5_initialization_id?:string; DBL5_checkpoint?:Dbl5Checkpoint };
@@ -208,7 +210,8 @@ export function featureWindowMs(d: ParamDef): number {
     const originalWindow=48*H+5*mbi2NOf(d,intervalMs(intervalOf(d))/60000)*intervalMs(intervalOf(d));
     return d.formula?.includes('# seller-retention-v1') ? Math.max(formulaHistory,originalWindow) : originalWindow;
   }
-  const window = Math.max(featureTemplateId(d) === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  const minimumHours = usesHourlyCda(d) ? CDA_HOURLY_RETENTION_HOURS : 48;
+  const window = Math.max(featureTemplateId(d) === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, minimumHours * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
   if(featureTemplateId(d)==='ctba') return (d.researchWindowHours ?? 48)*H+formulaHistory;
   return Math.max(formulaHistory, featureUsesMbi(d) ? 48 * H + Math.max(mbiWarmupMs, 5 * mbiNOf(d) * intervalMs(intervalOf(d))) : window);
 }
@@ -858,8 +861,8 @@ export const CDA_FORMULA = sellerNegativeFormula([
 
 export const CDA_DEF: DeepDigFeatureDef = {
   id: 'cda',
-  name: '买方阻力',
-  short: 'CDA',
+  name: '买方阻力 ' + CDA_FIVE_MINUTE_LABEL,
+  short: CDA_FIVE_MINUTE_LABEL,
   definition: '买方阻力（−100 ~ 100）：过去 48 小时每根 K 线的成交支持 × 主动卖出权重 × 当前仍保留的向下价格位移速度，按时间加权后 100·tanh 压缩。当前价取成交均价与收盘价的较高者，保守衡量卖方成果；负值表示向下的价格优势仍被保留，数值越低表示买方面临的卖方阻力越强。沿用 CBA 的窗口、权重和波动率标准化；这是状态评分，不是订单簿阻力价位或下跌概率。',
   sellerSignVersion: 1,
   formula: CDA_FORMULA,
@@ -870,6 +873,23 @@ export const CDA_DEF: DeepDigFeatureDef = {
   source: 'campaigns',
   groupVars: 2,
   builtin: true,
+};
+
+// v1 uses the original CDA calculation on native hourly data, keeping the same window lengths in bars.
+export const CDA_HOURLY_DEF: DeepDigFeatureDef = {
+  ...CDA_DEF,
+  id: CDA_HOURLY_ID,
+  chartTemplate: CDA_HOURLY_ID,
+  name: '买方阻力 ' + CDA_HOURLY_LABEL,
+  short: CDA_HOURLY_LABEL,
+  interval: '1h',
+  halfLifeHours: DEFAULT_HALF_LIFE_HOURS * CDA_HOURLY_TIME_SCALE,
+  avgHours: DEFAULT_AVG_HOURS * CDA_HOURLY_TIME_SCALE,
+  formula: CDA_FORMULA
+    .replace('hl, 48)', 'hl, ' + CDA_HOURLY_RETENTION_HOURS + ')')
+    .replace('48 小时窗口', CDA_HOURLY_RETENTION_HOURS + ' 小时窗口'),
+  definition: CDA_DEF.definition.replace('48 小时', CDA_HOURLY_RETENTION_HOURS + ' 小时')
+    + ' 使用原生 1 小时 K 线。时间窗口为 5 分钟版的 12 倍，权重、尺度和方向相同。',
 };
 
 export const CTBA_DEF: DeepDigFeatureDef = { id:'ctba', name:'CTBA｜趋势买方优势', short:'CTBA', definition:CTBA_DESCRIPTION, formula:ctbaFormula(), scale:1, unit:'', positive:DEFAULT_POSITIVE, control:DEFAULT_CONTROL, source:'campaigns', groupVars:2, builtin:true, interval:'5m' };
@@ -1049,7 +1069,7 @@ export function createSellerFocusCopy(source:DeepDigFeatureDef,id=source.id+'-v2
   return {...copy,id,name:source.name+'｜版本2',short:state?'状态 S·版本2':source.short+'·版本2',chartCore:source.chartCore??FOCUS_SOURCE_CORES[source.id]??program.statements.at(-1)?.name??undefined,sellerSignVersion:1,focusSourceId:source.id,focusVersion:2,focusPrefix:prefix,formula,
     definition:source.definition+'\n版本2：独立复制创建时的账号公式和参数，保留原窗口、周期、半衰期及预热；历史聚合核中最近2小时的相对权重为更早数据的3倍。可在本副本公式顶部修改 '+prefix+'_h 和 '+prefix+'_weight；权重1恢复复制时原计算。重加权均值、波动尺度、递推/成交核；极值与时间滞后保持原义，不直接放大最终分数。'+(state?'状态S保持0–1刻度，0.5为均衡，越低越偏卖方；图表沿用原S的0.6参考线。':'零仍为均衡，卖方仍为负值。')+'原阈值不自动沿用。'};
 }
-export const SELLER_FOCUS_FEATURES:DeepDigFeatureDef[]=Object.keys(FOCUS_SOURCE_CORES).map(id=>({...createSellerFocusCopy(ORIGINAL_BUILTIN_FEATURES.find(d=>d.id===id)!,id+'-v2',id==='state'?Date.parse('2026-10-30T06:26:11Z'):SELLER_FOCUS_CREATED_AT),builtin:true}));
+export const SELLER_FOCUS_FEATURES:DeepDigFeatureDef[]=Object.keys(FOCUS_SOURCE_CORES).map(id=>({...createSellerFocusCopy(id === CDA_DEF.id ? { ...CDA_DEF, name: '买方阻力', short: 'CDA' } : ORIGINAL_BUILTIN_FEATURES.find(d=>d.id===id)!,id+'-v2',id==='state'?Date.parse('2026-10-30T06:26:11Z'):SELLER_FOCUS_CREATED_AT),builtin:true}));
 const BTC_ADJUSTED_FEATURES = [
   CBI2_DEF, CDI2_DEF, STATE_DEF, STATE2_DEF,
   ...SELLER_RETENTION_FEATURES.filter(def => def.retentionSourceId === CDI2_DEF.id),
@@ -1073,7 +1093,7 @@ export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEAT
     .join('\n'),
 }));
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -1163,6 +1183,10 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
   const legacyZNames = new Set(['买方推力漂移速度 DSP·az（Z 分数）', ['买方推力的加速度', ' az（Z 分数）'].join('')]);
   const legacyZDefinition = '与买方推力漂移速度 DSP·a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。';
   return [...builtins, ...custom].map(def => {
+    if (def.id === CDA_DEF.id) return { ...def,
+      short: def.short === 'CDA' ? CDA_DEF.short : def.short,
+      name: def.name === '买方阻力' ? CDA_DEF.name : def.name,
+    };
     if (def.id===DBL5_ID) return {...def,
       short:def.short==='DBL-5'?DBL5_DEF.short:def.short,
       name:def.name==='DBL-5｜达瓦斯箱体下轨'?DBL5_DEF.name:def.name,

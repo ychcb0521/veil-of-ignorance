@@ -88,7 +88,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
     </label>
     <p className="text-muted-foreground">{id
       ? '自动入选和已接手的币安手动多仓各自冻结当时的模板，按模板执行加仓、减仓和卖出。'
-      : '40 USDT 保证金、5 倍。CDA 原始值低于 −10 或 DBL-5-5mins 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。如需使用 DBL-5-1h，可在持仓监测模板中选择。'}</p>
+      : '40 USDT 保证金、5 倍。CDA-5mins 原始值低于 −10 或 DBL-5-5mins 防守线断裂时，按 5 分钟收盘确认卖出。另有下跌 5% 止损，以及上涨 2% 时卖出原始数量的 71.5%。可在持仓监测模板中选择 CDA-1h 或 DBL-5-1h。'}</p>
     {choiceName&&<p className="text-muted-foreground">原名：{choiceName.originalName}</p>}
     {choice && <p className="text-muted-foreground">首仓名义仓位 {+(size.marginUsdt * size.leverage).toPrecision(12)} USDT · {size.leverage} 倍 · 保证金 {+size.marginUsdt.toPrecision(12)} USDT</p>}
     {saveNotice && <p role="status" className="text-muted-foreground">{saveNotice}</p>}

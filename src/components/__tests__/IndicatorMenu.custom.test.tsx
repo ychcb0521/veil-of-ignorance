@@ -12,7 +12,7 @@ const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DBL5_1H', 'DBL5_GUARD_PLUS', 'DBL5_DISTANCE', 'DBL5_WIDTH', 'DBL5_AGE', 'DBL5_1H_DISTANCE', 'DBL5_1H_WIDTH', 'DBL5_1H_AGE', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'DBL5', 'DBL5_1H', 'DBL5_GUARD_PLUS', 'DBL5_DISTANCE', 'DBL5_WIDTH', 'DBL5_AGE', 'DBL5_1H_DISTANCE', 'DBL5_1H_WIDTH', 'DBL5_1H_AGE', 'SBS5M', 'SBS5M_QUALITY', 'SBS5M_DISTANCE', 'SBS5M_STEP', 'PRS6H', 'ATI6H', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'CDA_1H', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR', ...SELLER_RETENTION_SPECS.map(s=>s.chartId)];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)?.nameZh??accountResearchIndicators().find(item=>item.id===id)!.short;
 
 describe('自制区的十个特征值', () => {

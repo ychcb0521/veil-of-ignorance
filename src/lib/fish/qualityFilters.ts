@@ -1,3 +1,4 @@
+import { usesHourlyCda } from '@/lib/cdaPeriods';
 import { algorithmMetricMenu } from './algorithmMetricMenu';
 import { guardDistanceConfig } from './qualityAdditionVeto';
 import { guardDistanceDefinition, guardDistanceSignalChoices } from './qualityGuardDistance';
@@ -20,7 +21,7 @@ function build(definitions: readonly DeepDigFeatureDef[], originalPeriod = false
     try {
       const formula = item ? researchChartFormula(item,def.formula) : def.formula;
       const names = [...new Set(compileFeatureFormula(formula).program.statements.flatMap(s => s.name ? [s.name] : []))];
-      defs.set(def.id,{...def,formula,interval:originalPeriod ? intervalOf(def) : '5m'});
+      defs.set(def.id,{...def,formula,interval:originalPeriod || usesHourlyCda(def) ? intervalOf(def) : '5m'});
       const preferred = item ? [item.core,`avg_${item.core}`,`avg_${item.core}_2`] : [];
       for (const metric of [...new Set([...preferred.filter(n => names.includes(n)),...names,'结果'])]) {
         const suffix = item && metric === item.core ? '原始值' : item && metric === `avg_${item.core}` ? 'avg' : item && metric === `avg_${item.core}_2` ? 'avg₂' : metric;

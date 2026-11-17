@@ -1,3 +1,5 @@
+import { CDA_HOURLY_CHART_ID } from '@/lib/cdaPeriods';
+import { researchAverageHours } from '@/lib/researchIndicators';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
 import { IMPULSE_5M_ID, IMPULSE_5M_INDICATOR, registerImpulse5mChart } from '@/lib/impulse5mChart';
@@ -407,7 +409,7 @@ export function visibleIndicatorCompanions(ind: { type: string; showRaw?: boolea
  */
 export function indicatorCalcParams(kcName: string, ind: { type?: string; period: number; avgHours?: number; zscore?: boolean; guardVersion?: Dbl5GuardVersion }): number[] {
   const averaged = calibratedAverageForName(kcName);
-  if (averaged) return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(averaged.item), avgCalibrationVersion()];
+  if (averaged) return [ind.period, validHours(ind.avgHours, researchAverageHours(averaged.item)), btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(averaged.item), avgCalibrationVersion()];
   const base = DSP_Z_BASE_NAMES[kcName];
   if (base) return indicatorCalcParams(base, { ...ind, zscore: true });
   const research = researchIndicatorForKc(kcName);
@@ -563,11 +565,11 @@ function registerIndicator(template: IndicatorTemplate): void {
     const { item, spec, kind } = averaged;
     const key = template.figures?.[0]?.key ?? 'value';
     const definition: IndicatorTemplate = { ...template, minValue: undefined, maxValue: undefined,
-      calcParams: [item.period, AVG_DEFAULT_HOURS, 0, 0, 0],
+      calcParams: [item.period, researchAverageHours(item), 0, 0, 0],
       createTooltipDataSource: ({ indicator, defaultStyles }) => {
         const context = avgCalibrationContext(item.featureId, indicator.calcParams[0], indicator.calcParams[1], kind);
         const def = chartFeatureDef(item.featureId), names = def ? researchSeriesNames(item, def.formula) : null;
-        const label = (kind === 'avg' ? names?.avg : names?.avg2) ?? template.shortName;
+        const label = item.id === CDA_HOURLY_CHART_ID ? template.shortName : (kind === 'avg' ? names?.avg : names?.avg2) ?? template.shortName;
         return { name: `${label}${def?.unit ? `(${def.unit})` : ''}${context.limits ? '' : ` · ${context.status}`}`, calcParamsText: `(${indicator.calcParams[1]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never };
       },
       draw: args => {
@@ -585,7 +587,7 @@ function registerIndicator(template: IndicatorTemplate): void {
         return { color: averageAreaColor(point?.[key] ?? NaN, { center: spec.center, ...limits, range: spec.range }), size: 2.1 };
       } }],
       calc: (data, indicator) => {
-        const hours = validHours(indicator.calcParams[1], AVG_DEFAULT_HOURS);
+        const hours = validHours(indicator.calcParams[1], researchAverageHours(item));
         const context = avgCalibrationContext(item.featureId, indicator.calcParams[0], hours, kind);
         const limits = context.limits;
         indicator.minValue = limits?.lower ?? spec.center; indicator.maxValue = limits?.upper ?? spec.center;
@@ -1496,12 +1498,12 @@ export function registerCustomIndicators() {
     if(item.id.startsWith('DBL5')){registerDbl5Indicator(item);continue;}
     if('priceOverlay' in item&&item.priceOverlay){registerSbsPriceIndicator(item);continue;}
     for (const level of (('rawOnly' in item&&item.rawOnly)?[0]:[0, 1, 2])) {
-      const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
+      const label = level === 0 ? item.short : `avg_${item.id === CDA_HOURLY_CHART_ID ? item.short : item.core}${level === 2 ? '_2' : ''}`;
       // 均值线可单独设橘色线（avgNeutral）；没设就与原始值相同
       const line = level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
-        calcParams: 'marketEvidence' in item&&item.marketEvidence&&level>0?[item.period,AVG_DEFAULT_HOURS,0,0]:[item.period,0,0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
+        calcParams: 'marketEvidence' in item&&item.marketEvidence&&level>0?[item.period,AVG_DEFAULT_HOURS,0,0]:[item.period,0,0], precision: level === 0 ? (item.id === 'CDA' || item.id === CDA_HOURLY_CHART_ID ? 2 : 3) : 8,
         // Fixed-range averages retain their reference bounds; other averages use visible values.
         ...(level === 0 ? ((item.id.startsWith('SBS5M')||item.id.startsWith('DBL5'))&&item.min===item.max?{}:{ minValue: item.min, maxValue: item.max }) : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
         draw: args => {

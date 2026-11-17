@@ -79,7 +79,7 @@ it('exports one row per detector with a single detector column and shared sell r
   expect(sheet.rows.map(row=>indices.map(i=>row[i]))).toEqual([[10,4,12,-5,9,17],[10,4,12,-5,9,17]]);
   expect(sheet.columns.map(c => c.header).filter(h => h.endsWith('持仓小时'))).toHaveLength(2);
   expect(sheet.rows[0][headers.indexOf('探测算法 / 捕获阈值')]).not.toEqual(sheet.rows[1][headers.indexOf('探测算法 / 捕获阈值')]);
-  expect(sheet.columns.slice(6).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
+  expect(sheet.columns.slice(6).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA-5mins 原始值')]));
 });
 it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {
   const s = enableQualityComparison(importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1)]));

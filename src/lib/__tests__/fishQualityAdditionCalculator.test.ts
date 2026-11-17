@@ -4,11 +4,11 @@ import {positionGeometricMultiple} from '@/lib/campaignGeometricMetrics';
 import {additionMetricBaseDefinition, additionMetricTimeFields, withAdditionMetricTime} from '@/lib/fish/qualityAdditionMetric';
 import {syncQualityThresholdDefinitions} from '@/lib/fish/qualityComparison';
 import {displayAverage} from '@/lib/avgHighlight';
-import {makeQualityHoldingVeto} from '@/lib/fish/qualityFilters';
+import { makeQualityBuyFilter, makeQualityHoldingVeto } from '@/lib/fish/qualityFilters';
 import {evaluateCampaignAddSizing} from '@/lib/campaignAddSizingCheck';
 import {describe,it,expect} from 'vitest';
 import {evaluateQualitySample,newQualityStudy,qualityDefinition,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
-import {definitionKey} from '@/lib/deepDig/features';
+import { CDA_HOURLY_DEF, definitionKey } from '@/lib/deepDig/features';
 import {ADDITION_INDICATOR_INCREASE_VERSION, defaultQualityAddition, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCoverage';
 import {chartAtr} from '@/lib/atr';
@@ -369,4 +369,21 @@ it('lets the qualified alternate candidate win when the primary fails the increa
  g.addition={...base,...main,positionVersion:HOLDING_LEDGER_ADDITION_VERSION,maxRounds:1,rounds:[main],alternativeRounds:[alternative]};
  const result=await run(g,loader(rising),4);
  expect(result.additionFills).toMatchObject([{at:T+M,lane:'attack'}]);
+});
+
+it('reads hourly CDA in the primary and backup addition branches using their own thresholds', async () => {
+ const g = group(), base = g.addition!;
+ const variant = { ...CDA_HOURLY_DEF, formula: 'CDA = C / 10' };
+ const select = (threshold: number) => makeQualityBuyFilter(variant.id + ':CDA', '>', threshold, true, [variant]);
+ const round = (threshold: number) => ({
+   source: 'custom' as const, stricterPct:10, condition:select(threshold),
+ });
+ const load = loader(m => m === 0 ? bar(T,100,1,99,106) : bar(T+m*M,m >= 60 ? 110 : 105,1));
+ const simulate = (primary: number, backup: number) => run(freezeQualityPlan({ ...g,
+   addition:{ ...base, ...round(primary), positionVersion:HOLDING_LEDGER_ADDITION_VERSION, maxRounds:1,
+     rounds:[round(primary)], alternativeRounds:[round(backup)] },
+ }),load,62);
+ expect((await simulate(15,15)).additionFills ?? []).toHaveLength(0);
+ expect((await simulate(5,15)).additionFills).toMatchObject([{at:T+60*M,featureId:variant.id}]);
+ expect((await simulate(15,5)).additionFills).toMatchObject([{at:T+60*M,featureId:variant.id,lane:'attack'}]);
 });

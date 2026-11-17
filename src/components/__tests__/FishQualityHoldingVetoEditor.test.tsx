@@ -119,3 +119,27 @@ it('adds a payoff-ratio stop with a 5000R default that can be edited and saved',
  const saved=JSON.parse(document.querySelector('output')!.textContent!);expect(saved.find((v:{kind:string})=>v.kind==='payoff-ratio')).toMatchObject({kind:'payoff-ratio',direction:'>=',threshold:3000,enabled:true,label:'盈亏比止盈'});
  expect(holdingVetoDraft(saved).find(d=>d.choice==='payoff-ratio')).toMatchObject({threshold:'3000'});
 });
+
+
+it.each([true, false])('offers both CDA periods and restores an hourly veto (screening=%s)', entry => {
+ const view = render(<Editor entry={entry}/>);
+ const select = screen.getByLabelText('持仓否决 1 指标');
+ expect(Array.from((select as HTMLSelectElement).options).map(option => option.textContent)).toEqual(
+   expect.arrayContaining(['CDA-5mins 原值','CDA-1h 原值']));
+ fireEvent.change(select,{target:{value:'cda-1h-v1:CDA'}});
+ const period = screen.getByLabelText('持仓否决 1 K 线周期');
+ expect(period).toHaveValue('1h');
+ expect(period).toBeDisabled();
+ expect(screen.getByLabelText('持仓否决 1 公式回看（小时）')).toHaveAttribute('placeholder','288');
+ expect(screen.getByLabelText('持仓否决 1 半衰期（小时）')).toHaveAttribute('placeholder','72');
+ fireEvent.change(screen.getByLabelText('持仓否决 1 方向'),{target:{value:'<'}});
+ fireEvent.change(screen.getByLabelText('持仓否决 1 阈值'),{target:{value:'-15'}});
+ fireEvent.click(screen.getByLabelText('启用持仓否决 1'));
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));
+ const saved:QualityHoldingVeto[]=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved).toMatchObject([{enabled:true,threshold:-15,snapshot:{interval:'1h',featureId:'cda-1h-v1'}}]);
+ view.unmount();
+ render(<Editor entry={entry} saved={saved}/>);
+ expect(screen.getByLabelText('持仓否决 1 K 线周期')).toHaveValue('1h');
+ expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);
+});

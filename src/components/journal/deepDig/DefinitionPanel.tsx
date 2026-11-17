@@ -1,3 +1,4 @@
+import { CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
 import {Dbl5GuardDefinition} from './Dbl5GuardDefinition';
 import {ATI6H_DEFAULTS} from '@/lib/ati6h';
@@ -502,6 +503,8 @@ export function KlineSettings({ value, onChange, uses, testId }: {
   uses?: { hl: boolean; avgh: boolean } | null;
   testId: string;
 }) {
+  const hourlyCda = usesHourlyCda(value);
+  const scaleHours = (presets: readonly number[]) => hourlyCda ? presets.map(hours => hours * CDA_HOURLY_TIME_SCALE) : presets;
   const ivLabel = INTERVAL_LABEL[value.interval];
   const windowH = featureWindowMs(value) / 3_600_000;
   return (
@@ -509,7 +512,7 @@ export function KlineSettings({ value, onChange, uses, testId }: {
       <div className="flex items-start gap-x-2">
         <span className={PARAM_LABEL}>周期</span>
         <div className={SEGMENT} role="group" aria-label="K 线周期">
-          {(['cba-2','ctba'].includes(featureTemplateId(value)??'') ? ['5m'] as const : FEATURE_INTERVALS).map(iv => (
+          {(hourlyCda ? ['1h'] as const : ['cba-2','ctba'].includes(featureTemplateId(value)??'') ? ['5m'] as const : FEATURE_INTERVALS).map(iv => (
             <button key={iv} type="button" aria-pressed={value.interval === iv} title={INTERVAL_LABEL[iv]} data-testid={`${testId}-interval-${iv}`}
               onClick={() => onChange({ ...value, interval: iv })} className={chip(value.interval === iv)}>{iv}</button>
           ))}
@@ -534,13 +537,13 @@ export function KlineSettings({ value, onChange, uses, testId }: {
         <span className="text-[11px] text-muted-foreground">α = 1/{mbiNOf(value)} · 预热 {5 * mbiNOf(value)} 根 · κ = {(mbiNOf(value) / Math.sqrt(2 * mbiNOf(value) - 1)).toFixed(6)}</span>
       </div>}
       {value.id !== 'mbi' && !featureUsesMbi2(value) && <HoursPicker
-        label="半衰期" ariaLabel="半衰期" presets={HALF_LIFE_PRESETS} value={value.halfLifeHours} testId={`${testId}-hl`}
+        label="半衰期" ariaLabel="半衰期" presets={scaleHours(HALF_LIFE_PRESETS)} value={value.halfLifeHours} testId={`${testId}-hl`}
         onChange={h => onChange({ ...value, halfLifeHours: h })}
         summary={<>hl = {fmtBars(barsPerHalfLife(value))} 根 {ivLabel} K 线</>}
         unused={uses && !uses.hl ? 'hl' : null}
       />}
       {!featureUsesMbi2(value)&&<HoursPicker
-        label={featureUsesMbi(value) ? '曲线范围' : '平均时长'} ariaLabel="平均时长" presets={AVG_HOURS_PRESETS} value={value.avgHours} testId={`${testId}-avg`}
+        label={featureUsesMbi(value) ? '曲线范围' : '平均时长'} ariaLabel="平均时长" presets={scaleHours(AVG_HOURS_PRESETS)} value={value.avgHours} testId={`${testId}-avg`}
         onChange={h => onChange({ ...value, avgHours: h })}
         summary={featureUsesMbi(value) ? <>锚点前后各 {value.avgHours} 小时；均值窗口在公式中设置</> : <>avgh = {barsPerAvg(value)} 根</>}
         unused={value.id !== 'mbi' && uses && !uses.avgh ? 'avgh' : null}

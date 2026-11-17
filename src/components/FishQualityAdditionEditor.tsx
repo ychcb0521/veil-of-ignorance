@@ -418,7 +418,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
    <InfoBlock title="指标 · S / T / K">
-    <p>加仓条件（自选指标）在 5 分钟收盘达标、且加仓价 T 比最新成本线 S 至少高出 n 个 5 分钟 ATR(14) 时加仓（入场距离留空＝不检查）；K＝T − m × ATR，碰到 K 卖出全部持仓。S：首次加仓为首次买入价，之后为上一次加仓的 K。「方向」里的其它指标条件须在同一时刻同时满足。</p>
+    <p>加仓条件（自选指标）在所选周期收盘达标、且加仓价 T 比最新成本线 S 至少高出 n 个 5 分钟 ATR(14) 时加仓（入场距离留空＝不检查）；K＝T − m × ATR，碰到 K 卖出全部持仓。S：首次加仓为首次买入价，之后为上一次加仓的 K。「方向」里的其它指标条件须在同一时刻同时满足。</p>
     <p>这是 10-31 时的加仓方式（11-01 改成箱体位置后一度取消，11-04 应用户要求恢复）；涨幅门槛选「相对持仓均价」即与 10-31 版同一口径。</p>
    </InfoBlock>
    <InfoBlock title="箱体位置（5 分钟线）">

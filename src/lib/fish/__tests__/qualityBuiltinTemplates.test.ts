@@ -17,7 +17,7 @@ it('merges the SAPIEN box prefix, the RAVE attack rounds and the staged exits in
   // 公共部分：CDA < 0.5 → 涨 5.1% 后状态 S < 0.5；镜像 5% 卖 0.01%；基础止损取 RAVE 的 5% / 15%
   for (const p of [plan, r.structure, r.attack]) {
     expect(p).toMatchObject({ metric: 'CDA', definitionSource: 'account', execution: 'intrabar-1m', vetoFill: 'stop', rule: { direction: '<', threshold: .5 },
-      combo: { switchPct: 5.1, beforeLabel: 'CDA 原始值', after: { metric: 'state', rule: { direction: '<', threshold: .5 } } }, mirrorTakeProfit: { enabled: true, gainPct: 5, sellPct: .01 } });
+      combo: { switchPct: 5.1, beforeLabel: 'CDA-5mins 原始值', after: { metric: 'state', rule: { direction: '<', threshold: .5 } } }, mirrorTakeProfit: { enabled: true, gainPct: 5, sellPct: .01 } });
     expect(p.holdingVetoes!.map(v => [v.kind, v.direction, v.threshold, v.enabled])).toEqual([['static-drawdown', '>=', 5, true], ['dynamic-drawdown', '>=', 15, true]]);
     // SAPIEN 的分阶段否决：第 2、3 次加仓后换上 15% 动态回撤 + 1 分钟 5% + 5 分钟 7%，峰值从阶段起算
     expect(p.vetoStages!.map(s => [s.afterAdditions, s.conditions.map(c => [c.kind, c.threshold])])).toEqual([2, 3].map(n => [n, [['dynamic-drawdown', 15], ['drop-1m', 5], ['drop-5m', 7]]]));
@@ -29,7 +29,7 @@ it('merges the SAPIEN box prefix, the RAVE attack rounds and the staged exits in
   // 结构分支＝SAPIEN 5069 的 7 次箱体加仓
   expect(sRounds.map(x => [x.source, x.structure?.algorithm, x.structure?.trigger, x.structure?.kSource, x.structure?.buffer, x.structure?.versions?.box, x.minGainPct, x.prerequisites?.map(c => [c.metric, c.direction, c.threshold])]))
     .toEqual([['raise', .1], ['confirm', .3], ['confirm', .5], ['raise', .7], ['raise', .9], ['raise', 1.1], ['raise', 1.3]].map(([trigger, buffer]) => ['structure', 'dbl5', trigger, 'current', buffer, 'dbl-5-v2', 3, [['state', '>', .65]]]));
-  expect(r.structure.sellStages).toMatchObject([{ afterAdditions: 3, metric: 'CDA', label: 'CDA 原始值', rule: { metric: 'CDA', direction: '<', threshold: .5 } }]);
+  expect(r.structure.sellStages).toMatchObject([{ afterAdditions: 3, metric: 'CDA', label: 'CDA-5mins 原始值', rule: { metric: 'CDA', direction: '<', threshold: .5 } }]);
   // 进攻分支：前两次与结构分支完全相同，第 3–8 次＝RAVE 组合2 的第 3–8 次（S/T/K、涨幅按持仓均价）
   expect(aRounds.slice(0, 2)).toEqual(sRounds.slice(0, 2));
   expect(aRounds.slice(2).map(x => [x.source, x.condition?.metric, x.condition?.threshold, x.minGainPct, x.gainBasis, x.entryDistanceAtr, x.supportOffsetAtr]))

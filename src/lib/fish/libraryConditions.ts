@@ -1,4 +1,5 @@
 /** Historical library labels are derived only from stored evidence, never current account defaults. */
+import { CDA_FIVE_MINUTE_LABEL, CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { shortFishHash, type FishSnapshot } from './algorithm';
 import { fishMetricLabel, fishSourceLabel, savedFishMetric } from './records';
 import { qualityDefinition, type QualityBuyFilter } from './quality';
@@ -9,7 +10,7 @@ export interface LibraryCondition {
  key:string; label:string; metric:string; rule:string; text:string; context:string; snapshot:Partial<FishSnapshot>;
  formula?:string; halfLifeHours?:number; avgHours?:number; reading?:number; rawReading?:number; evidence:string;
 }
-const NAMES:Record<string,string>={cbi2:'CBI-2',mbi:'MBI',ctba:'CTBA',cbi:'CBI',cba:'CBA',state:'S',cda:'CDA',bss:'BSS','drift-speed-z':'az','drift-speed':'a','seller-control':'DSP·bc'};
+const NAMES:Record<string,string>={cbi2:'CBI-2',mbi:'MBI',ctba:'CTBA',cbi:'CBI',cba:'CBA',state:'S',cda:CDA_FIVE_MINUTE_LABEL,[CDA_HOURLY_ID]:CDA_HOURLY_LABEL,bss:'BSS','drift-speed-z':'az','drift-speed':'a','seller-control':'DSP·bc'};
 const definitions=new Map<string,{formula:string;interval:string;halfLifeHours:number;avgHours:number}>();
 function capturedDefinition(s:Partial<FishSnapshot>){
  if(!s.definitionKey)return;

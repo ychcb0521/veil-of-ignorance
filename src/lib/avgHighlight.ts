@@ -1,3 +1,4 @@
+import { CDA_HOURLY_CHART_ID, CDA_HOURLY_ID } from '@/lib/cdaPeriods';
 import { rollingMean, barsForHours } from '@/lib/deepDig/formula';
 /** Display-only calibration; raw indicators and their formulas do not use these limits. */
 export const AVG_HIGHLIGHT_COLORS = { buyer: '#0ECB81', seller: '#F6465D', neutral: '#848E9C' } as const;
@@ -26,6 +27,7 @@ export const AVG_HIGHLIGHT_SPECS = [
   { id: 'DSS', featureId: 'dss', core: 'DSS', center: 0, range: [-1, 1] },
   { id: 'CBA', featureId: 'cba', core: 'CBA', center: 0, range: [-100, 100] },
   { id: 'CDA', featureId: 'cda', core: 'CDA', center: 0, range: [-100, 100] },
+  { id: CDA_HOURLY_CHART_ID, featureId: CDA_HOURLY_ID, core: 'CDA', center: 0, range: [-100, 100] },
 ] as const;
 export type AvgHighlightSpec = typeof AVG_HIGHLIGHT_SPECS[number];
 export interface AverageLimits { lower: number; upper: number; d: number; count: number; above: number; below: number }
@@ -34,13 +36,13 @@ export function averageHighlightColor(value: number | null | undefined, limits?:
   return value! > limits.upper ? AVG_HIGHLIGHT_COLORS.buyer : value! < limits.lower ? AVG_HIGHLIGHT_COLORS.seller : AVG_HIGHLIGHT_COLORS.neutral;
 }
 /** Same 4:3:2:1 segmented average as avg_X_2. N denotes the complete four-block window. */
-export function displayAverage(values: ArrayLike<number | null>, hours: number, kind: AverageKind): Float64Array {
+export function displayAverage(values: ArrayLike<number | null>, hours: number, kind: AverageKind, barMinutes = 5): Float64Array {
   if (!(hours > 0) || !Number.isFinite(hours)) throw Error('均值时长 N 必须为正数');
   const core = Float64Array.from(values, v => v == null ? NaN : v);
-  if (kind === 'avg') return rollingMean(core, barsForHours(hours, 5));
-  const block = rollingMean(core, barsForHours(hours / 4, 5));
+  if (kind === 'avg') return rollingMean(core, barsForHours(hours, barMinutes));
+  const block = rollingMean(core, barsForHours(hours / 4, barMinutes));
   const out = new Float64Array(values.length).fill(NaN);
-  const offsets = [0, 1, 2, 3].map(k => k === 0 ? 0 : barsForHours(hours * k / 4, 5));
+  const offsets = [0, 1, 2, 3].map(k => k === 0 ? 0 : barsForHours(hours * k / 4, barMinutes));
   for (let i = 0; i < values.length; i++) {
     if (offsets.every(k => i >= k && Number.isFinite(block[i - k])))
       out[i] = (4 * block[i] + 3 * block[i - offsets[1]] + 2 * block[i - offsets[2]] + block[i - offsets[3]]) / 10;

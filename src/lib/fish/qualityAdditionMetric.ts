@@ -1,3 +1,4 @@
+import { usesHourlyCda } from '@/lib/cdaPeriods';
 import { compileFeatureFormula, definitionKey, intervalOf, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { RESEARCH_INTERVALS } from '@/lib/deepRsa/marketData';
 import type { ResearchInterval } from '@/lib/deepRsa/marketData';
@@ -71,6 +72,7 @@ export function additionMetricTimeFields(formula: string, metric: string): TimeF
 }
 
 export function metricIntervalOptions(definition: DeepDigFeatureDef) {
+  if (usesHourlyCda(definition)) return ['1h' as const];
   const compiled = compileFeatureFormula(definition.formula);
   if (compiled.usesDbl5 || compiled.usesSbs5m) return ['5m' as const];
   const intervals = RESEARCH_INTERVALS.filter(interval => intervalOf({ ...definition, interval }) === interval);

@@ -23,13 +23,13 @@ it('requests a cache miss only once; caches the result and separates window and 
   client.avgCalibrationContext('state',24,72,'avg');
   await vi.waitFor(() => expect(mocks.messages).toHaveLength(3));
 });
-it('fresh accounts get all shipped built-in limits without local history, IndexedDB or Binance access', async () => {
+it('fresh accounts get the shipped built-in limits without local history, IndexedDB or Binance access', async () => {
   mocks.signalCount = 0;
   mocks.read.mockRejectedValue(Error('IndexedDB unavailable'));
   const fetch = vi.fn(() => { throw Error('Binance 429'); }); vi.stubGlobal('fetch', fetch);
   const client = await import('../avgHighlightClient');
   const { AVG_HIGHLIGHT_SPECS } = await import('../avgHighlight');
-  const jobs = AVG_HIGHLIGHT_SPECS.flatMap(spec => [6,24,48].flatMap(hours => (['avg','avg2'] as const).map(kind => ({ featureId: spec.featureId, period: ['bss','dss'].includes(spec.featureId) ? 12 : ['state','state2','cbi2','cdi2'].includes(spec.featureId) ? 24 : 6, hours, kind }))));
+  const jobs = AVG_HIGHLIGHT_SPECS.filter(spec => spec.id !== 'CDA_1H').flatMap(spec => [6,24,48].flatMap(hours => (['avg','avg2'] as const).map(kind => ({ featureId: spec.featureId, period: ['bss','dss'].includes(spec.featureId) ? 12 : ['state','state2','cbi2','cdi2'].includes(spec.featureId) ? 24 : 6, hours, kind }))));
   const contexts = () => jobs.map(j => client.avgCalibrationContext(j.featureId,j.period,j.hours,j.kind));
   contexts();
   await vi.waitFor(() => expect(contexts().every(c => c.limits && c.status === '标准样本已校准')).toBe(true));
@@ -38,6 +38,12 @@ it('fresh accounts get all shipped built-in limits without local history, Indexe
   const previous = contexts().map(c => c.limits);
   localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id:'other-account'}}));
   expect(contexts().map(c => c.limits)).toEqual(previous);
+});
+it('starts a separate hourly calibration job without using the legacy CDA reference limits', async () => {
+  const { avgCalibrationContext } = await import('../avgHighlightClient');
+  expect(avgCalibrationContext('cda-1h-v1', 72, 288, 'avg').limits).toBeUndefined();
+  await vi.waitFor(() => expect(mocks.messages).toHaveLength(1));
+  expect(mocks.messages[0]).toMatchObject({ hours: 288, definitions: [{ def: { id: 'cda-1h-v1', interval: '1h' }, period: 72 }] });
 });
 it('never applies built-in limits to an edited core, named average, scale or period', async () => {
   const client = await import('../avgHighlightClient');

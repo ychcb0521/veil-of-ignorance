@@ -406,7 +406,7 @@ it('sorts each sell header by numeric return in both directions, keeps missing r
   }));
   render(<FishQuality state={s}/>);
   const symbols = () => screen.getAllByTestId('quality-fish-row').map(r => r.textContent);
-  for (const label of ['状态 S 原始值', 'CDA 原始值']) {
+  for (const label of ['状态 S 原始值', 'CDA-5mins 原始值']) {
     // 【用户要求】2026-11-01 卖出列不再有收益率栏（进程已删）：按同口径的首仓涨幅排序（本例出场价＝100＋收益率）
     fireEvent.click(screen.getByRole('button', { name: `按${label}首仓涨幅排序` }));
     expect(symbols()[0]).toContain('GAIN'); expect(symbols().at(-1)).toContain('MISSING');
@@ -566,7 +566,7 @@ it('replaces dynamic drawdown with peak gain and sorts each seller independently
   fireEvent.click(screen.getByRole('button',{name:`按状态 S 原始值${type}排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('HIGH');
   fireEvent.click(screen.getByRole('button',{name:`按状态 S 原始值${type}排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOW');
   expect(screen.getAllByTestId('quality-fish-row').at(-1)).toHaveTextContent('MISSING');
-  fireEvent.click(screen.getByRole('button',{name:`按CDA 原始值${type}排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOW');
+  fireEvent.click(screen.getByRole('button',{name:`按CDA-5mins 原始值${type}排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOW');
  }
  expect(screen.queryByRole('tab',{name:/比较探测/})).toBeNull();
 });
@@ -673,7 +673,7 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   // 2026-11-02 持仓监测里的「探测标签」已删（买前过滤已有）
   expect(headers[peak + 3]).toMatch(/^持仓时间/);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
+  fireEvent.click(screen.getByRole('button', { name: '按CDA-5mins 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
   expect(order().slice(0, 2)).toEqual(['CCCUSDT', 'BBBUSDT']);
   expect(screen.queryByRole('button',{name:'设置状态 S 原始值的买入过滤'})).toBeNull();

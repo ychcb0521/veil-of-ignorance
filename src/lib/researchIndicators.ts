@@ -1,3 +1,4 @@
+import { CDA_FIVE_MINUTE_LABEL, CDA_HOURLY_AVERAGE_HOURS, CDA_HOURLY_CHART_ID, CDA_HOURLY_ID, CDA_HOURLY_LABEL, CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
 import {DBL5_ID,DBL5_PROFILES,dbl5ProfileForFeature,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5GuardVersion} from '@/lib/dbl5m';
@@ -66,7 +67,9 @@ export const RESEARCH_INDICATORS = [
   { id: 'CDI2', featureId: 'cdi2', core: 'CDI2', short: 'CDI2', name: '买方失控程度 CDI2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'SELLER_CONTROL', featureId: 'seller-control', core: 'bc', short: 'DSP·bc', name: '卖方控制力 DSP·bc', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
   { id: 'DSS', featureId: 'dss', core: 'DSS', short: 'DSS', name: '买方状态恶化 DSS', period: 1, parameter: '近期窗口', neutral: 0, avgNeutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
-  { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
+  { id: 'CDA', featureId: 'cda', core: 'CDA', short: CDA_FIVE_MINUTE_LABEL, name: '买方阻力 ' + CDA_FIVE_MINUTE_LABEL, period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
+  { id: CDA_HOURLY_CHART_ID, featureId: CDA_HOURLY_ID, core: 'CDA', short: CDA_HOURLY_LABEL, name: '买方阻力 ' + CDA_HOURLY_LABEL,
+    period: 6 * CDA_HOURLY_TIME_SCALE, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
   { id: 'MBI_BEAR', featureId: 'mbi-bear', core: 'MBI_bear', short: 'MBI·空方', name: 'MBI 空方趋势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'CTBA_BEAR', featureId: 'ctba-bear', core: 'CTBA_bear', short: 'CTBA·空方', name: 'CTBA 空方趋势', period: CTBA_DEFAULTS.N, parameter: '窗口根数', neutral: 0, min: -100, max: 100, avgRange: [-100, 100], seller: true },
   { id:'MBI2',featureId:'mbi2',core:'MBI2',short:'MBI2',name:'MBI2 迈克尔买方优势（可调版）',period:25*5/60,parameter:'日历时长',parameterUnit:'h',neutral:0,min:-1,max:1,avgRange:[-1,1],components:['MBI2_state','MBI2_lead_h','MBI2_confirm_h'],seller:false },
@@ -91,13 +94,15 @@ export interface ResearchIndicator {
   neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
   priceOverlay?:boolean; rawOnly?:boolean; marketEvidence?:boolean; templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
+export const researchAverageHours = (item: Pick<ResearchIndicator, 'featureId' | 'templateId'>) =>
+  item.featureId === CDA_HOURLY_ID || item.templateId === CDA_HOURLY_CHART_ID ? CDA_HOURLY_AVERAGE_HOURS : 24;
 export const supportsDbl5GuardVersion = (item?: ResearchIndicator) =>
   !!item?.priceOverlay && item.core!=='DBL5P' && (item.id === 'DBL5' || item.id === DBL5_HOURLY_CHART.id || item.id === GUARD_PLUS_0_CHART_ID || item.templateId?.startsWith('DBL5') === true);
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
   const builtin = BUILTIN_FEATURES.find(d => d.id === def.id);
   const direct = CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === def.id);
-  const template = direct ?? CUSTOM_RESEARCH_INDICATORS.find(item => def.chartCore === item.core) ?? CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === featureTemplateId(def));
+  const template = direct ?? (usesHourlyCda(def) ? CUSTOM_RESEARCH_INDICATORS.find(item => item.id === CDA_HOURLY_CHART_ID) : undefined) ?? CUSTOM_RESEARCH_INDICATORS.find(item => def.chartCore === item.core) ?? CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === featureTemplateId(def));
   let core = def.chartCore ?? template?.core ?? '_feature_value';
   try {
     const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
@@ -141,7 +146,7 @@ export function syncResearchIndicatorConfigs<T extends { type: string; period: n
     changed = true;
     const preserveResponseWindow = response && (config.featureWindowPeriod == null || config.featureWindowPeriod === item.period);
     const reset = !preserveResponseWindow && (config.featureDefinitionVersion != null || hasSavedFeatureDefinition(item.featureId));
-    return { ...config, period: reset ? researchDefaultPeriod(item) : config.period, ...(reset ? { avgHours: 24 } : {}), featureDefinitionVersion: version, ...(response ? {featureWindowPeriod:item.period} : {}) };
+    return { ...config, period: reset ? researchDefaultPeriod(item) : config.period, ...(reset ? { avgHours: researchAverageHours(item) } : {}), featureDefinitionVersion: version, ...(response ? {featureWindowPeriod:item.period} : {}) };
   });
   return changed ? next : configs as T[];
 }
@@ -233,7 +238,7 @@ export function researchChartFormula(item: ResearchIndicator, formula: string): 
   const named = namedChartFormula(formula);
   const names = new Set(compileFeatureFormula(named).program.statements.map(s => s.name));
   const series = researchSeriesNames(item, named);
-  return item.rawOnly?named:appendResearchAverages(named, names, series);
+  return item.rawOnly?named:appendResearchAverages(named, names, series, researchAverageHours(item));
 }
 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
@@ -258,7 +263,7 @@ const extendedData = new WeakMap<KLineData[],Map<KLineData[],ExtendedChartData>>
 const EMPTY_HISTORY: KLineData[] = [];
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
 function formulaPlan(item: ResearchIndicator, source: string) {
-  const key = `${item.core}\n${source}`;
+  const key = `${item.id}\n${item.core}\n${source}`;
   let plan = formulaPlans.get(key);
   if (!plan) {
     const formula = researchChartFormula(item, source);
@@ -356,10 +361,12 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const def = accountFeatureDef(item.featureId);
   if (!def) return empty();
   if(def.retentionSourceId)item={...item,components:retentionComponents(def.retentionPrefix)};
+  const hourlyCda = usesHourlyCda(def);
+  const defaultAverage = researchAverageHours(item);
   let formula: string, usesBtc: boolean;
   try {
     ({ formula, usesBtc } = formulaPlan(item, def.formula));
-    if (options.averageHours != null && options.averageHours > 24) {
+    if (options.averageHours != null && options.averageHours > defaultAverage) {
       const core = researchSeriesNames(item, formula).core;
       let helper = '_display_average_history';
       while (formula.includes(helper)) helper += '_';
@@ -368,12 +375,12 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     }
   } catch { return empty(); }
   const dbl5=dbl5ProfileForFeature(featureTemplateId(def));
-  if(dbl5&&chartInterval(data)!==dbl5.minutes*60_000)return empty();
+  if ((dbl5 && chartInterval(data) !== dbl5.minutes * 60_000) || (hourlyCda && chartInterval(data) !== 3_600_000)) return empty();
   const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length) {
     const step = chartInterval(data);
     const dblStart=dbl5?(def.DBL5_initialization_start??data[0]?.DBL5_initialization_start as number|undefined):undefined;
-    const wanted=dblStart===undefined?chartFeatureHistoryBars(item.featureId,period,formula,featureUsesMbiFamily(def)||item.marketEvidence?step/60000:5):Math.max(0,(data[0].timestamp-dblStart)/step);
+    const wanted=dblStart===undefined?chartFeatureHistoryBars(item.featureId,period,formula,featureUsesMbiFamily(def)||item.marketEvidence||hourlyCda?step/60000:5):Math.max(0,(data[0].timestamp-dblStart)/step);
     const namespace=item.marketEvidence?featureTemplateId(def):featureUsesMbi2(def)||item.featureId==='ctba_12h-bear'?item.featureId:undefined;
     const fetched = options.fetchReference !== false ? chartPrehistory(data,wanted,step,namespace) : EMPTY_HISTORY;
     if(dbl5&&options.fetchReference!==false&&!chartPrehistoryReady(data,wanted,step,namespace))return {...empty(),pending:true};
@@ -447,10 +454,10 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const components=item.components?{components:Object.fromEntries(item.components.map(name=>[name,scaled(name,false)]))}:{};
   // Do not use out.core: the last account expression may itself be the weighted average.
   if (options.averageHours != null) {
-    if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });
+    if (options.averageHours === defaultAverage) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });
     const core = out?.vars.get(names.core) ?? data.map(() => null);
     const average = (kind: 'avg' | 'avg2') => {
-      const values = displayAverage(core, options.averageHours! * (item.marketEvidence ? 300000 / step : 1), kind);
+      const values = displayAverage(core, options.averageHours! * (item.marketEvidence ? 300000 / step : 1), kind, hourlyCda ? 60 : 5);
       return Array.from({ length: visibleLength }, (_, i) => {
         const index = visibleOffset + i;
         if (item.marketEvidence && unclosed(index)) return null;

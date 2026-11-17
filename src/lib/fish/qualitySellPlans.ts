@@ -24,7 +24,7 @@ export function makeQualitySellPlan(choice: string, direction: '<' | '>' | '>=',
   const filter = makeQualityBuyFilter(choice, direction, threshold ?? 0, true, definitions);
   const def = definitions.find(d => d.id === filter.snapshot.featureId)!;
   if (filter.metric === '结果' || compileFeatureFormula(def.formula).program.statements.some(s => s.name === filter.metric)) {
-    filter.snapshot.definitionKey = definitionKey({ ...def, interval: '5m' });
+    filter.snapshot.definitionKey = definitionKey({ ...def, interval: filter.snapshot.interval === '1h' ? '1h' : '5m' });
   }
   return { ...original, id: original?.id ?? id, label: filter.label, metric: filter.metric, snapshot: filter.snapshot,
     definitionSource: 'account', execution: 'intrabar-1m', vetoFill: 'stop',

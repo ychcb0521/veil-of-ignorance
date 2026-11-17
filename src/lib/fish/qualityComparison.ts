@@ -1,3 +1,4 @@
+import { CDA_FIVE_MINUTE_LABEL, CDA_HOURLY_ID, usesHourlyCda } from '@/lib/cdaPeriods';
 import { qualityRowMonitorTimeBasis } from './qualityAdmissionTime';
 import { researchChartFormula, researchIndicatorForFeature } from '@/lib/researchIndicators';
 import { isLegacyQualityPlan } from './qualityLegacyEngine';
@@ -24,7 +25,7 @@ export function enableQualityComparison(study: FishQualityStudy, definitions = a
   if (study.sellPlans) return study;
   const sellPlans: QualityGroup[] = [
     { def: STATE_DEF, metric: 'state', label: '状态 S 原始值', threshold: .5 },
-    { def: CDA_DEF, metric: 'CDA', label: 'CDA 原始值', threshold: -8 },
+    { def: CDA_DEF, metric: 'CDA', label: CDA_FIVE_MINUTE_LABEL + ' 原始值', threshold: -8 },
   ].map(({ def: builtin, metric, label, threshold }) => {
     const def = definitions.find(d => d.id === builtin.id) ?? builtin;
     return { id: `sell-${def.id}-raw`, label, metric, definitionSource: 'account' as const, execution: 'intrabar-1m' as const, vetoFill: 'stop' as const,
@@ -51,7 +52,7 @@ export function ensureQualitySellCombo(study: FishQualityStudy): FishQualityStud
     ...structuredClone(cda), id: QUALITY_SELL_COMBO_ID, label: '卖出算法组合1',
     // CDA 方案设过门槛才沿用（直接可用）；没设过就先「设置门槛」，在组合的卖出设置里应用后才开始算
     rule: cda.rule ? { ...cda.rule } : undefined,
-    combo: { switchPct: 5.1, beforeLabel: 'CDA', after: { label: '状态 S', metric: state.metric, snapshot: structuredClone(state.snapshot),
+    combo: { switchPct: 5.1, beforeLabel: CDA_FIVE_MINUTE_LABEL, after: { label: '状态 S', metric: state.metric, snapshot: structuredClone(state.snapshot),
       rule: state.rule ? { ...state.rule } : { metric: state.metric, direction: '<', threshold: state.snapshot.threshold } } },
     buyFilters: cda.buyFilters ? structuredClone(cda.buyFilters) : study.buyFilters ? structuredClone(study.buyFilters) : undefined,
     holdingVetoes: cda.holdingVetoes ? structuredClone(cda.holdingVetoes) : undefined,
@@ -100,10 +101,13 @@ export function syncQualityThresholdDefinitions(study: FishQualityStudy, definit
     if (hasAdditionMetricTime(old)) return old;
     const def = definitions.find(d => d.id === old.featureId) ?? BUILTIN_FEATURES.find(d => d.id === old.featureId);
     if (!def) return old;
-    const key = definitionKey({ ...executableThresholdDef(def, metric, averages), interval: '5m' });
-    if (old.definitionKey === key && old.featureName === def.name && old.featureShort === def.short) return old;
+    const interval = usesHourlyCda(def) ? '1h' : '5m';
+    const key = definitionKey({ ...executableThresholdDef(def, metric, averages), interval });
+    // Display names can change without altering a saved CDA snapshot.
+    if (old.definitionKey === key && (old.featureId === CDA_DEF.id || old.featureId === CDA_HOURLY_ID ||
+      old.featureName === def.name && old.featureShort === def.short)) return old;
     changed = true;
-    return { ...old, definitionKey: key, featureName: def.name, featureShort: def.short, interval: '5m' };
+    return { ...old, definitionKey: key, featureName: def.name, featureShort: def.short, interval };
   };
   const filters = (items: QualityBuyFilter[] | undefined) => {
     if (!items) return items;

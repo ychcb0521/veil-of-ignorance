@@ -1,3 +1,4 @@
+import { CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import { useId, useMemo } from 'react';
 import { AVG_HOURS_PRESETS, HALF_LIFE_PRESETS, avgHoursOf, halfLifeOf, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { additionMetricBaseDefinition, additionMetricTime, additionMetricTimeFields, metricIntervalOptions, type AdditionMetricTime } from '@/lib/fish/qualityAdditionMetric';
@@ -29,6 +30,8 @@ export function FishMetricTimeFields({ label, metric, definition, snapshot, time
   const { base, periods, hours } = options;
   const time = draftTime ?? (snapshot && additionMetricTime(snapshot));
   const interval = time?.interval ?? intervalOf(base);
+  const hourly = usesHourlyCda(base);
+  const timeScale = hourly ? CDA_HOURLY_TIME_SCALE : 1;
   return <div className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground ${className}`}>
     <label className="inline-flex items-center gap-1">
       K 线周期
@@ -64,8 +67,8 @@ export function FishMetricTimeFields({ label, metric, definition, snapshot, time
             className={field + ' w-24 font-mono tabular-nums'}/>
           小时
         </label>
-        <datalist id={presetId}>{(key === 'hl' ? HALF_LIFE_PRESETS : AVG_HOURS_PRESETS).map(hours => <option key={hours} value={hours}/>)}</datalist>
-        {key === 'window' && ['1', '24'].map(preset => <button key={preset} type="button" disabled={disabled}
+        <datalist id={presetId}>{(key === 'hl' ? HALF_LIFE_PRESETS : AVG_HOURS_PRESETS).map(hours => <option key={hours} value={hours * timeScale}/>)}</datalist>
+        {key === 'window' && [1, 24].map(hours => String(hours * timeScale)).map(preset => <button key={preset} type="button" disabled={disabled}
           aria-label={`${label} ${name} ${preset} 小时`} aria-pressed={value !== '' && Number(value) === Number(preset)}
           onClick={() => set(preset)} className="h-6 rounded border border-border/60 px-1.5 hover:text-foreground aria-pressed:border-primary/50 aria-pressed:text-primary disabled:opacity-40">{preset}h</button>)}
       </div>;

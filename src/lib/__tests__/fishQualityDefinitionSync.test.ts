@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { STATE_DEF, CDA_DEF, definitionKey, FEATURES_KEY } from '@/lib/deepDig/features';
+import { STATE_DEF, CDA_DEF, CDA_HOURLY_DEF, definitionKey, FEATURES_KEY } from '@/lib/deepDig/features';
 import { enableQualityComparison, qualityRowResult, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { archiveQualityStudy } from '@/lib/fish/qualityCampaignArchive';
 import { collectFishQuality, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDefinition, qualityResultKey } from '@/lib/fish/quality';
@@ -59,4 +59,37 @@ it('keeps generated averages and anonymous outputs executable and syncing twice 
     expect(qualityDefinition(next.sellPlans![0].snapshot).formula).toContain(metric + ' =');
     expect(syncQualitySellDefinitions(next, [def])).toBe(next);
   }
+});
+
+
+it('keeps the hourly CDA executable in filters, staged sellers and hard vetoes while preserving legacy fingerprints', async () => {
+  const { makeQualityBuyFilter, makeQualityHoldingVeto, makeQualitySignalMetrics } = await import('@/lib/fish/qualityFilters');
+  const { makeQualitySellPlan } = await import('@/lib/fish/qualitySellPlans');
+  const { freezeQualityPlan, planVersionChanges } = await import('@/lib/fish/qualityPlanVersions');
+  const { qualityMetricPlan } = await import('@/lib/fish/quality');
+  const defs = [CDA_DEF, CDA_HOURLY_DEF];
+  const cdaHour = CDA_HOURLY_DEF.id + ':CDA';
+  const cdaAvg = CDA_HOURLY_DEF.id + ':avg_CDA_2';
+  const sell = makeQualitySellPlan(cdaHour, '<', -10, defs);
+  const sellAverage = makeQualitySellPlan(cdaAvg, '<', -10, defs);
+  const filter = makeQualityBuyFilter(cdaAvg, '<', -12, true, defs);
+  const veto = makeQualityHoldingVeto(cdaHour, '<', -15, true, defs);
+  const [signalMetric] = makeQualitySignalMetrics([cdaHour], defs);
+  const old = makeQualitySellPlan('cda:CDA', '<', -10, defs);
+  const legacy = {...old, snapshot: {...old.snapshot, featureShort:'CDA', featureName:'买方阻力'}};
+  const frozenLegacy = freezeQualityPlan(legacy);
+  const frozen = freezeQualityPlan({...sell, buyFilters:[filter], holdingVetoes:[veto],
+    combo:{beforeLabel:sell.label, switchPct:2.5, after:{label:sellAverage.label, metric:sellAverage.metric,
+      snapshot:sellAverage.snapshot, rule:{metric:sellAverage.metric, direction:'<', threshold:-10}}}});
+  expect(planVersionChanges(JSON.parse(JSON.stringify(frozenLegacy)))).toEqual([]);
+  expect(planVersionChanges(JSON.parse(JSON.stringify(frozen)))).toEqual([]);
+  expect(frozenLegacy.frozenVersions?.some(v => v.key === 'cda-hourly')).toBe(false);
+  expect(frozen.frozenVersions?.find(v => v.key === 'cda-hourly')?.version).toContain('cda-1h-v1');
+  for (const item of [filter, sell, sellAverage, signalMetric]) {
+    expect(qualityMetricPlan(item.snapshot, item.metric).plan.step).toBe(3_600_000);
+  }
+  expect(qualityMetricPlan(veto.snapshot!, veto.metric).plan.step).toBe(3_600_000);
+  expect(qualityMetricPlan(old.snapshot, old.metric).plan.step).toBe(300_000);
+  const study = { ...newQualityStudy(), sellPlans:[frozen, frozenLegacy] };
+  expect(syncQualitySellDefinitions(study, defs).sellPlans).toEqual(study.sellPlans);
 });

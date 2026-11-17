@@ -1,3 +1,4 @@
+import { CDA_HOURLY_ID, usesHourlyCda } from '@/lib/cdaPeriods';
 import {dbl5ProfileForFeature,withDbl5GuardVersion,type Dbl5GuardVersion} from '@/lib/dbl5m';
 import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import {sbsHistoryBars} from '@/lib/sbs5m';
@@ -100,7 +101,7 @@ export const chartFeatureDef = (id: string): DeepDigFeatureDef | undefined => ac
  */
 const CHART_PARAM: Record<string, { param: 'hl' | 'avgh' } | { constant: string }> = {
   prs6h:{param:'hl'}, ati6h:{param:'hl'}, 'drift-speed': { param: 'hl' }, 'drift-speed-z': { param: 'hl' }, cba: { param: 'hl' }, 'cba-2': { param: 'hl' },
-  state: { param: 'avgh' }, state2: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
+  state: { param: 'avgh' }, state2: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' }, [CDA_HOURLY_ID]: { param: 'hl' },
   ctba: { constant:'N' }, cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
 };
 
@@ -197,9 +198,10 @@ export function chartFeatureHistoryBars(featureId: string, period: number, formu
   const cached = historyBarsCache.get(key);
   if (cached != null) return cached;
   const params = { ...featureParams(def), BAR_MINUTES:barMinutes, hl, avgh, 半衰期: hl, 平均时长: avgh, ...(usesMbi ? { MBI_N: period } : {}) };
+  const calendarHours = def.retentionSourceId || usesHourlyCda(def);
   const bars = usesMbi
     ? Math.max(programHistoryBars(program, params, barMinutes) + 1, Math.ceil(48 * 60 / barMinutes) + Math.max(5 * period, programHistoryBars(program, params, barMinutes, true)))
-    : programHistoryBars(program, params, def.retentionSourceId?barMinutes:5) + Math.ceil(32 * hl * (def.retentionSourceId?60/barMinutes:12)) + 2;
+    : programHistoryBars(program, params, calendarHours ? barMinutes : 5) + Math.ceil(32 * hl * (calendarHours ? 60 / barMinutes : 12)) + 2;
   if (historyBarsCache.size >= 128) historyBarsCache.clear();
   historyBarsCache.set(key, bars);
   return bars;
@@ -226,15 +228,16 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   const usesMbi = featureUsesMbi(def), usesMbi2=featureUsesMbi2(def), templateId = featureTemplateId(def);
   const formula = options.formula ?? def.formula;
   const dbl5=dbl5ProfileForFeature(templateId);
+  const hourlyCda = usesHourlyCda(def);
   const marketEvidence=!!dbl5||['ati6h','prs6h','sbs_5m'].includes(templateId??'');
-  if ((dbl5||['ctba','sbs_5m'].includes(templateId??'')) && dataList.length > 1) {
+  if ((dbl5||hourlyCda||['ctba','sbs_5m'].includes(templateId??'')) && dataList.length > 1) {
     // A missing first candle must not classify an otherwise 5m series as 10m.
     let cadence = Infinity;
     for (let i = 1; i < Math.min(dataList.length, 64); i++) {
       const step = dataList[i].timestamp - dataList[i - 1].timestamp;
       if (step > 0) cadence = Math.min(cadence, step);
     }
-    if (cadence !== (dbl5?.minutes??5)*60_000) return null;
+    if (cadence !== (dbl5?.minutes ?? (hourlyCda ? 60 : 5))*60_000) return null;
   }
   const binding = CHART_PARAM[featureTemplateId(def) ?? featureId];
   const p = Number(period);
@@ -242,7 +245,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   const constant = binding && 'constant' in binding ? binding.constant : null;
   const mbi2Minutes=usesMbi2?mbi2MinutesOf(dataList.slice(-65).map(b=>b.timestamp)):5;
   const params = {
-    interval: '5m' as const,
+    interval: hourlyCda ? '1h' as const : '5m' as const,
     halfLifeHours: binding && 'param' in binding && binding.param === 'hl' && has ? p : def.halfLifeHours,
     avgHours: binding && 'param' in binding && binding.param === 'avgh' && has ? p : def.avgHours,
     ...(usesMbi ? {

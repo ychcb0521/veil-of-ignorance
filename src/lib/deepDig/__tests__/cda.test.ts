@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_FEATURES, CBA_DEF, CBA_FORMULA, CDA_DEF, CDA_FORMULA, checkDefinition, compileFeatureFormula, evaluateOnBars, featureWindowMs, mergeFeatureDefs } from '../features';
+import { BUILTIN_FEATURES, CBA_DEF, CBA_FORMULA, CDA_DEF, CDA_HOURLY_DEF, CDA_FORMULA, checkDefinition, compileFeatureFormula, evaluateOnBars, featureWindowMs, mergeFeatureDefs } from '../features';
+import { researchChartFormula, researchChartSeries, researchIndicatorForFeature } from '@/lib/researchIndicators';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 function bars(buyShare?: number): ResearchBar[] {
   let c = 100;
@@ -36,13 +37,35 @@ function manual(data: ResearchBar[], t: number, minutes: number) {
 describe('CDA 买方阻力', () => {
   it('追加独立特征值，可编辑与隐藏；CBA 原定义及窗口、参数和显示尺度保留', () => {
     expect(BUILTIN_FEATURES.find(d=>d.id==='cda')).toBe(CDA_DEF);
-    expect(CDA_DEF).toMatchObject({ name: '买方阻力', short: 'CDA', scale: 1, unit: '' });
+    expect(CDA_DEF).toMatchObject({ name: '买方阻力 CDA-5mins', short: 'CDA-5mins', scale: 1, unit: '' });
     expect(checkDefinition(CDA_DEF)).toEqual({ formula: null, groups: null, scale: null });
     for (const params of [{}, { interval: '15m' as const, avgHours: 48, halfLifeHours: 12 }]) expect(featureWindowMs({ ...CDA_DEF, ...params })).toBe(featureWindowMs({ ...CBA_DEF, ...params }));
     const edited = { ...CDA_DEF, formula: CDA_FORMULA + '\navg_CDA = avg(CDA, 24)' };
     expect(mergeFeatureDefs([edited]).find(d => d.id === 'cda')?.formula).toBe(edited.formula);
     expect(mergeFeatureDefs([{ ...CDA_DEF, removed: true }]).some(d => d.id === 'cda')).toBe(false);
     expect(mergeFeatureDefs([]).find(d => d.id === 'cba')?.formula).toBe(CBA_FORMULA);
+  });
+  it('保持每个时间窗口的 K 线根数，原值和两条均值与同序列的 5 分钟基准逐根一致', () => {
+    const old = CDA_FORMULA + '\navg_CDA = avg(CDA, 24)\nm = avg(CDA, 6)\navg_CDA_2 = (4*m + 3*ago(m, 6) + 2*ago(m, 12) + ago(m, 18))/10';
+    const hourlyFormula = researchChartFormula(researchIndicatorForFeature(CDA_HOURLY_DEF), CDA_HOURLY_DEF.formula);
+    const data = bars();
+    const hourBars = data.map(bar => ({ ...bar, openTime: bar.openTime * 12 }));
+    const expected = run(data, old, CDA_DEF), actual = run(hourBars, hourlyFormula, CDA_HOURLY_DEF);
+    expect(CDA_HOURLY_DEF).toMatchObject({ interval: '1h', halfLifeHours: 72, avgHours: 288 });
+    expect(CDA_HOURLY_DEF.formula).toContain('hl, 576)');
+    expect(featureWindowMs(CDA_HOURLY_DEF)).toBe(12 * featureWindowMs(CDA_DEF));
+    for (const name of ['CDA', 'avg_CDA', 'avg_CDA_2']) {
+      expect(Number.isFinite(at(expected, name, 819))).toBe(true);
+      expect(actual.vars.get(name)).toEqual(expected.vars.get(name));
+    }
+    const chart = (list: ResearchBar[]) => list.map(b => ({ timestamp:b.openTime, open:b.open,high:b.high,low:b.low,
+      close:b.close,volume:b.volume!,turnover:b.quoteVolume!,takerBuyTurnover:b.takerBuyQuoteVolume! }));
+    const item = researchIndicatorForFeature(CDA_HOURLY_DEF);
+    expect(researchChartSeries(chart(data), item, 72, { fetchReference:false }).core.every(v => v === null)).toBe(true);
+    const plotted = researchChartSeries(chart(hourBars), item, 72, { fetchReference:false, averageHours:288 });
+    expect(plotted.core.at(-1)).toBe(at(actual, 'CDA', 819));
+    expect(plotted.avg.at(-1)).toBe(at(actual, 'avg_CDA', 819));
+    expect(plotted.avg2.at(-1)).toBe(at(actual, 'avg_CDA_2', 819));
   });
   it.each([5, 15])('逐项独立手算 %s 分钟周期的 48h 保留下移、时间归一化及上一根波动率', minutes => {
     const data = bars().map((b, i) => ({ ...b, openTime: i * minutes * 60000 }));

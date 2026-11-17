@@ -1,3 +1,4 @@
+import { CDA_HOURLY_CHART_ID, CDA_HOURLY_ID } from '@/lib/cdaPeriods';
 import { SELLER_RETENTION_SPECS } from '@/lib/sellerRetention';
 import {SELLER_FOCUS_FEATURES,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {CLEAN_ACCELERATION_1116_ID} from '@/lib/cleanAcceleration1116Chart';
@@ -13,7 +14,7 @@ export const CUSTOM_INDICATOR_GROUPS = [
   {key:'darvas-box',featureIds:['darvas_5m_lower','dbl5-guard-impulse-1115-v1','darvas_5m_distance_bps','darvas_5m_width_bps','darvas_5m_age_minutes'],ids:['DBL5',IMPULSE_5M_ID,GUARD_PLUS_0_CHART_ID,GUARD_1115_CHART_ID,IMPULSE_1115_CHART_ID,'DBL5_GUARD_PLUS','DBL5_DISTANCE','DBL5_WIDTH','DBL5_AGE'],title:'达瓦斯箱体 · 5m',note:'原版和 1115 各自提供防守线、急拉线与组合。距离和箱宽用基点，年龄用分钟。'},
   {key:'sbs-structure',featureIds:['sbs_5m','sbs_5m_quality','sbs_5m_distance','sbs_5m_step'],ids:['SBS5M','SBS5M_QUALITY','SBS5M_DISTANCE','SBS5M_STEP'],title:'台阶箱体支撑',note:'5m已收盘 · 主图价格台阶；证据分、标准化距离与台阶幅度为独立输出。研究初值。'},
   {key:'addition-evidence',featureIds:['ati6h','prs_intraday_add_evidence_6h'],ids:['ATI6H','PRS6H'],title:'多头追加支持证据',note:'最近6小时已收盘市场证据；ATI-6H 为0–1，PRS-6H 为0–100。均不是加仓指令或胜率。'},
-  { key: 'advantage', featureIds: ['cba', 'cda'], title: '是否保住单边优势', ids: ['CBA', 'CDA'], note: '0：净保留的单边优势为零。' },
+  { key: 'advantage', featureIds: ['cba', 'cda', CDA_HOURLY_ID], title: '是否保住单边优势', ids: ['CBA', 'CDA', CDA_HOURLY_CHART_ID], note: '0：净保留的单边优势为零。' },
   {key:'seller-retention',featureIds:SELLER_RETENTION_SPECS.map(s=>s.id),ids:SELLER_RETENTION_SPECS.map(s=>s.chartId),title:'卖方成果保留（独立副本）',note:'0：综合均衡参考；负值表示卖方倾向。原算法与新增位移分量共同决定。'},
   {key:'seller-focus-v2',featureIds:SELLER_FOCUS_FEATURES.map(d=>d.id),ids:SELLER_FOCUS_FEATURES.map(d=>'FEATURE_'+d.id),title:'空方特征 · 版本2（近2小时加权）',note:'保留原窗口，最近2小时的相对权重为更早数据的3倍；独立公式，可分别研究与选择。状态S保持0–1刻度。'},
 ] as const;

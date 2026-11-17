@@ -1,3 +1,4 @@
+import { CDA_HOURLY_ID, usesHourlyCda } from '@/lib/cdaPeriods';
 import { CUSTOM_RESEARCH_INDICATORS, researchSeriesNames } from './researchIndicators';
 import { chartFeatureDef } from '@/lib/featureSource';
 import { loadSignals, sortSignalsBy, SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
@@ -54,7 +55,8 @@ export function avgCalibrationContext(featureId: string, period: number, hours: 
           };
           worker.onerror = () => { for (const [k, state] of states) if (state.startsWith('校准中')) states.set(k, '校准失败，请重载后重试'); notify(); };
         }
-        const definitions = AVG_HIGHLIGHT_SPECS.map(item => {
+        const hourly = usesHourlyCda(def);
+        const definitions = AVG_HIGHLIGHT_SPECS.filter(item => hourly ? item.featureId === CDA_HOURLY_ID : item.featureId !== CDA_HOURLY_ID).map(item => {
           const definition = chartFeatureDef(item.featureId)!;
           const defaultPeriod = ['state', 'state2', 'cbi2', 'cdi2'].includes(item.featureId) ? definition.avgHours ?? 24 : ['bss', 'dss'].includes(item.featureId) ? 12 : definition.halfLifeHours ?? 6;
           const indicator = CUSTOM_RESEARCH_INDICATORS.find(i => i.featureId === item.featureId)!;

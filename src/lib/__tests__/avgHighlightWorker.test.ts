@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ cache: new Map<string, unknown>(), evaluate: vi.fn(), fetchBars: vi.fn() }));
 vi.mock('../avgHighlightStorage', () => ({ readAvgCache: async (k: string) => mocks.cache.get(k), writeAvgCache: async (k: string, value: unknown) => { mocks.cache.set(k, value); } }));
-vi.mock('@/lib/deepRsa/marketData', () => ({ fetchResearchKlines: mocks.fetchBars, clearMarketDataCache: vi.fn() }));
+vi.mock('@/lib/deepRsa/marketData', async original => ({ ...await original<typeof import('@/lib/deepRsa/marketData')>(), fetchResearchKlines: mocks.fetchBars, clearMarketDataCache: vi.fn() }));
 vi.mock('@/lib/deepDig/features', async original => ({ ...await original<typeof import('@/lib/deepDig/features')>(), evaluateOnBars: mocks.evaluate }));
 import { AVG_CALIBRATION_CUTOFF, AVG_HIGHLIGHT_SPECS, avgCoreKey } from '../avgHighlight';
 
