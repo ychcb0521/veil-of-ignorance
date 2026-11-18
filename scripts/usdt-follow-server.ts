@@ -1,4 +1,5 @@
 import { createUsdtPositionReader } from './usdt-position-reader.ts';
+import { readMacUsdtCredentials } from './usdt-macos-credentials.ts';
 import { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
 import { findUsdtCampaignFollow, usdtLiveCampaignId } from '../src/lib/fish/usdtLiveCampaign.ts';
 import { USDT_FOLLOW_MONITOR_BASIS } from '../src/lib/fish/usdtFollowMonitorBasis.ts';
@@ -25,6 +26,7 @@ const dashPort = 47321;
 const bodyLimit = 1_000_000;
 
 function loadCredentials(directory: string) {
+  if (process.platform === 'darwin') return readMacUsdtCredentials(directory);
   if (process.platform !== 'win32') throw Error('币安凭证由 Windows 当前用户保护');
   const script = [
     '$ErrorActionPreference="Stop"',

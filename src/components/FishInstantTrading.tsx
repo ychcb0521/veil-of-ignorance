@@ -187,7 +187,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
             ? follow.paused ? '已暂停开仓和加仓，现有实盘战役继续处理减仓和平仓。' : verifiedExecutor
               ? '实时新鱼入选后按冻结的买后模板开仓。币安手动仓位须逐笔确认托管。'
               : '本机执行端待更新。新版页面暂缓发送实盘开仓和加仓，已有仓位可继续减仓和平仓。'
-            : follow.issue || '在 Windows 启动执行端，将它生成的配对码填在这里。'}</p>
+            : follow.issue || '在本机启动执行端，将它生成的配对码填在这里。'}</p>
           <p className="select-all break-all text-muted-foreground">账号 ID {follow.owner}</p>
           <form className="flex items-center gap-2" onSubmit={async event => {
             event.preventDefault();
