@@ -51,6 +51,7 @@ import { FishQuality } from '@/components/FishQuality';
 import { FishLibraryDataManager } from './FishLibraryDataManager';
 import { ModuleErrorBoundary } from '@/components/ModuleErrorBoundary';
 import type { FishQualityState } from '@/hooks/useFishQuality';
+import { screenedSourceKeys, isScreenedSource } from '@/lib/fish/screenedSources';
 
 import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSuggestion,suggestedFishThreshold,mayFillFishThreshold,fishSuggestionTitle,type FishSuggestion,type FishSuggestionOptions,type FishSuggestionProgress} from '@/lib/fish/suggestions';
 
@@ -321,6 +322,8 @@ export function FishPanel(p: FishPanelProps) {
     window: { ...DEFAULT_FISH_HIT_RATE_WINDOW },
   });
   const {fresh,old}=useMemo(()=>{const fresh:TradeSignal[]=[],old:TradeSignal[]=[];for(const signal of p.signals)(signal.freshCatch&&fishSignalInRoundWindow(signal,{anchorMs:windowAnchor,lookbackHours:windowHours})?fresh:old).push(signal);return {fresh,old};},[p.signals,windowAnchor,windowHours]);
+  const screenedKeys = useMemo(() => screenedSourceKeys(p.quality?.preEntry?.library), [p.quality?.preEntry?.library.rounds, p.quality?.preEntry?.library.records]);
+  const visibleFresh = useMemo(() => fresh.filter(signal => !isScreenedSource(signal, screenedKeys)), [fresh, screenedKeys]);
   const x = p.progress, auto = p.auto;
   const saveSchedule = (mode: NonNullable<FishPanelProps['auto']>['mode'], hours: number) => {
     setError(auto?.setSchedule({ mode, hours }) ? '' : '捕捞频率未写入浏览器，请保留页面并重试');
@@ -598,7 +601,7 @@ export function FishPanel(p: FishPanelProps) {
     {x?.notice && <p className="break-words text-[10.5px] text-muted-foreground" data-testid="fish-notice">{x.notice}</p>}
     <div className={fishRail}>
       {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼舱」 */}
-      <FishLibrary key={owner+'new'} rememberViewKey={owner+'new'} level="sub" title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} info={<p>最近一次捕捞捕到的鱼。下次点「开始捕捞」时，这些会归入鱼舱。</p>} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼。'}
+      <FishLibrary key={owner+'new'} rememberViewKey={owner+'new'} level="sub" title="新鱼" testId="fish-new" signals={visibleFresh} defaultOpen={visibleFresh.length > 0} info={<p>最近一次捕捞捕到、尚未进入「筛选鱼」的鱼。进入筛选鱼后从这里移出；下次开始捕捞时，原始捕捞记录归入鱼舱。</p>} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼。'}
         tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </div>
     </section>

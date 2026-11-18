@@ -142,8 +142,10 @@ export function useFishMining(o: {
       if (added.length) latest.current.onMined?.(added);
     } catch (e) {
       if(!active())return;
-      if (e instanceof DOMException && e.name === 'AbortError') return; // 让路给捕捞，空闲后原地重扫
-      if (e instanceof Error && e.message === '取数器正忙') return;
+      if (e instanceof DOMException && e.name === 'AbortError' || e instanceof Error && e.message === '取数器正忙') {
+        if (hasMiningWork(readMiningState())) setWaiting('取数器正忙，其他任务结束后自动从当前档继续');
+        return;
+      }
       const fresh = readMiningState();
       if (!ownsAnchor(fresh)) return;
       const at=Date.now(),cooldown=readBinanceCooldown(at),failure=miningFailureState(fresh,e instanceof Error?e.message:String(e),at,'transient');
@@ -192,9 +194,11 @@ export function useFishMining(o: {
   const polling = hasMiningWork(state);
   useEffect(() => {
     if (!polling) return;
-    const timer = setInterval(() => void tickRef.current(), TICK_MS);
+    // A preempted anchor keeps its checkpoint; promptly recheck resource release.
+    const interval = waiting.includes('取数器正忙') ? 1000 : TICK_MS;
+    const timer = setInterval(() => void tickRef.current(), interval);
     return () => clearInterval(timer);
-  }, [o.account, polling]);
+  }, [o.account, polling, waiting]);
   useEffect(() => {
     if (!polling || !state.scan?.linkedLookback) return;
     const delay = state.cursorMs - Date.now();

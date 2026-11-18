@@ -133,9 +133,9 @@ it('waits while the fetcher is busy, rescans the same anchor after yielding, and
   } });
   act(() => h.result.current.start()); await flush(10);
   expect(mine).not.toHaveBeenCalled(); expect(h.result.current.waiting).toContain('取数器正忙');
-  busy = false; await flush(30_000);
+  busy = false; await flush(1000);
   expect(mine).toHaveBeenCalledTimes(1); expect(readMiningState().cursorMs).toBe(MINING_START_MS); // 让路：不前进
-  await flush(30_000);
+  await flush(1000);
   expect(mine).toHaveBeenCalledTimes(2); // 下一次巡检原地重扫，这次出错
   expect(mine.mock.calls[1][0].anchorMs).toBe(MINING_START_MS);
   expect(readMiningState()).toMatchObject({ cursorMs: MINING_START_MS, lastError: '网络中断' });

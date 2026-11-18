@@ -233,7 +233,6 @@ export class FishScanner {
     let progress = {done:0,total:rows.length,current:''}, waitingUntil:number|undefined;
     const publish = () => options.onProgress({...progress,...(waitingUntil?{waitingUntil}:{})});
     const { now, load, marketEnd, marketStart } = await this.qualityMarket(rows.map(row => row.source.symbol), options.signal, until => {
-      this.pool.setPriorityWaiting(options.signal, !!until);
       waitingUntil = until;
       publish();
     });
@@ -249,64 +248,90 @@ export class FishScanner {
 
   async trackScreenedCda(tasks: readonly ScreenedCdaTask[], snapshot: import('@/lib/fish/algorithm').FishSnapshot,
     target: number, signal: AbortSignal, onRead: OnScreenedCdaRead): Promise<void> {
-    const { now, load } = await this.qualityMarket(tasks.map(task => task.source.symbol), signal);
-    let next = 0;
-    const read = async () => {
-      while (next < tasks.length && !signal.aborted) {
-        const task = tasks[next++];
-        try {
-          const result = await readScreenedPositionExit(task, Math.min(now, target), snapshot, load, signal);
-          await onRead(task.id, result);
-        } catch (cause) {
-          if (!signal.aborted) await onRead(task.id, undefined, cause);
+    return this.instant(signal, async signal => {
+      const { now, load } = await this.qualityMarket(tasks.map(task => task.source.symbol), signal);
+      let next = 0;
+      const read = async () => {
+        while (next < tasks.length && !signal.aborted) {
+          const task = tasks[next++];
+          try {
+            const result = await readScreenedPositionExit(task, Math.min(now, target), snapshot, load, signal);
+            await onRead(task.id, result);
+          } catch (cause) {
+            if (!signal.aborted) await onRead(task.id, undefined, cause);
+          }
         }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(tasks.length, 3) }, read));
+      };
+      await Promise.all(Array.from({ length: Math.min(tasks.length, 3) }, read));
+    });
   }
 
   async trackInstantMonitor(sample: QualitySample, monitor: InstantMonitorSettings, buyAt: number,
     target: number, signal: AbortSignal, previous?: QualityResult, exchangeAt?: number) {
-    const { symbol } = sample.source;
-    const { now, load, marketEnd, marketStart } = await this.qualityMarket([symbol], signal);
-    const end = Math.min(target, await marketEnd?.(symbol) ?? now);
-    const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
-    return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start,exchangeAt??Date.now());
+    return this.instant(signal, async signal => {
+      const { symbol } = sample.source;
+      const { now, load, marketEnd, marketStart } = await this.qualityMarket([symbol], signal);
+      const end = Math.min(target, await marketEnd?.(symbol) ?? now);
+      const start = monitor.plan.initialization ? await marketStart?.(symbol) : undefined;
+      return evaluateInstantMonitor(instantMonitorSample(sample, buyAt), monitor, end, load, signal, previous, start,exchangeAt??Date.now());
+    });
   }
 
   async openInstantPosition(input: InstantPositionInput, signal: AbortSignal) {
-    const { load } = await this.qualityMarket([input.source.symbol], signal);
-    return freezeInstantPosition(input, load, signal);
+    return this.instant(signal, async signal => {
+      const { load } = await this.qualityMarket([input.source.symbol], signal);
+      return freezeInstantPosition(input, load, signal);
+    });
   }
 
   async markInstantPosition(input: Pick<InstantPositionInput, 'source' | 'buyAt'>, signal: AbortSignal) {
-    const { now, load } = await this.qualityMarket([input.source.symbol], signal);
-    return readInstantMark(input, now, load, signal);
+    return this.instant(signal, async signal => {
+      const { now, load } = await this.qualityMarket([input.source.symbol], signal);
+      return readInstantMark(input, now, load, signal);
+    });
   }
 
   async buildInstantCampaign(input: InstantCampaignInput, signal: AbortSignal) {
-    let market: ReturnType<FishScanner['qualityMarket']> | undefined;
-    return freezeInstantCampaign(input, async (...args) => {
-      market ??= this.qualityMarket([input.source.symbol], signal);
-      return (await market).load(...args);
-    }, signal);
+    return this.instant(signal, async signal => {
+      let market: ReturnType<FishScanner['qualityMarket']> | undefined;
+      return freezeInstantCampaign(input, async (...args) => {
+        market ??= this.qualityMarket([input.source.symbol], signal);
+        return (await market).load(...args);
+      }, signal);
+    });
   }
 
   async readInstantCampaignCandles(source: InstantCampaignInput['source'], interval: import('@/lib/deepRsa/marketData').ResearchInterval,
     from: number, to: number, signal: AbortSignal) {
-    const { now, load } = await this.qualityMarket([source.symbol], signal);
-    const plan = instantPricePlan(interval), first = Math.floor(from / plan.step) * plan.step;
-    const cut = Math.floor(Math.min(now, to) / plan.step) * plan.step;
-    const bars: ResearchBar[] = [];
-    for (let cursor = first; cursor < cut; cursor += 720 * plan.step) {
-      const end = Math.min(cut, cursor + 720 * plan.step);
-      bars.push(...await load({ ...source, timeMs: end, timeLabel: '', fallbackZone: '' }, cursor, end, plan, signal));
-    }
-    return bars;
+    return this.instant(signal, async signal => {
+      const { now, load } = await this.qualityMarket([source.symbol], signal);
+      const plan = instantPricePlan(interval), first = Math.floor(from / plan.step) * plan.step;
+      const cut = Math.floor(Math.min(now, to) / plan.step) * plan.step;
+      const bars: ResearchBar[] = [];
+      for (let cursor = first; cursor < cut; cursor += 720 * plan.step) {
+        const end = Math.min(cut, cursor + 720 * plan.step);
+        bars.push(...await load({ ...source, timeMs: end, timeLabel: '', fallbackZone: '' }, cursor, end, plan, signal));
+      }
+      return bars;
+    });
+  }
+
+  private async instant<T>(signal: AbortSignal, read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    // Concurrent positions often share their caller's lifetime. Each task owns its priority.
+    const task = new AbortController();
+    const cancel = () => task.abort();
+    if (signal.aborted) cancel();
+    else signal.addEventListener('abort', cancel, { once: true });
+    const release = this.pool.prioritize(task.signal);
+    try { return await read(task.signal); }
+    finally { signal.removeEventListener('abort', cancel); release(); }
   }
 
   private async qualityMarket(symbols: readonly string[], signal: AbortSignal, onWaiting?: (until?:number)=>void) {
-    const retry=createQualityMarketRetry(signal,onWaiting);
+    const retry=createQualityMarketRetry(signal, until => {
+      this.pool.setPriorityWaiting(signal, !!until);
+      onWaiting?.(until);
+    });
     const adapters=new Map(this.adapters);
     const binance=adapters.get('binance');
     if(binance)adapters.set('binance',{
