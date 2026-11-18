@@ -1,3 +1,4 @@
+import { reserveInstantAdmission } from '@/lib/fish/instantAdmission';
 import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
 import {newPreEntryHours, selectedPreEntryPlan} from '@/lib/fish/preEntryActivePlan';
@@ -133,8 +134,17 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
       }
     };
     let matchCheckpoint: Promise<boolean> | undefined, admittedRound: PreEntryRound | undefined;
-    const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound) =>
-      savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [record] }, true).then(() => {
+    const checkpointMatch = (record: PreEntryRecord, completed: PreEntryRound): Promise<boolean> => (async () => {
+      if (round.instantTrading && owner && !await reserveInstantAdmission(owner, record, completed)) {
+        const skipped = { ...record, status: 'unmatched' as const, matchedAt: undefined, detail: '该标的已有持仓，本次信号跳过开仓' };
+        await savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [skipped] }, true);
+        if (live()) {
+          commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r), records: current.current.records.map(r => r.id === record.id ? skipped : r) });
+          unconfirmedAdmissions.current.delete(completed.id);
+        }
+        return true;
+      }
+      return savePreEntryLibrary(owner, { version: 1, rounds: [completed], records: [record] }, true).then(() => {
         if (live()) {
           commit({ ...current.current, rounds: current.current.rounds.map(r => r.id === completed.id ? completed : r) });
           unconfirmedAdmissions.current.delete(completed.id);
@@ -143,7 +153,8 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
         }
         void projectCompleted([record]).catch(() => undefined);
         return true;
-      }).catch(() => false);
+      });
+    })().catch(() => false);
     const save = async () => {
       try {
         const snapshot = current.current;

@@ -1,3 +1,4 @@
+import { registerInstantHoldingCheck } from '@/lib/fish/instantAdmission';
 import {QualityTemplateNamesContext} from './QualityTemplateNamesContext';
 import {qualityTemplateNames} from '@/lib/fish/qualityTemplateNames';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -41,6 +42,11 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const usdtLive = useUsdtLiveTrading(owner, usdtFollow);
   const management = useBinanceManualMonitor(usdtFollow, usdtLive, instantMonitor.settings);
   const { issue: campaignIssue, positions } = useInstantCampaigns(owner, cdaTracking, true);
+  useEffect(() => owner ? registerInstantHoldingCheck(owner, symbol => {
+    const code = symbol.replace(/\//g, '').toUpperCase();
+    if (usdtFollow.connected && (!usdtLive.snapshot || !!usdtLive.issue)) throw Error('实盘持仓尚未核对，等待同步后再判断开仓');
+    return (usdtLive.snapshot?.positions ?? []).some(row => row.symbol.replace(/\//g, '').toUpperCase() === code && Number(row.quantity) > 0);
+  }) : undefined, [owner, usdtFollow.connected, usdtLive.snapshot, usdtLive.issue]);
   const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0 || (notify.config.enabled && cdaTracking.hasPendingSaleMail) || positions.length > 0;
   useEffect(() => { if (hasAutomaticWork) setScreeningRequested(true); }, [hasAutomaticWork]);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => {
