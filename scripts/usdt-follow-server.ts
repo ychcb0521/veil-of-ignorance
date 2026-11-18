@@ -1,9 +1,9 @@
 import { createUsdtPositionReader } from './usdt-position-reader.ts';
-import { readMacUsdtCredentials } from './usdt-macos-credentials.ts';
+import { loadUsdtCredentials, readUsdtConfig, usdtRuntime, lockUsdtDirectory } from './usdt-executor-context.ts';
+import { createUsdtHandoffService } from './usdt-handoff-service.ts';
 import { createUsdtCampaignReader } from './usdt-campaign-reader.ts';
 import { findUsdtCampaignFollow, usdtLiveCampaignId } from '../src/lib/fish/usdtLiveCampaign.ts';
 import { USDT_FOLLOW_MONITOR_BASIS } from '../src/lib/fish/usdtFollowMonitorBasis.ts';
-import { execFileSync } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
@@ -23,33 +23,7 @@ import { USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY, validUsdtLiveEntry } from '
 
 const origin = 'https://veil-of-ignorance-ten.vercel.app';
 const dashPort = 47321;
-const bodyLimit = 1_000_000;
-
-function loadCredentials(directory: string) {
-  if (process.platform === 'darwin') return readMacUsdtCredentials(directory);
-  if (process.platform !== 'win32') throw Error('币安凭证由 Windows 当前用户保护');
-  const script = [
-    '$ErrorActionPreference="Stop"',
-    '$saved = Get-Content -LiteralPath $env:VEIL_BINANCE_CREDENTIAL_FILE -Raw | ConvertFrom-Json',
-    '$key = $saved.apiKey | ConvertTo-SecureString',
-    '$secret = $saved.secretKey | ConvertTo-SecureString',
-    'try { @{apiKey=[net.networkcredential]::new("",$key).Password;secret=[net.networkcredential]::new("",$secret).Password} | ConvertTo-Json -Compress }',
-    'finally { $key.Dispose(); $secret.Dispose() }',
-  ].join('\n');
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  let buffer: Buffer;
-  try {
-    buffer = execFileSync('pwsh.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
-      windowsHide: true, timeout: 10_000, env: { ...process.env, VEIL_BINANCE_CREDENTIAL_FILE: join(directory, 'account.dpapi') },
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch { throw Error('无法读取本机加密的币安 API 凭证'); }
-  try {
-    const data = JSON.parse(buffer.toString('utf8'));
-    if (typeof data.apiKey !== 'string' || typeof data.secret !== 'string' || !data.apiKey || !data.secret) throw Error('币安凭证格式错误');
-    return { apiKey: data.apiKey as string, secret: Buffer.from(data.secret as string) };
-  } finally { buffer.fill(0); }
-}
+const bodyLimit = 8_000_000;
 
 function parseCampaigns(value: unknown, now: number): UsdtFollowCampaign[] {
   if (!Array.isArray(value) || value.length > 250) throw Error('即时交易请求格式无效');
@@ -123,7 +97,7 @@ function manualMonitor(value: InstantMonitorSettings) {
 
 export function serveUsdtFollower({
   owner, token, exchange, store, mode, startedAt, positionReader, campaignReader, managedClock, positionRequest,
-  allowedOrigin = origin, port = dashPort, statusFile,
+  allowedOrigin = origin, port = dashPort, statusFile, handoff,
 }: {
   owner: string; token: string; exchange: ReturnType<typeof createUsdtExchange>;
   store: ReturnType<typeof openUsdtFollowStore>; mode: 'hedge' | 'one-way'; startedAt: number;
@@ -132,6 +106,7 @@ export function serveUsdtFollower({
   managedClock?: () => number;
   positionRequest?: UsdtRequest;
   allowedOrigin?: string; port?: number; statusFile?: string;
+  handoff?: ReturnType<typeof createUsdtHandoffService>;
 }) {
   const readManaged = campaignReader && managedClock ? async (anchor: BinanceManualAnchor) => {
     const from = Math.max(1, anchor.openedAt - 1000);
@@ -149,13 +124,14 @@ export function serveUsdtFollower({
       throw Error('该合约存在策略跟随的仓位或待核对委托，请先处理原仓位');
     await controls.beforeOpening(symbol);
   }, managedClock);
+  void handoff?.begin(follower);
   const tokenDigest = digest(token);
   const snapshot = () => ({ connected: true, paused: follower.paused, startedAt: follower.entryAfter, statuses: follower.statuses(),
     guardPlusAdditions: 1, executionSafety: USDT_EXECUTION_SAFETY, controlRevision: store.controlRevision(),
     ...(positionReader ? { positionMirror: 1 } : {}), ...(campaignReader ? { campaignMirror: 1 } : {}),
     ...(readManaged ? { manualMonitor: 1, monitorSwitch: 1 } : {}), ...(controls ? { positionControls: 1 } : {}),
     ...(readManaged && controls ? { followMonitorSwitch: USDT_FOLLOW_MONITOR_BASIS } : {}),
-    ...(desk ? { orderDesk: 1 } : {}) });
+    ...(desk ? { orderDesk: 1 } : {}), ...(handoff ? { handoff: handoff.describe() } : {}) });
   const server = createServer({ maxHeaderSize: 4000, requestTimeout: 10_000, headersTimeout: 6000 }, (req, res) => {
     const work = async () => {
       if (req.headers.origin !== allowedOrigin ||
@@ -179,6 +155,27 @@ export function serveUsdtFollower({
       const content = await jsonBody(req);
       if (content.owner !== owner) return json(res, 403, { error: '本机执行端绑定了另一个无知之幕账号' });
       if (content.command === 'status') return json(res, 200, snapshot());
+      if (handoff && ['handoff-freeze','handoff-export','handoff-resume','handoff-cancellation','handoff-initialize','handoff-request'].includes(content.command))
+        return json(res, 200, await handoff.command(content, follower));
+      if (content.command === 'handoff-monitor-state') return json(res, 200, {
+        epoch: handoff?.describe().epoch, handoff: handoff?.describe(),
+        campaigns: store.readAll().filter(row => !row.managed && !['closed','ignored'].includes(row.status.state) &&
+          store.local('imported-monitor:' + row.campaign.id)).map(row => ({ campaign: row.campaign,
+            revision: store.local<number>('monitor-revision:' + row.campaign.id) ?? 0 })) });
+      if (handoff && content.command === 'sync' && handoff.capturable()) {
+        follower.captureFrozenMonitors(parseCampaigns(content.campaigns, Date.now()));
+        return json(res, 200, snapshot());
+      }
+      const readCommands = ['positions','position-history','position-campaigns','manual-monitor-status','desk-info'];
+      if (handoff && !readCommands.includes(content.command)) handoff.assertWritable();
+      if (content.command === 'handoff-monitor-update') {
+        const entries = parseCampaigns([content.campaign], Date.now()), id = entries[0].id;
+        if (content.epoch !== handoff?.describe().epoch || content.revision !== (store.local<number>('monitor-revision:' + id) ?? 0))
+          throw Error('接管监测状态已更新，请重新读取');
+        follower.updateRecovered(entries[0]);
+        store.setLocal('monitor-revision:' + id, content.revision + 1);
+        return json(res, 200, { ok: true });
+      }
       if (req.url === USDT_EXECUTION_PATH && desk) {
         if (content.command === 'desk-info') return json(res, 200, await desk.info(content.symbol));
         if (content.command === 'desk-open')
@@ -276,7 +273,7 @@ export function serveUsdtFollower({
   }, 1000);
   server.once('close', () => clearInterval(timer));
   server.listen(port, '127.0.0.1');
-  return server;
+  return Object.assign(server, { follower });
 }
 
 async function main() {
@@ -284,8 +281,9 @@ async function main() {
   if (!directory) throw Error('请指定保存币安凭证的本机目录');
   const live = process.argv.includes('--live');
   const setup = process.argv.includes('--prepare');
-  const credentials = loadCredentials(directory);
-  const request = createUsdtRequest(credentials);
+  const credentials = loadUsdtCredentials(directory);
+  let authorizeWrite: () => void = () => { throw Error('执行权尚未核验，禁止交易'); };
+  const request = createUsdtRequest(credentials, fetch, () => authorizeWrite());
   const exchange = createUsdtExchange(request);
   let verified: Awaited<ReturnType<typeof exchange.account>>;
   try { verified = await exchange.account(); }
@@ -305,32 +303,13 @@ async function main() {
     console.log(JSON.stringify({ connected: true, market: 'USDT-M', mode: verified.mode }));
     return;
   }
-  const config = JSON.parse(readFileSync(join(directory, 'usdt-follow.json'), 'utf8').replace(/^\uFEFF/, ''));
-  if (!/^[a-f0-9-]{36}$/i.test(config.owner) || !/^[0-9a-f]{64}$/i.test(config.token)
-    || config.account !== createHash('sha256').update(verified.id).digest('hex')) throw Error('本机实盘配对设置与币安账户不符');
-  mkdirSync(directory, { recursive: true });
-  const lockPath = join(directory, 'usdt-follow.lock');
-  let lock: number;
-  try { lock = openSync(lockPath, 'wx'); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    const pid = Number(readFileSync(lockPath, 'utf8'));
-    if (!Number.isInteger(pid) || pid <= 0) throw Error('本机执行端正在启动，请稍后重试');
-    try { process.kill(pid, 0); }
-    catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') throw cause;
-      unlinkSync(lockPath);
-      lock = openSync(lockPath, 'wx');
-    }
-    if (lock == null) throw Error('本机 U 本位执行端已运行');
-  }
-  writeFileSync(lock, String(process.pid));
-  let store: ReturnType<typeof openUsdtFollowStore> | undefined;
-  const close = () => {
-    try { store?.close(); } finally { closeSync(lock); unlinkSync(lockPath); credentials.secret.fill(0); }
-  };
-  process.once('exit', close);
-  store = openUsdtFollowStore(join(directory, 'usdt-follow.sqlite'), verified.id, config.owner);
+  const config = readUsdtConfig(directory);
+  if (config.account !== createHash('sha256').update(verified.id).digest('hex')) throw Error('本机配对账户不符');
+  const unlock = lockUsdtDirectory(directory);
+  const store = openUsdtFollowStore(join(directory, 'usdt-follow.sqlite'), verified.id, config.owner);
+  const handoff = createUsdtHandoffService(store, verified.id, config.owner, usdtRuntime(), exchange, request);
+  authorizeWrite = handoff.assertWritable;
+  process.once('exit', () => { try { store.close(); } finally { unlock(); credentials.secret.fill(0); } });
   const clockStart = performance.now();
   const clockReply = await fetch('https://fapi.binance.com/fapi/v1/time', { redirect: 'error', signal: AbortSignal.timeout(10_000) });
   const { serverTime } = await clockReply.json();
@@ -339,9 +318,12 @@ async function main() {
   const managedClock = () => Math.round(serverTime + performance.now() - clockMidpoint);
   const server = serveUsdtFollower({ owner: config.owner, token: config.token, exchange, store, mode: verified.mode, managedClock,
     startedAt: Date.now(), positionReader: createUsdtPositionReader(request, managedClock), campaignReader: createUsdtCampaignReader(request, managedClock),
-    positionRequest: request,
+    positionRequest: request, handoff,
     statusFile: join(directory, 'usdt-follow-status.json') });
-  server.once('listening', () => console.log('币安 U 本位执行端已就绪，等待已配对的即时交易。'));
+  server.once('listening', () => console.log('本机接口已就绪；以交接状态及本次账户对账结果决定是否允许执行。'));
+  for (const signal of ['SIGINT','SIGTERM'] as const) process.once(signal, () => {
+    void handoff.stop((server as typeof server & { follower: ReturnType<typeof createUsdtFollower> }).follower).then(() => server.close(() => process.exit(0)));
+  });
   server.once('error', () => { console.error('本机执行端端口不可用'); process.exit(1); });
 }
 

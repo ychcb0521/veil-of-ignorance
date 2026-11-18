@@ -34,7 +34,7 @@ async function main() {
     saveMacUsdtCredentials(directory, apiKey, secret);
     const token = randomBytes(32).toString('hex');
     writeFileSync(join(directory, 'proxy.json'), JSON.stringify({ proxy }), { mode: 0o600, flag: 'wx' });
-    writeFileSync(join(directory, 'usdt-follow.json'), JSON.stringify({ owner, token, account: createHash('sha256').update(verified.id).digest('hex') }), { mode: 0o600, flag: 'wx' });
+    writeFileSync(join(directory, 'usdt-follow.json'), JSON.stringify({ owner, token, account: createHash('sha256').update(verified.id).digest('hex'), ledgerAccount: verified.id }), { mode: 0o600, flag: 'wx' });
     console.log('账户只读验证通过，凭证已存入 Mac 钥匙串。配置过程没有下单。');
     console.log('本机配对码（仅粘贴到本机无知之幕的实盘配对入口）：\n' + token);
   } finally { credentials.secret.fill(0); }

@@ -6,6 +6,7 @@ import type { QualityGroup } from './quality';
 import { INSTANT_TEMPLATE_MONITOR, instantMonitorTemplateIssue } from './instantMonitorSettings';
 import { isLegacyQualityPlan } from './qualityLegacyEngine';
 import { validUsdtLiveEntry, type UsdtLiveEntry } from './usdtLiveEntry';
+import type { UsdtFrozenMonitor } from './usdtFrozenMonitor';
 
 export type UsdtFollowAction =
   | { id: string; at: number; action: 'open' | 'close' }
@@ -19,6 +20,7 @@ export interface UsdtFollowCampaign {
   leverage: number;
   liveEntry?: UsdtLiveEntry;
   requiresGuardPlus?: true;
+  frozenMonitor?: UsdtFrozenMonitor;
   actions: UsdtFollowAction[];
 }
 export interface UsdtFollowStatus {
@@ -91,7 +93,9 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   actions.sort((a, b) => a.at - b.at || order(a) - order(b));
   const campaign: UsdtFollowCampaign = { id: input.id, source: input.source, admittedAt: record.updatedAt,
     notional: 'notional' in size ? Number(size.notional) : size.marginUsdt * size.leverage, leverage: size.leverage, actions,
-    ...(usesGuardPlus(input.monitor?.plan)?{requiresGuardPlus:true}:{}) };
+    ...(usesGuardPlus(input.monitor?.plan)?{requiresGuardPlus:true}:{}),
+    ...(input.monitor ? { frozenMonitor: { version: 1, admission: { record, round }, checkpoint: monitor,
+      manual, mirror, sale } as UsdtFrozenMonitor } : {}) };
   return validUsdtLiveEntry({ ...campaign, liveEntry }) ? { ...campaign, liveEntry } : campaign;
 }
 

@@ -12,6 +12,9 @@ import type { FishCdaTracking } from './useFishCdaTracking';
 import { readFishPreferences, writeFishPreference } from '@/lib/fish/fishPreferencesDb';
 import { currentUsdtFollowCampaign, usdtFollowCampaigns, type UsdtFollowStatus } from '@/lib/fish/usdtFollow';
 import { USDT_EXECUTION_PATH, USDT_EXECUTION_SAFETY } from '@/lib/fish/usdtLiveEntry';
+import { advanceFrozenUsdtFollow } from '@/lib/fish/usdtFrozenContinuation';
+import type { UsdtFollowCampaign } from '@/lib/fish/usdtFollow';
+import { usdtFollowBatches } from '@/lib/fish/usdtFollowBatches';
 
 const endpoint = 'http://127.0.0.1:47321/api/usdt-follow';
 const executionEndpoint = 'http://127.0.0.1:47321' + USDT_EXECUTION_PATH;
@@ -42,6 +45,7 @@ interface FollowState {
   orderDesk?: 1;
   executionSafety?: number;
   controlRevision?: number;
+  handoff?: { stage: string; authorized: boolean; issue?: string };
 }
 const disconnected: FollowState = { connected: false, paused: false, startedAt: 0, statuses: [] };
 
@@ -95,6 +99,7 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
     const lifetime = new AbortController();
     let running = false, pending = false, startedAt = 0;
     let supportsGuardPlus = false;
+    let supportsHandoff = false;
     let known = new Set<string>();
     let lastResponse = '';
     let connectedOnce = false;
@@ -116,8 +121,10 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
         .flatMap(row => {
           const campaign = currentUsdtFollowCampaign(row, supportsGuardPlus, now);
           if (!campaign) return [];
-          return [control.current.executionSafety === USDT_EXECUTION_SAFETY ? campaign
-            : { ...campaign, actions: campaign.actions.filter(action => action.action !== 'add') }];
+          const { frozenMonitor, ...legacy } = campaign;
+          const safe = supportsHandoff ? campaign : legacy;
+          return [control.current.executionSafety === USDT_EXECUTION_SAFETY ? safe
+            : { ...safe, actions: safe.actions.filter(action => action.action !== 'add') }];
         });
       void (async () => {
         try {
@@ -128,8 +135,14 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
             body: JSON.stringify({ owner, command: kind, campaigns: entries,
               ...(pendingCommand?.revision === undefined ? {} : { controlRevision: pendingCommand.revision }) }),
           });
-          let response = await send(command, command === 'sync' ? current.slice(-250) : []);
+          const batches = command === 'sync' && supportsHandoff ? usdtFollowBatches(current.slice(-250)) : [command === 'sync' ? current.slice(-250) : []];
+          let response = await send(command, batches[0]);
           let payload = await response.json();
+          for (const batch of batches.slice(1)) {
+            if (!response.ok) break;
+            response = await send(command,batch);
+            payload = await response.json();
+          }
           if (command === 'status' && response.status === 400 && payload.error === '未知的实盘指令') {
             if (!legacyMirror || now - lastLegacyProbe >= 15_000) {
               response = await fetch(endpoint, {
@@ -158,6 +171,8 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
           const capabilityChanged=supportsGuardPlus!==(payload.guardPlusAdditions===1);
           supportsGuardPlus=payload.guardPlusAdditions===1;
           if(capabilityChanged)pending=true;
+          if (supportsHandoff !== (payload.handoff?.protocol === 1)) pending = true;
+          supportsHandoff = payload.handoff?.protocol === 1;
           known = new Set(payload.statuses.filter((row: UsdtFollowStatus) => !['ignored', 'closed'].includes(row.state)).map((row: UsdtFollowStatus) => row.id));
           if (commandPending.current === pendingCommand) commandPending.current = undefined;
           const wire = JSON.stringify(payload);
@@ -265,6 +280,35 @@ export function useUsdtFollow(owner: string | undefined, tracking: FishCdaTracki
   const deskClose = useCallback((request: UsdtPositionControlRequest, signal: AbortSignal) =>
     readMirror<UsdtPositionControlResult>({command:'desk-close',request},signal,70_000,true),[readMirror]);
   const data = state.owner === owner ? state.data : disconnected;
+  useEffect(() => {
+    if (!owner || !token || !data.connected || !data.handoff?.authorized || data.handoff.stage !== 'active') return;
+    const abort = new AbortController();
+    let busy = false;
+    const tick = async () => {
+      if (busy || abort.signal.aborted) return;
+      busy = true;
+      try {
+        const frozen = await readMirror<{epoch:number; campaigns:{campaign:UsdtFollowCampaign;revision:number}[]}>(
+          {command:'handoff-monitor-state'},abort.signal,15_000);
+        const market = await import('./useFish');
+        for (const saved of frozen.campaigns) {
+          if (abort.signal.aborted) return;
+          const next = await advanceFrozenUsdtFollow(saved.campaign,Date.now(), (state,end) => {
+            const {record,round} = state.admission;
+            const monitor = state.checkpoint?.instantMonitorSwitches?.at(-1)?.to ?? round.instantMonitor!;
+            return market.readPageInstantMonitor(record.sample,monitor,record.matchedAt!,end,abort.signal,state.checkpoint);
+          }, (from,to) => market.readPageInstantCampaignCandles(saved.campaign.frozenMonitor!.admission.record.sample.source,'1m',from,to,abort.signal));
+          if (next) await readMirror({command:'handoff-monitor-update',epoch:frozen.epoch,revision:saved.revision,campaign:next},
+            abort.signal,15_000,true);
+        }
+      } catch (error) {
+        if (!abort.signal.aborted) setIssue(error instanceof Error ? error.message : '交接持仓监测等待恢复');
+      } finally { busy = false; }
+    };
+    const timer = setInterval(() => void tick(),6000);
+    void tick();
+    return () => { abort.abort(); clearInterval(timer); };
+  },[owner,token,data.connected,data.handoff?.authorized,data.handoff?.stage,readMirror]);
   return { ...data, owner, paired: !!token, issue, connect, pause, resume, readPositions, readPositionHistory, readCampaigns,
     readManualMonitor, adoptManualMonitor, switchManualMonitor, switchFollowMonitor, advanceManualMonitor, controlPosition, readDeskQuote, deskOpen, deskClose };
 }

@@ -52,7 +52,7 @@ export function formatQuantity(units: number, step: string) {
 
 type Json = any;
 export type UsdtRequest = (method: 'GET' | 'POST' | 'DELETE', path: string, params?: Record<string, string>) => Promise<Json>;
-export function createUsdtRequest(credentials: { apiKey: string; secret: Buffer }, fetcher: typeof fetch = fetch): UsdtRequest {
+export function createUsdtRequest(credentials: { apiKey: string; secret: Buffer }, fetcher: typeof fetch = fetch, authorizeWrite?: () => void): UsdtRequest {
   const clocks = new Map<string, { offset: number; sampled: number }>();
   const send = async (method: Parameters<UsdtRequest>[0], path: string, params: Record<string, string>) => {
     const base = path.startsWith('/fapi/') ? futures : spot;
@@ -69,6 +69,8 @@ export function createUsdtRequest(credentials: { apiKey: string; secret: Buffer 
       clock = { sampled: Date.now(), offset: serverTime - Date.now() };
       clocks.set(base, clock);
     }
+    // Recheck after every await and immediately before dispatch. A freeze during clock lookup must fence this request.
+    if (method !== 'GET') authorizeWrite?.();
     const query = new URLSearchParams({ ...params, recvWindow: method === 'GET' ? '12000' : '5000', timestamp: String(Date.now() + clock.offset) });
     query.set('signature', createHmac('sha256', credentials.secret).update(query.toString()).digest('hex'));
     const response = await fetcher(base + path + (method === 'POST' ? '' : '?' + query), {

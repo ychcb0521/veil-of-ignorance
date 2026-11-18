@@ -33,15 +33,17 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
   const managedChecked = new Map<string, number>();
   let active = false;
   let manual = false;
+  let frozen = false;
   let finishTick: (() => void) | undefined;
   let lastContactAt = 0;
   let accepting = !store.paused();
   let entryAfter = startedAt;
   const write = (row: UsdtCampaignLedger) => { store.save(row); rows.set(row.campaign.id, row); };
 
-  const ingest = (campaigns: UsdtFollowCampaign[], now = Date.now()) => {
+  const ingest = (campaigns: UsdtFollowCampaign[], now = Date.now(), recovering = false) => {
     for (const incoming of campaigns) {
       const row = rows.get(incoming.id);
+      if (row && store.local('imported-monitor:' + incoming.id) && !recovering) continue;
       if (row?.managed) continue; // Only the managed-position protocol may advance this ledger.
       if (!row) {
         const open = incoming.actions[0];
@@ -56,6 +58,9 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
         throw Error('同一即时交易战役的冻结参数不一致');
       }
       if (row.status.state === 'closed' || row.status.state === 'ignored') continue;
+      if (row.campaign.frozenMonitor && incoming.frozenMonitor &&
+        JSON.stringify(row.campaign.frozenMonitor.admission.round.instantMonitor) !== JSON.stringify(incoming.frozenMonitor.admission.round.instantMonitor))
+        throw Error('同一实盘战役的冻结监测模板不一致');
       const prior = new Map(row.campaign.actions.map(action => [action.id, action]));
       let changed = false;
       for (const action of incoming.actions) {
@@ -66,6 +71,13 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
       if (changed) {
         row.campaign.actions = [...incoming.actions, ...[...prior.values()].filter(old => !incoming.actions.some(action => action.id === old.id))];
         write(row);
+      }
+      if (incoming.frozenMonitor && !store.local('imported-monitor:' + row.campaign.id)) {
+        const previous = row.campaign.frozenMonitor?.checkpoint?.endTime ?? 0;
+        if ((incoming.frozenMonitor.checkpoint?.endTime ?? 0) >= previous) {
+          row.campaign.frozenMonitor = incoming.frozenMonitor;
+          write(row);
+        }
       }
     }
     lastContactAt = now;
@@ -557,13 +569,67 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
 
   return {
     ingest, adopt, switchManaged, switchFollowMonitor, updateManaged,
+    updateRecovered(incoming: UsdtFollowCampaign) {
+      const row = rows.get(incoming.id);
+      if (!row || row.managed || !store.local('imported-monitor:' + incoming.id) || !incoming.frozenMonitor ||
+        JSON.stringify(row.campaign.frozenMonitor?.admission) !== JSON.stringify(incoming.frozenMonitor.admission) ||
+        (incoming.frozenMonitor.checkpoint?.endTime ?? 0) < (row.campaign.frozenMonitor?.checkpoint?.endTime ?? 0))
+        throw Error('交接监测状态身份或进度不符');
+      ingest([incoming], Date.now(), true);
+      row.campaign.frozenMonitor = incoming.frozenMonitor;
+      write(row);
+    },
+    captureFrozenMonitors(campaigns: UsdtFollowCampaign[]) {
+      for (const incoming of campaigns) {
+        const row = rows.get(incoming.id), frozen = incoming.frozenMonitor;
+        if (!row || row.managed || !frozen || store.local('imported-monitor:' + incoming.id) || ['closed','ignored'].includes(row.status.state)) continue;
+        if (row.campaign.source.symbol !== incoming.source.symbol || row.campaign.notional !== incoming.notional ||
+          row.campaign.leverage !== incoming.leverage || row.campaign.admittedAt !== incoming.admittedAt ||
+          row.campaign.liveEntry?.templateId !== frozen.admission.round.instantMonitor?.templateId ||
+          JSON.stringify(row.campaign.actions[0]) !== JSON.stringify(incoming.actions[0]))
+          throw Error('原网页监测快照与实盘战役不符');
+        if ((frozen.checkpoint?.endTime ?? 0) < (row.campaign.frozenMonitor?.checkpoint?.endTime ?? 0)) continue;
+        if (row.campaign.frozenMonitor &&
+          JSON.stringify(row.campaign.frozenMonitor.admission.round.instantMonitor) !== JSON.stringify(frozen.admission.round.instantMonitor))
+          throw Error('原冻结模板已变化，禁止覆盖');
+        row.campaign.frozenMonitor = frozen;
+        write(row);
+      }
+    },
     async runPositionControl<T>(run: () => Promise<T>) {
+      if (frozen) throw Error('执行器已冻结，禁止实盘操作');
       if (manual) throw Error('另一笔实盘操作正在进行，请稍后重试');
       manual = true;
       try {
         if (active) await new Promise<void>(resolve => { finishTick = resolve; });
         return await run();
       } finally { manual = false; }
+    },
+    async quiesce() {
+      frozen = true;
+      accepting = false;
+      while (active || manual) await new Promise(resolve => setTimeout(resolve, 10));
+    },
+    thaw() { frozen = false; accepting = !store.paused(); entryAfter = Date.now(); lastContactAt = 0; },
+    async reconcileForHandoff() {
+      if (active || manual) throw Error('执行器仍在处理上一笔操作');
+      for (const row of rows.values()) {
+        if (['closed', 'ignored'].includes(row.status.state)) continue;
+        const market = await readMarket(row.campaign.source.symbol);
+        if (!market) throw Error('交接缺少原合约规格');
+        for (const [key, order] of Object.entries(row.orders)) {
+          if (order.terminal) continue;
+          const report = await exchange.order(market, mode, order, false);
+          if (!report) throw Error('未决订单尚未查明，交接保持冻结，禁止换编号补单');
+          applyReport(row, key, market, report);
+        }
+        const held = syncBalance(row, market);
+        if (held.held && readManaged && row.orders.open?.exchangeId && row.orders.open.fills?.length) {
+          const actual = await readOriginalPosition(row, market);
+          if (reconcileExit(row, actual, market)) continue;
+        }
+        write(row);
+      }
     },
     managed: (includeFollow = false) => [...rows.values()].filter(row => row.managed && row.status.state !== 'closed' && (includeFollow || !row.managed.followBasis))
       .map(row => ({ position: row.managed!, status: row.status })),
@@ -574,7 +640,7 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
         ...(managed.checkpoint?.status === 'closed' ? { exitReason: managed.checkpoint.reason } : {}) };
     },
     pauseNewOrders: () => { store.setPaused(true); accepting = false; },
-    resumeNewOrders: (now = Date.now()) => { store.setPaused(false); entryAfter = now; accepting = true; },
+    resumeNewOrders: (now = Date.now()) => { if (frozen) throw Error('交接冻结尚未解除'); store.setPaused(false); entryAfter = now; accepting = true; },
     get entryAfter() { return entryAfter; },
     get paused() { return !accepting; },
     statuses: () => [...rows.values()].map(row => row.campaign.liveEntry && (!row.managed || row.managed.followBasis)
@@ -582,13 +648,13 @@ export function createUsdtFollower(store: Store, exchange: UsdtExchange, owner: 
         canSwitchFollowMonitor: !row.managed?.pending && (row.status.state === 'tracking' || row.status.issue === externalReductionIssue) }
       : row.status),
     async tick(now = Date.now()) {
-      if (active || manual) return;
+      if (active || manual || frozen) return;
       active = true;
       try {
         const prioritized = [...rows.values()].sort((a, b) =>
           Number(b.campaign.actions.some(event => event.action === 'close')) - Number(a.campaign.actions.some(event => event.action === 'close')));
         for (const row of prioritized) {
-          if (manual) break;
+          if (manual || frozen) break;
           if (row !== rows.get(row.campaign.id)) continue;
           if ((cooldown.get(row.campaign.id) ?? 0) > now) continue;
           if (row.status.state === 'closed') continue;
