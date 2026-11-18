@@ -110,6 +110,12 @@ it('导入事务遇到无效行完整回滚，源端出让记录不能被导入�
   expect(()=>target.importSnapshot(bad,{stage:'active'})).toThrow();
   expect(target.snapshot()).toEqual(before);expect(b.state().stage).toBe('empty');
 });
+it('新接收端存在来源不明的旧账本时不自动覆盖',()=>{
+  const source=machine(),s=makeStore(),target=machine(s);s.save(row());source.initializeSource();source.freeze();
+  const bundle=source.export(target.receiveRequest(),{},now);
+  expect(()=>target.import(bundle)).toThrow(/旧账本/);
+  expect(s.readAll()).toHaveLength(1);expect(target.state().stage).toBe('empty');
+});
 it('SQLite 逻辑快照包含 WAL 中尚未 checkpoint 的事务，而非复制主文件',()=>{
   const dir=mkdtempSync(join(tmpdir(),'veil-handoff-wal-')),path=join(dir,'ledger.sqlite');
   const s=makeStore(path);s.save(row());const writer=new DatabaseSync(path);writer.exec('PRAGMA wal_autocheckpoint=0');

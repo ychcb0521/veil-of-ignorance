@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
 const folder=dirname(fileURLToPath(import.meta.url));
 const mac=process.platform==='darwin';
 const prompt=createInterface({input:process.stdin,output:process.stdout});
@@ -33,7 +34,10 @@ async function main(){
     const choice=(await ask('请选择：')).toUpperCase();
     if(choice==='0')return;
     if(choice==='1'){
-      if(mac)run('macos-setup.mjs');
+      if(mac){
+        if(existsSync(join(directory,'usdt-follow.json')))run('handoff.mjs','prepare-account',directory);
+        else run('macos-setup.mjs');
+      }
       else if(await ask('此操作会停止现有 Windows 实盘并关闭旧自动重试。确认升级请输入“停止旧端”：')==='停止旧端')
         run('handoff.mjs','upgrade-windows',directory);
     }else if(choice==='2'){

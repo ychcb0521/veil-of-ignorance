@@ -98,6 +98,8 @@ export function createUsdtHandoff(store: Store, account: string, owner: string, 
         !store.local('consumed:' + receive.nonce), '交接文件不属于本次接管请求，或已经使用/作废');
       requireValue(['empty', 'outgoing', 'cancelled'].includes(current.stage) && value.epoch > current.epoch &&
         (!current.chain || value.parent === current.chain), '本端已有执行权或交接文件已过期');
+      requireValue(current.stage !== 'empty' || (store.readAll().length === 0 && store.snapshot().tables.position_controls.length === 0 &&
+        store.snapshot().tables.desk_orders.length === 0), '目标端已有未纳入交接的旧账本，必须先核对历史，禁止直接覆盖');
       if (current.stage === 'outgoing') requireValue(bundle.publicKey === current.bundle!.payload.request.publicKey, '退回账本并非来自接管设备');
       requireValue(createHash('sha256').update(value.ledger.account).digest('hex') === account && value.ledger.owner === owner, '交接账本的账户不符');
       const next: HandoffAuthority = { stage: 'staged', epoch: value.epoch, chain: handoffHash(bundle), bundle,

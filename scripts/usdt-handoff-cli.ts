@@ -164,6 +164,16 @@ async function main() {
   let credentials: ReturnType<typeof loadUsdtCredentials> | undefined;
   let store: ReturnType<typeof openUsdtFollowStore> | undefined;
   try {
+    if (command === 'prepare-account') {
+      credentials=loadUsdtCredentials(directory);
+      const read=createUsdtRequest(credentials,fetch,()=>{throw Error('账户准备只允许读取币安');});
+      const verified=await createUsdtExchange(read).account();
+      if(createHash('sha256').update(verified.id).digest('hex')!==config.account)throw Error('现有本机配置与币安账户不符');
+      store=openUsdtFollowStore(join(directory,'usdt-follow.sqlite'),verified.id,config.owner);
+      createUsdtHandoff(store,config.account,config.owner,usdtRuntime());
+      console.log('现有本机凭证与账户只读核验通过，配对码及旧账本保留；没有赋予执行权。');
+      return;
+    }
     // Request, import and cancellation remain available even if the new proxy/IP fails Binance authentication.
     const account = boundLedgerAccount(directory);
     store = openUsdtFollowStore(join(directory,'usdt-follow.sqlite'),account,config.owner);
