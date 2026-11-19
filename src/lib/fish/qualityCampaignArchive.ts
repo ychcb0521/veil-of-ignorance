@@ -1,3 +1,4 @@
+import {holdingImpulse1115Identity} from './holdingImpulse1115Classification';
 import {qualityMonitoringSample, qualityRowMonitorTimeBasis} from './qualityAdmissionTime';
 import { qualityAdvantageIdentity } from './qualityAdvantage';
 import {routerRuleLabel, routerResultFingerprint} from './qualityPlanRouter';
@@ -36,7 +37,7 @@ export const qualityVersionedRuleLabel = (plan: QualityGroup) => `${qualityRuleL
 const rowIndexes = new WeakMap<QualitySample[], Map<string, QualitySample>>();
 const frozenPlans = new WeakMap<QualityGroup, { key: string; plan: QualityGroup }>();
 function freezePlan(plan: QualityGroup): QualityGroup {
-  const key = qualitySellKey(plan), previous = frozenPlans.get(plan);
+  const key = qualitySellKey(plan)+(plan.impulse1115Classification?JSON.stringify(holdingImpulse1115Identity(plan.impulse1115Classification)):''), previous = frozenPlans.get(plan);
   if (previous?.key === key) return previous.plan;
   const copy = structuredClone(plan); frozenPlans.set(plan, { key, plan: copy }); return copy;
 }

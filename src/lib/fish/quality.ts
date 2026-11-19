@@ -1,3 +1,7 @@
+import {
+  readHoldingImpulse1115Classification,HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,
+  type HoldingImpulse1115Rule,type HoldingImpulse1115Reading,
+} from './holdingImpulse1115Classification';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
 import {boxAdditionBlockedAt,BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION} from './qualityBoxStop';
 import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,qualityRowMonitorTimeBasis,type QualityMonitorEntry,type QualityMonitorTimeBasis} from './qualityAdmissionTime';
@@ -44,6 +48,7 @@ export const QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>' | '>='; threshold: number; version?: typeof import('./qualityStaticDrawdownSell').STATIC_DRAWDOWN_SELL_VERSION }
 export interface QualityGroup {
+  impulse1115Classification?:HoldingImpulse1115Rule;
   preEntryThreeStage?: import('./preEntryThreeStage').PreEntryThreeStage;
   preEntryConditions?: import('./preEntryConditions').PreEntryConditions;
   staticFilter?: import('./qualityStaticFilterPlan').QualityStaticFilter;
@@ -107,6 +112,7 @@ export interface QualitySample {
   signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
+  impulse1115Classification?:HoldingImpulse1115Reading;
   followBasis?: import('./usdtFollowMonitorBasis').UsdtFollowMonitorBasis;
   instantMonitorSwitches?: import('./instantMonitorSwitchCheckpoint').InstantMonitorSwitch[];
   boxMarketRepair?: BoxMarketRepairVersion;
@@ -631,6 +637,27 @@ const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMExcept
 /** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 /** Replay each selected seller only until the next actual addition boundary. */
 export async function evaluateQualitySample(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=qualityPositionSize(group).notional,liveAt?:number):Promise<QualityResult>{
+ const result=await evaluateQualitySampleCore(sample,group,observeHours,now,load,signal,previous,initialNotional,liveAt);
+ // Forward execution must publish trade decisions without waiting for display-only market reads.
+ // The holding-monitor/replay path reads this observer independently with no live execution clock.
+ if(liveAt!=null)return result;
+ if(!group.impulse1115Classification||group.router||!['open','closed','waiting'].includes(result.status)||result.entryTime==null||!(result.entryPrice!>0))return result;
+ const observationAt=result.endTime??Math.min(Math.floor(now/QUALITY_MINUTE)*QUALITY_MINUTE,
+   observeHours===0?Infinity:result.entryTime+Math.ceil(observeHours*60)*QUALITY_MINUTE);
+ try{
+  const observation=await readHoldingImpulse1115Classification(group.impulse1115Classification,{
+   row:sample.source,entry:result.entryTime,at:observationAt,load,signal,
+   previous:previous?.key===result.key?previous.impulse1115Classification:undefined,
+  });
+  return {...result,impulse1115Classification:observation};
+ }catch(error){
+  abort(signal);
+  return {...result,impulse1115Classification:{version:HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,
+   identity:'unavailable',entry:result.entryTime,from:result.entryTime,through:result.entryTime,
+   requestedAt:observationAt,status:'waiting',message:error instanceof Error?error.message:'等待持仓分类证据'}};
+ }
+}
+async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup,observeHours:number,now:number,load:FishReconstructionLoader,signal:AbortSignal,previous?:QualityResult, initialNotional=qualityPositionSize(group).notional,liveAt?:number):Promise<QualityResult>{
  sample=qualityMonitoringSample(sample);
  if(sample.monitorEntry?.error)return {key:qualityResultKey(sample,group,observeHours),sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:sample.monitorEntry.error};
  if(group.router){

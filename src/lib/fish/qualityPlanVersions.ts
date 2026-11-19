@@ -1,3 +1,4 @@
+import {HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,holdingImpulse1115Identity} from './holdingImpulse1115Classification';
 import {IMPULSE_1115_CLASSIFICATION_VERSION,IMPULSE_1115_CLASSIFICATION_LABEL} from '@/lib/impulse1115Classification';
 import { CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { INTERVAL_LABEL } from '@/lib/deepDig/features';
@@ -102,6 +103,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (plan.preEntryThreeStage) out.push({key:'pre-entry-three-stage',part:'动态筛选',name:'三阶同刻准入',version:plan.preEntryThreeStage.version+' · 参数 #'+threeStageFingerprint(plan.preEntryThreeStage),summary:plan.preEntryThreeStage.version===PRE_ENTRY_SIGNAL_ANCHOR_VERSION?'跳过事件准入时，按原信号时点或动态门槛首次达标时点检查排除，检查通过后在该时点入选。启用事件准入时，按通过排除检查的候选事件时点入选。':plan.preEntryThreeStage.version===PRE_ENTRY_OPTIONAL_STAGES_VERSION?'必要条件、事件准入、排除检查各自启用或跳过。首次具备资格时，已达标的准入指标可立即产生候选。否决后继续观察，沿用原总截止时间。':plan.preEntryThreeStage.version==='pre-entry-three-stage-v9'?'两项均启用时先判静态门槛。静态达标即观察新事件，未通过才进入动态追踪，沿用原总截止时间。':plan.preEntryThreeStage.version==='pre-entry-three-stage-v8'?'必要条件只在原信号时点判定一次；任一新事件触发候选后向前检查排除条件，否决后继续找下一次新事件。首次满足时间为通过排除检查的新事件时刻。':plan.preEntryThreeStage.observationBasis==='retry-origin-v2'?'多条准入算法取或，必要条件和排除门槛仍须同刻通过；否决后从下一分钟重建观察起点；原门槛和总截止时间不变；指标保留预热，原生防守线不重启、旧事件不延期兑现。':'加仓共用资格、完整卖出排除及原生防守线更新同刻判断；观察起点固定，旧事件不延期兑现。'});
   if (plan.preEntryConditions) out.push({ key: 'pre-entry-conditions', part: '动态筛选', name: '入选条件与三组否决', version: preEntryConditionsVersion(plan), summary: '同一分钟入选条件全部满足且无否决；从筛选起点累计观察，不模拟持仓，旧轮次不升级。' });
   const add = (key: string, part: string, name: string, version: string, summary: string) => out.push({ key, part, name, version, summary });
+  if(plan.impulse1115Classification)add('holding-impulse-1115-classification','持仓监测','急拉线1115持仓分类',
+    HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingImpulse1115Identity(plan.impulse1115Classification))),
+    '只读取原生已收盘5m分类，逐方案冻结参数和版本；暂停续算保留每条线的历史，不产生任何交易动作。');
   const s = plan.snapshot;
   const screening = plan.preEntryThreeStage;
   const metricSnapshots = [

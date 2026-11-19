@@ -1,3 +1,4 @@
+import {IMPULSE_1115_STATUS} from '@/lib/impulse1115Classification';
 /**
  * 【用户要求】2026-11-04「持仓监测产生的交易战役的『持仓监测』点开之后，也可以导出详细信息。
  * 导出的这份文件用于跨币种的适配性分析和泛化应用」。
@@ -84,6 +85,8 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
   ];
   const sheets: XlsxSheet[] = [{ name: '概要', columns: [{ header: '项目', width: 22 }, { header: '数值', width: 60 }, { header: '说明', width: 44 }], rows: summary }];
   if (plan) sheets.push(qualityPlanDetailSheet([plan]));
+  if(ev?.impulse1115Classification?.row?.lines.length)sheets.push(sheet('急拉线持仓分类',['急拉线ID','冻结线价','形成时点','确认时点','主分类','细分状态'],
+    ev.impulse1115Classification.row.lines.flatMap(line=>line.history.map(state=>[line.lineId,line.price,time(line.detectedAt),time(state.at),state.mainClass===1?'一类':'二类',IMPULSE_1115_STATUS[state.status]])),['急拉线ID','细分状态']));
   sheets.push(sheet('加仓逐次', ['次', '时间', '距买入 小时', '加仓价 T', 'T 相对买入价 %', '成本线 S', 'K', 'ATR', 'ATR 占价格 %', 'T−S（ATR）', 'T−K（ATR）', 'T−K（%）', '要求入场距离 ATR', 'K＝T−m ATR 的 m', '位置',
     '新增币数', '加仓金额 USDT', '累计加仓金额 USDT', '加仓前币数 Q', '加仓前持仓均价', '可用落袋利润 P', '用掉落袋利润', '涨幅门槛', '加仓条件读数', '同时满足的条件'],
     additionRows(fills, entryPrice, entryAt), ['位置', '涨幅门槛', '加仓条件读数', '同时满足的条件']));

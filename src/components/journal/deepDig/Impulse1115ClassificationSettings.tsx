@@ -13,7 +13,8 @@ function ClassificationNumber({value,label,min,max,integer,onChange}:{
   },[value]);
   return <input aria-label={label} type="number" inputMode={integer?'numeric':'decimal'}
     min={min} max={max} step={integer?1:'any'} value={text}
-    className="w-28 min-w-0 rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+    className="min-w-0 rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+    style={{width:`calc(${Math.max(4,text.length)}ch + 4.5rem)`,flexShrink:0}}
     onChange={e=>{setText(e.target.value);onChange(e.target.value.trim()===''?NaN:Number(e.target.value));}}/>;
 }
 export function Impulse1115ClassificationSettings({value,onChange}:{

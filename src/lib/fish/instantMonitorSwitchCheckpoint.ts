@@ -28,6 +28,7 @@ export function rebaseInstantMonitorCheckpoint(current: QualityResult, initialNo
     instantMonitorSwitches: [...current.instantMonitorSwitches ?? [], { at, effectiveAt, from, to }],
     routeDecision: undefined, activeSellStage: undefined, sellStageSwitches: undefined, activeVetoStage: undefined,
     vetoStageSwitches: undefined, vetoPath: undefined, advantageState: undefined, boxStopStates: undefined,
+    ...(current.impulse1115Classification?{impulse1115Classification:undefined}:{}),
     additionGuardPlus: undefined, additionNote: undefined, boxMarketRepair: undefined, exitSnapshot: undefined, exitReading: undefined,
   };
 }

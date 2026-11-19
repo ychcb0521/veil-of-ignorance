@@ -76,7 +76,17 @@ export function equivalentRouterVersion(frozen:string,current:string):boolean{
 // Plans are immutable during a run; avoid serializing both frozen branches for every table row.
 const resultFingerprints=new WeakMap<QualityPlanRouter,string>();
 export function routerResultFingerprint(r:QualityPlanRouter):string{
- let value=resultFingerprints.get(r);if(!value){value=routerFingerprint(r);resultFingerprints.set(r,value);}return value;
+ let value=resultFingerprints.get(r);if(!value){
+  // Observations have their own identity/checkpoints and never create a new trade/campaign.
+  const strip=(plan:QualityGroup):QualityGroup=>{
+   if(!plan.impulse1115Classification)return plan;
+   const {impulse1115Classification,...trade}=plan;
+   return {...trade,...(trade.frozenVersions?{frozenVersions:trade.frozenVersions.filter(v=>v.key!=='holding-impulse-1115-classification')}:{})};
+  };
+  value=routerFingerprint(r.structure.impulse1115Classification||r.attack.impulse1115Classification
+    ?{...r,structure:strip(r.structure),attack:strip(r.attack)}:r);
+  resultFingerprints.set(r,value);
+ }return value;
 }
 export function validateQualityRouter(r: QualityPlanRouter) {
   const n = r.afterAdditions, from = raceAttackFromRound(r);

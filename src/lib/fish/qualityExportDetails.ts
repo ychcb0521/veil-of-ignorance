@@ -33,6 +33,11 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
       add(plan,'优势筛选与退出灵敏度','开关与参数',JSON.stringify({screenWeak:plan.advantage.screenWeak,beforeFirst:plan.advantage.beforeFirst,afterAddition:plan.advantage.afterAddition,confirmations:plan.advantage.confirmations}),plan.advantage.version+' #'+qualityAdvantageFingerprint(plan));
       QUALITY_ADVANTAGE_EXPLANATION.forEach((text,i)=>add(plan,'优势筛选与退出灵敏度','规则与依据 '+(i+1),text));
     }
+    if(plan.impulse1115Classification){
+      const rule=plan.impulse1115Classification;
+      add(plan,'急拉线1115持仓分类','分类参数',JSON.stringify(rule.definition.DBL5C_parameters??{}),rule.version);
+      add(plan,'急拉线1115持仓分类','冻结公式',rule.definition.formula,versions.get('holding-impulse-1115-classification')?.version??'');
+    }
     // 【用户要求】2026-11-04 10-31 旧方案（旧引擎或旧形态）：入场距离存在 entryBufferAtr、涨幅门槛相对持仓均价
     const legacy = isLegacyQualityPlan(plan) || hasPreBoxAdditionShape(plan);
     if (legacy) add(plan, '计算引擎', '引擎', isLegacyQualityPlan(plan) ? `${LEGACY_ENGINE_LABEL}（冻结，与原战役逐位一致）` : '10-31 时的方案形态（指标＋入场距离）', versions.get('engine')?.version ?? '');

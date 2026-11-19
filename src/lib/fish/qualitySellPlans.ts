@@ -1,3 +1,4 @@
+import {validateHoldingImpulse1115Rule} from './holdingImpulse1115Classification';
 import {validateQualityVetoStages} from './qualityVetoStages';
 import {validateQualitySellStages} from './qualitySellStages';
 import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -46,6 +47,7 @@ export function replaceQualitySellPlans(study: FishQualityStudy, incoming: reado
     if (!plan.id || ids.has(plan.id)) throw new Error('卖出算法编号重复');
     ids.add(plan.id);
     validateQualitySellStages(plan);validateQualityVetoStages(plan);validatePayoffStops(plan.holdingVetoes, plan.payoffRiskVersion ? initialLimitedDrawdownPct(plan) : undefined);
+    if(plan.impulse1115Classification)validateHoldingImpulse1115Rule(plan.impulse1115Classification);
     if (!plan.label.trim()) throw new Error('请填写卖出算法名称');
     validateQualityExitRule(plan.snapshot, plan.rule);
     if (plan.combo) validateQualityExitRule(plan.combo.after.snapshot, plan.combo.after.rule);

@@ -1,3 +1,4 @@
+import {FishHoldingImpulse1115Settings} from './FishHoldingImpulse1115Settings';
 import { useCampaignTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type {QualityTemplateName} from '@/lib/fish/qualityTemplateNames';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
@@ -45,6 +46,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, show
     {legacy && <LegacyEngineNote/>}
     {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly templateName={templateName} onSave={ignore}/>}
     {showSize && <FishQualityPositionManagement draft={positionManagementDraft(size)}/>}
+    {plan.impulse1115Classification&&<FishHoldingImpulse1115Settings value={plan.impulse1115Classification} readOnly/>}
     {savedOnly&&!plan.mirrorTakeProfit ? <p className="text-muted-foreground">原设置未记录镜像减仓。</p> :
       <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled} holdingLedger={addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>}
     {/* 旧引擎方案的加仓按 10-31 原始参数显示：新版编辑器会把它换算成箱体，显示的就不是当时的规则了 */}
