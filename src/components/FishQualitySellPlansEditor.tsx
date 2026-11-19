@@ -1,5 +1,6 @@
 import { useQualityTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type { QualityTemplateName } from '@/lib/fish/qualityTemplateNames';
+import { beijingTemplateDay, nextQualityPlanName, qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
 import { qualityTemplateKind } from '@/lib/fish/qualityPlanTemplates';
 import { createTuringQualityPlan } from '@/lib/fish/qualityTuringPlan';
 import { TURING_SCREENING_INITIALIZATION_VERSION } from '@/lib/fish/qualityInitialization';
@@ -175,10 +176,17 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
     } catch (cause) { setError(cause instanceof Error ? cause.message : '创建图灵杯副本失败'); }
   };
   const fromTemplate = (template: PlanTemplateActions['templates'][number]) => {
-    const copyBase = qualityPlanFromTemplate(template, newQualitySellPlanId(), uniqueLabel(template.name));
-    onCopyPlan?.({ ...template.plan, id: `template:${template.id}` }, copyBase);
-    change([...drafts, draftOf(copyBase)]);
-    onSelectPlan?.(copyBase.id);
+    try {
+      const resolver=names??qualityTemplateNames({planTemplates:[...(templates?.templates??[])]});
+      const now=Date.now();
+      const label=purpose==='sell'?nextQualityPlanName('monitor',
+        [...drafts.map(d=>labelOf(d,baseOf(d))),...plans.map(p=>p.label)],
+        resolver.numberedCount('monitor',beijingTemplateDay(now)!),now):uniqueLabel(template.name);
+      const copyBase = qualityPlanFromTemplate(template, newQualitySellPlanId(), label);
+      onCopyPlan?.({ ...template.plan, id: `template:${template.id}` }, copyBase);
+      change([...drafts, draftOf(copyBase)]);
+      onSelectPlan?.(copyBase.id);
+    } catch(cause) { setError(cause instanceof Error?cause.message:'从模板新建失败'); }
   };
   const build = (after?: (plans: QualityGroup[]) => QualityGroup[]) => {
       const currentIds=new Set(plans.map(p=>p.id));
@@ -234,7 +242,10 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extr
   const aliases = drafts.map(d=>{
     const base=baseOf(d);
     if(purpose!=='sell'||!base||d.label!==d.original?.label)return;
-    return templateName??(!readOnly?names?.forPlan(base):undefined);
+    if(templateName)return templateName;
+    const alias=!readOnly?names?.forPlan(base):undefined;
+    // A separately named working combination must not inherit the source template's display alias.
+    return alias&&(base.label===alias.originalName||base.label===alias.name)?alias:undefined;
   });
   const displayNames=new Map(preview.map((plan,index)=>[plan.id,aliases[index]?.name??plan.label]));
   const displayName=(plan:QualityGroup)=>displayNames.get(plan.id)??plan.label;

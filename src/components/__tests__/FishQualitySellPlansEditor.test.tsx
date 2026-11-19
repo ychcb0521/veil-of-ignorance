@@ -9,7 +9,38 @@ import { buildFusionTemplatePlan } from '@/lib/fish/qualityBuiltinTemplates';
 import { freezeQualityPlan } from '@/lib/fish/qualityPlanVersions';
 import { QualityTemplateNamesContext } from '@/contexts/QualityTemplateNamesContext';
 import { qualityTemplateNames } from '@/lib/fish/qualityTemplateNames';
-afterEach(() => { cleanup(); localStorage.clear(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+it('creates independently named template combinations, edits and saves them, and retains names after reopening',()=>{
+ const now=Date.parse('2026-11-19T09:00:00+08:00');vi.spyOn(Date,'now').mockReturnValue(now);
+ const plan=freezeQualityPlan({...initial()[0],label:'原始模板'}),before=structuredClone(plan);
+ const template={id:'source-template',name:plan.label,plan,savedAt:now,updatedAt:now};
+ const resolver=qualityTemplateNames({planTemplates:[template]}),save=vi.fn(),copy=vi.fn(),select=vi.fn();
+ const actions={templates:[template],save:vi.fn(),remove:vi.fn()};
+ const draw=(plans:QualityGroup[]) => <QualityTemplateNamesContext.Provider value={{resolver}}>
+   <FishQualitySellPlansEditor plans={plans} ready templates={actions} onSave={save} onCopyPlan={copy} onSelectPlan={select}
+     renderHolding={view=><div data-testid="draft-names">{view.plans.map(p=>view.displayName(p)).join('|')}</div>}/>
+ </QualityTemplateNamesContext.Provider>;
+ const view=render(draw([plan]));
+ for(let i=0;i<2;i++){
+   fireEvent.click(screen.getByRole('button',{name:/从模板新建/}));
+   fireEvent.click(screen.getByRole('button',{name:'用模板 监测_20261119_A 新建方案'}));
+ }
+ expect(screen.getByLabelText('卖出算法 2 名称')).toHaveValue('监测_20261119_B');
+ expect(screen.getByLabelText('卖出算法 3 名称')).toHaveValue('监测_20261119_C');
+ expect(screen.getByTestId('draft-names')).toHaveTextContent('监测_20261119_A|监测_20261119_B|监测_20261119_C');
+ fireEvent.change(screen.getByLabelText('卖出算法 2 名称'),{target:{value:'我的独立组合'}});
+ fireEvent.change(screen.getByLabelText('卖出算法 3 门槛'),{target:{value:'.37'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
+ const saved:QualityGroup[]=save.mock.calls.at(-1)![0];
+ expect(saved).toHaveLength(3);expect(new Set(saved.map(p=>p.id)).size).toBe(3);
+ expect(saved[0]).toEqual(before);expect(saved[1].label).toBe('我的独立组合');expect(saved[2].label).toBe('监测_20261119_C');
+ expect(saved[2].rule!.threshold).toBe(.37);expect(plan).toEqual(before);
+ expect(actions.save).not.toHaveBeenCalled();expect(actions.remove).not.toHaveBeenCalled();
+ view.unmount();render(draw(saved));
+ expect(screen.getByLabelText('卖出算法 2 名称')).toHaveValue('我的独立组合');
+ expect(screen.getByLabelText('卖出算法 3 名称')).toHaveValue('监测_20261119_C');
+ expect(select).toHaveBeenCalledWith(saved[2].id);
+});
 it('shows the same template name in the editor and monitor detail without saving the alias to the plan',()=>{
  const plan={...initial()[0],label:'20261114-3A'},savedAt=Date.parse('2026-11-14T08:00:00+08:00'),save=vi.fn();
  const resolver=qualityTemplateNames({planTemplates:[{id:'t',name:plan.label,plan,savedAt,updatedAt:savedAt}]});

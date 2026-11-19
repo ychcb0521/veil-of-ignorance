@@ -23,6 +23,20 @@ export function beijingTemplateDay(at:number):string|undefined{
   const day=new Date(at+8*3600_000);
   return at>0&&Number.isFinite(day.getTime())?day.toISOString().slice(0,10).replace(/-/g,''):undefined;
 }
+/** Reserve after saved template ordinals and all working drafts, without writing to the catalog. */
+export function nextQualityPlanName(kind:QualityTemplateKind, labels:readonly string[], reserved=0, at=Date.now()):string {
+  const prefix=TEMPLATE_KIND_PREFIX[kind]+'_'+beijingTemplateDay(at)+'_';
+  let last=reserved;
+  for(const label of labels){
+    if(!label.startsWith(prefix))continue;
+    const suffix=label.slice(prefix.length);
+    if(!/^[A-Z]+$/.test(suffix))continue;
+    let ordinal=0;
+    for(const letter of suffix)ordinal=ordinal*26+letter.charCodeAt(0)-64;
+    last=Math.max(last,ordinal);
+  }
+  return prefix+ordinalLetters(last+1);
+}
 function ordered(value:unknown):unknown{
   if(Array.isArray(value))return value.map(ordered);
   if(value&&Object.getPrototypeOf(value)===Object.prototype){

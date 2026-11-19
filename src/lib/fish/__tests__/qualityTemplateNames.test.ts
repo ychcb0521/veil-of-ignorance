@@ -1,12 +1,17 @@
 import {describe,expect,it} from 'vitest';
 import {monitorArchiveFixture} from './monitorArchive.fixture';
-import {qualityTemplateNames,campaignTemplateAlias} from '../qualityTemplateNames';
+import {qualityTemplateNames,campaignTemplateAlias,nextQualityPlanName} from '../qualityTemplateNames';
 import {createQualityTemplateDirectory} from '../qualityTemplateDirectory';
 import {deleteQualityPlanTemplate,type QualityPlanTemplate} from '../qualityPlanTemplates';
 import {makeQualityBuyFilter} from '../qualityFilters';
 import {createStaticFilterPlan} from '../qualityStaticFilterPlan';
 const monitor=monitorArchiveFixture().sellPlans![0];
 const midnight=Date.UTC(2026,10,10,16);
+it('allocates new combination names after reserved templates and draft names in Beijing time',()=>{
+ expect(nextQualityPlanName('monitor',['监测_20261111_D','监测_20261110_Z'],2,midnight)).toBe('监测_20261111_E');
+ expect(nextQualityPlanName('monitor',['监测_20261111_Z'],0,midnight)).toBe('监测_20261111_AA');
+ expect(nextQualityPlanName('monitor',[],2,midnight-1)).toBe('监测_20261110_C');
+});
 const template=(id:string,name:string,plan=monitor,savedAt=midnight,entryHours?:number):QualityPlanTemplate=>({id,name,plan,savedAt,updatedAt:savedAt,entryHours});
 describe('template display names',()=>{
  it('uses Beijing dates, separate categories, deterministic order and stable numbering across deletion',()=>{

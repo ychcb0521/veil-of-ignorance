@@ -1207,7 +1207,7 @@ it('saves a saved plan as a named template and creates a new plan from a templat
   expect(screen.getByLabelText('镜像平衡减仓卖出百分比')).toHaveValue(67);
   fireEvent.click(screen.getByRole('button', { name: '保存全部方案' }));
   const saved = vi.mocked(s.setSellPlans).mock.calls.at(-1)![0], made = saved.at(-1)!;
-  expect(made.id).not.toBe(a.id); expect(made.label).toBe('好组合');
+  expect(made.id).not.toBe(a.id); expect(made.label).toMatch(/^监测_\d{8}_[A-Z]+$/);
   expect(made).toMatchObject({ rule: { threshold: .45 }, mirrorTakeProfit: { gainPct: 2.5, sellPct: 67 }, holdingVetoes: [{ kind: 'static-drawdown', threshold: 5, enabled: true }] });
   // 删除要再确认一次
   fireEvent.click(screen.getByRole('button', { name: /从模板新建/ })); fireEvent.click(screen.getByRole('button', { name: '删除模板 好组合' }));
