@@ -150,9 +150,17 @@ it('保留全部旧选项，二次断裂两种语义都可新增为镜像后启�
  expect(hard().getByLabelText('镜像后 启用持仓否决 1')).not.toBeChecked();
  expect(hard().getByLabelText('镜像后 启用持仓否决 2')).not.toBeChecked();
  fireEvent.click(hard().getByLabelText('镜像后 启用持仓否决 1'));fireEvent.click(hard().getByLabelText('镜像后 启用持仓否决 2'));
- expect(hard().getAllByText(/启动时点：本次镜像平衡减仓实际成交后/)).toHaveLength(2);
- expect(hard().getByText(/减仓后第一次独立断裂停止本笔后续加仓/)).toBeInTheDocument();
- expect(hard().getByText(/减仓后第一次独立断裂只计数/)).toBeInTheDocument();
+ for(const [index,description] of [[1,/减仓后第一次独立断裂停止本笔后续加仓/],[2,/减仓后第一次独立断裂只计数/]] as const){
+  const help=hard().getByRole('button',{name:`镜像后 箱体止损 ${index} 启动说明`});
+  fireEvent.click(help);
+  expect(screen.getByText(/以本次持仓的镜像平衡减仓成交记录为准/)).toBeInTheDocument();
+  expect(screen.getByText(description)).toBeInTheDocument();
+  fireEvent.click(help);
+  const execution=hard().getByRole('button',{name:`镜像后 箱体止损 ${index} 执行与版本说明`});
+  fireEvent.click(execution);
+  expect(screen.getByText(/启动时点：本次镜像平衡减仓实际成交后/)).toBeInTheDocument();
+  fireEvent.click(execution);
+ }
  fireEvent.click(screen.getByRole('button',{name:/^保存(全部 \d|到)/}));
  const saved=vi.mocked(state.setSellPlans).mock.lastCall![0] as QualityGroup[];
  const rules=saved[0].holdingVetoes!.filter(v=>v.activation===V);

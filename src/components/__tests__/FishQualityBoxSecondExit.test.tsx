@@ -47,6 +47,7 @@ it('creates the new independent version from the dropdown and keeps both positio
  const view=render(<Editor/>);
  fireEvent.change(screen.getByLabelText('持仓否决 1 指标'),{target:{value:BOX_SECOND_EXIT_CHOICE}});
  fireEvent.click(screen.getByLabelText('启用持仓否决 1'));
+ fireEvent.click(screen.getByRole('button',{name:'箱体止损 1 执行与版本说明'}));
  expect(screen.getByText(/本条件不停加仓/)).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'保存'}));
  expect(JSON.parse(document.querySelector('output')!.textContent!)[0].boxStop.version).toBe(BOX_SECOND_EXIT_VERSION);

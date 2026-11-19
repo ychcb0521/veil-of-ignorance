@@ -37,6 +37,7 @@ it('offers the new choice in the dropdown and prevents enabling it in pre-entry 
  const view=render(<Editor/>);
  fireEvent.change(screen.getByLabelText('持仓否决 1 指标'),{target:{value:BOX_SECOND_BREAK_CHOICE}});
  fireEvent.click(screen.getByLabelText('启用持仓否决 1'));
+ fireEvent.click(screen.getByRole('button',{name:'箱体止损 1 执行与版本说明'}));
  expect(screen.getByText(/本笔持仓的主分支、备选分支/)).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'保存'}));
  expect(JSON.parse(document.querySelector('output')!.textContent!)[0].boxStop.version).toBe(BOX_SECOND_BREAK_VERSION);
