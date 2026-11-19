@@ -10,7 +10,7 @@ import { qualityFilterDefinitions, qualityFilterMenuChoices, type HoldingVetoDra
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import { LIMITED_STATIC_DRAWDOWN_CHOICE, LIMITED_STATIC_DRAWDOWN_LABEL, FREE_STATIC_DRAWDOWN_LABEL, isHoldingPriceChoice, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, type QualityOperator } from '@/lib/fish/qualityVeto';
 const field='h-7 min-w-0 rounded-md bg-muted/50 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
-type VetoEditorProps={draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;labelPrefix?:string;entry?:boolean;mirrorPhase?:'before'|'after'};
+type VetoEditorProps={draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void;compact?:boolean;hardStopPanel?:boolean;readOnly?:boolean;labelPrefix?:string;entry?:boolean;mirrorPhase?:'before'|'after'};
 const noDefinitions:ReturnType<typeof useFeatureDefinitions>=[];
 const ignore=()=>{};
 export function FishQualityHoldingVetoEditor(props:VetoEditorProps){
@@ -19,7 +19,7 @@ export function FishQualityHoldingVetoEditor(props:VetoEditorProps){
 export function FishFrozenHoldingVetoEditor(props:Omit<VetoEditorProps,'setDraft'>){
   return <HoldingVetoFields {...props} definitions={noDefinitions} setDraft={ignore} frozen/>;
 }
-function HoldingVetoFields({draft,setDraft,compact=false,labelPrefix='',entry=false,mirrorPhase,definitions,frozen=false}:
+function HoldingVetoFields({draft,setDraft,compact=false,hardStopPanel=false,readOnly=false,labelPrefix='',entry=false,mirrorPhase,definitions,frozen=false}:
   VetoEditorProps & {definitions:ReturnType<typeof useFeatureDefinitions>;frozen?:boolean}) {
   const newBoxSecondExit=()=>defaultBoxSecondExit(definitions, DBL5_RETEST_GUARD_VERSION);
   const newBoxSecondBreak=()=>defaultBoxSecondBreak(definitions, DBL5_RETEST_GUARD_VERSION);
@@ -35,8 +35,25 @@ function HoldingVetoFields({draft,setDraft,compact=false,labelPrefix='',entry=fa
     if(values.some(v=>!Number.isFinite(v)||v<=0||v>100))return `${label}阈值待完善`;
     return `${label} ≥ ${Math.min(...values)}%${enabled.length>1?'（同类条件中较小阈值先触发）':''}`;
   }).join('；');
-  return <section className="border-t border-border pt-3 space-y-2" data-testid="quality-holding-veto-editor">
-    {!compact&&<><p className="text-xs font-medium">持仓一票否决卖出</p>
+  const actions=<>
+    <div className="flex flex-wrap gap-x-3 gap-y-2"><button type="button" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" onClick={()=>setDraft([...draft,{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false}])}><Plus className="h-3 w-3"/>添加否决条件</button>
+      <button type="button" disabled={entry} title={entry?"观察期间没有实际加仓仓位，不适用":undefined} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:ADDITION_PROFIT_KIND,direction:'>=',threshold:'5',geometricMultiple:'100',enabled:false}])}><Plus className="h-3 w-3"/>添加加仓止盈约束</button>
+      <button type="button" disabled={entry} title={entry?"观察期间没有持仓盈亏，不适用":undefined} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:'5000',enabled:true}])}><Plus className="h-3 w-3"/>添加盈亏比止盈</button>
+      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_STOP_KIND,direction:'<=',threshold:'0',enabled:false,boxStop:defaultBoxStop(definitions)}])}><Plus className="h-3 w-3"/>添加箱体终止</button>
+      <button type="button" aria-label={mirrorPhase==='before'?'添加防守线断裂即退出（镜像前）':undefined} className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxBreak()}])}><Plus className="h-3 w-3"/>添加支撑断裂终止</button>
+      <button type="button" disabled={entry||mirrorPhase==='before'} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondBreak()}])}><Plus className="h-3 w-3"/>添加二次断裂终止</button>
+      <button type="button" aria-label={mirrorPhase==='after'?'添加防守线首次观察、二次退出（镜像后）':undefined} disabled={entry||mirrorPhase==='before'} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit()}])}><Plus className="h-3 w-3"/>添加持仓期间二次断裂终止</button></div>
+    {!entry&&!mirrorPhase&&<div className="flex flex-wrap gap-3 border-t border-border/50 pt-2">
+      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxBreak(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后 DBL-5 防守线</button>
+      <button type="button" data-testid="add-post-mirror-observe-second-exit" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后防守线首次观察、二次退出</button>
+      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondBreak(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后 DBL-5 二次支撑断裂</button>
+      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后持仓期间二次断裂终止</button>
+      <button type="button" disabled={!cdaChoice} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>cdaChoice&&setDraft([...draft,{choice:cdaChoice.key,direction:'<',threshold:'-15',enabled:false,activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后 CDA＜−15</button>
+    </div>}
+  </>;
+
+  return <section className={hardStopPanel?"space-y-2":"border-t border-border pt-3 space-y-2"} data-testid="quality-holding-veto-editor">
+    {!compact&&!hardStopPanel&&<><p className="text-xs font-medium">持仓一票否决卖出</p>
     <p className="text-[10.5px] leading-relaxed text-muted-foreground">任一启用约束完整达标，立即按最早可确认时点卖出；同一约束中的条件须同时满足，不同约束任一条达标即可，无需设置或等待普通卖出门槛。回撤盘中触价即模拟成交；指标逐分钟复原，不等原周期 K 线收盘。否决规则只作用于当前这套卖出方案（固定它做探测比较时同样生效），其他方案各有各的。阈值由你填写，未启用不生效。</p>
     </>}
     <div className="space-y-2">{draft.map((d,i)=>{const risk=isHoldingPriceChoice(d.choice)||d.choice===LIMITED_STATIC_DRAWDOWN_CHOICE,addition=d.choice===ADDITION_PROFIT_KIND,payoff=d.choice===PAYOFF_STOP_KIND,secondBreak=d.choice===BOX_SECOND_BREAK_CHOICE||d.choice===BOX_SECOND_EXIT_CHOICE,box=d.choice===BOX_STOP_KIND||d.choice===BOX_BREAK_CHOICE||secondBreak,afterMirror=!!d.activation||d.mirrorStage?.stage==='after',choice=choices.find(c=>c.key===d.choice),postMirrorKind=d.boxStop?.channels?'箱体 / 急拉线 K':box&&d.boxStop?.structure.algorithm==='dbl5'&&d.boxStop.structure.kSource==='guard'&&!d.boxStop.reference?(d.choice===BOX_SECOND_EXIT_CHOICE?'DBL-5 持仓期间二次断裂终止':secondBreak?'DBL-5 二次支撑断裂':'DBL-5 防守线'):isCdaProtection(choice?.featureId??d.saved?.snapshot?.featureId)?'硬性终止 CDA':undefined;const showMirrorGate=!!(postMirrorKind||d.activation)&&!entry&&!mirrorPhase&&!d.mirrorStage;
@@ -53,14 +70,17 @@ function HoldingVetoFields({draft,setDraft,compact=false,labelPrefix='',entry=fa
       {!addition&&!box&&<><select aria-label={`${labelPrefix}持仓否决 ${i+1} 方向`} className={`${field} w-14`} value={d.direction} disabled={risk||payoff} onChange={e=>patch(i,{direction:e.target.value as QualityOperator})}>{(risk||payoff?['>=']:['>=','>','<=','<']).map(v=><option key={v} value={v}>{v==='>='?'≥':v==='<='?'≤':v}</option>)}</select>
       <input aria-label={`${labelPrefix}持仓否决 ${i+1} 阈值`} type="number" step="any" min={risk ? 0 : undefined} max={risk ? 100 : undefined} placeholder="自行设置" className={field} style={{width:`calc(${Math.max(4,d.threshold.length)}ch + 4.5rem)`,flexShrink:0}} value={d.threshold} onChange={e=>patch(i,{threshold:e.target.value})}/>{risk&&<span className="text-[10px]">%</span>}{payoff&&<span className="text-[10px]" title="盈亏比＝整笔盈亏 ÷ L₀；L₀＝初始仓位 × 初始静态回撤阈值">R</span>}</>}
       <button type="button" aria-label={`${labelPrefix}删除持仓否决 ${i+1}`} className="p-1 text-muted-foreground" onClick={()=>setDraft(draft.filter((_,j)=>i!==j))}><X className="h-3 w-3"/></button>
-      {d.choice===LIMITED_STATIC_DRAWDOWN_CHOICE&&<p className="w-full pl-4 text-[10px] text-muted-foreground">限制止损价＝首仓买入价 ×（1−阈值%），盘中触及卖出全部余仓；开盘跳空越线按开盘价。本条按所属阶段生效，起始有效的限制阈值可作为初始风险依据。</p>}
+      {d.choice===LIMITED_STATIC_DRAWDOWN_CHOICE&&(hardStopPanel
+        ?<FishBoxStopInfo label={labelPrefix+'限制静态回撤说明'}><p>按首仓买入价计算。盘中触线清仓，开盘越线按开盘价成交。起始阶段的限制阈值可用于计算初始风险。</p></FishBoxStopInfo>
+        :<p className="w-full pl-4 text-[10px] text-muted-foreground">限制止损价＝首仓买入价 ×（1−阈值%），盘中触及卖出全部余仓；开盘跳空越线按开盘价。本条按所属阶段生效，起始有效的限制阈值可作为初始风险依据。</p>)}
       {showMirrorGate&&<div className="flex w-full flex-wrap items-center gap-1 pl-4 text-[11px]"><label className="inline-flex cursor-pointer items-center gap-2">
         <input type="checkbox" aria-label={`${labelPrefix}只在镜像平衡减仓策略后启动${postMirrorKind} ${i+1}`} checked={!!d.activation}
           onChange={e=>patch(i,{activation:e.target.checked?POST_MIRROR_PROTECTION_VERSION:undefined})}/>
         {box?'镜像减仓后启用':<>只在镜像平衡减仓策略后启动{postMirrorKind}</>}
       </label>{box&&<FishBoxStopInfo label={`${labelPrefix}箱体止损 ${i+1} 启动说明`}>{activationInfo}</FishBoxStopInfo>}</div>}
       {afterMirror&&box&&!showMirrorGate&&<div className="flex w-full items-center gap-1 pl-4"><span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">镜像后生效</span><FishBoxStopInfo label={`${labelPrefix}箱体止损 ${i+1} 启动说明`}>{activationInfo}</FishBoxStopInfo></div>}
-      {afterMirror&&!box&&<p className="w-full pl-4 text-[10px] leading-relaxed text-muted-foreground">以本次持仓的镜像平衡减仓成交记录为准；未启用或未成交时，本条不参与终止。开盘减仓后当分钟可检查；盘中减仓后防守线从下一分钟启动，CDA 从减仓后的首个可确认读数启动。不追补启动前的断裂、收盘计数或指标触发。其他终止与加减仓规则独立生效。</p>}
+      {afterMirror&&!box&&hardStopPanel&&<FishBoxStopInfo label={labelPrefix+'启动说明'}>{activationInfo}</FishBoxStopInfo>}
+      {afterMirror&&!box&&!hardStopPanel&&<p className="w-full pl-4 text-[10px] leading-relaxed text-muted-foreground">以本次持仓的镜像平衡减仓成交记录为准；未启用或未成交时，本条不参与终止。开盘减仓后当分钟可检查；盘中减仓后防守线从下一分钟启动，CDA 从减仓后的首个可确认读数启动。不追补启动前的断裂、收盘计数或指标触发。其他终止与加减仓规则独立生效。</p>}
 
       {(choice || d.saved?.snapshot) && <FishMetricTimeFields label={`${labelPrefix}持仓否决 ${i+1}`} className="basis-full pl-4"
         metric={d.saved?.metric ?? choice?.metric} definition={choice && metricDefinitions.get(choice.featureId)}
@@ -68,19 +88,19 @@ function HoldingVetoFields({draft,setDraft,compact=false,labelPrefix='',entry=fa
       {box&&<FishQualityBoxStopEditor afterMirror={afterMirror} entry={entry} rule={d.boxStop??(d.choice===BOX_SECOND_EXIT_CHOICE?newBoxSecondExit():d.choice===BOX_SECOND_BREAK_CHOICE?newBoxSecondBreak():d.choice===BOX_BREAK_CHOICE?defaultBoxBreak(definitions):defaultBoxStop(definitions))} onChange={boxStop=>patch(i,{boxStop})} disabled={!d.enabled} prefix={`${labelPrefix}箱体止损 ${i+1} `} definitions={definitions}/>}
       {addition&&<div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 text-[11px]"><span>几何仓位 ≥</span><input aria-label={`${labelPrefix}持仓否决 ${i+1} 几何仓位倍数`} type="number" min="0" step="any" value={d.geometricMultiple??'100'} className={field+' w-20'} onChange={e=>patch(i,{geometricMultiple:e.target.value})}/><span>倍，且价格高出均衡价 ≥</span><input aria-label={`${labelPrefix}持仓否决 ${i+1} 均衡价涨幅`} type="number" min="0" step="any" value={d.threshold} className={field+' w-20'} onChange={e=>patch(i,{threshold:e.target.value})}/><span>%</span><p className="w-full text-[10px] text-muted-foreground">实际加仓后才检查；均衡价取最近实际加仓的 K。两项同时满足即卖出全部余仓与加仓，多个约束任一条达标即可。</p></div>}
     </div>;})}</div>
-    {!compact&&<><p className="text-[10.5px] leading-relaxed text-primary" data-testid="quality-veto-risk-summary">当前填写（应用后生效）：{riskSummary}。</p>
+    {!compact&&<details open={hardStopPanel?undefined:true} className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">阈值与成交说明</summary><p className="text-[10.5px] leading-relaxed text-primary" data-testid="quality-veto-risk-summary">当前填写（应用后生效）：{riskSummary}。</p>
     <p className="text-[10px] leading-relaxed text-muted-foreground">{FREE_STATIC_DRAWDOWN_LABEL}以买入价为基准，在此独立勾选和填写阈值。动态回撤是先前高点至后续低点的最大跌幅，需另行启用。按止损单成交：盘中一触及止损价即按止损价卖出；开盘就跳空越线的按开盘价卖出，回撤可能超过阈值。同一分钟高低点先后不明时，不假定高点先发生。</p>
     <p className="text-[10px] leading-relaxed text-muted-foreground">短时跌幅：每分钟收盘检查，跌幅 =（窗口起点开盘价 − 当前收盘价）÷ 起点开盘价 × 100%。1 分钟取最近一根分钟 K 线；5 分钟取最近五根，每分钟滚动，持仓不足五分钟从买入时刻起算。达到你填写的百分比（≥）后，按下一分钟开盘价模拟卖出；不使用买入前价格，也不把盘中下影线当作收盘跌幅。</p>
     <p className="text-[10px] leading-relaxed text-muted-foreground">盈亏比止盈：整笔盈亏（镜像平衡减仓、减仓等已落袋＋按当时价格计的全部持仓）÷ L₀ ≥ N 时，立刻卖出全部持仓（含各次加仓）；盘中触及按目标价、开盘跳过按开盘价成交。新保存的条件有起始限制静态最大回撤时，L₀＝初始仓位 × 该限制阈值；其余方案沿用自由静态最大回撤作为计算依据。目前在启用条件加仓、镜像平衡减仓成交之后生效。</p>
     <p className="text-[10px] text-muted-foreground">指标选项来自当前账号公式，含自定义指标及公式变量；新增指标可在 Deep dig 定义。</p>
-    </>}
-    <div><button type="button" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" onClick={()=>setDraft([...draft,{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false}])}><Plus className="h-3 w-3"/>添加否决条件</button><button type="button" disabled={entry} title={entry?"观察期间没有实际加仓仓位，不适用":undefined} className="ml-3 inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:ADDITION_PROFIT_KIND,direction:'>=',threshold:'5',geometricMultiple:'100',enabled:false}])}><Plus className="h-3 w-3"/>添加加仓止盈约束</button><button type="button" disabled={entry} title={entry?"观察期间没有持仓盈亏，不适用":undefined} className="ml-3 inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:'5000',enabled:true}])}><Plus className="h-3 w-3"/>添加盈亏比止盈</button><button type="button" className="ml-3 inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_STOP_KIND,direction:'<=',threshold:'0',enabled:false,boxStop:defaultBoxStop(definitions)}])}><Plus className="h-3 w-3"/>添加箱体终止</button><button type="button" className="ml-3 inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxBreak()}])}><Plus className="h-3 w-3"/>添加支撑断裂终止</button><button type="button" disabled={entry||mirrorPhase==='before'} className="ml-3 inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondBreak()}])}><Plus className="h-3 w-3"/>添加二次断裂终止</button><button type="button" disabled={entry||mirrorPhase==='before'} className="ml-3 inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit()}])}><Plus className="h-3 w-3"/>添加持仓期间二次断裂终止</button></div>
-    {!entry&&!mirrorPhase&&<div className="flex flex-wrap gap-3 border-t border-border/50 pt-2">
-      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxBreak(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后 DBL-5 防守线</button>
-      <button type="button" data-testid="add-post-mirror-observe-second-exit" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后防守线首次观察、二次退出</button>
-      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_BREAK_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondBreak(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后 DBL-5 二次支撑断裂</button>
-      <button type="button" className="inline-flex items-center gap-1 text-[11px] text-primary" onClick={()=>setDraft([...draft,{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:false,boxStop:newBoxSecondExit(),activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后持仓期间二次断裂终止</button>
-      <button type="button" disabled={!cdaChoice} className="inline-flex items-center gap-1 text-[11px] text-primary disabled:opacity-40" onClick={()=>cdaChoice&&setDraft([...draft,{choice:cdaChoice.key,direction:'<',threshold:'-15',enabled:false,activation:POST_MIRROR_PROTECTION_VERSION}])}><Plus className="h-3 w-3"/>添加镜像减仓后 CDA＜−15</button>
-    </div>}
+    </details>}
+    {!readOnly&&(hardStopPanel?<details className="text-xs" data-settings-image-skip="">
+      <summary className="w-fit cursor-pointer text-primary">添加条件</summary>
+      <div className="mt-2 space-y-2 rounded-md border border-border p-2" onClick={e=>{
+        if(!(e.target instanceof Element)||!e.target.closest('button'))return;
+        const menu=e.currentTarget.closest('details');
+        if(menu){menu.open=false;menu.querySelector('summary')?.focus();}
+      }}>{actions}</div>
+    </details>:actions)}
   </section>;
 }

@@ -56,7 +56,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, show
       <h5 className="mb-2 font-medium">位置 · 已保存的分类显示设置</h5>
       <details><summary className="cursor-pointer text-muted-foreground">分类结果显示设置（本方案）</summary><FishHoldingImpulse1115Settings compact value={plan.impulse1115Classification} readOnly/></details>
     </section>}
-    <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span></div>
+    <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">任一条件触发即清仓</span></div>
       {savedOnly&&!plan.holdingVetoes?.length ? <p className="text-muted-foreground">无已保存的硬性终止条件。</p> :
         <FishQualityHardStopStagesEditor readOnly draft={planHoldingVetoDraft(plan.holdingVetoes)} setDraft={ignore}/>}
     </section>
