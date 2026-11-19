@@ -34,7 +34,7 @@ import { fishDelay, validateFishBars } from './shared';
 import { loadQualityScanChunk } from './qualityScanChunk';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
-import { initialLimitedDrawdownPct, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
+import { initialPayoffRiskThreshold, isStaticDrawdownSell, qualityExitAlgorithmLabel, qualityExitThresholdText, validateQualityExitRule } from './qualityStaticDrawdownSell';
 import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoIdentity, LIMITED_PAYOFF_RISK_VERSION, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
@@ -666,7 +666,7 @@ async function evaluateQualitySampleCore(sample:QualitySample,group:QualityGroup
   catch(error){abort(signal);return {key,sampleId:sample.id,groupId:group.id,evaluatedAt:now,status:'error',reason:error instanceof Error?error.message:'条件分支计算失败'};}
  }
 
- const initialPayoffRiskPct = group.payoffRiskVersion === LIMITED_PAYOFF_RISK_VERSION ? initialLimitedDrawdownPct(group) : undefined;
+ const initialPayoffRiskPct = group.payoffRiskVersion === LIMITED_PAYOFF_RISK_VERSION ? initialPayoffRiskThreshold(group) : undefined;
  if(!group.sellStages?.length&&!group.vetoStages?.length&&!group.advantage)return evaluateQualityPhase(sample,group,observeHours,now,load,signal,previous,{initialNotional,initialPayoffRiskPct,liveAt});
  const key=qualityResultKey(sample,group,observeHours),base={key,sampleId:sample.id,groupId:group.id,evaluatedAt:now};
  try{

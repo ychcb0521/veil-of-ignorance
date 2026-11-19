@@ -1,14 +1,35 @@
 import {useState} from 'react';
-import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import {afterEach,it,expect} from 'vitest';
 import {FishQualityHoldingVetoEditor} from '../FishQualityHoldingVetoEditor';
+import {FishQualityHardStopStagesEditor} from '../FishQualityHardStopStagesEditor';
 import {holdingVetoDraft,parseHoldingVetoDraft,planHoldingVetoDraft} from '@/lib/fish/qualityFilters';
 import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION } from '@/lib/dbl5m';
 import {BOX_STOP_GUARD_REGIME_VERSION,defaultBoxBreak,defaultBoxStop} from '@/lib/fish/qualityBoxStop';
-import {holdingVetoIdentity,type QualityHoldingVeto} from '@/lib/fish/qualityVeto';
+import {LIMITED_STATIC_DRAWDOWN_CHOICE,LIMITED_STATIC_DRAWDOWN_VETO_VERSION,holdingVetoIdentity,type QualityHoldingVeto} from '@/lib/fish/qualityVeto';
 import { qualityDefinition, qualityMetricPlan } from '@/lib/fish/quality';
 afterEach(cleanup);
+function StageEditor(){const [draft,setDraft]=useState<ReturnType<typeof holdingVetoDraft>>([]);return <><FishQualityHardStopStagesEditor draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存阶段</button><output/></>}
 function Editor({plan=false,entry=false,saved=[]}:{plan?:boolean;entry?:boolean;saved?:QualityHoldingVeto[]}={}){const [draft,setDraft]=useState(plan?planHoldingVetoDraft(saved):holdingVetoDraft(saved));return <><FishQualityHoldingVetoEditor entry={entry} draft={draft} setDraft={setDraft}/><button onClick={()=>{document.querySelector('output')!.textContent=JSON.stringify(parseHoldingVetoDraft(draft));}}>保存</button><output/></>}
+it('下拉可独立选择限制和自由静态回撤，阈值完整保存恢复且旧条件不转换',()=>{
+ const view=render(<Editor/>),select=screen.getByLabelText('持仓否决 1 指标');
+ expect(within(select).getByRole('option',{name:'限制静态最大回撤'})).toBeEnabled();expect(within(select).getByRole('option',{name:'自由静态最大回撤'})).toBeEnabled();
+ fireEvent.change(select,{target:{value:LIMITED_STATIC_DRAWDOWN_CHOICE}});fireEvent.change(screen.getByLabelText('持仓否决 1 阈值'),{target:{value:'3.123456789012345'}});fireEvent.click(screen.getByLabelText('启用持仓否决 1'));
+ expect(screen.getByLabelText('持仓否决 1 方向')).toBeDisabled();
+ fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'static-drawdown'}});fireEvent.change(screen.getByLabelText('持仓否决 2 阈值'),{target:{value:'3.5'}});fireEvent.click(screen.getByLabelText('启用持仓否决 2'));
+ fireEvent.click(screen.getByRole('button',{name:'保存'}));const saved:QualityHoldingVeto[]=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved[0]).toMatchObject({kind:'static-drawdown',label:'限制静态最大回撤',limitedStaticVersion:LIMITED_STATIC_DRAWDOWN_VETO_VERSION,threshold:3.123456789012345,enabled:true});expect(saved[1].limitedStaticVersion).toBeUndefined();
+ expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);view.unmount();render(<Editor saved={saved}/>);
+ expect(screen.getByLabelText('持仓否决 1 指标')).toHaveValue(LIMITED_STATIC_DRAWDOWN_CHOICE);expect(screen.getByLabelText('持仓否决 2 指标')).toHaveValue('static-drawdown');
+});
+it('限制静态回撤在镜像前后分别设置、勾选和保存',()=>{
+ render(<StageEditor/>);
+ for(const [testId,button,prefix,value] of [['quality-hard-stop-before','添加防守线断裂即退出（镜像前）','镜像前 ','3'],['quality-hard-stop-after','添加防守线首次观察、二次退出（镜像后）','镜像后 ','5']] as const){
+  const section=within(screen.getByTestId(testId));fireEvent.click(section.getByRole('button',{name:button}));fireEvent.change(section.getByLabelText(prefix+'持仓否决 1 指标'),{target:{value:LIMITED_STATIC_DRAWDOWN_CHOICE}});fireEvent.change(section.getByLabelText(prefix+'持仓否决 1 阈值'),{target:{value}});fireEvent.click(section.getByLabelText(prefix+'启用持仓否决 1'));
+ }
+ fireEvent.click(screen.getByRole('button',{name:'保存阶段'}));const saved:QualityHoldingVeto[]=JSON.parse(document.querySelector('output')!.textContent!);
+ expect(saved.map(v=>[v.limitedStaticVersion,v.threshold,v.mirrorStage?.stage])).toEqual([[LIMITED_STATIC_DRAWDOWN_VETO_VERSION,3,'before'],[LIMITED_STATIC_DRAWDOWN_VETO_VERSION,5,'after']]);expect(parseHoldingVetoDraft(holdingVetoDraft(saved))).toEqual(saved);
+});
 it.each([false,true])('freezes independent indicator periods and formula hours (screening=%s)', entry=>{
  const view=render(<Editor entry={entry}/>);
  for (const row of [1,2]) {

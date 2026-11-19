@@ -1,7 +1,7 @@
 import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishSnapshot } from './algorithm';
 import type { QualityExitRule, QualityGroup, QualityResult } from './quality';
-import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND } from './qualityVeto';
+import { FREE_STATIC_DRAWDOWN_LABEL, LIMITED_PAYOFF_RISK_VERSION, PAYOFF_STOP_KIND, isLimitedStaticDrawdownVeto, payoffStopL0Pct } from './qualityVeto';
 
 export const STATIC_DRAWDOWN_SELL_VERSION = 'sell-static-drawdown-v1' as const;
 export const ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL = '静态最大回撤止损';
@@ -51,7 +51,7 @@ export const qualityExitAlgorithmLabel = (rule: QualityExitRule | undefined, lab
 export function qualityStaticDrawdownReason(result?: Pick<QualityResult, 'exitSnapshot' | 'reason'>) {
   const cause = result?.exitSnapshot?.cause;
   if (cause?.kind === 'sell-static-drawdown') return result?.reason?.replace(ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_LABEL);
-  if (cause?.kind === 'static-drawdown' && cause.label) return result?.reason?.replace(cause.label, FREE_STATIC_DRAWDOWN_LABEL);
+  if (cause?.kind === 'static-drawdown' && cause.label) return isLimitedStaticDrawdownVeto(cause)?result?.reason:result?.reason?.replace(cause.label, FREE_STATIC_DRAWDOWN_LABEL);
   return result?.reason;
 }
 
@@ -60,15 +60,21 @@ function limitedDrawdownPct(rule?: QualityExitRule) {
     ? rule.threshold : undefined;
 }
 
-type LimitedDrawdownPlan = Pick<QualityGroup, 'rule' | 'combo' | 'router'>;
+type LimitedDrawdownPlan = Pick<QualityGroup, 'rule' | 'combo' | 'router' | 'holdingVetoes'>;
 
-export const initialLimitedDrawdownPct = (plan: LimitedDrawdownPlan) =>
-  limitedDrawdownPct((plan.router?.structure ?? plan).rule);
+export function initialLimitedDrawdownPct(plan: LimitedDrawdownPlan){
+  const initial=plan.router?.structure??plan,ordinary=limitedDrawdownPct(initial.rule);
+  const hard=(initial.holdingVetoes??[]).filter(v=>v.enabled&&isLimitedStaticDrawdownVeto(v)&&v.mirrorStage?.stage!=='after'&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<100).map(v=>v.threshold);
+  return hard.length?Math.min(...hard,...(ordinary!=null?[ordinary]:[])):ordinary;
+}
+export const initialPayoffRiskThreshold=(plan:LimitedDrawdownPlan)=>initialLimitedDrawdownPct(plan)??payoffStopL0Pct((plan.router?.structure??plan).holdingVetoes);
 
 export function withLimitedPayoffRisk(plan: QualityGroup): QualityGroup {
   const hasPayoff = (plan.holdingVetoes ?? []).some(v => v.enabled && v.kind === PAYOFF_STOP_KIND)
     || plan.vetoStages?.some(stage => stage.conditions.some(v => v.enabled && v.kind === PAYOFF_STOP_KIND));
-  const version = plan.addition?.enabled && initialLimitedDrawdownPct(plan) != null && hasPayoff ? LIMITED_PAYOFF_RISK_VERSION : undefined;
+  const marked=[...(plan.holdingVetoes??[]),...(plan.vetoStages??[]).flatMap(s=>s.conditions)].some(v=>v.enabled&&isLimitedStaticDrawdownVeto(v));
+  const initialRisk=initialLimitedDrawdownPct(plan)??(marked?payoffStopL0Pct(plan.holdingVetoes):undefined);
+  const version = plan.addition?.enabled && initialRisk != null && hasPayoff ? LIMITED_PAYOFF_RISK_VERSION : undefined;
   if (version === plan.payoffRiskVersion) return plan;
   const { payoffRiskVersion: _, ...base } = plan;
   return version ? { ...base, payoffRiskVersion: version } : base;

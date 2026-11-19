@@ -143,7 +143,7 @@ export async function findQualityIntrabarExit(o: {
   const boxState=()=>enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
   const activeRisk=(at:number)=>risk.filter(v=>mirrorHardStopActive(v,mirrorFill,at));
-  const phaseCause=(v:QualityHoldingVeto)=>({...{id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold},...(v.mirrorStage?{mirrorStage:v.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})});
+  const phaseCause=(v:QualityHoldingVeto)=>({...{id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold},...(v.limitedStaticVersion?{limitedStaticVersion:v.limitedStaticVersion}:{}),...(v.mirrorStage?{mirrorStage:v.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})});
   const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
   const dropMinutes: ResearchBar[] = [], dropPrevious = new Map<string, { at: number; reading: number }>();
   const maxDropWindow = Math.max(0, ...drops.map(v=>minuteDropWindow(v.kind)));
@@ -155,7 +155,7 @@ export async function findQualityIntrabarExit(o: {
       if(v.mirrorStage)continue; // New phased price rules inspect current prices below, never historical worst values.
       const reading=holdingVetoReading(path!,v.kind as 'static-drawdown'|'dynamic-drawdown');
       // Inclusive percentage thresholds tolerate only floating-point roundoff.
-      if(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,Math.abs(reading),Math.abs(v.threshold)))return {at,reading,barOpenTime:at-MINUTE,previous:riskPrevious.get(v.id),cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}};
+      if(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,Math.abs(reading),Math.abs(v.threshold)))return {at,reading,barOpenTime:at-MINUTE,previous:riskPrevious.get(v.id),cause:phaseCause(v)};
       riskPrevious.set(v.id,{at,reading});
     }
   };

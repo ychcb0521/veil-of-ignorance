@@ -1,3 +1,4 @@
+import {LIMITED_STATIC_DRAWDOWN_VETO_VERSION,LIMITED_STATIC_DRAWDOWN_LABEL,isLimitedStaticDrawdownVeto} from './qualityVeto';
 import {CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,classifiedImpulsePositionsIdentity,classifiedImpulsePositionLabel} from './qualityClassifiedImpulsePosition';
 import {HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,holdingImpulse1115Identity} from './holdingImpulse1115Classification';
 import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
@@ -160,6 +161,8 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', '沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
     '以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
+  const limitedStatic=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(isLimitedStaticDrawdownVeto);
+  if(limitedStatic.length)add('hard-stop-limited-static','硬性终止',LIMITED_STATIC_DRAWDOWN_LABEL,LIMITED_STATIC_DRAWDOWN_VETO_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(limitedStatic))),'以首仓买入价建立固定止损线，按各条件所属阶段触价或跳空退出；起始限制阈值可作为初始风险依据。');
   const mirrorStages=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.mirrorStage);
   if(mirrorStages.length)add('hard-stop-mirror-stages','硬性终止','镜像平衡减仓前／后两个阶段',
     MIRROR_HARD_STOP_STAGES_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(mirrorStages))),

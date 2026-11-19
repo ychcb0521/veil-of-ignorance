@@ -13,7 +13,7 @@ import { shortFishHash } from './algorithm';
 import type { QualityBuyFilter } from './quality';
 import type { QualitySignalMetric } from './qualitySignalReadings';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
-import { holdingBoxStopIdentity, validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, PAYOFF_STOP_LABEL } from './qualityVeto';
+import { LIMITED_STATIC_DRAWDOWN_CHOICE, LIMITED_STATIC_DRAWDOWN_LABEL, LIMITED_STATIC_DRAWDOWN_VETO_VERSION, isLimitedStaticDrawdownVeto, holdingBoxStopIdentity, validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels, ADDITION_PROFIT_KIND, ADDITION_PROFIT_LABEL, PAYOFF_STOP_KIND, PAYOFF_STOP_LABEL } from './qualityVeto';
 import { additionMetricTime, withAdditionMetricTime, type AdditionMetricTime } from './qualityAdditionMetric';
 export interface QualityFilterChoice { key: string; featureId: string; metric: string; label: string; group: string }
 function build(definitions: readonly DeepDigFeatureDef[], originalPeriod = false) {
@@ -74,6 +74,7 @@ export function makeQualitySignalMetrics(choiceKeys: readonly string[], definiti
 }
 export const qualityFilterChoiceKey = <T extends Pick<QualityBuyFilter, 'snapshot' | 'metric'>>(f: T) => `${f.snapshot.featureId}:${f.metric}`;
 export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs(),geometricMultiple=100):QualityHoldingVeto {
+  if(choiceKey===LIMITED_STATIC_DRAWDOWN_CHOICE){const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([LIMITED_STATIC_DRAWDOWN_VETO_VERSION,direction,threshold]))}`,label:LIMITED_STATIC_DRAWDOWN_LABEL,kind:'static-drawdown',direction,threshold,enabled,limitedStaticVersion:LIMITED_STATIC_DRAWDOWN_VETO_VERSION};validateHoldingVeto(v);return v;}
   if(choiceKey===PAYOFF_STOP_KIND){const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,'>=',threshold]))}`,label:PAYOFF_STOP_LABEL,kind:PAYOFF_STOP_KIND,direction:'>=',threshold,enabled};validateHoldingVeto(v);return v;}
   const risk=isHoldingPriceChoice(choiceKey),addition=choiceKey===ADDITION_PROFIT_KIND;
   const filter=risk||addition?undefined:makeQualityBuyFilter(choiceKey,direction==='<'||direction==='<='?'<':'>',threshold,enabled,definitions);
@@ -86,7 +87,7 @@ export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:
 /** 【用户要求】2026-11-03 每套卖出算法的硬性终止框都默认带一条「盈亏比止盈」（不勾选、预填 5000R），用不用由用户选。 */
 export const PAYOFF_STOP_DEFAULT_R='5000';
 const withPayoffRow=(rows:HoldingVetoDraft[]):HoldingVetoDraft[]=>rows.some(r=>r.choice===PAYOFF_STOP_KIND)?rows:[...rows,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:PAYOFF_STOP_DEFAULT_R,enabled:false}];
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind===BOX_STOP_KIND&&v.boxStop?boxStopChoice(v.boxStop):v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.mirrorStage?{mirrorStage:structuredClone(v.mirrorStage)}:{}),...(v.activation?{activation:v.activation}:{}),...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:isLimitedStaticDrawdownVeto(v)?LIMITED_STATIC_DRAWDOWN_CHOICE:v.kind===BOX_STOP_KIND&&v.boxStop?boxStopChoice(v.boxStop):v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.mirrorStage?{mirrorStage:structuredClone(v.mirrorStage)}:{}),...(v.activation?{activation:v.activation}:{}),...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
   [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}]);
 /** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
 export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
