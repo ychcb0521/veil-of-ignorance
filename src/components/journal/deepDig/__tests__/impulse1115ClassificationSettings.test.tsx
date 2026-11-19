@@ -43,4 +43,6 @@ it('原急拉线与持仓分类可同时选择，新增项不自动套用旧配�
   expect(items.map((item:IndicatorConfig)=>item.type)).toEqual(['DBL5_IMPULSE_1115',IMPULSE_1115_CLASSIFICATION_CHART_ID]);
   expect(visibleIndicatorCompanions(items[1])).toEqual([]);
   expect(screen.queryByLabelText(IMPULSE_1115_CLASSIFICATION_LABEL+' 防守线版本')).not.toBeInTheDocument();
+  fireEvent.click(within(group).getByLabelText(IMPULSE_1115_CLASSIFICATION_LABEL+' 说明'));
+  expect(within(group).getByText(/蓝色线为一类，橙色线为二类/)).toBeInTheDocument();expect(within(group).queryByText(/第1、2种|第3至6种|1至6/)).not.toBeInTheDocument();
 });

@@ -1,4 +1,5 @@
 import { CDA_HOURLY_ID, usesHourlyCda } from '@/lib/cdaPeriods';
+import {impulse1115ReferenceDisplayVars} from './impulse1115ClassificationDisplay';
 import {dbl5ProfileForFeature,withDbl5GuardVersion,type Dbl5GuardVersion} from '@/lib/dbl5m';
 import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import {sbsHistoryBars} from '@/lib/sbs5m';
@@ -325,6 +326,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   const vars = new Map<string, (number | null)[]>();
   for (const [name, v] of out.vars) if (!options.variables || options.variables.includes(name) || name === compiled.core) vars.set(name, toArr(v));
+  for(const [name,values] of impulse1115ReferenceDisplayVars(bars,out,options.variables??[]))vars.set(name,toArr(values));
   const core = compiled.core ? (vars.get(compiled.core) ?? toArr(out.last)) : toArr(out.last);
   const result: ChartFeatureSeries = { def, core, vars };
   if (!perList) { perList = new Map(); seriesCache.set(dataList, perList); }

@@ -33,7 +33,7 @@ export function Impulse1115ClassificationSettings({value,onChange}:{
       </label>)}
     </div>
     <p className="mt-3 leading-5 text-muted-foreground">附近容差和离开距离复用防守线回踩初值；尺度使用该急拉线形成时冻结的 ATR。
-      第1、2种为一类，第3至6种为二类；过渡期明确显示等待条件。参数仅属于此分类定义，保存后重新运行；
+      盘面以蓝色线显示一类、橙色线显示二类。参数仅属于此分类定义，保存后重新运行；
       已冻结模板继续使用各自原参数。分类不改变原线、不触发加减仓或对冲。</p>
   </fieldset>;
 }

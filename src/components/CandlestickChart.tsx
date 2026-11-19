@@ -1,4 +1,5 @@
 import {Dbl5ChartTimeline} from '@/lib/dbl5ChartTimeline';
+import {classifiedImpulseReplacesReference} from '@/lib/impulse1115ClassificationDisplay';
 import { ACCELERATION_DISPLAY_STEP, ACCELERATION_MINUTE, ACCELERATION_WARMUP_MINUTES, CLEAN_ACCELERATION_1116_ID, CLEAN_ACCELERATION_1116_INDICATOR, CLEAN_ACCELERATION_1116_NAME } from '@/lib/cleanAcceleration1116Chart';
 import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_ID } from '@/lib/impulse5mChart';
 import {subscribeAti6hMarketData} from '@/lib/ati6hMarketData';
@@ -2251,11 +2252,12 @@ function CandlestickChartComponent({
     const subpaneIds = () => new Set([...activeIndicatorPanes.current.values()].filter(id => !!id && id !== 'candle_pane'));
     const previousPaneIds = subpaneIds();
     const currentActive = new Set<string>();
+    const researchItems=accountResearchIndicators(featureDefinitions);
 
     for (const ind of indicators) {
       if (!ind.enabled || (ind.type === CLEAN_ACCELERATION_1116_ID && !fiveMinuteAcceleration)) continue;
       if (ind.type.startsWith('FEATURE_') && !accountResearchIndicators(featureDefinitions).some(item => item.id === ind.type)) continue;
-      const rawVisible = !customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false;
+      const rawVisible = !classifiedImpulseReplacesReference(ind.type,indicators,researchItems)&&(!customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false);
       if (rawVisible && !COMPANION_ONLY.has(ind.type)) currentActive.add(ind.type);
 
       const isOverlay = OVERLAY_INDICATOR_IDS.has(ind.type)||accountResearchIndicators(featureDefinitions).some(item=>item.id===ind.type&&item.priceOverlay);

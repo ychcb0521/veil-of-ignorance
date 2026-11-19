@@ -1,4 +1,5 @@
 import { evaluateOnBars, type CompiledFeature } from './deepDig/features';
+import {impulse1115ReferenceDisplayVars} from './impulse1115ClassificationDisplay';
 import { createFormulaEvaluationCache } from './deepDig/formula';
 import type { ResearchBar } from './deepRsa/window';
 export interface ChartComputeJob { rawDblPrices?:(ResearchBar['DBL5_prices']|null)[]; id:number; length:number; from?:number; packet:ArrayBuffer; compiled?:CompiledFeature; params:NonNullable<Parameters<typeof evaluateOnBars>[2]>; variables:string[] }
@@ -23,7 +24,8 @@ self.onmessage = ({ data: job }: MessageEvent<ChartComputeJob>) => {
     }
     if(context.compiled.usesDbl5)for(let i=job.from??0;i<job.length;i++){bars[i].DBL5_closed=values[(i-(job.from??0))*10+9]===1;bars[i].DBL5_prices=job.rawDblPrices?.[i-(job.from??0)]??undefined;}
     const output = evaluateOnBars(bars, context.compiled, job.params, context.cache), vars:Record<string,Float64Array> = {};
-    for (const name of job.variables) { const v=output.vars.get(name); if(v!=null) vars[name]=typeof v==='number'?new Float64Array(job.length).fill(v):v.slice(); }
+    const display=impulse1115ReferenceDisplayVars(bars,output,job.variables);
+    for (const name of job.variables) { const v=display.get(name)??output.vars.get(name); if(v!=null) vars[name]=typeof v==='number'?new Float64Array(job.length).fill(v):v.slice(); }
     self.postMessage({id:job.id,evicted,first:bars[0]?.openTime,last:bars.at(-1)?.openTime,vars,...(output.DBL5_checkpoint&&!output.DBL5P_checkpoint?{DBL5_checkpoint:output.DBL5_checkpoint}:{}),...(output.SBS5M_checkpoint?{SBS5M_checkpoint:output.SBS5M_checkpoint}:{}),...(output.PRS6H_checkpoint?{PRS6H_checkpoint:output.PRS6H_checkpoint}:{}),packet:job.packet}, { transfer:[job.packet,...Object.values(vars).map(a=>a.buffer as ArrayBuffer)] });
   } catch (error) { self.postMessage({id:job.id,error:String(error),packet:job.packet},{transfer:[job.packet]}); }
 };

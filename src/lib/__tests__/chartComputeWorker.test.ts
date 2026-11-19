@@ -1,4 +1,6 @@
 import{expect,it,vi}from'vitest';import{compileFeatureFormula,evaluateOnBars}from'../deepDig/features';
+import {IMPULSE_1115_CLASSIFICATION_RENDER_FIELDS,impulse1115ReferenceDisplayVars} from '../impulse1115ClassificationDisplay';
+import type {ChartComputeJob} from '../chartCompute.worker';
 it('worker results match full calculations across partial updates and new candles without detaching its cache',async()=>{
  const messages:any[]=[];const target={postMessage:(m:any)=>messages.push(m),onmessage:undefined as any};vi.stubGlobal('self',target);await import('../chartCompute.worker');
  const compiled=compileFeatureFormula('X=ema(C,6)\na=avg(X,24)\nb=median(C,6)'),params={interval:'5m' as const};let closes=[1,2,3];
@@ -26,4 +28,15 @@ it('PRS worker uses the shared causal engine, restores its seed and ignores a fo
  target.onmessage({data:{id:900,length:tail.length,from:0,packet:packet.buffer,compiled,params,variables:['PRS6H','PRS6H_S']}});
  const actual=messages.at(-1),expected=evaluateOnBars(tail.map((b,i)=>({...b,PRS6H_closed:i!==tail.length-1})),compiled,params);
  expect(actual.error).toBeUndefined();expect(actual.vars.PRS6H).toEqual(expected.vars.get('PRS6H'));expect(actual.PRS6H_checkpoint.last_time).toBe(expected.PRS6H_checkpoint!.last_time);vi.unstubAllGlobals();
+});
+it('分类线在后台线程与同步计算使用同一价格和分类，不改变原公式输出',async()=>{
+ vi.resetModules();const messages:{error?:string;vars:Record<string,Float64Array>}[]=[],target={postMessage:(m:typeof messages[number])=>messages.push(m),onmessage:undefined as ((event:{data:ChartComputeJob})=>void)|undefined};vi.stubGlobal('self',target);await import('../chartCompute.worker');
+ const {warm,impulse,bar,TICK}=await import('./fixtures/dbl5GuardPlusBars'),{classificationExamples}=await import('./fixtures/impulse1115ClassificationBars'),{Dbl5GuardPlusEngine}=await import('../dbl5GuardPlus'),{IMPULSE_1115_CLASSIFICATION_DEF}=await import('../deepDig/features');
+ const seed=[...warm(),impulse()],native=new Dbl5GuardPlusEngine({symbol:'TESTUSDT',tickSize:TICK}),origin=seed.map(b=>native.push(b)).at(-1)!.plus.early_impulse_event!,price=(x:number)=>Math.round((origin.impulse_guard_value+(x-100)*origin.frozen_atr)*100)/100;
+ const bars=[...seed,...classificationExamples[5].bars.map((b,i)=>bar(i+21,price(b.open),price(b.high),price(b.low),price(b.close)))],packet=new Float64Array(bars.length*10);
+ bars.forEach((b,i)=>packet.set([b.openTime,b.open,b.high,b.low,b.close,b.volume!,NaN,NaN,NaN,1],i*10));
+ const compiled=compileFeatureFormula(IMPULSE_1115_CLASSIFICATION_DEF.formula),params={...IMPULSE_1115_CLASSIFICATION_DEF,DBL5_symbol:'TESTUSDT',DBL5_tick_size:TICK};
+ target.onmessage!({data:{id:903,length:bars.length,from:0,packet:packet.buffer,compiled,params,variables:['DBL5C',...IMPULSE_1115_CLASSIFICATION_RENDER_FIELDS]}});
+ const actual=messages.at(-1),expected=evaluateOnBars(bars,compiled,params),display=impulse1115ReferenceDisplayVars(bars,expected,IMPULSE_1115_CLASSIFICATION_RENDER_FIELDS);
+ expect(actual.error).toBeUndefined();expect(actual.vars.DBL5C).toEqual(expected.vars.get('DBL5C'));for(const name of IMPULSE_1115_CLASSIFICATION_RENDER_FIELDS){expect(actual.vars[name]).toEqual(display.get(name));expect(expected.vars.has(name)).toBe(false);}vi.unstubAllGlobals();
 });

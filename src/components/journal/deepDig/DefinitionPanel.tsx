@@ -1,4 +1,5 @@
 import {Impulse1115ClassificationSettings} from './Impulse1115ClassificationSettings';
+import {IMPULSE_1115_CLASSIFICATION_DESCRIPTION} from '@/lib/impulse1115ClassificationDisplay';
 import { CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
 import {Dbl5GuardDefinition} from './Dbl5GuardDefinition';
@@ -77,7 +78,7 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
       </div>
       {dbl5ProfileForFeature(def.chartTemplate)&&<DblResearchScope def={def} samples={samples} onChange={patch=>onSave({...def,...patch})}/>}
       {def.chartTemplate==='sbs_5m'&&<SbsResearchSymbol def={def} samples={samples} onChange={v=>onSave({...def,SBS5M_research_symbol:v})}/>}
-      {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.definition}</p>}
+      {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.formula.includes('DBL5C_raw_')?IMPULSE_1115_CLASSIFICATION_DESCRIPTION:def.definition}</p>}
       {dbl5ProfileForFeature(featureTemplateId(def))&&<Dbl5GuardDefinition config={def.DBL5_config} timeframe={dbl5ProfileForFeature(featureTemplateId(def))?.timeframe}/>}
       <div className="grid max-w-[720px] grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>

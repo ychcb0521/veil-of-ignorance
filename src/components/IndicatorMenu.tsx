@@ -1,4 +1,5 @@
 import {IMPULSE_1115_CLASSIFICATION_CHART_ID} from '@/lib/impulse1115Classification';
+import {IMPULSE_1115_CLASS_COLORS,IMPULSE_1115_CLASSIFICATION_DESCRIPTION} from '@/lib/impulse1115ClassificationDisplay';
 import { CDA_HOURLY_CHART_ID, CDA_HOURLY_AVERAGE_HOURS } from '@/lib/cdaPeriods';
 import { chartFeaturePeriod } from '@/lib/featureSource';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
@@ -40,6 +41,7 @@ export interface IndicatorCatalogItem {
   isOverlay: boolean;
   defaultPeriod: number;
   color: string;
+  classificationColors?:boolean;
   /** Category for grouping */
   category: 'trend' | 'momentum' | 'volatility' | 'volume' | 'oscillator' | 'other' | 'custom';
   /** 参数框的含义（悬停提示）与单位（框后小字）；不写就是普通的「周期」。 */
@@ -87,8 +89,8 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
     defaultPeriod: IMPULSE_1115_CHART.period, color: '#a21caf', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: IMPULSE_1115_CHART_DESCRIPTION },
   {id:IMPULSE_1115_CLASSIFICATION_CHART_ID,nameZh:IMPULSE_1115_CLASSIFICATION_CHART.short,nameEn:IMPULSE_1115_CLASSIFICATION_CHART.name,
-    isOverlay:true,defaultPeriod:3,color:'#a21caf',category:'custom',fixedPeriod:true,rawOnly:true,
-    description:'一类为正常延续；二类为走弱、跌破或修复。沿用原急拉识别与冻结价格，逐根已收盘5m分类。状态标记和十字光标保留历史；阈值在 Deep Dig 的本分类「编辑定义」中设置。分类本身不触发交易。'},
+    isOverlay:true,defaultPeriod:3,color:IMPULSE_1115_CLASS_COLORS[1],classificationColors:true,category:'custom',fixedPeriod:true,rawOnly:true,
+    description:IMPULSE_1115_CLASSIFICATION_DESCRIPTION},
   { id: GUARD_PLUS_0_CHART_ID, nameZh: GUARD_PLUS_0_CHART.short, nameEn: GUARD_PLUS_0_CHART.name, isOverlay: true,
     defaultPeriod: GUARD_PLUS_0_CHART.period, color: '#2563eb', category: 'custom', fixedPeriod: true, rawOnly: true, guardVersionSelect: true,
     description: '在同一张图叠加原版防守线和原版 5 分钟急拉线。' },
@@ -379,12 +381,12 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
       const legacyId = item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : undefined;
       const def = definitions.find(def => def.id === (spec?.featureId ?? legacyId));
       const builtin = def && BUILTIN_FEATURES.find(d => d.id === def.id);
-      return def ? { ...entry, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: def.definition, detail: def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : entry;
+      return def ? { ...entry, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: spec?.core==='DBL5C'?IMPULSE_1115_CLASSIFICATION_DESCRIPTION:def.definition, detail: spec?.core==='DBL5C'?IMPULSE_1115_CLASSIFICATION_DESCRIPTION:def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : entry;
     }),
     ...researchItems.filter(item => item.id.startsWith('FEATURE_')).map(item => ({
       id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay:item.priceOverlay??false, ...(item.templateId?.startsWith('DBL5_1H')?{fixedInterval:'1h' as const}:{}),fixedPeriod:item.rawOnly&&(item.featureId.startsWith('sbs_5m')||item.templateId?.startsWith('DBL5')), defaultPeriod: researchDefaultPeriod(item),
       rawOnly:item.rawOnly,avgDefault:item.rawOnly?undefined:item.marketEvidence?24:undefined,avgHint:item.marketEvidence?'普通 avg 与分段加权 avg₂ 的总窗口 N；均值仅用于盘面展示。':undefined,color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit:item.parameterUnit??(['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H','CTBA_12H_BEAR'].includes(item.templateId??'')?'根':'h'),
-      description: definitions.find(def => def.id === item.featureId)?.definition,
+      description: item.core==='DBL5C'?IMPULSE_1115_CLASSIFICATION_DESCRIPTION:definitions.find(def => def.id === item.featureId)?.definition,classificationColors:item.core==='DBL5C',
       guardVersionSelect:supportsDbl5GuardVersion(item),
     })),
   ], [definitions, researchItems]);
@@ -604,7 +606,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
       onClick={() => onToggle(item)}
     >
       <div className="flex items-center gap-2.5 flex-1 basis-48 min-w-0">
-        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />
+        {item.classificationColors?<span aria-label="一类蓝色线，二类橙色线" className="flex w-4 shrink-0 flex-col gap-1"><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[1]}}/><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[2]}}/></span>:<span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium leading-4 text-foreground">{item.nameZh}</span>
@@ -704,8 +706,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           className="basis-full pl-[18px] pr-1 pt-1 text-[10px] leading-4 text-muted-foreground cursor-text"
           onClick={e => e.stopPropagation()}
         >
-          <p className="font-medium text-foreground/85">{item.fullName ?? item.nameZh}</p>
-          <p className="mt-0.5">{item.nameEn}</p>
+          {(!item.classificationColors||item.fullName&&item.fullName!==item.nameZh)&&<p className="font-medium text-foreground/85">{item.fullName ?? item.nameZh}</p>}
+          {!item.classificationColors&&<p className="mt-0.5">{item.nameEn}</p>}
           {item.description && <p className="mt-1 whitespace-normal" title={item.detail}>{item.description}</p>}
         </div>
       )}
