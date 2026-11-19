@@ -437,12 +437,10 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </InfoBlock>
   </div>}>
    <div className="space-y-2 text-[11px]">
-    <div role="group" aria-label="本轮位置策略" className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3" data-testid="addition-position-choices">
-     <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
-      <input className="shrink-0" type="checkbox" checked={nativeActive&&!combined} disabled={!d.enabled||nativeActive&&!combined&&!d.impulse&&!d.impulse1115&&!d.classified?.length}
-        onChange={e=>selectNativePosition(false,e.target.checked)}/>
-      <span className="min-w-0 [overflow-wrap:anywhere]">{standardPositionName}</span>
-     </label>
+    <div role="group" aria-label="本轮位置策略" className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" data-testid="addition-position-choices">
+     <fieldset className="min-w-0 rounded-lg border border-border/60 p-2" data-testid="addition-position-module-1115">
+      <legend className="px-1 font-medium text-muted-foreground">1115 系列</legend>
+      <div className="grid gap-2 sm:grid-cols-2">
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
       <input className="shrink-0" type="checkbox" checked={nativeActive&&combined} disabled={!d.enabled||!!d.impulse||nativeActive&&combined&&!d.impulse1115&&!d.classified?.length}
         onChange={e=>selectNativePosition(true,e.target.checked)}/>
@@ -454,6 +452,22 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
           e.target.checked?nativeActive:nativeActive||!d.impulse&&!d.classified?.length))}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_1115_DISPLAY_NAME}</span>
      </label>
+     {([1,2] as const).map(mainClass=><label key={mainClass} className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
+      <input className="shrink-0" type="checkbox" checked={!!d.classified?.some(p=>p.mainClass===mainClass)} disabled={!d.enabled} onChange={e=>{
+       const next=e.target.checked?[...(d.classified??[]),{...defaultClassifiedImpulsePosition(mainClass,defs,CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION),bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}].sort((a,b)=>a.mainClass-b.mainClass):d.classified?.filter(p=>p.mainClass!==mainClass);
+       patch(positions(d.impulse,d.impulse1115,e.target.checked?nativeActive:nativeActive||!d.impulse&&!d.impulse1115&&!next?.length,next));
+      }}/><span className="min-w-0 [overflow-wrap:anywhere]">{classifiedImpulsePositionLabel(mainClass)}</span>
+     </label>)}
+      </div>
+     </fieldset>
+     <fieldset className="min-w-0 rounded-lg border border-border/60 p-2" data-testid="addition-position-module-basic">
+      <legend className="px-1 font-medium text-muted-foreground">基础位置</legend>
+      <div className="grid gap-2">
+     <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
+      <input className="shrink-0" type="checkbox" checked={nativeActive&&!combined} disabled={!d.enabled||nativeActive&&!combined&&!d.impulse&&!d.impulse1115&&!d.classified?.length}
+        onChange={e=>selectNativePosition(false,e.target.checked)}/>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{standardPositionName}</span>
+     </label>
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60"
        title={combined?`切换到防守线或先启用独立急拉，再取消组合版，即可选用「${IMPULSE_5M_DISPLAY_NAME}」。`:undefined}>
       <input className="shrink-0" type="checkbox" checked={!!d.impulse} disabled={!d.enabled||combined}
@@ -461,12 +475,8 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
           e.target.checked?nativeActive:nativeActive||!d.impulse1115&&!d.classified?.length))}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_5M_DISPLAY_NAME}</span>
      </label>
-     {([1,2] as const).map(mainClass=><label key={mainClass} className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
-      <input className="shrink-0" type="checkbox" checked={!!d.classified?.some(p=>p.mainClass===mainClass)} disabled={!d.enabled} onChange={e=>{
-       const next=e.target.checked?[...(d.classified??[]),{...defaultClassifiedImpulsePosition(mainClass,defs,CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION),bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}].sort((a,b)=>a.mainClass-b.mainClass):d.classified?.filter(p=>p.mainClass!==mainClass);
-       patch(positions(d.impulse,d.impulse1115,e.target.checked?nativeActive:nativeActive||!d.impulse&&!d.impulse1115&&!next?.length,next));
-      }}/><span className="min-w-0 [overflow-wrap:anywhere]">{classifiedImpulsePositionLabel(mainClass)}</span>
-     </label>)}
+      </div>
+     </fieldset>
     </div>
     <div className={`grid items-start gap-2${nativeActive&&d.impulse1115&&!combined?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
     {nativeActive&&

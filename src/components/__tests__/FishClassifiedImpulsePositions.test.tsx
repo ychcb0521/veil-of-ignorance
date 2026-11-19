@@ -20,13 +20,13 @@ it('位置保留原四项再增一／二类，按轮选择、填写和保存，�
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  const choices=()=>within(screen.getByRole('group',{name:'本轮位置策略'}));expect(choices().getAllByRole('checkbox')).toHaveLength(6);
  for(const mainClass of [1,2] as const)fireEvent.click(choices().getByLabelText(classifiedImpulsePositionLabel(mainClass)));
- fireEvent.click(choices().getAllByRole('checkbox')[0]);
+ fireEvent.click(within(choices().getByRole('group',{name:'基础位置'})).getAllByRole('checkbox')[0]);
  expect(screen.getByText('K＝急拉线（一类） − N × ATR')).toBeVisible();expect(screen.getByText('K＝急拉线（二类） − N × ATR')).toBeVisible();
  fireEvent.change(screen.getByLabelText(classifiedImpulsePositionLabel(1)+' N（ATR 倍数）'),{target:{value:'0.712345678901234'}});
  fireEvent.change(screen.getByLabelText(classifiedImpulsePositionLabel(2)+' N（ATR 倍数）'),{target:{value:'1.1'}});
  expect(screen.getAllByText('分类判定参数').every(e=>!e.parentElement!.hasAttribute('open'))).toBe(true);
  fireEvent.click(screen.getByRole('tab',{name:'第 2 次'}));expect(choices().getByLabelText(classifiedImpulsePositionLabel(1))).not.toBeChecked();
- fireEvent.click(choices().getByLabelText(classifiedImpulsePositionLabel(2)));fireEvent.click(choices().getAllByRole('checkbox')[0]);
+ fireEvent.click(choices().getByLabelText(classifiedImpulsePositionLabel(2)));fireEvent.click(within(choices().getByRole('group',{name:'基础位置'})).getAllByRole('checkbox')[0]);
  fireEvent.change(screen.getByLabelText(classifiedImpulsePositionLabel(2)+' N（ATR 倍数）'),{target:{value:'0.4'}});
  fireEvent.click(screen.getByRole('tab',{name:'第 1 次'}));expect(screen.getByLabelText(classifiedImpulsePositionLabel(1)+' N（ATR 倍数）')).toHaveValue(.712345678901234);
  const saved=save();expect(saved.rounds[0].classifiedImpulsePositions.map((p:{mainClass:number;bufferAtr:number;skipNative?:true})=>[p.mainClass,p.bufferAtr,p.skipNative])).toEqual([[1,.712345678901234,true],[2,1.1,true]]);
