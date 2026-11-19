@@ -1,6 +1,6 @@
 import {defaultStructureAddition} from '@/lib/fish/qualityAdditionStructure';
 import {it,expect} from 'vitest';
-import {defaultClassifiedImpulsePosition,createClassifiedImpulsePositionReader,CLASSIFIED_IMPULSE_POSITION_VERSION,validateClassifiedImpulsePositions} from '@/lib/fish/qualityClassifiedImpulsePosition';
+import {defaultClassifiedImpulsePosition,createClassifiedImpulsePositionReader,CLASSIFIED_IMPULSE_POSITION_VERSION,CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,validateClassifiedImpulsePositions} from '@/lib/fish/qualityClassifiedImpulsePosition';
 import {Dbl5GuardPlusEngine} from '@/lib/dbl5GuardPlus';
 import {withTuringInitialization} from '@/lib/fish/qualityInitialization';
 import {findCalculatorAdditions} from '@/lib/fish/qualityAdditionCalculator';
@@ -95,4 +95,30 @@ it('新增版本、类别、分类定义与 K 随轮次和备选冻结；旧身�
 it('拒绝错误版本、重复分类、非5分钟、空参数及非计算器执行',()=>{
  const p=position(1);for(const bad of [{...p,version:'wrong'},{...p,bufferAtr:NaN},{...p,definition:{...p.definition,interval:'1h'}}])expect(()=>validateClassifiedImpulsePositions([bad as typeof p])).toThrow();
  expect(()=>validateClassifiedImpulsePositions([p,p])).toThrow();expect(()=>validateQualityAddition({enabled:true,source:'custom',stricterPct:10,quantityMode:'fixed',quantity:1,classifiedImpulsePositions:[p]})).toThrow('计算器');
+});
+it.each([1,2] as const)('新版第 %s 类的 K 从急拉线扣手填 N×冻结 ATR，旧版起涨低点仍保持',async mainClass=>{
+ const read=createClassifiedImpulsePositionReader({row,entry,load,signal});
+ for(const n of [0,1.5]){
+  const p={...defaultClassifiedImpulsePosition(mainClass,[],CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION),bufferAtr:n,skipNative:true as const},before=JSON.stringify(p);
+  const hit=await read(p,entry,entry+mainClass*F+M,[]),expected=Math.floor((line-n*atr)/Number(TICK)+1e-9)*Number(TICK);
+  expect(hit!.reading).toBeCloseTo(expected,10);expect(hit!.structureEvidence).toMatchObject({algorithmVersion:CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,basePrice:line,buffer:n,nativeAtr:atr,impulseClassification:{linePrice:line,mainClass}});
+  const old=await read({...p,version:CLASSIFIED_IMPULSE_POSITION_VERSION},entry,entry+mainClass*F+M,[]);
+  expect(old!.reading).toBeCloseTo(Math.floor((native.impulse_origin_low-n*atr)/Number(TICK)+1e-9)*Number(TICK),10);expect(old!.structureEvidence!.basePrice).toBe(native.impulse_origin_low);
+  expect(old!.structureEvidence!.eventId).not.toBe(hit!.structureEvidence!.eventId);expect(JSON.stringify(p)).toBe(before);
+ }
+});
+it.each([1,2] as const)('新版第 %s 类的定量与卖出 K 共用新公式，暂停恢复和原生支撑减仓互不混用',async mainClass=>{
+ const p={...defaultClassifiedImpulsePosition(mainClass,[],CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION),bufferAtr:1.5,skipNative:true as const};
+ const opts={...options(),classifiedImpulsePositions:[p],supportReduction:{enabled:true,minDropAtr:.5,maxPct:80,version:2 as const}},whole=await findCalculatorAdditions(opts),expected=Math.floor((line-1.5*atr)/Number(TICK)+1e-9)*Number(TICK);
+ expect(whole.fills).toHaveLength(1);expect(whole.fills[0].sizing!.support).toBeCloseTo(expected,10);expect(whole.fills[0].structureEvidence!.guardPrice).toBeCloseTo(expected,10);
+ const prior=await findCalculatorAdditions({...opts,end:entry+6*M,prices:opts.prices.slice(0,6)}),resumed=await findCalculatorAdditions({...opts,since:entry+6*M,previous:prior.fills,prices:opts.prices.slice(6)});
+ expect(resumed.fills).toEqual(whole.fills);expect(whole.reductions??[]).toHaveLength(0);
+});
+it('新公式冻结实际执行版本，改基准会被指纹拦截；v1 清单保持可执行',()=>{
+ const old=freezeQualityPlan({...makeQualitySellPlan('state:state','<',.4,BUILTIN_FEATURES),addition:{enabled:true,source:'structure',stricterPct:10,structure:defaultStructureAddition(),quantityMode:'calculator',quantity:1,classifiedImpulsePositions:[position(1)]}}),before=JSON.stringify(old);
+ const next=structuredClone(old);next.addition!.classifiedImpulsePositions![0].version=CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION;
+ expect(planVersionChanges(next).length).toBeGreaterThan(0);
+ const frozen=freezeQualityPlan(next);expect(planVersionChanges(JSON.parse(JSON.stringify(frozen)))).toEqual([]);
+ expect(frozen.frozenVersions!.find(v=>v.key==='addition-impulse-class-primary-1-1')!.version).toContain(CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION);
+ expect(planVersionChanges(old)).toEqual([]);expect(JSON.stringify(old)).toBe(before);expect(additionIdentity(next.addition)).not.toEqual(additionIdentity(old.addition));
 });

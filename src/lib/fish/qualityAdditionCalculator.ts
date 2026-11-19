@@ -1,4 +1,4 @@
-import {CLASSIFIED_IMPULSE_POSITION_VERSION,createClassifiedImpulsePositionReader} from './qualityClassifiedImpulsePosition';
+import {isClassifiedImpulsePositionVersion,createClassifiedImpulsePositionReader} from './qualityClassifiedImpulsePosition';
 import {mirrorHardStopActive,mirrorHardStopRange} from './qualityMirrorHardStopStages';
 import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
@@ -222,7 +222,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  interface SupportDrop {at:number;support:number;atr:number;evidence:import('./qualityAdditionStructure').StructureAdditionEvidence;basis:number}
  /** 最近一次加仓所依据的箱体支撑（或减仓后的新支撑）在 (from, until) 内首次下移 ≥ minDropAtr×ATR 的 5 分钟收盘。 */
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
-  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion)||evidence.algorithmVersion===CLASSIFIED_IMPULSE_POSITION_VERSION)return;
+  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion)||isClassifiedImpulsePositionVersion(evidence.algorithmVersion))return;
   const previousRound=o.roundRules?.[carried+fills.length-1];
   const winningAlternative=last.lane==='attack'&&(evidence.algorithmVersion===DBL5_PROFILES['1h'].version||evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;

@@ -13,19 +13,21 @@ import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '../signalLibrary';
 
 export const CLASSIFIED_IMPULSE_POSITION_VERSION='holding-impulse-1115-classified-position-v1';
+export const CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION='holding-impulse-1115-classified-line-k-v2';
+export const isClassifiedImpulsePositionVersion=(version?:string)=>version===CLASSIFIED_IMPULSE_POSITION_VERSION||version===CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION;
 export interface ClassifiedImpulsePosition {
- version:typeof CLASSIFIED_IMPULSE_POSITION_VERSION;mainClass:1|2;definition:DeepDigFeatureDef;
+ version:typeof CLASSIFIED_IMPULSE_POSITION_VERSION|typeof CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION;mainClass:1|2;definition:DeepDigFeatureDef;
  bufferAtr:number;minDistancePct?:number;skipNative?:true;
 }
 export const classifiedImpulsePositionLabel=(mainClass:1|2)=>`DBL-5-急拉线-1115 · ${mainClass===1?'一类':'二类'}`;
-export function defaultClassifiedImpulsePosition(mainClass:1|2,definitions:readonly DeepDigFeatureDef[]=[]):ClassifiedImpulsePosition{
+export function defaultClassifiedImpulsePosition(mainClass:1|2,definitions:readonly DeepDigFeatureDef[]=[],version:ClassifiedImpulsePosition['version']=CLASSIFIED_IMPULSE_POSITION_VERSION):ClassifiedImpulsePosition{
  const definition=structuredClone(definitions.find(d=>d.id===IMPULSE_1115_CLASSIFICATION_VERSION)??IMPULSE_1115_CLASSIFICATION_DEF);
  definition.DBL5C_parameters={...impulse1115ClassificationParams(definition.DBL5C_parameters)};
- return {version:CLASSIFIED_IMPULSE_POSITION_VERSION,mainClass,definition,bufferAtr:DBL5_GUARD_PLUS_PARAMS.bufferAtr};
+ return {version,mainClass,definition,bufferAtr:DBL5_GUARD_PLUS_PARAMS.bufferAtr};
 }
 export function validateClassifiedImpulsePositions(positions:readonly ClassifiedImpulsePosition[]|undefined){
  const seen=new Set<number>();for(const p of positions??[]){
-  if(p.version!==CLASSIFIED_IMPULSE_POSITION_VERSION||![1,2].includes(p.mainClass)||seen.has(p.mainClass)||!Number.isFinite(p.bufferAtr)||p.bufferAtr<0||p.bufferAtr>20||p.skipNative!=null&&p.skipNative!==true||p.minDistancePct!=null&&(!Number.isFinite(p.minDistancePct)||p.minDistancePct<=0||p.minDistancePct>=50))throw Error('急拉分类位置须使用独立版本、唯一的一／二类及有效 K 参数');
+  if(!isClassifiedImpulsePositionVersion(p.version)||![1,2].includes(p.mainClass)||seen.has(p.mainClass)||!Number.isFinite(p.bufferAtr)||p.bufferAtr<0||p.bufferAtr>20||p.skipNative!=null&&p.skipNative!==true||p.minDistancePct!=null&&(!Number.isFinite(p.minDistancePct)||p.minDistancePct<=0||p.minDistancePct>=50))throw Error('急拉分类位置须使用独立版本、唯一的一／二类及有效 K 参数');
   seen.add(p.mainClass);if(p.definition.interval!=='5m')throw Error('急拉分类位置只使用已收盘5分钟证据');
   validateHoldingImpulse1115Rule({version:HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,definition:p.definition});
  }
@@ -54,9 +56,11 @@ export function createClassifiedImpulsePositionReader(o:{row:TradeSignal;entry:n
      const line=point.current;if(!line?.available||line.mainClass!==position.mainClass||line.case==null||line.at!==point.at||point.at<=o.entry)return;
      const origin=origins.get(line.lineId),bar=bars[i],base=native.get(point.at);if(!origin||!base?.data_valid)throw Error('急拉分类位置缺少该线冻结起点或原生精度证据');
      const tick=dbl5TickAt(o.row.symbol,bar.openTime,base.tick_size,bar.PRS6H_data_source);if(tick==null)throw Error('急拉分类位置缺少历史报价精度');
-     const selected=structureAdditionK({basePrice:origin.impulse_origin_low,buffer:position.bufferAtr,bufferUnit:'atr',tickSize:String(tick)},line.frozenAtr);if(!selected)throw Error('急拉分类位置 K 无效');
+     // v1 retains its frozen origin-low basis. v2 subtracts the manual N from the native line itself.
+     const basePrice=position.version===CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION?line.price:origin.impulse_origin_low;
+     const selected=structureAdditionK({basePrice,buffer:position.bufferAtr,bufferUnit:'atr',tickSize:String(tick)},line.frozenAtr);if(!selected)throw Error('急拉分类位置 K 无效');
      const id=[line.lineId,line.status,line.at,shortFishHash(JSON.stringify(classifiedImpulsePositionsIdentity([position])))].join(':');
-     decisions.push({close:bar.close,e:{algorithm:'dbl5',trigger:'confirm',event:'IMPULSE_CLASS_'+position.mainClass,eventId:id,boxId:id,episodeId:base.episode_id,at:point.at,confirmedAt:point.at,supportPrice:selected.k,upperPrice:bar.high,nativeInvalidation:null,tickSize:String(tick),algorithmVersion:CLASSIFIED_IMPULSE_POSITION_VERSION,definitionKey:definitionKey(def),parameters:{classification:IMPULSE_1115_CLASSIFICATION_VERSION,mainClass:position.mainClass,parameters:def.DBL5C_parameters,bufferAtr:position.bufferAtr},initializationStart:from,dataChecksum:base.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:'support',basePrice:origin.impulse_origin_low,bufferUnit:'atr',buffer:position.bufferAtr,nativeAtr:line.frozenAtr,guardPrice:selected.k,guardRegime:'trend',guardCloses:1,impulseClassification:{version:IMPULSE_1115_CLASSIFICATION_VERSION,lineId:line.lineId,linePrice:line.price,mainClass:line.mainClass,case:line.case,status:line.status,confirmedAt:line.at}}});
+     decisions.push({close:bar.close,e:{algorithm:'dbl5',trigger:'confirm',event:'IMPULSE_CLASS_'+position.mainClass,eventId:id,boxId:id,episodeId:base.episode_id,at:point.at,confirmedAt:point.at,supportPrice:selected.k,upperPrice:bar.high,nativeInvalidation:null,tickSize:String(tick),algorithmVersion:position.version,definitionKey:definitionKey(def),parameters:{classification:IMPULSE_1115_CLASSIFICATION_VERSION,mainClass:position.mainClass,parameters:def.DBL5C_parameters,bufferAtr:position.bufferAtr},initializationStart:from,dataChecksum:base.data_checksum,marketRuleVersion:DBL5_MARKET_RULE_VERSION,kBasis:'support',basePrice,bufferUnit:'atr',buffer:position.bufferAtr,nativeAtr:line.frozenAtr,guardPrice:selected.k,guardRegime:'trend',guardCloses:1,impulseClassification:{version:IMPULSE_1115_CLASSIFICATION_VERSION,lineId:line.lineId,linePrice:line.price,mainClass:line.mainClass,case:line.case,status:line.status,confirmedAt:line.at}}});
     });cursor=to;await fishDelay(0,o.signal);if(stop())break;
    }
   };
@@ -69,7 +73,7 @@ export function createClassifiedImpulsePositionReader(o:{row:TradeSignal;entry:n
    for(const {e,close} of decisions){
     if(!eligible(e))continue;
     if(gain&&close<gain.referencePrice*(1+gain.thresholdPct/100)){onSkip?.({at:e.at,support:e.supportPrice,reason:'gain',close,referencePrice:gain.referencePrice,thresholdPct:gain.thresholdPct});continue;}
-    return {at:e.at,price:NaN,scanFrom:o.entry,reading:e.supportPrice,threshold:0,direction:'>' as const,metric:'confirmed_impulse_class',label:classifiedImpulsePositionLabel(position.mainClass),featureId:CLASSIFIED_IMPULSE_POSITION_VERSION,definitionKey:e.definitionKey,barOpenTime:e.at-STEP,structureEvidence:structuredClone(e),...(gain?{priceGate:{...gain,basis:gain.basis??'real-average' as const,observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at}}:{})};
+    return {at:e.at,price:NaN,scanFrom:o.entry,reading:e.supportPrice,threshold:0,direction:'>' as const,metric:'confirmed_impulse_class',label:classifiedImpulsePositionLabel(position.mainClass),featureId:position.version,definitionKey:e.definitionKey,barOpenTime:e.at-STEP,structureEvidence:structuredClone(e),...(gain?{priceGate:{...gain,basis:gain.basis??'real-average' as const,observedPrice:close,gainPct:(close/gain.referencePrice-1)*100,confirmedAt:e.at}}:{})};
    }
   };
  }

@@ -139,6 +139,7 @@ export function assertStructureVersionsAvailable(rule: Parameters<typeof structu
 
 /** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */
 export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
+  {id:'holding-impulse-1115-classified-line-k-v2',since:'2026-11-19',summary:'一类／二类加仓位置新增 K＝原生急拉线价格−N×该线冻结 ATR，N 可手动设置并按轮次、分类和分支独立保存。按报价步长向下取整，定量和退出共用所选 K；保留原起涨低点基准的 v1 实现与指纹，已存方案不自动转换。'},
   {id:'holding-mirror-hard-stop-stages-v1',since:'2026-11-19',summary:'新增镜像平衡减仓前／后硬性终止阶段。减仓实际成交后前段退出判断停止，后段独立开始计数；盘中成交以收盘可确认时点切换指标，价格保护从下一分钟开始。全程条件、旧版减仓后条件、原生箱体与防守线计算均保留，不自动迁移已存模板。'},
   {id:'holding-post-mirror-protection-v1',since:'2026-11-19',summary:'新增独立的镜像平衡减仓后启动约束：仅凭本次持仓减仓成交记录启用 DBL-5 防守线或 CDA 硬性终止。开盘减仓后当分钟可检查，盘中减仓后防守线从下一分钟、CDA 从首个后续读数检查；不追补启动前断裂和计数。原防守线计算、原终止选项及已存模板保持不变。'},
   {id:'holding-support-second-exit-v1',since:'2026-11-19',summary:'新增独立选项“持仓期间二次断裂终止”：按冻结周期与防守线参数累计本次持仓后的独立原生红叉。首次只计数，不因本条件停止加仓；第二次确认后按下一分钟开盘价卖出全部持仓。预热与持续在线下不重复计数，防守线重建及暂停续算不清零，其他加仓否决和退出仍独立生效。保留原“首次断裂停加仓，二次断裂终止”版本及模板语义。'},
