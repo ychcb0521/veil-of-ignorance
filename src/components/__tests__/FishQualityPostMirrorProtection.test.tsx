@@ -9,6 +9,8 @@ import {newQualityStudy,type QualityGroup} from '@/lib/fish/quality';
 import {makeQualitySellPlan} from '@/lib/fish/qualitySellPlans';
 import {makeQualityHoldingVeto,holdingVetoDraft,parseHoldingVetoDraft} from '@/lib/fish/qualityFilters';
 import {POST_MIRROR_PROTECTION_VERSION as V} from '@/lib/fish/qualityPostMirrorProtection';
+import {defaultBoxSecondExit,BOX_SECOND_EXIT_CHOICE} from '@/lib/fish/qualityBoxStop';
+import {DBL5_RETEST_GUARD_VERSION} from '@/lib/dbl5m';
 import type {FishQualityState} from '@/hooks/useFishQuality';
 import type {QualityHoldingVeto} from '@/lib/fish/qualityVeto';
 import {BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION} from '@/lib/fish/qualityBoxStop';
@@ -68,6 +70,7 @@ it('冻结配置只读地显示启动范围；买前筛选不出现新增持仓�
  expect(screen.queryByRole('button',{name:'添加镜像减仓后 CDA＜−15'})).toBeNull();
  expect(screen.queryByRole('button',{name:'添加镜像减仓后 DBL-5 二次支撑断裂'})).toBeNull();
  expect(screen.queryByRole('button',{name:'添加镜像减仓后持仓期间二次断裂终止'})).toBeNull();
+ expect(screen.queryByTestId('add-post-mirror-observe-second-exit')).toBeNull();
 });
 it('保留全部旧选项，二次断裂两种语义都可新增为镜像后启动并独立保存',()=>{
  const {state,plans}=fixture(),before=JSON.stringify(plans);render(<Settings state={state}/>);
@@ -86,6 +89,21 @@ it('保留全部旧选项，二次断裂两种语义都可新增为镜像后启�
  const saved=vi.mocked(state.setSellPlans).mock.lastCall![0] as QualityGroup[];
  const rules=saved[0].holdingVetoes!.filter(v=>v.activation===V);
  expect(rules.map(v=>v.boxStop?.version)).toEqual([BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION]);
+ expect(saved[0].holdingVetoes!.find(v=>!v.activation)).toEqual(plans[0].holdingVetoes[0]);
+ expect(saved[1]).toEqual(plans[1]);expect(JSON.stringify(plans)).toBe(before);
+},15000);
+it('明确的首次观察、二次退出入口复用只计数版本，原入口与原方案完整保留',()=>{
+ const {state,plans}=fixture(),before=JSON.stringify(plans);render(<Settings state={state}/>);
+ const hard=within(screen.getAllByTestId('quality-hard-stop')[0]);
+ for(const name of ['添加支撑断裂终止','添加二次断裂终止','添加持仓期间二次断裂终止','添加镜像减仓后 DBL-5 防守线','添加镜像减仓后 DBL-5 二次支撑断裂','添加镜像减仓后持仓期间二次断裂终止'])expect(hard.getByRole('button',{name})).toBeInTheDocument();
+ fireEvent.click(hard.getByRole('button',{name:'添加镜像减仓后防守线首次观察、二次退出'}));
+ expect(hard.getByTestId('post-mirror-observe-second-exit')).toHaveTextContent('防守线第一次断裂观察，第二次断裂退出');
+ expect(hard.getByLabelText('启用持仓否决 3')).not.toBeChecked();
+ fireEvent.click(hard.getByLabelText('启用持仓否决 3'));
+ fireEvent.click(screen.getByRole('button',{name:/^保存(全部 \d|到)/}));
+ const saved=vi.mocked(state.setSellPlans).mock.lastCall![0] as QualityGroup[];
+ const expected=parseHoldingVetoDraft([{choice:BOX_SECOND_EXIT_CHOICE,direction:'<=',threshold:'0',enabled:true,boxStop:defaultBoxSecondExit(BUILTIN_FEATURES,DBL5_RETEST_GUARD_VERSION),activation:V}],BUILTIN_FEATURES);
+ expect(saved[0].holdingVetoes!.filter(v=>v.activation)).toEqual(expected);
  expect(saved[0].holdingVetoes!.find(v=>!v.activation)).toEqual(plans[0].holdingVetoes[0]);
  expect(saved[1]).toEqual(plans[1]);expect(JSON.stringify(plans)).toBe(before);
 },15000);

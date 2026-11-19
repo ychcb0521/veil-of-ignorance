@@ -101,11 +101,11 @@ it.each([['首次停加仓',defaultBoxSecondBreak,true],['首次只计数',defau
  expect(waiting.status).toBe('open');expect(waiting.additionsBlockedAt).toBeUndefined();
  expect(waiting.boxStopStates?.['gated-box'].breakCount).toBeUndefined();
 });
-it.each(['primary','attack'] as const)('镜像后首次断裂才锁定 %s 及全部后续轮次，暂停恢复保留锁和计数',async lane=>{
+it.each([['primary',true],['attack',true],['primary',false],['attack',false]] as const)('镜像后首次断裂按所选口径处理 %s 加仓，暂停恢复保留锁和计数（停加仓=%s）',async(lane,locks)=>{
  const addDef={...def,id:'add',formula:'raw = B'},condition=makeQualityBuyFilter('add:raw','>',.5,true,[addDef]);
  condition.snapshot={...condition.snapshot,definitionKey:features.definitionKey(addDef),interval:'1m'};
  const round={source:'custom' as const,stricterPct:0,condition};
- const g=plan([box(defaultBoxSecondBreak())]);
+ const g=plan([box(locks?defaultBoxSecondBreak():defaultBoxSecondExit())]);
  g.addition={...defaultQualityAddition(),enabled:true,source:'custom',condition,maxRounds:30,
   rounds:Array.from({length:30},()=>lane==='primary'?round:{...round,condition:{...condition,threshold:1000}}),
   ...(lane==='attack'?{alternativeRounds:Array.from({length:30},()=>round)}:{})};
@@ -115,11 +115,13 @@ it.each(['primary','attack'] as const)('镜像后首次断裂才锁定 %s 及全
  expect(before.boxStopStates?.['gated-box'].breakCount).toBeUndefined();
  expect(before.mirrorFill?.at).toBe(T+9*M);expect(before.additionFills!.length).toBeGreaterThan(0);
  if(lane==='attack')expect(before.additionFills!.every(f=>f.lane==='attack')).toBe(true);
- const first=await run(g,20,l);expect(first.status).toBe('open');expect(first.additionsBlockedAt).toBe(T+15*M);
+ const first=await run(g,20,l);expect(first.status).toBe('open');expect(first.additionsBlockedAt).toBe(locks?T+15*M:undefined);
  expect(first.boxStopStates?.['gated-box'].breakCount).toBe(1);
- expect(first.additionFills!.every(f=>f.at<T+15*M)).toBe(true);
+ if(locks)expect(first.additionFills!.every(f=>f.at<T+15*M)).toBe(true);
+ else{expect(first.additionFills!.some(f=>f.at>=T+15*M)).toBe(true);expect(first.boxStopStates?.['gated-box'].firstBreakAt).toBeUndefined();expect(first.boxStopStates?.['gated-box'].firstCountedBreakAt).toBe(T+15*M);}
  expect(await run(g,20,l,JSON.parse(JSON.stringify(before)))).toEqual(first);
- expect(await run(g,28,l,JSON.parse(JSON.stringify(first)))).toEqual(await run(g,28,l));
+ const exited=await run(g,28,l);expect(exited).toMatchObject({status:'closed',endTime:T+25*M,exitSnapshot:{cause:{boxBreakEvidence:{breakCount:2}}}});
+ expect(await run(g,28,l,JSON.parse(JSON.stringify(first)))).toEqual(exited);
 });
 it('新约束等待时，原硬止损与普通卖出仍可先独立终止',async()=>{
  const stop:QualityHoldingVeto={id:'static',label:'静态',enabled:true,kind:'static-drawdown',direction:'>=',threshold:5};
