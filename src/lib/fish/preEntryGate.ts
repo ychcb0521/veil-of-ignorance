@@ -8,7 +8,7 @@ import { validateFishBars } from './shared';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { activeAdditionVetoes, evaluateAdditionVetoes, fastDropHit, type AdditionVetoHit } from './qualityAdditionVeto';
 import { advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, type QualityHoldingPath } from './qualityVeto';
-import { createBoxStopReader, isBoxBreak } from './qualityBoxStop';
+import { createBoxStopReader, boxStopRuleEntries, isBoxBreak } from './qualityBoxStop';
 import { preEntryConditionText, preEntryVetoes, type PreEntryConditions } from './preEntryConditions';
 import { formatUTC8 } from '../timeFormat';
 
@@ -114,7 +114,7 @@ export function createPreEntryGate(o: { conditions: PreEntryConditions; start: n
       }
     }
     const states=boxReader.states();
-    if ((path || !o.allowEmptyObservation) && boxes.some(v=>!isBoxBreak(v.boxStop!)&&states[v.id]?.line==null)) return {blocked,pending:'等待有效箱体 K 基准，尚不入选'};
+    if ((path || !o.allowEmptyObservation) && boxes.some(v=>boxStopRuleEntries(v.boxStop!).some(c=>c.enabled&&!isBoxBreak(c.rule)&&states[v.id+(c.channel?':'+c.channel:'')]?.line==null))) return {blocked,pending:'等待有效箱体 K 基准，尚不入选'};
     return {blocked,...(historical.pending?{pending:historical.pending}:{})};
   };
   // v7 only: reuse causal indicator/ATR warmup, never reload the same market

@@ -8,7 +8,7 @@ import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICA
 import { expressionConditions } from './preEntryThreeStage';
 import {DBL5_1115_POSITION_RACE_VERSION,DBL5_GUARD_PLUS_LABEL,DBL5_GUARD_PLUS_PARAMS,DBL5_GUARD_PLUS_VERSION,IMPULSE_1115_CONFIGURABLE_K_VERSION,IMPULSE_1115_DISPLAY_NAME,IMPULSE_1115_POSITION_LABEL,dbl5GuardPlusParams} from '@/lib/dbl5GuardPlus';
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
-import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,isBoxSecondBreak,boxStopAlgorithmLabel,boxStopLabel,boxStopIdentity} from './qualityBoxStop';
+import {BOX_STOP_KIND,freezeBoxStop,isBoxBreak,isBoxSecondBreak,boxStopAlgorithmLabel,boxStopLabel,boxStopIdentity,boxStopRuleEntries} from './qualityBoxStop';
 import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryConditions';
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
@@ -171,7 +171,12 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     join([qualityVetoVersion(plan), ...vetoes.filter(v => v.snapshot?.definitionKey).map(v => formulaFingerprint(v.snapshot!))]),
     plan.vetoFill === 'stop' ? '回撤止损盘中触及按止损价成交' : '回撤否决下一分钟开盘成交');
   vetoes.filter(v => v.kind === BOX_STOP_KIND).forEach((v, i) => {
-    const r = v.boxStop!, versions = structureVersions(r.structure);
+    const r = v.boxStop!;
+    if(r.channels){
+      const children=boxStopRuleEntries(r).map(c=>{const versions=structureVersions(c.rule.structure);return join([c.rule.version,c.rule.reference?.version,versions.box,versions.guard]);});
+      add(`hard-stop-box-${i}`,'硬性终止',boxStopLabel(r),join([r.version,...children,'参数 #'+shortFishHash(JSON.stringify(boxStopIdentity(r)))]),BOX_K_EXECUTION_VERSIONS.find(item=>item.id===r.version)!.summary);return;
+    }
+    const versions = structureVersions(r.structure);
     const version = join([r.version, r.reference?.version, versions.box, versions.guard, (r.guardRegime || isBoxSecondBreak(r) || r.reference) && '参数 #' + shortFishHash(JSON.stringify(boxStopIdentity(r)))]);
     const summary = BOX_K_EXECUTION_VERSIONS.find(item => item.id === r.version)?.summary
       ?? (isBoxBreak(r) ? `仅在原生 ${boxStopAlgorithmLabel(r)} 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂` : `独立箱体止损；只用已收盘 ${INTERVAL_LABEL[r.structure.definition.interval??'5m']}结构，触价或收盘确认由用户选择`);

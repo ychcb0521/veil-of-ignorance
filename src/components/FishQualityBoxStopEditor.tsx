@@ -1,5 +1,4 @@
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
-import {useId} from 'react';
 import { DBL5_PROFILES, DBL5_VARIANT_TIMEFRAMES, dbl5Defaults, DBL5_GUARD_DEFAULTS, DBL5_RETEST_GUARD_VERSION, dbl5GuardVersion, type Dbl5Config, type Dbl5VariantTimeframe } from '@/lib/dbl5m';
 import { SBS5M_DEFAULTS, SBS5M_PARAMETER_SPECS } from '@/lib/sbs5m';
 import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
@@ -7,10 +6,25 @@ import { CURRENT_GUARD_VERSION, freezeStructureVersions, structureDbl5Timeframe,
 import { Dbl5GuardVersionSelect } from '@/components/Dbl5GuardVersionSelect';
 import {BOX_STOP_REFERENCE_LABELS,type BoxStopReferenceKind} from '@/lib/fish/qualityBoxReference';
 import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION,DBL5_GUARD_PLUS_PARAMS} from '@/lib/dbl5GuardPlus';
-import { BOX_STOP_GUARD_REGIMES, boxStopAlgorithmLabel, isBoxBreak, isBoxSecondBreak, isBoxSecondBreakExitOnly, selectBoxStopGuardRegime, selectBoxStopTimeframe, selectBoxStopReference, clearBoxStopReference, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
+import { BOX_STOP_GUARD_REGIMES, boxStopChannelSettings, selectBoxStopChannels, BOX_STOP_CHANNEL_LABELS, type BoxStopChannel, boxStopAlgorithmLabel, isBoxBreak, isBoxSecondBreak, isBoxSecondBreakExitOnly, selectBoxStopGuardRegime, selectBoxStopTimeframe, selectBoxStopReference, clearBoxStopReference, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
 const field='h-7 rounded bg-muted/50 px-2 text-[11px] min-w-0';
-export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definitions,entry=false,admission=false,vetoOnly=false,afterMirror=false}:{rule:BoxStopRule;onChange:(rule:BoxStopRule)=>void;disabled:boolean;prefix:string;definitions:readonly DeepDigFeatureDef[];entry?:boolean;admission?:boolean;vetoOnly?:boolean;afterMirror?:boolean}) {
-  const categoryName=useId();
+type BoxStopEditorProps={rule:BoxStopRule;onChange:(rule:BoxStopRule)=>void;disabled:boolean;prefix:string;definitions:readonly DeepDigFeatureDef[];entry?:boolean;admission?:boolean;vetoOnly?:boolean;afterMirror?:boolean};
+export function FishQualityBoxStopEditor(props:BoxStopEditorProps) {
+  const {rule,onChange,disabled,prefix,definitions,admission,afterMirror}=props;
+  if(admission||isBoxBreak(rule))return <FishQualityBoxStopSingleEditor {...props}/>;
+  const channels=boxStopChannelSettings(rule,definitions);
+  const toggle=(channel:BoxStopChannel,enabled:boolean)=>onChange(selectBoxStopChannels({...channels,[channel]:{...channels[channel],enabled}}));
+  const change=(channel:BoxStopChannel,next:BoxStopRule)=>onChange(rule.channels?selectBoxStopChannels({...channels,[channel]:{...channels[channel],rule:next}}):next);
+  return <fieldset disabled={disabled} className="w-full space-y-3 rounded border border-border/60 p-2" data-testid="quality-box-stop-editor">
+    {afterMirror&&<p className="text-[11px] font-medium text-primary">启动时点：本次镜像平衡减仓实际成交后；启动前证据不追补。</p>}
+    <p className="text-[11px] text-muted-foreground" data-testid="quality-box-independent-channels">急拉线与非急拉线可同时勾选。两路的 ATR 冗余、K 更新及确认方式各自独立；{props.entry?'任一路触发则本分钟不入选':'任一路先触发即退出全部持仓'}。取消一路保留该路参数，保存后只运行仍勾选的路。</p>
+    {(['regular','impulse'] as const).map(channel=><fieldset key={channel} className="min-w-0 space-y-2 rounded border border-border/60 p-3" data-testid={channel==='regular'?'quality-box-regular-settings':'quality-box-impulse-settings'}>
+      <legend className="px-1 text-xs font-medium"><label className="flex items-center gap-2"><input type="checkbox" aria-label={prefix+'使用'+BOX_STOP_CHANNEL_LABELS[channel]} checked={channels[channel].enabled} onChange={e=>toggle(channel,e.target.checked)}/>{BOX_STOP_CHANNEL_LABELS[channel]}信息{channel==='regular'?' · 箱体 / 防守线':''}</label></legend>
+      {channels[channel].enabled?<FishQualityBoxStopSingleEditor {...props} afterMirror={false} rule={channels[channel].rule} onChange={next=>change(channel,next)} channel={channel} prefix={prefix+(rule.channels?BOX_STOP_CHANNEL_LABELS[channel]+' ':'')}/>:<p className="text-[10.5px] text-muted-foreground">本路未启用；勾选后独立填写，不影响另一路参数。</p>}
+    </fieldset>)}
+  </fieldset>;
+}
+function FishQualityBoxStopSingleEditor({rule,onChange,disabled,prefix,definitions,entry=false,admission=false,vetoOnly=false,afterMirror=false,channel}:BoxStopEditorProps&{channel?:BoxStopChannel}) {
   const s=rule.structure,def=s.definition,eventMode=isBoxBreak(rule),secondBreak=isBoxSecondBreak(rule),exitOnly=isBoxSecondBreakExitOnly(rule),put=(patch:Partial<BoxStopRule>)=>onChange({...rule,...patch});
   const timeframe=structureDbl5Timeframe(s), alternate=timeframe!=='5m';
   const {periodLabel,minutes}=DBL5_PROFILES[timeframe];
@@ -46,11 +60,10 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
   const onAlgorithmChange=(e:React.ChangeEvent<HTMLSelectElement>)=>selectAlgorithm(e.target.value as Parameters<typeof selectAlgorithm>[0]);
   const dbl=(key:keyof Dbl5Config,value:number)=>putStructure({definition:{...def,DBL5_config:{...def.DBL5_config,[key]:value}}});
   const number=(label:string,value:number,onValue:(n:number)=>void,min=0,max?:number,step='any')=><label className="flex flex-wrap items-center gap-1 text-[11px]">{label}<input disabled={disabled} aria-label={prefix+label} className={field+' shrink-0 font-mono text-[13px] tabular-nums'} style={{width:`calc(${Math.max(4,String(Number.isFinite(value)?value:'').length)}ch + 4.5rem)`,minWidth:'7rem',flexShrink:0}} type="number" min={min} max={max} step={step} value={Number.isFinite(value)?value:''} onChange={e=>onValue(e.target.value.trim()?Number(e.target.value):NaN)}/></label>;
-  return <fieldset disabled={disabled} className="w-full space-y-2 rounded border border-border/60 p-2" data-testid="quality-box-stop-editor">
+  return <fieldset disabled={disabled} className="w-full space-y-2 rounded border border-border/60 p-2" data-testid={channel?"quality-box-stop-single-editor":"quality-box-stop-editor"}>
     {afterMirror&&<p className="text-[11px] font-medium text-primary">启动时点：本次镜像平衡减仓实际成交后；启动前的断裂不追补。</p>}
-    {!admission&&!eventMode&&<p className="text-[11px] text-muted-foreground">每条约束选择一类参考作为 K 基准；下方分开填写，止损 K 的额外冗余与执行方式共用。需要两类同时独立止损时，分别添加两条约束。</p>}
-    <fieldset className="min-w-0 space-y-2 rounded border border-border/60 p-3" data-testid="quality-box-regular-settings">
-      <legend className="px-1 text-xs font-medium">{!admission&&!eventMode?<label className="flex items-center gap-2"><input type="radio" name={categoryName} aria-label={prefix+'使用非急拉线'} checked={!rule.reference} onChange={()=>chooseBasis(s.kSource==='guard'?'guard':s.kBasis)}/>非急拉线信息 · 箱体 / 防守线</label>:'非急拉线信息 · 箱体 / 防守线'}</legend>
+    <fieldset className="min-w-0 space-y-2 rounded border border-border/60 p-3" data-testid="quality-box-native-background-settings">
+      <legend className="px-1 text-xs font-medium">{channel==='impulse'?'急拉线原生背景参数（独立）':'箱体 / 防守线参数'}</legend>
     {admission?<div className="flex flex-wrap items-center gap-2 text-[11px]">
       <label>箱体算法 <select aria-label={prefix+'算法'} className={field} disabled={!!rule.reference} title={rule.reference?'急拉线使用原生5分钟；先改选常规K基准再切换算法或周期':undefined} value={algorithmValue} onChange={onAlgorithmChange}>{algorithmOptions}</select></label>
       <span>{algorithmLabel} 原生防守线 · 新线事件准入</span>
@@ -79,8 +92,8 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
       </>:<>{SBS5M_PARAMETER_SPECS.map(spec=><span key={spec.key} title={spec.description}>{number(spec.label+'（'+spec.unit+'）',def.SBS5M_config?.[spec.key]??SBS5M_DEFAULTS[spec.key],n=>putStructure({definition:{...def,SBS5M_config:{...def.SBS5M_config,[spec.key]:n}}}),spec.min,spec.max,spec.integer?'1':'any')}</span>)}<label className="text-[11px]">成交量口径 <select aria-label={prefix+'成交量口径'} className={field} value={def.SBS5M_config?.volume_mode??SBS5M_DEFAULTS.volume_mode} onChange={e=>putStructure({definition:{...def,SBS5M_config:{...def.SBS5M_config,volume_mode:e.target.value as 'quote'|'base_times_close'}}})}><option value="quote">原始成交额</option><option value="base_times_close">成交量 × 收盘价</option></select></label></>}
     </div></details>}
     </fieldset>
-    {!admission&&!eventMode&&<fieldset className="min-w-0 space-y-2 rounded border border-primary/25 bg-primary/[0.02] p-3" data-testid="quality-box-impulse-settings">
-      <legend className="px-1 text-xs font-medium"><label className="flex items-center gap-2"><input type="radio" name={categoryName} aria-label={prefix+'使用急拉线'} checked={!!rule.reference} disabled={s.algorithm!=='dbl5'||alternate} onChange={()=>chooseBasis('impulse1115')}/>急拉线信息</label></legend>
+    {!admission&&!eventMode&&channel==='impulse'&&<fieldset className="min-w-0 space-y-2 rounded border border-primary/25 bg-primary/[0.02] p-3" data-testid="quality-box-impulse-reference">
+      <legend className="px-1 text-xs font-medium">急拉参考线参数</legend>
       {rule.reference?<>
         <label className="flex flex-wrap items-center gap-2 text-[11px]">急拉线 K 基准 <select aria-label={prefix+'K基准'} className={field+' max-w-full'} value={rule.reference.kind} onChange={e=>chooseBasis(e.target.value)}>{Object.entries(BOX_STOP_REFERENCE_LABELS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
         {rule.reference.kind==='impulse0'?<p className="text-[10.5px] text-muted-foreground">急拉线-0 直接使用原生起涨低点，不在生成参考线时扣除 ATR 缓冲；下方“额外冗余”仍可单独设置。</p>:<>
@@ -92,7 +105,7 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
       </>:<p className="text-[10.5px] text-muted-foreground">{s.algorithm!=='dbl5'||alternate?'急拉线仅支持原生 DBL-5 · 5m；先在非急拉线区选择该算法和周期，再手动选择本区。':'当前使用非急拉线，本区无需填写；选择“急拉线信息”后填写急拉线类型和自身缓冲。'}</p>}
     </fieldset>}
     {!admission&&!eventMode&&<div className="space-y-2 border-t border-border/60 pt-2" data-testid="quality-box-stop-execution">
-      <p className="text-[11px] font-medium">以上两类共用 · 生成止损 K 与执行</p>
+      <p className="text-[11px] font-medium">{channel==='impulse'?'急拉线独立冗余与执行':'非急拉线独立冗余与执行'}</p>
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         {number('额外冗余',s.buffer,n=>putStructure({buffer:n}))}<select aria-label={prefix+'冗余单位'} className={field} value={s.bufferUnit} onChange={e=>putStructure({bufferUnit:e.target.value as typeof s.bufferUnit})}><option value="atr">倍 ATR(14)</option><option value="percent">%</option></select>
         <label>K 更新 <select aria-label={prefix+'更新方式'} className={field} value={rule.update} onChange={e=>put({update:e.target.value as BoxStopRule['update']})}><option value="fixed">首次有效 K 固定</option><option value="raise-only">只升不降</option><option value="follow">跟随最新结构（允许下移）</option></select></label>

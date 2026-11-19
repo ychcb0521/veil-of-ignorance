@@ -13,7 +13,7 @@ it('导出详细信息：下载一个 xlsx，文件名带标的与方案，页�
   fireEvent.click(screen.getByRole('button', { name: '查看持仓监测设置' }));
   fireEvent.click(await screen.findByRole('button', { name: '导出详细信息' }));
   // 点击后才加载导出代码：负载高时会超过默认的 1 秒
-  expect(await screen.findByRole('status', {}, { timeout: 10_000 })).toHaveTextContent(/已导出 持仓监测-TESTUSDT-.+\.xlsx/);
+  expect(await screen.findByText(/已导出 持仓监测-TESTUSDT-.+\.xlsx/, { selector: '[role="status"]' }, { timeout: 10_000 })).toHaveTextContent(/已导出 持仓监测-TESTUSDT-.+\.xlsx/);
   expect(created).toHaveBeenCalledWith(expect.any(Blob)); expect(click).toHaveBeenCalledOnce();
 });
 it('没有战役数据时不显示导出按钮', () => {

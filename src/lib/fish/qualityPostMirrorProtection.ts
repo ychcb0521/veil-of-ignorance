@@ -7,7 +7,8 @@ export const POST_MIRROR_PROTECTION_VERSION='holding-post-mirror-protection-v1';
 export const POST_MIRROR_PROTECTION_LABEL='仅在镜像平衡减仓成交后启动';
 export const isCdaProtection=(featureId?:string)=>featureId==='cda'||featureId===CDA_HOURLY_ID;
 export function canGateAfterMirror(v:Pick<QualityHoldingVeto,'kind'|'boxStop'|'snapshot'>){
-  return v.kind==='box-stop'&&v.boxStop?.structure.algorithm==='dbl5'&&v.boxStop.structure.kSource==='guard'&&!v.boxStop.reference
+  return v.kind==='box-stop'&&v.boxStop?.version==='holding-box-stop-independent-channels-v1'
+    ||v.kind==='box-stop'&&v.boxStop?.structure.algorithm==='dbl5'&&v.boxStop.structure.kSource==='guard'&&!v.boxStop.reference
     ||v.kind==='indicator'&&isCdaProtection(v.snapshot?.featureId);
 }
 /** An intraminute fill has no reliable high/low ordering: arm price stops next minute. */

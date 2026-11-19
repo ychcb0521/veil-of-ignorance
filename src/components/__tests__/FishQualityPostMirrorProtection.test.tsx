@@ -100,6 +100,21 @@ it('镜像前可跳过未填条件并保存恢复，镜像后与旧全程不受�
  expect(enabled[0].holdingVetoes?.find(v=>v.mirrorStage?.stage==='before')).toMatchObject({enabled:true,boxStop:{version:'holding-support-break-v1'}});
  expect(enabled[0].holdingVetoes?.find(v=>v.mirrorStage?.stage==='after')).toEqual(after);
 },20000);
+it('真实镜像后硬性终止可同时启用两路，各方案 ATR 独立保存',()=>{
+ const {state,plans}=fixture(),original=JSON.stringify(plans);render(<Settings state={state}/>);
+ const back=()=>within(screen.getAllByTestId('quality-hard-stop-after')[0]);
+ const configure=(regular:number,impulse:number)=>{
+  fireEvent.click(back().getByRole('button',{name:'添加箱体终止'}));fireEvent.click(back().getByLabelText('镜像后 启用持仓否决 1'));
+  fireEvent.click(back().getByLabelText('镜像后 箱体止损 1 使用急拉线'));
+  fireEvent.change(back().getByLabelText('镜像后 箱体止损 1 非急拉线 额外冗余'),{target:{value:String(regular)}});
+  fireEvent.change(back().getByLabelText('镜像后 箱体止损 1 急拉线 额外冗余'),{target:{value:String(impulse)}});
+ };
+ configure(.9,1.7);const tabs=within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab');fireEvent.click(tabs[1]);configure(.2,.4);fireEvent.click(tabs[0]);
+ expect(back().getByLabelText('镜像后 箱体止损 1 非急拉线 额外冗余')).toHaveValue(.9);expect(back().getByLabelText('镜像后 箱体止损 1 急拉线 额外冗余')).toHaveValue(1.7);
+ fireEvent.click(screen.getByRole('button',{name:/^保存(全部 \d|到)/}));const saved=vi.mocked(state.setSellPlans).mock.lastCall![0] as QualityGroup[];
+ for(const [i,r,imp] of [[0,.9,1.7],[1,.2,.4]])expect(saved[i].holdingVetoes?.find(v=>v.boxStop?.channels)).toMatchObject({mirrorStage:mirrorHardStopStage('after'),boxStop:{channels:{regular:{enabled:true,rule:{structure:{buffer:r}}},impulse:{enabled:true,rule:{structure:{buffer:imp}}}}}});
+ expect(saved[0].holdingVetoes?.find(v=>v.kind==='indicator')).toEqual(plans[0].holdingVetoes[0]);expect(JSON.stringify(plans)).toBe(original);
+},20000);
 it('保存后恢复显示各自的启动开关，取消新开关只更改该条件',()=>{
  const original=makeQualityHoldingVeto('cda:CDA','<',-15,true,BUILTIN_FEATURES);
  const saved:QualityHoldingVeto[]=[original,{...structuredClone(original),id:original.id+'-'+V,activation:V}];
