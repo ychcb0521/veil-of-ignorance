@@ -153,7 +153,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     plan.vetoFill === 'stop' ? '回撤止损盘中触及按止损价成交' : '回撤否决下一分钟开盘成交');
   vetoes.filter(v => v.kind === BOX_STOP_KIND).forEach((v, i) => {
     const r = v.boxStop!, versions = structureVersions(r.structure);
-    const version = join([r.version, versions.box, versions.guard, (r.guardRegime || isBoxSecondBreak(r)) && '参数 #' + shortFishHash(JSON.stringify(boxStopIdentity(r)))]);
+    const version = join([r.version, r.reference?.version, versions.box, versions.guard, (r.guardRegime || isBoxSecondBreak(r) || r.reference) && '参数 #' + shortFishHash(JSON.stringify(boxStopIdentity(r)))]);
     const summary = BOX_K_EXECUTION_VERSIONS.find(item => item.id === r.version)?.summary
       ?? (isBoxBreak(r) ? `仅在原生 ${boxStopAlgorithmLabel(r)} 防守线红叉确认后，按下一分钟开盘价全仓卖出；不将影线或缺失线当断裂` : `独立箱体止损；只用已收盘 ${INTERVAL_LABEL[r.structure.definition.interval??'5m']}结构，触价或收盘确认由用户选择`);
     add(`hard-stop-box-${i}`, '硬性终止', boxStopLabel(r), version, summary);

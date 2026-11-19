@@ -4,6 +4,7 @@ import { activeAdditionVetoes, validateAdditionVetoes, BOX_BREAK_VETO_VERSION, t
 import { activeHoldingVetoes, validateHoldingVeto, type QualityHoldingVeto } from './qualityVeto';
 import { freezeBoxStop, isBoxSecondBreak } from './qualityBoxStop';
 import { structureVersions } from './boxAlgorithmVersions';
+import {BOX_STOP_REFERENCE_VERSION} from './qualityBoxReference';
 
 export const PRE_ENTRY_CONDITIONS_VERSION = 'pre-entry-conditions-v4' as const;
 /** Separate buy-before-entry settings. These never become holding sell rules. */
@@ -39,11 +40,12 @@ export function preEntryConditionsVersion(plan: QualityGroup, legacyBoxBreakOrde
   validatePreEntryConditions(value);
   const boxes = preEntryVetoes(value).filter(v => v.boxStop).map(v => [v.boxStop!.version, structureVersions(v.boxStop!.structure)]);
   const boxBreak=value?.entryVetoes.some(v=>v.kind==='box-break')&&!legacyBoxBreakOrder;
+  const reference=preEntryVetoes(value).some(v=>!!v.boxStop?.reference)&&!legacyBoxBreakOrder;
   // Only the new opt-in condition uses this canonical format. Arrays and every
   // parameter remain intact; all earlier templates retain their exact serializer.
   const payload=[value,plan.buyFilters,boxes];
-  const serialized=boxBreak?JSON.stringify(payload,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item):JSON.stringify(payload);
-  return PRE_ENTRY_CONDITIONS_VERSION + (boxBreak?' · '+BOX_BREAK_VETO_VERSION:'') + ' · 参数 #' + shortFishHash(serialized);
+  const serialized=boxBreak||reference?JSON.stringify(payload,(_k,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item):JSON.stringify(payload);
+  return PRE_ENTRY_CONDITIONS_VERSION + (boxBreak?' · '+BOX_BREAK_VETO_VERSION:reference?' · '+BOX_STOP_REFERENCE_VERSION:'') + ' · 参数 #' + shortFishHash(serialized);
 }
 
 export const preEntryConditionText = (text:string) => text.replace(/自由静态最大回撤/g,'筛选过程静态最大回撤').replace(/持仓/g,'筛选').replace(/不再加仓/g,'不入选').replace(/下一分钟开盘全仓卖出|触碰 K 立即卖出/g,'本分钟不入选');

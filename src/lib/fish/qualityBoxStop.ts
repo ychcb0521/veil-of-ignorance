@@ -1,11 +1,15 @@
-import { evaluateOnBars, featureWindowMs, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { evaluateOnBars, featureWindowMs, DBL5_GUARD_PLUS_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { BOX_STOP_REFERENCE_VERSION, BOX_STOP_REFERENCE_LABELS, defaultBoxStopReference, boxStopReferenceIdentity, validateBoxStopReference, createImpulse0StopReference, type BoxStopReference, type BoxStopReferenceKind } from './qualityBoxReference';
+import { type Dbl5GuardPlusCheckpoint } from '@/lib/dbl5GuardPlus';
+import { dbl5TickAt } from '@/lib/dbl5mMarketRules';
+import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import { advanceChartAtr, type ChartAtrState } from '@/lib/atr';
 import { compileFishProgram } from './algorithm';
 import { freezeStructureVersions, structureDbl5Timeframe, selectStructureGuardVersion } from './boxAlgorithmVersions';
-import { defaultStructureAddition, structureActiveBox, structureAdditionIdentity, selectStructureTimeframe, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
+import { defaultStructureAddition, structureActiveBox, structureAdditionIdentity, structureAdditionK, selectStructureTimeframe, validateStructureAddition, type StructureAdditionRule } from './qualityAdditionStructure';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { validateFishBars } from './shared';
-import { DBL5_PROFILES, dbl5Parameters, type Dbl5Timeframe, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
+import { DBL5_PROFILES, DBL5_GUARD_VERSION, dbl5GuardVersion, dbl5Parameters, type Dbl5Timeframe, type Dbl5GuardVersion, type Dbl5Checkpoint, type Dbl5Row } from '@/lib/dbl5m';
 import { sbsParameters, type SbsCheckpoint } from '@/lib/sbs5m';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -25,7 +29,8 @@ export const BOX_BREAK_CHOICE = 'box-support-break';
 export const BOX_SECOND_BREAK_VERSION = 'holding-support-second-break-v1';
 export const BOX_SECOND_BREAK_CHOICE = 'box-support-second-break';
 export interface BoxStopRule {
-  version: typeof BOX_STOP_VERSION | typeof BOX_STOP_GUARD_REGIME_VERSION | typeof BOX_BREAK_VERSION | typeof BOX_SECOND_BREAK_VERSION;
+  version: typeof BOX_STOP_VERSION | typeof BOX_STOP_GUARD_REGIME_VERSION | typeof BOX_BREAK_VERSION | typeof BOX_SECOND_BREAK_VERSION | typeof BOX_STOP_REFERENCE_VERSION;
+  reference?:BoxStopReference;
   guardRegime?: BoxStopGuardRegime;
   structure: StructureAdditionRule;
   update: 'fixed' | 'raise-only' | 'follow';
@@ -36,6 +41,16 @@ export function selectBoxStopGuardRegime(rule: BoxStopRule, regime: keyof typeof
   const { guardRegime: _previous, ...base } = rule;
   return regime === 'both' ? { ...base, version: BOX_STOP_VERSION }
     : { ...base, version: BOX_STOP_GUARD_REGIME_VERSION, guardRegime: regime };
+}
+export function selectBoxStopReference(rule:BoxStopRule,kind:BoxStopReferenceKind):BoxStopRule {
+  const {guardRegime:_,...base}=selectBoxStopTimeframe(rule,'5m');
+  const structure={...base.structure,kSource:kind==='impulse0'?'current' as const:'guard' as const};
+  return freezeBoxStop({...base,version:BOX_STOP_REFERENCE_VERSION,reference:defaultBoxStopReference(kind),
+    structure:kind==='impulse0'?structure:selectStructureGuardVersion(structure,DBL5_GUARD_VERSION)});
+}
+export function clearBoxStopReference(rule:BoxStopRule):BoxStopRule {
+  if(!rule.reference)return rule;
+  const {reference:_,...base}=rule;return {...base,version:BOX_STOP_VERSION};
 }
 
 export interface BoxStopState { line?: number; confirmedAt?: number; count: number; /** Only the opt-in second-break version counts native red crosses. */ breakCount?:number; firstBreakAt?:number }
@@ -64,6 +79,7 @@ export function defaultBoxBreak(defs: readonly DeepDigFeatureDef[] = [], guardVe
   });
 }
 export function selectBoxStopTimeframe(rule:BoxStopRule, timeframe:Dbl5Timeframe, defs:readonly DeepDigFeatureDef[]=[]) {
+  if(rule.reference&&timeframe!=='5m')throw Error('急拉线 K 基准仅使用原生 5 分钟线，请先手动改选箱底或防守线');
   const oldTimeframe=structureDbl5Timeframe(rule.structure);
   if(rule.structure.algorithm!=='dbl5'||oldTimeframe===timeframe)return rule;
   const structure=selectStructureTimeframe(rule.structure,timeframe,defs);
@@ -75,9 +91,14 @@ export function boxStopAlgorithmLabel(rule:BoxStopRule) {
   return rule.structure.algorithm==='dbl5'?DBL5_PROFILES[structureDbl5Timeframe(rule.structure)].label:'SBS-5M';
 }
 export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule {
-  if (!rule || ![BOX_STOP_VERSION,BOX_STOP_GUARD_REGIME_VERSION,BOX_BREAK_VERSION,BOX_SECOND_BREAK_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
+  if (!rule || ![BOX_STOP_VERSION,BOX_STOP_GUARD_REGIME_VERSION,BOX_BREAK_VERSION,BOX_SECOND_BREAK_VERSION,BOX_STOP_REFERENCE_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
   validateStructureAddition(rule.structure);
   const nativeConfirmation=`close-${structureDbl5Timeframe(rule.structure)}`;
+  if(rule.version===BOX_STOP_REFERENCE_VERSION){
+    validateBoxStopReference(rule.reference);
+    if(rule.structure.algorithm!=='dbl5'||structureDbl5Timeframe(rule.structure)!=='5m'||rule.guardRegime!==undefined)throw Error('急拉线 K 基准须使用独立的原生 5 分钟执行版本');
+    if(rule.reference!.kind!=='impulse0'&&(rule.structure.kSource!=='guard'||dbl5GuardVersion(rule.structure.definition.DBL5_config)!==DBL5_GUARD_VERSION))throw Error('急拉线-1115 须保留原防守线 v1 基线');
+  }else if(rule.reference!==undefined)throw Error('急拉线 K 基准与执行版本不符，请保留原版并新建副本');
   if (rule.version === BOX_STOP_GUARD_REGIME_VERSION) {
     if (rule.structure.algorithm !== 'dbl5' || rule.structure.kSource !== 'guard' || !['trend', 'range'].includes(rule.guardRegime ?? '')) {
       throw Error('箱体硬止损的单一线型须使用 DBL-5 防守线并选择实线或虚线');
@@ -93,12 +114,12 @@ export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule
 export function boxStopIdentity(r: BoxStopRule) {
   const config = r.structure.definition.DBL5_config;
   // New rules have a stable fingerprint across the editor and JSONB field order.
-  const structure = (r.version === BOX_STOP_GUARD_REGIME_VERSION || isBoxSecondBreak(r)) && config
+  const structure = (r.version === BOX_STOP_GUARD_REGIME_VERSION || isBoxSecondBreak(r) || r.reference) && config
     ? { ...r.structure, definition: { ...r.structure.definition, DBL5_config: Object.fromEntries(Object.keys(config).sort().map(key => [key, config[key as keyof typeof config]])) } }
     : r.structure;
-  return [r.version, structureAdditionIdentity(structure), r.update, r.confirmation, r.closes, ...(r.guardRegime ? [r.guardRegime] : [])];
+  return [r.version, structureAdditionIdentity(structure), r.update, r.confirmation, r.closes, ...(r.guardRegime ? [r.guardRegime] : []),...(r.reference?[boxStopReferenceIdentity(r.reference)]:[])];
 }
-export const boxStopLabel = (r: BoxStopRule) => isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
+export const boxStopLabel = (r: BoxStopRule) => isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.reference?BOX_STOP_REFERENCE_LABELS[r.reference.kind]:r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
 
 /** Only already closed native structures can place a stop for the next minute. */
 export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
@@ -106,11 +127,15 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).map(v=>{
     validateBoxStop(v.boxStop);
-    const rule=v.boxStop,def=rule.structure.definition,plan=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
+    const rule=v.boxStop,zero=rule.reference?.kind==='impulse0',plus=rule.reference&&!zero;
+    if(zero&&(o.row.exchange!=null&&o.row.exchange!=='binance'||o.row.market==='us_stock'||isTuringCupSymbol(o.row.symbol)))throw Error('急拉线-0 K 基准仅支持币安真实 5 分钟量价，不能用其他市场或模拟成交额代替');
+    const def:DeepDigFeatureDef=zero?{id:'box-stop-impulse0',name:'急拉线-0',short:'急拉线-0',definition:'',formula:'C',scale:1,unit:'',positive:'1',control:'0',interval:'5m'}:plus?{...DBL5_GUARD_PLUS_DEF,DBL5_config:rule.structure.definition.DBL5_config}:rule.structure.definition;
+    const compiled=compileFishProgram(def,{statistic:'结果',direction:'>',threshold:0,constraints:[]});
+    const plan=zero?{...compiled,requiresMarketEvidence:true}:compiled;
     const step=plan.step;
-    const from=qualityHistoryFrom(o.load,Math.floor(o.entry/step)*step-Math.ceil(featureWindowMs(def)/step)*step,step);
+    const from=qualityHistoryFrom(o.load,Math.floor(o.entry/step)*step-(zero?281:Math.ceil(featureWindowMs(def)/step))*step,step);
     if(from<0)throw Error('箱体硬止损初始化历史不足');
-    return {v,rule,def,plan,step,from,cursor:from,dbl:undefined as Dbl5Checkpoint|undefined,sbs:undefined as SbsCheckpoint|undefined,atr:undefined as ChartAtrState|undefined,latestLine:undefined as {line:number;at:number}|undefined,state:{count:0,...o.previous?.[v.id]} as BoxStopState};
+    return {v,rule,def,plan,step,from,cursor:from,dbl:undefined as Dbl5Checkpoint|undefined,sbs:undefined as SbsCheckpoint|undefined,plus:undefined as Dbl5GuardPlusCheckpoint|undefined,readZero:zero?createImpulse0StopReference():undefined,atr:undefined as ChartAtrState|undefined,latestLine:undefined as {line:number;at:number}|undefined,state:{count:0,...o.previous?.[v.id]} as BoxStopState};
   });
   const states=()=>Object.fromEntries(rules.map(r=>[r.v.id,{...r.state}]));
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
@@ -129,14 +154,17 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
         if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
         const to=Math.min(cut,r.cursor+500*r.step),bars=await load(o.row,r.cursor,to,r.plan,o.signal);
         validateFishBars(bars,to,(to-r.cursor)/r.step,r.step);
-        const out=evaluateOnBars(bars,r.plan.compiled,{...r.def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:r.from,DBL5_initialization_id:`box-stop:${r.from}`,DBL5_checkpoint:r.dbl,SBS5M_symbol:o.row.symbol,SBS5M_initialization_id:`box-stop:${r.from}`,SBS5M_checkpoint:r.sbs});
+        const out=evaluateOnBars(bars,r.plan.compiled,{...r.def,DBL5_symbol:o.row.symbol,DBL5_initialization_start:r.from,DBL5_initialization_id:`box-stop:${r.from}`,DBL5_checkpoint:r.dbl,...(r.rule.reference&&r.rule.reference.kind!=='impulse0'?{DBL5P_checkpoint:r.plus,DBL5P_impulseBufferAtr:r.rule.reference.impulseBufferAtr}:{}),SBS5M_symbol:o.row.symbol,SBS5M_initialization_id:`box-stop:${r.from}`,SBS5M_checkpoint:r.sbs});
         r.dbl=out.DBL5_checkpoint;r.sbs=out.SBS5M_checkpoint;
-        const rows=r.rule.structure.algorithm==='dbl5'?out.DBL5_details:out.SBS5M_details;
+        r.plus=out.DBL5P_checkpoint;
+        const rows=r.readZero?bars.map(()=>({data_valid:true} as Dbl5Row)):r.rule.structure.algorithm==='dbl5'?out.DBL5_details:out.SBS5M_details;
         if(!rows||rows.length!==bars.length)throw Error('箱体硬止损缺少结构读数');
         rows.forEach((row,i)=>{
           if(!row.data_valid)throw Error(BOX_STOP_INVALID_DATA);
+          if(r.readZero&&bars[i].DBL5_closed===false)throw Error('急拉线-0 K 基准不能读取尚未收盘的5分钟线');
           r.atr=advanceChartAtr(r.atr,bars[i]);
           const at=bars[i].openTime+r.step;
+          const zero=r.readZero?.(bars[i]);
           if(isBoxSecondBreak(r.rule)){
             // Rebuild missed post-entry events on resume (including settlement gaps).
             // The native red cross is a one-shot event; a price remaining below K is not another break.
@@ -158,9 +186,12 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
           }
           if (r.rule.guardRegime && (row as Dbl5Row).darvas_5m_guard_regime !== r.rule.guardRegime) return;
           const active=structureActiveBox(r.rule.structure,row);
-          const base=r.rule.structure.kSource==='guard'?(row as Dbl5Row).darvas_5m_guard:r.rule.structure.kBasis==='invalidation'?active?.invalidation:active?.support;
+          const reference=r.rule.reference,plus=out.DBL5P_details?.[i];
+          const base=reference?reference.kind==='impulse0'?zero?.price:reference.kind==='impulse1115'?plus?.impulse_guard_value:plus?.guard_plus_value:r.rule.structure.kSource==='guard'?(row as Dbl5Row).darvas_5m_guard:r.rule.structure.kBasis==='invalidation'?active?.invalidation:active?.support;
           if(base==null)return; // Keep an existing protective K when the box subsequently breaks.
-          const line=base-(r.rule.structure.bufferUnit==='atr'?r.rule.structure.buffer*r.atr.value:base*r.rule.structure.buffer/100);
+          const tick=reference?(r.readZero?dbl5TickAt(o.row.symbol,bars[i].openTime,bars[i].DBL5_tick_size??bars[i].ATI6H_tick_size??bars[i].PRS6H_tick_size,bars[i].PRS6H_data_source):(row as Dbl5Row).tick_size):undefined;
+          if(reference&&tick==null)throw Error(BOX_STOP_INVALID_DATA);
+          const line=reference?structureAdditionK({basePrice:base,buffer:r.rule.structure.buffer,bufferUnit:r.rule.structure.bufferUnit,tickSize:String(tick)},r.atr.value)?.k??NaN:base-(r.rule.structure.bufferUnit==='atr'?r.rule.structure.buffer*r.atr.value:base*r.rule.structure.buffer/100);
           if(!(line>0)||!Number.isFinite(line))throw Error('箱体硬止损 K 无效，请检查冗余');
           r.latestLine={line,at};
           if(r.state.line==null||r.rule.update==='follow'||r.rule.update==='raise-only'&&line>r.state.line){r.state.line=line;r.state.count=0;r.state.confirmedAt=at;}
