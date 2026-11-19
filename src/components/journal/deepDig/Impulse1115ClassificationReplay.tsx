@@ -48,6 +48,6 @@ export function Impulse1115ClassificationReplay({data,series}:{data:DeepDigData;
       </div>
     </div>:<p>尚无已确认急拉线</p>}
     <p className="text-muted-foreground">仅展示本次运行冻结的参数和逐根证据。原线断开或到期后仍观察冻结价；缺口暂停该线。
-      盘面蓝色线为一类、橙色线为二类；分类不触发交易动作。</p>
+      盘面绿色线为一类、橙色线为二类；分类不触发交易动作。</p>
   </section>;
 }

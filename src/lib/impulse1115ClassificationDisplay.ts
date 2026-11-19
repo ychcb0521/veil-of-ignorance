@@ -2,8 +2,8 @@ import {DBL5_STEP} from './dbl5m';
 import type {Impulse1115ClassificationRow} from './impulse1115Classification';
 import type {Dbl5GuardPlusRow} from './dbl5GuardPlus';
 
-export const IMPULSE_1115_CLASS_COLORS=Object.freeze({1:'#2563eb',2:'#ea580c'});
-export const IMPULSE_1115_CLASSIFICATION_DESCRIPTION='蓝色线为一类，橙色线为二类。直接用原急拉线的颜色区分类别，按已收盘的5分钟行情更新。';
+export const IMPULSE_1115_CLASS_COLORS=Object.freeze({1:'#16a34a',2:'#ea580c'});
+export const IMPULSE_1115_CLASSIFICATION_DESCRIPTION='绿色线为一类，橙色线为二类。直接用原急拉线的颜色区分类别，按已收盘的5分钟行情更新。';
 export const IMPULSE_1115_REFERENCE_CLASS='_DBL5C_reference_class';
 export const IMPULSE_1115_REFERENCE_DETECTED_AT='_DBL5C_reference_detected_at';
 export const IMPULSE_1115_DISPLAY_REFERENCE='_DBL5C_display_reference';

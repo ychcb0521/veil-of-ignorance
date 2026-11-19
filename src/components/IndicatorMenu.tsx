@@ -606,7 +606,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
       onClick={() => onToggle(item)}
     >
       <div className="flex items-center gap-2.5 flex-1 basis-48 min-w-0">
-        {item.classificationColors?<span aria-label="一类蓝色线，二类橙色线" className="flex w-4 shrink-0 flex-col gap-1"><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[1]}}/><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[2]}}/></span>:<span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />}
+        {item.classificationColors?<span aria-label="一类绿色线，二类橙色线" className="flex w-4 shrink-0 flex-col gap-1"><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[1]}}/><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[2]}}/></span>:<span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium leading-4 text-foreground">{item.nameZh}</span>
