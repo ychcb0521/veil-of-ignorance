@@ -16,6 +16,9 @@ function Editor({entry=false,saved=initial()}:{entry?:boolean;saved?:BoxStopRule
 it.each([false,true])('adds real reference choices, saves and reopens each independently (screening=%s)',entry=>{
  for(const kind of Object.keys(BOX_STOP_REFERENCE_LABELS) as BoxStopReferenceKind[]){
   const source=initial(),before=JSON.stringify(source),view=render(<Editor entry={entry} saved={source}/>);
+  expect(screen.getByTestId('quality-box-regular-settings')).toBeInTheDocument();
+  expect(screen.getByTestId('quality-box-impulse-settings')).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('箱体止损 1 使用急拉线'));
   const select=screen.getByLabelText('箱体止损 1 K基准');
   expect(Array.from((select as HTMLSelectElement).options).map(o=>o.textContent)).toEqual(expect.arrayContaining(Object.values(BOX_STOP_REFERENCE_LABELS)));
   fireEvent.change(select,{target:{value:kind}});
@@ -25,8 +28,8 @@ it.each([false,true])('adds real reference choices, saves and reopens each indep
   fireEvent.change(screen.getByLabelText('箱体止损 1 确认方式'),{target:{value:'close-1m'}});
   fireEvent.change(screen.getByLabelText('箱体止损 1 连续确认根数'),{target:{value:'2'}});
   if(kind!=='impulse0'){
-   fireEvent.change(screen.getByLabelText('箱体止损 1 急拉线原生冗余 ATR'),{target:{value:'0.123456789012345'}});
-   expect(screen.getByLabelText('箱体止损 1 急拉线原生冗余 ATR').style.flexShrink).toBe('0');
+   fireEvent.change(screen.getByLabelText('箱体止损 1 急拉线向下缓冲（ATR 倍数）'),{target:{value:'0.123456789012345'}});
+   expect(screen.getByLabelText('箱体止损 1 急拉线向下缓冲（ATR 倍数）').style.flexShrink).toBe('0');
    expect(screen.queryByLabelText('箱体止损 1 防守线类型')).toBeNull();
   }
   fireEvent.click(screen.getByRole('button',{name:'保存'}));
@@ -38,15 +41,15 @@ it.each([false,true])('adds real reference choices, saves and reopens each indep
   view.unmount();const restored=render(<Editor entry={entry} saved={saved[0].boxStop!}/>);
   expect(screen.getByLabelText('箱体止损 1 K基准')).toHaveValue(kind);
   expect(screen.getByLabelText('箱体止损 1 更新方式')).toHaveValue('fixed');
-  if(kind!=='impulse0')expect(screen.getByLabelText('箱体止损 1 急拉线原生冗余 ATR')).toHaveValue(.123456789012345);
+  if(kind!=='impulse0')expect(screen.getByLabelText('箱体止损 1 急拉线向下缓冲（ATR 倍数）')).toHaveValue(.123456789012345);
   restored.unmount();
  }
 });
 it('requires an explicit regular basis before changing to an hourly algorithm and preserves the original selection',()=>{
  render(<Editor/>);
  expect(screen.getByLabelText('箱体止损 1 K基准')).toHaveValue('support');
- fireEvent.change(screen.getByLabelText('箱体止损 1 K基准'),{target:{value:'impulse1115'}});
- fireEvent.change(screen.getByLabelText('箱体止损 1 K基准'),{target:{value:'guard'}});
+ fireEvent.click(screen.getByLabelText('箱体止损 1 使用急拉线'));
+ fireEvent.click(screen.getByLabelText('箱体止损 1 使用非急拉线'));
  expect(screen.getByLabelText('箱体止损 1 算法')).not.toBeDisabled();
  fireEvent.change(screen.getByLabelText('箱体止损 1 算法'),{target:{value:'1h'}});
  expect(Array.from((screen.getByLabelText('箱体止损 1 K基准') as HTMLSelectElement).options).some(o=>o.value==='impulse1115')).toBe(false);
