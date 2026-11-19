@@ -28,8 +28,10 @@ export const BOX_BREAK_VERSION = 'holding-support-break-v1';
 export const BOX_BREAK_CHOICE = 'box-support-break';
 export const BOX_SECOND_BREAK_VERSION = 'holding-support-second-break-v1';
 export const BOX_SECOND_BREAK_CHOICE = 'box-support-second-break';
+export const BOX_SECOND_EXIT_VERSION = 'holding-support-second-exit-v1';
+export const BOX_SECOND_EXIT_CHOICE = 'box-support-second-exit';
 export interface BoxStopRule {
-  version: typeof BOX_STOP_VERSION | typeof BOX_STOP_GUARD_REGIME_VERSION | typeof BOX_BREAK_VERSION | typeof BOX_SECOND_BREAK_VERSION | typeof BOX_STOP_REFERENCE_VERSION;
+  version: typeof BOX_STOP_VERSION | typeof BOX_STOP_GUARD_REGIME_VERSION | typeof BOX_BREAK_VERSION | typeof BOX_SECOND_BREAK_VERSION | typeof BOX_SECOND_EXIT_VERSION | typeof BOX_STOP_REFERENCE_VERSION;
   reference?:BoxStopReference;
   guardRegime?: BoxStopGuardRegime;
   structure: StructureAdditionRule;
@@ -53,7 +55,13 @@ export function clearBoxStopReference(rule:BoxStopRule):BoxStopRule {
   const {reference:_,...base}=rule;return {...base,version:BOX_STOP_VERSION};
 }
 
-export interface BoxStopState { line?: number; confirmedAt?: number; count: number; /** Only the opt-in second-break version counts native red crosses. */ breakCount?:number; firstBreakAt?:number }
+export interface BoxStopState {
+  line?: number; confirmedAt?: number; count: number; breakCount?:number;
+  /** Legacy first-break addition lock; never set by the exit-only version. */
+  firstBreakAt?:number;
+  /** Exit-only count evidence, independent of any addition veto or lock. */
+  firstCountedBreakAt?:number;
+}
 /** A first break latches across checkpoints and seller/veto stage changes. */
 export function boxAdditionBlockedAt(states:Record<string,BoxStopState>|undefined, previous?:number):number|undefined {
   const times=[...(previous==null?[]:[previous]),...Object.values(states??{}).flatMap(s=>s.firstBreakAt==null?[]:[s.firstBreakAt])];
@@ -65,9 +73,10 @@ export function freezeBoxStop(rule:BoxStopRule):BoxStopRule {
 }
 export const defaultBoxStop = (defs: readonly DeepDigFeatureDef[] = []): BoxStopRule => freezeBoxStop({version: BOX_STOP_VERSION, structure: {...defaultStructureAddition('dbl5', defs), kSource:'current'}, update:'raise-only', confirmation:'touch', closes:1});
 /** Opt-in event exit: the exact DBL-5 flag used to draw a red cross. */
-export const isBoxSecondBreak = (rule:BoxStopRule) => rule.version === BOX_SECOND_BREAK_VERSION;
+export const isBoxSecondBreakExitOnly = (rule:BoxStopRule) => rule.version === BOX_SECOND_EXIT_VERSION;
+export const isBoxSecondBreak = (rule:BoxStopRule) => rule.version === BOX_SECOND_BREAK_VERSION || isBoxSecondBreakExitOnly(rule);
 export const isBoxBreak = (rule:BoxStopRule) => rule.version === BOX_BREAK_VERSION || isBoxSecondBreak(rule);
-export const boxStopChoice = (rule:BoxStopRule) => isBoxSecondBreak(rule)?BOX_SECOND_BREAK_CHOICE:isBoxBreak(rule)?BOX_BREAK_CHOICE:BOX_STOP_KIND;
+export const boxStopChoice = (rule:BoxStopRule) => isBoxSecondBreakExitOnly(rule)?BOX_SECOND_EXIT_CHOICE:isBoxSecondBreak(rule)?BOX_SECOND_BREAK_CHOICE:isBoxBreak(rule)?BOX_BREAK_CHOICE:BOX_STOP_KIND;
 export function defaultBoxBreak(defs: readonly DeepDigFeatureDef[] = [], guardVersion?: Dbl5GuardVersion): BoxStopRule {
   const structure: StructureAdditionRule = {...defaultStructureAddition('dbl5', defs), kSource:'guard', buffer:0, bufferUnit:'atr'};
   return freezeBoxStop({
@@ -87,11 +96,12 @@ export function selectBoxStopTimeframe(rule:BoxStopRule, timeframe:Dbl5Timeframe
   return {...rule,structure,confirmation} satisfies BoxStopRule;
 }
 export const defaultBoxSecondBreak = (defs:readonly DeepDigFeatureDef[]=[],guardVersion?:Dbl5GuardVersion):BoxStopRule => ({...defaultBoxBreak(defs,guardVersion),version:BOX_SECOND_BREAK_VERSION});
+export const defaultBoxSecondExit = (defs:readonly DeepDigFeatureDef[]=[],guardVersion?:Dbl5GuardVersion):BoxStopRule => ({...defaultBoxBreak(defs,guardVersion),version:BOX_SECOND_EXIT_VERSION});
 export function boxStopAlgorithmLabel(rule:BoxStopRule) {
   return rule.structure.algorithm==='dbl5'?DBL5_PROFILES[structureDbl5Timeframe(rule.structure)].label:'SBS-5M';
 }
 export function validateBoxStop(rule?: BoxStopRule): asserts rule is BoxStopRule {
-  if (!rule || ![BOX_STOP_VERSION,BOX_STOP_GUARD_REGIME_VERSION,BOX_BREAK_VERSION,BOX_SECOND_BREAK_VERSION,BOX_STOP_REFERENCE_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
+  if (!rule || ![BOX_STOP_VERSION,BOX_STOP_GUARD_REGIME_VERSION,BOX_BREAK_VERSION,BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION,BOX_STOP_REFERENCE_VERSION].includes(rule.version)) throw Error('箱体硬止损版本不可用，请保留原版并新建方案');
   validateStructureAddition(rule.structure);
   const nativeConfirmation=`close-${structureDbl5Timeframe(rule.structure)}`;
   if(rule.version===BOX_STOP_REFERENCE_VERSION){
@@ -119,7 +129,7 @@ export function boxStopIdentity(r: BoxStopRule) {
     : r.structure;
   return [r.version, structureAdditionIdentity(structure), r.update, r.confirmation, r.closes, ...(r.guardRegime ? [r.guardRegime] : []),...(r.reference?[boxStopReferenceIdentity(r.reference)]:[])];
 }
-export const boxStopLabel = (r: BoxStopRule) => isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.reference?BOX_STOP_REFERENCE_LABELS[r.reference.kind]:r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
+export const boxStopLabel = (r: BoxStopRule) => isBoxSecondBreakExitOnly(r)?`${boxStopAlgorithmLabel(r)} 持仓期间二次断裂终止；首次只计数，不因本条件停加仓；第二次断裂下一分钟开盘全仓卖出`:isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.reference?BOX_STOP_REFERENCE_LABELS[r.reference.kind]:r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
 
 /** Only already closed native structures can place a stop for the next minute. */
 export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
@@ -171,7 +181,8 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
             if(at<=observationEntry || at<=(r.state.confirmedAt??-Infinity) || (r.state.breakCount??0)>=2)return;
             if((row as Dbl5Row).darvas_5m_guard_broken){
               r.state.breakCount=(r.state.breakCount??0)+1;
-              r.state.firstBreakAt??=at;
+              if(isBoxSecondBreakExitOnly(r.rule))r.state.firstCountedBreakAt??=at;
+              else r.state.firstBreakAt??=at;
               r.state.confirmedAt=at;
               record(r.v.id,Math.max(observationSince,at),r.state);
             }
@@ -201,7 +212,7 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       if(!isBoxSecondBreak(r.rule))record(r.v.id,minute.openTime,r.state);
       if(isBoxBreak(r.rule)){
         if(isBoxSecondBreak(r.rule)&&(r.state.breakCount??0)>=2){breakAt=r.state.confirmedAt;brokenBar=breakAt!-r.step;}
-        if(breakAt!=null)candidates.push({at:observedAt,reading:isBoxSecondBreak(r.rule)?2:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:isBoxSecondBreak(r.rule)?2:1,boxBreakEvidence:{version:r.rule.version,event:`darvas_${structureDbl5Timeframe(r.rule.structure)}_guard_broken`,confirmedAt:breakAt,sourceBarOpenTime:brokenBar!,...(isBoxSecondBreak(r.rule)?{breakCount:2,firstBreakAt:r.state.firstBreakAt}:{})}}});
+        if(breakAt!=null)candidates.push({at:observedAt,reading:isBoxSecondBreak(r.rule)?2:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:isBoxSecondBreak(r.rule)?2:1,boxBreakEvidence:{version:r.rule.version,event:`darvas_${structureDbl5Timeframe(r.rule.structure)}_guard_broken`,confirmedAt:breakAt,sourceBarOpenTime:brokenBar!,...(isBoxSecondBreak(r.rule)?{breakCount:2,firstBreakAt:isBoxSecondBreakExitOnly(r.rule)?r.state.firstCountedBreakAt:r.state.firstBreakAt}:{})}}});
         continue;
       }
       const line=r.state.line;if(line==null)continue;

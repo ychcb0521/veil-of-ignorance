@@ -2,7 +2,7 @@ import { usesHourlyCda } from '@/lib/cdaPeriods';
 import { algorithmMetricMenu } from './algorithmMetricMenu';
 import { guardDistanceConfig } from './qualityAdditionVeto';
 import { guardDistanceDefinition, guardDistanceSignalChoices } from './qualityGuardDistance';
-import {BOX_STOP_KIND,BOX_BREAK_CHOICE,BOX_SECOND_BREAK_CHOICE,boxStopChoice,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
+import {BOX_STOP_KIND,BOX_BREAK_CHOICE,BOX_SECOND_BREAK_CHOICE,BOX_SECOND_EXIT_CHOICE,boxStopChoice,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopLabel,type BoxStopRule} from './qualityBoxStop';
 /** Filter choices use the same account definitions as charts and Deep dig. */
 import { compileFeatureFormula, definitionKey, intervalOf, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
@@ -89,7 +89,7 @@ export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]
 /** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
 export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
 export function parseHoldingVetoDraft(draft:HoldingVetoDraft[], definitions?:readonly DeepDigFeatureDef[]):QualityHoldingVeto[] {
-  const boxChoice=(choice:string)=>[BOX_STOP_KIND,BOX_BREAK_CHOICE,BOX_SECOND_BREAK_CHOICE].includes(choice);
+  const boxChoice=(choice:string)=>[BOX_STOP_KIND,BOX_BREAK_CHOICE,BOX_SECOND_BREAK_CHOICE,BOX_SECOND_EXIT_CHOICE].includes(choice);
   const boxes=draft.filter(d=>boxChoice(d.choice)).map(d=>{validateBoxStop(d.boxStop);if(d.choice!==boxStopChoice(d.boxStop))throw Error('支撑断裂与触价条件的执行版本不符');return {id:'veto-box-'+shortFishHash(JSON.stringify(boxStopIdentity(d.boxStop))),label:boxStopLabel(d.boxStop),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:0,enabled:d.enabled,boxStop:freezeBoxStop(structuredClone(d.boxStop))};});
   draft=draft.filter(d=>!boxChoice(d.choice));
   if(draft.some(d=>(d.enabled||d.threshold.trim())&&(!d.threshold.trim()||!Number.isFinite(Number(d.threshold)))))throw new Error('请为启用的否决条件填写有限数字阈值');

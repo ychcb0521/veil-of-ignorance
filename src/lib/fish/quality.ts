@@ -1,5 +1,5 @@
 import {HOLDING_LEDGER_ADDITION_VERSION} from './qualityHoldingLedger';
-import {boxAdditionBlockedAt,BOX_SECOND_BREAK_VERSION} from './qualityBoxStop';
+import {boxAdditionBlockedAt,BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION} from './qualityBoxStop';
 import {qualityLibraryEntryAt,qualityMonitorEntryAt,qualityMonitoringSample,qualityRowMonitorTimeBasis,type QualityMonitorEntry,type QualityMonitorTimeBasis} from './qualityAdmissionTime';
 import {preEntryWindowLoader} from './preEntryWindowLoader';
 import { qualityHistoryFrom, qualityInitializationPending, withTuringInitialization } from './qualityInitialization';
@@ -895,6 +895,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
         ? `组合卖出：涨幅已达 ${group.combo.switchPct}%，按 ${group.combo.after.label} ${group.combo.after.rule.direction} ${group.combo.after.rule.threshold} 盘中复原达标，下一分钟开盘卖出`
         : `组合卖出：涨幅未达 ${group.combo.switchPct}%，按 ${group.combo.beforeLabel} ${group.rule!.direction} ${group.rule!.threshold} 盘中复原达标，下一分钟开盘卖出`)
         : closed && trigger?.cause?.kind === 'sell-static-drawdown' ? `卖出算法${trigger.stage === 'before' ? '前段' : trigger.stage === 'after' ? '后段' : ''}：${trigger.cause.label} ≥ ${trigger.cause.threshold}%；${trigger.atOpen ? '开盘跳空越线，按开盘价' : '盘中触及止损价，按止损价'}卖出全部余仓`
+        : closed && trigger?.cause?.boxBreakEvidence?.version===BOX_SECOND_EXIT_VERSION ? '持仓期间第二次箱体断裂已确认（两次独立防守线红叉），按下一分钟开盘价卖出全部持仓；本条件未在首次断裂时停止加仓'
         : closed && trigger?.cause?.boxBreakEvidence?.version===BOX_SECOND_BREAK_VERSION ? '第二次箱体断裂已确认（两次独立防守线红叉），按下一分钟开盘价卖出全部持仓；第一次断裂后已停止加仓'
         : closed && trigger?.cause?.boxBreakEvidence ? `一票否决：${trigger.cause.boxBreakEvidence.event==='darvas_5m_guard_broken'?'DBL-5-5mins':trigger.cause.label.split(' ')[0]} 防守线断裂（红叉已确认），按下一分钟开盘价卖出全部持仓`
         : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${['indicator','box-stop'].includes(trigger.cause.kind)?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
