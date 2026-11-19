@@ -1,4 +1,5 @@
 import {HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,holdingImpulse1115Identity} from './holdingImpulse1115Classification';
+import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
 import {IMPULSE_1115_CLASSIFICATION_VERSION,IMPULSE_1115_CLASSIFICATION_LABEL} from '@/lib/impulse1115Classification';
 import { CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { INTERVAL_LABEL } from '@/lib/deepDig/features';
@@ -157,6 +158,10 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', '沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
     '以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
+  const postMirror=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.activation);
+  if(postMirror.length)add('hard-stop-after-mirror','硬性终止',POST_MIRROR_PROTECTION_LABEL,
+    POST_MIRROR_PROTECTION_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(postMirror))),
+    '仅凭本次持仓镜像减仓成交记录启用；盘中成交后的防守线从下一分钟检查，CDA从首个后续读数检查，不追补启动前证据。暂停续算保留成交与独立状态，原约束不变。');
   if (vetoes.length) add('hard-stop', '硬性终止', vetoes.map(v => holdingVetoLabel(v)).join(' 或 '),
     join([qualityVetoVersion(plan), ...vetoes.filter(v => v.snapshot?.definitionKey).map(v => formulaFingerprint(v.snapshot!))]),
     plan.vetoFill === 'stop' ? '回撤止损盘中触及按止损价成交' : '回撤否决下一分钟开盘成交');

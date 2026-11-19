@@ -18,6 +18,7 @@ import type { QualityHoldingVeto } from './qualityVeto';
 import type { QualityTrigger } from './qualityIntrabar';
 
 import { BOX_STOP_INVALID_DATA } from './qualityBoxMarketRepair';
+import {POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
 
 export const BOX_STOP_KIND = 'box-stop' as const;
 export const BOX_STOP_VERSION = 'holding-box-stop-v1';
@@ -132,7 +133,7 @@ export function boxStopIdentity(r: BoxStopRule) {
 export const boxStopLabel = (r: BoxStopRule) => isBoxSecondBreakExitOnly(r)?`${boxStopAlgorithmLabel(r)} 持仓期间二次断裂终止；首次只计数，不因本条件停加仓；第二次断裂下一分钟开盘全仓卖出`:isBoxSecondBreak(r)?`${boxStopAlgorithmLabel(r)} 首次支撑断裂停止加仓，第二次断裂下一分钟开盘全仓卖出`:isBoxBreak(r)?`${boxStopAlgorithmLabel(r)} 支撑断裂（防守线红叉确认）；下一分钟开盘全仓卖出`:`${boxStopAlgorithmLabel(r)} ${r.reference?BOX_STOP_REFERENCE_LABELS[r.reference.kind]:r.structure.kSource==='guard' ? `防守线${r.guardRegime ? `（${BOX_STOP_GUARD_REGIMES[r.guardRegime]}）` : ''}` : r.structure.kBasis==='invalidation'?'失效线':'箱底'} − ${r.structure.buffer}${r.structure.bufferUnit==='atr'?'ATR':'%'}；${({fixed:'首次有效线固定','raise-only':'只升不降',follow:'跟随最新线'})[r.update]}；${r.confirmation==='touch'?'触碰 K 立即卖出':`${r.confirmation==='close-1m'?'1 分钟':DBL5_PROFILES[structureDbl5Timeframe(r.structure)].periodLabel}连续 ${r.closes} 根收盘 ≤ K`}`;
 
 /** Only already closed native structures can place a stop for the next minute. */
-export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>}) {
+export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:TradeSignal;entry:number;since:number;load:FishReconstructionLoader;signal:AbortSignal;previous?:Record<string,BoxStopState>;activationAt?:()=>number|undefined}) {
   const load = o.load.boxStopMarketLoad ?? o.load;
   let observationEntry=o.entry,observationSince=o.since;
   const rules=o.vetoes.filter(v=>v.enabled&&v.kind===BOX_STOP_KIND).map(v=>{
@@ -151,9 +152,16 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   const history=new Map(rules.map(r=>[r.v.id,[{at:o.since,state:{...r.state}}]]));
   const record=(id:string,at:number,state:BoxStopState)=>{const list=history.get(id)!;if(JSON.stringify(list.at(-1)!.state)!==JSON.stringify(state))list.push({at,state:{...state}});};
   const statesAt=(at:number)=>Object.fromEntries(rules.map(r=>[r.v.id,{...history.get(r.v.id)!.filter(p=>p.at<=at).at(-1)?.state}]));
-  const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean}):Promise<QualityTrigger|undefined>=>{
+  const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean;onlyActivated?:boolean}):Promise<QualityTrigger|undefined>=>{
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
+      if(options?.onlyActivated&&!r.v.activation)continue;
+      const activationAt=r.v.activation?o.activationAt?.():undefined;
+      if(r.v.activation&&(activationAt==null||minute.openTime<activationAt))continue;
+      const ruleEntry=activationAt==null?observationEntry:Math.max(observationEntry,activationAt-1);
+      const ruleSince=activationAt==null?observationSince:Math.max(observationSince,activationAt);
+      const activationEvidence=r.v.activation?{activation:r.v.activation,activationAt}:{};
+      const label=boxStopLabel(r.rule)+(r.v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'');
       let breakAt:number|undefined,brokenBar:number|undefined;
       // Entry v4 observes the newly completed native event at this minute's
       // close. Touch stops still use only lines known before the minute opened.
@@ -178,21 +186,21 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
           if(isBoxSecondBreak(r.rule)){
             // Rebuild missed post-entry events on resume (including settlement gaps).
             // The native red cross is a one-shot event; a price remaining below K is not another break.
-            if(at<=observationEntry || at<=(r.state.confirmedAt??-Infinity) || (r.state.breakCount??0)>=2)return;
+            if(at<=ruleEntry || at<=(r.state.confirmedAt??-Infinity) || (r.state.breakCount??0)>=2)return;
             if((row as Dbl5Row).darvas_5m_guard_broken){
               r.state.breakCount=(r.state.breakCount??0)+1;
               if(isBoxSecondBreakExitOnly(r.rule))r.state.firstCountedBreakAt??=at;
               else r.state.firstBreakAt??=at;
               r.state.confirmedAt=at;
-              record(r.v.id,Math.max(observationSince,at),r.state);
+              record(r.v.id,Math.max(ruleSince,at),r.state);
             }
             return;
           }
           // Older history initializes the box/ATR, never moves an already saved stop backwards.
-          if(at<Math.floor(observationSince/r.step)*r.step || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
+          if(at<Math.floor(ruleSince/r.step)*r.step || (r.state.confirmedAt!=null&&at<=r.state.confirmedAt))return;
           if(isBoxBreak(r.rule)){
             // Warmup breaks are historical. An unavailable/newly absent line is not a red cross.
-            if(at>observationEntry&&at>=observationSince&&(row as Dbl5Row).darvas_5m_guard_broken&&breakAt==null){breakAt=at;brokenBar=bars[i].openTime;r.state.confirmedAt=at;}
+            if(at>ruleEntry&&at>=ruleSince&&(row as Dbl5Row).darvas_5m_guard_broken&&breakAt==null){breakAt=at;brokenBar=bars[i].openTime;r.state.confirmedAt=at;}
             return;
           }
           if (r.rule.guardRegime && (row as Dbl5Row).darvas_5m_guard_regime !== r.rule.guardRegime) return;
@@ -212,11 +220,11 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
       if(!isBoxSecondBreak(r.rule))record(r.v.id,minute.openTime,r.state);
       if(isBoxBreak(r.rule)){
         if(isBoxSecondBreak(r.rule)&&(r.state.breakCount??0)>=2){breakAt=r.state.confirmedAt;brokenBar=breakAt!-r.step;}
-        if(breakAt!=null)candidates.push({at:observedAt,reading:isBoxSecondBreak(r.rule)?2:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'>=',threshold:isBoxSecondBreak(r.rule)?2:1,boxBreakEvidence:{version:r.rule.version,event:`darvas_${structureDbl5Timeframe(r.rule.structure)}_guard_broken`,confirmedAt:breakAt,sourceBarOpenTime:brokenBar!,...(isBoxSecondBreak(r.rule)?{breakCount:2,firstBreakAt:isBoxSecondBreakExitOnly(r.rule)?r.state.firstCountedBreakAt:r.state.firstBreakAt}:{})}}});
+        if(breakAt!=null)candidates.push({at:observedAt,reading:isBoxSecondBreak(r.rule)?2:1,...(!nativeClose?{fillPrice:minute.open,fillPeak:minute.open,atOpen:true}:{}),barOpenTime:brokenBar!,cause:{id:r.v.id,label,...activationEvidence,kind:BOX_STOP_KIND,direction:'>=',threshold:isBoxSecondBreak(r.rule)?2:1,boxBreakEvidence:{version:r.rule.version,event:`darvas_${structureDbl5Timeframe(r.rule.structure)}_guard_broken`,confirmedAt:breakAt,sourceBarOpenTime:brokenBar!,...(isBoxSecondBreak(r.rule)?{breakCount:2,firstBreakAt:isBoxSecondBreakExitOnly(r.rule)?r.state.firstCountedBreakAt:r.state.firstBreakAt}:{})}}});
         continue;
       }
       const line=r.state.line;if(line==null)continue;
-      const cause={id:r.v.id,label:boxStopLabel(r.rule),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:line,boxStopEvidence:{version:r.rule.version,line,confirmedAt:r.state.confirmedAt!,confirmation:r.rule.confirmation,...(r.rule.guardRegime ? {guardRegime:r.rule.guardRegime} : {})}};
+      const cause={id:r.v.id,label,...activationEvidence,kind:BOX_STOP_KIND,direction:'<=' as const,threshold:line,boxStopEvidence:{version:r.rule.version,line,confirmedAt:r.state.confirmedAt!,confirmation:r.rule.confirmation,...(r.rule.guardRegime ? {guardRegime:r.rule.guardRegime} : {})}};
       if(r.rule.confirmation==='touch'){
         if(minute.low<=line*(1+1e-12)){const atOpen=minute.open<=line*(1+1e-12);candidates.push({at:minute.openTime,reading:atOpen?minute.open:line,fillPrice:atOpen?minute.open:line,fillPeak:minute.open,barOpenTime:minute.openTime,atOpen,cause});}
       }else if(r.rule.confirmation==='close-1m'||(minute.openTime+60000)%r.step===0){
