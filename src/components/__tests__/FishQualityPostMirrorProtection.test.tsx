@@ -11,6 +11,7 @@ import {makeQualityHoldingVeto,holdingVetoDraft,parseHoldingVetoDraft} from '@/l
 import {POST_MIRROR_PROTECTION_VERSION as V} from '@/lib/fish/qualityPostMirrorProtection';
 import type {FishQualityState} from '@/hooks/useFishQuality';
 import type {QualityHoldingVeto} from '@/lib/fish/qualityVeto';
+import {BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION} from '@/lib/fish/qualityBoxStop';
 
 function fixture(){
  const first={...makeQualitySellPlan('state:state','<',.45,BUILTIN_FEATURES,undefined,'first'),label:'第一套',
@@ -65,4 +66,26 @@ it('冻结配置只读地显示启动范围；买前筛选不出现新增持仓�
  view.unmount();render(<FishQualityHoldingVetoEditor entry draft={[]} setDraft={()=>{}}/>);
  expect(screen.queryByRole('button',{name:'添加镜像减仓后 DBL-5 防守线'})).toBeNull();
  expect(screen.queryByRole('button',{name:'添加镜像减仓后 CDA＜−15'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'添加镜像减仓后 DBL-5 二次支撑断裂'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'添加镜像减仓后持仓期间二次断裂终止'})).toBeNull();
 });
+it('保留全部旧选项，二次断裂两种语义都可新增为镜像后启动并独立保存',()=>{
+ const {state,plans}=fixture(),before=JSON.stringify(plans);render(<Settings state={state}/>);
+ const hard=()=>within(screen.getAllByTestId('quality-hard-stop')[0]);
+ expect(hard().getByRole('button',{name:'添加二次断裂终止'})).toBeInTheDocument();
+ expect(hard().getByRole('button',{name:'添加持仓期间二次断裂终止'})).toBeInTheDocument();
+ fireEvent.click(hard().getByRole('button',{name:'添加镜像减仓后 DBL-5 二次支撑断裂'}));
+ fireEvent.click(hard().getByRole('button',{name:'添加镜像减仓后持仓期间二次断裂终止'}));
+ expect(hard().getByRole('checkbox',{name:'只在镜像平衡减仓策略后启动DBL-5 二次支撑断裂 3'})).toBeChecked();
+ expect(hard().getByRole('checkbox',{name:'只在镜像平衡减仓策略后启动DBL-5 持仓期间二次断裂终止 4'})).toBeChecked();
+ fireEvent.click(hard().getByLabelText('启用持仓否决 3'));fireEvent.click(hard().getByLabelText('启用持仓否决 4'));
+ expect(hard().getAllByText(/启动时点：本次镜像平衡减仓实际成交后/)).toHaveLength(2);
+ expect(hard().getByText(/减仓后第一次独立断裂停止本笔后续加仓/)).toBeInTheDocument();
+ expect(hard().getByText(/减仓后第一次独立断裂只计数/)).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:/^保存(全部 \d|到)/}));
+ const saved=vi.mocked(state.setSellPlans).mock.lastCall![0] as QualityGroup[];
+ const rules=saved[0].holdingVetoes!.filter(v=>v.activation===V);
+ expect(rules.map(v=>v.boxStop?.version)).toEqual([BOX_SECOND_BREAK_VERSION,BOX_SECOND_EXIT_VERSION]);
+ expect(saved[0].holdingVetoes!.find(v=>!v.activation)).toEqual(plans[0].holdingVetoes[0]);
+ expect(saved[1]).toEqual(plans[1]);expect(JSON.stringify(plans)).toBe(before);
+},15000);

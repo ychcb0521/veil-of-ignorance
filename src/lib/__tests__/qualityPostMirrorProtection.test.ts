@@ -1,7 +1,8 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import * as features from '@/lib/deepDig/features';
 import {evaluateQualitySample,newQualityStudy,qualityResultKey,type QualityGroup,type QualitySample} from '@/lib/fish/quality';
-import {createBoxStopReader,defaultBoxBreak,defaultBoxSecondExit,defaultBoxStop} from '@/lib/fish/qualityBoxStop';
+import {createBoxStopReader,defaultBoxBreak,defaultBoxSecondBreak,defaultBoxSecondExit,defaultBoxStop} from '@/lib/fish/qualityBoxStop';
+import {defaultQualityAddition} from '@/lib/fish/qualityAddition';
 import {POST_MIRROR_PROTECTION_VERSION as V,postMirrorProtectionAt} from '@/lib/fish/qualityPostMirrorProtection';
 import {holdingVetoDraft,parseHoldingVetoDraft,makeQualityHoldingVeto,makeQualityBuyFilter} from '@/lib/fish/qualityFilters';
 import {defaultStructureAddition} from '@/lib/fish/qualityAdditionStructure';
@@ -89,11 +90,36 @@ it('启动前收盘不累计，新 K 条件从启动后独立累计确认根数'
  const l=load(at=>at===T+3*M?bar(at,100,106,99,100):bar(at));
  expect(await run(plan([box(r)]),8,l)).toMatchObject({status:'closed',endTime:T+6*M,mirrorFill:{at:T+3*M}});
 });
-it('二次断裂也从镜像成交后开始计数，预先红叉不凑成第二次',async()=>{
+it.each([['首次停加仓',defaultBoxSecondBreak,true],['首次只计数',defaultBoxSecondExit,false]] as const)('二次断裂从镜像成交后开始计数，预先红叉不凑成第二次（%s）',async(_label,makeRule,locks)=>{
  const l=load(at=>at===T+9*M?bar(at,100,106,99,104):bar(at));
- const g=plan([box(defaultBoxSecondExit())]),r=await run(g,28,l);
+ const g=plan([box(makeRule())]),r=await run(g,28,l);
  expect(r).toMatchObject({status:'closed',endTime:T+25*M,exitSnapshot:{cause:{boxBreakEvidence:{firstBreakAt:T+15*M,breakCount:2}}}});
+ expect(r.additionsBlockedAt).toBe(locks?T+15*M:undefined);
  expect(await run(g,28,l,await run(g,20,l))).toEqual(r);
+ expect(await run(plan([box(makeRule(),false)]),28,l)).toMatchObject({status:'closed',endTime:T+15*M});
+ const waiting=await run({...g,mirrorTakeProfit:{...g.mirrorTakeProfit!,enabled:false}},28,l);
+ expect(waiting.status).toBe('open');expect(waiting.additionsBlockedAt).toBeUndefined();
+ expect(waiting.boxStopStates?.['gated-box'].breakCount).toBeUndefined();
+});
+it.each(['primary','attack'] as const)('镜像后首次断裂才锁定 %s 及全部后续轮次，暂停恢复保留锁和计数',async lane=>{
+ const addDef={...def,id:'add',formula:'raw = B'},condition=makeQualityBuyFilter('add:raw','>',.5,true,[addDef]);
+ condition.snapshot={...condition.snapshot,definitionKey:features.definitionKey(addDef),interval:'1m'};
+ const round={source:'custom' as const,stricterPct:0,condition};
+ const g=plan([box(defaultBoxSecondBreak())]);
+ g.addition={...defaultQualityAddition(),enabled:true,source:'custom',condition,maxRounds:30,
+  rounds:Array.from({length:30},()=>lane==='primary'?round:{...round,condition:{...condition,threshold:1000}}),
+  ...(lane==='attack'?{alternativeRounds:Array.from({length:30},()=>round)}:{})};
+ const minuteLoad=load(at=>{const n=(at-T)/M;return n===9?bar(at,100,106,99,104):bar(at,n>9?100+(n-9)*10:100);});
+ const l:FishReconstructionLoader=async(...args)=>{const bars=await minuteLoad(...args);return args[3].step===M?bars:bars.map(b=>({...b,high:b.open+1,low:b.open-1}));};
+ const before=await run(g,14,l);expect(before.additionsBlockedAt).toBeUndefined();
+ expect(before.boxStopStates?.['gated-box'].breakCount).toBeUndefined();
+ expect(before.mirrorFill?.at).toBe(T+9*M);expect(before.additionFills!.length).toBeGreaterThan(0);
+ if(lane==='attack')expect(before.additionFills!.every(f=>f.lane==='attack')).toBe(true);
+ const first=await run(g,20,l);expect(first.status).toBe('open');expect(first.additionsBlockedAt).toBe(T+15*M);
+ expect(first.boxStopStates?.['gated-box'].breakCount).toBe(1);
+ expect(first.additionFills!.every(f=>f.at<T+15*M)).toBe(true);
+ expect(await run(g,20,l,JSON.parse(JSON.stringify(before)))).toEqual(first);
+ expect(await run(g,28,l,JSON.parse(JSON.stringify(first)))).toEqual(await run(g,28,l));
 });
 it('新约束等待时，原硬止损与普通卖出仍可先独立终止',async()=>{
  const stop:QualityHoldingVeto={id:'static',label:'静态',enabled:true,kind:'static-drawdown',direction:'>=',threshold:5};
