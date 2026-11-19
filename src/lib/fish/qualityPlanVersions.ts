@@ -1,3 +1,4 @@
+import {IMPULSE_1115_CLASSIFICATION_VERSION,IMPULSE_1115_CLASSIFICATION_LABEL} from '@/lib/impulse1115Classification';
 import { CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { INTERVAL_LABEL } from '@/lib/deepDig/features';
 import { ADDITION_INDICATOR_TIME_VERSION, INDICATOR_FORMULA_TIME_VERSION, INDICATOR_PERIOD_VERSION, hasAdditionMetricTime, hasMetricPeriodOverride, hasMetricFormulaTimeOverride } from './qualityAdditionMetric';
@@ -115,6 +116,10 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     ...(screening?.sellRules??[]).flatMap(rule=>expressionConditions(rule.expression).map(condition=>condition.snapshot)),
     ...(screening?.hardVetoes??[]).map(rule=>rule.snapshot),
   ].filter((snapshot):snapshot is FishSnapshot=>!!snapshot);
+  const impulseClassifications=metricSnapshots.filter(s=>s.definitionKey?.includes(IMPULSE_1115_CLASSIFICATION_VERSION));
+  if(impulseClassifications.length)add('impulse-1115-classification','持仓指标',IMPULSE_1115_CLASSIFICATION_LABEL,
+    join([IMPULSE_1115_CLASSIFICATION_VERSION,...new Set(impulseClassifications.map(formulaFingerprint))]),
+    '冻结每条急拉线的一类/二类、细分及过渡状态，保留刺穿、跌破、收复和独立测试证据；分类不自行触发交易。');
   const hourlyCda = metricSnapshots.filter(s => s.featureId === CDA_HOURLY_ID || s.definitionKey?.includes('"chart=' + CDA_HOURLY_ID + '"'));
   if (hourlyCda.length) add('cda-hourly', '指标周期', CDA_HOURLY_LABEL,
     join([CDA_HOURLY_ID, ...new Set(hourlyCda.map(formulaFingerprint))]),

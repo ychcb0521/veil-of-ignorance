@@ -5,6 +5,12 @@ import {
   DBL5_GUARD_PLUS_VERSION, Dbl5GuardPlusEngine, guardPlusNumeric,
   type Dbl5GuardPlusCheckpoint, type Dbl5GuardPlusRow,
 } from '@/lib/dbl5GuardPlus';
+import {
+  IMPULSE_1115_CLASSIFICATION_VERSION, IMPULSE_1115_CLASSIFICATION_LABEL, IMPULSE_1115_CLASSIFICATION_DEFAULTS,
+  IMPULSE_1115_CLASSIFICATION_FIELDS, Impulse1115ClassificationEngine, impulse1115ClassificationNumeric,
+  impulse1115ClassificationParams, type Impulse1115ClassificationParams, type Impulse1115ClassificationCheckpoint,
+  type Impulse1115ClassificationRow,
+} from '@/lib/impulse1115Classification';
 import {DBL5_GUARD_VERSION,dbl5GuardVersion,type Dbl5Options} from '@/lib/dbl5m';
 import {dbl5AsOf,computeDbl5,dbl5Numeric,dbl5ConfigHash,dbl5Parameters,dbl5Step,DBL5_ID,DBL5_VERSION,DBL5_PROFILES,dbl5Defaults,dbl5ProfileForFeature,type Dbl5VariantTimeframe,DBL5_FIELDS,DBL5_RENDER_FIELDS,type Dbl5Config,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {computeSbs5m,sbsHistoryBars,sbsNumeric,sbsConfigHash,sbsParameters,SBS5M_ID,SBS5M_VERSION,SBS5M_FIELDS,type SbsConfig,type SbsRow,type SbsCheckpoint} from '@/lib/sbs5m';
@@ -40,6 +46,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program, type FormulaEvaluationCache } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef extends MbiParams, Mbi2Params {
+  DBL5C_parameters?:Partial<Impulse1115ClassificationParams>;
   DBL5_config?:Partial<Dbl5Config>;
   DBL5_dimension?:'price'|'distance'|'width'|'age';
   DBL5_research_symbol?:string;
@@ -171,7 +178,7 @@ export const featureTemplateId = (d: { id?: string; chartTemplate?: string }) =>
 export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => dbl5ProfileForFeature(featureTemplateId(d))?.timeframe ?? (usesHourlyCda(d) ? '1h' : ['cba-2', 'ctba', 'sbs_5m'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL);
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint; SBS5M_symbol?:string; SBS5M_tick_size?:number|null; SBS5M_data_source?:string; SBS5M_data_version?:string; SBS5M_initialization_id?:string; SBS5M_checkpoint?:SbsCheckpoint; DBL5_symbol?:string; DBL5_market?:string; DBL5_tick_size?:string|number|null; DBL5_data_source?:string; DBL5_data_version?:string; DBL5_initialization_id?:string; DBL5_checkpoint?:Dbl5Checkpoint };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5C_parameters' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'> & { id?: string; formula?: string; ATI6H_tick_size?:number|null; PRS6H_tick_size?:number|null; PRS6H_symbol?:string; PRS6H_data_source?:string; PRS6H_data_version?:string; PRS6H_checkpoint?:PrsCheckpoint; SBS5M_symbol?:string; SBS5M_tick_size?:number|null; SBS5M_data_source?:string; SBS5M_data_version?:string; SBS5M_initialization_id?:string; SBS5M_checkpoint?:SbsCheckpoint; DBL5_symbol?:string; DBL5_market?:string; DBL5_tick_size?:string|number|null; DBL5_data_source?:string; DBL5_data_version?:string; DBL5_initialization_id?:string; DBL5_checkpoint?:Dbl5Checkpoint };
 export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
 export const featureUsesMbi2 = (d:{id?:string;formula?:string}) => d.id==='mbi2'||/\bmbiz2\s*\(/.test((d.formula??'').replace(/(#|\/\/).*$/gm,''));
 export const featureUsesMbiFamily = (d:{id?:string;formula?:string}) => featureUsesMbi(d)||featureUsesMbi2(d);
@@ -1020,7 +1027,7 @@ export function dbl5VariantDefinition(timeframe:Dbl5VariantTimeframe):DeepDigFea
     formula:DBL5_DEF.formula.replace(DBL5_VERSION,version),
   };
 }
-export const featureUsesDbl5GuardPlus = (def: {formula?: string}) => /\bDBL5P_raw_\w+\b/.test(def.formula ?? '');
+export const featureUsesDbl5GuardPlus = (def: {formula?: string}) => /\bDBL5[PC]_raw_\w+\b/.test(def.formula ?? '');
 function guardPlusInput(name: string): string {
   return name === 'DBL5P' ? 'DBL5P_raw_value' : 'DBL5P_raw_' + name.slice(6);
 }
@@ -1029,6 +1036,16 @@ export const DBL5_GUARD_PLUS_DEF: DeepDigFeatureDef = {
   chartCore: 'DBL5P', definition: '无 BTC 依赖。5m 收盘后比较原版防守线与冻结的急拉起点参考。急拉起点参考，尚不代表回踩验证。',
   formula: '# ' + DBL5_GUARD_PLUS_VERSION + '\n' +
     [...DBL5_GUARD_PLUS_NUMERIC.slice(1), 'DBL5P'].map(name => `${name} = ${guardPlusInput(name)}`).join('\n'),
+};
+export const IMPULSE_1115_CLASSIFICATION_DEF: DeepDigFeatureDef = {
+  ...DBL5_GUARD_PLUS_DEF, id:IMPULSE_1115_CLASSIFICATION_VERSION,
+  name:IMPULSE_1115_CLASSIFICATION_LABEL, short:IMPULSE_1115_CLASSIFICATION_LABEL, chartCore:'DBL5C',
+  unit:'分类', DBL5C_parameters:{...IMPULSE_1115_CLASSIFICATION_DEFAULTS},
+  definition:'独立观察原急拉线的持仓状态。一类为正常延续（第1、2种），二类为走弱、跌破或修复（第3至6种）。主分类只有1或2；细分0表示等待，1至6对应六种状态。只在证据齐备的5m收盘生效，保留每条线的测试、刺穿、跌破、收复及状态历史。原线断裂或到期后仍以冻结价格观察；行情缺口暂停该线。本分类不触发交易动作。编辑定义可调整分类参数。',
+  formula:'# '+IMPULSE_1115_CLASSIFICATION_VERSION+'\n'+
+    '# DBL5C：主分类1/2；state：已确认第1至6种，0为过渡；valid：数据连续可用；pierced：曾刺穿\n'+
+    [...IMPULSE_1115_CLASSIFICATION_FIELDS.slice(1),'DBL5C'].map(name=>
+      name+' = '+(name==='DBL5C'?'DBL5C_raw_value':'DBL5C_raw_'+name.slice(6))).join('\n'),
 };
 export const DBL5_DIMENSIONS:DeepDigFeatureDef[]=[
  {id:'darvas_5m_distance_bps',name:'DBL-5-5mins｜距下轨基点',short:'DBL·距离',core:'DBL5_distance_bps',dimension:'distance',unit:'bp'},
@@ -1093,7 +1110,7 @@ export const BTC_FREE_FEATURES: readonly DeepDigFeatureDef[] = BTC_ADJUSTED_FEAT
     .join('\n'),
 }));
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [...ORIGINAL_BUILTIN_FEATURES, CDA_HOURLY_DEF, ...DBL5_HOURLY_FEATURES, DBL5_GUARD_PLUS_DEF, IMPULSE_1115_CLASSIFICATION_DEF, ...SELLER_FOCUS_FEATURES, ...BTC_FREE_FEATURES];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -1226,7 +1243,7 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5C_parameters' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
   const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
@@ -1241,6 +1258,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if(featureUsesMbi2(d)){const p=featureParams(d);key.push(`MBI2_T_HOURS=${p.MBI2_T_HOURS}`,`MBI2_Z0=${p.MBI2_Z0}`,`MBI2_BAND=${p.MBI2_BAND}`,`MBI2_CONFIRM=${p.MBI2_CONFIRM}`);}
   const dbl5=dbl5ProfileForFeature(featureTemplateId(d));
   if(dbl5)key.push(dbl5.version,DBL5_MARKET_RULE_VERSION,dbl5ConfigHash(d.DBL5_config),'DBL5_config='+JSON.stringify(dbl5Parameters(d.DBL5_config)),'DBL5_dimension='+(d.DBL5_dimension??'price'),'DBL5_research_symbol='+(d.DBL5_research_symbol??''),'DBL5_initialization_start='+(d.DBL5_initialization_start??''));
+  if (/\bDBL5C_raw_/.test(d.formula)) key.push(IMPULSE_1115_CLASSIFICATION_VERSION,'DBL5C_parameters='+JSON.stringify({...IMPULSE_1115_CLASSIFICATION_DEFAULTS,...d.DBL5C_parameters}));
   if(featureUsesDbl5GuardPlus(d))key.push(DBL5_GUARD_PLUS_VERSION,JSON.stringify(DBL5_GUARD_PLUS_PARAMS));
   if(featureTemplateId(d)===SBS5M_ID)key.push(SBS5M_VERSION,sbsConfigHash(d.SBS5M_config),'SBS5M_config='+JSON.stringify(sbsParameters(d.SBS5M_config)),'SBS5M_dimension='+(d.SBS5M_dimension??'price'),'init:window-start-v1','SBS5M_research_symbol='+(d.SBS5M_research_symbol??''));
   if(featureTemplateId(d)==='prs6h')key.push(PRS6H_VERSION,'PRS6H_config='+JSON.stringify(d.PRS6H_config??{}),d.PRS6H_config?.volumeMode??'quote');
@@ -1264,6 +1282,7 @@ export interface CompiledFeature {
   usesSbs5m?:boolean;
   usesDbl5?:boolean;
   usesDbl5GuardPlus?:boolean;
+  usesImpulse1115Classification?:boolean;
 }
 
 /** 公式里用到了哪些参数（界面上没用到的参数淡一点）；公式写错时返回 null。 */
@@ -1277,9 +1296,11 @@ export function formulaParamUse(formula: string): { hl: boolean; avgh: boolean }
 }
 
 export function compileFeatureFormula(formula: string): CompiledFeature {
-  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES, ...ATI6H_NUMERIC_FIELDS.map(n=>n==='ATI6H'?'ATI6H_raw_value':'ATI6H_raw_'+n.slice(6)),...DBL5_FIELDS.map(n=>n==='DBL5'?'DBL5_raw_value':'DBL5_raw_'+n.slice(5)),...DBL5_GUARD_PLUS_NUMERIC.map(guardPlusInput),...SBS5M_FIELDS.map(n=>n==='SBS5M'?'SBS5M_raw_value':'SBS5M_raw_'+n.slice(6)),...PRS6H_FIELDS.map(n=>n==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+n.slice(6))]));
-  const usesDbl5GuardPlus = [...program.inputs].some(name => name.startsWith('DBL5P_raw_'));
-  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }), usesMbi2: featureUsesMbi2({formula}), usesAti6h:[...program.inputs].some(n=>n.startsWith('ATI6H_raw_')),usesDbl5:usesDbl5GuardPlus||[...program.inputs].some(n=>n.startsWith('DBL5_raw_')),usesDbl5GuardPlus,usesSbs5m:[...program.inputs].some(n=>n.startsWith('SBS5M_raw_')),usesPrs6h:[...program.inputs].some(n=>n.startsWith('PRS6H_raw_')) };
+  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES, ...ATI6H_NUMERIC_FIELDS.map(n=>n==='ATI6H'?'ATI6H_raw_value':'ATI6H_raw_'+n.slice(6)),...DBL5_FIELDS.map(n=>n==='DBL5'?'DBL5_raw_value':'DBL5_raw_'+n.slice(5)),...DBL5_GUARD_PLUS_NUMERIC.map(guardPlusInput),
+    ...IMPULSE_1115_CLASSIFICATION_FIELDS.map(n=>n==='DBL5C'?'DBL5C_raw_value':'DBL5C_raw_'+n.slice(6)),...SBS5M_FIELDS.map(n=>n==='SBS5M'?'SBS5M_raw_value':'SBS5M_raw_'+n.slice(6)),...PRS6H_FIELDS.map(n=>n==='PRS6H'?'PRS6H_raw_value':'PRS6H_raw_'+n.slice(6))]));
+  const usesImpulse1115Classification = [...program.inputs].some(name=>name.startsWith('DBL5C_raw_'));
+  const usesDbl5GuardPlus = usesImpulse1115Classification || [...program.inputs].some(name => name.startsWith('DBL5P_raw_'));
+  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }), usesMbi2: featureUsesMbi2({formula}), usesAti6h:[...program.inputs].some(n=>n.startsWith('ATI6H_raw_')),usesDbl5:usesDbl5GuardPlus||[...program.inputs].some(n=>n.startsWith('DBL5_raw_')),usesDbl5GuardPlus,...(usesImpulse1115Classification?{usesImpulse1115Classification}:{}),usesSbs5m:[...program.inputs].some(n=>n.startsWith('SBS5M_raw_')),usesPrs6h:[...program.inputs].some(n=>n.startsWith('PRS6H_raw_')) };
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
@@ -1321,6 +1342,7 @@ export function computeFeatureValues(
 function nativeAmountBar(bar:ResearchBar):ResearchBar{return {...bar,...(bar.ATI6H_quoteVolume!==undefined?{quoteVolume:bar.ATI6H_quoteVolume}:{}),...(bar.ATI6H_takerBuyQuoteVolume!==undefined?{takerBuyQuoteVolume:bar.ATI6H_takerBuyQuoteVolume}:{})};}
 export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef & {
   DBL5P_checkpoint?: Dbl5GuardPlusCheckpoint;
+  DBL5C_checkpoint?: Impulse1115ClassificationCheckpoint;
   DBL5P_impulseBufferAtr?: number;
 } = {}, cache?: FormulaEvaluationCache) {
   if (compiled.usesMbi || params.id === 'mbi') validateMbiParams(mbiNOf(params), mbiZ0Of(params));
@@ -1344,6 +1366,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
   }
   let DBL5_details:Dbl5Row[]|undefined,DBL5_checkpoint:Dbl5Checkpoint|undefined;
   let DBL5P_details:Dbl5GuardPlusRow[]|undefined, DBL5P_checkpoint:Dbl5GuardPlusCheckpoint|undefined;
+  let DBL5C_details:Impulse1115ClassificationRow[]|undefined, DBL5C_checkpoint:Impulse1115ClassificationCheckpoint|undefined;
   let DBL5_inputs:Record<string,Float64Array>={};
   let SBS5M_details:SbsRow[]|undefined,SBS5M_checkpoint:SbsCheckpoint|undefined;
   let atiInputs:Record<string,Float64Array>={};
@@ -1396,7 +1419,21 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
     if(compiled.usesDbl5GuardPlus){
       if(params.DBL5_checkpoint&&!params.DBL5P_checkpoint)throw Error('急拉-1115 需要自己的检查点或完整顺序回放');
       const engine=new Dbl5GuardPlusEngine({...options,checkpoint:params.DBL5P_checkpoint,impulseBufferAtr:params.DBL5P_impulseBufferAtr});
-      const points=prepared.flatMap(bar=>{const point=engine.push(bar);return point?[point]:[];});
+      const classification = compiled.usesImpulse1115Classification ? new Impulse1115ClassificationEngine({
+        params:params.DBL5C_parameters,checkpoint:params.DBL5C_checkpoint,
+        identity:JSON.stringify([options.symbol,options.market,options.config,options.dataSource,options.dataVersion,options.initializationStart,options.initializationId]),
+      }) : undefined;
+      if (classification && !!params.DBL5P_checkpoint !== !!params.DBL5C_checkpoint) throw Error('急拉分类须成对恢复原生与分类检查点，或从冻结起点完整回放');
+      if(classification)DBL5C_details=[];
+      const points=prepared.flatMap(bar=>{
+        const point=engine.push(bar);
+        if(point && classification){
+          const row=classification.push(bar,point.plus,point.base.tick_size ?? NaN);
+          if(row)DBL5C_details!.push(row);
+        }
+        return point?[point]:[];
+      });
+      DBL5C_checkpoint=classification?.checkpoint();
       DBL5_details=points.map(point=>point.base);
       DBL5P_details=points.map(point=>point.plus);
       DBL5P_checkpoint=engine.checkpoint();
@@ -1418,13 +1455,22 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
       }
     }
   }
+  if(DBL5C_details){
+    const byTime=new Map(DBL5C_details.map(row=>[row.at,row]));
+    for(const name of IMPULSE_1115_CLASSIFICATION_FIELDS){
+      DBL5_inputs[name==='DBL5C'?'DBL5C_raw_value':'DBL5C_raw_'+name.slice(6)]=Float64Array.from(bars,bar=>{
+        const row=byTime.get(bar.openTime+300000);
+        return row?impulse1115ClassificationNumeric(row,name)??NaN:NaN;
+      });
+    }
+  }
   const evaluated = evaluateProgramVars(compiled.program, {
     ...DBL5_inputs, ...atiInputs, ...input,
     ...featureParams(params),
   }, { barMinutes: intervalMs(intervalOf(params)) / 60_000, cache });
   if(compiled.usesDbl5)for(const name of DBL5_RENDER_FIELDS)evaluated.vars.set(name,DBL5_inputs[name]);
   if(DBL5P_details)for(const name of DBL5_GUARD_PLUS_RENDER)evaluated.vars.set(name,DBL5_inputs[name]);
-  return {...evaluated,...(DBL5_details?{DBL5_details,DBL5_checkpoint}:{}),...(DBL5P_details?{DBL5P_details,DBL5P_checkpoint}:{}),...(SBS5M_details?{SBS5M_details,SBS5M_checkpoint}:{}), ...(ATI6H_details?{ATI6H_details,ATI6H_archive}: {}),...(PRS6H_details?{PRS6H_details,PRS6H_checkpoint}:{})};
+  return {...evaluated,...(DBL5C_details?{DBL5C_details,DBL5C_checkpoint}:{}),...(DBL5_details?{DBL5_details,DBL5_checkpoint}:{}),...(DBL5P_details?{DBL5P_details,DBL5P_checkpoint}:{}),...(SBS5M_details?{SBS5M_details,SBS5M_checkpoint}:{}), ...(ATI6H_details?{ATI6H_details,ATI6H_archive}: {}),...(PRS6H_details?{PRS6H_details,PRS6H_checkpoint}:{})};
 }
 
 /** 公式里可选作因变量的变量：起了名的每一个；最后一句没起名时再加一个「结果」。写错时为空。 */
@@ -1578,7 +1624,7 @@ export interface DefinitionCheck {
 }
 
 /** 保存前检查：公式、分组标准能否解析，显示倍率是不是正数。 */
-export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'interval' | 'chartTemplate' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'> & {id?:string}): DefinitionCheck {
+export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'interval' | 'chartTemplate' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5C_parameters' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'> & {id?:string}): DefinitionCheck {
   const msg = (f: () => unknown) => {
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };
@@ -1595,6 +1641,7 @@ export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive
       if(compiled.usesDbl5GuardPlus&&(intervalOf(d)!=='5m'||dbl5GuardVersion(d.DBL5_config)!==DBL5_GUARD_VERSION)){
         throw Error('急拉-1115 需要已收盘 5m 数据及防守线 v1 基线');
       }
+      if(compiled.usesImpulse1115Classification)impulse1115ClassificationParams(d.DBL5C_parameters);
       if(template==='sbs_5m')sbsParameters(d.SBS5M_config);
       if(template==='prs6h')prsParameters(d.PRS6H_config);
       if(/\bctba\s*\(/.test(d.formula)) evaluateOnBars([],compiled,d);

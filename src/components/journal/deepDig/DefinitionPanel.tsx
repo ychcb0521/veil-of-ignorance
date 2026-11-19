@@ -1,3 +1,4 @@
+import {Impulse1115ClassificationSettings} from './Impulse1115ClassificationSettings';
 import { CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import {SettingsImageScope,SettingsImageButton,useSettingsImageCapture} from '@/components/SettingsImageExport';
 import {Dbl5GuardDefinition} from './Dbl5GuardDefinition';
@@ -54,7 +55,7 @@ function DefinitionImageParameters({def}:{def:DeepDigFeatureDef}) {
   const capture=useSettingsImageCapture();
   if(!capture)return null;
   const {id:_id,formula:_formula,...parameters}=paramsOf(def);
-  const saved=Object.fromEntries(Object.entries(def).filter(([key])=>/^(DBL5_|SBS5M_|PRS6H_|ATI6H_|MBI_|MBI2_)/.test(key)||['researchWindowHours','chartCore','btcFreeSourceId','retentionVersion','focusVersion'].includes(key)));
+  const saved=Object.fromEntries(Object.entries(def).filter(([key])=>/^(DBL5_|DBL5C_|SBS5M_|PRS6H_|ATI6H_|MBI_|MBI2_)/.test(key)||['researchWindowHours','chartCore','btcFreeSourceId','retentionVersion','focusVersion'].includes(key)));
   const template=featureTemplateId(def);
   const complete={...parameters,...saved,
     ...(dbl5ProfileForFeature(template)?{DBL5_config:{...dbl5Defaults(dbl5ProfileForFeature(template)?.timeframe),...def.DBL5_config}}:{}),
@@ -161,6 +162,10 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
         }}/>
         <Dbl5GuardDefinition config={draft.DBL5_config} timeframe={dbl5ProfileForFeature(featureTemplateId(draft))?.timeframe}/>
       </>}
+      {draft.formula.includes('DBL5C_raw_')&&<div className="flex gap-2">
+        <span className={label}>分类</span>
+        <Impulse1115ClassificationSettings value={draft.DBL5C_parameters} onChange={value=>set('DBL5C_parameters',value)}/>
+      </div>}
       <div className="flex gap-2">
         <span className={label}>参数</span>
         {dbl5ProfileForFeature(draft.chartTemplate)&&<details className="min-w-0 flex-1 text-xs" open><summary className="cursor-pointer">DBL-5 参数 · 研究初值</summary><textarea aria-label="DBL5 参数配置" value={dblText} rows={5} className={cn(INPUT,'mt-2 w-full font-mono')} onChange={e=>{setDblText(e.target.value);try{const p=JSON.parse(e.target.value);const config=dbl5Parameters(p);if(config.timeframe!==dbl5ProfileForFeature(draft.chartTemplate)?.timeframe)throw Error('周期须与所选 DBL-5 版本一致');set('DBL5_config',p);setDblError('');}catch(error){setDblError(error instanceof Error?error.message:'参数JSON无效');}}}/>{dblError&&<p role="alert" className={RED}>{dblError}</p>}<p className="mt-2 text-muted-foreground">周期固定为 {dbl5ProfileForFeature(draft.chartTemplate)?.periodLabel}。n 为回看及确认根数；window_minutes 为几何证据年龄，须为周期分钟数的整数倍，并满足 2n+1 小于窗口根数。默认窗口为 72 根。到期从origin_time计算，触底不续期。</p></details>}

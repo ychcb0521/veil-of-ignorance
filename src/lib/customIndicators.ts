@@ -4,9 +4,11 @@ import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {dbl5ChartGuardParam,registerDbl5Indicator} from '@/lib/dbl5mChart';
 import { IMPULSE_5M_ID, IMPULSE_5M_INDICATOR, registerImpulse5mChart } from '@/lib/impulse5mChart';
 import {CLEAN_ACCELERATION_1116_ID,CLEAN_ACCELERATION_1116_INDICATOR,registerCleanAcceleration1116Chart} from '@/lib/cleanAcceleration1116Chart';
+import {registerImpulse1115ClassificationChart} from './impulse1115ClassificationChart';
+import {IMPULSE_1115_CLASSIFICATION_CHART_ID} from './impulse1115Classification';
 import {registerImpulse1115Chart} from '@/lib/impulse1115Chart';
 import type {Dbl5GuardVersion} from '@/lib/dbl5m';
-import {GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion} from '@/lib/researchIndicators';
+import {IMPULSE_1115_CLASSIFICATION_CHART, GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion} from '@/lib/researchIndicators';
 import {registerSbsPriceIndicator} from '@/lib/sbs5mChart';
 import {PRS6H_STATES} from '@/lib/prs6h';
 import {ATI6H_COMPONENTS,ATI6H_LABELS} from '@/lib/ati6h';
@@ -353,6 +355,7 @@ export function registerAccountFeatureIndicators(definitions: readonly DeepDigFe
     CUSTOM_INDICATOR_MAP[item.id] = researchKcName(item.id);
     INDICATOR_COMPANIONS[item.id] = (item.rawOnly?[]:[1, 2]).map(level => ({ key: item.id + '#AVG' + (level === 2 ? '2' : ''), kcName: researchKcName(item.id, level) }));
     if (registeredAccountIndicators.has(item.id)) continue;
+    if(item.core==='DBL5C'){registerImpulse1115ClassificationChart(item);registeredAccountIndicators.add(item.id);continue;}
     if(item.templateId?.startsWith('DBL5')){registerDbl5Indicator(item);registeredAccountIndicators.add(item.id);continue;}
     if(item.priceOverlay){registerSbsPriceIndicator(item);registeredAccountIndicators.add(item.id);continue;}
     for (const level of (('rawOnly' in item&&item.rawOnly)?[0]:[0, 1, 2])) {
@@ -1492,6 +1495,7 @@ export function registerCustomIndicators() {
   registerCleanAcceleration1116Chart();
   registerImpulse5mChart();
   registerImpulse1115Chart(IMPULSE_1115_CHART);
+  registerImpulse1115ClassificationChart(IMPULSE_1115_CLASSIFICATION_CHART);
   registerDbl5Indicator(GUARD_1115_CHART);
   registerDbl5Indicator(GUARD_PLUS_0_CHART);
   for (const item of RESEARCH_INDICATORS) {
@@ -1568,6 +1572,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   [CLEAN_ACCELERATION_1116_ID]: CLEAN_ACCELERATION_1116_INDICATOR,
   [IMPULSE_5M_ID]: IMPULSE_5M_INDICATOR,
   [IMPULSE_1115_CHART_ID]: researchKcName(IMPULSE_1115_CHART_ID),
+  [IMPULSE_1115_CLASSIFICATION_CHART_ID]: researchKcName(IMPULSE_1115_CLASSIFICATION_CHART_ID),
   [GUARD_1115_CHART_ID]: researchKcName(GUARD_1115_CHART_ID),
   [GUARD_PLUS_0_CHART_ID]: researchKcName(GUARD_PLUS_0_CHART_ID),
   // Built-in klinecharts indicators (verified in klinecharts 9.8.12 ESM)

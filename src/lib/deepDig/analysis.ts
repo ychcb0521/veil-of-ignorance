@@ -1,3 +1,5 @@
+import type {Impulse1115ClassificationRow,Impulse1115ClassificationCheckpoint} from '@/lib/impulse1115Classification';
+import {IMPULSE_1115_CLASSIFICATION_DEFAULTS} from '@/lib/impulse1115Classification';
 import {dbl5AsOf,dbl5ProfileForFeature,dbl5FieldUnit,type Dbl5Row,type Dbl5Checkpoint} from '@/lib/dbl5m';
 import {saveDbl5Checkpoint} from '@/lib/dbl5mPersistence';
 import type {Dbl5GuardPlusRow,Dbl5GuardPlusCheckpoint} from '@/lib/dbl5GuardPlus';
@@ -48,9 +50,11 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM' | 'ATI6H_parameters' | 'ATI6H_volume_mode' | 'ATI6H_dependency' | 'PRS6H_config' | 'SBS5M_config' | 'SBS5M_dimension' | 'SBS5M_research_symbol' | 'DBL5C_parameters' | 'DBL5_config' | 'DBL5_dimension' | 'DBL5_research_symbol' | 'DBL5_initialization_start'>;
 
 export interface DeepDigRow {
+  DBL5C_details?:Impulse1115ClassificationRow;
+  DBL5C_checkpoint?:Impulse1115ClassificationCheckpoint;
   DBL5_details?:Dbl5Row;
   DBL5_checkpoint?:Dbl5Checkpoint;
   DBL5P_details?:Dbl5GuardPlusRow;
@@ -141,7 +145,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { ...(!!dbl5ProfileForFeature(featureTemplateId(def))?{DBL5_config:def.DBL5_config,DBL5_dimension:def.DBL5_dimension,DBL5_research_symbol:def.DBL5_research_symbol,DBL5_initialization_start:def.DBL5_initialization_start}:{}), ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
+  return { ...(def.formula.includes('DBL5C_raw_')?{DBL5C_parameters:{...IMPULSE_1115_CLASSIFICATION_DEFAULTS,...def.DBL5C_parameters}}:{}), ...(!!dbl5ProfileForFeature(featureTemplateId(def))?{DBL5_config:def.DBL5_config,DBL5_dimension:def.DBL5_dimension,DBL5_research_symbol:def.DBL5_research_symbol,DBL5_initialization_start:def.DBL5_initialization_start}:{}), ...(featureTemplateId(def)===SBS5M_ID?{SBS5M_config:def.SBS5M_config,SBS5M_dimension:def.SBS5M_dimension,SBS5M_research_symbol:def.SBS5M_research_symbol}:{}), ...(featureTemplateId(def)==='prs6h'?{PRS6H_config:def.PRS6H_config}:{}), ...(featureTemplateId(def)==='ati6h'?{ATI6H_parameters:def.ATI6H_parameters,ATI6H_volume_mode:def.ATI6H_volume_mode,ATI6H_dependency:def.ATI6H_dependency}:{}), id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -222,7 +226,7 @@ export async function collectDeepDigRun(
   const startedAt = Date.now();
   if(featureTemplateId(def)==='ati6h'&&!def.ATI6H_dependency)def={...def,ATI6H_dependency:ati6hDependencyOf(def)};
   const DBL5_windows:NonNullable<DeepDigSeries['DBL5_windows']>={};
-  const dblDetails=new Map<string,{row:Dbl5Row;checkpoint:Dbl5Checkpoint;plus?:Dbl5GuardPlusRow;plusCheckpoint?:Dbl5GuardPlusCheckpoint}>();
+  const dblDetails=new Map<string,{row:Dbl5Row;checkpoint:Dbl5Checkpoint;plus?:Dbl5GuardPlusRow;plusCheckpoint?:Dbl5GuardPlusCheckpoint;classification?:Impulse1115ClassificationRow;classificationCheckpoint?:Impulse1115ClassificationCheckpoint}>();
   const DBL5_diagnostics:NonNullable<DeepDigData['DBL5_diagnostics']>={};
   const SBS5M_windows:NonNullable<DeepDigSeries['SBS5M_windows']>={};
   const sbsDetails=new Map<string,{row:SbsRow;checkpoint:SbsCheckpoint}>();
@@ -282,13 +286,16 @@ export async function collectDeepDigRun(
       if(!!dbl5ProfileForFeature(featureTemplateId(def))&&inputWindow){
         const out=evaluateOnBars(inputWindow.bars,compiled,scopedParams),rows=out.DBL5_details??[],row=dbl5AsOf(rows,ctx.anchorMs),checkpoint=out.DBL5_checkpoint;
         if(row&&checkpoint){
-          dblDetails.set(ctx.id,{row,checkpoint,plus:out.DBL5P_details?.find(point=>point.at===row.at),plusCheckpoint:out.DBL5P_checkpoint});
+          dblDetails.set(ctx.id,{row,checkpoint,plus:out.DBL5P_details?.find(point=>point.at===row.at),plusCheckpoint:out.DBL5P_checkpoint,classification:out.DBL5C_details?.find(point=>point.at===row.at),classificationCheckpoint:out.DBL5C_checkpoint});
           if(!compiled.usesDbl5GuardPlus)void saveDbl5Checkpoint(checkpoint);
         }
         const begin=ctx.anchorMs-(def.researchWindowHours??6)*3600000;
         DBL5_windows[ctx.id]={checkpoint,rows:rows.filter(r=>r.at>begin),prices:inputWindow.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))>begin).map(b=>({time:b.openTime+intervalMs(intervalOf(def)),close:b.close}))};
         if(out.DBL5P_details)Object.assign(DBL5_windows[ctx.id],{
           guardPlusRows:out.DBL5P_details.filter(point=>point.at>begin),guardPlusCheckpoint:out.DBL5P_checkpoint,
+        });
+        if(out.DBL5C_details)Object.assign(DBL5_windows[ctx.id],{
+          classificationRows:out.DBL5C_details.filter(point=>point.at>begin),classificationCheckpoint:out.DBL5C_checkpoint,
         });
         const events=[...new Map(rows.flatMap(r=>r.events).map(e=>[e.id,e])).values()];
         DBL5_diagnostics[ctx.id]={available:rows.filter(r=>r.darvas_5m_available).length,missing:rows.filter(r=>!r.darvas_5m_available).length,event_counts:Object.fromEntries([...new Set(events.map(e=>e.type))].map(t=>[t,events.filter(e=>e.type===t).length])),initialization_start:checkpoint?.initialization_start??null,data_checksum:checkpoint?.data_checksum??''};
@@ -337,6 +344,7 @@ export async function collectDeepDigRun(
   for(const row of described.rows){
     const detail=dblDetails.get(row.id);
     if(detail?.plus){row.DBL5P_details=detail.plus;row.DBL5P_checkpoint=detail.plusCheckpoint;}
+    if(detail?.classification){row.DBL5C_details=detail.classification;row.DBL5C_checkpoint=detail.classificationCheckpoint;}
   }
   for(const row of described.rows){const dbl=dblDetails.get(row.id);if(dbl){row.DBL5_details=dbl.row;row.DBL5_checkpoint=dbl.checkpoint;}const sbs=sbsDetails.get(row.id);if(sbs){row.SBS5M_details=sbs.row;row.SBS5M_checkpoint=sbs.checkpoint;}const prs=prsDetails.get(row.id);if(prs){row.PRS6H_details=prs.row;const {points,active,references,obstacles,archive,event_ids,last_row,...metadata}=prs.checkpoint;row.PRS6H_checkpoint=metadata;}const detail=atiDetails.get(row.id);if(detail){row.ATI6H_details=detail.row;row.ATI6H_archive=detail.archive;}}
   // Kept in Other for visibility/counts, but never enter the price-fetching event rows or inference.

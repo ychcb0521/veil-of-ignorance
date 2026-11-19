@@ -95,7 +95,7 @@ describe('自制区的十个特征值', () => {
     expect(within(group).getByText('5m · 定义参数')).toBeInTheDocument();expect(registered.has('SBS5M_CUSTOM')).toBe(true);
   });
   it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
-    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual([CLEAN_ACCELERATION_1116_ID,'IMPULSE_5M',IMPULSE_1115_CHART_ID,GUARD_PLUS_0_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual([CLEAN_ACCELERATION_1116_ID,'IMPULSE_5M',IMPULSE_1115_CHART_ID,'DBL5_IMPULSE_1115_STATES',GUARD_PLUS_0_CHART_ID,GUARD_1115_CHART_ID, ...ids]);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');

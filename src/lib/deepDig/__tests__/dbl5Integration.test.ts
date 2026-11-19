@@ -20,7 +20,7 @@ const params={...def,DBL5_symbol:'DBLUSDT',DBL5_tick_size:1};
 it('registers main price and three independent units using one causal state machine',()=>{
  const old=[PRS6H_DEF,ATI6H_DEF,SBS5M_DEF].map(definitionKey),bars=sample(),core=computeDbl5(bars,{symbol:'DBLUSDT',tickSize:1,initializationStart:T,initializationId:`start:${T}:v1`}),out=evaluateOnBars(bars,compileFeatureFormula(def.formula),params);
  expect(mergeFeatureDefs([]).filter(d=>d.chartTemplate==='darvas_5m_lower').map(d=>d.id))
-  .toEqual([DBL5_DEF.id,...DBL5_DIMENSIONS.map(d=>d.id),DBL5_GUARD_PLUS_DEF.id]);
+  .toEqual([DBL5_DEF.id,...DBL5_DIMENSIONS.map(d=>d.id),DBL5_GUARD_PLUS_DEF.id,'impulse-1115-holding-classification-v1']);
  expect(out.DBL5_details).toEqual(core.rows);
  for(const n of DBL5_FIELDS)expect(out.vars.get(n)).toEqual(Float64Array.from(core.rows,r=>dbl5Numeric(r,n)??NaN));
  for(const d of DBL5_DIMENSIONS){expect(evaluateOnBars(bars,compileFeatureFormula(d.formula),{...params,...d}).DBL5_details.map(r=>r.darvas_5m_lower)).toEqual(core.rows.map(r=>r.darvas_5m_lower));expect(d.formula).not.toContain('DBL5_raw_value');}

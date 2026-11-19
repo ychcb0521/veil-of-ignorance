@@ -20,8 +20,9 @@ export function deepDigCsv(data: DeepDigData): string {
   const sbsColumns=featureTemplateId(data.definition)==='sbs_5m'?['SBS5M_details','SBS5M_checkpoint','SBS5M_config','SBS5M_dimension','SBS5M_research_symbol']:[];
   const prsColumns=featureTemplateId(data.definition)==='prs6h'?['PRS6H_state','PRS6H_market_ready','PRS6H_config_hash','PRS6H_reasons','PRS6H_details','PRS6H_checkpoint']:[];
   const atiColumns=featureTemplateId(data.definition)==='ati6h'?['ATI6H_shortboard','ATI6H_data_status','ATI6H_reason_codes','ATI6H_volume_mode','ATI6H_version','ATI6H_structure_id','ATI6H_structure_status','ATI6H_nearest_resistance_type','ATI6H_breakout_cross_now','ATI6H_parameters','ATI6H_details','ATI6H_archive','ATI6H_dependency']:[];
+  const classificationColumns=data.definition.formula.includes('DBL5C_raw_')?['DBL5C_details','DBL5C_checkpoint','DBL5C_parameters'] as const:[];
   const plusColumns=featureUsesDbl5GuardPlus(data.definition)?['DBL5P_details','DBL5P_checkpoint'] as const:[];
-  const rows: unknown[][] = [['事件ID', '标的', '锚点UTC', '取样偏移小时', '分组', '结果原值', ...columns, '24h期末收益', '24h最大涨幅', '24h最大跌幅', ...params,...dblColumns,...sbsColumns,...prsColumns,...atiColumns,...plusColumns]];
+  const rows: unknown[][] = [['事件ID', '标的', '锚点UTC', '取样偏移小时', '分组', '结果原值', ...columns, '24h期末收益', '24h最大涨幅', '24h最大跌幅', ...params,...dblColumns,...sbsColumns,...prsColumns,...atiColumns,...plusColumns,...classificationColumns]];
   for (const row of data.rows) rows.push([
     row.id, row.symbol, new Date(row.anchorMs).toISOString(), (data.sampleOffsetMs ?? 0) / 3600000, groupLabel(row.group, data.definition.source), row.v,
     ...columns.map(name => row.vars?.[name]), row.endRet, row.maxUp, row.maxDown,
@@ -31,6 +32,7 @@ export function deepDigCsv(data: DeepDigData): string {
     ...prsColumns.map(name=>{const value=name==='PRS6H_details'?row.PRS6H_details:name==='PRS6H_checkpoint'?row.PRS6H_checkpoint:row.PRS6H_details?.[name as keyof typeof row.PRS6H_details];return typeof value==='object'?JSON.stringify(value):value;}),
     ...atiColumns.map(name=>{const value=name==='ATI6H_details'?row.ATI6H_details:name==='ATI6H_archive'?row.ATI6H_archive:name==='ATI6H_dependency'?data.definition.ATI6H_dependency:row.ATI6H_details?.[name];return typeof value==='object'?JSON.stringify(value):value;}),
     ...plusColumns.map(name=>JSON.stringify(row[name])),
+    ...classificationColumns.map(name=>JSON.stringify(name==='DBL5C_parameters'?data.definition.DBL5C_parameters:row[name])),
   ]);
   return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
 }

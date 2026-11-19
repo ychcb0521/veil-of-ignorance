@@ -27,6 +27,7 @@ export function formatSeriesOffset(ms: number): string {
 
 export interface DeepDigSeries {
   DBL5_windows?:Record<string,{checkpoint?:import('@/lib/dbl5m').Dbl5Checkpoint;rows:import('@/lib/dbl5m').Dbl5Row[];prices:{time:number;close:number}[];
+    classificationRows?:import('@/lib/impulse1115Classification').Impulse1115ClassificationRow[];classificationCheckpoint?:import('@/lib/impulse1115Classification').Impulse1115ClassificationCheckpoint;
     guardPlusRows?:import('@/lib/dbl5GuardPlus').Dbl5GuardPlusRow[];guardPlusCheckpoint?:import('@/lib/dbl5GuardPlus').Dbl5GuardPlusCheckpoint}>;
   SBS5M_windows?:Record<string,{checkpoint?:import('@/lib/sbs5m').SbsCheckpoint;rows:import('@/lib/sbs5m').SbsRow[];prices:{time:number;close:number}[]}>;
   PRS6H_windows?:Record<string,{checkpoint?:import('@/lib/prs6h').PrsCheckpoint;rows:import('@/lib/prs6h').PrsRow[];prices:{time:number;close:number}[]}>;

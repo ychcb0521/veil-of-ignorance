@@ -7,6 +7,7 @@
  *  2. 方案保存时把所用版本写进 structure.versions（freezeStructureVersions）。之后哪怕默认参数变了，已存方案仍按原版本、原参数运行。
  *  3. src/lib/__tests__/boxAlgorithmVersions.test.ts 用固定 K 线锁住每个版本的输出；那里的期望值不能改，只能为新版本另加。
  */
+import {IMPULSE_1115_CLASSIFICATION_VERSION,IMPULSE_1115_CLASSIFICATION_LABEL} from '@/lib/impulse1115Classification';
 import type { StructureAdditionRule } from './qualityAdditionStructure';
 import { DBL5_1115_POSITION_RACE_VERSION, DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_LABEL, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_LABEL, IMPULSE_1115_POSITION_VERSION } from '@/lib/dbl5GuardPlus';
 import { DBL5_GUARD_DEFAULTS, DBL5_GUARD_VERSION, DBL5_PROFILES, DBL5_VARIANT_TIMEFRAMES, dbl5ProfileForFeature, DBL5_RETEST_GUARD_VERSION, DBL5_GUARD_RETEST, dbl5GuardVersion, withDbl5GuardVersion, type Dbl5GuardVersion } from '@/lib/dbl5m';
@@ -69,6 +70,12 @@ export const BOX_ALGORITHM_VERSIONS: readonly BoxAlgorithmVersion[] = Object.fre
   { id: DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, algorithm: 'dbl5', layer: 'guard', label: `${DBL5_GUARD_PLUS_DISPLAY_NAME} · 可调急拉 ATR`, since: '2026-11-16',
     summary: '无 BTC 依赖。原组合版的首次急拉判定和防守线不变，急拉参考使用自定的前置 ATR 冗余。',
     rules: ['急拉参考＝起涨低点 − 所设倍数 × 急拉前的 5 分钟 ATR(14)，按报价步长向下取整。', '与防守线按原组合规则选取有效参考，使用该参考的 K 和收盘确认方式。'] },
+  {id:IMPULSE_1115_CLASSIFICATION_VERSION,algorithm:'dbl5',layer:'guard',label:IMPULSE_1115_CLASSIFICATION_LABEL,since:'2026-11-19',
+    summary:'原急拉识别和参考价格不变，新增独立、因果的持仓状态分类。',
+    rules:['第1、2种固定映射一类；第3至6种固定映射二类。过渡状态说明等待条件，不另增主分类。',
+      '每条急拉线独立冻结价格与ATR，逐根已收盘5m更新；刺穿、有效跌破与修复保留各自证据。',
+      '原线断裂、到期后仍可按冻结价格观察；缺口暂停该线。历史不回填，检查点须与原生证据成对恢复。',
+      '只输出分类与展示；原防守线、急拉线、模板版本和交易动作不变。']},
   ...DBL5_VARIANT_TIMEFRAMES.flatMap((timeframe): BoxAlgorithmVersion[] => {
     const {version,label,periodLabel,minutes}=DBL5_PROFILES[timeframe];
     return [

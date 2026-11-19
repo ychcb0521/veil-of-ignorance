@@ -256,6 +256,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   if(usesMbi2)Object.assign(params,{id:def.id,formula:def.formula,interval:RESEARCH_INTERVALS.find(i=>intervalMs(i)===mbi2Minutes*60000)??def.interval??'5m',
     MBI2_T_HOURS:has?p:mbi2HoursOf(def,mbi2Minutes),MBI2_Z0:def.MBI2_Z0,MBI2_BAND:mbi2BandOf(def),MBI2_CONFIRM:mbi2ConfirmOf(def)});
+  if(def.formula.includes('DBL5C_raw_'))Object.assign(params,{DBL5C_parameters:def.DBL5C_parameters});
   if(dbl5&&!dataList.some(b=>typeof b.researchSymbol==='string'))return null;
   if(dbl5){
     const metadata=dataList.find(b=>typeof b.researchSymbol==='string'),symbol=metadata?.researchSymbol as string|undefined;

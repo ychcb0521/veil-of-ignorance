@@ -1,3 +1,7 @@
+import {
+  IMPULSE_1115_CLASSIFICATION_CHART_ID,IMPULSE_1115_CLASSIFICATION_LABEL,IMPULSE_1115_CLASSIFICATION_VERSION,
+  IMPULSE_1115_CLASSIFICATION_FIELDS,
+} from './impulse1115Classification';
 import { CDA_FIVE_MINUTE_LABEL, CDA_HOURLY_AVERAGE_HOURS, CDA_HOURLY_CHART_ID, CDA_HOURLY_ID, CDA_HOURLY_LABEL, CDA_HOURLY_TIME_SCALE, usesHourlyCda } from '@/lib/cdaPeriods';
 import { isTuringCupSymbol } from '@/lib/turingCupSymbol';
 import {DBL5_MARKET_RULE_VERSION} from '@/lib/dbl5mMarketRules';
@@ -9,7 +13,7 @@ import {ati6hMarketVersion,requestAti6hTickSize} from '@/lib/ati6hMarketData';
 import {ati6hDependencyOf} from '@/lib/deepDig/features';
 import { SELLER_RETENTION_SPECS, retentionComponents } from '@/lib/sellerRetention';
 import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
-import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, IMPULSE_1115_CLASSIFICATION_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { CTBA_DEFAULTS, CTBA_ABSOLUTE_BOUND } from '@/lib/ctba';
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
@@ -50,6 +54,12 @@ export const GUARD_PLUS_0_CHART: ResearchIndicator = {
 };
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
+export const IMPULSE_1115_CLASSIFICATION_CHART: ResearchIndicator = {
+  id:IMPULSE_1115_CLASSIFICATION_CHART_ID,featureId:IMPULSE_1115_CLASSIFICATION_VERSION,core:'DBL5C',
+  short:IMPULSE_1115_CLASSIFICATION_LABEL,name:IMPULSE_1115_CLASSIFICATION_LABEL,
+  period:3,parameter:'分类参数（编辑定义）',neutral:0,min:0,max:0,seller:false,marketEvidence:true,
+  rawOnly:true,priceOverlay:true,components:IMPULSE_1115_CLASSIFICATION_FIELDS.filter(n=>n!=='DBL5C'),
+};
 export const RESEARCH_INDICATORS = [
   DBL5_GUARD_CHART,
   DBL5_HOURLY_CHART,
@@ -97,12 +107,12 @@ export interface ResearchIndicator {
 export const researchAverageHours = (item: Pick<ResearchIndicator, 'featureId' | 'templateId'>) =>
   item.featureId === CDA_HOURLY_ID || item.templateId === CDA_HOURLY_CHART_ID ? CDA_HOURLY_AVERAGE_HOURS : 24;
 export const supportsDbl5GuardVersion = (item?: ResearchIndicator) =>
-  !!item?.priceOverlay && item.core!=='DBL5P' && (item.id === 'DBL5' || item.id === DBL5_HOURLY_CHART.id || item.id === GUARD_PLUS_0_CHART_ID || item.templateId?.startsWith('DBL5') === true);
+  !!item?.priceOverlay && item.core!=='DBL5P' && item.core!=='DBL5C' && (item.id === 'DBL5' || item.id === DBL5_HOURLY_CHART.id || item.id === GUARD_PLUS_0_CHART_ID || item.templateId?.startsWith('DBL5') === true);
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
   const builtin = BUILTIN_FEATURES.find(d => d.id === def.id);
-  const direct = CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === def.id);
-  const template = direct ?? (usesHourlyCda(def) ? CUSTOM_RESEARCH_INDICATORS.find(item => item.id === CDA_HOURLY_CHART_ID) : undefined) ?? CUSTOM_RESEARCH_INDICATORS.find(item => def.chartCore === item.core) ?? CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === featureTemplateId(def));
+  const direct = CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === def.id) ?? (def.id===IMPULSE_1115_CLASSIFICATION_VERSION?IMPULSE_1115_CLASSIFICATION_CHART:undefined);
+  const template = direct ?? (def.chartCore==='DBL5C'?IMPULSE_1115_CLASSIFICATION_CHART:undefined) ?? (usesHourlyCda(def) ? CUSTOM_RESEARCH_INDICATORS.find(item => item.id === CDA_HOURLY_CHART_ID) : undefined) ?? CUSTOM_RESEARCH_INDICATORS.find(item => def.chartCore === item.core) ?? CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === featureTemplateId(def));
   let core = def.chartCore ?? template?.core ?? '_feature_value';
   try {
     const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
@@ -127,7 +137,7 @@ export function accountResearchIndicators(definitions: readonly DeepDigFeatureDe
   const items: ResearchIndicator[] = [...CUSTOM_RESEARCH_INDICATORS.map(item => {
     const def = definitions.find(d => d.id === item.featureId);
     return def ? researchIndicatorForFeature(def) : item;
-  }), ...definitions.filter(def => def.focusVersion || def.btcFreeSourceId || !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature), GUARD_1115_CHART, IMPULSE_1115_CHART, GUARD_PLUS_0_CHART];
+  }), ...definitions.filter(def => def.focusVersion || def.btcFreeSourceId || !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature), GUARD_1115_CHART, IMPULSE_1115_CHART, GUARD_PLUS_0_CHART, researchIndicatorForFeature(definitions.find(d=>d.id===IMPULSE_1115_CLASSIFICATION_VERSION)??IMPULSE_1115_CLASSIFICATION_DEF)];
   accountRegistryCache.set(definitions, items);
   return items;
 }
@@ -279,7 +289,8 @@ export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
   const dbl5=dbl5ProfileForFeature(featureTemplateId(def??{}));
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(dbl5?[dbl5.version,DBL5_MARKET_RULE_VERSION,def?.DBL5_config,def?.DBL5_dimension,def?.DBL5_initialization_start,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  const values: unknown[] = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(dbl5?[dbl5.version,DBL5_MARKET_RULE_VERSION,def?.DBL5_config,def?.DBL5_dimension,def?.DBL5_initialization_start,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})===SBS5M_ID?[SBS5M_VERSION,def?.SBS5M_config,def?.SBS5M_dimension,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='prs6h'?[def?.PRS6H_config,ati6hMarketVersion()]:[]), ...(featureTemplateId(def??{})==='ati6h'?[def?.ATI6H_parameters,def?.ATI6H_volume_mode,ati6hDependencyOf(def??{}),ati6hMarketVersion()]:[]), ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
+  if(def?.formula.includes('DBL5C_raw_'))values.push(IMPULSE_1115_CLASSIFICATION_VERSION,def.DBL5C_parameters);
   if(def?.formula.includes('DBL5P_raw_'))values.push(DBL5_GUARD_PLUS_VERSION,DBL5_GUARD_PLUS_PARAMS);
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;

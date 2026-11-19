@@ -1,7 +1,8 @@
+import {IMPULSE_1115_CLASSIFICATION_CHART_ID} from '@/lib/impulse1115Classification';
 import { CDA_HOURLY_CHART_ID, CDA_HOURLY_AVERAGE_HOURS } from '@/lib/cdaPeriods';
 import { chartFeaturePeriod } from '@/lib/featureSource';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
-import { accountResearchIndicators, GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_DESCRIPTION, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
+import { accountResearchIndicators, IMPULSE_1115_CLASSIFICATION_CHART, GUARD_1115_CHART, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART, GUARD_PLUS_0_CHART_ID, IMPULSE_1115_CHART, IMPULSE_1115_CHART_DESCRIPTION, IMPULSE_1115_CHART_ID, supportsDbl5GuardVersion } from '@/lib/researchIndicators';
 import { DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION, type Dbl5GuardVersion } from '@/lib/dbl5m';
 import { boxAlgorithmVersion } from '@/lib/fish/boxAlgorithmVersions';
 import { CTBA_DEFAULTS, CTBA_DESCRIPTION } from '@/lib/ctba';
@@ -85,6 +86,9 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   { id: IMPULSE_1115_CHART_ID, nameZh: IMPULSE_1115_CHART.short, nameEn: IMPULSE_1115_CHART.name, isOverlay: true,
     defaultPeriod: IMPULSE_1115_CHART.period, color: '#a21caf', category: 'custom', fixedPeriod: true, rawOnly: true,
     description: IMPULSE_1115_CHART_DESCRIPTION },
+  {id:IMPULSE_1115_CLASSIFICATION_CHART_ID,nameZh:IMPULSE_1115_CLASSIFICATION_CHART.short,nameEn:IMPULSE_1115_CLASSIFICATION_CHART.name,
+    isOverlay:true,defaultPeriod:3,color:'#a21caf',category:'custom',fixedPeriod:true,rawOnly:true,
+    description:'一类为正常延续；二类为走弱、跌破或修复。沿用原急拉识别与冻结价格，逐根已收盘5m分类。状态标记和十字光标保留历史；阈值在 Deep Dig 的本分类「编辑定义」中设置。分类本身不触发交易。'},
   { id: GUARD_PLUS_0_CHART_ID, nameZh: GUARD_PLUS_0_CHART.short, nameEn: GUARD_PLUS_0_CHART.name, isOverlay: true,
     defaultPeriod: GUARD_PLUS_0_CHART.period, color: '#2563eb', category: 'custom', fixedPeriod: true, rawOnly: true, guardVersionSelect: true,
     description: '在同一张图叠加原版防守线和原版 5 分钟急拉线。' },
@@ -592,7 +596,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   const custom = item.category === 'custom';
   const [descriptionOpen, setDescriptionOpen] = useState(false);
 
-  const plainFiveMinute = [CLEAN_ACCELERATION_1116_ID, IMPULSE_5M_ID, IMPULSE_1115_CHART_ID, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART_ID].includes(item.id);
+  const plainFiveMinute = [CLEAN_ACCELERATION_1116_ID, IMPULSE_5M_ID, IMPULSE_1115_CHART_ID, IMPULSE_1115_CLASSIFICATION_CHART_ID, GUARD_1115_CHART_ID, GUARD_PLUS_0_CHART_ID].includes(item.id);
   return (
     <div
       ref={ref}

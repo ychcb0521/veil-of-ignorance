@@ -1,3 +1,4 @@
+import {Impulse1115ClassificationReplay} from './Impulse1115ClassificationReplay';
 import {Dbl5EvidenceView} from './Dbl5EvidenceView';
 import {GuardPlusReplay} from './GuardPlusEvidence';
 import {featureUsesDbl5GuardPlus} from '@/lib/deepDig/features';
@@ -499,6 +500,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
           {def.researchWindowHours != null ? <>各组平均 · 入场前 {formatHoursText(def.researchWindowHours)} · {liveSeries?.offsets.length ?? Math.round(def.researchWindowHours*12)} 个已收盘{intervalOf(def)}时间点</> : <>各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）</>}
         </span>
       )} testId="deep-dig-series-block">
+        {result.definition.formula.includes('DBL5C_raw_')&&<Impulse1115ClassificationReplay data={result} series={liveSeries}/>}
         {featureTemplateId(def)==='darvas_5m_lower'&&(featureUsesDbl5GuardPlus(def)
           ?<GuardPlusReplay data={result} series={liveSeries}/>
           :<Dbl5EvidenceView data={result} series={liveSeries}/>)}
