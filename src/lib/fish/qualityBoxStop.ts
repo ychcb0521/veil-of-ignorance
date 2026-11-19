@@ -19,6 +19,7 @@ import type { QualityTrigger } from './qualityIntrabar';
 
 import { BOX_STOP_INVALID_DATA } from './qualityBoxMarketRepair';
 import {POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
+import {mirrorHardStopStageLabel} from './qualityMirrorHardStopStages';
 
 export const BOX_STOP_KIND = 'box-stop' as const;
 export const BOX_STOP_VERSION = 'holding-box-stop-v1';
@@ -155,13 +156,15 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
   const read=async (minute:ResearchBar, options?:{observeNativeClose?:boolean;onlyActivated?:boolean}):Promise<QualityTrigger|undefined>=>{
     const candidates:QualityTrigger[]=[];
     for(const r of rules){
-      if(options?.onlyActivated&&!r.v.activation)continue;
-      const activationAt=r.v.activation?o.activationAt?.():undefined;
-      if(r.v.activation&&(activationAt==null||minute.openTime<activationAt))continue;
+      const after=!!r.v.activation||r.v.mirrorStage?.stage==='after',boundary=o.activationAt?.();
+      if(options?.onlyActivated&&!after)continue;
+      if(r.v.mirrorStage?.stage==='before'&&boundary!=null&&minute.openTime>=boundary)continue;
+      const activationAt=after?boundary:undefined;
+      if(after&&(activationAt==null||minute.openTime<activationAt))continue;
       const ruleEntry=activationAt==null?observationEntry:Math.max(observationEntry,activationAt-1);
       const ruleSince=activationAt==null?observationSince:Math.max(observationSince,activationAt);
-      const activationEvidence=r.v.activation?{activation:r.v.activation,activationAt}:{};
-      const label=boxStopLabel(r.rule)+(r.v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'');
+      const activationEvidence={...(r.v.activation?{activation:r.v.activation,activationAt}:{}),...(r.v.mirrorStage?{mirrorStage:r.v.mirrorStage,...(boundary!=null?{mirrorStageBoundary:boundary}:{})}:{})};
+      const label=boxStopLabel(r.rule)+(r.v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'')+(r.v.mirrorStage?'（'+mirrorHardStopStageLabel(r.v.mirrorStage)+'）':'');
       let breakAt:number|undefined,brokenBar:number|undefined;
       // Entry v4 observes the newly completed native event at this minute's
       // close. Touch stops still use only lines known before the minute opened.
@@ -235,7 +238,13 @@ export function createBoxStopReader(o:{vetoes:readonly QualityHoldingVeto[];row:
     }
     return candidates.sort((a,b)=>a.at-b.at||Number(!!b.atOpen)-Number(!!a.atOpen)||(b.fillPrice??0)-(a.fillPrice??0))[0];
   };
-  return {read,states,statesAt,restartObservation(at:number){
+  return {read,states,statesAt,deactivateBefore(boundary:number){
+    for(const r of rules){if(r.v.mirrorStage?.stage!=='before')continue;
+      const list=history.get(r.v.id)!,past=list.filter(p=>p.at<boundary);
+      r.state={...(past.at(-1)?.state??{count:0})};
+      history.set(r.v.id,past.length?past:[{at:o.since,state:{...r.state}}]);record(r.v.id,boundary,r.state);
+    }
+  },restartObservation(at:number){
     observationEntry=observationSince=at;
     for(const r of rules){
       r.state={count:0,...(r.latestLine?{line:r.latestLine.line,confirmedAt:r.latestLine.at}:{})};

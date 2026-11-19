@@ -1,5 +1,6 @@
 import {createBoxStopReader,type BoxStopState} from './qualityBoxStop';
 import {postMirrorProtectionAt,type POST_MIRROR_PROTECTION_VERSION} from './qualityPostMirrorProtection';
+import {mirrorHardStopActive,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
 import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
 import { completeZeroTradeBar, zeroTradeReadingPending } from './qualityZeroTrade';
 import { isTuringCupSymbol } from '../turingCupSymbol';
@@ -13,7 +14,7 @@ import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
 import { loadQualityScanChunk } from './qualityScanChunk';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
+import { activeHoldingVetoes, holdingVetoName, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
 import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror';
 import { ORIGINAL_STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION, type StaticDrawdownSellRule } from './qualityStaticDrawdownSell';
@@ -53,6 +54,7 @@ export function minuteTransport(plan: FishProgram): FishProgram {
 }
 
 export interface QualityIntrabarCondition {
+  mirrorStage?:MirrorHardStopStage;
   activation?:typeof POST_MIRROR_PROTECTION_VERSION;
   /** Opt-in pre-entry v4: a match excludes admission instead of confirming it. */
   entryVeto?: boolean;
@@ -92,6 +94,7 @@ export async function findQualityIntrabarExit(o: {
   // condition to the end and accidentally overlook an earlier veto from another.
   const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule,stage:o.ruleStage,closeOnly:o.ruleCloseOnly}]:[])];
   const streams=[];
+  const deferred=(v:{activation?:string;mirrorStage?:MirrorHardStopStage})=>!!v.activation||!!v.mirrorStage;
   const initializeStream=async(s:{plan:FishProgram;start:number;history:ResearchBar[];partial?:ResearchBar;initialized:boolean},at:number)=>{
     const start=Math.floor(at/s.plan.step)*s.plan.step,from=qualityHistoryFrom(o.load,start-s.plan.warm*s.plan.step,s.plan.step);
     if(from<0)throw Error('盘中复原的公式预热历史不足');
@@ -103,10 +106,10 @@ export async function findQualityIntrabarExit(o: {
   for(const c of inputs) {
     if (!(c.plan.step>=MINUTE) || c.plan.step%MINUTE!==0) throw new Error('盘中复原要求指标周期为整数分钟');
     const start=Math.floor(o.since/c.plan.step)*c.plan.step,from=qualityHistoryFrom(o.load,start-c.plan.warm*c.plan.step,c.plan.step);
-    if(!c.activation&&from<0) throw new Error('盘中复原的公式预热历史不足');
-    const history=!c.activation&&from<start?[...await o.load(o.row,from,start,c.plan,signal)]:[];
-    if(!c.activation&&from<start)validateFishBars(history,start,(start-from)/c.plan.step,c.plan.step);
-    streams.push({...c,start,history,initialized:!c.activation,cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
+    if(!deferred(c)&&from<0) throw new Error('盘中复原的公式预热历史不足');
+    const history=!deferred(c)&&from<start?[...await o.load(o.row,from,start,c.plan,signal)]:[];
+    if(!deferred(c)&&from<start)validateFishBars(history,start,(start-from)/c.plan.step,c.plan.step);
+    streams.push({...c,start,history,initialized:!deferred(c),cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
   }
   let holding=o.holding, mirrorFill=o.mirrorFill,sellerPeak=o.sellerPeak??holding?.peak??0;
   if(o.switchPct!=null&&!holding) throw new Error('组合卖出缺少买入价和持仓路径');
@@ -139,14 +142,17 @@ export async function findQualityIntrabarExit(o: {
   const boxReader=createBoxStopReader({vetoes:enabled,row:o.row,entry:o.entry,since:o.since,load:o.load,signal:o.signal,previous:o.boxStopStates,activationAt:()=>postMirrorProtectionAt(mirrorFill)});
   const boxState=()=>enabled.some(v=>v.kind==='box-stop')?{boxStopStates:boxReader.states(),boxStopStateAt:boxReader.statesAt}:{};
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
+  const activeRisk=(at:number)=>risk.filter(v=>mirrorHardStopActive(v,mirrorFill,at));
+  const phaseCause=(v:QualityHoldingVeto)=>({...{id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold},...(v.mirrorStage?{mirrorStage:v.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})});
   const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
   const dropMinutes: ResearchBar[] = [], dropPrevious = new Map<string, { at: number; reading: number }>();
   const maxDropWindow = Math.max(0, ...drops.map(v=>minuteDropWindow(v.kind)));
   if(risk.length&&!holding) throw new Error('持仓一票否决缺少买入价和回撤路径');
-  const riskPrevious=new Map(risk.map(v=>[v.id,{at:o.since,reading:holdingVetoReading(holding!,v.kind as 'static-drawdown'|'dynamic-drawdown')}]));
+  const riskPrevious=new Map(risk.filter(v=>!v.mirrorStage).map(v=>[v.id,{at:o.since,reading:holdingVetoReading(holding!,v.kind as 'static-drawdown'|'dynamic-drawdown')}]));
   const checkFrom=o.resumed?o.since+MINUTE:o.entry;
   const checkRisk=(at:number,path:QualityHoldingPath|undefined):QualityTrigger|undefined=>{
     for(const v of risk) {
+      if(v.mirrorStage)continue; // New phased price rules inspect current prices below, never historical worst values.
       const reading=holdingVetoReading(path!,v.kind as 'static-drawdown'|'dynamic-drawdown');
       // Inclusive percentage thresholds tolerate only floating-point roundoff.
       if(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,Math.abs(reading),Math.abs(v.threshold)))return {at,reading,barOpenTime:at-MINUTE,previous:riskPrevious.get(v.id),cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}};
@@ -155,10 +161,12 @@ export async function findQualityIntrabarExit(o: {
   };
   const checkDrop=(at:number):QualityTrigger|undefined=>{
     for(const v of drops) {
-      const value=minuteDropReading(dropMinutes,minuteDropWindow(v.kind),o.entry,at);
+      if(!mirrorHardStopActive(v,mirrorFill,at))continue;
+      const phaseEntry=v.mirrorStage?.stage==='after'?Math.max(o.entry,postMirrorProtectionAt(mirrorFill)!):o.entry;
+      const value=minuteDropReading(dropMinutes,minuteDropWindow(v.kind),phaseEntry,at);
       if(!value)continue;
       const {reading,start}=value;
-      if(at>=checkFrom&&(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,reading,v.threshold)))return {at,reading,barOpenTime:start,previous:dropPrevious.get(v.id),cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}};
+      if(at>=checkFrom&&(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,reading,v.threshold)))return {at,reading,barOpenTime:start,previous:dropPrevious.get(v.id),cause:phaseCause(v)};
       dropPrevious.set(v.id,{at,reading});
     }
   };
@@ -176,12 +184,12 @@ export async function findQualityIntrabarExit(o: {
     const after=switched();
     for(const s of streams) {
       const activationAt=s.activation?postMirrorProtectionAt(mirrorFill):undefined;
-      if(s.activation&&(activationAt==null||at<activationAt))continue;
-      if(!s.initialized)await initializeStream(s,at);
+      if(!mirrorHardStopActive(s,mirrorFill,at))continue;
       if(o.conditionsUntil!=null&&at>o.conditionsUntil)continue;
       if(!s.cause&&o.ordinaryUntil!=null&&at>o.ordinaryUntil)continue;
       if(s.stage==='before'&&after||s.stage==='after'&&!after)continue;
       if(s.closeOnly && (at<=o.entry || at%s.plan.step!==0))continue;
+      if(!s.initialized)await initializeStream(s,at);
       const bars=s.partial?[...s.history,s.partial]:s.history;
       const out=evaluateOnBars(bars,s.plan.compiled,s.plan.def,s.cache).vars.get(s.plan.averageName);
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;
@@ -205,7 +213,8 @@ export async function findQualityIntrabarExit(o: {
         continue;
       }
       if(at>=checkFrom&&met&&(!confirmation||confirmation.confirmed)) {
-        const trigger:QualityTrigger={at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause&&s.activation?{...s.cause,activation:s.activation,activationAt}:s.cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
+        const cause=s.cause?{...s.cause,...(s.activation?{activation:s.activation,activationAt}:{}),...(s.mirrorStage?{mirrorStage:s.mirrorStage,...(postMirrorProtectionAt(mirrorFill)!=null?{mirrorStageBoundary:postMirrorProtectionAt(mirrorFill)}:{})}:{})}:undefined;
+        const trigger:QualityTrigger={at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause,...(s.stage?{stage:s.stage}:{}),...(confirmation?{advantage:confirmation.evidence}:{})};
         if(o.matchMode!=='all')return trigger;
         matches.push(trigger);
       }
@@ -233,6 +242,7 @@ export async function findQualityIntrabarExit(o: {
     if(observed<target && Math.abs(observed-target)>target*1e-12)return;
     const atOpen=minute.open>=target,price=atOpen?minute.open:target;
     mirrorFill={at:minute.openTime,price,fraction:o.mirror.sellPct/100,gainPct:o.mirror.gainPct,atOpen};
+    if(enabled.some(v=>v.mirrorStage?.stage==='before'))boxReader.deactivateBefore(postMirrorProtectionAt(mirrorFill)!);
     if(mirrorFill.fraction===1)return {at:minute.openTime,reading:(price/holding.entry-1)*100,barOpenTime:minute.openTime,fillPrice:price,fillPeak:price,atOpen,
       cause:{id:'mirror-take-profit',label:'镜像止盈',kind:'mirror-take-profit',direction:'>=',threshold:o.mirror.gainPct}};
   };
@@ -253,18 +263,25 @@ export async function findQualityIntrabarExit(o: {
         const opening=advanceQualityHolding(holding,{...minute,high:minute.open,low:minute.open,close:minute.open});
         const trigger=checkRisk(minute.openTime,opening);
         if(trigger) {prices.push(minute);return {trigger:{...trigger,barOpenTime:minute.openTime,atOpen:true},prices,mirrorFill};}
+        const openPhaseStop=qualityIntrabarStop(holding,{...minute,high:minute.open,low:minute.open,close:minute.open},activeRisk(minute.openTime).filter(v=>v.mirrorStage));
+        if(openPhaseStop){prices.push(minute);return {trigger:{at:minute.openTime,barOpenTime:minute.openTime,reading:openPhaseStop.reading,fillPrice:minute.open,fillPeak:openPhaseStop.peak,atOpen:true,cause:phaseCause(openPhaseStop.veto)},prices,mirrorFill,...boxState()};}
         if(boxTrigger?.atOpen){prices.push(minute);return {trigger:boxTrigger,prices,mirrorFill,...boxState()};}
         const openSeller = staticSellAt(minute, true);
         if (openSeller) { prices.push(minute); return { trigger: openSeller, prices, mirrorFill, ...boxState() }; }
         const hadMirror=!!mirrorFill,openProfit=mirrorAt(minute,true);
         if(openProfit) {prices.push(minute);return {trigger:openProfit,prices,mirrorFill};}
-        if(!hadMirror&&mirrorFill&&enabled.some(v=>v.activation&&v.kind==='box-stop')){
+        if(!hadMirror&&mirrorFill&&enabled.some(v=>v.mirrorStage)){
+          if(boxTrigger?.cause?.mirrorStage?.stage==='before')boxTrigger=undefined;
+          const openAfterStop=qualityIntrabarStop(holding,{...minute,high:minute.open,low:minute.open,close:minute.open},activeRisk(minute.openTime).filter(v=>v.mirrorStage?.stage==='after'));
+          if(openAfterStop){prices.push(minute);return {trigger:{at:minute.openTime,barOpenTime:minute.openTime,reading:openAfterStop.reading,fillPrice:minute.open,fillPeak:openAfterStop.peak,atOpen:true,cause:phaseCause(openAfterStop.veto)},prices,mirrorFill,...boxState()};}
+        }
+        if(!hadMirror&&mirrorFill&&enabled.some(v=>(v.activation||v.mirrorStage?.stage==='after')&&v.kind==='box-stop')){
           const armed=await boxReader.read(minute,{onlyActivated:true});
           if(armed?.atOpen){prices.push(minute);return {trigger:armed,prices,mirrorFill,...boxState()};}
           if(armed&&(!boxTrigger||armed.at<boxTrigger.at||armed.at===boxTrigger.at&&(armed.fillPrice??0)>(boxTrigger.fillPrice??0)))boxTrigger=armed;
         }
         // 开盘没越线：盘中碰到回撤止损价就按止损价卖出，不等这一分钟收完
-        const stop=qualityIntrabarStop(holding,minute,risk);
+        const stop=qualityIntrabarStop(holding,minute,activeRisk(minute.openTime));
         const priceSeller = staticSellAt(minute, false);
         if (priceSeller && priceSeller.fillPrice! > Math.max(stop?.price ?? 0, boxTrigger?.fillPrice ?? 0)) {
           prices.push(minute);
@@ -274,15 +291,16 @@ export async function findQualityIntrabarExit(o: {
           prices.push(minute);
           const v=stop.veto;
           return {trigger:{at:minute.openTime,reading:stop.reading,barOpenTime:minute.openTime,previous:riskPrevious.get(v.id),fillPrice:stop.price,fillPeak:stop.peak,
-            cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}},prices,mirrorFill};
+            cause:phaseCause(v)},prices,mirrorFill,...(v.mirrorStage?boxState():{})};
         }
       }
       // A stop wins when high/low ordering is unknown; an observable opening fill is already settled.
       if(boxTrigger?.fillPrice!=null){prices.push(minute);return {trigger:boxTrigger,prices,mirrorFill,...boxState()};}
       const mirrorTrigger=mirrorAt(minute,false);
       if(mirrorTrigger) {prices.push(minute);return {trigger:mirrorTrigger,prices,mirrorFill};}
+      if(boxTrigger?.cause?.mirrorStage?.stage==='before'&&!mirrorHardStopActive(boxTrigger.cause,mirrorFill,boxTrigger.at))boxTrigger=undefined;
       for(const s of streams){
-        if(s.activation){const activeAt=postMirrorProtectionAt(mirrorFill);if(activeAt==null||minute.openTime+MINUTE<activeAt)continue;if(!s.initialized)await initializeStream(s,minute.openTime);}
+        if(deferred(s)){if(!mirrorHardStopActive(s,mirrorFill,minute.openTime+MINUTE))continue;if(!s.initialized)await initializeStream(s,minute.openTime);}
         if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       }
       if(minute.openTime>=o.since) {prices.push(minute);if(holding){holding=advanceQualityHolding(holding,minute);sellerPeak=Math.max(sellerPeak,minute.high);}}

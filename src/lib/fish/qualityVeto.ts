@@ -1,3 +1,4 @@
+import {validateMirrorHardStopStage,mirrorHardStopStageLabel,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
 /** Frozen holding-period exit conditions. Any enabled condition can close the paper trade. */
 import type { FishSnapshot } from './algorithm';
 import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL,canGateAfterMirror} from './qualityPostMirrorProtection';
@@ -11,6 +12,7 @@ export interface QualityHoldingVeto {
   geometricMultiple?:number;
   boxStop?:BoxStopRule;
   activation?:typeof POST_MIRROR_PROTECTION_VERSION;
+  mirrorStage?:MirrorHardStopStage;
 }
 export const FREE_STATIC_DRAWDOWN_LABEL = '自由静态最大回撤';
 export const holdingPriceLabels = { 'static-drawdown': '持仓过程静态最大回撤', 'dynamic-drawdown': '持仓过程动态最大回撤', 'drop-1m': '1分钟内跌幅', 'drop-5m': '5分钟内跌幅' } as const;
@@ -22,12 +24,13 @@ export const ADDITION_PROFIT_LABEL='加仓后几何仓位与均衡价止盈';
 export const PAYOFF_STOP_KIND='payoff-ratio' as const;
 export const PAYOFF_STOP_LABEL='盈亏比止盈';
 export const LIMITED_PAYOFF_RISK_VERSION = 'payoff-stop-limited-initial-risk-v2' as const;
-export const holdingVetoName = (v: { kind: string; label: string;activation?:string }) => (v.kind === 'static-drawdown' ? FREE_STATIC_DRAWDOWN_LABEL : v.label)+(v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'');
-export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'|'activation'>&{kind:string})=>v.kind===BOX_STOP_KIND&&'boxStop' in v?boxStopLabel((v as QualityHoldingVeto).boxStop!)+(v.activation?POST_MIRROR_PROTECTION_LABEL:''):v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${holdingVetoName(v)} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
-export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'|'activation'>, 'kind'> & {activationAt?:number;kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support' | 'sell-static-drawdown';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;guardTimeframe?:'1h';boxStopEvidence?:{version:string;line:number;confirmedAt:number;confirmation:string;guardRegime?:BoxStopGuardRegime};boxBreakEvidence?:{version:string;event:`darvas_${import('@/lib/dbl5m').Dbl5Timeframe}_guard_broken`;confirmedAt:number;sourceBarOpenTime:number;breakCount?:number;firstBreakAt?:number};/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number};/** 几何仓位保住有效涨幅：当时的几何仓位、门槛、百分比与上移后的止损线。 */geometricLock?:{multiple:number;threshold:number;pct:number;line:number;k:number};/** 盈亏比止盈：L₀、目标价与成交时的整笔盈亏。 */payoffBasis?:{l0:number;l0Pct:number;targetPrice:number;pnl:number}};
+export const holdingVetoName = (v: { kind: string; label: string;activation?:string;mirrorStage?:MirrorHardStopStage }) => (v.kind === 'static-drawdown' ? FREE_STATIC_DRAWDOWN_LABEL : v.label)+(v.activation?'（'+POST_MIRROR_PROTECTION_LABEL+'）':'')+(v.mirrorStage?'（'+mirrorHardStopStageLabel(v.mirrorStage)+'）':'');
+export const holdingVetoLabel=(v:Pick<QualityHoldingVeto,'label'|'direction'|'threshold'|'geometricMultiple'|'activation'|'mirrorStage'>&{kind:string})=>v.kind===BOX_STOP_KIND&&'boxStop' in v?boxStopLabel((v as QualityHoldingVeto).boxStop!)+(v.activation?POST_MIRROR_PROTECTION_LABEL:'')+(v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''):v.kind===PAYOFF_STOP_KIND?`盈亏比 ≥ ${v.threshold}R${v.mirrorStage?mirrorHardStopStageLabel(v.mirrorStage):''}`:v.kind===ADDITION_PROFIT_KIND?`几何仓位 ≥ ${v.geometricMultiple??100}× 且 价格高出均衡价 ≥ ${v.threshold}%`:`${holdingVetoName(v)} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`;
+export type QualityExitCause = Omit<Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'|'geometricMultiple'|'activation'|'mirrorStage'>, 'kind'> & {mirrorStageBoundary?:number;activationAt?:number;kind:QualityHoldingVeto['kind'] | 'mirror-take-profit' | 'addition-support' | 'sell-static-drawdown';/** 防守线 K：连续几根 5 分钟收盘低于 K 才确认。 */confirmCloses?:number;guardTimeframe?:'1h';boxStopEvidence?:{version:string;line:number;confirmedAt:number;confirmation:string;guardRegime?:BoxStopGuardRegime};boxBreakEvidence?:{version:string;event:`darvas_${import('@/lib/dbl5m').Dbl5Timeframe}_guard_broken`;confirmedAt:number;sourceBarOpenTime:number;breakCount?:number;firstBreakAt?:number};/** 【用户要求】2026-11-02 K 连续下移达到次数全仓卖出：次数与最后一次下移前后的 K。 */supportDrops?:{count:number;previousK:number;newK:number;support:number};additionBasis?:{geometricMultiple:number;equilibriumPrice:number;targetPrice:number};/** 几何仓位保住有效涨幅：当时的几何仓位、门槛、百分比与上移后的止损线。 */geometricLock?:{multiple:number;threshold:number;pct:number;line:number;k:number};/** 盈亏比止盈：L₀、目标价与成交时的整笔盈亏。 */payoffBasis?:{l0:number;l0Pct:number;targetPrice:number;pnl:number}};
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
+  validateMirrorHardStopStage(v);
   if(v.activation!==undefined&&(v.activation!==POST_MIRROR_PROTECTION_VERSION||!canGateAfterMirror(v)))throw Error('镜像减仓后启动仅适用于独立 DBL-5 防守线或 CDA 硬性终止，请保留原条件并新建副本');
   if(v.kind===BOX_STOP_KIND){validateBoxStop(v.boxStop);return;}
   if (![...Object.keys(holdingPriceLabels),'indicator',ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND].includes(v.kind))throw new Error('未知的持仓否决指标');
@@ -39,7 +42,7 @@ export function validateHoldingVeto(v: QualityHoldingVeto) {
 }
 /** 盈亏比止盈要用 L₀：方案里须同时启用静态回撤（取最小的那条百分比）。 */
 export function payoffStopL0Pct(vetoes: readonly QualityHoldingVeto[] = []): number | undefined {
-  const stops = activeHoldingVetoes(vetoes).filter(v => v.kind === 'static-drawdown' && (v.direction === '>=' || v.direction === '>') && v.threshold > 0 && v.threshold <= 100).map(v => v.threshold);
+  const stops = activeHoldingVetoes(vetoes).filter(v => v.kind === 'static-drawdown' && v.mirrorStage?.stage!=='after' && (v.direction === '>=' || v.direction === '>') && v.threshold > 0 && v.threshold <= 100).map(v => v.threshold);
   return stops.length ? Math.min(...stops) : undefined;
 }
 export function validatePayoffStops(vetoes: readonly QualityHoldingVeto[] = [], limitedPct?: number) {
@@ -49,10 +52,10 @@ export function validatePayoffStops(vetoes: readonly QualityHoldingVeto[] = [], 
 export function holdingBoxStopIdentity(v:QualityHoldingVeto){
   const r=v.boxStop!,config=r.structure.definition.DBL5_config;
   // Canonical reads apply only to the new opt-in wrapper; frozen objects are never rewritten.
-  return boxStopIdentity(v.activation&&config?{...r,structure:{...r.structure,definition:{...r.structure.definition,DBL5_config:Object.fromEntries(Object.entries(config).sort(([a],[b])=>a.localeCompare(b)))}}}:r);
+  return boxStopIdentity((v.activation||v.mirrorStage)&&config?{...r,structure:{...r.structure,definition:{...r.structure.definition,DBL5_config:Object.fromEntries(Object.entries(config).sort(([a],[b])=>a.localeCompare(b)))}}}:r);
 }
 export function holdingVetoIdentity(vetoes: readonly QualityHoldingVeto[] = []): unknown[] {
-  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[]),...(v.kind===BOX_STOP_KIND?[holdingBoxStopIdentity(v)]:[]),...(v.activation?[v.activation]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return activeHoldingVetoes(vetoes).map(v => [v.kind,v.direction,v.threshold,v.metric ?? null,v.snapshot?.definitionKey ?? null,v.snapshot?.interval ?? null,...(v.kind===ADDITION_PROFIT_KIND?[v.geometricMultiple??100]:[]),...(v.kind===BOX_STOP_KIND?[holdingBoxStopIdentity(v)]:[]),...(v.activation?[v.activation]:[]),...(v.mirrorStage?[[v.mirrorStage.version,v.mirrorStage.stage]]:[])]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 export interface QualityHoldingPath { entry: number; peak: number; minimum: number; dynamic: number }
 /** OHLC cannot tell high/low order within a minute: use prior peak/open→low, and high→close, whose order is known. */

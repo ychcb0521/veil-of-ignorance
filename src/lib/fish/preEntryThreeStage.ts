@@ -143,7 +143,7 @@ export function validatePreEntryThreeStage(c?: PreEntryThreeStage): asserts c is
     checkExpression(r.expression);
     if (!expressionConditions(r.expression).some(f=>f.enabled)) throw Error('完整卖出规则至少启用一项条件');
   });
-  c.hardVetoes.forEach(v => { unique(v.id); if (v.enabled) { if(v.activation)throw Error('镜像减仓后启动只适用于实际持仓'); if(preEntryPositionOnly(v.kind)) throw Error('观察阶段没有实际仓位，不能启用盈亏比或几何仓位条件'); validateHoldingVeto(v); } });
+  c.hardVetoes.forEach(v => { unique(v.id); if (v.enabled) { if(v.activation||v.mirrorStage)throw Error('镜像减仓后启动只适用于实际持仓'); if(preEntryPositionOnly(v.kind)) throw Error('观察阶段没有实际仓位，不能启用盈亏比或几何仓位条件'); validateHoldingVeto(v); } });
   const g = c.guard.rule;
   if (g.version !== 'holding-support-break-v1' || g.confirmation !== 'guard-break' || g.update !== 'follow' || g.closes !== 1 || g.structure.algorithm !== 'dbl5' || g.structure.kSource !== 'guard' || g.structure.buffer !== 0 || g.structure.bufferUnit !== 'atr' || g.structure.guardTrendOnly) throw Error('三阶准入须读取完整原生 DBL-5 防守线更新（含实虚和下移）');
   validateStructureAddition(g.structure);

@@ -1,3 +1,4 @@
+import {mirrorHardStopActive,mirrorHardStopRange} from './qualityMirrorHardStopStages';
 import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
 import { createAdditionIncreaseReader } from './qualityAdditionIncrease';
@@ -12,7 +13,7 @@ import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandida
 import {ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_VERSION,additionUsesNativePosition,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
 import {additionVetoesNeedMinutes,evaluateAdditionVetoes,additionVetoIdentity,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
-import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
+import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,holdingVetoName,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
 import type {TradeSignal} from '@/lib/signalLibrary';
@@ -153,12 +154,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const h=holdings(Number.MAX_SAFE_INTEGER);if(!(h.held>0))return;
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));let best:SupportStop|undefined;
   for(const v of payoffRules){
+   const phaseFrom=mirrorHardStopRange(v,o.mirror,from);if(!Number.isFinite(phaseFrom))continue;const first=Math.max(0,Math.ceil((phaseFrom-(bars[0]?.openTime??phaseFrom))/MINUTE));
    const target=(v.threshold*payoffL0!+h.cost-h.realized)/h.held;if(!(target>0)||!Number.isFinite(target))continue;
    const search=(node:number,left:number,right:number):number=>{if(right<=first||highTree[node]<target*(1-1e-12))return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
-   const bar=bars[search(1,0,size)];if(!bar)continue;
+   const bar=bars[search(1,0,size)];if(!bar||!mirrorHardStopActive(v,o.mirror,bar.openTime))continue;
    const ordinary=o.ordinaryExit;if(ordinary&&bar.openTime===ordinary.at&&(ordinary.atOpen||!ordinary.mirror||ordinary.price<=target))continue;
    const atOpen=bar.open>=target*(1-1e-12),price=atOpen?bar.open:target;
-   const hit:SupportStop={at:bar.openTime,price,support:currentK().k??o.entryPrice,atOpen,cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,payoffBasis:{l0:payoffL0!,l0Pct:payoffL0Pct!,targetPrice:target,pnl:h.held*price-h.cost+h.realized}}};
+   const hit:SupportStop={at:bar.openTime,price,support:currentK().k??o.entryPrice,atOpen,cause:{...(v.mirrorStage?{mirrorStage:v.mirrorStage}:{}),id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,payoffBasis:{l0:payoffL0!,l0Pct:payoffL0Pct!,targetPrice:target,pnl:h.held*price-h.cost+h.realized}}};
    if(!best||hit.at<best.at||hit.at===best.at&&hit.price<best.price)best=hit;
   }
   return best;
@@ -177,12 +179,13 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
   let profit:SupportStop|undefined;
   for(const v of profitRules){
+   const phaseFrom=mirrorHardStopRange(v,o.mirror,from);if(!Number.isFinite(phaseFrom))continue;const first=Math.max(0,Math.ceil((phaseFrom-(bars[0]?.openTime??phaseFrom))/MINUTE));
    const required=v.geometricMultiple??100;if(multiple+32*Number.EPSILON*Math.max(1,multiple,required)<required)continue;
    const target=sellK*(1+v.threshold/100);if(!(target>0)||!Number.isFinite(target))throw Error('加仓止盈目标价超出有效范围');
    const search=(node:number,left:number,right:number):number=>{if(right<=first||highTree[node]<target*(1-1e-12))return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
-   const bar=bars[search(1,0,size)];if(!bar)continue;
+   const bar=bars[search(1,0,size)];if(!bar||!mirrorHardStopActive(v,o.mirror,bar.openTime))continue;
    const ordinary=o.ordinaryExit;if(ordinary&&bar.openTime===ordinary.at&&(ordinary.atOpen||!ordinary.mirror||ordinary.price<=target))continue;
-   const atOpen=bar.open>=target*(1-1e-12),hit={at:bar.openTime,price:atOpen?bar.open:target,support,atOpen,cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,geometricMultiple:required,additionBasis:{geometricMultiple:multiple,equilibriumPrice:sellK,targetPrice:target}}};
+   const atOpen=bar.open>=target*(1-1e-12),hit={at:bar.openTime,price:atOpen?bar.open:target,support,atOpen,cause:{...(v.mirrorStage?{mirrorStage:v.mirrorStage}:{}),id:v.id,label:v.mirrorStage?holdingVetoName(v):v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,geometricMultiple:required,additionBasis:{geometricMultiple:multiple,equilibriumPrice:sellK,targetPrice:target}}};
    if(!profit||hit.at<profit.at||hit.at===profit.at&&(hit.atOpen&&!profit.atOpen||hit.atOpen===profit.atOpen&&hit.price<profit.price))profit=hit;
   }
   // The minute open is ordered. When both intraminute boundaries touch, retain the protective stop.

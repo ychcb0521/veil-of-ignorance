@@ -5,7 +5,7 @@ export interface QualityVetoStage {afterAdditions:number;conditions:QualityHoldi
 export type QualityVetoStageActivation=QualityVetoStage&{at:number;mode:'overlay'|'replace';peakBasis:'holding'|'stage'};
 export const orderedVetoStages=(g:Pick<QualityGroup,'vetoStages'>)=>[...(g.vetoStages??[])].sort((a,b)=>a.afterAdditions-b.afterAdditions);
 const originalSlot=(v:QualityHoldingVeto)=>v.kind==='box-stop'?`${v.kind}:${v.boxStop?.structure.algorithm}${v.boxStop&&isBoxSecondBreakExitOnly(v.boxStop)?':support-second-exit':v.boxStop&&isBoxSecondBreak(v.boxStop)?':support-second-break':v.boxStop&&isBoxBreak(v.boxStop)?':support-break':''}`:v.kind==='indicator'?`${v.kind}:${v.snapshot?.featureId}:${v.metric}`:v.kind;
-const slot=(v:QualityHoldingVeto)=>originalSlot(v)+(v.activation?':'+v.activation:'');
+const slot=(v:QualityHoldingVeto)=>originalSlot(v)+(v.activation?':'+v.activation:'')+(v.mirrorStage?':'+v.mirrorStage.version+':'+v.mirrorStage.stage:'');
 export const qualityVetoStagesIdentity=(g:Pick<QualityGroup,'vetoStages'|'vetoStageMode'|'vetoPeakBasis'>)=>g.vetoStages?.length?['addition-count-veto-stages-v1',g.vetoStageMode??'overlay',g.vetoPeakBasis??'stage',orderedVetoStages(g).map(s=>[s.afterAdditions,s.conditions.map(v=>[v.enabled,holdingVetoIdentity([{...v,enabled:true}])[0]])])]:null;
 export function validateQualityVetoStages(g:Pick<QualityGroup,'vetoStages'|'vetoStageMode'|'vetoPeakBasis'|'addition'>){
  if(!g.vetoStages?.length)return;

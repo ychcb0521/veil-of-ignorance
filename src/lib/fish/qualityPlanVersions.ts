@@ -1,5 +1,6 @@
 import {HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,holdingImpulse1115Identity} from './holdingImpulse1115Classification';
 import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
+import {MIRROR_HARD_STOP_STAGES_VERSION} from './qualityMirrorHardStopStages';
 import {IMPULSE_1115_CLASSIFICATION_VERSION,IMPULSE_1115_CLASSIFICATION_LABEL} from '@/lib/impulse1115Classification';
 import { CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { INTERVAL_LABEL } from '@/lib/deepDig/features';
@@ -158,6 +159,10 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   if (plan.payoffRiskVersion) add('payoff-initial-risk', '盈亏比止盈', '沿用首仓限制静态最大回撤', plan.payoffRiskVersion,
     '以首仓限制回撤阈值计算 L₀，分段切换后仍沿用开仓阈值。');
   const vetoes = activeHoldingVetoes(plan.holdingVetoes);
+  const mirrorStages=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.mirrorStage);
+  if(mirrorStages.length)add('hard-stop-mirror-stages','硬性终止','镜像平衡减仓前／后两个阶段',
+    MIRROR_HARD_STOP_STAGES_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(mirrorStages))),
+    '按镜像实际成交切换：前段停止生效，后段独立开始观察；不回放启动前断裂、跌幅或已结束的触价。原全程条件及旧版减仓后条件不自动转换。');
   const postMirror=[...vetoes,...(plan.vetoStages??[]).flatMap(s=>activeHoldingVetoes(s.conditions))].filter(v=>v.activation);
   if(postMirror.length)add('hard-stop-after-mirror','硬性终止',POST_MIRROR_PROTECTION_LABEL,
     POST_MIRROR_PROTECTION_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(holdingVetoIdentity(postMirror))),

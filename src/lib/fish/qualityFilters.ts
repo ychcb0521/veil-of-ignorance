@@ -1,3 +1,4 @@
+import {MIRROR_HARD_STOP_STAGES_VERSION,type MirrorHardStopStage} from './qualityMirrorHardStopStages';
 import { usesHourlyCda } from '@/lib/cdaPeriods';
 import {POST_MIRROR_PROTECTION_VERSION} from './qualityPostMirrorProtection';
 import { algorithmMetricMenu } from './algorithmMetricMenu';
@@ -81,17 +82,17 @@ export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperato
   validateHoldingVeto(v);return v;
 }
 
-export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;activation?:typeof POST_MIRROR_PROTECTION_VERSION;geometricMultiple?:string;boxStop?:BoxStopRule;time?:AdditionMetricTime;saved?:QualityHoldingVeto};
+export type HoldingVetoDraft={choice:string;direction:QualityOperator;threshold:string;enabled:boolean;activation?:typeof POST_MIRROR_PROTECTION_VERSION;mirrorStage?:MirrorHardStopStage;geometricMultiple?:string;boxStop?:BoxStopRule;time?:AdditionMetricTime;saved?:QualityHoldingVeto};
 /** 【用户要求】2026-11-03 每套卖出算法的硬性终止框都默认带一条「盈亏比止盈」（不勾选、预填 5000R），用不用由用户选。 */
 export const PAYOFF_STOP_DEFAULT_R='5000';
 const withPayoffRow=(rows:HoldingVetoDraft[]):HoldingVetoDraft[]=>rows.some(r=>r.choice===PAYOFF_STOP_KIND)?rows:[...rows,{choice:PAYOFF_STOP_KIND,direction:'>=',threshold:PAYOFF_STOP_DEFAULT_R,enabled:false}];
-export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind===BOX_STOP_KIND&&v.boxStop?boxStopChoice(v.boxStop):v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.activation?{activation:v.activation}:{}),...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
+export const holdingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>(saved.length?saved.map(v=>({choice:v.kind===BOX_STOP_KIND&&v.boxStop?boxStopChoice(v.boxStop):v.kind==='indicator'?`${v.snapshot?.featureId}:${v.metric}`:v.kind,direction:v.direction,threshold:String(v.threshold),enabled:v.enabled,...(v.mirrorStage?{mirrorStage:structuredClone(v.mirrorStage)}:{}),...(v.activation?{activation:v.activation}:{}),...(v.snapshot&&v.kind==='indicator'?{saved:v,time:additionMetricTime(v.snapshot)}:{}),...(v.boxStop?{boxStop:structuredClone(v.boxStop)}:{}),...(v.kind===ADDITION_PROFIT_KIND?{geometricMultiple:String(v.geometricMultiple??100)}:{})})):
   [{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false},{choice:'dynamic-drawdown',direction:'>=',threshold:'',enabled:false}]);
 /** 方案的硬性终止框（不含各次加仓后的否决）：默认多一条不勾选的盈亏比止盈。 */
 export const planHoldingVetoDraft=(saved:QualityHoldingVeto[]=[]):HoldingVetoDraft[]=>withPayoffRow(holdingVetoDraft(saved));
 export function parseHoldingVetoDraft(draft:HoldingVetoDraft[], definitions?:readonly DeepDigFeatureDef[]):QualityHoldingVeto[] {
   const boxChoice=(choice:string)=>[BOX_STOP_KIND,BOX_BREAK_CHOICE,BOX_SECOND_BREAK_CHOICE,BOX_SECOND_EXIT_CHOICE].includes(choice);
-  const gated=(v:QualityHoldingVeto,d:HoldingVetoDraft):QualityHoldingVeto=>{const {activation:_,...base}=v;if(d.activation&&base.boxStop)base.id='veto-box-'+shortFishHash(JSON.stringify(holdingBoxStopIdentity({...base,activation:d.activation})));const suffix='-'+POST_MIRROR_PROTECTION_VERSION;if(base.id.endsWith(suffix))base.id=base.id.slice(0,-suffix.length);const rule=d.activation?{...base,activation:d.activation,id:base.id+'-'+d.activation}:base;validateHoldingVeto(rule);return rule;};
+  const gated=(v:QualityHoldingVeto,d:HoldingVetoDraft):QualityHoldingVeto=>{const {activation:_,mirrorStage:__,...base}=v;if((d.activation||d.mirrorStage)&&base.boxStop)base.id='veto-box-'+shortFishHash(JSON.stringify(holdingBoxStopIdentity({...base,...(d.activation?{activation:d.activation}:{}),...(d.mirrorStage?{mirrorStage:d.mirrorStage}:{})})));const stageSuffix=new RegExp('-'+MIRROR_HARD_STOP_STAGES_VERSION+'-(before|after)$');base.id=base.id.replace(stageSuffix,'');const suffix='-'+POST_MIRROR_PROTECTION_VERSION;if(base.id.endsWith(suffix))base.id=base.id.slice(0,-suffix.length);const rule=d.activation?{...base,activation:d.activation,id:base.id+'-'+d.activation}:base;const staged=d.mirrorStage?{...rule,mirrorStage:structuredClone(d.mirrorStage),id:rule.id+'-'+d.mirrorStage.version+'-'+d.mirrorStage.stage}:rule;validateHoldingVeto(staged);return staged;};
   const boxes=draft.filter(d=>boxChoice(d.choice)).map(d=>{validateBoxStop(d.boxStop);if(d.choice!==boxStopChoice(d.boxStop))throw Error('支撑断裂与触价条件的执行版本不符');return gated({id:'veto-box-'+shortFishHash(JSON.stringify(boxStopIdentity(d.boxStop))),label:boxStopLabel(d.boxStop),kind:BOX_STOP_KIND,direction:'<=' as const,threshold:0,enabled:d.enabled,boxStop:freezeBoxStop(structuredClone(d.boxStop))},d);});
   draft=draft.filter(d=>!boxChoice(d.choice));
   if(draft.some(d=>(d.enabled||d.threshold.trim())&&(!d.threshold.trim()||!Number.isFinite(Number(d.threshold)))))throw new Error('请为启用的否决条件填写有限数字阈值');

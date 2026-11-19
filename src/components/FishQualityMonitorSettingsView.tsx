@@ -1,3 +1,4 @@
+import {FishQualityHardStopStagesEditor} from './FishQualityHardStopStagesEditor';
 import {FishHoldingImpulse1115Settings} from './FishHoldingImpulse1115Settings';
 import { useCampaignTemplateNames } from '@/contexts/QualityTemplateNamesContext';
 import type {QualityTemplateName} from '@/lib/fish/qualityTemplateNames';
@@ -54,7 +55,7 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, show
       legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span></div>
       {savedOnly&&!plan.holdingVetoes?.length ? <p className="text-muted-foreground">无已保存的硬性终止条件。</p> :
-        <FishQualityHoldingVetoEditor draft={planHoldingVetoDraft(plan.holdingVetoes)} setDraft={ignore}/>}
+        <FishQualityHardStopStagesEditor readOnly draft={planHoldingVetoDraft(plan.holdingVetoes)} setDraft={ignore}/>}
     </section>
     <section className="space-y-2 rounded-lg border border-border/60 p-3" data-testid="quality-plan-versions"><h4 className="text-xs font-medium">算法版本</h4>{savedOnly ? <SavedMonitorVersions plan={plan}/> : <PlanVersionList plan={plan}/>}</section>
   </div>;
