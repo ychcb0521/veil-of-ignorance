@@ -1,3 +1,4 @@
+import {shortFishHash} from './algorithm';
 import { instantMonitorSize } from './instantMonitorExecution';
 import { instantPositionInput } from './instantCampaign';
 import { qualityAdditionFills } from './qualityAddition';
@@ -47,7 +48,7 @@ function usesGuardPlus(plan?: QualityGroup): boolean {
   if(plan?.router)return usesGuardPlus(plan.router.structure)||usesGuardPlus(plan.router.attack);
   const addition=plan?.addition;
   return !!addition?.enabled&&[...(addition.rounds?.length?addition.rounds:[addition]),...(addition.alternativeRounds??[])]
-    .some(rule=>!!rule.impulse1115Position||rule.source==='structure'&&!!rule.structure?.guardPlusVersion);
+    .some(rule=>!!rule.classifiedImpulsePositions?.length||!!rule.impulse1115Position||rule.source==='structure'&&!!rule.structure?.guardPlusVersion);
 }
 
 function followCampaign({ record, round }: ScreenedFishAdmission, tracking: FishCdaTracking): UsdtFollowCampaign | undefined {
@@ -73,9 +74,9 @@ function followCampaign({ record, round }: ScreenedFishAdmission, tracking: Fish
   if (mirror) actions.push({ id: 'mirror', at: mirror.at, ...(mirror.fraction === 1
     ? { action: 'close' as const } : { action: 'mirror' as const, fraction: mirror.fraction, atOpen: mirror.atOpen }) });
   for (const [index, fill] of qualityAdditionFills(monitor ?? {}).entries()) {
-    const impulse=fill.structureEvidence?.guardPlus?.early_impulse_event;
-    actions.push({ id: impulse?'add-'+impulse.impulse_id:'add-' + (index + 1), at: fill.at, action: 'add', notional: fill.notional,
-      ...(impulse?{impulseFreshUntil:impulse.fresh_until}:{}) });
+    const impulse=fill.structureEvidence?.guardPlus?.early_impulse_event,classified=fill.structureEvidence?.impulseClassification;
+    actions.push({ id: classified?'add-class-'+shortFishHash(fill.structureEvidence!.eventId):impulse?'add-'+impulse.impulse_id:'add-' + (index + 1), at: fill.at, action: 'add', notional: fill.notional,
+      ...(classified?{impulseFreshUntil:classified.confirmedAt+300000}:impulse?{impulseFreshUntil:impulse.fresh_until}:{}) });
   }
   for (const [index, fill] of (monitor?.additionReductions ?? []).entries()) {
     actions.push({ id: 'support-' + (index + 1), at: fill.at, action: 'support-reduction', fraction: fill.fraction });

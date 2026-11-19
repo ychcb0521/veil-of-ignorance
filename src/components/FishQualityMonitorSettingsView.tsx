@@ -47,12 +47,15 @@ export function FishQualityMonitorSettingsView({ plan, holdingOnly = false, show
     {legacy && <LegacyEngineNote/>}
     {!holdingOnly && <FishQualitySellPlansEditor plans={plans} ready={false} readOnly templateName={templateName} onSave={ignore}/>}
     {showSize && <FishQualityPositionManagement draft={positionManagementDraft(size)}/>}
-    {plan.impulse1115Classification&&<FishHoldingImpulse1115Settings value={plan.impulse1115Classification} readOnly/>}
     {savedOnly&&!plan.mirrorTakeProfit ? <p className="text-muted-foreground">原设置未记录镜像减仓。</p> :
       <FishQualityMirrorEditor draft={mirror} setDraft={ignore} additionEnabled={addition.enabled} holdingLedger={addition.positionVersion===HOLDING_LEDGER_ADDITION_VERSION}/>}
     {/* 旧引擎方案的加仓按 10-31 原始参数显示：新版编辑器会把它换算成箱体，显示的就不是当时的规则了 */}
     {savedOnly&&!plan.addition ? <p className="text-muted-foreground">原设置未记录加仓。</p> :
-      legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
+      legacy ? <LegacyAdditionView plan={plan}/> : <FishQualityAdditionEditor positionExtra={plan.impulse1115Classification?<FishHoldingImpulse1115Settings compact value={plan.impulse1115Classification} readOnly/>:undefined} draft={addition} setDraft={ignore} vetoStages={vetoStages} setVetoStages={ignore}/>}
+    {plan.impulse1115Classification&&(legacy||savedOnly&&!plan.addition)&&<section className="rounded border border-border/60 p-3" data-testid="addition-timing">
+      <h5 className="mb-2 font-medium">位置 · 已保存的分类显示设置</h5>
+      <details><summary className="cursor-pointer text-muted-foreground">分类结果显示设置（本方案）</summary><FishHoldingImpulse1115Settings compact value={plan.impulse1115Classification} readOnly/></details>
+    </section>}
     <section className="space-y-2 rounded-lg border border-destructive/20 bg-destructive/[0.02] p-3" data-testid="quality-hard-stop"><div className="flex items-center gap-1.5"><h4 className="text-xs font-medium">④ 硬性终止</h4><span className="text-[10px] text-muted-foreground">必要充分 · 任一达标即卖出全部持仓</span></div>
       {savedOnly&&!plan.holdingVetoes?.length ? <p className="text-muted-foreground">无已保存的硬性终止条件。</p> :
         <FishQualityHardStopStagesEditor readOnly draft={planHoldingVetoDraft(plan.holdingVetoes)} setDraft={ignore}/>}

@@ -1,3 +1,4 @@
+import {CLASSIFIED_IMPULSE_POSITION_VERSION,classifiedImpulsePositionsIdentity,classifiedImpulsePositionLabel} from './qualityClassifiedImpulsePosition';
 import {HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,holdingImpulse1115Identity} from './holdingImpulse1115Classification';
 import {POST_MIRROR_PROTECTION_VERSION,POST_MIRROR_PROTECTION_LABEL} from './qualityPostMirrorProtection';
 import {MIRROR_HARD_STOP_STAGES_VERSION} from './qualityMirrorHardStopStages';
@@ -237,6 +238,7 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     addGuardPlusVersions(a.alternativeRounds??[],'alternative');
     for(const [lane,rules] of [['主分支',rounds],['进攻备选',a.alternativeRounds??[]]] as const){
       rules.forEach((round,index)=>{
+        for(const classified of round.classifiedImpulsePositions??[])add(`addition-impulse-class-${lane==='主分支'?'primary':'alternative'}-${index+1}-${classified.mainClass}`,`第 ${index+1} 次加仓 · ${lane}`,classifiedImpulsePositionLabel(classified.mainClass),join([CLASSIFIED_IMPULSE_POSITION_VERSION,IMPULSE_1115_CLASSIFICATION_VERSION,DBL5_GUARD_PLUS_VERSION,'参数 #'+shortFishHash(JSON.stringify(classifiedImpulsePositionsIdentity([classified])))]),'仅最新急拉线在5分钟收盘确认一／二类的新状态时生成一次位置机会；过渡和持续同状态不重复。沿用方向、否决、K、定量与退出；旧位置不转换。');
         const position=round.impulse1115Position;
         const race=position&&!position.skipNative&&round.source==='structure'&&round.structure?.guardPlusVersion
           ?DBL5_1115_POSITION_RACE_VERSION:undefined;

@@ -1,3 +1,4 @@
+import {CLASSIFIED_IMPULSE_POSITION_VERSION,createClassifiedImpulsePositionReader} from './qualityClassifiedImpulsePosition';
 import {mirrorHardStopActive,mirrorHardStopRange} from './qualityMirrorHardStopStages';
 import { DBL5_PROFILES } from '@/lib/dbl5m';
 import {HOLDING_LEDGER_ADDITION_VERSION,replayQualityHoldingLedger,calculateHoldingLedgerAddition} from './qualityHoldingLedger';
@@ -21,8 +22,8 @@ import type {ResearchBar} from '@/lib/deepRsa/window';
 import {IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, isImpulse1115PositionVersion, type Dbl5GuardPlusRow} from '@/lib/dbl5GuardPlus';
 const MINUTE=60000,STEP=5*MINUTE,PERIOD=14,WARM=PERIOD*20+1;
 interface SupportStop {at:number;price:number;support:number;atOpen:boolean;cause?:QualityExitCause;confirmCloses?:number;guardTimeframe?:'1h'}
-type Position='native'|'impulse'|'impulse1115';
-type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'|'impulsePosition'|'impulse1115Position'>&{entryVetoes?:QualityAdditionEntryVeto[]};
+type Position='native'|'impulse'|'impulse1115'|'class1'|'class2';
+type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'|'impulsePosition'|'impulse1115Position'|'classifiedImpulsePositions'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
  positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
@@ -78,6 +79,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const readIncrease=createAdditionIncreaseReader(o);
  let readImpulse:ReturnType<typeof createImpulseAdditionReader>|undefined;
+ let readClassified:ReturnType<typeof createClassifiedImpulsePositionReader>|undefined;
  let positionAttempts:{at:number;ids:Set<string>}|undefined;
  const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
  const historyReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createVetoHistoryReader>>();
@@ -220,7 +222,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  interface SupportDrop {at:number;support:number;atr:number;evidence:import('./qualityAdditionStructure').StructureAdditionEvidence;basis:number}
  /** 最近一次加仓所依据的箱体支撑（或减仓后的新支撑）在 (from, until) 内首次下移 ≥ minDropAtr×ATR 的 5 分钟收盘。 */
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
-  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion))return;
+  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion)||evidence.algorithmVersion===CLASSIFIED_IMPULSE_POSITION_VERSION)return;
   const previousRound=o.roundRules?.[carried+fills.length-1];
   const winningAlternative=last.lane==='attack'&&(evidence.algorithmVersion===DBL5_PROFILES['1h'].version||evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
@@ -289,7 +291,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     after:start,end,priceAt,checkIncrease:check,...(gain?{priceGate:gain}:{})});
    let cursor=start;
    while(cursor<end){
-    const hit=position==='impulse'?await (readImpulse??=createImpulseAdditionReader(o))(rule.impulsePosition!,cursor,end,gain):
+    const classified=position==='class1'||position==='class2'?rule.classifiedImpulsePositions?.find(p=>p.mainClass===(position==='class1'?1:2)):undefined;
+    const hit=classified?await (readClassified??=createClassifiedImpulsePositionReader(o))(classified,cursor,end,fills,gain,onSkip):position==='impulse'?await (readImpulse??=createImpulseAdditionReader(o))(rule.impulsePosition!,cursor,end,gain):
       position==='impulse1115'?await readStructure.impulse1115(cursor,end,fills,gain,onSkip):
         await readStructure(rule.structure!,cursor,end,fills,gain,onSkip);
     if(!hit||!check)return hit;
@@ -313,10 +316,10 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   };
   const skipMark=skipped.length;
   let hit:Omit<QualityAdditionFill,'quantity'|'notional'>|undefined;
-  if(primaryRule.impulsePosition||alternative?.impulsePosition||primaryRule.impulse1115Position||alternative?.impulse1115Position){
+  if(primaryRule.impulsePosition||alternative?.impulsePosition||primaryRule.impulse1115Position||alternative?.impulse1115Position||primaryRule.classifiedImpulsePositions?.length||alternative?.classifiedImpulsePositions?.length){
    let first:typeof hit;
    const choose=async(rule:RoundScan|Options,lane:'structure'|'attack',position:Position)=>{
-    if(!(position==='native'?additionUsesNativePosition(rule):position==='impulse'?rule.impulsePosition:rule.impulse1115Position))return;
+    if(!(position==='native'?additionUsesNativePosition(rule):position==='impulse'?rule.impulsePosition:position==='impulse1115'?rule.impulse1115Position:rule.classifiedImpulsePositions?.some(p=>p.mainClass===(position==='class1'?1:2))))return;
     const key=lane+'-'+position;
     const revisit=positionAttempts?.at===after&&fills.at(-1)?.at!==after&&!positionAttempts.ids.has(key);
     const candidateBasis=rule.gainBasis==='average'?'real-average':'cost-line';
@@ -328,8 +331,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     }
    };
    let winner='';
-   for(const position of ['native','impulse','impulse1115'] as const)await choose(primaryRule,'structure',position);
-   if(alternative)for(const position of ['native','impulse','impulse1115'] as const)await choose(alternative,'attack',position);
+   for(const position of ['native','impulse','impulse1115','class1','class2'] as const)await choose(primaryRule,'structure',position);
+   if(alternative)for(const position of ['native','impulse','impulse1115','class1','class2'] as const)await choose(alternative,'attack',position);
    hit=first;
    if(hit){
     for(let i=skipped.length-1;i>=skipMark;i--)if(skipped[i].at>hit.at)skipped.splice(i,1);
@@ -410,7 +413,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    hit.reading=boxK.k;
   }
   // 【用户要求】2026-11-03 K 最小距离：K 离加仓价不足设定百分比时放宽到 T×(1−x%)，加仓量与止损都按放宽后的 K
-  const minDistancePct=impulse1115?impulse1115.minDistancePct:
+  const classifiedPosition=hit.structureEvidence?.impulseClassification?round.classifiedImpulsePositions?.find(p=>p.mainClass===hit!.structureEvidence!.impulseClassification!.mainClass):undefined;
+  const minDistancePct=classifiedPosition?classifiedPosition.minDistancePct:impulse1115?impulse1115.minDistancePct:
     hit.structureEvidence?.algorithm==='impulse5m'?round.impulsePosition?.minDistancePct:round.structure?.minDistancePct;
   const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,hit.structureEvidence.nativeAtr??atr!,minDistancePct):boxK;
   const sellK=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!;

@@ -1,3 +1,5 @@
+import {FishClassifiedImpulsePositions,type ClassifiedImpulsePositionDraft} from './FishClassifiedImpulsePositions';
+import {defaultClassifiedImpulsePosition,classifiedImpulsePositionLabel} from '@/lib/fish/qualityClassifiedImpulsePosition';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_PROFILES,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION,dbl5Defaults,dbl5GuardVersion} from '@/lib/dbl5m';
@@ -49,6 +51,7 @@ interface DetectorPreDraft {enabled:boolean;featureId:string;stricterPct:string}
 type IncreaseDraft = MetricDraft & { saved?: AdditionIncreaseMetric };
 const DEFAULT_INCREASE_METRIC = 'state:avg_state_2';
 interface RoundDraft extends ConditionDraft {
+ classified?:ClassifiedImpulsePositionDraft[];
  impulse?: Impulse5mDraft;
  impulse1115?: Impulse1115Draft;
 increaseMetrics: IncreaseDraft[];detectorPre:DetectorPreDraft;entryVetoes:AdditionVetoDraft;source:'detector'|'custom'|'structure';structure:StructureAdditionRule;structureBuffer:string;stricterPct:string;extraConditions:ConditionDraft[];gainEnabled:boolean;minGainPct:string;supportOffsetAtr:string;sellSwitch:SellSwitchDraft;
@@ -103,6 +106,7 @@ const sellSwitchDraft=(stage?:QualitySellStage):SellSwitchDraft=>stage
 const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=false):RoundDraft=>{
  const custom=rule.source==='custom',conditions=qualityAdditionConditions(rule),atr=qualityAdditionAtrSettings(rule);
  const common={stricterPct:String(rule.stricterPct),gainEnabled:rule.minGainPct!=null,minGainPct:String(rule.minGainPct??5),supportOffsetAtr:String(atr.supportOffsetAtr),sellSwitch:sellSwitchDraft(stage),entryVetoes:vetoDraftOf(rule.entryVetoes),
+  classified:rule.classifiedImpulsePositions?.map(p=>({...structuredClone(p),bufferAtr:String(p.bufferAtr),minDistancePct:String(p.minDistancePct??'')})),
   impulse:rule.impulsePosition?{bufferAtr:String(rule.impulsePosition.bufferAtr),minDistancePct:String(rule.impulsePosition.minDistancePct??''),skipNative:rule.impulsePosition.skipNative}:undefined,
   impulse1115:rule.impulse1115Position?{minDistancePct:String(rule.impulse1115Position.minDistancePct??''),skipNative:rule.impulse1115Position.skipNative,
    ...(rule.impulse1115Position.version===IMPULSE_1115_CONFIGURABLE_K_VERSION?{bufferAtr:String(rule.impulse1115Position.bufferAtr)}:{})}:undefined,
@@ -116,7 +120,7 @@ const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=f
  return {source:'structure',structure:structuredClone(rule.source==='structure'&&rule.structure?rule.structure:defaultStructureAddition()),structureBuffer:String(rule.source==='structure'?rule.structure?.buffer??0:0),
   ...conditionDraft(undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),...common};
 };
-const copyRound=(d:RoundDraft):RoundDraft=>({impulse:d.impulse&&{...d.impulse},impulse1115:d.impulse1115&&{...d.impulse1115},entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,time:structuredClone(d.time),savedCondition:structuredClone(d.savedCondition),extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
+const copyRound=(d:RoundDraft):RoundDraft=>({classified:structuredClone(d.classified),impulse:d.impulse&&{...d.impulse},impulse1115:d.impulse1115&&{...d.impulse1115},entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,time:structuredClone(d.time),savedCondition:structuredClone(d.savedCondition),extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
 export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellStages?:readonly QualitySellStage[]):AdditionDraft {
  rule??={...defaultQualityAddition(),positionVersion:HOLDING_LEDGER_ADDITION_VERSION};
  const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
@@ -125,6 +129,7 @@ export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellS
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
+ if(d.classified?.length)rule.classifiedImpulsePositions=d.classified.map(p=>({...structuredClone(p),bufferAtr:p.bufferAtr.trim()?Number(p.bufferAtr):NaN,minDistancePct:p.minDistancePct.trim()?Number(p.minDistancePct):undefined}));
  if(d.impulse)rule.impulsePosition={version:IMPULSE_5M_VERSION,
    bufferAtr:d.impulse.bufferAtr.trim()?Number(d.impulse.bufferAtr):NaN,
    ...(d.impulse.minDistancePct.trim()?{minDistancePct:Number(d.impulse.minDistancePct)}:{}),
@@ -233,7 +238,7 @@ function PositionSetting({label,children,wide=false}:{label:ReactNode;children:R
  </div>;
 }
 /** vetoStages：每次加仓「卖出」里的否决条件，存为方案的 vetoStages（afterAdditions = 第几次），与硬性终止同一套条件和引擎。 */
-export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean}) {
+export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVetoStages,imageRound,stickyRounds=false,positionExtra}:{draft:AdditionDraft;setDraft:(draft:AdditionDraft)=>void;vetoStages?:VetoStagesDraft;setVetoStages?:(draft:VetoStagesDraft)=>void;imageRound?:number;stickyRounds?:boolean;positionExtra?:ReactNode}) {
  const imageCapture=useSettingsImageCapture();
  const defs=useFeatureDefinitions(),choices=useMemo(()=>qualityFilterMenuChoices(defs),[defs]);
  const features=[...new Map(choices.map(c=>[c.featureId,c.group])).entries()];
@@ -284,13 +289,14 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   <button type="button" disabled={!d.enabled} aria-label={`删除加仓方向条件 ${i+1}`} className="shrink-0 px-1 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40" onClick={()=>patch({extraConditions:d.extraConditions.filter((_,j)=>j!==i)})}>删除</button>
  </div>;
  const box=d.source==='structure';
- const nativeActive=!d.impulse?.skipNative&&!d.impulse1115?.skipNative;
+ const nativeActive=!d.impulse?.skipNative&&!d.impulse1115?.skipNative&&!d.classified?.some(p=>p.skipNative);
  const combined=box&&d.structure.kSource==='guard'&&!!d.structure.guardPlusVersion;
  const period=structureDbl5Timeframe(d.structure),profile=DBL5_PROFILES[period];
  const standardPositionName=box&&d.structure.algorithm==='dbl5'&&d.structure.kSource==='guard'?profile.label:'箱体／指标位置';
  const nativePositionName=combined?DBL5_GUARD_PLUS_DISPLAY_NAME:standardPositionName;
- const positions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive):Pick<AdditionDraft,'impulse'|'impulse1115'>=>({
-  impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115?true:undefined},
+ const positions=(impulse:Impulse5mDraft|undefined,impulse1115:Impulse1115Draft|undefined,native=nativeActive,classified=d.classified):Pick<AdditionDraft,'impulse'|'impulse1115'|'classified'>=>({
+  classified:classified?.length?classified.map(p=>({...p,skipNative:native?undefined:true})):undefined,
+  impulse:impulse&&{...impulse,skipNative:!native&&!impulse1115&&!classified?.length?true:undefined},
   impulse1115:impulse1115&&{...impulse1115,skipNative:native?undefined:true},
  });
  const selectNativePosition=(useCombined:boolean,checked:boolean)=>{
@@ -431,30 +437,36 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </InfoBlock>
   </div>}>
    <div className="space-y-2 text-[11px]">
-    <div role="group" aria-label="本轮位置策略" className="grid grid-cols-4 items-stretch gap-2" data-testid="addition-position-choices">
+    <div role="group" aria-label="本轮位置策略" className="grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3" data-testid="addition-position-choices">
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
-      <input className="shrink-0" type="checkbox" checked={nativeActive&&!combined} disabled={!d.enabled||nativeActive&&!combined&&!d.impulse&&!d.impulse1115}
+      <input className="shrink-0" type="checkbox" checked={nativeActive&&!combined} disabled={!d.enabled||nativeActive&&!combined&&!d.impulse&&!d.impulse1115&&!d.classified?.length}
         onChange={e=>selectNativePosition(false,e.target.checked)}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{standardPositionName}</span>
      </label>
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
-      <input className="shrink-0" type="checkbox" checked={nativeActive&&combined} disabled={!d.enabled||!!d.impulse||nativeActive&&combined&&!d.impulse1115}
+      <input className="shrink-0" type="checkbox" checked={nativeActive&&combined} disabled={!d.enabled||!!d.impulse||nativeActive&&combined&&!d.impulse1115&&!d.classified?.length}
         onChange={e=>selectNativePosition(true,e.target.checked)}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{DBL5_GUARD_PLUS_DISPLAY_NAME}</span>
      </label>
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
       <input className="shrink-0" type="checkbox" checked={!!d.impulse1115} disabled={!d.enabled}
         onChange={e=>patch(positions(d.impulse,e.target.checked?{bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}:undefined,
-          e.target.checked?nativeActive:nativeActive||!d.impulse))}/>
+          e.target.checked?nativeActive:nativeActive||!d.impulse&&!d.classified?.length))}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_1115_DISPLAY_NAME}</span>
      </label>
      <label className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60"
        title={combined?`切换到防守线或先启用独立急拉，再取消组合版，即可选用「${IMPULSE_5M_DISPLAY_NAME}」。`:undefined}>
       <input className="shrink-0" type="checkbox" checked={!!d.impulse} disabled={!d.enabled||combined}
         onChange={e=>patch(positions(e.target.checked?{bufferAtr:'0',minDistancePct:''}:undefined,d.impulse1115,
-          e.target.checked?nativeActive:nativeActive||!d.impulse1115))}/>
+          e.target.checked?nativeActive:nativeActive||!d.impulse1115&&!d.classified?.length))}/>
       <span className="min-w-0 [overflow-wrap:anywhere]">{IMPULSE_5M_DISPLAY_NAME}</span>
      </label>
+     {([1,2] as const).map(mainClass=><label key={mainClass} className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
+      <input className="shrink-0" type="checkbox" checked={!!d.classified?.some(p=>p.mainClass===mainClass)} disabled={!d.enabled} onChange={e=>{
+       const next=e.target.checked?[...(d.classified??[]),{...defaultClassifiedImpulsePosition(mainClass,defs),bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}].sort((a,b)=>a.mainClass-b.mainClass):d.classified?.filter(p=>p.mainClass!==mainClass);
+       patch(positions(d.impulse,d.impulse1115,e.target.checked?nativeActive:nativeActive||!d.impulse&&!d.impulse1115&&!next?.length,next));
+      }}/><span className="min-w-0 [overflow-wrap:anywhere]">{classifiedImpulsePositionLabel(mainClass)}</span>
+     </label>)}
     </div>
     <div className={`grid items-start gap-2${nativeActive&&d.impulse1115&&!combined?' grid-cols-[minmax(0,3fr)_minmax(0,2fr)]':''}`}>
     {nativeActive&&
@@ -555,7 +567,9 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </div>
    {d.impulse&&<FishQualityImpulse5mSettings position={d.impulse} inputClass={cell+' w-20 max-w-full'}
      disabled={!d.enabled} change={position=>patch(positions(position,d.impulse1115))}/>}
-   <p className="text-muted-foreground">同一轮只成交一次。{d.impulse
+   {!!d.classified?.length&&<FishClassifiedImpulsePositions positions={d.classified} disabled={!d.enabled} change={next=>patch(positions(d.impulse,d.impulse1115,nativeActive,next))}/>}
+   {positionExtra&&<details className="text-[11px]"><summary className="cursor-pointer text-muted-foreground">分类结果显示设置（本方案）</summary>{positionExtra}</details>}
+   <p className="text-muted-foreground">同一轮只成交一次。{d.classified?.length?'原位置和分类位置可并选，先达标者成交；同分钟原位置优先。':d.impulse
      ?`同分钟依次评估${[nativeActive?nativePositionName:null,IMPULSE_5M_DISPLAY_NAME,d.impulse1115?IMPULSE_1115_DISPLAY_NAME:null].filter(Boolean).join('、')}。`
      :nativeActive&&d.impulse1115
      ?`同分钟先评估「${nativePositionName}」，再评估「${IMPULSE_1115_DISPLAY_NAME}」。`

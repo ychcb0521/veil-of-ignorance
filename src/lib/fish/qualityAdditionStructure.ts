@@ -37,6 +37,7 @@ export interface StructureAdditionEvidence {
  previousBoxId?:string;previousSupportPrice?:number;
  /** K 取 DBL-5 防守线时：加仓那一刻的防守线、行情状态，以及止损要连续几根 5 分钟收盘低于 K（冻结，之后不变）。 */
  guardPrice?:number;guardRegime?:'trend'|'range';guardCloses?:number;
+ impulseClassification?:{version:string;lineId:string;linePrice:number;mainClass:1|2;case:1|2|3|4|5|6;status:import('@/lib/impulse1115Classification').Impulse1115Status;confirmedAt:number};
  guardPlus?:Dbl5GuardPlusRow;
  nativeAtr?:number;
  /** Set only when sizing accepts a fill; no subsequent candle can move this K. */

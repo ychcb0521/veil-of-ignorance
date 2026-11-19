@@ -23,14 +23,14 @@ function Settings({state}:{state:FishQualityState}){
 }
 it('持仓监测真实入口逐方案编辑、切换与保存；原方案字段与模板保持不动',()=>{
  const {plans,state}=fixture(),before=JSON.stringify(plans);
- render(<Settings state={state}/>);
+ render(<Settings state={state}/>);fireEvent.click(screen.getByText('分类结果显示设置（本方案）'));
  const checkbox=()=>screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115 · 持仓分类'});
  expect(checkbox()).not.toBeChecked();expect(state.setSellPlans).not.toHaveBeenCalled();
  fireEvent.click(checkbox());
  fireEvent.change(screen.getByLabelText('有效跌破连续收盘'),{target:{value:'3'}});
  fireEvent.change(screen.getByLabelText('回踩附近容差'),{target:{value:'0.375123456789'}});
  const tabs=()=>within(screen.getByRole('tablist',{name:'选择要设置持仓监测的卖出方案'})).getAllByRole('tab');
- fireEvent.click(tabs()[1]);expect(checkbox()).not.toBeChecked();
+ fireEvent.click(tabs()[1]);fireEvent.click(screen.getByText('分类结果显示设置（本方案）'));expect(checkbox()).not.toBeChecked();
  fireEvent.click(checkbox());fireEvent.change(screen.getByLabelText('有效跌破连续收盘'),{target:{value:'4'}});
  fireEvent.click(tabs()[0]);
  expect(screen.getByLabelText('有效跌破连续收盘')).toHaveValue(3);
@@ -45,7 +45,7 @@ it('持仓监测真实入口逐方案编辑、切换与保存；原方案字段�
  expect(JSON.stringify(plans)).toBe(before);
 },15000);
 it('无效分类参数拦截保存并保留输入；关闭开关移除本方案分类设置',()=>{
- const {state}=fixture();render(<Settings state={state}/>);
+ const {state}=fixture();render(<Settings state={state}/>);fireEvent.click(screen.getByText('分类结果显示设置（本方案）'));
  const checkbox=screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115 · 持仓分类'});
  fireEvent.click(checkbox);
  fireEvent.change(screen.getByLabelText('有效跌破连续收盘'),{target:{value:''}});
@@ -59,12 +59,18 @@ it('无效分类参数拦截保存并保留输入；关闭开关移除本方案�
 it('冻结设置只读展示同一分类参数；没有配置的旧模板不自动增加',()=>{
  const {plans}=fixture(),configured={...plans[0],impulse1115Classification:defaultHoldingImpulse1115Rule()};
  const before=JSON.stringify(configured);
- const view=render(<FishQualityMonitorSettingsView plan={configured} holdingOnly/>);
+ const view=render(<FishQualityMonitorSettingsView plan={configured} holdingOnly/>);fireEvent.click(screen.getByText('分类结果显示设置（本方案）'));
  expect(screen.getByRole('checkbox',{name:'DBL-5-急拉线-1115 · 持仓分类'})).toBeDisabled();
  expect(screen.getByLabelText('有效跌破连续收盘')).toBeDisabled();
  expect(JSON.stringify(configured)).toBe(before);
  view.unmount();render(<FishQualityMonitorSettingsView plan={plans[0]} holdingOnly/>);
  expect(screen.queryByTestId('holding-impulse1115-settings')).not.toBeInTheDocument();
+});
+it('历史冻结记录没有加仓设置时仍在位置区保留原分类参数，只读不补造规则',()=>{
+ const {plans}=fixture(),plan={...plans[0],impulse1115Classification:defaultHoldingImpulse1115Rule()},before=JSON.stringify(plan);
+ render(<FishQualityMonitorSettingsView plan={plan} holdingOnly savedOnly/>);
+ expect(screen.getByText('原设置未记录加仓。')).toBeInTheDocument();expect(screen.getByTestId('addition-timing')).toContainElement(screen.getByTestId('holding-impulse1115-settings'));
+ fireEvent.click(screen.getByText('分类结果显示设置（本方案）'));expect(screen.getByLabelText('有效跌破连续收盘')).toBeDisabled();expect(JSON.stringify(plan)).toBe(before);expect(plan).not.toHaveProperty('addition');
 });
 it('监测结果显示主分类和细分；等待提示及历史选择均来自冻结结果',()=>{
  const history=[{at:1,mainClass:1,case:1,status:'UNTESTED',tests:0},{at:2,mainClass:2,case:4,status:'QUICK_RECLAIM',tests:0}];

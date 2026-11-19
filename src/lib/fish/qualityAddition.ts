@@ -1,3 +1,4 @@
+import {CLASSIFIED_IMPULSE_POSITION_VERSION,classifiedImpulsePositionsIdentity,validateClassifiedImpulsePositions,type ClassifiedImpulsePosition} from './qualityClassifiedImpulsePosition';
 export const ADDITION_K_TOUCH_VERSION='addition-k-touch-v1' as const;
 export const ADDITION_INDICATOR_INCREASE_VERSION='addition-indicator-increase-v1' as const;
 /** Conditional paper additions; disabled and legacy rules retain their frozen identities. */
@@ -34,10 +35,11 @@ export type Impulse1115Position = {
   | { version: typeof IMPULSE_1115_POSITION_VERSION }
   | { version: typeof IMPULSE_1115_CONFIGURABLE_K_VERSION; bufferAtr: number }
 );
-export const additionUsesNativePosition = (rule: Pick<QualityAdditionRule,'impulsePosition'|'impulse1115Position'>) =>
-  !rule.impulsePosition?.skipNative && !rule.impulse1115Position?.skipNative;
+export const additionUsesNativePosition = (rule: Pick<QualityAdditionRule,'impulsePosition'|'impulse1115Position'|'classifiedImpulsePositions'>) =>
+  !rule.impulsePosition?.skipNative && !rule.impulse1115Position?.skipNative && !rule.classifiedImpulsePositions?.some(p=>p.skipNative);
 
 export interface QualityAdditionRule {
+  classifiedImpulsePositions?:ClassifiedImpulsePosition[];
   impulsePosition?: ImpulseAdditionPosition;
   impulse1115Position?: Impulse1115Position;
   positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
@@ -132,7 +134,7 @@ export interface QualityReductionFill { at: number; price: number; fraction: num
   previousPositionK?: number;
   newPositionK?: number }
 export interface QualityDetectorPrerequisite { enabled: boolean; stricterPct: number; featureId?: string }
-export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'impulsePosition'|'impulse1115Position'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
+export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'impulsePosition'|'impulse1115Position'|'classifiedImpulsePositions'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
 export const activeDetectorPrerequisite=(r?:Pick<QualityAdditionRoundRule,'detectorPrerequisite'|'source'>)=>r?.source!=='custom'&&r?.detectorPrerequisite?.enabled?r.detectorPrerequisite:undefined;
 export const qualityAdditionAtrSettings=(rule:Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'>)=>({entryBufferAtr:rule.entryBufferAtr??2,supportOffsetAtr:rule.supportOffsetAtr??1.5});
 const atrIdentity=(rule:QualityAdditionRoundRule)=>qualityAdditionAtrSettings(rule).supportOffsetAtr;
@@ -197,6 +199,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
     [[ADDITION_POSITION_RACE_VERSION,rule.impulsePosition??null,rule.rounds?.map(r=>r.impulsePosition??null)??null,rule.alternativeRounds?.map(r=>r.impulsePosition??null)??null]]:[]),
   ...([rule,...(rule.rounds??[]),...(rule.alternativeRounds??[])].some(r=>r.impulse1115Position)?
     [[IMPULSE_1115_POSITION_VERSION,rule.impulse1115Position??null,rule.rounds?.map(r=>r.impulse1115Position??null)??null,rule.alternativeRounds?.map(r=>r.impulse1115Position??null)??null]]:[]),
+  ...([rule,...(rule.rounds??[]),...(rule.alternativeRounds??[])].some(r=>r.classifiedImpulsePositions?.length)?[[CLASSIFIED_IMPULSE_POSITION_VERSION,classifiedImpulsePositionsIdentity(rule.classifiedImpulsePositions),rule.rounds?.map(r=>classifiedImpulsePositionsIdentity(r.classifiedImpulsePositions))??null,rule.alternativeRounds?.map(r=>classifiedImpulsePositionsIdentity(r.classifiedImpulsePositions))??null]]:[]),
   ...(rule.minGainPct!=null?[['closed-gain-gate-v1',rule.minGainPct,rule.quantityMode==='calculator'?'cost-line':'real-average']]:[]),
   ...(rule.maxRounds!=null||rule.rounds?.length?[['independent-addition-rounds-v1',rule.maxRounds??null,rule.rounds?.map(r=>[r.source,timingIdentity(r),r.minGainPct??null])??null]]:[]),
   // 入场距离删除后结果口径变了：所有平衡公式加仓都带新标记，旧口径（含入场距离门槛）的结果不会被当成新结果
@@ -220,6 +223,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if (!rule?.enabled) return;
   if(rule.positionVersion!==undefined&&(rule.positionVersion!==HOLDING_LEDGER_ADDITION_VERSION||rule.quantityMode!=='calculator'))throw Error('加仓持仓账版本不可用');
   if (!['detector','custom','structure'].includes(rule.source) || !(rule.quantityMode?['calculator','entry','fixed'].includes(rule.quantityMode):['entry','fixed'].includes(rule.amountMode))) throw new Error('加仓条件来源或数量方式无效');
+  validateClassifiedImpulsePositions(rule.classifiedImpulsePositions);if(rule.classifiedImpulsePositions?.length&&rule.quantityMode!=='calculator')throw Error('分类位置仅适用于计算器加仓');
   const impulse=rule.impulsePosition, impulse1115=rule.impulse1115Position;
   if(impulse&&rule.source==='structure'&&rule.structure?.guardPlusVersion)throw Error('请先取消选择「5 分钟急拉线」，再启用 1115 组合版');
   if(impulse && (rule.quantityMode!=='calculator'||impulse.version!==IMPULSE_5M_VERSION||
@@ -265,11 +269,11 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
     }
   }
   if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
-  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
+  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,classifiedImpulsePositions:round.classifiedImpulsePositions,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
   if(rule.alternativeRounds?.length){
     if(!rule.rounds?.length||rule.quantityMode!=='calculator')throw new Error('每轮分流的进攻备选须配合逐轮独立条件与按平衡公式定量');
     if(rule.alternativeRounds.length>rule.rounds.length)throw new Error('进攻备选的轮数不能多于保守轮数');
-    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
+    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,classifiedImpulsePositions:round.classifiedImpulsePositions,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
     if(rule.attackFromRound!=null&&(!Number.isInteger(rule.attackFromRound)||rule.attackFromRound<1||rule.attackFromRound>rule.alternativeRounds.length))throw new Error(`进攻备选参与竞速的起始次数须为 1 至 ${rule.alternativeRounds.length} 的整数`);
   }else if(rule.attackFromRound!=null)throw new Error('「进攻从第几次起」须配合进攻备选');
 }
@@ -281,6 +285,7 @@ export function stricterAdditionThreshold(threshold: number, direction: '<' | '>
 }
 function additionFormulaLabel(rule:QualityAdditionRule){
   const rounds=rule.rounds?.length?rule.rounds:[rule],first=qualityAdditionAtrSettings(rounds[0]);
+  if([...rounds,...(rule.alternativeRounds??[])].some(r=>r.classifiedImpulsePositions?.length))return '逐轮位置 · 急拉线1115分类';
   if([...rounds,...(rule.alternativeRounds??[])].some(r=>r.impulse1115Position))return '逐轮位置 · 已启用急拉线-1115';
   if([...rounds,...(rule.alternativeRounds??[])].some(r=>r.impulsePosition))return '逐轮位置 · 已启用 5 分钟急拉线';
   if(rounds.some(r=>r.source==='structure'))return rounds.length===1&&rounds[0].structure?structureAdditionLabel(rounds[0].structure):'逐轮箱体 / ATR 平衡线独立设置';
