@@ -60,14 +60,20 @@ function limitedDrawdownPct(rule?: QualityExitRule) {
     ? rule.threshold : undefined;
 }
 
-type LimitedDrawdownPlan = Pick<QualityGroup, 'rule' | 'combo' | 'router' | 'holdingVetoes'>;
+type LimitedDrawdownPlan = Pick<QualityGroup, 'rule' | 'combo' | 'router' | 'holdingVetoes' | 'vetoStages'>;
 
 export function initialLimitedDrawdownPct(plan: LimitedDrawdownPlan){
   const initial=plan.router?.structure??plan,ordinary=limitedDrawdownPct(initial.rule);
   const hard=(initial.holdingVetoes??[]).filter(v=>v.enabled&&isLimitedStaticDrawdownVeto(v)&&v.mirrorStage?.stage!=='after'&&Number.isFinite(v.threshold)&&v.threshold>0&&v.threshold<100).map(v=>v.threshold);
   return hard.length?Math.min(...hard,...(ordinary!=null?[ordinary]:[])):ordinary;
 }
-export const initialPayoffRiskThreshold=(plan:LimitedDrawdownPlan)=>initialLimitedDrawdownPct(plan)??payoffStopL0Pct((plan.router?.structure??plan).holdingVetoes);
+export function initialPayoffRiskThreshold(plan:LimitedDrawdownPlan){
+  const initial=plan.router?.structure??plan,limited=initialLimitedDrawdownPct(initial);
+  if(limited!=null)return limited;
+  const marked=[...(initial.holdingVetoes??[]),...(initial.vetoStages??[]).flatMap(s=>s.conditions)].some(v=>v.enabled&&isLimitedStaticDrawdownVeto(v));
+  // Unmarked saved plans retain their original per-phase fallback, even if they carry an old payoff tag.
+  return marked?payoffStopL0Pct(initial.holdingVetoes):undefined;
+}
 
 export function withLimitedPayoffRisk(plan: QualityGroup): QualityGroup {
   const hasPayoff = (plan.holdingVetoes ?? []).some(v => v.enabled && v.kind === PAYOFF_STOP_KIND)

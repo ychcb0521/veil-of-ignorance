@@ -40,6 +40,10 @@ it('仅加仓后新增限制时，盈亏比执行仍冻结首仓原有风险',()
  const g=withLimitedPayoffRisk({...plan(),addition:{...defaultQualityAddition(),enabled:true},holdingVetoes:[free(5),makeQualityHoldingVeto('payoff-ratio','>=',10)],vetoStages:[{afterAdditions:1,conditions:[limited(3)]}]});
  expect(g.payoffRiskVersion).toBe(LIMITED_PAYOFF_RISK_VERSION);expect(initialPayoffRiskThreshold(g)).toBe(5);
 });
+it('没有新限制项的旧方案保持原来的逐阶段风险回退，不因已有标签转换',()=>{
+ const old={...plan(),payoffRiskVersion:LIMITED_PAYOFF_RISK_VERSION,holdingVetoes:[free(5)],vetoStages:[{afterAdditions:1,conditions:[free(3)]}]},before=JSON.stringify(old);
+ expect(initialPayoffRiskThreshold(old)).toBeUndefined();expect(initialLimitedDrawdownPct(old)).toBeUndefined();expect(JSON.stringify(old)).toBe(before);
+});
 it('保存恢复区分两类静态回撤，显式冻结新版本，旧参数和指纹不改',()=>{
  const old=freezeQualityPlan({...plan(),holdingVetoes:[free(3)]}),before=JSON.stringify(old),next=freezeQualityPlan({...plan(),holdingVetoes:[limited(3)]});
  expect(parseHoldingVetoDraft(holdingVetoDraft(next.holdingVetoes))).toEqual(next.holdingVetoes);expect(holdingVetoIdentity(next.holdingVetoes)).not.toEqual(holdingVetoIdentity(old.holdingVetoes));
