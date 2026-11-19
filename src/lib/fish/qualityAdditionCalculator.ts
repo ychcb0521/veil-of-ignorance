@@ -11,7 +11,7 @@ import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCov
 import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
-import {ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_VERSION,additionUsesNativePosition,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
+import {ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_INTRABAR_VERSION,additionFloorFollowsPosition,additionUsesNativePosition,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
 import {additionVetoesNeedMinutes,evaluateAdditionVetoes,additionVetoIdentity,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
 import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,holdingVetoName,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
@@ -123,7 +123,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const current=currentK();
   if(current.k===support&&current.sellK!=null){
    const kStop=closes&&o.kStopVersion!==ADDITION_K_TOUCH_VERSION?findGuardStop(current.sellK,closes,from):findTouchStop(current.sellK,from);
-   if(current.sellK===support)return kStop;
+   // v3 keeps F independently active even when zero ATR makes F equal to K.
+   if(current.sellK===support&&!(o.breakevenFloor?.enabled&&o.breakevenFloor.version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION))return kStop;
    const floor=findTouchStop(support,from);
    return floor&&(!kStop||floor.at<kStop.at||floor.at===kStop.at&&floor.atOpen&&!kStop.atOpen)
     ?{...floor,cause:{id:'addition-floor',kind:'addition-support',label:'保本底线 F',direction:'<=',threshold:support}}
@@ -418,7 +419,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     hit.structureEvidence?.algorithm==='impulse5m'?round.impulsePosition?.minDistancePct:round.structure?.minDistancePct;
   const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,hit.structureEvidence.nativeAtr??atr!,minDistancePct):boxK;
   const sellK=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!;
-  const floor=o.breakevenFloor,followPosition=floor?.version===ADDITION_POSITION_FLOOR_VERSION;
+  const floor=o.breakevenFloor,followPosition=additionFloorFollowsPosition(floor?.version);
   const floorRule=floor?.enabled&&(followPosition||hit.structureEvidence?.guardCloses&&selected)?floor:undefined;
   const floorK=floorRule?(hit.structureEvidence&&selected?
    structureAdditionK({...hit.structureEvidence,...selected,basePrice:sellK,buffer:floorRule.atr,bufferUnit:'atr'},hit.structureEvidence.nativeAtr??atr!)?.k??NaN:

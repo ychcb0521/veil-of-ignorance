@@ -450,11 +450,31 @@ it('selects the winning position for F and retains the chosen floor version on r
   fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
   fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
   fireEvent.click(screen.getByLabelText('防守线保本底线'));
-  expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v2');
+  expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v3');
   expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('严格低于本次 K');
   const rule=save() as QualityAdditionRule;
-  expect(rule.breakevenFloor).toEqual({enabled:true,atr:.25,version:'breakeven-floor-v2'});
+  expect(rule.breakevenFloor).toEqual({enabled:true,atr:.25,version:'breakeven-floor-v3'});
   expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
+  fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0'}});
+  fireEvent.change(screen.getByLabelText('保本底线基准'),{target:{value:'breakeven-floor-v2'}});
+  const old=save();expect(old.breakevenFloor).toEqual({enabled:true,atr:0,version:'breakeven-floor-v2'});
+  expect(parseAdditionDraft(additionDraft(old),BUILTIN_FEATURES)).toEqual(old);
+  expect(screen.getByTestId('addition-breakeven-floor')).toHaveTextContent('原版零 ATR 沿用 K 确认');
   fireEvent.change(screen.getByLabelText('保本底线基准'),{target:{value:'legacy'}});
-  expect(save().breakevenFloor).toEqual({enabled:true,atr:.25});
+  expect(save().breakevenFloor).toEqual({enabled:true,atr:0});
+});
+
+it('explains the independent zero-ATR floor for all impulse positions',()=>{
+ render(<BreakevenFloorNotes followPosition intrabarFloor/>);
+ const notes=screen.getByTestId('breakeven-floor-notes');
+ expect(notes).toHaveTextContent('原急拉线和一类／二类急拉线均适用');
+ expect(notes).toHaveTextContent('F 与 K 重合时也立即全仓卖出，不等收盘');
+});
+
+it.each(['一类','二类'])('defaults a newly enabled %s impulse floor to independent intrabar execution',kind=>{
+ render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
+ fireEvent.click(screen.getByRole('checkbox',{name:new RegExp('DBL-5-急拉线-1115.*'+kind)}));
+ fireEvent.click(screen.getByLabelText('防守线保本底线'));
+ expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v3');
+ expect(save().breakevenFloor).toMatchObject({version:'breakeven-floor-v3'});
 });

@@ -109,3 +109,13 @@ describe('plan version manifest', () => {
     expect(comparePlanVersions([], qualityPlanVersions(plan)).every(c => c.from === null)).toBe(true);
   });
 });
+
+it('freezes the independent intrabar floor separately and preserves saved v2 plans',()=>{
+ const old=freezeQualityPlan({...plan,addition:{...plan.addition!,breakevenFloor:{enabled:true,atr:0,version:'breakeven-floor-v2'}}});
+ const original=JSON.stringify(old);
+ const next=freezeQualityPlan({...plan,addition:{...plan.addition!,breakevenFloor:{enabled:true,atr:0,version:'breakeven-floor-v3'}}});
+ expect(qualityPlanVersions(old).find(v=>v.key==='addition-position-floor')?.version).toBe('breakeven-floor-v2');
+ expect(qualityPlanVersions(next).find(v=>v.key==='addition-position-floor')?.version).toBe('breakeven-floor-v3');
+ expect(planVersionChanges(old)).toEqual([]);expect(planVersionChanges(next)).toEqual([]);
+ expect(JSON.stringify(old)).toBe(original);
+});

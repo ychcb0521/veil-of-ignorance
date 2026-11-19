@@ -120,10 +120,10 @@ it('uses the same holding ledger if the impulse wins from the attack lane', asyn
   expect(result.fills[1]).toMatchObject({lane:'attack',ledger:{costBefore:210},sizing:{coinsBefore:2,previousSupport:105}});
 });
 
-it('sets a new sell K and sizes at the new F after the impulse replaces the guard', async () => {
+it.each(['breakeven-floor-v2','breakeven-floor-v3'] as const)('sets a new sell K and sizes at the new F after the impulse replaces the guard (%s)', async version => {
   native.at=entry+5*minute;
   native.support=105;
-  const breakevenFloor={enabled:true,atr:.5,version:'breakeven-floor-v2'} as const;
+  const breakevenFloor={enabled:true,atr:.5,version} as const;
   const input=fixture();
   const at=impulseAt+minute;
   const prices=input.prices.map(bar=>bar.openTime===at?{...bar,low:109.89}:bar);

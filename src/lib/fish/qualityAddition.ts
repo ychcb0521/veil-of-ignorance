@@ -99,7 +99,9 @@ export interface QualityAdditionRule {
 export interface QualityGeometricLockRule { enabled: boolean; multiple: number; pct: number }
 export const defaultGeometricLock = (): QualityGeometricLockRule => ({ enabled: false, multiple: 10, pct: 1 });
 export const ADDITION_POSITION_FLOOR_VERSION='breakeven-floor-v2' as const;
-export interface QualityBreakevenFloorRule { enabled: boolean; atr: number; version?:typeof ADDITION_POSITION_FLOOR_VERSION }
+export const ADDITION_POSITION_FLOOR_INTRABAR_VERSION='breakeven-floor-v3' as const;
+export const additionFloorFollowsPosition=(version?:string)=>version===ADDITION_POSITION_FLOOR_VERSION||version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION;
+export interface QualityBreakevenFloorRule { enabled: boolean; atr: number; version?:typeof ADDITION_POSITION_FLOOR_VERSION|typeof ADDITION_POSITION_FLOOR_INTRABAR_VERSION }
 export const defaultBreakevenFloor = (): QualityBreakevenFloorRule => ({ enabled: false, atr: BREAKEVEN_FLOOR_DEFAULT_ATR });
 /**
  * 保本底线 F 离防守线 K 的 ATR 倍数（缺省值）。2026-11-04 按「组合算法1-8」94 笔回放定为 0.25：
@@ -257,7 +259,7 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   }
   validateAdditionVetoes(rule.entryVetoes);
   for(const r of [rule,...(rule.rounds??[])]){const dp=activeDetectorPrerequisite(r);if(dp&&(!Number.isFinite(dp.stricterPct)||dp.stricterPct<0||dp.stricterPct>1000))throw new Error('方向 · 探测算法：门槛提高幅度须为 0–1000%');}
-  if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(f.version!=null&&f.version!==ADDITION_POSITION_FLOOR_VERSION)throw Error('保本底线执行版本不可用');if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}
+  if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(f.version!=null&&!additionFloorFollowsPosition(f.version))throw Error('保本底线执行版本不可用');if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}
   if(rule.geometricLock?.enabled){const g=rule.geometricLock;if(!Number.isFinite(g.multiple)||g.multiple<=0||g.multiple>1e6)throw new Error('保住有效涨幅：几何仓位门槛须为大于 0 的数字');if(!Number.isFinite(g.pct)||g.pct<0||g.pct>100)throw new Error('保住有效涨幅：百分比须为 0–100%');}
   if(rule.supportReduction?.enabled){const r=rule.supportReduction;if(!Number.isFinite(r.minDropAtr)||r.minDropAtr<0||r.minDropAtr>20)throw new Error('支撑下移减仓：触发的下移幅度须为 0–20 倍 ATR');if(!Number.isFinite(r.maxPct)||r.maxPct<=0||r.maxPct>100)throw new Error('支撑下移减仓：单次减仓上限须为 0–100%');if(r.exitAfterDrops!=null&&(!Number.isInteger(r.exitAfterDrops)||r.exitAfterDrops<1||r.exitAfterDrops>20))throw new Error('K 连续下移全仓卖出：次数须为 1–20 的整数');}
   if(rule.quantityMode==='calculator'){
