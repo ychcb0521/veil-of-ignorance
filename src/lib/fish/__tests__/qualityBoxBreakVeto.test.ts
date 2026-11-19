@@ -11,7 +11,7 @@ import {defaultQualityAddition} from '../qualityAddition';
 import {findCalculatorAdditions} from '../qualityAdditionCalculator';
 import {compileFishProgram} from '../algorithm';
 import {createPreEntryGate} from '../preEntryGate';
-import {emptyPreEntryConditions} from '../preEntryConditions';
+import {emptyPreEntryConditions,preEntryConditionsVersion} from '../preEntryConditions';
 import {freezeQualityPlan,planVersionChanges} from '../qualityPlanVersions';
 import {saveQualityPlanTemplate,qualityPlanFromTemplate} from '../qualityPlanTemplates';
 import type {ResearchBar} from '@/lib/deepRsa/window';
@@ -154,6 +154,17 @@ it('matches the unchanged native renderer event and never emits a sell action',a
  expect(await read(expected[0].at-M)).toEqual({});
  expect(await read(expected[0].at)).toMatchObject({hit:{kind:'box-break'}});
  expect(await read(expected[1].at)).toEqual(await read(expected[0].at));
+});
+it('restores the new screening veto after JSONB reorders template object fields',()=>{
+ const saved=freezeQualityPlan({...group(),addition:undefined,preEntryConditions:{...emptyPreEntryConditions(),entryVetoes:[rule()]}});
+ const jsonb=JSON.parse(JSON.stringify(saved,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).reverse()):v));
+ expect(planVersionChanges(jsonb)).toEqual([]);
+ const legacy=structuredClone(saved),entryVersion=legacy.frozenVersions!.find(v=>v.key==='pre-entry-conditions')!;
+ entryVersion.version=preEntryConditionsVersion(legacy,true);
+ const before=JSON.stringify(legacy);
+ expect(planVersionChanges(legacy)).toEqual([]);expect(JSON.stringify(legacy)).toBe(before);
+ const edited=structuredClone(jsonb);edited.preEntryConditions.entryVetoes[0].boxBreak.rule.structure.definition.DBL5_config.guard_range_closes=3;
+ expect(planVersionChanges(edited).some(v=>v.key==='pre-entry-conditions')).toBe(true);
 });
 it('keeps hourly native breaks separate from five-minute events',async()=>{
  const hourly=rule();hourly.boxBreak!.rule=selectBoxStopTimeframe(hourly.boxBreak!.rule,'1h');

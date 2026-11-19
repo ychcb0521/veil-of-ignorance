@@ -291,12 +291,15 @@ export function planVersionChanges(plan: QualityGroup): PlanVersionChange[] {
   const current = body(plan);
   return comparePlanVersions(plan.frozenVersions, qualityPlanVersions(current)).filter(change => {
     const path = change.key.split(':'), key = path.pop();
-    if (!key || !['hard-stop-params','lower-wick-veto','veto-history','addition-support-quality'].includes(key) || !change.from || !change.to) return true;
+    if (!key || !['hard-stop-params','lower-wick-veto','veto-history','addition-support-quality','pre-entry-conditions'].includes(key) || !change.from || !change.to) return true;
     let branch = current;
     for (const part of path) {
       if (!branch.router || (part !== 'structure' && part !== 'attack')) return true;
       branch = branch.router[part];
     }
+    // Preserve an already frozen 758 asset only when its original serializer
+    // reproduces the exact stored fingerprint. Never rewrite or bless edits.
+    if(key==='pre-entry-conditions')return !(branch.preEntryConditions?.entryVetoes.some(v=>v.kind==='box-break')&&change.from===preEntryConditionsVersion(branch,true));
     return !(key === 'hard-stop-params' ? compatibleHoldingParameterOrder(branch.holdingVetoes, change.from) : compatibleAdditionParameterOrder(branch, key, change.from));
   });
 }

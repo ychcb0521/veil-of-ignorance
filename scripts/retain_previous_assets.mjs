@@ -28,11 +28,24 @@ const now = Date.now();
 const warn = message => console.warn(`[retain-assets] ${message}`);
 const host = (process.env.RETAIN_ASSETS_FROM || process.env.VERCEL_PROJECT_PRODUCTION_URL || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 const origin = host ? `https://${host}` : '';
+// A rollback can leave the previous build behind Vercel Authentication.
+// Optional short-lived, deployment-scoped read access; never log the token/cookie.
+const shareToken = process.env.RETAIN_ASSETS_SHARE || '';
+let sourceCookie = '';
 
 async function get(url, timeoutMs = 15_000) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal, headers: { 'cache-control': 'no-cache' } });
+    if (shareToken && new URL(url).origin !== origin) throw Error('旧资源授权只能用于指定部署');
+    if (shareToken && !sourceCookie) {
+      const accessUrl = new URL(origin);
+      accessUrl.searchParams.set('_vercel_share', shareToken);
+      const access = await fetch(accessUrl, { signal: controller.signal, redirect: 'manual' });
+      sourceCookie = (access.headers.getSetCookie?.() || []).map(value => value.split(';')[0]).join('; ');
+      if (!sourceCookie) throw Error('旧资源部署的临时只读授权未建立');
+    }
+    const response = await fetch(url, { signal: controller.signal, ...(shareToken ? { redirect: 'error' } : {}),
+      headers: { 'cache-control': 'no-cache', ...(sourceCookie ? { cookie: sourceCookie } : {}) } });
     // Keep the deadline through body consumption. Headers can arrive while an
     // old asset's body stalls indefinitely, otherwise blocking the whole release.
     const body = await response.arrayBuffer();
@@ -116,4 +129,4 @@ async function main() {
   console.log(`[retain-assets] 本次 ${currentFiles.length} 个文件；保留前 ${kept.length} 版的 ${copied} 个旧文件${missing ? `，${missing} 个已取不到` : ''}`);
 }
 
-main().catch(error => warn(`跳过：${error.message}`));
+await main().catch(error => warn(`跳过：${error.message}`));
