@@ -43,7 +43,8 @@ function fixture(kind:AdditionEntryVetoKind):FishReconstructionLoader{return asy
  if(kind==='fast-drop'&&p.step===M&&at===T-10*M){open=120;high=120;close=100;}
  return {openTime:at,open,close,high,low,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50};
 });}
-const cases=[...ADDITION_VETO_KINDS.map(kind=>({kind,timeframe:'5m' as const})),{kind:'guard-distance' as const,timeframe:'1h' as const}];
+// Box-break counts only events AFTER entry, so it has its own post-entry native-event fixtures.
+const cases=[...ADDITION_VETO_KINDS.filter(kind=>kind!=='box-break').map(kind=>({kind,timeframe:'5m' as const})),{kind:'guard-distance' as const,timeframe:'1h' as const}];
 for(const lane of ['primary','attack'] as const)for(const {kind,timeframe} of cases)it(lane+' '+kind+' '+timeframe+' vetoes the real holding addition and screening gate while preserving the saved template',async()=>{
  const rule={...ADDITION_VETO_DEFAULTS[kind],enabled:true,...(kind==='guard-distance'?{atr:.5,guardDistance:guardDistanceConfig(undefined,undefined,timeframe)}:{historyHours:6})};
  const base:QualityGroup={id:'g',label:'原始资产',metric:'raw',snapshot,execution:'intrabar-1m',mirrorTakeProfit:{enabled:true,gainPct:5,sellPct:50},rule:{metric:'raw',direction:'<',threshold:0},addition:{...defaultQualityAddition(),maxRounds:1,enabled:true,source:'custom',condition:{id:'add',label:'价格',metric:'raw',direction:'>',threshold:90,enabled:true,snapshot},entryVetoes:[rule]}};

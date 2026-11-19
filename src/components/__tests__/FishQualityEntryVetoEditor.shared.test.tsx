@@ -11,10 +11,10 @@ it.each([false,true])('exposes every registered veto independently in entry=%s w
  render(<Editor/>);
  for(const key of SHARED_VETO_DRAFT_KEYS){
   const kind=key==='guard-distance-1h'?'guard-distance':key;
-  const label=kind==='guard-distance'?(key==='guard-distance-1h'?'距 DBL-5-1h 防守线过远':'距 DBL-5-5mins 防守线过远'):entry&&kind==='fast-drop'?'筛选期间急跌':ADDITION_VETO_LABELS[kind];
+  const label=kind==='guard-distance'?(key==='guard-distance-1h'?'距 DBL-5-1h 防守线过远':'距 DBL-5-5mins 防守线过远'):entry&&kind==='box-break'?'筛选期间箱体断裂':entry&&kind==='fast-drop'?'筛选期间急跌':ADDITION_VETO_LABELS[kind];
   const checkbox=screen.getByLabelText(`启用${entry?'入选前':'加仓'}否决 ${label}`);
   expect(checkbox).not.toBeChecked();fireEvent.click(checkbox);
-  const values=JSON.parse(document.querySelector('output')!.textContent!);expect(values).toHaveLength(1);expect(values[0].kind).toBe(kind);if(kind==='guard-distance')expect(values[0].guardDistance.parameters.timeframe).toBe(key==='guard-distance-1h'?'1h':'5m');expect(values[0].historyHours).toBe(kind==='guard-distance'?undefined:6);
+  const values=JSON.parse(document.querySelector('output')!.textContent!);expect(values).toHaveLength(1);expect(values[0].kind).toBe(kind);if(kind==='guard-distance')expect(values[0].guardDistance.parameters.timeframe).toBe(key==='guard-distance-1h'?'1h':'5m');expect(values[0].historyHours).toBe(kind==='guard-distance'||kind==='box-break'?undefined:6);
   expect(screen.getAllByRole('checkbox').filter(e=>(e as HTMLInputElement).checked&&e.getAttribute('aria-label')?.startsWith('启用'))).toHaveLength(1);
   fireEvent.click(checkbox);expect(document.querySelector('output')!.textContent).toBe('[]');
  }

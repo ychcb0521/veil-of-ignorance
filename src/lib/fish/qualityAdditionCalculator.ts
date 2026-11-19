@@ -11,7 +11,7 @@ import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
 import {ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_VERSION,additionUsesNativePosition,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
-import {additionVetoesNeedMinutes,evaluateAdditionVetoes,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
+import {additionVetoesNeedMinutes,evaluateAdditionVetoes,additionVetoIdentity,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
 import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
 import type {QualityMirrorFill} from './qualityMirror';
 import type {FishReconstructionLoader} from './reconstruction';
@@ -80,6 +80,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  let positionAttempts:{at:number;ids:Set<string>}|undefined;
  const skipped:AdditionSkipRecord[]=[],skip=(r:AdditionSkipRecord)=>{skipped.push(r);};
  const historyReaders=new Map<readonly QualityAdditionEntryVeto[],ReturnType<typeof createVetoHistoryReader>>();
+ const boxBreakReaders=new Map<string,ReturnType<typeof createVetoHistoryReader>>();
  const vetoed:AdditionVetoRecord[]=[],reductions:QualityReductionFill[]=[...(o.previousReductions??[])];
  // 续算时从上一段最后一条锁住记录恢复（收复判断仍按之后的 5 分钟收盘）
  let pullbackLock:{peak:number;at:number}|undefined=(()=>{const r=[...(o.previousVetoes??[])].reverse().find(v=>v.lockPeak!=null&&v.lockAt!=null);return r?{peak:r.lockPeak!,at:r.lockAt!}:undefined;})();
@@ -273,7 +274,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    skip({at:x.at,round:roundNo,support:x.support,...(x.reason==='gain'?{kind:'gain',label:'涨幅门槛未达',reading:`收盘 ${p8(x.close!)} 比${basis==='real-average'?'持仓均价':'成本线 S'} ${p8(x.referencePrice!)} 只涨 ${((x.close!/x.referencePrice!-1)*100).toFixed(2)}%，要求 ≥ ${x.thresholdPct}%`}:x.reason==='no-guard'?{kind:'no-guard',label:'防守线断开',reading:'这一刻防守线刚被跌破、尚未重建，没有 K 基准'}:x.reason==='guard-range'?{kind:'guard-range',label:'防守线是虚线（震荡期）',reading:'只用实线时，震荡期不加仓'}:{kind:'no-old-c',label:'没有旧 C',reading:'上一根 5 分钟线上没有不同的有效箱体（首个箱体或中间支撑失效），K 没有旧 C 可用'})});
   };
   const previousFillAt=fills.at(-1)?.at??o.entry;
-  const findRoundHit=async(rule:RoundScan|Options,end:number,gainBasis:typeof basis,reference:number,start=after,position:Position='native')=>{
+  const scanRoundHit=async(rule:RoundScan|Options,end:number,gainBasis:typeof basis,reference:number,start=after,position:Position='native')=>{
    if(rule.unavailable||end<=start)return;
    const gain=rule.minGainPct==null?undefined:{referencePrice:reference,thresholdPct:rule.minGainPct,basis:gainBasis};
    const check=rule.indicatorIncrease ? async(at:number,support?:number)=>{
@@ -293,6 +294,19 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     if(readings)return {...hit,indicatorIncrease:readings};
     cursor=hit.at;
    }
+  };
+  // Only the new native-break version filters each lane before the race.
+  // A vetoed primary must not suppress an eligible alternative at the same time.
+  const findRoundHit=async(...args:Parameters<typeof scanRoundHit>)=>{
+   const hit=await scanRoundHit(...args),rule=args[0],rules=rule.entryVetoes;
+   if(!hit||!rules?.some(v=>v.enabled&&v.kind==='box-break'))return hit;
+   const nativeRules=rules.filter(v=>v.enabled&&v.kind==='box-break'),readerKey=JSON.stringify(additionVetoIdentity(nativeRules));
+   let read=boxBreakReaders.get(readerKey);
+   if(!read){read=createVetoHistoryReader({rules:nativeRules,entry:o.entry,row:o.row,load:o.load,signal:o.signal});boxBreakReaders.set(readerKey,read);}
+   const result=await read(hit.at);
+   if(!result.hit&&!result.pending)return hit;
+   vetoed.push({at:hit.at,round:roundNo,...(result.hit??{kind:'box-break-pending',label:'箱体断裂待判定',reading:result.pending!})});
+   return undefined;
   };
   const skipMark=skipped.length;
   let hit:Omit<QualityAdditionFill,'quantity'|'notional'>|undefined;
@@ -332,6 +346,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     else if(hit)hit.lane='structure';
    }
   }
+  // A rejected later lane is speculative once an earlier lane wins.
+  if(hit)for(let i=vetoed.length-1;i>=0;i--)if(vetoed[i].round===roundNo&&vetoed[i].at>hit.at&&['box-break','box-break-pending'].includes(vetoed[i].kind))vetoed.splice(i,1);
   if(hit?.structureEvidence&&Number.isNaN(hit.price)){
    const price=priceAt.get(hit.at);
    if(!(price!>0)||!Number.isFinite(price))throw Error('缺少位置加仓下一分钟开盘价');
@@ -353,14 +369,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    else{const last=since.at(-1)?.bar.close;vetoed.push({at:hit.at,round:roundNo,kind:'pullback',label:'冲高回落：未收复最高点前不再加仓',reading:`锁住时持仓最高 ${+pullbackLock.peak.toPrecision(8)}，尚未收复${last!=null?`（最新收盘 ${+last.toPrecision(8)}）`:''}`,lockPeak:pullbackLock.peak,lockAt:pullbackLock.at});after=hit.at;continue;}
   }
   if(round.entryVetoes?.some(v=>v.enabled)){
-   if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='guard-distance')){
+   if(round.entryVetoes.some(v=>v.enabled&&v.kind!=='guard-distance'&&v.kind!=='box-break')){
     await readAtr(hit.at);const cut=Math.floor(hit.at/STEP)*STEP,s=readAtr.series().filter(x=>x.bar.openTime+STEP<=cut);
-    const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='guard-distance'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
+    const legacyVetoes=round.entryVetoes.filter(v=>v.historyHours==null&&v.kind!=='guard-distance'&&v.kind!=='box-break'),minutes=additionVetoesNeedMinutes(legacyVetoes)?await minutesUntil(hit.at):undefined;
     const veto=evaluateAdditionVetoes(legacyVetoes,s.map(x=>x.bar),s.map(x=>x.atr),o.entry,minutes);
     if(veto){const {lockPeak,...hitText}=veto;if(lockPeak!=null)pullbackLock={peak:lockPeak,at:cut};vetoed.push({at:hit.at,round:roundNo,...hitText,...(lockPeak!=null?{lockPeak,lockAt:cut}:{})});after=hit.at;continue;}
    }
-   if(round.entryVetoes.some(v=>v.enabled&&(v.historyHours!=null||v.kind==='guard-distance'))){
-    let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes,entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
+   if(round.entryVetoes.some(v=>v.enabled&&(v.kind!=='box-break'&&(v.historyHours!=null||v.kind==='guard-distance')))){
+    let history=historyReaders.get(round.entryVetoes);if(!history){history=createVetoHistoryReader({rules:round.entryVetoes.filter(v=>v.kind!=='box-break'),entry:o.entry,row:o.row,load:o.load,signal:o.signal});historyReaders.set(round.entryVetoes,history);}
     const minute=o.prices[(hit.at-MINUTE-(o.prices[0]?.openTime??hit.at))/MINUTE];
     const result=await history(hit.at,minute);
     if(result.hit||result.pending){

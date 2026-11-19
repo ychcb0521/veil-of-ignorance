@@ -3,14 +3,27 @@
  * 新 C 出现也不加——ONTUSDT 第 3 次、STRKUSDT 第 2、3 次加仓都加在这类形态之后，扫损成了必然。
  * 只看加仓那一刻已收盘的 5 分钟 K 线；ATR 为 5 分钟 ATR(14)（Wilder，与加仓 K 同一序列）。任一条成立即这次不加，继续等下一个新 C。
  */
-import { DBL5_GUARD_DEFAULTS, DBL5_GUARD_VERSION, DBL5_PROFILES, dbl5ConfigHash, dbl5GuardVersion, dbl5Parameters, withDbl5GuardVersion, type Dbl5Config, type Dbl5GuardVersion } from '../dbl5m';
+import { DBL5_GUARD_DEFAULTS, DBL5_GUARD_VERSION, DBL5_RETEST_GUARD_VERSION, DBL5_PROFILES, dbl5ConfigHash, dbl5GuardVersion, dbl5Parameters, withDbl5GuardVersion, type Dbl5Config, type Dbl5GuardVersion } from '../dbl5m';
+import {BOX_BREAK_VERSION,defaultBoxBreak,freezeBoxStop,validateBoxStop,boxStopIdentity,boxStopAlgorithmLabel,type BoxStopRule} from './qualityBoxStop';
 import { DBL5_MARKET_RULE_VERSION } from '../dbl5mMarketRules';
 import { DOUBLE_DROP_VERSION, doubleDropState } from './qualityDoubleDrop';
 import {ENTRY_STALL_TURN_5M_VERSION,PULLBACK_NEW_HIGH_5M_VERSION,defaultEntryStallTurn5m,validateEntryStallTurn5m} from './preEntryStallTurn5m';
 /** 2026-11-09：长下影线独立版本；与长上影线对称，原有规则及身份不变。 */
 export const LOWER_WICK_VETO_VERSION = 'addition-lower-wick-v1' as const;
 export const VETO_HISTORY_VERSION = 'addition-veto-history-v1' as const;
-export type AdditionEntryVetoKind = 'upper-wick' | 'lower-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop' | 'double-drop' | 'stall-turn' | 'pullback-new-high' | 'guard-distance';
+export type AdditionEntryVetoKind = 'upper-wick' | 'lower-wick' | 'lower-spike' | 'volatility' | 'pullback' | 'pullback-atr' | 'fast-drop' | 'double-drop' | 'stall-turn' | 'pullback-new-high' | 'guard-distance' | 'box-break';
+export const BOX_BREAK_VETO_VERSION='addition-holding-box-break-v1' as const;
+export interface BoxBreakVetoConfig {version:typeof BOX_BREAK_VETO_VERSION;rule:BoxStopRule}
+export const defaultBoxBreakVeto=():BoxBreakVetoConfig=>({version:BOX_BREAK_VETO_VERSION,rule:defaultBoxBreak([],DBL5_RETEST_GUARD_VERSION)});
+export function boxBreakVetoIdentity(config:BoxBreakVetoConfig) {
+  const rule=config.rule,parameters=rule.structure.definition.DBL5_config;
+  const stable=parameters?{...rule,structure:{...rule.structure,definition:{...rule.structure.definition,DBL5_config:Object.fromEntries(Object.keys(parameters).sort().map(k=>[k,parameters[k as keyof typeof parameters]]))}}}:rule;
+  return [config.version,boxStopIdentity(stable)];
+}
+export function freezeBoxBreakVeto(config:BoxBreakVetoConfig):BoxBreakVetoConfig {
+  validateAdditionVetoes([{kind:'box-break',enabled:true,boxBreak:config}]);
+  return {...config,rule:freezeBoxStop(structuredClone(config.rule))};
+}
 export const GUARD_DISTANCE_VETO_VERSION = 'guard-distance-veto-v1' as const;
 export const GUARD_DISTANCE_1H_VETO_VERSION='guard-distance-1h-v1' as const;
 export interface GuardDistanceConfig {
@@ -48,6 +61,7 @@ export interface QualityAdditionEntryVeto {
   /** 【用户要求】2026-11-03 冲高回落（含仅 ATR）：触发后锁住——收复当时的持仓最高点（5 分钟收盘 ≥ 该价）之前，之后的新 C 都不加仓。 */
   sticky?: boolean;
   guardDistance?: GuardDistanceConfig;
+  boxBreak?:BoxBreakVetoConfig;
   riseMinutes?:number; risePct?:number; stallMinutes?:number; maxProgressPct?:number; turnMinutes?:number;
 }
 export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditionEntryVeto> = {
@@ -65,15 +79,17 @@ export const ADDITION_VETO_DEFAULTS: Record<AdditionEntryVetoKind, QualityAdditi
   'stall-turn': {kind:'stall-turn',enabled:false,historyHours:6,riseMinutes:60,risePct:1,stallMinutes:15,maxProgressPct:20,turnMinutes:10},
   'pullback-new-high': {kind:'pullback-new-high',enabled:false,historyHours:6,pct:3},
   'guard-distance': {kind:'guard-distance', enabled:false, atr:3},
+  'box-break': {kind:'box-break',enabled:false},
 };
 export const ADDITION_VETO_KINDS = Object.keys(ADDITION_VETO_DEFAULTS) as AdditionEntryVetoKind[];
-export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-wick': '长下影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌', 'double-drop':'二次急跌未收复', 'stall-turn':'滞涨转弱（5分钟）','pullback-new-high':'猛烈回调未创新高（5分钟）', 'guard-distance':'距 DBL-5 防守线过远' };
+export const ADDITION_VETO_LABELS: Record<AdditionEntryVetoKind, string> = { 'upper-wick': '长上影线', 'lower-wick': '长下影线', 'lower-spike': '向下大插针', volatility: '高震荡', pullback: '冲高回落', 'pullback-atr': '冲高回落·仅ATR', 'fast-drop': '持仓期间急跌', 'double-drop':'二次急跌未收复', 'stall-turn':'滞涨转弱（5分钟）','pullback-new-high':'猛烈回调未创新高（5分钟）', 'guard-distance':'距 DBL-5 防守线过远', 'box-break':'持仓期间箱体断裂' };
 export const activeAdditionVetoes = (vetoes?: readonly QualityAdditionEntryVeto[]) => (vetoes ?? []).filter(v => v.enabled);
 export function additionVetoLabel(v: QualityAdditionEntryVeto): string {
   const label=v.historyHours!=null?baseVetoLabel({...v,lookbackBars:Math.ceil(v.historyHours*12)}).replace(/持仓/g,'历史窗口'):baseVetoLabel(v);
   return label + ((v.kind === 'pullback' || v.kind === 'pullback-atr') && v.sticky ? '，未收复最高点前不再加仓' : '') + (v.historyHours!=null?` · 历史回看 ${v.historyHours} 小时`:'');
 }
 function baseVetoLabel(v: QualityAdditionEntryVeto): string {
+  if(v.kind==='box-break')return `持仓期间箱体断裂（${v.boxBreak?boxStopAlgorithmLabel(v.boxBreak.rule):'DBL-5'} 原生红叉确认后不再加仓）`;
   if(v.kind==='guard-distance')return `${ADDITION_VETO_LABELS[v.kind]}（高出 > ${v.atr} ATR）`;
   if(v.kind==='stall-turn')return `滞涨转弱（5分钟）：上涨${v.riseMinutes}分钟 → 滞涨${v.stallMinutes}分钟 → 转弱${v.turnMinutes}分钟`;
   if(v.kind==='pullback-new-high')return `猛烈回调未创新高（5分钟）：回调 ≥ ${v.pct}%，须收盘严格突破冻结前高才恢复`;
@@ -96,6 +112,11 @@ const pullbackText = (d: QualityAdditionEntryVeto) => [d.atr != null ? `≥ ${d.
 export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVeto[]) {
   for (const v of activeAdditionVetoes(vetoes)) {
     if (!ADDITION_VETO_KINDS.includes(v.kind)) throw new Error('加仓否决条件类型无效');
+    if(v.kind==='box-break'){
+      if(v.historyHours!=null||v.boxBreak?.version!==BOX_BREAK_VETO_VERSION||v.boxBreak?.rule?.version!==BOX_BREAK_VERSION)throw Error('持仓期间箱体断裂：缺少独立的冻结执行版本，或误用了其他扫描范围');
+      validateBoxStop(v.boxBreak.rule);
+      continue;
+    }
     if (v.kind === 'guard-distance') {
       if (v.atr == null || !Number.isFinite(v.atr) || v.atr <= 0) throw Error('距 DBL-5 防守线过远：ATR 倍数须为大于 0 的有限数字');
       const config = v.guardDistance;
@@ -141,7 +162,7 @@ export function validateAdditionVetoes(vetoes?: readonly QualityAdditionEntryVet
     if (v.kind === 'volatility' && (bad(d.ratio, 0, 50) || bad(d.er, 0, 1))) throw new Error('高震荡：ATR 倍数须为 0–50，效率比须为 0–1');
   }
 }
-export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { if(v.kind==='guard-distance')return [v.kind,v.guardDistance?.version,v.guardDistance?.boxVersion,v.guardDistance?.guardVersion,DBL5_MARKET_RULE_VERSION,v.atr,v.guardDistance&&dbl5ConfigHash(v.guardDistance.parameters)]; if(v.kind==='stall-turn')return [v.kind,ENTRY_STALL_TURN_5M_VERSION,v.historyHours,v.riseMinutes,v.risePct,v.stallMinutes,v.maxProgressPct,v.turnMinutes]; if(v.kind==='pullback-new-high')return [v.kind,PULLBACK_NEW_HIGH_5M_VERSION,v.historyHours,v.pct]; if(v.historyHours!=null){const {historyHours,...original}=v;return [VETO_HISTORY_VERSION,historyHours,additionVetoIdentity([original])[0]];} if(v.kind==='lower-wick'){const d={...ADDITION_VETO_DEFAULTS['lower-wick'],...v};return [v.kind,LOWER_WICK_VETO_VERSION,d.lookbackBars,d.atr,d.ratio];} if(v.kind==='double-drop')return [v.kind,DOUBLE_DROP_VERSION,v.atr??null,v.pct??null,v.join??'and']; const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+export const additionVetoIdentity = (vetoes?: readonly QualityAdditionEntryVeto[]) => activeAdditionVetoes(vetoes).map(v => { if(v.kind==='box-break')return [v.kind,...(v.boxBreak?boxBreakVetoIdentity(v.boxBreak):[])]; if(v.kind==='guard-distance')return [v.kind,v.guardDistance?.version,v.guardDistance?.boxVersion,v.guardDistance?.guardVersion,DBL5_MARKET_RULE_VERSION,v.atr,v.guardDistance&&dbl5ConfigHash(v.guardDistance.parameters)]; if(v.kind==='stall-turn')return [v.kind,ENTRY_STALL_TURN_5M_VERSION,v.historyHours,v.riseMinutes,v.risePct,v.stallMinutes,v.maxProgressPct,v.turnMinutes]; if(v.kind==='pullback-new-high')return [v.kind,PULLBACK_NEW_HIGH_5M_VERSION,v.historyHours,v.pct]; if(v.historyHours!=null){const {historyHours,...original}=v;return [VETO_HISTORY_VERSION,historyHours,additionVetoIdentity([original])[0]];} if(v.kind==='lower-wick'){const d={...ADDITION_VETO_DEFAULTS['lower-wick'],...v};return [v.kind,LOWER_WICK_VETO_VERSION,d.lookbackBars,d.atr,d.ratio];} if(v.kind==='double-drop')return [v.kind,DOUBLE_DROP_VERSION,v.atr??null,v.pct??null,v.join??'and']; const d = v.kind === 'pullback' ? pullbackParams(v) : { ...ADDITION_VETO_DEFAULTS[v.kind], ...v }; return [d.kind, d.lookbackBars ?? null, d.atr ?? null, d.ratio ?? null, d.pct ?? null, d.er ?? null, ...(d.kind === 'fast-drop' ? [(d.windows ?? []).map(w => [w.minutes, w.pct])] : []), ...(d.kind === 'pullback' && d.pct != null ? ['pullback-pct-v1', d.join ?? null] : []), ...((d.kind === 'pullback' || d.kind === 'pullback-atr') && v.sticky ? ['pullback-sticky-v1'] : [])]; }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 
 export interface VetoBar { openTime: number; open: number; high: number; low: number; close: number }
 export interface AdditionVetoHit { kind: AdditionEntryVetoKind; label: string; reading: string;
@@ -173,7 +194,7 @@ export function evaluateAdditionVetoes(vetoes: readonly QualityAdditionEntryVeto
   const A = atr[n - 1], last = bars[n - 1];
   const fmt = (x: number) => +x.toFixed(2);
   for (const raw of active) {
-    if (raw.kind === 'guard-distance') continue; // Evaluated by the shared native-line reader.
+    if (raw.kind === 'guard-distance'||raw.kind==='box-break') continue; // Evaluated by the shared native-line reader.
     const v = raw.kind==='double-drop'?raw:{ ...ADDITION_VETO_DEFAULTS[raw.kind], ...raw };
     if(v.kind!=='double-drop'&&(!(A>0)||!Number.isFinite(A)))continue;
     if(v.kind==='double-drop'){

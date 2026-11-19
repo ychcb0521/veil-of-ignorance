@@ -5,6 +5,7 @@ import { compileFishProgram } from './algorithm';
 import { evaluateAdditionVetoes, validateAdditionVetoes, isFiveMinuteShapeVeto, ADDITION_VETO_LABELS, type AdditionEntryVetoKind, type AdditionVetoHit, type QualityAdditionEntryVeto, type VetoBar } from './qualityAdditionVeto';
 import {createEntryStallTurn5mReader,createPullbackNewHigh5mReader,defaultEntryStallTurn5m} from './preEntryStallTurn5m';
 import { createGuardDistanceVetoReader } from './qualityGuardDistance';
+import { createBoxBreakVetoReader } from './qualityBoxBreakVeto';
 import { qualityHistoryFrom } from './qualityInitialization';
 import { doubleDropState } from './qualityDoubleDrop';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -22,16 +23,20 @@ type VetoHistoryOptions={rules:readonly QualityAdditionEntryVeto[];entry:number;
 export function createVetoHistoryReader(o:VetoHistoryOptions){
  const shapes=o.rules.filter(v=>v.enabled&&isFiveMinuteShapeVeto(v));
  const distances=o.rules.filter(v=>v.enabled&&v.kind==='guard-distance');
- if(!shapes.length&&!distances.length)return createLegacyVetoHistoryReader(o);
+ const breaks=o.rules.filter(v=>v.enabled&&v.kind==='box-break');
+ if(!shapes.length&&!distances.length&&!breaks.length)return createLegacyVetoHistoryReader(o);
  validateAdditionVetoes(shapes);
- const original=createLegacyVetoHistoryReader({...o,rules:o.rules.filter(v=>!isFiveMinuteShapeVeto(v)&&v.kind!=='guard-distance')});
+ const original=createLegacyVetoHistoryReader({...o,rules:o.rules.filter(v=>!isFiveMinuteShapeVeto(v)&&v.kind!=='guard-distance'&&v.kind!=='box-break')});
  const readers=shapes.map(v=>{const common={row:o.row,load:o.load,signal:o.signal,origin:o.entry};return {rule:v,read:v.kind==='stall-turn'?createEntryStallTurn5mReader({...common,condition:{...defaultEntryStallTurn5m(),historyHours:v.historyHours!,riseMinutes:v.riseMinutes!,risePct:v.risePct!,stallMinutes:v.stallMinutes!,maxProgressPct:v.maxProgressPct!,turnMinutes:v.turnMinutes!,pullback:undefined}}):createPullbackNewHigh5mReader({...common,historyHours:v.historyHours!,pct:v.pct!})};});
  const distanceReaders=distances.map(v=>createGuardDistanceVetoReader(v,{row:o.row,start:o.entry,load:o.load,signal:o.signal},o.availableStart));
+ const breakReaders=breaks.map(v=>createBoxBreakVetoReader(v,o));
  return async(at:number,minute?:VetoBar):Promise<HistoryVetoResult>=>{
   // Advance every independent lock, even while another rule already blocks.
   const results=[];for(const {rule,read} of readers)results.push({rule,result:await read(at,{openTime:at-M} as ResearchBar)});
+  const breakResults=[];for(const read of breakReaders)breakResults.push(await read(at));
   const old=await original(at);if(old.hit)return old;
   for(const {rule,result}of results)if(result.blocked)return {hit:{kind:rule.kind,label:ADDITION_VETO_LABELS[rule.kind],reading:result.blocked}};
+  for(const result of breakResults)if(result.hit||result.pending)return result;
   let pending:HistoryVetoResult={pending:old.pending??results.find(r=>r.result.pending)?.result.pending};
   for(const read of distanceReaders){
    const result=await read(at,minute);

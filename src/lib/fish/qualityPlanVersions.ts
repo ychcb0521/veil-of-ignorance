@@ -9,7 +9,7 @@ import { freezePreEntryConditions, preEntryConditionsVersion } from './preEntryC
 import { routerFingerprint, routerVersionSummary, validateQualityRouter, equivalentRouterVersion } from './qualityPlanRouter';
 import { qualityAdvantageFingerprint, validateQualityAdvantage, QUALITY_ADVANTAGE_VERSION } from './qualityAdvantage';
 import { DOUBLE_DROP_VERSION } from './qualityDoubleDrop';
-import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, GUARD_DISTANCE_VETO_VERSION, additionVetoIdentity, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
+import { LOWER_WICK_VETO_VERSION, VETO_HISTORY_VERSION, GUARD_DISTANCE_VETO_VERSION, BOX_BREAK_VETO_VERSION, additionVetoIdentity, validateAdditionVetoes, isFiveMinuteShapeVeto } from './qualityAdditionVeto';
 import { compatibleHoldingParameterOrder, compatibleAdditionParameterOrder } from './qualityPlanParameterCompatibility';
 import { freezePreEntryThreeStage, threeStageFingerprint, stableEntryJson, PRE_ENTRY_OPTIONAL_STAGES_VERSION, PRE_ENTRY_SIGNAL_ANCHOR_VERSION } from './preEntryThreeStage';
 import { ENTRY_STALL_TURN_5M_VERSION, PULLBACK_NEW_HIGH_5M_VERSION } from './preEntryStallTurn5m';
@@ -92,6 +92,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
   const distances=sharedVetoes.filter(v=>v.kind==='guard-distance');
   if(distances.length)out.push({key:'shared-guard-distance',part:'共用一票否决',name:distances.some(v=>v.guardDistance?.parameters.timeframe==='1h')?'距 DBL-5 防守线过远（按所选周期）':'距 DBL-5 防守线过远',version:[...new Set(distances.map(v=>v.guardDistance?.version??GUARD_DISTANCE_VETO_VERSION))].join(' · ')+' · 参数 #'+shortFishHash(stableEntryJson(additionVetoIdentity(distances))),summary:'候选时点最近的 1 分钟收盘价高出所选周期防守线超过 N 倍原生 ATR(14) 即否决；缺有效读数时暂不放行。'});
   const shapeVetoes=sharedVetoes.filter(isFiveMinuteShapeVeto);
+  const boxBreaks=sharedVetoes.filter(v=>v.kind==='box-break');
+  validateAdditionVetoes(boxBreaks);
+  if(boxBreaks.length)out.push({key:'shared-box-break',part:'共用一票否决',name:'持仓／筛选期间箱体断裂',version:BOX_BREAK_VETO_VERSION+' · 参数 #'+shortFishHash(stableEntryJson(additionVetoIdentity(boxBreaks))),summary:'按冻结周期和防守线参数，从本次持仓或筛选起点累计原生红叉。首次已确认断裂后，勾选该条件的加仓分支或筛选持续否决；预热事件不计入、重建与重筛不解除、恢复时重建原始历史。本条件本身不卖出，主分支与备选分支各自勾选。'});
   for(const kind of ['stall-turn','pullback-new-high'] as const){const rules=shapeVetoes.filter(v=>v.kind===kind);if(rules.length)out.push({key:'shared-'+kind,part:'共用一票否决',name:kind==='stall-turn'?'滞涨转弱（5分钟）':'猛烈回调未创新高（5分钟）',version:(kind==='stall-turn'?ENTRY_STALL_TURN_5M_VERSION:PULLBACK_NEW_HIGH_5M_VERSION)+' · 参数 #'+shortFishHash(stableEntryJson(rules)),summary:'动态筛选与持仓加仓共用、独立开关；只在5分钟收盘后更新，独立回看和恢复锁定，不改写旧模板。'});}
   const lowerWicks=[...(plan.preEntryThreeStage?.additionVetoes??[]),...(plan.preEntryConditions?.entryVetoes??[]),...(plan.addition?.enabled?[plan.addition,...(plan.addition.rounds??[]),...(plan.addition.alternativeRounds??[])].flatMap(r=>r.entryVetoes??[]):[])].filter(v=>v.enabled&&v.kind==='lower-wick');
   if(lowerWicks.length)out.push({key:'lower-wick-veto',part:'一票否决',name:'长下影线',version:LOWER_WICK_VETO_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(lowerWicks)),summary:'只读已收盘 5 分钟 K 线；下影＝min(开盘,收盘)−最低价，长度达到 ATR 倍数且占整根振幅达到比例时否决，与长上影线对称。'});

@@ -1,4 +1,6 @@
 import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
+import {createVetoHistoryReader} from './qualityVetoHistory';
+import type {QualityAdditionEntryVeto} from './qualityAdditionVeto';
 /** Re-scan closed observations. All custom constraints must hold at one decision time. */
 import { compileFishProgram, evaluateFishProgram, type FishProgram } from './algorithm';
 import type { FishReconstructionLoader } from './reconstruction';
@@ -10,6 +12,7 @@ export interface AdditionCandidate { plan: FishProgram; scale: number; threshold
 const MINUTE=60000;
 interface ScanOptions {
  candidates:AdditionCandidate[];required?:AdditionCandidate[];checkIncrease?:(at:number)=>Promise<AdditionIncreaseObservation[]|undefined>;row:TradeSignal;entry:number;end:number;notional?:number;quantity?:number;after?:number;
+ boxBreakVetoes?:readonly QualityAdditionEntryVeto[];
  priceAt?:ReadonlyMap<number,number>;priceGate?:{referencePrice:number;thresholdPct:number;basis:'real-average'|'cost-line'};
  load:FishReconstructionLoader;signal:AbortSignal;
 }
@@ -97,6 +100,8 @@ export async function findQualityAdditionTrigger(o:ScanOptions):Promise<Omit<Qua
 }
 export async function findQualityAddition(o:ScanOptions):Promise<QualityAdditionFill|undefined>{
  const trigger=await findQualityAdditionTrigger(o);if(!trigger)return;
+ const rules=o.boxBreakVetoes?.filter(v=>v.enabled&&v.kind==='box-break');
+ if(rules?.length){const result=await createVetoHistoryReader({...o,rules})(trigger.at);if(result.hit||result.pending)return;}
  const quantity=o.quantity??o.notional!/trigger.price,notional=o.quantity==null?o.notional!:quantity*trigger.price;
  if(!(quantity>0)||!Number.isFinite(quantity)||!(notional>0)||!Number.isFinite(notional))throw Error('加仓数量或成交金额超出可计算范围');
  return {...trigger,quantity,notional};

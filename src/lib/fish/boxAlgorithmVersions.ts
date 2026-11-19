@@ -132,6 +132,7 @@ export function assertStructureVersionsAvailable(rule: Parameters<typeof structu
 
 /** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */
 export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
+  {id:'addition-holding-box-break-v1',since:'2026-11-19',summary:'新增共用一票否决：持仓期间首次原生防守线红叉确认后，启用该条件的加仓轮次及分支不再加仓；筛选按本轮起点后的断裂持续排除。买入／筛选前预热不计、重建不解除。按冻结周期与参数重建历史，缺数据暂不放行。独立开关，不触发卖出，不改变旧箱体、加仓否决和模板。'},
   {id:'holding-support-second-break-v1',since:'2026-11-19',summary:'独立选用：从本次持仓开始按冻结周期与防守线参数累计原生红叉。第一次断裂锁定本笔全部后续加仓，第二次独立断裂确认后按下一分钟开盘价全仓卖出；预热事件和持续在线下不重复计数。锁定跨暂停续算及加仓分支切换保留，其他保护与卖出仍可更早触发。'},
   {id:'binance-manual-monitor-v1',since:'2026-11-15',summary:'币安 U 本位手动首仓按真实成交数量和价格初始化，冻结所选买后模板；每笔托管动作先核对实际持仓，随后按实际成交续算。'},
   {id:'holding-dbl5-binance-trade-grid-v1',since:'2026-11-13',summary:'持仓监测遇到可核验的币安 AKEUSDT / RAVEUSDT 报价格点错误时，从入场前按交易所公布的精确成交格点重放。保留原始成交价格、箱体、防守线及卖出参数，成功结果单独标记数据修复版本；真实缺口继续报错。'},
