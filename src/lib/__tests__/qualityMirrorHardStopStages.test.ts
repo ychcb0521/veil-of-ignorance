@@ -34,6 +34,12 @@ it('减仓后停用前段一次退出，后段首次只观察、第二次全仓�
  expect(await run(g,20,l,JSON.parse(JSON.stringify(first)))).toEqual(whole);
  expect(await run(g,20,l,await run(g,2,l))).toEqual(whole);
 });
+it('镜像前留空跳过时仍可运行后段，减仓前的断裂不计入后段',async()=>{
+ const g=group([box('after')]),l=path(9),first=await run(g,20,l);
+ expect(first).toMatchObject({status:'open',mirrorFill:{at:T+9*M},boxStopStates:{after:{breakCount:1,firstCountedBreakAt:T+15*M}}});
+ const full=await run(g,30,l);expect(full).toMatchObject({status:'closed',endTime:T+25*M,exitSnapshot:{cause:{id:'after',boxBreakEvidence:{breakCount:2,firstBreakAt:T+15*M}}}});
+ expect(await run(g,30,l,JSON.parse(JSON.stringify(first)))).toEqual(full);
+});
 it('镜像不启用或不成交时始终使用前段，不放行后段',async()=>{
  const g=group();g.mirrorTakeProfit!.enabled=false;
  expect(await run(g)).toMatchObject({status:'closed',endTime:T+5*M,exitSnapshot:{cause:{id:'before'}}});

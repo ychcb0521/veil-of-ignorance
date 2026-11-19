@@ -71,6 +71,35 @@ it('硬性终止真实入口分前后两段；旧全程规则只有明确移入�
  expect(v.find(v=>v.mirrorStage?.stage==='after')?.boxStop?.version).toBe(BOX_SECOND_EXIT_VERSION);
  expect(saved[1]).toEqual(plans[1]);expect(JSON.stringify(plans)).toBe(before);
 },20000);
+it('镜像前可跳过未填条件并保存恢复，镜像后与旧全程不受影响，仍可重新启用前段保护',()=>{
+ const {state,plans}=fixture(),original=plans[0].holdingVetoes[0];
+ plans[0].holdingVetoes=parseHoldingVetoDraft(holdingVetoDraft([original,
+  {...structuredClone(original),mirrorStage:mirrorHardStopStage('before')},
+  {...structuredClone(original),mirrorStage:mirrorHardStopStage('after')}]),BUILTIN_FEATURES);
+ const frozen=JSON.stringify(plans),after=plans[0].holdingVetoes.find(v=>v.mirrorStage?.stage==='after');
+ const view=render(<Settings state={state}/>),front=()=>within(screen.getAllByTestId('quality-hard-stop-before')[0]);
+ expect(front().queryByTestId('quality-hard-stop-before-skipped')).toBeNull();
+ fireEvent.click(front().getByRole('button',{name:'添加否决条件'}));
+ fireEvent.click(front().getByLabelText('镜像前 启用持仓否决 2'));
+ expect(front().getByLabelText('镜像前 持仓否决 2 阈值')).toHaveValue(null);
+ fireEvent.click(front().getByRole('button',{name:'跳过本阶段，不填写'}));
+ expect(front().getByTestId('quality-hard-stop-before-skipped')).toBeVisible();
+ expect(front().queryAllByRole('textbox')).toHaveLength(0);expect(front().queryAllByRole('spinbutton')).toHaveLength(0);
+ fireEvent.click(screen.getByRole('button',{name:/^保存(全部 \d|到)/}));
+ const saved=vi.mocked(state.setSellPlans).mock.lastCall![0] as QualityGroup[];
+ expect(saved[0].holdingVetoes?.some(v=>v.mirrorStage?.stage==='before')).toBe(false);
+ expect(saved[0].holdingVetoes?.find(v=>v.mirrorStage?.stage==='after')).toEqual(after);
+ expect(saved[0].holdingVetoes?.find(v=>!v.mirrorStage)).toEqual(original);
+ expect(saved[1]).toEqual(plans[1]);expect(JSON.stringify(plans)).toBe(frozen);
+ view.unmount();const restored={...state,study:{...state.study,sellPlans:saved},setSellPlans:vi.fn()};render(<Settings state={restored}/>);
+ expect(front().getByTestId('quality-hard-stop-before-skipped')).toBeVisible();
+ fireEvent.click(front().getByRole('button',{name:'添加防守线断裂即退出（镜像前）'}));
+ fireEvent.click(front().getByLabelText('镜像前 启用持仓否决 1'));
+ fireEvent.click(screen.getByRole('button',{name:/^保存(全部 \d|到)/}));
+ const enabled=vi.mocked(restored.setSellPlans).mock.lastCall![0] as QualityGroup[];
+ expect(enabled[0].holdingVetoes?.find(v=>v.mirrorStage?.stage==='before')).toMatchObject({enabled:true,boxStop:{version:'holding-support-break-v1'}});
+ expect(enabled[0].holdingVetoes?.find(v=>v.mirrorStage?.stage==='after')).toEqual(after);
+},20000);
 it('保存后恢复显示各自的启动开关，取消新开关只更改该条件',()=>{
  const original=makeQualityHoldingVeto('cda:CDA','<',-15,true,BUILTIN_FEATURES);
  const saved:QualityHoldingVeto[]=[original,{...structuredClone(original),id:original.id+'-'+V,activation:V}];
