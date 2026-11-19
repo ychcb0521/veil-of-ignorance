@@ -4,10 +4,10 @@ import { SBS5M_DEFAULTS, SBS5M_PARAMETER_SPECS } from '@/lib/sbs5m';
 import { defaultStructureAddition } from '@/lib/fish/qualityAdditionStructure';
 import { CURRENT_GUARD_VERSION, freezeStructureVersions, structureDbl5Timeframe, selectStructureGuardVersion, structureVersionLabel, structureVersions } from '@/lib/fish/boxAlgorithmVersions';
 import { Dbl5GuardVersionSelect } from '@/components/Dbl5GuardVersionSelect';
-import { BOX_STOP_GUARD_REGIMES, boxStopAlgorithmLabel, isBoxBreak, selectBoxStopGuardRegime, selectBoxStopTimeframe, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
+import { BOX_STOP_GUARD_REGIMES, boxStopAlgorithmLabel, isBoxBreak, isBoxSecondBreak, selectBoxStopGuardRegime, selectBoxStopTimeframe, type BoxStopRule } from '@/lib/fish/qualityBoxStop';
 const field='h-7 rounded bg-muted/50 px-2 text-[11px] min-w-0';
 export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definitions,entry=false,admission=false}:{rule:BoxStopRule;onChange:(rule:BoxStopRule)=>void;disabled:boolean;prefix:string;definitions:readonly DeepDigFeatureDef[];entry?:boolean;admission?:boolean}) {
-  const s=rule.structure,def=s.definition,eventMode=isBoxBreak(rule),put=(patch:Partial<BoxStopRule>)=>onChange({...rule,...patch});
+  const s=rule.structure,def=s.definition,eventMode=isBoxBreak(rule),secondBreak=isBoxSecondBreak(rule),put=(patch:Partial<BoxStopRule>)=>onChange({...rule,...patch});
   const timeframe=structureDbl5Timeframe(s), alternate=timeframe!=='5m';
   const {periodLabel,minutes}=DBL5_PROFILES[timeframe];
   const algorithmLabel=boxStopAlgorithmLabel(rule);
@@ -41,7 +41,7 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
       <span>{algorithmLabel} 原生防守线 · 新线事件准入</span>
     </div>:eventMode?<div className="flex flex-wrap items-center gap-2 text-[11px]">
       <label>箱体算法 <select aria-label={prefix+'算法'} className={field} value={algorithmValue} onChange={onAlgorithmChange}>{algorithmOptions}</select></label>
-      <span>{algorithmLabel} 防守线断裂 · {alternate?`${periodLabel}收盘红叉`:'与图中红叉使用同一事件'} · {entry?'确认当分钟不入选':'确认后按下一分钟开盘价卖出全部持仓'}</span>
+      <span>{algorithmLabel} 防守线断裂 · {alternate?`${periodLabel}收盘红叉`:'与图中红叉使用同一事件'} · {secondBreak?'首次断裂停止加仓，第二次断裂后按下一分钟开盘价卖出全部持仓':entry?'确认当分钟不入选':'确认后按下一分钟开盘价卖出全部持仓'}</span>
     </div>:<div className="flex flex-wrap items-center gap-2 text-[11px]">
       <label>箱体算法 <select aria-label={prefix+'算法'} className={field} value={algorithmValue} onChange={onAlgorithmChange}>{algorithmOptions}<option value="sbs5m">SBS-5M 台阶箱体</option></select></label>
       <span className="text-muted-foreground">K 线周期 {timeframe}</span>
@@ -66,7 +66,7 @@ export function FishQualityBoxStopEditor({rule,onChange,disabled,prefix,definiti
         {s.kSource==='guard'&&<>{number('上涨期防守冗余',def.DBL5_config?.guard_trend_atr??DBL5_GUARD_DEFAULTS.guard_trend_atr,n=>dbl('guard_trend_atr',n),0,20)}{number('震荡期防守冗余',def.DBL5_config?.guard_range_atr??DBL5_GUARD_DEFAULTS.guard_range_atr,n=>dbl('guard_range_atr',n),0,20)}{number('防守线震荡断线根数',def.DBL5_config?.guard_range_closes??DBL5_GUARD_DEFAULTS.guard_range_closes,n=>dbl('guard_range_closes',n),1,12,'1')}</>}
       </>:<>{SBS5M_PARAMETER_SPECS.map(spec=><span key={spec.key} title={spec.description}>{number(spec.label+'（'+spec.unit+'）',def.SBS5M_config?.[spec.key]??SBS5M_DEFAULTS[spec.key],n=>putStructure({definition:{...def,SBS5M_config:{...def.SBS5M_config,[spec.key]:n}}}),spec.min,spec.max,spec.integer?'1':'any')}</span>)}<label className="text-[11px]">成交量口径 <select aria-label={prefix+'成交量口径'} className={field} value={def.SBS5M_config?.volume_mode??SBS5M_DEFAULTS.volume_mode} onChange={e=>putStructure({definition:{...def,SBS5M_config:{...def.SBS5M_config,volume_mode:e.target.value as 'quote'|'base_times_close'}}})}><option value="quote">原始成交额</option><option value="base_times_close">成交量 × 收盘价</option></select></label></>}
     </div></details>
-    <p className="text-[10px] leading-relaxed text-muted-foreground">{admission?`使用已收盘的 ${periodLabel}箱体和防守线，只记录新线事件；断裂本身不构成准入。`:entry?(eventMode?`筛选起点后的已收盘 ${periodLabel}结构确认原生红叉时，该分钟不入选。`:`使用已收盘的 ${periodLabel}结构计算 K。触及 K 或达到所选收盘确认条件时，该分钟不入选。`):alternate?(eventMode?`使用已收盘的 ${periodLabel} K 线，按原防守线规则确认红叉。确认后按下一分钟开盘价模拟卖出。`:`使用已收盘的 ${periodLabel} K 线建立止损线，额外冗余使用 ${periodLabel} ATR(14)。选择触价时按分钟行情执行，选择收盘确认时按下一分钟开盘价执行。`):eventMode?'只认持仓后已收盘 5 分钟结构的原生防守线断裂事件。上涨期 1 根收盘严格低于防守线确认；震荡期按细节设置的连续根数确认。影线触碰、尚无支撑或数据缺失不当作红叉。与图表使用相同参数和历史时才能逐点对齐。与其他一票否决、加仓 K 各自独立，任一条件先触发都会先卖出；不改变加仓定量。':'只读已收盘 5 分钟结构，K＝所选基准−冗余；额外 ATR 沿用盘面 ATR(14)。尚无有效线时等待；已有 K 在结构失效后继续保护。K 改变后重新累计收盘确认根数。触价模式开盘越线按开盘价，否则按 K 模拟卖出全部持仓；收盘确认按下一分钟开盘价。独立于加仓 K，不改变加仓定量。'}</p>
+    <p className="text-[10px] leading-relaxed text-muted-foreground">{secondBreak?`从本次持仓开始，只累计已收盘 ${periodLabel}结构的独立防守线红叉。第一次确认后，本笔持仓的主分支、备选分支及后续各轮均停止加仓，防守线重建也不解锁。第二次独立红叉确认后，按下一分钟开盘价全仓卖出。买入前预热事件不计数；持续跌在线下不重复计数。暂停续算保留计数；其他止损、减仓和普通卖出继续生效。`:admission?`使用已收盘的 ${periodLabel}箱体和防守线，只记录新线事件；断裂本身不构成准入。`:entry?(eventMode?`筛选起点后的已收盘 ${periodLabel}结构确认原生红叉时，该分钟不入选。`:`使用已收盘的 ${periodLabel}结构计算 K。触及 K 或达到所选收盘确认条件时，该分钟不入选。`):alternate?(eventMode?`使用已收盘的 ${periodLabel} K 线，按原防守线规则确认红叉。确认后按下一分钟开盘价模拟卖出。`:`使用已收盘的 ${periodLabel} K 线建立止损线，额外冗余使用 ${periodLabel} ATR(14)。选择触价时按分钟行情执行，选择收盘确认时按下一分钟开盘价执行。`):eventMode?'只认持仓后已收盘 5 分钟结构的原生防守线断裂事件。上涨期 1 根收盘严格低于防守线确认；震荡期按细节设置的连续根数确认。影线触碰、尚无支撑或数据缺失不当作红叉。与图表使用相同参数和历史时才能逐点对齐。与其他一票否决、加仓 K 各自独立，任一条件先触发都会先卖出；不改变加仓定量。':'只读已收盘 5 分钟结构，K＝所选基准−冗余；额外 ATR 沿用盘面 ATR(14)。尚无有效线时等待；已有 K 在结构失效后继续保护。K 改变后重新累计收盘确认根数。触价模式开盘越线按开盘价，否则按 K 模拟卖出全部持仓；收盘确认按下一分钟开盘价。独立于加仓 K，不改变加仓定量。'}</p>
     {eventMode && !admission && guardVersion === DBL5_RETEST_GUARD_VERSION &&
       <p className="text-[10px] leading-relaxed text-muted-foreground">遇到需独立回踩的首根低点，新防守线在回踩确认后才生效。等待期间仍检查已有防守线的断裂。</p>}
     <p className="text-[10px] font-mono text-primary">{rule.version} · {structureVersionLabel(s)} · 保存时冻结参数与版本</p>

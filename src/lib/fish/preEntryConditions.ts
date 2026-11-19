@@ -2,7 +2,7 @@ import { shortFishHash } from './algorithm';
 import type { QualityGroup } from './quality';
 import { activeAdditionVetoes, validateAdditionVetoes, type QualityAdditionEntryVeto } from './qualityAdditionVeto';
 import { activeHoldingVetoes, validateHoldingVeto, type QualityHoldingVeto } from './qualityVeto';
-import { freezeBoxStop } from './qualityBoxStop';
+import { freezeBoxStop, isBoxSecondBreak } from './qualityBoxStop';
 import { structureVersions } from './boxAlgorithmVersions';
 
 export const PRE_ENTRY_CONDITIONS_VERSION = 'pre-entry-conditions-v4' as const;
@@ -21,6 +21,7 @@ export function validatePreEntryConditions(value?: PreEntryConditions) {
   if(value.entryVetoes.some(v=>v.enabled&&v.kind==='double-drop'))throw Error('二次急跌目前用于新版加仓否决；动态筛选 v4 不支持，请保留原轮次');
   validateAdditionVetoes(value.entryVetoes);
   for (const veto of activeHoldingVetoes([...value.sellVetoes, ...value.hardVetoes])) {
+    if(veto.boxStop&&isBoxSecondBreak(veto.boxStop))throw Error('首次断裂停加仓、二次断裂终止只适用于实际持仓，不能用于买前筛选');
     if (preEntryPositionOnly(veto.kind)) throw Error('买前筛选没有实际持仓，不能启用加仓仓位或盈亏比条件');
     validateHoldingVeto(veto);
   }

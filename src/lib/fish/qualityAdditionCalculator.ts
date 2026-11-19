@@ -34,6 +34,8 @@ interface Options extends AtrSettings {
  breakevenFloor?:import('./qualityAddition').QualityBreakevenFloorRule;
  previousVetoes?:readonly AdditionVetoRecord[];
  vetoes?:readonly QualityHoldingVeto[];pauseAfterAdditionCount?:number;
+ /** Opt-in first box break: both lanes stop adding at this confirmed native close; protection continues. */
+ additionsBlockedAt?:number;
  candidates:AdditionCandidate[];required?:AdditionCandidate[];
  /** 这一轮的方向条件注定无法满足（如信号没有所选的探测算法）：不再加仓。 */
  unavailable?:string;
@@ -251,7 +253,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const drop=await findSupportDrop(Math.max(after,supportAt??after),scanEnd);
   const completed=carried+fills.length,roundNo=completed+1;
   const roundEntry=o.roundRules?.[completed],alternative=roundNo>=(o.attackFromRound??1)?roundEntry?.alternative:undefined,primaryRule=roundEntry??o;
-  const addsDone=completed>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=drop?Math.min(scanEnd,drop.at):scanEnd;
+  const addsDone=completed>=(o.maxRounds??(o.repeat?Infinity:1))||!!primaryRule.unavailable&&(!alternative||!!alternative.unavailable),addEnd=Math.min(drop?Math.min(scanEnd,drop.at):scanEnd,o.additionsBlockedAt??Infinity);
   if(addsDone||addEnd<=after){if(drop){const exit=await applyDrop(drop);if(exit)return done(exit);after=drop.at;continue;}return done(stop);}
   let round:RoundScan|Options=primaryRule;
   const soldBefore=o.notional/o.entryPrice*(halfMirror?.fraction??0);
