@@ -38,7 +38,7 @@ export function capturedReading(snapshot:Partial<FishSnapshot>) {
  const scale=snapshot.scale??capturedScale(snapshot,fromKey(snapshot));
  const rawReading=Number.isFinite(snapshot.average)?snapshot.average:undefined;
  const value=rawReading!==undefined&&scale!==undefined?rawReading*scale:undefined;
- return {rawReading,reading:Number.isFinite(value)?value:undefined};
+ return {rawReading,scale,reading:Number.isFinite(value)?value:undefined};
 }
 export function libraryCondition(input:Partial<FishSnapshot>,evidence='记录快照'):LibraryCondition {
  const snapshot=knownSnapshot(input),def=capturedDefinition(snapshot),label=fishSourceLabel(snapshot),metric=fishMetricLabel(snapshot);

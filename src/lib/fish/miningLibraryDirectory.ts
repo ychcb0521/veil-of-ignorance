@@ -28,21 +28,51 @@ export interface MiningDirectoryEvidence {
 }
 export interface MiningDetectorReading {
  metric:string;
+ seriesKey:string;
  reading?:number;
  rawReading?:number;
+ percentile?:number;
+ sampleCount?:number;
 }
 export function miningReadingsByEntry({family,records,runs}:MiningDirectoryEvidence) {
  const byEntry=new Map<string,MiningDetectorReading[]>();
+ const distributions=new Map<string,MiningDetectorReading[]>();
+ // A frozen formula can be several KB. Keep it once when identifying comparable series.
+ const definitions=new Map<string,number>();
  for(const record of records){
   const members=miningHitSnapshots(record,runs.get(record.runId));
   const entry=qualityMiningEntryKey(miningRecordSignal(record));
   const readings=byEntry.get(entry)??[];
   for(const member of members){
-   if(miningAlgorithmFamily(miningFamilySnapshot(member))!==family)continue;
-   const item={metric:fishMetricLabel(member),...capturedReading(member)};
-   if(!readings.some(r=>r.metric===item.metric&&r.reading===item.reading&&r.rawReading===item.rawReading))readings.push(item);
+   const feature=miningFamilySnapshot(member);
+   if(miningAlgorithmFamily(feature)!==family)continue;
+   const metric=fishMetricLabel(member), {reading,rawReading,scale}=capturedReading(member);
+   const definition=member.definitionKey??'';
+   if(!definitions.has(definition))definitions.set(definition,definitions.size);
+   const seriesKey=JSON.stringify([feature.featureId??feature.featureShort,metric,definitions.get(definition),member.interval,member.unit,scale]);
+   if(readings.some(r=>r.seriesKey===seriesKey&&r.reading===reading&&r.rawReading===rawReading))continue;
+   const item:MiningDetectorReading={metric,seriesKey,reading,rawReading};
+   readings.push(item);
+   if(reading!==undefined){
+    const series=distributions.get(seriesKey)??[];
+    series.push(item);
+    distributions.set(seriesKey,series);
+   }
   }
   byEntry.set(entry,readings);
+ }
+ for(const series of distributions.values()){
+  series.sort((a,b)=>a.reading!-b.reading!);
+  // Empirical CDF. The last rank in each tie counts all observations <= the value.
+  let end=series.length;
+  while(end>0){
+   const value=series[end-1].reading, percentile=100*end/series.length;
+   do{
+    const item=series[--end];
+    item.percentile=percentile;
+    item.sampleCount=series.length;
+   }while(end>0&&series[end-1].reading===value);
+  }
  }
  return byEntry;
 }

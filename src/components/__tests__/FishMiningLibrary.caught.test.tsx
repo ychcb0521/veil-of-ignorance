@@ -34,6 +34,8 @@ it('sorts the entire searched family by its own frozen hit readings and keeps im
     }
     if(i===1){first.statistic='结果';delete first.scale;}
     if(i===2)first.average=NaN;
+    if(i===61)first.average=0; // Equal readings share the inclusive rank.
+    if(i>=63)first.interval='1h';
     // Older captures can carry the OR mode only on the run.
     delete s.fish!.combination;
     s.fish!.algorithms![2]={...first,featureShort:'CBI-2',average:500};
@@ -48,25 +50,40 @@ it('sorts the entire searched family by its own frozen hit readings and keeps im
   const view=within(await screen.findByTestId('quality-workspace-source-rows'));
   const firstRow=()=>view.getAllByRole('row')[1];
   const sort=(label:string)=>fireEvent.click(view.getByRole('button',{name:'按'+label+'排序'}));
-  expect(view.getAllByRole('columnheader')).toHaveLength(6);
+  const host=view.getByRole('region',{name:'捕捞明细'});
+  expect(view.getAllByRole('columnheader')).toHaveLength(7);
+  expect(view.queryByRole('button',{name:'下一页'})).toBeNull();
+  expect(view.getByRole('table')).toHaveAttribute('aria-rowcount','66');
   expect(firstRow()).toHaveTextContent('FISH64');
-  fireEvent.click(view.getByRole('button',{name:'下一页'}));
+  fireEvent.scroll(host,{target:{scrollTop:28*40}});
+  await waitFor(()=>expect(host.querySelector('tr[aria-rowindex="42"]')).toBeInTheDocument());
   sort('探测数值');
-  expect(view.getByText('1 / 2')).toBeInTheDocument();
+  expect(host.scrollTop).toBe(0);
   expect(firstRow()).toHaveTextContent('FISH00');
   const values=within(firstRow()).getAllByRole('cell')[3];
   expect(values).toHaveTextContent('avg_CBI2_2-60');
   expect(values).toHaveTextContent('second120');
   expect(values).not.toHaveTextContent('500');
+  const percentiles=within(firstRow()).getAllByRole('cell')[4];
+  expect(within(percentiles).getByText('1.64%')).toHaveAttribute('title',expect.stringContaining('61 个有效读数'));
+  expect(within(percentiles).getByText('100.00%')).toHaveAttribute('title','second · 1 个有效读数');
   fireEvent.click(within(firstRow()).getByRole('checkbox'));
   sort('探测数值');
   expect(firstRow()).toHaveTextContent('FISH03');
-  fireEvent.click(view.getByRole('button',{name:'下一页'}));
+  fireEvent.scroll(host,{target:{scrollTop:28*60}});
+  await waitFor(()=>expect(host.querySelector('tr[aria-rowindex="65"]')).toBeInTheDocument());
   const tail=view.getAllByRole('row').slice(-2);
   expect(tail.map(r=>r.textContent).join(' ')).toContain('未记录');
   expect(tail.map(r=>r.textContent).join(' ')).toContain('原值 -5.9（倍率未记录）');
+  expect(tail.map(r=>within(r).getAllByRole('cell')[4].textContent)).toEqual(['—','—']);
   fireEvent.change(view.getByRole('textbox'),{target:{value:'fish6'}});
   expect(within(firstRow()).getAllByRole('cell')[3]).toHaveTextContent(/^0$/);
+  expect(view.getAllByText('98.36%')).toHaveLength(2);
+  sort('百分位');
+  expect(firstRow()).toHaveTextContent('FISH64');
+  sort('百分位');
+  expect(firstRow()).toHaveTextContent('FISH63');
+  expect(within(firstRow()).getAllByRole('cell')[4]).toHaveTextContent('50.00%');
   sort('标的');sort('市场');sort('入场时间');sort('信号时间');
   fireEvent.change(view.getByRole('textbox'),{target:{value:''}});
   sort('选取');
