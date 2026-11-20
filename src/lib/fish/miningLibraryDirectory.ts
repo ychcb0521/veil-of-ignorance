@@ -1,6 +1,7 @@
-import {miningHitSnapshots,miningFamilySnapshot} from './libraryConditions';
-import {emptyMiningLibrary,miningRecordSignal,type FishMiningLibrary,type FishMiningRecord} from './miningLibrary';
-import {newQualityStudy,importQualityFish,qualityComparisonRows,qualityMembers,qualityGroupId} from './quality';
+import {capturedReading,miningHitSnapshots,miningFamilySnapshot} from './libraryConditions';
+import {emptyMiningLibrary,miningRecordSignal,type FishMiningLibrary,type FishMiningRecord,type FishMiningRun} from './miningLibrary';
+import {newQualityStudy,importQualityFish,qualityComparisonRows,qualityMembers,qualityGroupId,qualityMiningEntryKey} from './quality';
+import {fishMetricLabel} from './records';
 import type {FishSnapshot} from './algorithm';
 export function miningAlgorithmFamily(snapshot:Pick<FishSnapshot,'featureId'|'featureShort'|'statistic'>):string{
  const text=(snapshot.featureId??snapshot.featureShort??snapshot.statistic??'').toLowerCase().replace(/[_\s-]/g,'');
@@ -19,6 +20,31 @@ export function miningAlgorithmDirectories(library:FishMiningLibrary){
 export function miningFamilyLibrary(library:FishMiningLibrary,records:FishMiningRecord[]):FishMiningLibrary{
  const ids=new Set(records.map(r=>r.id)),runIds=new Set(records.map(r=>r.runId));
  return {...emptyMiningLibrary(),runs:library.runs.filter(r=>runIds.has(r.id)),records,anchors:library.anchors.filter(a=>runIds.has(a.runId)).map(a=>({...a,recordIds:a.recordIds.filter(id=>ids.has(id))}))};
+}
+export interface MiningDirectoryEvidence {
+ family:string;
+ records:readonly FishMiningRecord[];
+ runs:ReadonlyMap<string,FishMiningRun>;
+}
+export interface MiningDetectorReading {
+ metric:string;
+ reading?:number;
+ rawReading?:number;
+}
+export function miningReadingsByEntry({family,records,runs}:MiningDirectoryEvidence) {
+ const byEntry=new Map<string,MiningDetectorReading[]>();
+ for(const record of records){
+  const members=miningHitSnapshots(record,runs.get(record.runId));
+  const entry=qualityMiningEntryKey(miningRecordSignal(record));
+  const readings=byEntry.get(entry)??[];
+  for(const member of members){
+   if(miningAlgorithmFamily(miningFamilySnapshot(member))!==family)continue;
+   const item={metric:fishMetricLabel(member),...capturedReading(member)};
+   if(!readings.some(r=>r.metric===item.metric&&r.reading===item.reading&&r.rawReading===item.rawReading))readings.push(item);
+  }
+  byEntry.set(entry,readings);
+ }
+ return byEntry;
 }
 export function miningDirectoryStudy(records:readonly FishMiningRecord[],family:string){
  const out=importQualityFish({...newQualityStudy(0),independentFilters:true,sellPlans:[]},records.map(miningRecordSignal),0,'mined');

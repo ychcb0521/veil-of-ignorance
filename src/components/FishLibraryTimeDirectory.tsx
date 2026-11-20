@@ -16,6 +16,7 @@ import {combineDirectoryStudies} from '@/lib/fish/qualityDirectorySelection';
 export interface FishDirectoryItem {
   id:string; at:number; label:string; summary:string; note?:string; sourceRoundId?:string;
   revision?:unknown;
+  renderStudy?:(study:FishQualityStudy,close:()=>void)=>ReactNode;
   templateGroup?:QualityTemplateDirectoryGroup;
   settings?:()=>ReactNode|Promise<ReactNode>;
   purgeable?: boolean;
@@ -243,7 +244,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             {onSelectDirectory&&<div className="px-4 pt-3"><button type="button" className={action+' text-primary'} disabled={loading||!!loadError||!!busy} onClick={async()=>{setBusy(item.id);setError('');try{if(!await onSelectDirectory(item.id,snapshot))throw Error('目录未载入，当前组合表保留，请重试');changeOpen(false);}catch(e){setError(e instanceof Error?e.message:'目录选择失败');}finally{setBusy('');}}}>{busy===item.id?'正在载入…':'选择此目录'}</button></div>}
             {onCopyStudy&&<div className="flex items-center gap-1 px-4 pt-3"><button type="button" disabled={loading||!!loadError||!!busy} onClick={()=>void copy()} className={action+' text-primary'}><Copy className="h-3 w-3"/>{busy===item.id?'正在保存副本…':'复制至组合表'}</button><FishQualityInfo label="复制至组合表说明"><p>先将当前组合表完整归档，再载入这份记录的独立副本。原归档保留，不自动运行。</p></FishQualityInfo></div>}
             {item.note&&<p className="px-4 pt-3 text-[10px] text-muted-foreground">{item.note}</p>}
-            <div key={selectedId}>{renderStudy?.(snapshot,()=>changeOpen(false))??<p className="px-4 py-3 text-xs text-muted-foreground">{snapshot.results.length} 项运行结果 · 可复制至组合表继续操作</p>}</div>
+            <div key={selectedId}>{(item.renderStudy??renderStudy)?.(snapshot,()=>changeOpen(false))??<p className="px-4 py-3 text-xs text-muted-foreground">{snapshot.results.length} 项运行结果 · 可复制至组合表继续操作</p>}</div>
             {typeof item.details==='function'?item.details(()=>changeOpen(false)):item.details}
           </div>}
         </div>;

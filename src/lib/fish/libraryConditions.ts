@@ -26,10 +26,19 @@ function fromKey(s:Partial<FishSnapshot>):Partial<FishSnapshot>{
  return {featureId:p[0]||undefined,statistic:p[1]||undefined,direction:p[3]==='>'||p[3]==='<'?p[3]:undefined,
   threshold:Number.isFinite(threshold)?threshold:undefined,...(Number.isFinite(H)&&H>0?{H}:{})};
 }
+function capturedScale(input:Partial<FishSnapshot>, key:Partial<FishSnapshot>) {
+ const statistic=input.statistic??key.statistic, H=input.H??key.H;
+ return input.scale??(statistic&&statistic!=='结果'&&!H?1:undefined);
+}
 function knownSnapshot(input:Partial<FishSnapshot>):Partial<FishSnapshot>{
  const key=fromKey(input);
- const statistic=input.statistic??key.statistic,H=input.H??key.H;
- return {...key,...Object.fromEntries(Object.entries(input).filter(([,v])=>v!==undefined)),featureShort:input.featureShort??NAMES[input.featureId??key.featureId??''],scale:input.scale??(statistic&&statistic!=='结果'&&!H?1:undefined)};
+ return {...key,...Object.fromEntries(Object.entries(input).filter(([,v])=>v!==undefined)),featureShort:input.featureShort??NAMES[input.featureId??key.featureId??''],scale:capturedScale(input,key)};
+}
+export function capturedReading(snapshot:Partial<FishSnapshot>) {
+ const scale=snapshot.scale??capturedScale(snapshot,fromKey(snapshot));
+ const rawReading=Number.isFinite(snapshot.average)?snapshot.average:undefined;
+ const value=rawReading!==undefined&&scale!==undefined?rawReading*scale:undefined;
+ return {rawReading,reading:Number.isFinite(value)?value:undefined};
 }
 export function libraryCondition(input:Partial<FishSnapshot>,evidence='记录快照'):LibraryCondition {
  const snapshot=knownSnapshot(input),def=capturedDefinition(snapshot),label=fishSourceLabel(snapshot),metric=fishMetricLabel(snapshot);
@@ -37,8 +46,7 @@ export function libraryCondition(input:Partial<FishSnapshot>,evidence='记录快
  const rule=direction&&typeof threshold==='number'&&Number.isFinite(threshold)?`${direction} ${threshold}`:'门槛未记录';
  const scale=snapshot.scale,unit=scale===undefined?'倍率未记录':scale===1?'原值':`显示值（原值 × ${scale}）`;
  const context=`${def?.interval??snapshot.interval??'周期未记录'} · ${unit} · ${def?`公式 ${shortFishHash(snapshot.definitionKey!)}`:'公式未记录'}`;
- const rawReading=typeof snapshot.average==='number'&&Number.isFinite(snapshot.average)?snapshot.average:undefined;
- const reading=rawReading!==undefined&&typeof scale==='number'&&Number.isFinite(scale)?rawReading*scale:undefined;
+ const {rawReading,reading}=capturedReading(snapshot);
  const text=`${label} · ${metric} ${rule}`;
  return {key:JSON.stringify([snapshot.featureId,metric,direction,threshold,snapshot.definitionKey,snapshot.interval,scale,snapshot.H,snapshot.constraints,snapshot.constraintKey]),
   label,metric,rule,text,context,snapshot,...(def??{}),rawReading,reading,evidence};

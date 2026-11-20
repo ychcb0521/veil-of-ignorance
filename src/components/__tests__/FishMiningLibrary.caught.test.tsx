@@ -1,6 +1,7 @@
 // 【用户要求】2026-10-27「捕捞库中命中算法这里只显示探测算法（也就是被哪个算法捕捉到的）」
 import { fireEvent, render, screen, within,waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+import { FishWorkspaceRows } from '@/components/FishWorkspaceSource';
 import { FishMiningLibrary } from '@/components/FishMiningLibrary';
 import { FishBulkDeleteContext } from '@/components/FishBulkDeletion';
 import { emptyMiningLibrary, type FishMiningLibrary as Library } from '@/lib/fish/miningLibrary';
@@ -20,6 +21,61 @@ const snap = (featureShort: string, statistic: string, algorithmKey: string) => 
 const signal = (symbol: string, hit: number[], key = 'k1'): TradeSignal => ({ id: symbol, symbol, timeMs: A - 3_600_000, timeLabel: '', fallbackZone: '', mined: { anchorMs: A },
   fish: { ...snap('CBI-2', 'avg_CBI2_2', key), combination: 'or', hitAlgorithms: hit, algorithms: [snap('CBI-2', 'avg_CBI2_2', 'a'), snap('S', 'avg_state_2', 'b'), snap('CBA', 'avg_CBA_2', 'c')] } });
 const record = (s: TradeSignal, id: string, catchKey: string, at: number) => ({ id, runId: 'r', anchorMs: A, catchKey, signal: s, firstSavedAt: at, updatedAt: at });
+
+it('sorts the entire searched family by its own frozen hit readings and keeps imported selections stable',async()=>{
+  const records=Array.from({length:65},(_,i)=>{
+    const s=signal('FISH'+String(i).padStart(2,'0'),[1]);
+    s.timeMs+=i*1000;
+    const first=s.fish!.algorithms![0];
+    Object.assign(first,{average:(i-60)/10,scale:10,startAverage:999,threshold:-100});
+    if(i===0){
+      s.fish!.algorithms!.push({...first,statistic:'second',average:12});
+      s.fish!.hitAlgorithms=[1,4];
+    }
+    if(i===1){first.statistic='结果';delete first.scale;}
+    if(i===2)first.average=NaN;
+    // Older captures can carry the OR mode only on the run.
+    delete s.fish!.combination;
+    s.fish!.algorithms![2]={...first,featureShort:'CBI-2',average:500};
+    return record(s,s.id,s.id,A);
+  });
+  store.library={...emptyMiningLibrary(),records,runs:[{id:'r',rules:[],combination:'or'}]};
+  const onImport=vi.fn((_study:unknown,_ids:readonly string[])=>true);
+  render(<FishMiningLibrary renderStudy={(snapshot,close,mining)=>
+    <FishWorkspaceRows snapshot={snapshot} mining={mining} onImport={onImport} onDone={close}/>}/>);
+  fireEvent.click(screen.getByRole('button',{name:'打开捕捞库'}));
+  fireEvent.click(await screen.findByLabelText('打开捕捞归档 mining-family-CBI-2'));
+  const view=within(await screen.findByTestId('quality-workspace-source-rows'));
+  const firstRow=()=>view.getAllByRole('row')[1];
+  const sort=(label:string)=>fireEvent.click(view.getByRole('button',{name:'按'+label+'排序'}));
+  expect(view.getAllByRole('columnheader')).toHaveLength(6);
+  expect(firstRow()).toHaveTextContent('FISH64');
+  fireEvent.click(view.getByRole('button',{name:'下一页'}));
+  sort('探测数值');
+  expect(view.getByText('1 / 2')).toBeInTheDocument();
+  expect(firstRow()).toHaveTextContent('FISH00');
+  const values=within(firstRow()).getAllByRole('cell')[3];
+  expect(values).toHaveTextContent('avg_CBI2_2-60');
+  expect(values).toHaveTextContent('second120');
+  expect(values).not.toHaveTextContent('500');
+  fireEvent.click(within(firstRow()).getByRole('checkbox'));
+  sort('探测数值');
+  expect(firstRow()).toHaveTextContent('FISH03');
+  fireEvent.click(view.getByRole('button',{name:'下一页'}));
+  const tail=view.getAllByRole('row').slice(-2);
+  expect(tail.map(r=>r.textContent).join(' ')).toContain('未记录');
+  expect(tail.map(r=>r.textContent).join(' ')).toContain('原值 -5.9（倍率未记录）');
+  fireEvent.change(view.getByRole('textbox'),{target:{value:'fish6'}});
+  expect(within(firstRow()).getAllByRole('cell')[3]).toHaveTextContent(/^0$/);
+  sort('标的');sort('市场');sort('入场时间');sort('信号时间');
+  fireEvent.change(view.getByRole('textbox'),{target:{value:''}});
+  sort('选取');
+  expect(firstRow()).toHaveTextContent('FISH00');
+  expect(within(firstRow()).getByRole('checkbox')).toBeChecked();
+  fireEvent.click(view.getByRole('button',{name:'导入组合表'}));
+  expect(onImport).toHaveBeenCalledTimes(1);
+  expect(onImport.mock.calls[0][1]).toHaveLength(1);
+});
 
 it('shows only the detectors that actually caught each signal, merges identical rows, and keeps alias-repaired fish in the hold', async () => {
   const ake = signal('AKEUSDT', [1, 3]), akeOld = { ...signal('AKEUSDT', [1, 3], 'k-old') };

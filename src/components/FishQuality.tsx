@@ -8,6 +8,7 @@ import {fishCaughtBy} from '@/lib/fish/records';
 import {hasCampaignOnSignalDay,hasTradeOnSignalDay} from '@/lib/signalCampaignIndex';
 import {qualityTemplateImportSelection,templateCampaignPath, type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
 import { isAutomaticPreEntryRound } from '@/lib/fish/preEntryMonitor';
+import type { MiningDirectoryEvidence } from '@/lib/fish/miningLibraryDirectory';
 import { FishWorkspaceRows, FishWorkspaceSource, fishSourceButton } from './FishWorkspaceSource';
 import { Database, Save, Trash2 } from 'lucide-react';
 import {FishCombinationHelp} from './FishCombinationHelp';
@@ -752,8 +753,8 @@ export function FishQuality({ state, mining, capturing, onJump, onRate,canJump,j
     setQuery('');setMonth('');setAlgorithmsState([]);setOpen(true);resetScroll();
     return true;
   };
-  const renderArchive = (snapshot: FishQualityStudy, close?: () => void) => workspace ? <div className="space-y-2 px-4 py-3">
-    <FishWorkspaceRows snapshot={snapshot} onImport={importWorkspace} onDone={close}/>
+  const renderArchive = (snapshot: FishQualityStudy, close?: () => void, directory?:MiningDirectoryEvidence) => workspace || directory ? <div className="space-y-2 px-4 py-3">
+    <FishWorkspaceRows snapshot={snapshot} onImport={workspace ? importWorkspace : undefined} onDone={close} mining={directory}/>
     <FishDeferredDetails summary="查看归档组合表" className="text-[11px]">
       <ArchivedQualityBoard study={snapshot} onJump={onJump} canJump={canJump}/>
     </FishDeferredDetails>

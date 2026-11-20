@@ -1,6 +1,7 @@
 import {FishDeferredDetails,FishLibraryTimeDirectory,libraryDirectoryAction,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
+import {FishWorkspaceRows} from './FishWorkspaceSource';
 import {FishMiningTransfer} from './FishMiningTransfer';
-import {miningAlgorithmDirectories,miningFamilyLibrary,miningDirectoryStudy} from '@/lib/fish/miningLibraryDirectory';
+import {miningAlgorithmDirectories,miningFamilyLibrary,miningDirectoryStudy,type MiningDirectoryEvidence} from '@/lib/fish/miningLibraryDirectory';
 import {downloadDirectoryTables} from '@/lib/fish/qualityLibraryDirectory';
 import type {FishQualityStudy} from '@/lib/fish/quality';
 import {useFishBulkDelete} from './FishBulkDeletion';
@@ -26,7 +27,7 @@ const runText = (run: FishMiningRun) => run.rules.filter(rule => rule.enabled !=
 type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null };
 
 
-type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;account?:string;holdKeys?:()=>ReadonlySet<string>;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onSelectInTable?:(signals:readonly TradeSignal[])=>boolean;renderStudy?:(s:FishQualityStudy, close?: () => void)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>};
+type MiningDirectoryProps={openRequest?:FishDirectoryRequest;onSelectDirectory?:(id:string,s:FishQualityStudy,ids?:string[])=>Promise<boolean>;directoryEdits?:Record<string,{hidden:boolean;at:number}>;onSetHidden?:(id:string,hidden:boolean)=>Promise<boolean>;account?:string;holdKeys?:()=>ReadonlySet<string>;onJump?:(s:TradeSignal)=>void;canJump?:(s:TradeSignal)=>boolean;onSelectInTable?:(signals:readonly TradeSignal[])=>boolean;renderStudy?:(s:FishQualityStudy, close:() => void, directory:MiningDirectoryEvidence)=>ReactNode;onCopyStudy?:(s:FishQualityStudy)=>Promise<boolean>};
 export function FishMiningLibrary(props:MiningDirectoryProps){
  const {account,renderStudy,onCopyStudy,directoryEdits,openRequest,onSelectDirectory}=props;
  const bulk=useFishBulkDelete(); const [library,setLibrary]=useState<FishMiningLibrary>(emptyMiningLibrary),[open,setOpen]=useState(false),[loadError,setLoadError]=useState(''),[loading,setLoading]=useState(false),[attempt,setAttempt]=useState(0);
@@ -59,8 +60,12 @@ export function FishMiningLibrary(props:MiningDirectoryProps){
   const ids=records.map(r=>r.id);
   bulk?.({kind:'mining',ids,targets:miningRecordDeleteTargets(library.records,new Set(ids)),clearAll});
  };
- const items:FishDirectoryItem[]=directories.map(d=>({id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><FishDeferredDetails summary="挖掘记录详情" className="m-4 text-[11px]">{()=> <FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} allRecords={library.records} onClose={close}/>}</FishDeferredDetails>}));
- return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" loading={loading} loadError={loadError} onRetry={()=>setAttempt(a=>a+1)} items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} renderStudy={renderStudy} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
+ const runs=useMemo(()=>new Map(library.runs.map(run=>[run.id,run])),[library.runs]);
+ const items:FishDirectoryItem[]=directories.map(d=>({
+   renderStudy:(snapshot,close)=>renderStudy?renderStudy(snapshot,close,{family:d.family,records:d.records,runs}):
+    <div className="px-4 py-3"><FishWorkspaceRows snapshot={snapshot} mining={{family:d.family,records:d.records,runs}}/></div>,
+   id:d.id,at:0,label:d.family+' 系列',summary:d.records.length+' 条记录',revision:library,study:()=>miningDirectoryStudy(d.records,d.family),details:close=><FishDeferredDetails summary="挖掘记录详情" className="m-4 text-[11px]">{()=> <FishMiningRecords {...props} librarySource={miningFamilyLibrary(library,d.records)} allRecords={library.records} onClose={close}/>}</FishDeferredDetails>}));
+ return <FishLibraryTimeDirectory openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="捕捞库" prefix="mining" kind="algorithm" loading={loading} loadError={loadError} onRetry={()=>setAttempt(a=>a+1)} items={items} edits={edits} onDeleteRecords={bulk?id=>{const directory=directories.find(d=>d.id===id);if(directory)requestDelete(directory.records);}:undefined} onCopyStudy={onCopyStudy} onOpenChange={setOpen} recordCount={library.records.length}
   description={`${loading?'正在核对云端 · ':loadError?'本机 · ':''}${library.records.length} 条记录 · ${directories.length} 类算法 · ${library.anchors.length} 档`}
   transferMenu={({exportLibrary,canExportLibrary})=><FishMiningTransfer key={account} account={account} onExport={exportLibrary} canExport={canExportLibrary}/>}
   dataActions={bulk&&<button type="button" className={libraryDirectoryAction+" text-destructive"} disabled={loading||!!loadError||(!library.records.length&&!library.anchors.length)} onClick={()=>requestDelete(library.records,true)}>清空捕捞库</button>}
