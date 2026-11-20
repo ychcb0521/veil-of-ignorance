@@ -49,6 +49,14 @@ describe('support-drop reduction (reduction calculator formula)', () => {
     expect(additionStopReductionText(orders[1].reduction!)).toBe('减仓 40% @ 115'); expect(additionStopReductionText({ fraction: 0, price: 115 })).toBe('无需减仓');
     expect(orders[0].detail).toContain('保本底线 F 108');
   });
+  it('shows the profit exit above its sizing K before and after a reduction',()=>{
+    const add=fill(2000,120,1,110,.5);
+    add.sizing!.profitFloor=111;
+    const reduced={...cut(3000,115,.4,1.5,170,110,105),previousProfitFloor:111,newProfitFloor:105.5};
+    const orders=qualityAdditionStopOrders({quality_addition_fill:add} as never,{closed_at:new Date(4000).toISOString(),comparison:{sellEvidence:{additionFills:[add],additionReductions:[reduced],triggerCause:{kind:'addition-support',id:'addition-profit-floor',threshold:105.5}}}} as never);
+    expect(orders.map(v=>[v.price,v.floor,v.status])).toEqual([[110,111,'lowered'],[105,105.5,'triggered']]);
+    expect(orders[1].detail).toContain('加仓量按 K 算');
+  });
   it('is off by default, has its own run identity and validates its inputs; the editor round-trips it', () => {
     const rule = { ...defaultQualityAddition(), enabled: true };
     expect(rule.supportReduction).toBeUndefined();

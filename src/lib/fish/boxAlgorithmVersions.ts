@@ -155,6 +155,7 @@ export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
   {id:'holding-dbl5-binance-trade-grid-v2',since:'2026-11-17',summary:'持仓箱体止损支持币安 BULLAUSDT 新旧挂单混合成交。仅在原报价校验失败时按 0.000001 精确校验原始价格，适用于已保存的 5 分钟和 1 小时 DBL-5 箱体规则。真实行情缺口继续报错。'},
   {id:'holding-box-stop-guard-regime-v2',since:'2026-11-13',summary:'DBL-5 防守线可按上涨期实线或震荡期虚线建立与更新硬止损 K。其他线型出现时沿用已有 K，尚无 K 时等待。沿用冻结的防守线算法、冗余、K 更新与成交确认设置。'},
   {id:'breakeven-floor-v2',since:'2026-11-15',summary:'保本底线跟随实际触发加仓的位置 K，按 F 定量；逐笔冻结卖出 K 与 F。防守线按配置收盘或触价，其他位置按触价。'},
+  {id:'breakeven-floor-v4',since:'2026-11-20',summary:'按实际持仓成本和已实现净盈亏在本次位置 K 定量，独立卖出线 F＝K＋m×ATR。触线全仓退出，零倍数盘中触 K，跳空以开盘价成交。'},
   {id:'breakeven-floor-v3',since:'2026-11-19',summary:'保本底线独立按盘中触价执行，覆盖实际成交的防守线、原急拉线及一类／二类急拉线。F＝K−N×ATR；N＝0、F 与 K 重合时也不等待 K 收盘确认。跳空越过 F 按开盘价。定量仍按 F，旧版执行与已保存方案保持原样。'},
   {id:'addition-position-race-v1',since:'2026-11-15',summary:'5 分钟急拉线与原位置可并行或独立启用。同分钟只执行一次，按成功成交共用轮次与持仓账。急拉按已收盘 5 分钟量价确认，无 BTC 依赖。'},
   {id:'addition-k-touch-v1',since:'2026-11-07',summary:'加仓卖出第一行的 K / K′ 改为盘中即时触碰全仓卖出，包含防守线与影线；跳空按开盘价。旧方案未选此版本仍按原规则执行，原加仓定量与 F 不变。'},

@@ -47,7 +47,7 @@ function additionRows(fills: readonly QualityAdditionFill[], entryPrice?: number
       p8(S), p8(K), p8(atr), atr && T ? r(atr / T * 100, 4) : null,
       atr && S != null ? r((T - S) / atr, 4) : null, atr && K != null ? r((T - K) / atr, 4) : null, K != null ? r((1 - K / T) * 100, 4) : null,
       z?.requiredBufferAtr ?? null, z?.supportOffsetAtr ?? null,
-      (ev ? `${additionStructureEvidenceLabel(ev)} · 支撑 C ${p8(ev.supportPrice)} · K 基准 ${p8(ev.basePrice)}${z?.guardK != null ? ` · 防守线 ${p8(z.guardK)}` : ''}` : '指标 · S / T / K')+(z?.positionK!=null?` · 定量 F ${p8(z.support)}`:''),
+      (ev ? `${additionStructureEvidenceLabel(ev)} · 支撑 C ${p8(ev.supportPrice)} · K 基准 ${p8(ev.basePrice)}${z?.guardK != null ? ` · 防守线 ${p8(z.guardK)}` : ''}` : '指标 · S / T / K')+(z?.profitFloor!=null?` · 定量 K ${p8(z.support)} · 卖出 F ${p8(z.profitFloor)}`:z?.positionK!=null?` · 定量 F ${p8(z.support)}`:''),
       p8(f.quantity), r(f.notional, 4), r(invested, 4), p8(z?.coinsBefore), p8(z?.realAverageBefore), r(z?.mirrorAvailableBefore, 4), r(z?.mirrorUsed, 4),
       f.priceGate ? `${f.priceGate.basis === 'real-average' ? '相对持仓均价' : '相对成本线 S'} ${p8(f.priceGate.referencePrice)}：涨 ${r(f.priceGate.gainPct)}%（要求 ≥ ${f.priceGate.thresholdPct}%）` : '',
       f.label ? `${f.label} ${f.direction} ${f.threshold}（读数 ${p8(f.reading)}）` : '',
@@ -94,12 +94,12 @@ export function qualityCampaignSheets(campaign: TradeCampaign): XlsxSheet[] {
     [...(ev?.additionSkips ?? []).map(s => ({ ...s, type: '未加仓' })), ...(ev?.additionVetoes ?? []).map(v => ({ ...v, type: '否决', support: undefined }))]
       .sort((a, b) => a.at - b.at).map(s => [time(s.at), s.round, s.type, s.label, s.reading, p8(s.support)]), ['读数']));
   const cuts = ev?.additionReductions ?? [];
-  const hasSeparateFloor = cuts.some(x => x.newPositionK != null);
+  const hasSeparateFloor = cuts.some(x => x.newPositionK != null || x.newProfitFloor != null);
   sheets.push(sheet('减仓', ['时间', '价格', '减仓比例 %', '减仓币数', '实现盈亏 USDT', '原 K', '新 K', '原支撑', '新支撑', 'ATR',
     ...(hasSeparateFloor ? ['原 F', '新 F'] : [])],
     cuts.map(x => [time(x.at), p8(x.price), r(x.fraction * 100, 4), p8(x.quantity), r(x.realizedPnl, 4),
       p8(x.previousPositionK ?? x.previousK), p8(x.newPositionK ?? x.newK), p8(x.previousSupport), p8(x.newSupport), p8(x.atr),
-      ...(hasSeparateFloor ? [p8(x.previousPositionK == null ? undefined : x.previousK), p8(x.newPositionK == null ? undefined : x.newK)] : [])])));
+      ...(hasSeparateFloor ? [p8(x.previousProfitFloor??(x.previousPositionK == null ? undefined : x.previousK)), p8(x.newProfitFloor??(x.newPositionK == null ? undefined : x.newK))] : [])])));
   sheets.push(sheet('交易事件', ['时间', '事件', '价格', '金额 USDT', '实现盈亏 USDT', '备注'],
     events.map(e => [time(e.timestamp), EVENT_LABELS[e.event_type] ?? e.event_type, p8(e.price), r(e.size_usdt, 4), r(e.realized_pnl, 4), e.notes ?? '']), ['备注']));
   const plusRows=fills.flatMap(fill=>fill.structureEvidence?.guardPlus?[fill.structureEvidence.guardPlus]:[]);

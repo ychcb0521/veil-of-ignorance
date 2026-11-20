@@ -35,7 +35,7 @@ import { qualityComboIdentity, qualityVetoVersion } from './quality';
 import { isStaticDrawdownSell, qualityExitThresholdText, STATIC_DRAWDOWN_SELL_LABEL, STATIC_DRAWDOWN_SELL_VERSION } from './qualityStaticDrawdownSell';
 import { activeHoldingVetoes, holdingVetoIdentity, holdingVetoLabel } from './qualityVeto';
 import { mirrorExecutionIdentity, mirrorIdentity } from './qualityMirror';
-import { ADDITION_POSITION_FLOOR_INTRABAR_VERSION, activeDetectorPrerequisite, additionIdentity, additionIncreaseIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
+import { ADDITION_PROFIT_FLOOR_VERSION, ADDITION_POSITION_FLOOR_INTRABAR_VERSION, activeDetectorPrerequisite, additionIdentity, additionIncreaseIdentity, additionMirrorIdentity, qualityAdditionConditions, qualityAdditionPrerequisites } from './qualityAddition';
 import { qualityVetoStagesIdentity } from './qualityVetoStages';
 import { qualitySellStagesIdentity } from './qualitySellStages';
 import { BOX_K_EXECUTION_VERSIONS, boxAlgorithmVersion, freezeStructureVersions, structureVersions } from './boxAlgorithmVersions';
@@ -191,9 +191,9 @@ export function qualityPlanVersions(plan: QualityGroup): PlanVersionEntry[] {
     const doubleDrops=[a,...(a.rounds??[]),...(a.alternativeRounds??[])].map(r=>(r.entryVetoes??[]).filter(v=>v.enabled&&v.kind==='double-drop')).filter(r=>r.length);
     if(doubleDrops.length)add('addition-support-quality','加仓否决','二次急跌未收复前高',DOUBLE_DROP_VERSION+' · 参数 #'+shortFishHash(JSON.stringify(doubleDrops)), '首次急跌前高与 ATR 固定；连续下跌只计一次，反弹脱离急跌区后再跌计第二次；5 分钟收盘收复前高才恢复。原箱体和防守线输出不变。');
     if(a.breakevenFloor?.enabled&&a.breakevenFloor.version)add('addition-position-floor','保本底线',
-      '跟随最近一次加仓 K · F＝K−'+a.breakevenFloor.atr+' ATR',a.breakevenFloor.version,
-      a.breakevenFloor.version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION?'以实际成交的 K 算 F 并定量；F 独立盘中触价全仓卖出，零 ATR 也生效，不等 K 收盘确认；跳空按开盘价。':'以实际触发位置的 K 算保本底线 F；按 F 定量，K 与 F 分开记录。');
-    if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,a.breakevenFloor?.version?'盘中低于或等于 K 即触发，开盘越线按开盘价。F 继续用于定量。':'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
+      '跟随最近一次加仓 K · F＝K'+(a.breakevenFloor.version===ADDITION_PROFIT_FLOOR_VERSION?'＋':'−')+a.breakevenFloor.atr+' ATR',a.breakevenFloor.version,
+      a.breakevenFloor.version===ADDITION_PROFIT_FLOOR_VERSION?'按整场持仓账在 K 定量。F＝K＋倍数×ATR，盘中触及 F 全仓退出，跳空按开盘价。':a.breakevenFloor.version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION?'以实际成交的 K 算 F 并定量；F 独立盘中触价全仓卖出，零 ATR 也生效，不等 K 收盘确认；跳空按开盘价。':'以实际触发位置的 K 算保本底线 F；按 F 定量，K 与 F 分开记录。');
+    if(a.kStopVersion)add('addition-k-stop','加仓 K 止损','K / K′ 即时触价全仓卖出',a.kStopVersion,a.breakevenFloor?.version===ADDITION_PROFIT_FLOOR_VERSION?'K 用于定量，回落先触及上方 F 即全仓退出。':a.breakevenFloor?.version?'盘中低于或等于 K 即触发，开盘越线按开盘价。F 继续用于定量。':'盘中低于或等于 K 即触发，影线计入；开盘越线按开盘价，否则按 K。保本底线仍用于原定量，防守线收盘确认不再延迟 K。');
     const rounds = a.rounds?.length ? a.rounds : [a];
     [...rounds,...(a.alternativeRounds??[])].forEach((round,index)=>{
       const position=round.impulsePosition;

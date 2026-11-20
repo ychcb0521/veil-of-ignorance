@@ -41,6 +41,32 @@ describe('calculator additions with causal ATR and support stops',()=>{
   expect(r.averageEntryPrice).toBeCloseTo(second.realAverage);expect(r.totalInvested).toBeCloseTo(100+a.notional+b.notional);
   const resumed=await run(g,loader(rising),3,await run(g,loader(rising),2));expect(resumed).toEqual(r);
  });
+ it.each([false,true])('sizes on K and sells the whole campaign above breakeven on a touch, including signed mirror cash flows (ledger=%s)',async ledger=>{
+  const g=group();
+  g.addition={...g.addition!,...(ledger?{positionVersion:HOLDING_LEDGER_ADDITION_VERSION}:{}),breakevenFloor:{enabled:true,atr:.1,version:'breakeven-floor-v4'}};
+  const prices=loader(m=>m<3?rising(m):bar(T+m*M,125,0,116));
+  const plan=freezeQualityPlan(g),r=await run(plan,prices,5);
+  expect(planVersionChanges(plan)).toEqual([]);
+  expect(planVersionChanges({...plan,addition:{...plan.addition!,breakevenFloor:{enabled:true,atr:.1,version:'breakeven-floor-v3'}}})).not.toEqual([]);
+  expect(r).toMatchObject({status:'closed',endPrice:117.2,exitSnapshot:{cause:{id:'addition-profit-floor'}}});
+  const [a,b]=r.additionFills!;
+  expect(b.sizing).toMatchObject({support:117,profitFloor:117.2});
+  const remaining=.5+a.quantity+b.quantity;
+  expect(r.pnl).toBeCloseTo(remaining*.2,9);
+  const data=campaign(plan,r);
+  expect(computeCampaignRealizedPnl(data.campaign,data.legs,data.tradeRecords).total).toBeCloseTo(r.pnl!,9);
+  const checks=evaluateCampaignAddSizing(data);
+  for(const leg of data.legs.filter(l=>l.quality_addition_fill))expect(checks.get(leg.id)?.status).toBe('ok');
+  expect(await run(plan,prices,5,await run(plan,prices,3))).toEqual(r);
+  const gap=await run(plan,loader(m=>m<3?rising(m):bar(T+m*M,115,0,114)),5);
+  expect(gap).toMatchObject({endPrice:115,exitSnapshot:{atOpen:true,cause:{id:'addition-profit-floor'}}});
+  expect(gap.pnl).toBeLessThan(0);
+ });
+ it('rejects a floor at the addition price and does not install a stop on an unfilled addition',async()=>{
+  const g=group();g.addition={...g.addition!,breakevenFloor:{enabled:true,atr:1.5,version:'breakeven-floor-v4'}};
+  const r=await run(g,loader(rising),3);expect(r.additionFills??[]).toEqual([]);expect(r.status).toBe('open');
+  expect(r.additionSkips?.some(s=>s.kind==='profit-floor')).toBe(true);
+ });
  it('only uses five-minute candles already closed at fill time, including after resume',async()=>{
   const requests:{from:number;to:number;step:number}[]=[],g=group();const r=await run(g,loader(rising,999,requests),3);
   expect(r.additionFills?.map(a=>a.sizing?.atr)).toEqual([2,2]);expect(requests.filter(r=>r.step===5*M).every(r=>r.to<=T)).toBe(true);

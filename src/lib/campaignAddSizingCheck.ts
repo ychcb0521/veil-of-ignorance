@@ -520,7 +520,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       }
     }
 
-    const frozen = fill?.positionVersion === HOLDING_LEDGER_ADDITION_VERSION && fill.at === t && fill.price === s2 ? fill.ledger : undefined;
+    const frozen = fill && (fill.positionVersion === HOLDING_LEDGER_ADDITION_VERSION || fill.sizing?.profitFloor != null) && fill.at === t && fill.price === s2 ? fill.ledger : undefined;
     const frozenCoins = fill?.sizing?.coinsBefore;
     if (frozen && positive(frozenCoins) && Number.isFinite(frozen.costBefore) && frozen.costBefore >= 0 && Number.isFinite(frozen.realizedBefore)) {
       x1Coins = frozenCoins;

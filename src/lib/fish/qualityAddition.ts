@@ -100,9 +100,10 @@ export interface QualityGeometricLockRule { enabled: boolean; multiple: number; 
 export const defaultGeometricLock = (): QualityGeometricLockRule => ({ enabled: false, multiple: 10, pct: 1 });
 export const ADDITION_POSITION_FLOOR_VERSION='breakeven-floor-v2' as const;
 export const ADDITION_POSITION_FLOOR_INTRABAR_VERSION='breakeven-floor-v3' as const;
-export const additionFloorFollowsPosition=(version?:string)=>version===ADDITION_POSITION_FLOOR_VERSION||version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION;
-export interface QualityBreakevenFloorRule { enabled: boolean; atr: number; version?:typeof ADDITION_POSITION_FLOOR_VERSION|typeof ADDITION_POSITION_FLOOR_INTRABAR_VERSION }
-export const defaultBreakevenFloor = (): QualityBreakevenFloorRule => ({ enabled: false, atr: BREAKEVEN_FLOOR_DEFAULT_ATR });
+export const ADDITION_PROFIT_FLOOR_VERSION='breakeven-floor-v4' as const;
+export const additionFloorFollowsPosition=(version?:string)=>version===ADDITION_POSITION_FLOOR_VERSION||version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION||version===ADDITION_PROFIT_FLOOR_VERSION;
+export interface QualityBreakevenFloorRule { enabled: boolean; atr: number; version?:typeof ADDITION_POSITION_FLOOR_VERSION|typeof ADDITION_POSITION_FLOOR_INTRABAR_VERSION|typeof ADDITION_PROFIT_FLOOR_VERSION }
+export const defaultBreakevenFloor = (): QualityBreakevenFloorRule => ({ enabled: false, atr: BREAKEVEN_FLOOR_DEFAULT_ATR, version: ADDITION_PROFIT_FLOOR_VERSION });
 /**
  * 保本底线 F 离防守线 K 的 ATR 倍数（缺省值）。2026-11-04 按「组合算法1-8」94 笔回放定为 0.25：
  * 不开 +1823.42（加仓后亏损 7 笔 −13.40）；m＝0.25 +1434.98、去前 2 名 +317.24、加仓后亏损 0；
@@ -134,7 +135,8 @@ export interface QualityReductionFill { at: number; price: number; fraction: num
   newGuardK?: number;
   /** V2 sell prices before and after the move. The original previousK / newK pair holds F and F′. */
   previousPositionK?: number;
-  newPositionK?: number }
+  newPositionK?: number;
+  previousProfitFloor?: number; newProfitFloor?: number }
 export interface QualityDetectorPrerequisite { enabled: boolean; stricterPct: number; featureId?: string }
 export type QualityAdditionRoundRule=Pick<QualityAdditionRule,'source'|'structure'|'impulsePosition'|'impulse1115Position'|'classifiedImpulsePositions'|'stricterPct'|'condition'|'conditions'|'prerequisites'|'indicatorIncrease'|'minGainPct'|'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'entryVetoes'|'detectorPrerequisite'>;
 export const activeDetectorPrerequisite=(r?:Pick<QualityAdditionRoundRule,'detectorPrerequisite'|'source'>)=>r?.source!=='custom'&&r?.detectorPrerequisite?.enabled?r.detectorPrerequisite:undefined;
@@ -161,7 +163,9 @@ export interface QualityAdditionFill {
     /** 保本底线：防守线 K（收盘确认的那条线）与 F 离它的 ATR 倍数；此时 support＝F（加仓量与盘中止损都按 F）。 */
     guardK?:number;
     /** V2 sell K for the winning source; support then stores F for sizing. */
-    positionK?:number;floorAtr?:number;requiredBufferAtr?:number;supportOffsetAtr?:number;coverageGap?:number};
+    positionK?:number;
+    /** v4 keeps support at the sizing price K and freezes the higher exit separately. */
+    profitFloor?:number;floorAtr?:number;requiredBufferAtr?:number;supportOffsetAtr?:number;coverageGap?:number};
 }
 export interface QualityAdditionObservation {
   prsEvidence?:import('../prs6h').PrsRow;

@@ -148,14 +148,15 @@ export function withMinKDistance(e:StructureAdditionEvidence,selected:{k:number;
  const w=structureAdditionK({...e,basePrice:T*(1-minPct/100),buffer:0},atr);
  return w&&w.k<selected.k?{k:w.k,bufferPrice:e.basePrice-w.k,widenedFrom:selected.k,minDistancePct:minPct}:selected;
 }
-export function structureAdditionK(e:Pick<StructureAdditionEvidence,'basePrice'|'buffer'|'bufferUnit'|'tickSize'>,atr:number):{k:number;bufferPrice:number}|undefined {
+export function structureAdditionK(e:Pick<StructureAdditionEvidence,'basePrice'|'buffer'|'bufferUnit'|'tickSize'>,atr:number,offset:'below'|'above'='below'):{k:number;bufferPrice:number}|undefined {
  if(!(atr>0)||!Number.isFinite(atr)||!(e.basePrice>0)||!Number.isFinite(e.basePrice)||!Number.isFinite(e.buffer)||e.buffer<0)return;
  const decimal=(v:number|string)=>{const m=/^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(String(v));if(!m)throw Error('箱体K价格无效');let n=BigInt(m[1]+(m[2]??'')),s=(m[2]?.length??0)-Number(m[3]??0);if(s<0){n*=10n**BigInt(-s);s=0;}return {n,d:10n**BigInt(s)};};
  const base=decimal(e.basePrice),buffer=decimal(e.buffer),scale=decimal(e.bufferUnit==='atr'?atr:e.basePrice),t=decimal(dbl5TickRule(e.tickSize));
  const marginN=buffer.n*scale.n,marginD=buffer.d*scale.d*(e.bufferUnit==='percent'?100n:1n);
- const priceN=base.n*marginD-marginN*base.d,priceD=base.d*marginD;
+ const priceN=base.n*marginD+(offset==='above'?marginN:-marginN)*base.d,priceD=base.d*marginD;
  if(priceN<=0n||t.n<=0n)return;
- const ticks=priceN*t.d/(priceD*t.n);
+ const divisor=priceD*t.n;
+ const ticks=(priceN*t.d+(offset==='above'?divisor-1n:0n))/divisor;
  if(ticks<=0n)return;
  const k=dbl5TickPrice(ticks,e.tickSize);return {k,bufferPrice:e.basePrice-k};
 }

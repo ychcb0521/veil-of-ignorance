@@ -200,8 +200,8 @@ it('saves the breakeven floor in 卖出, default off, and explains it',()=>{
  expect(screen.getByLabelText('保本底线ATR倍数')).toHaveValue(0.25);
  expect(save().breakevenFloor).toBeUndefined();
  fireEvent.click(screen.getByLabelText('防守线保本底线'));fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0.3'}});
- const rule=save();expect(rule.breakevenFloor).toEqual({enabled:true,atr:.3});
- expect(additionDraft(rule).breakevenFloor).toEqual({enabled:true,atr:'0.3'});
+ const rule=save();expect(rule.breakevenFloor).toEqual({enabled:true,atr:.3,version:'breakeven-floor-v4'});
+ expect(additionDraft(rule).breakevenFloor).toEqual({enabled:true,atr:'0.3',version:'breakeven-floor-v4'});
  const bad=additionDraft(rule);bad.breakevenFloor={enabled:true,atr:'-1'};expect(()=>parseAdditionDraft(bad,BUILTIN_FEATURES)).toThrow('保本底线');
  expect(screen.getByRole('button',{name:'保本底线说明'})).toBeInTheDocument();
  cleanup();render(<BreakevenFloorNotes/>);const notes=screen.getByTestId('breakeven-floor-notes');
@@ -450,10 +450,15 @@ it('selects the winning position for F and retains the chosen floor version on r
   fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
   fireEvent.click(screen.getByLabelText('DBL-5-急拉线-1115'));
   fireEvent.click(screen.getByLabelText('防守线保本底线'));
-  expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v3');
+  expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v4');
   expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('严格低于本次 K');
   const rule=save() as QualityAdditionRule;
-  expect(rule.breakevenFloor).toEqual({enabled:true,atr:.25,version:'breakeven-floor-v3'});
+  expect(rule.breakevenFloor).toEqual({enabled:true,atr:.25,version:'breakeven-floor-v4'});
+  expect(screen.getByTestId('addition-breakeven-floor')).toHaveTextContent('本次加仓 K ＋');
+  expect(screen.getByTestId('addition-breakeven-floor')).toHaveTextContent('加仓量按 K 算');
+  fireEvent.change(screen.getByLabelText('保本底线基准'),{target:{value:'breakeven-floor-v3'}});
+  expect(screen.getByTestId('addition-breakeven-floor')).toHaveTextContent('本次加仓 K −');
+  const v3=save();expect(parseAdditionDraft(additionDraft(v3),BUILTIN_FEATURES)).toEqual(v3);
   expect(parseAdditionDraft(additionDraft(rule),BUILTIN_FEATURES)).toEqual(rule);
   fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0'}});
   fireEvent.change(screen.getByLabelText('保本底线基准'),{target:{value:'breakeven-floor-v2'}});
@@ -475,6 +480,6 @@ it.each(['一类','二类'])('defaults a newly enabled %s impulse floor to indep
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  fireEvent.click(screen.getByRole('checkbox',{name:new RegExp('DBL-5-急拉线-1115.*'+kind)}));
  fireEvent.click(screen.getByLabelText('防守线保本底线'));
- expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v3');
- expect(save().breakevenFloor).toMatchObject({version:'breakeven-floor-v3'});
+ expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v4');
+ expect(save().breakevenFloor).toMatchObject({version:'breakeven-floor-v4'});
 });

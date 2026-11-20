@@ -9,7 +9,7 @@ import type { QualityGroup, QualityResult, QualitySample } from './quality';
 import { qualityRuleText } from './quality';
 import { mirrorLabel } from './qualityMirror';
 import { activeHoldingVetoes, holdingVetoLabel } from './qualityVeto';
-import { activeDetectorPrerequisite, additionLabel, qualityAdditionFills, qualityAdditionPrerequisites } from './qualityAddition';
+import { ADDITION_PROFIT_FLOOR_VERSION, additionFloorFollowsPosition, activeDetectorPrerequisite, additionLabel, qualityAdditionFills, qualityAdditionPrerequisites } from './qualityAddition';
 import { structureAdditionLabel } from './qualityAdditionStructure';
 import { activeAdditionVetoes, additionVetoLabel } from './qualityAdditionVeto';
 import { qualitySellStagesLabel } from './qualitySellStages';
@@ -58,7 +58,7 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
     else {
       add(plan, '加仓', '总设置', additionLabel(a), versions.get('addition')?.version ?? '');
       if (a.supportReduction?.enabled) add(plan, '加仓', '支撑线下移减仓', `下移 ≥ ${a.supportReduction.minDropAtr} ATR · 单次最多减 ${a.supportReduction.maxPct}%${a.supportReduction.exitAfterDrops != null ? ` · K 连续下移 ${a.supportReduction.exitAfterDrops} 次全仓卖出` : ''}`);
-      if (a.breakevenFloor?.enabled) add(plan, '加仓', '保本底线', `F＝防守线 K − ${a.breakevenFloor.atr}×ATR：盘中碰到即按 F 卖出全部持仓，加仓量按 F 算`);
+      if (a.breakevenFloor?.enabled) add(plan, '加仓', '保本底线', a.breakevenFloor.version===ADDITION_PROFIT_FLOOR_VERSION?`F＝本次加仓 K ＋ ${a.breakevenFloor.atr}×ATR，加仓量按 K 算，盘中触及 F 全仓退出`:`F＝${additionFloorFollowsPosition(a.breakevenFloor.version)?'本次加仓 K':'防守线 K'} − ${a.breakevenFloor.atr}×ATR：盘中碰到即按 F 卖出全部持仓，加仓量按 F 算`);
       if (a.geometricLock?.enabled) add(plan, '加仓', '保住有效涨幅', `几何仓位 > ${a.geometricLock.multiple} 时止损上移到 Kₘ＋${a.geometricLock.pct}%×首次开仓价，盘中碰线卖出全部持仓`);
       (a.rounds?.length ? a.rounds : [a]).forEach((r, i) => {
         const n = `第 ${i + 1} 次加仓`, dp = activeDetectorPrerequisite(r);

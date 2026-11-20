@@ -10,7 +10,7 @@ export type AdditionStopStatus = 'pending' | 'triggered' | 'replaced' | 'lowered
 export interface AdditionStopOrder { price: number; placedAt: number; status: AdditionStopStatus; endedAt: number | null; label: string; detail: string;
   /** K′ 委托：挪 K 那一刻的支撑下移减仓（比例为 0＝保本价已低于 K′、无需减仓）。 */
   reduction?: { fraction: number; price: number };
-  /** 开着保本底线时：这张委托下方的保本底线 F（盘中碰到即卖；price 是收盘确认的防守线 K）。 */
+  /** 开着保本底线时：这张委托的保本底线 F（盘中碰到即卖；price 是收盘确认的防守线 K）。 */
   floor?: number }
 /** 【用户要求】2026-11-03「K线下移的时候，并未减仓」：减仓并进了各仓位的盈亏、Legs 里看不出来，K′ 委托上直接写出这一刀。 */
 export const additionStopReductionText = (r: NonNullable<AdditionStopOrder['reduction']>) => r.fraction > 0 ? `减仓 ${pct(r.fraction)} @ ${+r.price.toPrecision(8)}` : '无需减仓';
@@ -22,17 +22,17 @@ const pct = (x: number) => `${+(x * 100).toFixed(2)}%`;
 export function qualityAdditionStopOrders(leg: Pick<TradeJournal, 'quality_addition_fill'>, campaign?: Pick<TradeCampaign, 'closed_at' | 'comparison'> | null): AdditionStopOrder[] {
   const fill = leg.quality_addition_fill, sizing = fill?.sizing;
   const separateK = sizing?.positionK ?? sizing?.guardK;
-  const F = separateK != null ? sizing?.support : undefined, K = separateK ?? sizing?.support;
+  const F = sizing?.profitFloor ?? (separateK != null ? sizing?.support : undefined), K = separateK ?? sizing?.support;
   if (!fill || K == null || !(K > 0) || !Number.isFinite(K)) return [];
   const evidence = campaign?.comparison?.sellEvidence, guard = fill.kStopVersion===ADDITION_K_TOUCH_VERSION?undefined:fill.structureEvidence?.guardCloses;
   const widened = fill.structureEvidence?.widenedFrom != null ? `；位置算出的 K ${fill.structureEvidence.widenedFrom} 离加仓价不足 ${fill.structureEvidence.minDistancePct}%，已放宽到此` : '';
-  const label = fill.structureEvidence?.algorithm==='impulse5m' ? '急拉线 K' : fill.structureEvidence?.guardCloses ? '防守线 K' : '支撑线 K', floorText = (f?: number) => f != null ? `；保本底线 F ${+f.toPrecision(8)}：盘中碰到即按 F 卖出全部持仓（加仓量按 F 算）` : '';
+  const label = fill.structureEvidence?.algorithm==='impulse5m' ? '急拉线 K' : fill.structureEvidence?.guardCloses ? '防守线 K' : '支撑线 K', floorText = (f?: number) => f != null ? `；保本底线 F ${+f.toPrecision(8)}：盘中碰到即按 F 卖出全部持仓（加仓量按 ${sizing?.profitFloor!=null?'K':'F'} 算）` : '';
   const detail = (guard ? `${fill.structureEvidence?.algorithmVersion===DBL5_PROFILES['1h'].version?'1 小时':'5 分钟'}收盘连续 ${guard} 根低于 K 才卖出` : '价格碰到 K 即卖出全部持仓') + widened;
   const fills = evidence?.additionFills ?? [], index = fills.findIndex(f => f.at === fill.at), next = index >= 0 ? fills[index + 1] : undefined;
   const moves = (evidence?.additionReductions ?? []).filter(r => r.at > fill.at && (!next || r.at < next.at) && r.newK > 0 && Number.isFinite(r.newK));
   const chain: Omit<AdditionStopOrder, 'status' | 'endedAt'>[] = [{ price: K, placedAt: fill.at, label, detail: detail + floorText(F), ...(F != null ? { floor: F } : {}) },
-    ...moves.map(r => ({ price: r.newPositionK ?? r.newGuardK ?? r.newK, placedAt: r.at, label: label.replace('K', 'K′'), reduction: { fraction: r.fraction, price: r.price }, ...((r.newPositionK ?? r.newGuardK) != null ? { floor: r.newK } : {}),
-      detail: `支撑线从 ${+r.previousSupport.toPrecision(8)} 下移到 ${+r.newSupport.toPrecision(8)}（${+((r.previousSupport - r.newSupport) / r.atr).toFixed(2)} ATR），止损从 ${+(r.previousPositionK??r.previousK).toPrecision(8)} 挪到 ${+(r.newPositionK??r.newK).toPrecision(8)}；${r.fraction > 0 ? `按减仓计算器在 ${+r.price.toPrecision(8)} 减仓 ${pct(r.fraction)}，碰到 ${r.newPositionK!=null?"F′":"K′"} 时整笔约保本` : `整笔保本价已低于 ${r.newPositionK!=null?"F′":"K′"}，无需减仓`}。${detail}${floorText((r.newPositionK ?? r.newGuardK) != null ? r.newK : undefined)}` }))];
+    ...moves.map(r => ({ price: r.newPositionK ?? r.newGuardK ?? r.newK, placedAt: r.at, label: label.replace('K', 'K′'), reduction: { fraction: r.fraction, price: r.price }, ...(r.newProfitFloor!=null?{floor:r.newProfitFloor}:(r.newPositionK ?? r.newGuardK) != null ? { floor: r.newK } : {}),
+      detail: `支撑线从 ${+r.previousSupport.toPrecision(8)} 下移到 ${+r.newSupport.toPrecision(8)}（${+((r.previousSupport - r.newSupport) / r.atr).toFixed(2)} ATR），止损从 ${+(r.previousPositionK??r.previousK).toPrecision(8)} 挪到 ${+(r.newPositionK??r.newK).toPrecision(8)}；${r.fraction > 0 ? `按减仓计算器在 ${+r.price.toPrecision(8)} 减仓 ${pct(r.fraction)}，碰到 ${r.newPositionK!=null?"F′":"K′"} 时整笔约保本` : `整笔保本价已低于 ${r.newPositionK!=null?"F′":"K′"}，无需减仓`}。${detail}${floorText(r.newProfitFloor??((r.newPositionK ?? r.newGuardK) != null ? r.newK : undefined))}` }))];
   const closedAt = campaign?.closed_at ? Date.parse(campaign.closed_at) : null;
   return chain.map((o, i): AdditionStopOrder => {
     const after = chain[i + 1];

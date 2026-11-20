@@ -141,6 +141,27 @@ it.each(['breakeven-floor-v2','breakeven-floor-v3'] as const)('sets a new sell K
   expect(resumed).toEqual(result);
 });
 
+it.each([0,.1])('keeps winning K for sizing and a separate touch floor for guard and impulse (N=%s)', async atr=>{
+  native.at=entry+5*minute;
+  native.support=105;
+  const input=fixture(),breakevenFloor={enabled:true,atr,version:'breakeven-floor-v4' as const};
+  const plain=await findCalculatorAdditions(input);
+  const at=impulseAt+minute;
+  const prices=input.prices.map(b=>b.openTime===at?{...b,low:109.8}:b);
+  const full=await findCalculatorAdditions({...input,prices,breakevenFloor});
+  expect(full.fills).toHaveLength(2);
+  for(const [i,fill] of full.fills.entries()){
+    expect(fill.quantity).toBeCloseTo(plain.fills[i].quantity);
+    expect(fill.sizing!.support).toBe(plain.fills[i].sizing!.support);
+    if(atr===0)expect(fill.sizing!.profitFloor).toBe(fill.sizing!.support);
+    else expect(fill.sizing!.profitFloor).toBeGreaterThan(fill.sizing!.support);
+  }
+  const F=full.fills[1].sizing!.profitFloor!;
+  expect(full.stop).toMatchObject({at,price:F,atOpen:false,cause:{id:'addition-profit-floor',threshold:F}});
+  const resumed=await findCalculatorAdditions({...fixture(full.fills.slice(0,1),entry+15*minute),breakevenFloor,prices:prices.filter(b=>b.openTime>=entry+15*minute)});
+  expect(resumed).toEqual(full);
+});
+
 it('triggers the followed floor before the original guard is confirmed by a close', async () => {
   native.at=entry+5*minute;
   native.support=105;
