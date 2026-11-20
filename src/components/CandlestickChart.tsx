@@ -26,19 +26,20 @@ import {
   TooltipShowType,
   type Chart,
   type KLineData,
+  type CandleTooltipCustomCallbackData,
   type OverlayCreate,
 } from "klinecharts";
 import { chartAmountFields, type KlineData } from "@/hooks/useBinanceData";
-import { DSP_V_STEPS } from "@/lib/dynamicSchellingPoint";
+import { ChartReadout, routeOverlayReadout, type ChartReadoutHandle } from "./ChartReadout";
 import type { PendingOrder } from "@/types/trading";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { IndicatorMenu } from "./IndicatorMenu";
 import type { Dbl5GuardVersion } from '@/lib/dbl5m';
-import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
+import { BarChart3, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, customIndicatorPane, indicatorCalcParams } from "@/lib/customIndicators";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, visibleIndicatorCompanions, customIndicatorPane, indicatorCalcParams } from "@/lib/customIndicators";
 import { researchIndicatorForKc, migrateResearchIndicators, invalidateResearchChartData, inheritForwardResearchChartData } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
@@ -62,10 +63,6 @@ import {
   type InteractionController,
 } from "@/lib/klineChartInteraction";
 import { buildAnalysisOrderPriceBounds } from "@/lib/analysisAutoFitPriceRange";
-import { legendReservedRight, toolbarInsetRight, priceAxisToolbarInset, TOOLBAR_DEFAULT_INSET as TOOLBAR_FALLBACK_INSET } from "@/lib/chartLegendReservation";
-
-/** 画布图例字号：与右上角按钮的 text-[10px] 对齐（klinecharts 默认 12）。 */
-const LEGEND_FONT_SIZE = 10;
 import {
   ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR,
   registerAnalysisAutoFitBoundsIndicator,
@@ -127,15 +124,8 @@ const OVERLAY_INDICATOR_IDS = new Set([
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
 const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", STATE2: "状态 S2", SELLER_CONTROL: "DSP·bc", [IMPULSE_5M_ID]: IMPULSE_5M_DISPLAY_NAME, [CLEAN_ACCELERATION_1116_ID]: CLEAN_ACCELERATION_1116_NAME };
-/** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
-const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
 const COMPANION_ONLY = new Set(["DSP_VA", "DSP_Z"]);
-/** 有 Z 分数开关的菜单项（动态谢林点两项）。 */
-const Z_TOGGLE_TYPES = new Set(["DSP"]);
-/** 这个菜单项是否带副图均线参数（自己或附属副图之一用均线时长）。 */
-const hasAvgParam = (type: string) =>
-  [KLINE_INDICATOR_MAP[type], ...(INDICATOR_COMPANIONS[type] ?? []).map(c => c.kcName)].some(n => n != null && AVG_PARAM_INDICATORS.has(n));
 const COMPANION_KC_NAME: Record<string, string> = Object.fromEntries(
   Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName]),
 );
@@ -630,6 +620,13 @@ function CandlestickChartComponent({
     Object.assign(COMPANION_KC_NAME, Object.fromEntries(Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName])));
   }, [featureDefinitions]);
   useEffect(() => { if (JSON.stringify(indicators) !== JSON.stringify(savedIndicators)) setIndicators(indicators); }, [indicators, savedIndicators, setIndicators]);
+  const readoutRef = useRef<ChartReadoutHandle>(null);
+  const [readoutOpen, setReadoutOpen] = useState(false);
+  const readoutOpenRef = useRef(false);
+  const toggleReadout = () => {
+    readoutOpenRef.current = !readoutOpenRef.current;
+    setReadoutOpen(readoutOpenRef.current);
+  };
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [showOrderLines, setShowOrderLines] = usePersistedState("show_order_lines", true);
   const [showTradeMarkers, setShowTradeMarkers] = usePersistedState("show_trade_markers", false);
@@ -1238,148 +1235,22 @@ function CandlestickChartComponent({
 
 
   // ============================================================
-  // 顶部 OHLC 图例与右上角工具栏的避让
-  // ============================================================
-  /**
-   * 事故：点到 K 线时顶部文字互相重叠（「收 0.124450」压着「指标」、「幅」压着「标记」）。
-   * 画布上的 OHLC 图例与 HTML 工具栏在抢同一条水平带，而图例宽度是数据决定的。
-   * 病根与解法见 `@/lib/chartLegendReservation`；这里只负责**实测**那两个几何量：
-   * 绘图区宽度（不含右侧 Y 轴）与工具栏左边缘（换算到图表容器坐标）。
-   */
-  const legendToolbarRef = useRef<HTMLDivElement>(null);
-  const chartWrapperRef = useRef<HTMLDivElement>(null);
-  const [legendOffsetRight, setLegendOffsetRight] = useState(0);
-  const [toolbarRight, setToolbarRight] = useState(analysisMode ? 88 : TOOLBAR_FALLBACK_INSET);
-
+  // The main pane's legends live in the header; subpanes keep their own legends.
   useEffect(() => {
-    const toolbar = legendToolbarRef.current;
-    const container = containerRef.current;
-    if (!toolbar || !container) return;
-
-    const measure = () => {
-      const chart = chartRef.current;
-      if (!chart) return;
-
-      const main = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
-      const mainWidth = main?.width ?? 0;
-      if (!(mainWidth > 0)) return;
-      const containerRect = container.getBoundingClientRect();
-
-      // ① 工具栏先躲开右上角的布局按钮组（父组件里的，子组件看不见，只能实测）
-      const wrapperEl = chartWrapperRef.current;
-      const controlsEl = wrapperEl?.closest("[data-chart-layout-root]")
-        ?.querySelector("[data-chart-layout-controls]") as HTMLElement | null;
-      const wrapperRect = wrapperEl?.getBoundingClientRect() ?? null;
-      let inset = toolbarRight;
-      if (wrapperRect) {
-        const c = controlsEl?.getBoundingClientRect() ?? null;
-        inset = toolbarInsetRight({
-          wrapper: { top: wrapperRect.top, right: wrapperRect.right, bottom: wrapperRect.bottom },
-          controls: c ? { top: c.top, left: c.left, bottom: c.bottom } : null,
-        });
-        inset = Math.max(inset, priceAxisToolbarInset(wrapperRect.right, containerRect.left, mainWidth));
-        setToolbarRight(prev => (Math.abs(prev - inset) < 1 ? prev : inset));
-      }
-
-      // ② 图例躲开工具栏**移动之后**的左边缘——这里必须**算**，不能读 DOM。
-      //
-      // ResizeObserver 只在尺寸变化时触发，不管位置；而 ① 让工具栏左移时宽度并没变。
-      // 此刻 React 还没把新的 right 写进 DOM，读 getBoundingClientRect() 拿到的是
-      // **移动前**那个更靠右的位置，图例据此少留一截，正好差出几像素的残余重叠。
-      // 工具栏的宽度不受移动影响，所以移动后的左边缘可以直接算出来：确定性的算术，
-      // 优于对渲染时序的假设（用 requestAnimationFrame 等一帧会引入闪烁与时序依赖）。
-      const toolbarWidth = toolbar.getBoundingClientRect().width;
-      const toolbarLeft = wrapperRect
-        ? wrapperRect.right - inset - toolbarWidth - containerRect.left
-        : toolbar.getBoundingClientRect().left - containerRect.left;
-      const reserved = legendReservedRight({ mainWidth, toolbarLeft });
-      // 亚像素抖动不触发 setStyles——那会整张重绘。
-      setLegendOffsetRight(prev => (Math.abs(prev - reserved) < 1 ? prev : reserved));
-    };
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(toolbar);
-    observer.observe(container);
-    const frame = requestAnimationFrame(measure);
-    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
-  }, [analysisMode, indicators.length, toolbarRight, symbol, data.length]);
-
-  // ============================================================
-  // Theme reactivity & Tooltip customization
-  // ============================================================
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
-
-    const baseStyle = chartStylesForMode(theme, showLastPriceLine);
-
-    // Inject custom tooltip formatter to use shorter labels (prevent overlap) and add Price Change Rate
-    const styles = {
-      ...baseStyle,
-      candle: {
-        ...baseStyle.candle,
-        tooltip: {
-          ...baseStyle.candle.tooltip,
-          // 给右上角工具栏让路：图例撞上按钮之前先换行（见上方 legendOffsetRight）
-          offsetRight: legendOffsetRight,
-          // 与右上角按钮的 text-[10px] 对齐；klinecharts 默认 12，画布上比按钮明显更大。
-          text: { ...(baseStyle.candle.tooltip as { text?: object }).text, size: LEGEND_FONT_SIZE },
-          custom: (data: any) => {
-            const current = data.current;
-            if (!current) return [];
-
-            const prev = data.prev;
-            let changePct = 0;
-            if (prev && prev.close > 0) {
-              changePct = ((current.close - prev.close) / prev.close) * 100;
-            }
-            const isUp = changePct >= 0;
-            const color = isUp ? "#0ECB81" : "#F6465D";
-            const sign = isUp ? "+" : "";
-
-            // Format time: YYYY-MM-DD HH:mm
-            const tooltipTransform = displayTimestampTransformRef.current;
-            const d = new Date(tooltipTransform ? tooltipTransform(current.timestamp) : current.timestamp);
-            const timeStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-
-            /**
-             * 字段顺序按**语义分组**，不按 OHLC 惯例。
-             *
-             * 图例是按整个字段自动换行的，所以顺序决定了断点落在哪里。
-             * 分成「这根K线发生了什么」与「区间与成交量」两组：
-             *   开 → 收 → 幅   一笔行情的起点、终点、结果，三个数要连读才有意义
-             *   高 / 低 / 量    区间与成交量，是背景信息
-             * 窄图上断点正好落在两组之间，读起来是两句话而不是被截断的一句；
-             * 宽图上仍是一行。把 幅 排在 收 后面尤其要紧——涨跌幅是收盘价的注解，
-             * 原来它被挤到第二行末尾，与它解释的那个数隔了一整行。
-             */
-            return [
-              { title: "时间 ", value: timeStr },
-              { title: "开 ", value: current.open.toFixed(pricePrecision) },
-              { title: "收 ", value: current.close.toFixed(pricePrecision) },
-              { title: "幅 ", value: { text: `${sign}${changePct.toFixed(2)}%`, color } },
-              { title: "高 ", value: current.high.toFixed(pricePrecision) },
-              { title: "低 ", value: current.low.toFixed(pricePrecision) },
-              { title: "量 ", value: current.volume.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
-            ];
-          },
+    const base = chartStylesForMode(theme, showLastPriceLine);
+    chartRef.current?.setStyles({
+      ...base,
+      candle: { ...base.candle, tooltip: { ...base.candle.tooltip, showRule: TooltipShowRule.Always,
+        custom: ({ current, prev }: CandleTooltipCustomCallbackData) => {
+          readoutRef.current?.quote(current, prev?.close);
+          return [];
         },
-      },
-    };
-
-    // 副图的指标图例(VOL(1) MA1:… / HV(20) 年化σ%:…)同样对齐，
-    // 只改主图会让两种字号并存，看起来像没改干净。
-    (styles as { indicator?: unknown }).indicator = {
-      ...(baseStyle as { indicator?: object }).indicator,
-      tooltip: {
-        ...((baseStyle as { indicator?: { tooltip?: object } }).indicator?.tooltip ?? {}),
-        text: { size: LEGEND_FONT_SIZE },
-      },
-    };
-
-    chart.setStyles(styles);
-  }, [theme, pricePrecision, showLastPriceLine, legendOffsetRight]);
+      } },
+      indicator: { ...base.indicator, tooltip: { ...base.indicator.tooltip, text: { size: 10 },
+        showRule: readoutOpen ? TooltipShowRule.Always : TooltipShowRule.FollowCross,
+      } },
+    });
+  }, [theme, showLastPriceLine, readoutOpen]);
 
   // ============================================================
   // Price/Volume precision
@@ -2279,6 +2150,10 @@ function CandlestickChartComponent({
             isOverlay,
             isOverlay ? { id: "candle_pane" } : { height: 80 },
           );
+          if (isOverlay && paneId === "candle_pane") {
+            const classified = researchItems.some(item => item.id === ind.type && item.core === "DBL5C");
+            routeOverlayReadout(chart, kcName, ind.type, classified, () => readoutOpenRef.current ? readoutRef.current : null);
+          }
           configureResearchPaneAxis(chart, paneId, kcName);
           activeIndicatorPanes.current.set(ind.type, paneId);
         } catch (e) {
@@ -2317,6 +2192,7 @@ function CandlestickChartComponent({
             chart.removeIndicator(paneId, kcName);
           }
         } catch {}
+        readoutRef.current?.remove(type);
         activeIndicatorPanes.current.delete(type);
       }
     }
@@ -2334,6 +2210,7 @@ function CandlestickChartComponent({
       const pane = customIndicatorPane(name);
       const root = paneId ? chart.getDom?.(paneId, DomPosition.Main) : null;
       if (!pane || !root) continue;
+      if (pane.visibility === "showRaw" && researchItems.some(item => item.id === pane.type && item.priceOverlay)) continue;
       const label = `${accountResearchIndicators(featureDefinitions).find(item => item.id === pane.type)?.short ?? INDICATOR_CHIP_LABEL[pane.type] ?? pane.type} · ${pane.visibility === 'showRaw' ? '原值' : pane.visibility === 'showAverage' ? 'avg' : 'avg₂'}`;
       const button = document.createElement('button');
       button.type = 'button';
@@ -2518,15 +2395,84 @@ function CandlestickChartComponent({
   // ============================================================
 
   return (
-    <div className="flex flex-col h-full bg-card">
+    <div data-chart-indicator-host className="relative flex h-full min-h-0 min-w-0 flex-col bg-card">
       {loadingOlder && (
         <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 text-[10px] text-primary animate-pulse font-mono px-2 py-0.5 rounded bg-card/80 border border-border/50">
           加载更早数据...
         </div>
       )}
 
+      <ChartReadout ref={readoutRef} expanded={readoutOpen} onToggle={toggleReadout} hasData={data.length > 0}
+        precision={pricePrecision} timezone={timezone} transform={displayTimestampTransform}>
+        <div className="relative flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            aria-label="指标"
+            aria-expanded={showIndicatorPanel}
+            data-chart-indicator-trigger
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setShowIndicatorPanel((prev) => !prev);
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-150 ease-out origin-top active:scale-[0.98] ${
+              showIndicatorPanel
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>指标</span>
+            {indicators.length > 0 && <span aria-hidden className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">{indicators.length}</span>}
+          </button>
+
+          {!analysisMode && (
+            <>
+              {/* Show order lines toggle */}
+              <button
+                type="button"
+                onClick={() => setShowOrderLines((prev) => !prev)}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+                  showOrderLines
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                }`}
+                aria-label="挂单" aria-pressed={showOrderLines}
+                title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
+              >
+                <ListOrdered className="w-3.5 h-3.5" />
+                <span className="chart-action-label">挂单</span>
+              </button>
+
+              {/* Show/hide trade markers toggle */}
+              <button
+                type="button"
+                onClick={() => setShowTradeMarkers((prev) => !prev)}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
+                  showTradeMarkers
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                }`}
+                aria-label="标记" aria-pressed={showTradeMarkers}
+                title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
+              >
+                {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                <span className="chart-action-label">标记</span>
+              </button>
+            </>
+          )}
+
+          <IndicatorMenu
+            open={showIndicatorPanel}
+            mbi2ChartMinutes={mbi2ChartMinutes}
+            onClose={() => setShowIndicatorPanel(false)}
+            indicators={indicators}
+            onIndicatorsChange={setIndicators}
+          />
+        </div>
+      </ChartReadout>
       {/* Chart area with toolbar */}
-      <div ref={chartWrapperRef} data-chart-indicator-host className="flex-1 min-h-0 relative overflow-hidden">
+      <div className="flex-1 min-h-0 relative overflow-hidden">
         <div
           ref={containerRef}
           data-chart-indicator-boundary
@@ -2548,91 +2494,7 @@ function CandlestickChartComponent({
           />
         )}
 
-        {/* Right side: indicator buttons */}
-        <div
-          ref={legendToolbarRef}
-          style={{ right: toolbarRight }}
-          className="absolute top-0 z-10 flex items-center gap-2 py-1.5 px-2 max-w-[60%] overflow-visible"
-        >
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              setShowIndicatorPanel((prev) => !prev);
-            }}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all duration-150 ease-out origin-top active:scale-[0.98] ${
-              showIndicatorPanel
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>指标</span>
-          </button>
 
-          {!analysisMode && (
-            <>
-              {/* Show order lines toggle */}
-              <button
-                type="button"
-                onClick={() => setShowOrderLines((prev) => !prev)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-                  showOrderLines
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                }`}
-                title={showOrderLines ? "隐藏挂单线" : "显示挂单线"}
-              >
-                <ListOrdered className="w-3.5 h-3.5" />
-                <span>挂单</span>
-              </button>
-
-              {/* Show/hide trade markers toggle */}
-              <button
-                type="button"
-                onClick={() => setShowTradeMarkers((prev) => !prev)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors duration-150 ease-out active:scale-[0.98] ${
-                  showTradeMarkers
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                }`}
-                title={showTradeMarkers ? "隐藏交易标记" : "显示交易标记"}
-              >
-                {showTradeMarkers ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                <span>标记</span>
-              </button>
-            </>
-          )}
-
-          <div className="flex items-center gap-1 max-w-full overflow-x-auto">
-            {indicators.map((ind) => (
-              <span
-                key={ind.type}
-                title={INDICATOR_CHIP_TITLE[ind.type]}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
-                style={{ background: `${ind.color}20`, color: ind.color }}
-              >
-                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.type===CLEAN_ACCELERATION_1116_ID||ind.type===IMPULSE_5M_ID||(ind.type.startsWith('DBL5')&&!ind.type.startsWith('DBL5_1H'))||(accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5')&&!accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5_1H'))||ind.type.startsWith('SBS5M')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('SBS5M')?'5m':ind.type.startsWith('DBL5_1H')||accountResearchIndicators(featureDefinitions).find(item=>item.id===ind.type)?.templateId?.startsWith('DBL5_1H')?'1h':ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
-                <button
-                  type="button"
-                  onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}
-                  className="hover:opacity-70"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </span>
-            ))}
-          </div>
-
-          <IndicatorMenu
-            open={showIndicatorPanel}
-            mbi2ChartMinutes={mbi2ChartMinutes}
-            onClose={() => setShowIndicatorPanel(false)}
-            indicators={indicators}
-            onIndicatorsChange={setIndicators}
-          />
-        </div>
       </div>
     </div>
   );

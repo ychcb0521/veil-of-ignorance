@@ -27,8 +27,13 @@ it('draws at close instead of source open, uses backward crosshair lookup and br
  const atOpen=template.createTooltipDataSource({indicator:{result},crosshair:{dataIndex:1},defaultStyles:{tooltip:{icons:[]}}});expect(atOpen.values[0].value).toBe('100');expect(atOpen.calcParamsText).toContain('基准箱');
 });
 
-it('empty chart panes explain pending, invalid data and unconfirmed structure instead of staying silently blank',()=>{
+it('keeps empty overlay status in the readout and the price plot clear',()=>{
  const item=accountResearchIndicators().find(i=>i.id==='DBL5');registerDbl5Indicator(item);const template=registered.get('DBL5_CUSTOM');
- for(const [row,label] of [[{_pending:1},'正在准备5m历史行情'],[{_DBL5_invalid:1},'历史价格精度不可验证'],[{},'暂无已确认箱体']] as const){const ctx={save:vi.fn(),restore:vi.fn(),setLineDash:vi.fn(),fillText:vi.fn()};template.draw({ctx,indicator:{result:[row]},visibleRange:{from:0,to:1},xAxis:{},yAxis:{}});expect(ctx.fillText.mock.calls[0][0]).toContain(label);}
+ for(const [row,label] of [[{_pending:1},'正在准备5m历史行情'],[{_DBL5_invalid:1},'历史价格精度不可验证'],[{},'无有效箱体']] as const){
+  const ctx={save:vi.fn(),restore:vi.fn(),setLineDash:vi.fn(),beginPath:vi.fn(),stroke:vi.fn(),fillText:vi.fn()},indicator={result:[row]};
+  template.draw({ctx,indicator,visibleRange:{from:0,to:1},xAxis:{},yAxis:{}});
+  expect(ctx.fillText).not.toHaveBeenCalled();
+  expect(template.createTooltipDataSource({indicator,crosshair:{},defaultStyles:{tooltip:{icons:[]}}}).calcParamsText).toContain(label);
+ }
  registerDbl5Indicator(accountResearchIndicators().find(i=>i.id==='DBL5_DISTANCE'));expect(registered.get('DBL5_DISTANCE_CUSTOM').precision).toBe(2);
 });

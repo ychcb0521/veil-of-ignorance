@@ -40,6 +40,12 @@ function registerGuardPlusIndicator(item:ResearchIndicator){
   name:researchKcName(item.id),shortName:item.short,calcParams:[3,0,0],precision:12,
   figures:defenseOnly?[defense]:[defense,{key:'DBL5P_impulse',title:'急拉线: ',type:'line',styles:()=>({color:IMPULSE_1115_LINE_COLOR})},
    {key:'value',title:'组合参考: ',type:'line',styles:()=>({color:'#8795a5'})}],
+  createTooltipDataSource:({indicator,crosshair,defaultStyles})=>{
+   const row=indicator.result[crosshair.dataIndex??indicator.result.length-1];
+   return {name:item.short,calcParamsText:row?._pending?' · 正在准备5m历史行情':' · 5m',
+    icons:defaultStyles.tooltip.icons,values:indicator.figures.map(figure=>({title:figure.title??'',
+     value:Number.isFinite(row?.[figure.key])?Number(row[figure.key].toPrecision(12)).toString():'—'}))};
+  },
   calc:(bars,indicator)=>{
    const source=defenseOnly?accountResearchIndicators().find(indicator=>indicator.id==='DBL5_GUARD_PLUS')!:item;
    const series=researchChartSeries(bars,source,indicator.calcParams[0]);
@@ -90,9 +96,7 @@ function registerGuardPlusIndicator(item:ResearchIndicator){
     }
     drawImpulse1115Reference(params,points);
    }
-   if(rows.some(row=>row._pending===1)){
-    ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText(item.short+' · 正在准备5m历史行情…',8,40);
-   }
+
    ctx.restore();
    return true;
   },
@@ -195,7 +199,7 @@ export function registerDbl5Indicator(item:ResearchIndicator){
       }
     }
     const visible=indicator.result.slice(Math.max(0,visibleRange.from),Math.min(indicator.result.length,visibleRange.to));
-    if(visible.length&&!visible.some(r=>Number.isFinite(r?.value))){const last=visible.at(-1),text=last?._pending?`正在准备${period}历史行情…`:last?._DBL5_invalid===1?'行情或历史价格精度不可验证':last?._DBL5_warmup===1?`连续${period}行情预热中`:'当前可见范围暂无已确认箱体';ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText(item.short+' · '+text,8,40);}
+    if(!price&&visible.length&&!visible.some(r=>Number.isFinite(r?.value))){const last=visible.at(-1),text=last?._pending?`正在准备${period}历史行情…`:last?._DBL5_invalid===1?'行情或历史价格精度不可验证':last?._DBL5_warmup===1?`连续${period}行情预热中`:'当前可见范围暂无已确认箱体';ctx.fillStyle='#8895a5';ctx.font='11px sans-serif';ctx.fillText(item.short+' · '+text,8,40);}
     ctx.restore();
     if(originalCombined)drawImpulse5mReference(params,row=>({value:row.impulse5mValue,confirmedAt:row.impulse5mConfirmedAt}));
     return true;

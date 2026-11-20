@@ -51,7 +51,7 @@ it('在原线价上直接画两色线段，无圆点，分类在确认后才改�
  drawImpulse1115Classification({ctx,visibleRange:{from:0,to:4},xAxis:{convertToPixel:(i:number)=>i*10},yAxis:{convertToPixel:(p:number)=>p}} as never,rows);
  const blue=strokes.find(s=>s.color===IMPULSE_1115_CLASS_COLORS[1]&&s.points.some(p=>p[1]===100))!,orange=strokes.find(s=>s.color===IMPULSE_1115_CLASS_COLORS[2]&&s.points.some(p=>p[1]===100))!;
  expect(blue.points).toContainEqual([30,100]);expect(orange.points).toEqual([[30,100],[40,100]]);
- expect(ctx.arc).not.toHaveBeenCalled();expect(ctx.fill).not.toHaveBeenCalled();expect(texts).toEqual(['一类','二类']);
+ expect(ctx.arc).not.toHaveBeenCalled();expect(ctx.fill).not.toHaveBeenCalled();expect(texts).toEqual([]);
 });
 it('重叠原线按身份匹配分类，断裂后在原冻结价呈现分类，缺口停止绘制',()=>{
  const a={lineId:'a',detectedAt:300000,price:100,mainClass:1,available:true},b={lineId:'b',detectedAt:600000,price:100,mainClass:2,available:true};

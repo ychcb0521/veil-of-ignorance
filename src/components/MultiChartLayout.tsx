@@ -222,14 +222,12 @@ export function MultiChartLayout({
       className={
         isFullscreen
           ? "fixed inset-0 z-[9999] bg-white dark:bg-[#0b0e11] flex flex-col w-full h-full"
-          : "h-full flex flex-col relative"
+          : "isolate h-full flex flex-col relative"
       }
     >
-      {/* 打标记供 CandlestickChart 实测避让——它的工具栏原来写死 right-12(48px)，
-          而这一组实测宽约 94px、占到 102px，必然被压住。见 chartLegendReservation。 */}
       <div
         data-chart-layout-controls
-        className={`absolute right-2 top-1 z-30 flex items-center ${
+        className={`relative z-30 my-0.5 mr-2 flex shrink-0 flex-wrap items-center justify-end self-end ${
           isFullscreen
             ? "gap-2"
             : "gap-0.5 rounded border border-border/50 bg-card/90 px-1 py-0.5"
@@ -342,7 +340,7 @@ export function MultiChartLayout({
               onPricePicked={onPricePicked}
             />
           </div>
-          <div className="bg-background min-h-0 overflow-hidden relative">
+          <div className="bg-background flex min-h-0 flex-col overflow-hidden relative">
             <SubChartIntervalSelector
               interval={subCharts[0].interval}
               onChange={(v) => handleSubIntervalChange(0, v)}
@@ -391,7 +389,7 @@ export function MultiChartLayout({
             />
           </div>
           {[0, 1, 2].map((i) => (
-            <div key={i} className="bg-background min-h-0 overflow-hidden relative">
+            <div key={i} className="bg-background flex min-h-0 flex-col overflow-hidden relative">
               <SubChartIntervalSelector
                 interval={subCharts[i].interval}
                 onChange={(v) => handleSubIntervalChange(i, v)}
@@ -511,7 +509,7 @@ function FullscreenSpeedSelector({ speed, onSetSpeed }: { speed: number; onSetSp
 
 function SubChartIntervalSelector({ interval, onChange }: { interval: string; onChange: (v: string) => void }) {
   return (
-    <div className="absolute top-1 left-10 z-20 flex gap-0.5">
+    <div className="flex shrink-0 flex-wrap gap-0.5 border-b border-border/50 px-2 py-0.5">
       {INTERVALS.map((iv) => (
         <button
           key={iv}

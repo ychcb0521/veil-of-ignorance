@@ -1,0 +1,35 @@
+.chart-readout { container-type: inline-size; }
+.chart-quote-button {
+  container-type: inline-size;
+  flex: 1 1 0%;
+  min-width: 0;
+  border-radius: 4px;
+  text-align: left;
+}
+.chart-quote-button:hover { background: hsl(var(--muted) / .55); }
+.chart-quote-button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
+.chart-quote-line, .chart-readout-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+.chart-quote-line { align-items: center; height: 30px; white-space: nowrap; overflow: hidden; }
+.chart-quote-line svg { width: 12px; height: 12px; flex: none; color: hsl(var(--muted-foreground)); }
+.chart-quote-time, .chart-quote-field > span { color: hsl(var(--muted-foreground)); }
+.chart-quote-field { display: inline-flex; align-items: baseline; gap: 4px; }
+.chart-quote-field b, .chart-quote-line > b { font-weight: 550; }
+.chart-readout-detail { max-height: min(7.5rem, 24vh); overflow: auto; padding: 0 10px 6px; }
+.chart-readout-row { flex-wrap: wrap; padding: 4px 0; color: hsl(var(--muted-foreground)); }
+.chart-readout-row + .chart-readout-row { border-top: 1px solid hsl(var(--border) / .55); }
+.chart-readout-row strong, .chart-readout-row b { font-weight: 550; color: hsl(var(--foreground)); }
+@container (max-width: 620px) { .chart-quote-line [data-field="开"] { display: none; } }
+@container (max-width: 485px) {
+  .chart-quote-line [data-field="高"], .chart-quote-line [data-field="低"] { display: none; }
+}
+@container (max-width: 290px) { .chart-quote-time { display: none; } }
+@container (max-width: 185px) { .chart-quote-line > b { display: none; } .chart-quote-line { gap: 4px; } }
+
+@container (max-width: 360px) { .chart-action-label { display: none; } }

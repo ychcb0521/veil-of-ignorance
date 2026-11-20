@@ -320,6 +320,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     if (!open) return;
     const timer = window.setTimeout(() => {
       const handler = (e: MouseEvent) => {
+        if (anchorRef.current?.closest('[data-chart-indicator-host]')?.querySelector('[data-chart-indicator-trigger]')?.contains(e.target as Node)) return;
         if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose();
       };
       document.addEventListener('mousedown', handler);
@@ -392,7 +393,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
   ], [definitions, researchItems]);
   const filtered = useMemo(() => {
     let items = availableCatalog;
-    if (categoryFilter) {
+    if (categoryFilter === "selected") {
+      items = items.filter(item => indicators.some(indicator => indicator.type === item.id));
+    } else if (categoryFilter) {
       items = items.filter(i => i.category === categoryFilter);
     }
     if (search.trim()) {
@@ -403,7 +406,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
       );
     }
     return items;
-  }, [search, categoryFilter, availableCatalog]);
+  }, [search, categoryFilter, availableCatalog, indicators]);
 
   const toggleIndicator = (item: IndicatorCatalogItem, guardVersion?: Dbl5GuardVersion) => {
     const existing = indicators.find(i => i.type === item.id);
@@ -455,6 +458,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
 
   if (!open) return null;
 
+  const missingSelections = categoryFilter === 'selected'
+    ? indicators.filter(ind => !availableCatalog.some(item => item.id === ind.type) && ind.type.toLowerCase().includes(search.trim().toLowerCase()))
+    : [];
   const overlays = categoryFilter==='custom'?[]:filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
   const customGroups = categoryFilter === 'custom' ? [
@@ -515,6 +521,10 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
         >
           全部
         </button>
+        <button type="button" onClick={() => setCategoryFilter("selected")} aria-pressed={categoryFilter === "selected"}
+          className="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground aria-pressed:bg-primary aria-pressed:text-primary-foreground">
+          已选 {indicators.length}
+        </button>
         {categories.map(cat => (
           <button
             type="button"
@@ -531,7 +541,11 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
       </div>
 
       <div className="max-h-[60vh] min-h-0 flex-auto overflow-y-auto bg-card">
-        {(!INDICATOR_CATALOG?.length || filtered.length === 0) && (
+        {missingSelections.map(ind => <button key={ind.type} type="button" className="flex w-full items-center justify-between px-3 py-2 text-xs hover:bg-muted"
+          aria-label={`移除 ${ind.type}`} onClick={() => onIndicatorsChange(indicators.filter(item => item.type !== ind.type))}>
+          {ind.type}<X aria-hidden className="h-3.5 w-3.5" />
+        </button>)}
+        {filtered.length === 0 && missingSelections.length === 0 && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">未找到匹配的指标</div>
         )}
 
@@ -578,7 +592,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, m
     </div>
   );
   return <>
-    <span ref={anchorRef} aria-hidden data-indicator-menu-anchor className="pointer-events-none absolute right-0 top-10 h-0 w-0"/>
+    <span ref={anchorRef} aria-hidden data-indicator-menu-anchor className="pointer-events-none absolute right-0 top-full h-0 w-0"/>
     {floating && typeof document !== 'undefined' ? createPortal(panel, document.body) : panel}
   </>;
 }
@@ -609,7 +623,9 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         {item.classificationColors?<span aria-label="一类绿色线，二类橙色线" className="flex w-4 shrink-0 flex-col gap-1"><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[1]}}/><span className="h-0.5 w-full" style={{background:IMPULSE_1115_CLASS_COLORS[2]}}/></span>:<span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium leading-4 text-foreground">{item.nameZh}</span>
+            <button type="button" aria-pressed={!!active}
+              onClick={e => { e.stopPropagation(); onToggle(item); }}
+              className="text-left text-xs font-medium leading-4 text-foreground">{item.nameZh}</button>
             {custom && (
               <button
                 type="button"

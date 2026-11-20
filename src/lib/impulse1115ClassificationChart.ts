@@ -51,7 +51,7 @@ export function drawImpulse1115Classification(
   rows:readonly Impulse1115ClassificationChartRow[],
 ) {
   const {ctx,visibleRange,xAxis,yAxis}=params;
-  ctx.save();ctx.font='11px sans-serif';ctx.lineWidth=2.2;ctx.setLineDash([]);
+  ctx.save();ctx.lineWidth=2.2;ctx.setLineDash([]);
   const start=Math.max(0,Math.floor(visibleRange.from)-2),end=Math.min(rows.length,Math.ceil(visibleRange.to)+1);
   for(const mainClass of [1,2] as const){
     ctx.strokeStyle=IMPULSE_1115_CLASS_COLORS[mainClass];ctx.beginPath();let drawn=false;
@@ -65,10 +65,6 @@ export function drawImpulse1115Classification(
       }
     }
     if(drawn)ctx.stroke();
-  }
-  for(const [mainClass,x,label] of [[1,8,'一类'],[2,78,'二类']] as const){
-    ctx.strokeStyle=IMPULSE_1115_CLASS_COLORS[mainClass];ctx.fillStyle=IMPULSE_1115_CLASS_COLORS[mainClass];
-    ctx.beginPath();ctx.moveTo(x,53);ctx.lineTo(x+18,53);ctx.stroke();ctx.fillText(label,x+24,57);
   }
   ctx.restore();
 }
