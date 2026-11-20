@@ -1,5 +1,5 @@
 import {FishClassifiedImpulsePositions,type ClassifiedImpulsePositionDraft} from './FishClassifiedImpulsePositions';
-import {CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,defaultClassifiedImpulsePosition,classifiedImpulsePositionLabel} from '@/lib/fish/qualityClassifiedImpulsePosition';
+import {defaultClassifiedImpulsePosition,classifiedImpulsePositionLabel} from '@/lib/fish/qualityClassifiedImpulsePosition';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
 import {ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, ADDITION_POSITION_FLOOR_INTRABAR_VERSION, additionFloorFollowsPosition, type QualityBreakevenFloorRule, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_PROFILES,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION,dbl5Defaults,dbl5GuardVersion} from '@/lib/dbl5m';
@@ -454,7 +454,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
      </label>
      {([1,2] as const).map(mainClass=><label key={mainClass} className="flex min-w-0 items-center gap-1.5 rounded border border-border/60 p-2 font-medium has-[:checked]:border-primary/60">
       <input className="shrink-0" type="checkbox" checked={!!d.classified?.some(p=>p.mainClass===mainClass)} disabled={!d.enabled} onChange={e=>{
-       const next=e.target.checked?[...(d.classified??[]),{...defaultClassifiedImpulsePosition(mainClass,defs,CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION),bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}].sort((a,b)=>a.mainClass-b.mainClass):d.classified?.filter(p=>p.mainClass!==mainClass);
+       const next=e.target.checked?[...(d.classified??[]),{...defaultClassifiedImpulsePosition(mainClass,defs),bufferAtr:String(DBL5_GUARD_PLUS_PARAMS.bufferAtr),minDistancePct:''}].sort((a,b)=>a.mainClass-b.mainClass):d.classified?.filter(p=>p.mainClass!==mainClass);
        patch(positions(d.impulse,d.impulse1115,e.target.checked?nativeActive:nativeActive||!d.impulse&&!d.impulse1115&&!next?.length,next));
       }}/><span className="min-w-0 [overflow-wrap:anywhere]">{classifiedImpulsePositionLabel(mainClass)}</span>
      </label>)}

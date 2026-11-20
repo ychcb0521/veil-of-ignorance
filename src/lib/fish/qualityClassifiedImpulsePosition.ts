@@ -14,13 +14,14 @@ import type {TradeSignal} from '../signalLibrary';
 
 export const CLASSIFIED_IMPULSE_POSITION_VERSION='holding-impulse-1115-classified-position-v1';
 export const CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION='holding-impulse-1115-classified-line-k-v2';
-export const isClassifiedImpulsePositionVersion=(version?:string)=>version===CLASSIFIED_IMPULSE_POSITION_VERSION||version===CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION;
+export const CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION='holding-impulse-1115-classified-origin-k-v3';
+export const isClassifiedImpulsePositionVersion=(version?:string)=>version===CLASSIFIED_IMPULSE_POSITION_VERSION||version===CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION||version===CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION;
 export interface ClassifiedImpulsePosition {
- version:typeof CLASSIFIED_IMPULSE_POSITION_VERSION|typeof CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION;mainClass:1|2;definition:DeepDigFeatureDef;
+ version:typeof CLASSIFIED_IMPULSE_POSITION_VERSION|typeof CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION|typeof CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION;mainClass:1|2;definition:DeepDigFeatureDef;
  bufferAtr:number;minDistancePct?:number;skipNative?:true;
 }
 export const classifiedImpulsePositionLabel=(mainClass:1|2)=>`DBL-5-急拉线-1115 · ${mainClass===1?'一类':'二类'}`;
-export function defaultClassifiedImpulsePosition(mainClass:1|2,definitions:readonly DeepDigFeatureDef[]=[],version:ClassifiedImpulsePosition['version']=CLASSIFIED_IMPULSE_POSITION_VERSION):ClassifiedImpulsePosition{
+export function defaultClassifiedImpulsePosition(mainClass:1|2,definitions:readonly DeepDigFeatureDef[]=[],version:ClassifiedImpulsePosition['version']=CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION):ClassifiedImpulsePosition{
  const definition=structuredClone(definitions.find(d=>d.id===IMPULSE_1115_CLASSIFICATION_VERSION)??IMPULSE_1115_CLASSIFICATION_DEF);
  definition.DBL5C_parameters={...impulse1115ClassificationParams(definition.DBL5C_parameters)};
  return {version,mainClass,definition,bufferAtr:DBL5_GUARD_PLUS_PARAMS.bufferAtr};
@@ -56,7 +57,7 @@ export function createClassifiedImpulsePositionReader(o:{row:TradeSignal;entry:n
      const line=point.current;if(!line?.available||line.mainClass!==position.mainClass||line.case==null||line.at!==point.at||point.at<=o.entry)return;
      const origin=origins.get(line.lineId),bar=bars[i],base=native.get(point.at);if(!origin||!base?.data_valid)throw Error('急拉分类位置缺少该线冻结起点或原生精度证据');
      const tick=dbl5TickAt(o.row.symbol,bar.openTime,base.tick_size,bar.PRS6H_data_source);if(tick==null)throw Error('急拉分类位置缺少历史报价精度');
-     // v1 retains its frozen origin-low basis. v2 subtracts the manual N from the native line itself.
+     // v3 uses the origin low, matching the unclassified 1115 K. Frozen v1/v2 bases remain executable.
      const basePrice=position.version===CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION?line.price:origin.impulse_origin_low;
      const selected=structureAdditionK({basePrice,buffer:position.bufferAtr,bufferUnit:'atr',tickSize:String(tick)},line.frozenAtr);if(!selected)throw Error('急拉分类位置 K 无效');
      const id=[line.lineId,line.status,line.at,shortFishHash(JSON.stringify(classifiedImpulsePositionsIdentity([position])))].join(':');

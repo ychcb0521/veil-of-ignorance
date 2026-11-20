@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {findCalculatorAdditions} from '../qualityAdditionCalculator';
 import {ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_VERSION,ADDITION_POSITION_FLOOR_INTRABAR_VERSION,type QualityAdditionFill,type QualityBreakevenFloorRule} from '../qualityAddition';
 import {IMPULSE_1115_CONFIGURABLE_K_VERSION} from '@/lib/dbl5GuardPlus';
-import {CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION} from '../qualityClassifiedImpulsePosition';
+import {CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION} from '../qualityClassifiedImpulsePosition';
 import {IMPULSE_5M_VERSION} from '@/lib/impulse5m';
 const M=60_000,at=Date.UTC(2026,7,7),K=100;
 type Options=Parameters<typeof findCalculatorAdditions>[0];
@@ -24,6 +24,8 @@ it.each([
   ['原急拉线1115',IMPULSE_1115_CONFIGURABLE_K_VERSION,undefined],
   ['一类急拉线',CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,1],
   ['二类急拉线',CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,2],
+  ['一类起涨点',CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION,1],
+  ['二类起涨点',CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION,2],
 ] as const)('%s zero ATR floor sells on a wick without a five-minute close',async(_name,algorithmVersion,mainClass)=>{
   const o=fixture({algorithmVersion,mainClass}),result=await findCalculatorAdditions(o);
   expect(result.stop).toMatchObject({at:at+2*M,price:K,atOpen:false,cause:{id:'addition-floor',threshold:K}});

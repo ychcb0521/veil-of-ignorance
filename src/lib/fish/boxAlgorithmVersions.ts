@@ -139,6 +139,7 @@ export function assertStructureVersionsAvailable(rule: Parameters<typeof structu
 
 /** 新增执行层，不改变上方任何原生箱体 / 防守线输出和既有版本说明。 */
 export const BOX_K_EXECUTION_VERSIONS = Object.freeze([
+  {id:'holding-impulse-1115-classified-origin-k-v3',since:'2026-11-20',summary:'一类／二类新设置统一以该急拉的起涨点（起涨低点）计算 K＝起涨点−N×急拉开始前冻结的5m ATR(14)，与原1115位置同一基准，只扣一次N倍；分类仍独立决定触发时机。K按报价步长向下取整，继续应用最小距离，定量与退出共用K；原v1、v2及已存方案、模板不自动转换。'},
   {id:'holding-limited-static-drawdown-v1',since:'2026-11-19',summary:'硬性终止独立新增限制静态最大回撤，按首仓买入价×（1−所设百分比）触价全仓退出，跳空按开盘价；可选镜像前／后阶段。起始有效的限制阈值可冻结为初始风险，镜像后及加仓后新设阈值不回写首仓风险。原自由静态回撤、普通卖出算法及已存模板不转换。'},
   {id:'holding-impulse-1115-classified-line-k-v2',since:'2026-11-19',summary:'一类／二类加仓位置新增 K＝原生急拉线价格−N×该线冻结 ATR，N 可手动设置并按轮次、分类和分支独立保存。按报价步长向下取整，定量和退出共用所选 K；保留原起涨低点基准的 v1 实现与指纹，已存方案不自动转换。'},
   {id:'holding-mirror-hard-stop-stages-v1',since:'2026-11-19',summary:'新增镜像平衡减仓前／后硬性终止阶段。减仓实际成交后前段退出判断停止，后段独立开始计数；盘中成交以收盘可确认时点切换指标，价格保护从下一分钟开始。全程条件、旧版减仓后条件、原生箱体与防守线计算均保留，不自动迁移已存模板。'},

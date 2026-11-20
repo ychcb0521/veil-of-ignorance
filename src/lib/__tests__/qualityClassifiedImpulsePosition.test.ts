@@ -1,11 +1,11 @@
 import {defaultStructureAddition} from '@/lib/fish/qualityAdditionStructure';
 import {it,expect} from 'vitest';
-import {defaultClassifiedImpulsePosition,createClassifiedImpulsePositionReader,CLASSIFIED_IMPULSE_POSITION_VERSION,CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,validateClassifiedImpulsePositions} from '@/lib/fish/qualityClassifiedImpulsePosition';
-import {Dbl5GuardPlusEngine} from '@/lib/dbl5GuardPlus';
+import {defaultClassifiedImpulsePosition,createClassifiedImpulsePositionReader,CLASSIFIED_IMPULSE_POSITION_VERSION,CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION,CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION,validateClassifiedImpulsePositions} from '@/lib/fish/qualityClassifiedImpulsePosition';
+import {Dbl5GuardPlusEngine,IMPULSE_1115_CONFIGURABLE_K_VERSION} from '@/lib/dbl5GuardPlus';
 import {withTuringInitialization} from '@/lib/fish/qualityInitialization';
 import {findCalculatorAdditions} from '@/lib/fish/qualityAdditionCalculator';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
-import {additionIdentity,validateQualityAddition,type QualityAdditionRule,type QualityAdditionFill} from '@/lib/fish/qualityAddition';
+import {ADDITION_K_TOUCH_VERSION,additionIdentity,validateQualityAddition,type QualityAdditionRule,type QualityAdditionFill} from '@/lib/fish/qualityAddition';
 import {freezeQualityPlan,planVersionChanges} from '@/lib/fish/qualityPlanVersions';
 import {makeQualitySellPlan} from '@/lib/fish/qualitySellPlans';
 import {BUILTIN_FEATURES,definitionKey} from '@/lib/deepDig/features';
@@ -25,7 +25,7 @@ const nativeBars=new Map([...seed,...future].map(b=>[b.openTime,{...b,quoteVolum
 const price=(t:number):ResearchBar=>({openTime:t,open:112,high:112.2,low:111.9,close:112,volume:100,quoteVolume:1000,takerBuyVolume:50,takerBuyQuoteVolume:500,DBL5_tick_size:TICK});
 const raw:FishReconstructionLoader=async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>p.step===M?price(a+i*M):nativeBars.get(a+i*p.step)??({...price(a+i*p.step),open:102,high:102.1,low:101.9,close:102}));
 const load=withTuringInitialization(raw,row.symbol,START);
-const position=(mainClass:1|2)=>({...defaultClassifiedImpulsePosition(mainClass),skipNative:true as const});
+const position=(mainClass:1|2)=>({...defaultClassifiedImpulsePosition(mainClass,[],CLASSIFIED_IMPULSE_POSITION_VERSION),skipNative:true as const});
 const options=()=>({row,entry,entryPrice:80,notional:100,end:entry+15*M,since:entry,prices:Array.from({length:15},(_,i)=>price(entry+i*M)),previous:[] as QualityAdditionFill[],repeat:false,maxRounds:1,candidates:[],positionVersion:HOLDING_LEDGER_ADDITION_VERSION,load,signal});
 it('直接复用原生急拉和分类证据，一类形成与二类快速收回各从确认根开始',async()=>{
  const read=createClassifiedImpulsePositionReader({row,entry,load,signal});
@@ -120,5 +120,43 @@ it('新公式冻结实际执行版本，改基准会被指纹拦截；v1 清单�
  expect(planVersionChanges(next).length).toBeGreaterThan(0);
  const frozen=freezeQualityPlan(next);expect(planVersionChanges(JSON.parse(JSON.stringify(frozen)))).toEqual([]);
  expect(frozen.frozenVersions!.find(v=>v.key==='addition-impulse-class-primary-1-1')!.version).toContain(CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION);
+ expect(planVersionChanges(old)).toEqual([]);expect(JSON.stringify(old)).toBe(before);expect(additionIdentity(next.addition)).not.toEqual(additionIdentity(old.addition));
+});
+it.each([1,2] as const)('起涨点 v3 第 %s 类只扣一次 N×冻结 ATR，原生分类及 v1/v2 输出不变',async mainClass=>{
+ const read=createClassifiedImpulsePositionReader({row,entry,load,signal});
+ for(const n of [0,.5,1.3]){
+  const p={...defaultClassifiedImpulsePosition(mainClass),bufferAtr:n,skipNative:true as const};
+  validateClassifiedImpulsePositions([p]);
+  const hit=await read(p,entry,entry+mainClass*F+M,[]),expected=Math.floor((native.impulse_origin_low-n*atr)/Number(TICK)+1e-9)*Number(TICK);
+  expect(hit!.reading).toBeCloseTo(expected,10);expect(hit!.structureEvidence).toMatchObject({algorithmVersion:CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION,basePrice:native.impulse_origin_low,buffer:n,nativeAtr:atr,impulseClassification:{linePrice:line,mainClass}});
+  const oldOrigin=await read({...p,version:CLASSIFIED_IMPULSE_POSITION_VERSION},entry,entry+mainClass*F+M,[]),oldLine=await read({...p,version:CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION},entry,entry+mainClass*F+M,[]);
+  expect(hit!.reading).toBe(oldOrigin!.reading);expect(oldLine!.reading).toBeCloseTo(Math.floor((line-n*atr)/Number(TICK)+1e-9)*Number(TICK),10);
+  expect(hit!.structureEvidence!.impulseClassification).toEqual(oldLine!.structureEvidence!.impulseClassification);
+  expect(hit!.structureEvidence!.eventId).not.toBe(oldOrigin!.structureEvidence!.eventId);expect(hit!.structureEvidence!.eventId).not.toBe(oldLine!.structureEvidence!.eventId);
+ }
+});
+it.each([1,2] as const)('起涨点 v3 第 %s 类与原1115使用同一基准及冻结ATR，定量和卖出K一致',async mainClass=>{
+ const p={...defaultClassifiedImpulsePosition(mainClass,[],CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION),bufferAtr:1.3,skipNative:true as const};
+ const opts={...options(),classifiedImpulsePositions:[p]},whole=await findCalculatorAdditions(opts),original=await findCalculatorAdditions({...options(),impulse1115Position:{version:IMPULSE_1115_CONFIGURABLE_K_VERSION,bufferAtr:1.3,skipNative:true}});
+ expect(whole.fills).toHaveLength(1);expect(original.fills).toHaveLength(1);
+ const fill=whole.fills[0],reference=original.fills[0];
+ expect(fill.structureEvidence!.basePrice).toBe(reference.structureEvidence!.basePrice);expect(fill.structureEvidence!.nativeAtr).toBe(reference.structureEvidence!.guardPlus!.early_impulse_event!.frozen_atr);
+ expect(fill.sizing!.support).toBe(reference.sizing!.support);expect(fill.structureEvidence!.guardPrice).toBe(reference.structureEvidence!.guardPrice);expect(fill.quantity).toBe(reference.quantity);
+ const prior=await findCalculatorAdditions({...opts,end:entry+6*M,prices:opts.prices.slice(0,6)}),resumed=await findCalculatorAdditions({...opts,since:entry+6*M,previous:prior.fills,prices:opts.prices.slice(6)});
+ expect(resumed.fills).toEqual(whole.fills);
+ const widened=await findCalculatorAdditions({...opts,classifiedImpulsePositions:[{...p,minDistancePct:20}],kStopVersion:ADDITION_K_TOUCH_VERSION,prices:opts.prices.map(b=>b.openTime===entry+mainClass*F+M?{...b,open:100,high:101,low:88,close:90}:b)});
+ expect(widened.fills[0].sizing!.support).toBeCloseTo(112*.8,10);expect(widened.fills[0].structureEvidence).toMatchObject({k:widened.fills[0].sizing!.support,minDistancePct:20});
+ expect(widened.stop).toMatchObject({at:entry+mainClass*F+M,price:widened.fills[0].sizing!.support,atOpen:false});
+});
+it('起涨点 v3 主分支与备选各自冻结版本，切换旧公式必须重新冻结运行副本',()=>{
+ const base=makeQualitySellPlan('state:state','<',.4,BUILTIN_FEATURES),oldPosition={...defaultClassifiedImpulsePosition(1,[],CLASSIFIED_IMPULSE_LINE_K_POSITION_VERSION),skipNative:true as const},old=freezeQualityPlan({...base,addition:{enabled:true,source:'structure',stricterPct:10,structure:defaultStructureAddition(),quantityMode:'calculator',quantity:1,classifiedImpulsePositions:[oldPosition]}}),before=JSON.stringify(old);
+ const next=structuredClone(old);next.addition!.classifiedImpulsePositions![0].version=CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION;
+ expect(planVersionChanges(next).length).toBeGreaterThan(0);
+ const frozen=freezeQualityPlan(next);expect(planVersionChanges(JSON.parse(JSON.stringify(frozen)))).toEqual([]);
+ expect(frozen.frozenVersions!.find(v=>v.key==='addition-impulse-class-primary-1-1')).toMatchObject({version:expect.stringContaining(CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION),summary:expect.stringContaining('起涨点')});
+ const round=(mainClass:1|2)=>({source:'structure' as const,stricterPct:10,structure:defaultStructureAddition(),classifiedImpulsePositions:[{...defaultClassifiedImpulsePosition(mainClass,[],CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION),skipNative:true as const,bufferAtr:mainClass}]});
+ const both=freezeQualityPlan({...base,addition:{...next.addition!,maxRounds:1,repeat:false,rounds:[round(1)],alternativeRounds:[round(2)]}});validateQualityAddition(both.addition);
+ expect(planVersionChanges(JSON.parse(JSON.stringify(both)))).toEqual([]);
+ for(const key of ['addition-impulse-class-primary-1-1','addition-impulse-class-alternative-1-2'])expect(both.frozenVersions!.find(v=>v.key===key)!.version).toContain(CLASSIFIED_IMPULSE_ORIGIN_K_POSITION_VERSION);
  expect(planVersionChanges(old)).toEqual([]);expect(JSON.stringify(old)).toBe(before);expect(additionIdentity(next.addition)).not.toEqual(additionIdentity(old.addition));
 });
