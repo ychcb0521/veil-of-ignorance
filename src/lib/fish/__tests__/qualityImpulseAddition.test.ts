@@ -176,3 +176,44 @@ it('triggers the followed floor before the original guard is confirmed by a clos
   expect(legacy.fills[1].sizing).toMatchObject({support:109.9});
   expect(legacy.fills[1].sizing?.positionK).toBeUndefined();
 });
+
+it('activates the second exit only on its fill and resumes the same floor on either lane',async()=>{
+ native.at=entry+5*minute;native.support=105;
+ const input=fixture();
+ const first={enabled:true,atr:0,version:'breakeven-floor-v3' as const};
+ const second={enabled:true,atr:.4,version:'breakeven-floor-v4' as const};
+ const common={breakevenFloor:first,roundExits:{version:'addition-round-exits-v1' as const,overrides:{2:{breakevenFloor:second}}}};
+ const original={...input.roundRules[0],impulsePosition:undefined};
+ const alternative={...original,impulsePosition:{...impulsePosition,skipNative:true as const}};
+ for (const roundRules of [input.roundRules,[original,{...original,alternative}]]){
+  const at=impulseAt+minute;
+  const prices=input.prices.map(b=>b.openTime===at?{...b,low:109.8}:b);
+  const result=await findCalculatorAdditions({...input,...common,prices,roundRules});
+  expect(result.fills).toHaveLength(2);
+  expect(result.fills[0].sizing).toMatchObject({positionK:105,floorAtr:0});
+  expect(result.fills[0].sizing?.profitFloor).toBeUndefined();
+  const secondFill=result.fills[1];
+  expect(secondFill.sizing?.floorAtr).toBe(.4);
+  expect(secondFill.sizing!.profitFloor).toBeGreaterThan(secondFill.sizing!.support);
+  expect(result.stop).toMatchObject({at,price:secondFill.sizing!.profitFloor,cause:{id:'addition-profit-floor'}});
+  const since=entry+15*minute;
+  const resumed=await findCalculatorAdditions({...fixture(result.fills.slice(0,1),since),...common,roundRules,prices:prices.filter(b=>b.openTime>=since)});
+  expect(resumed).toEqual(result);
+ }
+});
+
+it('keeps the first exit when a later candidate is skipped and removes its floor after a successful second fill',async()=>{
+ native.at=entry+5*minute;native.support=105;
+ const input=fixture(),floor={enabled:true,atr:.5,version:'breakeven-floor-v4' as const};
+ const run=await findCalculatorAdditions({...input,breakevenFloor:floor,
+  roundExits:{version:'addition-round-exits-v1',overrides:{2:{}}}});
+ expect(run.fills).toHaveLength(2);
+ expect(run.fills[0].sizing?.profitFloor).toBeGreaterThan(105);
+ expect(run.fills[1].sizing?.profitFloor).toBeUndefined();
+ const at=impulseAt+minute;
+ const result=await findCalculatorAdditions({...input,breakevenFloor:floor,prices:input.prices.map(b=>b.openTime===at?{...b,low:104}:b),
+  roundExits:{version:'addition-round-exits-v1',overrides:{2:{breakevenFloor:{...floor,atr:20}}}}});
+ expect(result.skipped).toEqual(expect.arrayContaining([expect.objectContaining({kind:'profit-floor',round:2})]));
+ expect(result.fills).toHaveLength(1);
+ expect(result.stop).toMatchObject({at,price:result.fills[0].sizing!.profitFloor,cause:{id:'addition-profit-floor'}});
+});

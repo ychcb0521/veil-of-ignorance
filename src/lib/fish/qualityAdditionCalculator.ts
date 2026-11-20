@@ -11,7 +11,7 @@ import {calculateAddPosition,initialAddPositionState} from '@/lib/addPositionCov
 import {compileFishProgram} from './algorithm';
 import {validateFishBars,fishDelay} from './shared';
 import {findQualityAdditionTrigger,requiredConditionsReader,type AdditionCandidate} from './qualityAdditionScan';
-import {ADDITION_PROFIT_FLOOR_VERSION,ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_INTRABAR_VERSION,additionFloorFollowsPosition,additionUsesNativePosition,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
+import {additionExitForRound,type QualityAdditionRule,type QualityBreakevenFloorRule,ADDITION_PROFIT_FLOOR_VERSION,ADDITION_K_TOUCH_VERSION,ADDITION_POSITION_FLOOR_INTRABAR_VERSION,additionFloorFollowsPosition,additionUsesNativePosition,isPartialMirror,qualityAdditionAtrSettings,supportDropReduction,type QualityAdditionFill,type QualityAdditionRoundRule,type QualityReductionFill,type QualitySupportReductionRule} from './qualityAddition';
 import {createStructureAdditionReader,structureAdditionK,withMinKDistance,type StructureAdditionRule} from './qualityAdditionStructure';
 import {additionVetoesNeedMinutes,evaluateAdditionVetoes,additionVetoIdentity,type QualityAdditionEntryVeto,type VetoBar} from './qualityAdditionVeto';
 import {ADDITION_PROFIT_KIND,PAYOFF_STOP_KIND,holdingVetoName,activeHoldingVetoes,payoffStopL0Pct,type QualityHoldingVeto,type QualityExitCause} from './qualityVeto';
@@ -26,6 +26,7 @@ type Position='native'|'impulse'|'impulse1115'|'class1'|'class2';
 type AtrSettings=Pick<QualityAdditionRoundRule,'entryBufferAtr'|'supportOffsetAtr'|'entryDistanceAtr'|'gainBasis'|'indicatorIncrease'|'impulsePosition'|'impulse1115Position'|'classifiedImpulsePositions'>&{entryVetoes?:QualityAdditionEntryVeto[]};
 type RoundScan={candidates:AdditionCandidate[];required?:AdditionCandidate[];unavailable?:string;minGainPct?:number;structure?:StructureAdditionRule}&AtrSettings;
 interface Options extends AtrSettings {
+ roundExits?:QualityAdditionRule['roundExits'];
  positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;
  kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
  advantage?: import('./qualityAdvantage').QualityAdvantageRule;
@@ -74,15 +75,15 @@ export interface AdditionVetoRecord {at:number;round:number;kind:string;label:st
 export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityAdditionFill[];stop?:SupportStop;stageBoundary?:{at:number;price:number};vetoed?:AdditionVetoRecord[];reductions?:QualityReductionFill[];skipped?:AdditionSkipRecord[];guardPlus?:Dbl5GuardPlusRow}>{
  // 镜像止盈须已成交且留有余仓（2026-11-02 起不限 50%，平衡公式对任意比例成立）。镜像成交那一分钟本身不能排出先后，不加仓。
  const independent=o.positionVersion===HOLDING_LEDGER_ADDITION_VERSION,halfMirror=o.mirror;if(!independent&&!isPartialMirror(halfMirror))return {fills:[]};
- const profitRule=o.breakevenFloor?.enabled&&o.breakevenFloor.version===ADDITION_PROFIT_FLOOR_VERSION?o.breakevenFloor:undefined;
- const ledgerSizing=independent||!!profitRule;
- const raisedFloor=(k:number,atr:number,evidence?:QualityAdditionFill['structureEvidence'])=>{
+ const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
+ const carried=o.carriedAdditions??0;
+ const activeExit=()=>additionExitForRound(o,carried+fills.length);
+ const profitRuleFor=(floor?:QualityBreakevenFloorRule)=>floor?.enabled&&floor.version===ADDITION_PROFIT_FLOOR_VERSION?floor:undefined;
+ const raisedFloor=(profitRule:QualityBreakevenFloorRule|undefined,k:number,atr:number,evidence?:QualityAdditionFill['structureEvidence'])=>{
   if(!profitRule)return;
   if(!evidence)return k+profitRule.atr*atr;
   return structureAdditionK({...evidence,basePrice:k,buffer:profitRule.atr,bufferUnit:'atr'},atr,'above')?.k;
  };
- const fills=[...o.previous],priceAt=new Map(o.prices.map(b=>[b.openTime,b.open]));
- const carried=o.carriedAdditions??0;
  let after=Math.max(o.entry,o.since-MINUTE,independent?o.entry:halfMirror!.at,fills.at(-1)?.at??o.entry);const readAtr=atrReader(o),readStructure=createStructureAdditionReader(o),prerequisiteReaders=new Map<readonly AdditionCandidate[],(at:number)=>Promise<import('./qualityAddition').QualityAdditionObservation[]|undefined>>();
  const readIncrease=createAdditionIncreaseReader(o);
  let readImpulse:ReturnType<typeof createImpulseAdditionReader>|undefined;
@@ -134,15 +135,16 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
    return hit && {...hit,cause:{id:'addition-profit-floor',kind:'addition-support',label:'保本底线 F',direction:'<=',threshold:current.profitFloor}};
   }
   if(current.k===support&&current.sellK!=null){
-   const kStop=closes&&o.kStopVersion!==ADDITION_K_TOUCH_VERSION?findGuardStop(current.sellK,closes,from):findTouchStop(current.sellK,from);
+   const kStop=closes&&activeExit().kStopVersion!==ADDITION_K_TOUCH_VERSION?findGuardStop(current.sellK,closes,from):findTouchStop(current.sellK,from);
+   const floorRule=activeExit().breakevenFloor;
    // v3 keeps F independently active even when zero ATR makes F equal to K.
-   if(current.sellK===support&&!(o.breakevenFloor?.enabled&&o.breakevenFloor.version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION))return kStop;
+   if(current.sellK===support&&!(floorRule?.enabled&&floorRule.version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION))return kStop;
    const floor=findTouchStop(support,from);
    return floor&&(!kStop||floor.at<kStop.at||floor.at===kStop.at&&floor.atOpen&&!kStop.atOpen)
     ?{...floor,cause:{id:'addition-floor',kind:'addition-support',label:'保本底线 F',direction:'<=',threshold:support}}
     :kStop;
   }
-  if(o.kStopVersion===ADDITION_K_TOUCH_VERSION){const cur=currentK();return findTouchStop(cur.k===support?(cur.guard??support):support,from);}
+  if(activeExit().kStopVersion===ADDITION_K_TOUCH_VERSION){const cur=currentK();return findTouchStop(cur.k===support?(cur.guard??support):support,from);}
   if(closes){
    // 【用户要求】2026-11-03 保本底线：防守线 K 照旧收盘确认、下一分钟开盘卖；F（＝support，加仓量按它算）盘中碰到即按 F 卖，谁先到算谁
    const cur=currentK(),guard=cur.k===support?cur.guard:undefined;if(guard==null)return findGuardStop(support,closes,from);
@@ -155,10 +157,11 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  /** 价格盘中碰到这条线即卖出（跳空按开盘价）。 */
  const findTouchStop=(support:number,from:number):SupportStop|undefined=>{
   const first=Math.max(0,Math.ceil((from-(bars[0]?.openTime??from))/MINUTE));
-  const search=(node:number,left:number,right:number):number=>{if(right<=first||lowTree[node]>(o.kStopVersion===ADDITION_K_TOUCH_VERSION?support*(1+1e-12):support))return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
+  const touchThreshold=activeExit().kStopVersion===ADDITION_K_TOUCH_VERSION?support*(1+1e-12):support;
+  const search=(node:number,left:number,right:number):number=>{if(right<=first||lowTree[node]>touchThreshold)return -1;if(right-left===1)return left;const middle=(left+right)>>>1,found=search(node*2,left,middle);return found<0?search(node*2+1,middle,right):found;};
   const index=search(1,0,size),bar=bars[index];if(!bar)return;
   const exit=o.ordinaryExit;if(exit&&bar.openTime===exit.at&&(exit.atOpen||!exit.mirror&&exit.price>=support))return;
-  const atOpen=bar.open<=(o.kStopVersion===ADDITION_K_TOUCH_VERSION?support*(1+1e-12):support);return {at:bar.openTime,price:atOpen?bar.open:support,support,atOpen};
+  const atOpen=bar.open<=touchThreshold;return {at:bar.openTime,price:atOpen?bar.open:support,support,atOpen};
  };
  const profitRules=activeHoldingVetoes(o.vetoes).filter(v=>v.kind===ADDITION_PROFIT_KIND).sort((a,b)=>a.id.localeCompare(b.id));
  // 【用户要求】2026-11-03 盈亏比止盈：整笔盈亏 ÷ L₀ ≥ N 时卖出全部持仓；L₀＝初始仓位 × 静态回撤%
@@ -183,8 +186,8 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
  const findPositionExit=(support:number|undefined,from:number):SupportStop|undefined=>{
   const sellK=currentK().sellK??support;
   // 【用户要求】2026-11-03 几何仓位 > 门槛时，止损从 Kₘ 上移到 Kₘ＋x%×首次开仓价，至少保住 x% 的开仓价有效涨幅
-  const lockRule=o.geometricLock?.enabled?o.geometricLock:undefined;let lockStop:SupportStop|undefined,locked=false;
-  if(lockRule&&sellK!=null&&fills.length){
+  const lockRule=activeExit().geometricLock;let lockStop:SupportStop|undefined,locked=false;
+  if(lockRule?.enabled&&sellK!=null&&fills.length){
    const h=holdings(Number.MAX_SAFE_INTEGER),M=h.held/(o.notional/o.entryPrice),line=sellK+lockRule.pct/100*o.entryPrice;
    if(M>lockRule.multiple&&line>Math.max(sellK,currentK().profitFloor??sellK)){locked=true;const hit=findTouchStop(line,from);if(hit)lockStop={...hit,cause:{id:'geometric-lock',kind:'addition-support',label:`几何仓位 > ${lockRule.multiple} 保住有效涨幅`,direction:'<=',threshold:line,geometricLock:{multiple:M,threshold:lockRule.multiple,pct:lockRule.pct,line,k:sellK}}};}
   }
@@ -222,7 +225,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   return f?{k:f.sizing?.support,at:f.at,guard:f.sizing?.guardK,sellK:f.sizing?.positionK,profitFloor:f.sizing?.profitFloor}:{};
  };
  /** 某时刻的持仓（含镜像、加仓、此前减仓）：币数、按均价的持仓成本、已实现利润。 */
- const holdings=(at:number)=>{
+ const holdings=(at:number,ledgerSizing=independent||!!profitRuleFor(activeExit().breakevenFloor))=>{
   if(ledgerSizing)return replayQualityHoldingLedger({notional:o.notional,entryPrice:o.entryPrice,entryAt:o.entry,additions:fills,mirror:o.mirror,reductions,through:at,details:false});
   const coins0=o.notional/o.entryPrice,m=o.mirror&&(o.mirror.at<at||o.mirror.at===at&&o.mirror.atOpen)?o.mirror:undefined;
   let held=coins0,cost=o.notional,mirrorProfit=0,reductionProfit=0;
@@ -231,11 +234,11 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   for(const r of reductions)if(r.at<=at){held-=r.quantity;cost-=r.costRemoved;reductionProfit+=r.realizedPnl;}
   return {held,cost,mirrorProfit,reductionProfit,realized:mirrorProfit+reductionProfit,mirrorQuantity:coins0*(m?.fraction??0)};
  };
- const dropRule=o.supportReduction?.enabled?o.supportReduction:undefined;
  interface SupportDrop {at:number;support:number;atr:number;evidence:import('./qualityAdditionStructure').StructureAdditionEvidence;basis:number}
  /** 最近一次加仓所依据的箱体支撑（或减仓后的新支撑）在 (from, until) 内首次下移 ≥ minDropAtr×ATR 的 5 分钟收盘。 */
  const findSupportDrop=async(from:number,until:number):Promise<SupportDrop|undefined>=>{
-  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion)||isClassifiedImpulsePositionVersion(evidence.algorithmVersion))return;
+  const dropRule=activeExit().supportReduction;
+  const last=fills.at(-1),evidence=last?.structureEvidence;if(!dropRule?.enabled||!last||!evidence||evidence.algorithm==='impulse5m'||isImpulse1115PositionVersion(evidence.algorithmVersion)||isClassifiedImpulsePositionVersion(evidence.algorithmVersion))return;
   const previousRound=o.roundRules?.[carried+fills.length-1];
   const winningAlternative=last.lane==='attack'&&(evidence.algorithmVersion===DBL5_PROFILES['1h'].version||evidence.guardPlus||previousRound?.impulsePosition||previousRound?.alternative?.impulsePosition||previousRound?.impulse1115Position||previousRound?.alternative?.impulse1115Position);
   const rule=winningAlternative?previousRound?.alternative?.structure:previousRound?.structure??o.structure;if(!rule)return;
@@ -256,14 +259,16 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   const T=priceAt.get(d.at),{k:Kold,guard:Gold,sellK:sellKold}=currentK();if(!(T!>0)||!Number.isFinite(T)||Kold==null||!(T!>Kold))return;
   const guardSel=structureAdditionK({...d.evidence,basePrice:d.support},d.atr),floorAtr=(Gold??sellKold)!=null?fills.at(-1)?.sizing?.floorAtr:undefined;
   const selected=guardSel&&floorAtr!=null?structureAdditionK({...d.evidence,basePrice:guardSel.k,buffer:floorAtr,bufferUnit:'atr'},d.atr):guardSel;if(!selected||!(selected.k<Kold))return;
-  const limit=dropRule!.exitAfterDrops,lastFill=fills.at(-1)?.at??-Infinity,count=reductions.filter(r=>r.at>lastFill).length+1;
+  const dropRule=activeExit().supportReduction!;
+  const limit=dropRule.exitAfterDrops,lastFill=fills.at(-1)?.at??-Infinity,count=reductions.filter(r=>r.at>lastFill).length+1;
   if(limit!=null&&count>=limit)return {at:d.at,price:T!,support:selected.k,atOpen:true,cause:{id:'addition-support-drops',kind:'addition-support',label:`K 连续下移 ${count} 次`,direction:'<=',threshold:selected.k,supportDrops:{count,previousK:Kold,newK:selected.k,support:d.support}}};
-  const Kn=selected.k,held=holdings(d.at),cut=supportDropReduction(held,T!,Kn,dropRule!.maxPct);if(!cut)return;
+  const Kn=selected.k,held=holdings(d.at),cut=supportDropReduction(held,T!,Kn,dropRule.maxPct);if(!cut)return;
   const {fraction,breakeven}=cut,quantity=fraction*held.held,costRemoved=fraction*held.cost;
   const previousProfitFloor=currentK().profitFloor;
-  const newProfitFloor=previousProfitFloor!=null?raisedFloor(Kn,d.atr,d.evidence):undefined;
+  const profitRule=profitRuleFor(activeExit().breakevenFloor);
+  const newProfitFloor=previousProfitFloor!=null?raisedFloor(profitRule,Kn,d.atr,d.evidence):undefined;
   if(profitRule&&previousProfitFloor!=null&&newProfitFloor==null)throw Error('下移后的保本底线 F 无效');
-  reductions.push({...(newProfitFloor!=null?{previousProfitFloor,newProfitFloor}:{}),at:d.at,price:T!,fraction,quantity,costRemoved,realizedPnl:quantity*T!-costRemoved,breakeven,previousK:Kold,newK:Kn,previousSupport:d.basis,newSupport:d.support,atr:d.atr,...(floorAtr!=null&&guardSel?(sellKold!=null?{previousPositionK:sellKold,newPositionK:guardSel.k}:{newGuardK:guardSel.k}):{})});
+  reductions.push({...(o.roundExits?{reductionVersion:dropRule.version??1}:{}),...(newProfitFloor!=null?{previousProfitFloor,newProfitFloor}:{}),at:d.at,price:T!,fraction,quantity,costRemoved,realizedPnl:quantity*T!-costRemoved,breakeven,previousK:Kold,newK:Kn,previousSupport:d.basis,newSupport:d.support,atr:d.atr,...(floorAtr!=null&&guardSel?(sellKold!=null?{previousPositionK:sellKold,newPositionK:guardSel.k}:{newGuardK:guardSel.k}):{})});
  };
  while(after<o.end){
   if(o.signal.aborted)throw new DOMException('已暂停','AbortError');
@@ -434,13 +439,14 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
     hit.structureEvidence?.algorithm==='impulse5m'?round.impulsePosition?.minDistancePct:round.structure?.minDistancePct;
   const selected=boxK&&hit.structureEvidence?withMinKDistance(hit.structureEvidence,boxK,hit.price,hit.structureEvidence.nativeAtr??atr!,minDistancePct):boxK;
   const sellK=hit.structureEvidence?selected?.k??NaN:hit.price-supportOffsetAtr*atr!;
-  const floor=o.breakevenFloor,followPosition=additionFloorFollowsPosition(floor?.version);
+  const nextExit=additionExitForRound(o,roundNo);
+  const floor=nextExit.breakevenFloor,profitRule=profitRuleFor(floor),ledgerSizing=independent||!!profitRule,followPosition=additionFloorFollowsPosition(floor?.version);
   const floorRule=floor?.enabled&&(followPosition||hit.structureEvidence?.guardCloses&&selected)?floor:undefined;
   const floorK=floorRule&&!profitRule?(hit.structureEvidence&&selected?
    structureAdditionK({...hit.structureEvidence,...selected,basePrice:sellK,buffer:floorRule.atr,bufferUnit:'atr'},hit.structureEvidence.nativeAtr??atr!)?.k??NaN:
    sellK-floorRule.atr*atr!):undefined;
   const K=floorK??sellK,S=support??o.entryPrice;after=hit.at;
-  const profitFloor=raisedFloor(sellK,hit.structureEvidence?.nativeAtr??atr!,hit.structureEvidence);
+  const profitFloor=raisedFloor(profitRule,sellK,hit.structureEvidence?.nativeAtr??atr!,hit.structureEvidence);
   if(profitRule&&(profitFloor==null||!Number.isFinite(profitFloor)||profitFloor>=hit.price)){
    skip({at:hit.at,round:roundNo,kind:'profit-floor',label:'保本底线未低于加仓价',reading:`回落卖出需要 F 低于本次加仓价 T ${p8(hit.price)}`});continue;
   }
@@ -460,7 +466,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   if(!hit.structureEvidence&&round.entryDistanceAtr!=null){const minimum=round.entryDistanceAtr*atr!;
    if(buffer+8*Number.EPSILON*Math.max(hit.price,S,minimum)<minimum){skip({at:hit.at,round:roundNo,kind:'entry-distance',label:'入场距离不足',reading:`T ${p8(hit.price)} 只比成本线 S ${p8(S)} 高 ${(buffer/atr!).toFixed(2)} ATR，要求 ≥ ${round.entryDistanceAtr} ATR`});continue;}}
   // 持仓、成本与落袋利润都扣除了此前的支撑下移减仓（G＝本轮全部已实现净盈亏，减仓所得也算）
-  const held=holdings(hit.at),Q=held.held,cost=held.cost;
+  const held=holdings(hit.at,ledgerSizing),Q=held.held,cost=held.cost;
   const profit=Math.max(0,held.mirrorProfit+held.reductionProfit);
   // 【用户要求】2026-11-03 ORDIUSDT「K 下移时并未减仓，后续的加仓也出了问题」：减仓比例 X 正是让余仓保本价落到 K′ 的那一份，
   // 减仓所得已经花在把成本线压到 K′ 上；再按「成本线 S＝K′、可用＝落袋 − 各次加仓用掉的镜像利润」算，就把这笔所得又算了一遍（多加 8.25%）。
@@ -468,7 +474,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   // 于是 Q×(K−b)＝各仓按开仓价在 K 的浮盈垫 + G，与加仓校验同一笔账（b 高于或低于 K′ 都成立）。
   // 没有减仓时两种算法相等（平衡公式保证成本线＝上一次 K），仍用原式，旧结果逐位不变。
   // 只有 v2（version＝2）这样算；v1 的方案与模板照旧（2026-11-03 用户要求模板必须原样复原）。
-  const reduced=o.supportReduction?.version===2&&reductions.some(r=>r.at<=hit.at),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
+  const reduced=reductions.some(r=>r.at<=hit.at&&(r.reductionVersion??activeExit().supportReduction?.version)===2),used=fills.reduce((n,f)=>n+(f.sizing?.mirrorUsed??0),0);
   const Sb=ledgerSizing?(cost-held.realized)/Q:reduced?(cost-(held.mirrorProfit+held.reductionProfit))/Q:S;
   const state=reduced?{...initialAddPositionState(Sb,Q,profit,cost/Q),mirrorProfitAllocated:profit,mirrorProfitAvailable:0}:{...initialAddPositionState(S,Q,profit,cost/Q),mirrorProfitAllocated:used,mirrorProfitAvailable:Math.max(0,profit-used)};
   const sized=ledgerSizing?calculateHoldingLedgerAddition(held,hit.price,K):calculateAddPosition({currentPrice:hit.price,support:K,state});after=hit.at;
@@ -483,7 +489,7 @@ export async function findCalculatorAdditions(o:Options):Promise<{fills:QualityA
   }
   if(advantage?.grade==='U')skip({at:hit.at,round:roundNo,kind:'advantage-unavailable',label:'优势辅助数据缺失，沿用原规则',reading:advantage.reason??'缺辅助数据'});
   if(advantage)hit={...hit,advantage};
-  fills.push({...hit,...(ledgerSizing?{...(independent?{positionVersion:HOLDING_LEDGER_ADDITION_VERSION}:{}),ledger:{costBefore:cost,realizedBefore:held.realized,mirrorQuantityBefore:held.mirrorQuantity,breakevenBefore:Sb}}:{}),...(o.kStopVersion?{kStopVersion:o.kStopVersion}:{}),quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:ledgerSizing?S:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:ledgerSizing?0:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(profitFloor!=null?{profitFloor,floorAtr:profitRule!.atr}:floorRule?{...(followPosition?{positionK:sellK}:{guardK:sellK}),floorAtr:floorRule.atr}:{})}});
+  fills.push({...hit,...(ledgerSizing?{...(independent?{positionVersion:HOLDING_LEDGER_ADDITION_VERSION}:{}),ledger:{costBefore:cost,realizedBefore:held.realized,mirrorQuantityBefore:held.mirrorQuantity,breakevenBefore:Sb}}:{}),...(nextExit.kStopVersion?{kStopVersion:nextExit.kStopVersion}:{}),quantity:sized.addCoins,notional,sizing:{support:K,previousSupport:ledgerSizing?S:Sb,atr:atr!,atrAt,coinsBefore:Q,realAverageBefore:cost/Q,baseCoins:sized.baseCoins,mirrorCoins:sized.mirrorCoins,mirrorUsed:sized.mirrorUsed,mirrorAvailableBefore:ledgerSizing?0:state.mirrorProfitAvailable,costBufferAtr:buffer/atr!,...(hit.structureEvidence?{}:{supportOffsetAtr}),...(!hit.structureEvidence&&round.entryDistanceAtr!=null?{requiredBufferAtr:round.entryDistanceAtr}:{}),coverageGap:sized.coverageGap,...(profitFloor!=null?{profitFloor,floorAtr:profitRule!.atr}:floorRule?{...(followPosition?{positionK:sellK}:{guardK:sellK}),floorAtr:floorRule.atr}:{})}});
   if(carried+fills.length===o.pauseAfterAdditionCount)return {fills,stageBoundary:{at:hit.at,price:hit.price},...(vetoed.length?{vetoed}:{}),...(reductions.length?{reductions}:{}),...(skipped.length?{skipped}:{})};
  }
  return done(findPositionExit(currentK().k,Math.max(o.since,currentK().at??o.since)));

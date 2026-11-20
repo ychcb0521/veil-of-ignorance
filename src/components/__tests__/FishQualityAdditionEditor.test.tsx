@@ -61,7 +61,7 @@ it('shows the selected peak basis beside the dynamic stage condition without cha
  expect(screen.getByTestId('addition-dynamic-drawdown-basis')).toHaveTextContent('沿用持仓以来最高价，不因加仓重置');
  expect(screen.getByLabelText('第 1 次加仓后 持仓否决 1 阈值')).toHaveValue(15);
 });
-it('switches the screenshot K row to immediate execution, persists it for every round, and preserves original sizing',()=>{
+it('switches immediate K execution only on the selected round and preserves its original sizing',()=>{
  render(<Editor/>);fireEvent.click(screen.getByLabelText('启用条件加仓'));
  fireEvent.change(screen.getByLabelText('K基准箱体'),{target:{value:'guard'}});
  fireEvent.click(screen.getByLabelText('防守线保本底线'));
@@ -70,7 +70,7 @@ it('switches the screenshot K row to immediate execution, persists it for every 
  fireEvent.change(screen.getByLabelText('碰到K执行版本'),{target:{value:'addition-k-touch-v1'}});
  expect(screen.getByTestId('addition-sell-k')).toHaveTextContent('影线算，不等 1 分钟或 5 分钟收盘确认');
  const current=save(),{kStopVersion,...body}=current;expect(kStopVersion).toBe('addition-k-touch-v1');expect(body).toEqual(original);
- tab(2);expect(screen.getByLabelText('碰到K执行版本')).toHaveValue('addition-k-touch-v1');
+ tab(2);expect(screen.getByLabelText('碰到K执行版本')).toHaveValue('legacy');tab(1);
  expect(parseAdditionDraft(additionDraft(current),BUILTIN_FEATURES)).toEqual(current);
  fireEvent.change(screen.getByLabelText('碰到K执行版本'),{target:{value:'legacy'}});
  expect(save()).toEqual(original);
@@ -482,4 +482,31 @@ it.each(['一类','二类'])('defaults a newly enabled %s impulse floor to indep
  fireEvent.click(screen.getByLabelText('防守线保本底线'));
  expect(screen.getByLabelText('保本底线基准')).toHaveValue('breakeven-floor-v4');
  expect(save().breakevenFloor).toMatchObject({version:'breakeven-floor-v4'});
+});
+
+it('edits only the fifth exit of an eight-round saved plan, including disabling its inherited floor',()=>{
+ const shared={enabled:true,atr:0,version:'breakeven-floor-v4' as const};
+ const original={...defaultQualityAddition(),enabled:true,maxRounds:8,breakevenFloor:shared};
+ const {unmount}=render(<Editor initial={original}/>);
+ tab(5);
+ fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0.7'}});
+ fireEvent.click(screen.getByLabelText('支撑线下移时减仓'));
+ fireEvent.click(screen.getByLabelText('K连续下移全仓卖出'));
+ fireEvent.click(screen.getByLabelText('几何仓位大时保住有效涨幅'));
+ const saved=save();
+ expect(Object.keys(saved.roundExits.overrides)).toEqual(['5']);
+ expect(saved.roundExits.overrides[5]).toMatchObject({breakevenFloor:{...shared,atr:.7},supportReduction:{exitAfterDrops:3},geometricLock:{enabled:true}});
+ expect(saved.breakevenFloor).toEqual(shared);
+ unmount();render(<Editor initial={saved}/>);
+ for(const round of [1,4,6,8]){
+  tab(round);
+  expect(screen.getByLabelText('保本底线ATR倍数')).toHaveValue(0);
+  expect(screen.getByLabelText('支撑线下移时减仓')).not.toBeChecked();
+ }
+ tab(5);expect(screen.getByLabelText('保本底线ATR倍数')).toHaveValue(.7);
+ fireEvent.click(screen.getByLabelText('防守线保本底线'));
+ const disabled=save();
+ expect(disabled.roundExits.overrides[5].breakevenFloor).toBeUndefined();
+ expect(parseAdditionDraft(additionDraft(disabled),BUILTIN_FEATURES)).toEqual(disabled);
+ expect(original.breakevenFloor).toEqual(shared);
 });

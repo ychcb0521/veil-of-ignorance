@@ -100,3 +100,19 @@ it('moves the race gate together with its version and ignores it for one-time ro
   expect(() => prepareQualityRouterDraft(race, race.structure, race.attack, race.threshold, 0)).toThrow('整数');
   expect(() => prepareQualityRouterDraft(race, race.structure, race.attack, race.threshold, 9)).toThrow('不能从第 9 次起');
 });
+
+it('shares exits only through the decision and allows a shorter attack lane in a round race',()=>{
+ const old=fixture(),attack=structuredClone(old.attack);
+ const floor={breakevenFloor:{enabled:true,atr:.5,version:'breakeven-floor-v4' as const}};
+ attack.addition!.roundExits={version:'addition-round-exits-v1',overrides:{2:floor,3:floor}};
+ const fork=prepareQualityRouterDraft(old,old.structure,attack,.9);
+ expect(fork.structure.addition!.roundExits!.overrides).toEqual({2:floor});
+ expect(fork.attack.addition!.roundExits!.overrides).toEqual({2:floor,3:floor});
+ const shorter=structuredClone(old.attack);
+ shorter.addition!.maxRounds=2;shorter.addition!.rounds=shorter.addition!.rounds!.slice(0,2);
+ const race:QualityPlanRouter={...old,version:QUALITY_ROUTER_RACE_VERSION,afterAdditions:0,attack:shorter};
+ const primary=structuredClone(race.structure);primary.addition!.roundExits=attack.addition!.roundExits;
+ const edited=prepareQualityRouterDraft(race,primary,shorter,.9);
+ expect(edited.structure.addition!.roundExits!.overrides).toEqual({2:floor,3:floor});
+ expect(edited.attack.addition!.roundExits!.overrides).toEqual({2:floor});
+});

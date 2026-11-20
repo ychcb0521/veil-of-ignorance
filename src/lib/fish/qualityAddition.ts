@@ -51,6 +51,8 @@ export interface QualityAdditionRule {
   repeat?:boolean;
   maxRounds?:number;
   rounds?:QualityAdditionRoundRule[];
+  /** Complete sell settings for rounds that differ from the original shared settings. */
+  roundExits?: {version:typeof ADDITION_ROUND_EXITS_VERSION; overrides:Record<number,QualityAdditionExitRule>};
   /**
    * 【用户要求】2026-11-05 每轮分流（版本 3）：与 rounds 按序号对齐的「进攻备选」。每一轮里 rounds[i]（保守）与 alternativeRounds[i]（进攻）
    * 同时等候，先满足者成交（同一分钟先保守）；成交记录 lane 写明走的是哪一边。缺省＝没有备选，旧方案结果逐位不变。
@@ -96,6 +98,30 @@ export interface QualityAdditionRule {
   /** Frozen legacy rules retain their original cash sizing. New saves use quantityMode. */
   amountMode?: 'entry' | 'fixed'; amountUsdt?: number; condition?: QualityBuyFilter;
 }
+export const ADDITION_ROUND_EXITS_VERSION = 'addition-round-exits-v1' as const;
+export type QualityAdditionExitRule = Pick<QualityAdditionRule, 'kStopVersion'|'breakevenFloor'|'supportReduction'|'geometricLock'>;
+type AdditionExitConfig = QualityAdditionExitRule & Pick<QualityAdditionRule,'roundExits'>;
+export function additionExitForRound(config: AdditionExitConfig, round: number): QualityAdditionExitRule {
+  return config.roundExits?.overrides[round] ?? config;
+}
+export const additionExitKeys=['kStopVersion','breakevenFloor','supportReduction','geometricLock'] as const;
+/** Keep only differences from the saved shared rule, including an empty (all optional exits off) round. */
+export function buildRoundExits(base:QualityAdditionExitRule, exits:readonly QualityAdditionExitRule[]):QualityAdditionRule['roundExits'] {
+  const fallback=JSON.stringify(additionExitIdentity(base));
+  const overrides:Record<number,QualityAdditionExitRule>={};
+  exits.forEach((exit,index)=>{
+    if(JSON.stringify(additionExitIdentity(exit))!==fallback){
+      overrides[index+1]=Object.fromEntries(additionExitKeys.filter(key=>exit[key]!==undefined).map(key=>[key,exit[key]]));
+    }
+  });
+  return Object.keys(overrides).length?{version:ADDITION_ROUND_EXITS_VERSION,overrides}:undefined;
+}
+export function additionExitIdentity(exit: QualityAdditionExitRule) {
+  const {breakevenFloor: floor, supportReduction: cut, geometricLock: lock} = exit;
+  return [exit.kStopVersion ?? null, floor?.enabled ? [floor.version ?? 'breakeven-floor-v1', floor.atr] : null,
+    cut?.enabled ? [cut.version ?? 1, cut.minDropAtr, cut.maxPct, cut.exitAfterDrops ?? null] : null,
+    lock?.enabled ? [lock.multiple, lock.pct] : null];
+}
 export interface QualityGeometricLockRule { enabled: boolean; multiple: number; pct: number }
 export const defaultGeometricLock = (): QualityGeometricLockRule => ({ enabled: false, multiple: 10, pct: 1 });
 export const ADDITION_POSITION_FLOOR_VERSION='breakeven-floor-v2' as const;
@@ -130,7 +156,9 @@ export function supportDropReduction(p:{held:number;cost:number;realized:number}
 }
 export const defaultSupportReduction = (): QualitySupportReductionRule => ({ enabled: false, minDropAtr: .5, maxPct: 80, version: 2 });
 /** 一次支撑下移减仓：减掉当时持仓的 fraction；costRemoved 为按均价移出的成本，realizedPnl＝quantity×price − costRemoved。 */
-export interface QualityReductionFill { at: number; price: number; fraction: number; quantity: number; costRemoved: number; realizedPnl: number; breakeven: number; previousK: number; newK: number; previousSupport: number; newSupport: number; atr: number;
+export interface QualityReductionFill {
+  reductionVersion?:1|2;
+  at: number; price: number; fraction: number; quantity: number; costRemoved: number; realizedPnl: number; breakeven: number; previousK: number; newK: number; previousSupport: number; newSupport: number; atr: number;
   /** 开着保本底线时：挪到的防守线 K′（newK 是它下方的保本底线 F′）。 */
   newGuardK?: number;
   /** V2 sell prices before and after the move. The original previousK / newK pair holds F and F′. */
@@ -214,6 +242,7 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...([rule,...(rule.rounds??[])].some(r=>r.entryDistanceAtr!=null)?[['entry-distance-v1',[rule,...(rule.rounds??[])].map(r=>r.entryDistanceAtr??null)]]:[]),
   ...([rule,...(rule.rounds??[])].some(r=>r.gainBasis==='average')?[['gain-basis-average-v1',[rule,...(rule.rounds??[])].map(r=>r.gainBasis??null)]]:[]),
   ...(rule.geometricLock?.enabled?[['geometric-lock-v1',rule.geometricLock.multiple,rule.geometricLock.pct]]:[]),
+  ...(rule.roundExits ? [[ADDITION_ROUND_EXITS_VERSION, Object.entries(rule.roundExits.overrides).map(([round,exit])=>[Number(round),additionExitIdentity(exit)])]] : []),
   ...(rule.kStopVersion?[[rule.kStopVersion]]:[]),
   ...(rule.breakevenFloor?.enabled?[[rule.breakevenFloor.version??'breakeven-floor-v1',rule.breakevenFloor.atr]]:[]),
   // v2（2026-11-03）：减仓后再加仓时，减仓所得不再当成额外可用利润重复计入（v1 会多加）；开了减仓的方案须重算
@@ -224,6 +253,12 @@ export const additionIdentity = (rule?: QualityAdditionRule): unknown[] => !rule
   ...(rule.alternativeRounds?.length?[['addition-round-race-v1',rule.alternativeRounds.map(r=>[r.source,timingIdentity(r),r.minGainPct??null,atrIdentity(r),r.entryDistanceAtr??null,r.gainBasis??null,additionVetoIdentity(r.entryVetoes)])]]:[]),
   // 2026-11-06 结构开局：进攻备选从第 n 次起才参与；n＝1 或没有备选时身份不变
   ...(rule.alternativeRounds?.length&&(rule.attackFromRound??1)>1?[['addition-round-race-from-v1',rule.attackFromRound]]:[])];
+function validateAdditionExits(rule:QualityAdditionExitRule):void {
+  if(rule.kStopVersion!=null&&rule.kStopVersion!==ADDITION_K_TOUCH_VERSION)throw Error('加仓 K 止损执行版本不可用');
+  if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(f.version!=null&&!additionFloorFollowsPosition(f.version))throw Error('保本底线执行版本不可用');if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}
+  if(rule.geometricLock?.enabled){const g=rule.geometricLock;if(!Number.isFinite(g.multiple)||g.multiple<=0||g.multiple>1e6)throw new Error('保住有效涨幅：几何仓位门槛须为大于 0 的数字');if(!Number.isFinite(g.pct)||g.pct<0||g.pct>100)throw new Error('保住有效涨幅：百分比须为 0–100%');}
+  if(rule.supportReduction?.enabled){const r=rule.supportReduction;if(!Number.isFinite(r.minDropAtr)||r.minDropAtr<0||r.minDropAtr>20)throw new Error('支撑下移减仓：触发的下移幅度须为 0–20 倍 ATR');if(!Number.isFinite(r.maxPct)||r.maxPct<=0||r.maxPct>100)throw new Error('支撑下移减仓：单次减仓上限须为 0–100%');if(r.exitAfterDrops!=null&&(!Number.isInteger(r.exitAfterDrops)||r.exitAfterDrops<1||r.exitAfterDrops>20))throw new Error('K 连续下移全仓卖出：次数须为 1–20 的整数');}
+}
 export function validateQualityAddition(rule?: QualityAdditionRule): void {
   if(rule?.kStopVersion!=null&&rule.kStopVersion!==ADDITION_K_TOUCH_VERSION)throw new Error('加仓 K 止损执行版本不可用，请保留原方案并选择受支持的新版');
   if (!rule?.enabled) return;
@@ -263,9 +298,17 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
   }
   validateAdditionVetoes(rule.entryVetoes);
   for(const r of [rule,...(rule.rounds??[])]){const dp=activeDetectorPrerequisite(r);if(dp&&(!Number.isFinite(dp.stricterPct)||dp.stricterPct<0||dp.stricterPct>1000))throw new Error('方向 · 探测算法：门槛提高幅度须为 0–1000%');}
-  if(rule.breakevenFloor?.enabled){const f=rule.breakevenFloor;if(f.version!=null&&!additionFloorFollowsPosition(f.version))throw Error('保本底线执行版本不可用');if(!Number.isFinite(f.atr)||f.atr<0||f.atr>20)throw new Error('保本底线：离防守线的 ATR 倍数须为 0–20');}
-  if(rule.geometricLock?.enabled){const g=rule.geometricLock;if(!Number.isFinite(g.multiple)||g.multiple<=0||g.multiple>1e6)throw new Error('保住有效涨幅：几何仓位门槛须为大于 0 的数字');if(!Number.isFinite(g.pct)||g.pct<0||g.pct>100)throw new Error('保住有效涨幅：百分比须为 0–100%');}
-  if(rule.supportReduction?.enabled){const r=rule.supportReduction;if(!Number.isFinite(r.minDropAtr)||r.minDropAtr<0||r.minDropAtr>20)throw new Error('支撑下移减仓：触发的下移幅度须为 0–20 倍 ATR');if(!Number.isFinite(r.maxPct)||r.maxPct<=0||r.maxPct>100)throw new Error('支撑下移减仓：单次减仓上限须为 0–100%');if(r.exitAfterDrops!=null&&(!Number.isInteger(r.exitAfterDrops)||r.exitAfterDrops<1||r.exitAfterDrops>20))throw new Error('K 连续下移全仓卖出：次数须为 1–20 的整数');}
+  validateAdditionExits(rule);
+  if(rule.roundExits){
+    const {version,overrides}=rule.roundExits;
+    if(version!==ADDITION_ROUND_EXITS_VERSION || rule.quantityMode!=='calculator' || !overrides || typeof overrides!=='object' || Array.isArray(overrides))
+      throw Error('逐次加仓卖出设置的版本或格式无效');
+    for(const [key,exit] of Object.entries(overrides)){
+      const round=Number(key);
+      if(!Number.isInteger(round)||String(round)!==key||round<1||round>Math.min(100,qualityAdditionRoundLimit(rule))||!exit||typeof exit!=='object'||Array.isArray(exit))throw Error('逐次加仓卖出设置的次数无效');
+      try {validateAdditionExits(exit);} catch(error) {throw Error(`第 ${round} 次加仓：${error instanceof Error?error.message:'卖出条件无效'}`);}
+    }
+  }
   if(rule.quantityMode==='calculator'){
     const atr=qualityAdditionAtrSettings(rule);
     if(rule.source!=='structure'&&(!Number.isFinite(atr.supportOffsetAtr)||atr.supportOffsetAtr<=0))throw new Error('K 回撤的 ATR 倍数须为大于 0 的有限数字');
@@ -275,11 +318,11 @@ export function validateQualityAddition(rule?: QualityAdditionRule): void {
     }
   }
   if(rule.maxRounds!=null&&(!Number.isInteger(rule.maxRounds)||rule.maxRounds<1||rule.maxRounds>100))throw new Error('最多加仓次数须为 1 至 100 的整数');
-  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,classifiedImpulsePositions:round.classifiedImpulsePositions,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
+  if(rule.rounds){if(rule.maxRounds==null||rule.rounds.length!==rule.maxRounds)throw new Error('每次加仓须有对应的独立条件');for(const [i,round] of rule.rounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,classifiedImpulsePositions:round.classifiedImpulsePositions,roundExits:undefined,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}}}
   if(rule.alternativeRounds?.length){
     if(!rule.rounds?.length||rule.quantityMode!=='calculator')throw new Error('每轮分流的进攻备选须配合逐轮独立条件与按平衡公式定量');
     if(rule.alternativeRounds.length>rule.rounds.length)throw new Error('进攻备选的轮数不能多于保守轮数');
-    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,classifiedImpulsePositions:round.classifiedImpulsePositions,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
+    for(const [i,round] of rule.alternativeRounds.entries()){try{validateQualityAddition({...rule,...round,impulsePosition:round.impulsePosition,impulse1115Position:round.impulse1115Position,classifiedImpulsePositions:round.classifiedImpulsePositions,roundExits:undefined,maxRounds:undefined,rounds:undefined,alternativeRounds:undefined,attackFromRound:undefined});}catch(e){throw new Error(`第 ${i+1} 次加仓 · 进攻备选：${e instanceof Error?e.message:'条件无效'}`);}}
     if(rule.attackFromRound!=null&&(!Number.isInteger(rule.attackFromRound)||rule.attackFromRound<1||rule.attackFromRound>rule.alternativeRounds.length))throw new Error(`进攻备选参与竞速的起始次数须为 1 至 ${rule.alternativeRounds.length} 的整数`);
   }else if(rule.attackFromRound!=null)throw new Error('「进攻从第几次起」须配合进攻备选');
 }

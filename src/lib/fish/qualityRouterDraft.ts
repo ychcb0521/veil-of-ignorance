@@ -1,7 +1,7 @@
 import type { QualityGroup } from './quality';
 import { canonicalRouterJson, isRaceRouter, RACE_ROUND_KEYS, raceAttackFromRound, routerOrdinal, routerPrefixText, routerVersionFor, validateQualityRouter, type QualityPlanRouter } from './qualityPlanRouter';
 import { freezeQualityPlan } from './qualityPlanVersions';
-import { qualityAdditionPrerequisites, validateQualityAddition } from './qualityAddition';
+import { additionExitForRound, additionExitKeys, buildRoundExits, type QualityAdditionExitRule, qualityAdditionPrerequisites, validateQualityAddition } from './qualityAddition';
 import { validateQualityMirror } from './qualityMirror';
 import { initialLimitedDrawdownPct, withLimitedPayoffRisk } from './qualityStaticDrawdownSell';
 import { validatePayoffStops } from './qualityVeto';
@@ -31,11 +31,30 @@ export function prepareQualityRouterDraft(original: QualityPlanRouter, structure
   const n = original.afterAdditions, race = isRaceRouter(original);
   const additionKeys = new Set([original.structure, original.attack, structure, attack].flatMap(p => Object.keys(p.addition ?? {})));
   for (const key of additionKeys) {
-    if (key === 'rounds' || key === 'maxRounds' || race && (RACE_ROUND_KEYS as readonly string[]).includes(key)) continue;
+    if (key === 'roundExits' || key === 'rounds' || key === 'maxRounds' || race && (RACE_ROUND_KEYS as readonly string[]).includes(key)) continue;
     const [oldA, oldB, a, b] = [original.structure, original.attack, structure, attack].map(p => p.addition?.[key]);
     if (same(oldA, a) && same(oldB, b)) continue;
     const value = reconcile('加仓通用设置', oldA, oldB, a, b);
     for (const branch of branches) { if (value === undefined) delete branch.addition![key]; else branch.addition![key] = structuredClone(value); }
+  }
+  const inputs=[original.structure,original.attack,structure,attack];
+  if(inputs.some(p=>p.addition?.roundExits)){
+    const commonCount=race?Math.min(...branches.map(p=>p.addition?.rounds?.length??0)):n;
+    const sharedExits=Array.from({length:commonCount},(_,i)=>{
+      const rules=inputs.map(p=>additionExitForRound(p.addition??{},i+1));
+      const changes:Partial<QualityAdditionExitRule>={};
+      for(const key of additionExitKeys){
+        if(same(rules[0][key],rules[2][key])&&same(rules[1][key],rules[3][key]))continue;
+        Object.assign(changes,{[key]:reconcile(`第 ${i+1} 次加仓后的卖出`,rules[0][key],rules[1][key],rules[2][key],rules[3][key])});
+      }
+      return changes;
+    });
+    branches.forEach((branch,j)=>{
+      const config=branch.addition!, edited=inputs[j+2].addition!;
+      const exits=(config.rounds??[]).map((_,i)=>({...additionExitForRound(edited,i+1),...sharedExits[i]}));
+      const stages=buildRoundExits(config,exits);
+      if(stages)config.roundExits=stages;else delete config.roundExits;
+    });
   }
   const shared = Array.from({ length: n }, (_, i) => reconcile(`第 ${i + 1} 次加仓`, original.structure.addition?.rounds?.[i], original.attack.addition?.rounds?.[i], structure.addition?.rounds?.[i], attack.addition?.rounds?.[i]));
   for (const branch of branches) {

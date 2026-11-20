@@ -9,7 +9,7 @@ import type { QualityGroup, QualityResult, QualitySample } from './quality';
 import { qualityRuleText } from './quality';
 import { mirrorLabel } from './qualityMirror';
 import { activeHoldingVetoes, holdingVetoLabel } from './qualityVeto';
-import { ADDITION_PROFIT_FLOOR_VERSION, additionFloorFollowsPosition, activeDetectorPrerequisite, additionLabel, qualityAdditionFills, qualityAdditionPrerequisites } from './qualityAddition';
+import { additionExitForRound, type QualityAdditionExitRule, ADDITION_PROFIT_FLOOR_VERSION, additionFloorFollowsPosition, activeDetectorPrerequisite, additionLabel, qualityAdditionFills, qualityAdditionPrerequisites } from './qualityAddition';
 import { structureAdditionLabel } from './qualityAdditionStructure';
 import { activeAdditionVetoes, additionVetoLabel } from './qualityAdditionVeto';
 import { qualitySellStagesLabel } from './qualitySellStages';
@@ -57,19 +57,32 @@ export function qualityPlanDetailSheet(plans: readonly QualityGroup[]): XlsxShee
     if (!a?.enabled) add(plan, '加仓', '条件加仓', '未启用');
     else {
       add(plan, '加仓', '总设置', additionLabel(a), versions.get('addition')?.version ?? '');
-      if (a.supportReduction?.enabled) add(plan, '加仓', '支撑线下移减仓', `下移 ≥ ${a.supportReduction.minDropAtr} ATR · 单次最多减 ${a.supportReduction.maxPct}%${a.supportReduction.exitAfterDrops != null ? ` · K 连续下移 ${a.supportReduction.exitAfterDrops} 次全仓卖出` : ''}`);
-      if (a.breakevenFloor?.enabled) add(plan, '加仓', '保本底线', a.breakevenFloor.version===ADDITION_PROFIT_FLOOR_VERSION?`F＝本次加仓 K ＋ ${a.breakevenFloor.atr}×ATR，加仓量按 K 算，盘中触及 F 全仓退出`:`F＝${additionFloorFollowsPosition(a.breakevenFloor.version)?'本次加仓 K':'防守线 K'} − ${a.breakevenFloor.atr}×ATR：盘中碰到即按 F 卖出全部持仓，加仓量按 F 算`);
-      if (a.geometricLock?.enabled) add(plan, '加仓', '保住有效涨幅', `几何仓位 > ${a.geometricLock.multiple} 时止损上移到 Kₘ＋${a.geometricLock.pct}%×首次开仓价，盘中碰线卖出全部持仓`);
-      (a.rounds?.length ? a.rounds : [a]).forEach((r, i) => {
+      const writeExits=(section:string,exit:QualityAdditionExitRule)=>{
+        if (exit.supportReduction?.enabled) add(plan, section, '支撑线下移减仓', `下移 ≥ ${exit.supportReduction.minDropAtr} ATR · 单次最多减 ${exit.supportReduction.maxPct}%${exit.supportReduction.exitAfterDrops != null ? ` · K 连续下移 ${exit.supportReduction.exitAfterDrops} 次全仓卖出` : ''}`);
+        if (exit.breakevenFloor?.enabled) add(plan, section, '保本底线', exit.breakevenFloor.version===ADDITION_PROFIT_FLOOR_VERSION?`F＝本次加仓 K ＋ ${exit.breakevenFloor.atr}×ATR，加仓量按 K 算，盘中触及 F 全仓退出`:`F＝${additionFloorFollowsPosition(exit.breakevenFloor.version)?'本次加仓 K':'防守线 K'} − ${exit.breakevenFloor.atr}×ATR：盘中碰到即按 F 卖出全部持仓，加仓量按 F 算`);
+        if (exit.geometricLock?.enabled) add(plan, section, '保住有效涨幅', `几何仓位 > ${exit.geometricLock.multiple} 时止损上移到 Kₘ＋${exit.geometricLock.pct}%×首次开仓价，盘中碰线卖出全部持仓`);
+      };
+      if(!a.roundExits)writeExits('加仓',a);
+      const roundCount = a.roundExits
+        ? a.maxRounds ?? Math.max(1,...Object.keys(a.roundExits.overrides).map(Number))
+        : a.rounds?.length ?? 1;
+      for (let i=0; i<roundCount; i++) {
+        const r=a.rounds?.[i] ?? a;
         const n = `第 ${i + 1} 次加仓`, dp = activeDetectorPrerequisite(r);
         const direction = [...qualityAdditionPrerequisites(r).map(f => `${f.label} ${f.direction} ${f.threshold}`), ...(dp ? [`${dp.featureId ?? '原探测算法（全部）'} 探测值比原门槛提高 ≥ ${dp.stricterPct}%`] : []), ...(r.minGainPct != null ? [gainText(r)] : []), ...(r.indicatorIncrease ? [r.indicatorIncrease.metrics.map(f=>f.label).join('、') + '均高于上次成交时读数'] : [])];
         add(plan, n, '方向', direction.length ? direction.join(' 且 ') : '无');
         const vetoes = activeAdditionVetoes(r.entryVetoes);
         add(plan, n, '否决', vetoes.length ? vetoes.map(additionVetoLabel).join('；') : '无');
         add(plan, n, '位置', position(r), versions.get(`box-${i + 1}`)?.version ?? versions.get(`trigger-${i + 1}`)?.version ?? '');
+        if(a.roundExits){
+          const exit=additionExitForRound(a,i+1);
+          add(plan,n,'碰到 K',exit.kStopVersion?'即时触价全仓卖出':'原版执行');
+          if(!exit.breakevenFloor?.enabled)add(plan,n,'保本底线','关闭');
+          writeExits(n,exit);
+        }
         const stage = plan.vetoStages?.find(s => s.afterAdditions === i + 1), sell = plan.sellStages?.find(s => s.afterAdditions === i + 1);
         add(plan, n, '卖出', ['碰到 K 卖出全部持仓', ...(stage ? [`否决：${stage.conditions.filter(c => c.enabled).map(c => holdingVetoLabel(c)).join(' 或 ')}`] : []), ...(sell ? [`改用 ${sell.label} ${sell.rule.direction} ${sell.rule.threshold}`] : [])].join('；'));
-      });
+      }
     }
     if (plan.vetoStages?.length) add(plan, '加仓后切换', '否决条件', qualityVetoStagesLabel(plan), versions.get('veto-stages')?.version ?? '');
     if (plan.sellStages?.length) add(plan, '加仓后切换', '卖出算法', qualitySellStagesLabel(plan), versions.get('sell-stages')?.version ?? '');

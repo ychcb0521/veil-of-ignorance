@@ -1,3 +1,4 @@
+import {qualityPlanDetailSheet} from '@/lib/fish/qualityExportDetails';
 import {useState} from 'react';
 import {expect,it,vi} from 'vitest';
 import {fireEvent,render,screen,within} from '@testing-library/react';
@@ -7,6 +8,9 @@ import {FishQualityMonitorSettingsView} from '../FishQualityMonitorSettingsView'
 import {newQualityStudy,type QualityGroup} from '@/lib/fish/quality';
 import {defaultHoldingImpulse1115Rule,type HoldingImpulse1115Reading} from '@/lib/fish/holdingImpulse1115Classification';
 import type {FishQualityState} from '@/hooks/useFishQuality';
+import {additionExitForRound} from '@/lib/fish/qualityAddition';
+import {freezeQualityPlan,planVersionChanges} from '@/lib/fish/qualityPlanVersions';
+import {qualityPlanFromTemplate,saveQualityPlanTemplate} from '@/lib/fish/qualityPlanTemplates';
 import {makeQualitySellPlan} from '@/lib/fish/qualitySellPlans';
 import {BUILTIN_FEATURES} from '@/lib/deepDig/features';
 
@@ -84,3 +88,33 @@ it('监测结果显示主分类和细分；等待提示及历史选择均来自�
  view.unmount();render(<FishHoldingImpulse1115Evidence value={{...value,status:'waiting',message:'等待5m行情'}} compact/>);
  expect(screen.getByTestId('holding-impulse1115-reading')).toHaveTextContent('等待5m行情');
 });
+
+it('saves only round five from holding settings and restores its exact frozen template copy',()=>{
+ const {plans,state}=fixture();
+ const legacy:QualityGroup['addition']={enabled:true,source:'detector',stricterPct:10,quantityMode:'calculator',maxRounds:8,
+  breakevenFloor:{enabled:true,version:'breakeven-floor-v4',atr:0}};
+ const original=freezeQualityPlan({...plans[0],addition:legacy});
+ state.study.sellPlans=[original,plans[1]];
+ const before=JSON.stringify(original);
+ const view=render(<Settings state={state}/>);
+ fireEvent.click(screen.getByRole('tab',{name:'第 5 次'}));
+ fireEvent.change(screen.getByLabelText('保本底线ATR倍数'),{target:{value:'0.75'}});
+ fireEvent.click(screen.getByRole('button',{name:/^保存到/}));
+ const saved=vi.mocked(state.setSellPlans).mock.lastCall![0][0];
+ expect(saved.addition).toEqual({...legacy,roundExits:{version:'addition-round-exits-v1',overrides:{5:{breakevenFloor:{...legacy.breakevenFloor,atr:.75}}}}});
+ const frozen=freezeQualityPlan(saved);
+ const template=saveQualityPlanTemplate(newQualityStudy(),frozen,'第五次卖出').planTemplates![0];
+ const copy=qualityPlanFromTemplate(JSON.parse(JSON.stringify(template)),'copy');
+ expect(planVersionChanges(copy)).toEqual([]);
+ const modified=structuredClone(copy);
+ modified.addition!.roundExits!.overrides[5].breakevenFloor!.atr=.1;
+ expect(planVersionChanges(modified).map(v=>v.key)).toContain('addition-round-exit-5');
+ expect(additionExitForRound(copy.addition!,6).breakevenFloor?.atr).toBe(0);
+ const exported=qualityPlanDetailSheet([copy]).rows.filter(r=>r[2]==='保本底线');
+ expect(exported.find(r=>r[1]==='第 5 次加仓')?.[3]).toContain('0.75×ATR');
+ expect(exported.find(r=>r[1]==='第 6 次加仓')?.[3]).toContain('0×ATR');
+ expect(JSON.stringify(original)).toBe(before);
+ view.unmount();render(<FishQualityMonitorSettingsView plan={copy} holdingOnly/>);
+ fireEvent.click(screen.getByRole('tab',{name:'第 5 次'}));
+ expect(screen.getByLabelText('保本底线ATR倍数')).toHaveValue(.75);
+}, 20_000);

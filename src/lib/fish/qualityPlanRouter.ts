@@ -1,6 +1,6 @@
 import type { QualityGroup, QualityResult, QualitySample } from './quality';
 import { shortFishHash } from './algorithm';
-import { qualityAdditionConditions, type QualityAdditionRule } from './qualityAddition';
+import { additionExitForRound, additionExitIdentity, qualityAdditionConditions, type QualityAdditionRule } from './qualityAddition';
 
 export const QUALITY_ROUTER_VERSION = 'second-structural-addition-state-router-v1';
 /**
@@ -41,6 +41,7 @@ export function raceSharedAddition(a?: QualityAdditionRule): Partial<QualityAddi
   if (!a) return a;
   const rest: Record<string, unknown> = { ...a };
   for (const k of RACE_ROUND_KEYS) delete rest[k];
+  delete rest.roundExits;
   return rest as Partial<QualityAdditionRule>;
 }
 /** 每轮分流运行时的那一套方案：结构分支加上「进攻备选＝进攻分支各轮」。 */
@@ -95,6 +96,13 @@ export function validateQualityRouter(r: QualityPlanRouter) {
   if (!Number.isInteger(from) || from < 1 || from > 100) throw Error('进攻分支参与竞速的起始次数须为 1 至 100 的整数');
   if ((n !== 0 && n !== 1 && n !== 2) || r.version !== routerVersionFor(n, from) || !Number.isFinite(r.threshold) || r.threshold < 0 || r.threshold > 1) throw Error('条件分支版本或门槛无效');
   if (!r.structure || !r.attack || r.structure.router || r.attack.router || r.structure.engine || r.attack.engine) throw Error('条件分支必须是两套独立的当前引擎方案');
+  if(r.structure.addition?.roundExits||r.attack.addition?.roundExits){
+    const sharedCount=n||r.attack.addition?.rounds?.length||0;
+    for(let round=1;round<=sharedCount;round++){
+      const exits=[r.structure,r.attack].map(p=>additionExitIdentity(additionExitForRound(p.addition??{},round)));
+      if(canonicalRouterJson(exits[0])!==canonicalRouterJson(exits[1]))throw Error(`两个分支第 ${round} 次加仓后的卖出标准须一致`);
+    }
+  }
   if (n === 0) {
     for (const p of [r.structure, r.attack]) if (!p.addition?.enabled || p.addition.quantityMode !== 'calculator' || !p.addition.rounds?.length || p.addition.alternativeRounds?.length || p.addition.attackFromRound != null) throw Error('每轮分流的两条分支都须启用逐轮独立条件、按平衡公式定量的加仓');
     if (r.attack.addition!.rounds!.length > r.structure.addition!.rounds!.length) throw Error('进攻分支的加仓轮数不能多于结构分支');

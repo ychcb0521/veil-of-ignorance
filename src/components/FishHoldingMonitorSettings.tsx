@@ -1,3 +1,4 @@
+import {additionExitKeys,additionExitForRound,buildRoundExits} from '@/lib/fish/qualityAddition';
 import {FishQualityHardStopStagesEditor} from './FishQualityHardStopStagesEditor';
 import {FishHoldingImpulse1115Settings} from './FishHoldingImpulse1115Settings';
 import {validateHoldingImpulse1115Rule,type HoldingImpulse1115Rule} from '@/lib/fish/holdingImpulse1115Classification';
@@ -81,8 +82,34 @@ function parseChangedMonitorDraft(plan: QualityGroup, draft: MonitorDraft, defin
   }
   if (same(draft.addition, original.addition)) { parsed.addition = plan.addition; parsed.sellStages = plan.sellStages; return parsed; }
   if (plan.addition && parsed.addition) {
-    const restoreAdditionField=<K extends keyof NonNullable<QualityGroup['addition']>>(key:K)=>{parsed.addition![key]=plan.addition![key];};
-    const roundKeys = Object.keys({ ...additionDraft().otherRounds[0], time: undefined, savedCondition: undefined }).filter(k => k !== 'sellSwitch');
+    const restoreAdditionField=<K extends keyof NonNullable<QualityGroup['addition']>>(key:K)=>{
+      if (plan.addition![key] === undefined) delete parsed.addition![key];
+      else parsed.addition![key]=plan.addition![key];
+    };
+    if (plan.addition.quantityMode === 'calculator') {
+      // Keep the saved shared rule as the fallback even when the first tab is edited.
+      const edited = parsed.addition;
+      const count = Number(draft.addition.maxRounds);
+      const exits = Array.from({length:count}, (_,i) => {
+        const current = i ? draft.addition.otherRounds[i-1] : draft.addition;
+        const previous = i ? original.addition.otherRounds[i-1] : original.addition;
+        return current && previous && additionExitKeys.every(key => same(current[key],previous[key]))
+          ? additionExitForRound(plan.addition!,i+1) : additionExitForRound(edited,i+1);
+      });
+      const roundExits = buildRoundExits(plan.addition,exits);
+      const timingDraft=(value:typeof draft.addition)=>JSON.stringify(value,(key,item)=>
+        additionExitKeys.some(field=>field===key)?undefined:item);
+      if (timingDraft(draft.addition) === timingDraft(original.addition)) {
+        // An exit-only edit also preserves historical timing, sizing and unlimited repeats.
+        parsed.addition={...plan.addition};
+        if (roundExits) parsed.addition.roundExits=roundExits; else delete parsed.addition.roundExits;
+        parsed.sellStages=plan.sellStages;
+        return parsed;
+      }
+      for (const key of additionExitKeys) restoreAdditionField(key);
+      if (roundExits) edited.roundExits=roundExits; else delete edited.roundExits;
+    }
+    const roundKeys = Object.keys({ ...additionDraft().otherRounds[0], time: undefined, savedCondition: undefined }).filter(k => !['sellSwitch','supportReduction','geometricLock','breakevenFloor','kStopVersion'].includes(k));
     const roundDraftAt = (d: MonitorDraft, i: number) => { const value = i ? d.addition.otherRounds[i - 1] : d.addition; return value ? Object.fromEntries(roundKeys.map(k => [k, value[k]])) : undefined; };
     const oldFirst = plan.addition.rounds?.[0];
     if (oldFirst && same(roundDraftAt(draft, 0), roundDraftAt(original, 0))) {
@@ -92,8 +119,8 @@ function parseChangedMonitorDraft(plan: QualityGroup, draft: MonitorDraft, defin
       }
     }
     parsed.addition.rounds = parsed.addition.rounds?.map((r, i) => plan.addition!.rounds?.[i] && same(roundDraftAt(draft, i), roundDraftAt(original, i)) ? plan.addition!.rounds[i] : r);
-    for (const key of ['supportReduction','geometricLock','breakevenFloor'] as const) {
-      if (same(draft.addition[key], original.addition[key])) restoreAdditionField(key);
+    if (plan.addition.quantityMode !== 'calculator') {
+      for (const key of additionExitKeys) if (same(draft.addition[key], original.addition[key])) restoreAdditionField(key);
     }
     parsed.sellStages = parsed.sellStages?.map(stage => {
       const old = plan.sellStages?.find(s => s.afterAdditions === stage.afterAdditions);

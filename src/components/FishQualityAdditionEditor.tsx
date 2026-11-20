@@ -1,7 +1,7 @@
 import {FishClassifiedImpulsePositions,type ClassifiedImpulsePositionDraft} from './FishClassifiedImpulsePositions';
 import {defaultClassifiedImpulsePosition,classifiedImpulsePositionLabel} from '@/lib/fish/qualityClassifiedImpulsePosition';
 import {HOLDING_LEDGER_ADDITION_VERSION} from '@/lib/fish/qualityHoldingLedger';
-import {ADDITION_PROFIT_FLOOR_VERSION, ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, ADDITION_POSITION_FLOOR_INTRABAR_VERSION, additionFloorFollowsPosition, type QualityBreakevenFloorRule, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
+import {additionExitForRound, buildRoundExits, type QualityAdditionExitRule, ADDITION_PROFIT_FLOOR_VERSION, ADDITION_INDICATOR_INCREASE_VERSION, ADDITION_K_TOUCH_VERSION, ADDITION_POSITION_FLOOR_VERSION, ADDITION_POSITION_FLOOR_INTRABAR_VERSION, additionFloorFollowsPosition, type QualityBreakevenFloorRule, type AdditionIncreaseMetric} from '@/lib/fish/qualityAddition';
 import {DBL5_PROFILES,DBL5_GUARD_DEFAULTS,DBL5_RETEST_GUARD_VERSION,dbl5Defaults,dbl5GuardVersion} from '@/lib/dbl5m';
 import { IMPULSE_5M_DISPLAY_NAME, IMPULSE_5M_VERSION } from '@/lib/impulse5m';
 import {DBL5_GUARD_PLUS_CONFIGURABLE_K_VERSION, DBL5_GUARD_PLUS_DISPLAY_NAME, DBL5_GUARD_PLUS_PARAMS, DBL5_GUARD_PLUS_VERSION, IMPULSE_1115_CONFIGURABLE_K_VERSION, IMPULSE_1115_DISPLAY_NAME, IMPULSE_1115_POSITION_VERSION} from '@/lib/dbl5GuardPlus';
@@ -50,7 +50,13 @@ export interface SellSwitchDraft extends ConditionDraft {enabled:boolean}
 interface DetectorPreDraft {enabled:boolean;featureId:string;stricterPct:string}
 type IncreaseDraft = MetricDraft & { saved?: AdditionIncreaseMetric };
 const DEFAULT_INCREASE_METRIC = 'state:avg_state_2';
-interface RoundDraft extends ConditionDraft {
+interface RoundExitDraft {
+  kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;
+  supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string;exitEnabled?:boolean;exitAfterDrops?:string;version?:2};
+  geometricLock?:{enabled:boolean;multiple:string;pct:string};
+  breakevenFloor?:{enabled:boolean;atr:string;version?:QualityBreakevenFloorRule['version']};
+}
+interface RoundDraft extends ConditionDraft, RoundExitDraft {
  classified?:ClassifiedImpulsePositionDraft[];
  impulse?: Impulse5mDraft;
  impulse1115?: Impulse1115Draft;
@@ -81,15 +87,9 @@ export function BreakevenFloorNotes({immediate=false,followPosition=false,intrab
  <p><b className="font-medium text-foreground">为什么需要</b>：平衡公式只保证在 K 价卖出时整笔保本。防守线要等 5 分钟收盘确认、下一分钟开盘才卖，组合卖出与否决也按下一分钟开盘卖，成交价可能低于 K，加仓后就会亏。</p>
  <p><b className="font-medium text-foreground">怎么做</b>：在防守线 K 下方 m×ATR 再挂一条保本底线 F。加仓量按 F 用平衡公式算；价格盘中碰到 F，立即按 F 卖出全部持仓。防守线 K 照旧收盘确认，两者谁先到算谁。所以不论哪条路径卖出，成交价都不低于 F，整笔不亏。</p>
  <p><b className="font-medium text-foreground">例外</b>：开盘直接跳空到 F 下方时，按开盘价卖出。</p>
- <p><b className="font-medium text-foreground">取舍</b>：m 越大，F 离 K 越远，防守线的噪音容忍度保留越多，但加仓量也越小。只对 K 取防守线的那几次生效，各次通用。</p>
+ <p><b className="font-medium text-foreground">取舍</b>：m 越大，F 离 K 越远，防守线的噪音容忍度保留越多，但加仓量也越小。本次加仓以防守线为 K 时生效。</p>
 </div>;}
-export interface AdditionDraft extends RoundDraft {alternativeRounds?:QualityAdditionRoundRule[];attackFromRound?:number;positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;kStopVersion?:typeof ADDITION_K_TOUCH_VERSION;enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
-  /** 支撑线下移减仓（各次加仓通用）。 */
-  supportReduction?:{enabled:boolean;minDropAtr:string;maxPct:string;exitEnabled?:boolean;exitAfterDrops?:string;version?:2};
-  /** 几何仓位 > 门槛时保住 x% 开仓价有效涨幅（各次通用）。 */
-  geometricLock?:{enabled:boolean;multiple:string;pct:string};
-  /** 保本底线（按所选版本在 K 上方或下方设置 F，各次通用）。 */
-  breakevenFloor?:{enabled:boolean;atr:string;version?:QualityBreakevenFloorRule['version']};
+export interface AdditionDraft extends RoundDraft {alternativeRounds?:QualityAdditionRoundRule[];attackFromRound?:number;positionVersion?:typeof HOLDING_LEDGER_ADDITION_VERSION;enabled:boolean;quantityMode:'calculator'|'entry'|'fixed';quantity:string;repeat:boolean;maxRounds:string;otherRounds:RoundDraft[];
   /** 设在「最多加仓次数」之后的旧切换阶段：原样保留，不在轮次里显示。 */
   laterSellStages?:QualitySellStage[]}
 const conditionDraft=(f?:QualityBuyFilter):ConditionDraft=>f
@@ -121,12 +121,36 @@ const roundDraft=(rule:QualityAdditionRoundRule,stage?:QualitySellStage,legacy=f
  return {source:'structure',structure:structuredClone(rule.source==='structure'&&rule.structure?rule.structure:defaultStructureAddition()),structureBuffer:String(rule.source==='structure'?rule.structure?.buffer??0:0),
   ...conditionDraft(undefined),extraConditions:qualityAdditionPrerequisites(rule).map(conditionDraft),...common};
 };
-const copyRound=(d:RoundDraft):RoundDraft=>({classified:structuredClone(d.classified),impulse:d.impulse&&{...d.impulse},impulse1115:d.impulse1115&&{...d.impulse1115},entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,time:structuredClone(d.time),savedCondition:structuredClone(d.savedCondition),extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
+function roundExitDraft(exit:QualityAdditionExitRule):RoundExitDraft {
+ const cut=exit.supportReduction??defaultSupportReduction(), lock=exit.geometricLock??defaultGeometricLock();
+ const floor=exit.breakevenFloor??defaultBreakevenFloor();
+ return {
+  kStopVersion:exit.kStopVersion,
+  supportReduction:{enabled:cut.enabled,minDropAtr:String(cut.minDropAtr),maxPct:String(cut.maxPct),exitEnabled:cut.exitAfterDrops!=null,exitAfterDrops:String(cut.exitAfterDrops??3),version:cut.version},
+  geometricLock:{enabled:lock.enabled,multiple:String(lock.multiple),pct:String(lock.pct)},
+  breakevenFloor:{enabled:floor.enabled,atr:String(floor.atr),version:floor.version},
+ };
+}
+function parseRoundExit(d:RoundExitDraft):QualityAdditionExitRule {
+ const {supportReduction:cut,geometricLock:lock,breakevenFloor:floor}=d;
+ const number=(value:string)=>value.trim()?Number(value):NaN;
+ return {
+  ...(d.kStopVersion?{kStopVersion:d.kStopVersion}:{}),
+  ...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:number(cut.minDropAtr),maxPct:number(cut.maxPct),
+   ...(cut.exitEnabled?{exitAfterDrops:number(cut.exitAfterDrops??'')}:{}),...(cut.version?{version:cut.version}:{})}}:{}),
+  ...(lock?.enabled?{geometricLock:{enabled:true,multiple:number(lock.multiple),pct:number(lock.pct)}}:{}),
+  ...(floor?.enabled?{breakevenFloor:{enabled:true,atr:number(floor.atr),...(floor.version?{version:floor.version}:{})}}:{}),
+ };
+}
+const copyRound=(d:RoundDraft):RoundDraft=>({kStopVersion:d.kStopVersion,supportReduction:structuredClone(d.supportReduction),geometricLock:structuredClone(d.geometricLock),breakevenFloor:structuredClone(d.breakevenFloor),classified:structuredClone(d.classified),impulse:d.impulse&&{...d.impulse},impulse1115:d.impulse1115&&{...d.impulse1115},entryDistanceAtr:d.entryDistanceAtr,gainBasis:d.gainBasis,source:d.source,structure:structuredClone(d.structure),structureBuffer:d.structureBuffer,stricterPct:d.stricterPct,choice:d.choice,direction:d.direction,threshold:d.threshold,time:structuredClone(d.time),savedCondition:structuredClone(d.savedCondition),extraConditions:structuredClone(d.extraConditions),increaseMetrics:structuredClone(d.increaseMetrics),gainEnabled:d.gainEnabled,minGainPct:d.minGainPct,supportOffsetAtr:d.supportOffsetAtr,sellSwitch:{...d.sellSwitch,enabled:false},entryVetoes:structuredClone(d.entryVetoes),detectorPre:{...d.detectorPre}});
 export function additionDraft(rule:QualityAdditionRule|undefined=undefined,sellStages?:readonly QualitySellStage[]):AdditionDraft {
  rule??={...defaultQualityAddition(),positionVersion:HOLDING_LEDGER_ADDITION_VERSION};
- const count=rule.maxRounds??(rule.repeat===false?1:3),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
+ const count=rule.maxRounds??Math.max(rule.repeat===false?1:3,...Object.keys(rule.roundExits?.overrides??{}).map(Number)),stages=orderedSellStages({sellStages:[...(sellStages??[])]}),stageAt=(n:number)=>stages.find(s=>s.afterAdditions===n);
  const first=roundDraft(rule.rounds?.[0]??rule,stageAt(1),rule.enabled),later=stages.filter(s=>s.afterAdditions>count);
- return {...first,alternativeRounds:structuredClone(rule.alternativeRounds),attackFromRound:rule.attackFromRound,...(rule.positionVersion?{positionVersion:rule.positionVersion}:{}),...(rule.kStopVersion?{kStopVersion:rule.kStopVersion}:{}),enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),otherRounds:Array.from({length:count-1},(_,i)=>roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled)),supportReduction:(r=>({enabled:r.enabled,minDropAtr:String(r.minDropAtr),maxPct:String(r.maxPct),exitEnabled:r.exitAfterDrops!=null,exitAfterDrops:String(r.exitAfterDrops??3),...(r.version===2?{version:2 as const}:{})}))(rule.supportReduction??defaultSupportReduction()),geometricLock:(g=>({enabled:g.enabled,multiple:String(g.multiple),pct:String(g.pct)}))(rule.geometricLock??defaultGeometricLock()),breakevenFloor:(f=>({enabled:f.enabled,atr:String(f.atr),...(f.version?{version:f.version}:{})}))(rule.breakevenFloor??defaultBreakevenFloor()),...(later.length?{laterSellStages:later}:{})};
+ return {...first,...roundExitDraft(additionExitForRound(rule,1)),alternativeRounds:structuredClone(rule.alternativeRounds),attackFromRound:rule.attackFromRound,...(rule.positionVersion?{positionVersion:rule.positionVersion}:{}),
+  enabled:rule.enabled,quantityMode:'calculator',quantity:'1',repeat:count>1,maxRounds:String(count),
+  otherRounds:Array.from({length:count-1},(_,i)=>({...roundDraft(rule.rounds?.[i+1]??rule,stageAt(i+2),rule.enabled),...roundExitDraft(additionExitForRound(rule,i+2))})),
+  ...(later.length?{laterSellStages:later}:{})};
 }
 function parseRound(d:RoundDraft,enabled:boolean,defs:readonly DeepDigFeatureDef[]):QualityAdditionRoundRule{
  const rule:QualityAdditionRoundRule={source:d.source,stricterPct:d.stricterPct.trim()?Number(d.stricterPct):NaN,supportOffsetAtr:d.source==='structure'?undefined:d.supportOffsetAtr.trim()?Number(d.supportOffsetAtr):NaN};
@@ -191,8 +215,12 @@ export function parseAdditionDraft(d:AdditionDraft,defs:readonly DeepDigFeatureD
  const n=roundCount(d);
  // 【用户要求】2026-11-02 保存时冻结箱体算法版本（防守线参数写成明确值）
  const rounds=Array.from({length:n},(_,i)=>{try{const r=parseRound(i?d.otherRounds[i-1]??d:d,d.enabled,defs);return r.structure?{...r,structure:freezeStructureVersions(r.structure)}:r;}catch(e){throw new Error(`第 ${i+1} 次加仓：${e instanceof Error?e.message:'条件无效'}`);}});
- const cut=d.supportReduction,num=(x:string)=>x.trim()?Number(x):NaN;
- const rule:QualityAdditionRule={enabled:d.enabled,...(d.positionVersion?{positionVersion:d.positionVersion}:{}),...(d.kStopVersion?{kStopVersion:d.kStopVersion}:{}),quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,...(d.alternativeRounds?.length?{alternativeRounds:structuredClone(d.alternativeRounds),attackFromRound:d.attackFromRound}:{}),...rounds[0],...(cut?.enabled?{supportReduction:{enabled:true,minDropAtr:num(cut.minDropAtr),maxPct:num(cut.maxPct),...(cut.exitEnabled?{exitAfterDrops:num(cut.exitAfterDrops??'')}:{}),...(cut.version===2?{version:2 as const}:{})}}:{}),...(d.geometricLock?.enabled?{geometricLock:{enabled:true,multiple:num(d.geometricLock.multiple),pct:num(d.geometricLock.pct)}}:{}),...(d.breakevenFloor?.enabled?{breakevenFloor:{enabled:true,atr:num(d.breakevenFloor.atr),...(d.breakevenFloor.version?{version:d.breakevenFloor.version}:{})}}:{})};validateQualityAddition(rule);return rule;
+ const firstExit=parseRoundExit(d);
+ const exits=buildRoundExits(firstExit,[firstExit,...Array.from({length:n-1},(_,i)=>parseRoundExit(d.otherRounds[i]??d))]);
+ const rule:QualityAdditionRule={enabled:d.enabled,...(d.positionVersion?{positionVersion:d.positionVersion}:{}),quantityMode:'calculator',quantity:1,repeat:n>1,maxRounds:n,rounds,
+  ...(d.alternativeRounds?.length?{alternativeRounds:structuredClone(d.alternativeRounds),attackFromRound:d.attackFromRound}:{}),...rounds[0],...firstExit,
+  ...(exits?{roundExits:exits}:{})};
+ validateQualityAddition(rule);return rule;
 }
 /** 各次加仓「卖出」里设置的改用卖出算法 → 方案的 sellStages；没有任何切换时返回 undefined。 */
 export function parseAdditionSellStages(d:AdditionDraft,defs:readonly DeepDigFeatureDef[]):QualitySellStage[]|undefined{
@@ -339,7 +367,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
       <dt className="font-mono text-foreground">K</dt><dd>均衡线，也是加仓后的止损线：K = 旧C 或新C − n×ATR（每次加仓自选）</dd>
       <dt className="font-mono text-foreground">C</dt><dd>箱体支撑：新 C 触发加仓；旧 C 是上一箱体的支撑，多留一个箱体作冗余</dd>
       <dt className="font-mono text-foreground">防</dt><dd>防守线（DBL-5）：新箱底抬高且与上一箱体重叠不到一半为上涨期，线＝箱底 − a×ATR、只升不降；否则为震荡期，线＝震荡区最低箱底 − b×ATR，区间内的小箱体不抬线。跌破须按 5 分钟收盘确认（上涨期 1 根、震荡期连续 2 根），确认后下一分钟开盘卖出。图上蓝色实线＝上涨期、虚线＝震荡期，都是防守线；细节见「位置」里防守线旁的 ⓘ</dd>
-      <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后为上一次的{all.breakevenFloor?.enabled&&all.breakevenFloor.version!==ADDITION_PROFIT_FLOOR_VERSION&&additionFloorFollowsPosition(all.breakevenFloor.version)?'定量线 F':' K'}</dd>
+      <dt className="font-mono text-foreground">S</dt><dd>成本线：首轮为首次买入价，之后沿用上一次实际加仓的定量线，按该次的卖出设置取 K 或 F</dd>
       <dt className="font-mono text-foreground">Q</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'加仓前实际持币数，未卖出时为全部建仓数量':'加仓前持币数（首轮为镜像平衡减仓后的剩余币数）'}</dd>
       <dt className="font-mono text-foreground">账</dt><dd>{all.positionVersion===HOLDING_LEDGER_ADDITION_VERSION?'C成本为剩余仓位的取得成本；G已实现为镜像及减仓的净盈亏（亏损保留负号）。历次加仓成本已计入，不能重复使用落袋。':'P为本轮可用落袋利润，用过的不再重复使用。'}</dd>
      </dl>
@@ -376,7 +404,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </select>}
   </div>
 
-  <Part title="方向" role="必要不充分 · 位置那一刻须全部满足" testId="addition-prerequisites" info={<p>方向条件本身不会触发加仓：只有在「位置」达到的那一刻，下列指标和涨幅门槛全部满足，这次加仓才成立；不满足就等下一个位置。指标只读当时最后一根已收盘 K 线。涨幅门槛＝那一刻收盘价相对最新成本线 S 的涨幅（首轮 S 为首次买入价，之后为上一次加仓的 K）。探测算法：这条信号的原探测算法（或只选其中一个）在那一刻的读数，须沿原探测方向达到原门槛再提高 x%（调整量＝原门槛绝对值 × x%，原门槛为 0 时按 1 个单位）；信号没有所选的探测算法就不加仓。</p>}>
+  <Part title="方向" role="必要不充分 · 位置那一刻须全部满足" testId="addition-prerequisites" info={<p>方向条件本身不会触发加仓：只有在「位置」达到的那一刻，下列指标和涨幅门槛全部满足，这次加仓才成立；不满足就等下一个位置。指标只读当时最后一根已收盘 K 线。涨幅门槛＝那一刻收盘价相对最新成本线 S 的涨幅（首轮 S 为首次买入价，之后为上一次实际加仓的定量线）。探测算法：这条信号的原探测算法（或只选其中一个）在那一刻的读数，须沿原探测方向达到原门槛再提高 x%（调整量＝原门槛绝对值 × x%，原门槛为 0 时按 1 个单位）；信号没有所选的探测算法就不加仓。</p>}>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
    {d.source!=='custom'&&(()=>{const dp=d.detectorPre??{enabled:false,featureId:'',stricterPct:'10'},setDp=(next:Partial<DetectorPreDraft>)=>patch({detectorPre:{...dp,...next}});
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="启用探测算法方向条件" disabled={!d.enabled} checked={dp.enabled} onChange={e=>setDp({enabled:e.target.checked})}/><span className={dp.enabled?'font-medium':'text-muted-foreground'}>探测算法</span></label>
@@ -424,7 +452,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </Part>
   <Part title="位置" role="必要充分 · 达到即加仓" testId="addition-timing" info={<div className="space-y-3">
    <InfoBlock title="指标 · S / T / K">
-    <p>加仓条件（自选指标）在所选周期收盘达标、且加仓价 T 比最新成本线 S 至少高出 n 个 5 分钟 ATR(14) 时加仓（入场距离留空＝不检查）；K＝T − m × ATR，碰到 K 卖出全部持仓。S：首次加仓为首次买入价，之后为上一次加仓的 K。「方向」里的其它指标条件须在同一时刻同时满足。</p>
+    <p>加仓条件（自选指标）在所选周期收盘达标、且加仓价 T 比最新成本线 S 至少高出 n 个 5 分钟 ATR(14) 时加仓（入场距离留空＝不检查）；K＝T − m × ATR，碰到 K 卖出全部持仓。S：首次加仓为首次买入价，之后为上一次实际加仓的定量线。「方向」里的其它指标条件须在同一时刻同时满足。</p>
     <p>这是 10-31 时的加仓方式（11-01 改成箱体位置后一度取消，11-04 应用户要求恢复）；涨幅门槛选「相对持仓均价」即与 10-31 版同一口径。</p>
    </InfoBlock>
    <InfoBlock title="箱体位置（5 分钟线）">
@@ -587,7 +615,7 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
    </div>
   </Part>
 
-  <Part title="卖出" role="必要充分 · 任一达标即卖出全部持仓" testId="addition-sell" info={<div className="space-y-2">
+  <Part title="卖出" role={`第 ${index+1} 次加仓成交后生效`} testId="addition-sell" info={<div className="space-y-2">
    <p>这里的卖出条件与 ④ 硬性终止并列：任何一个先达标，都立即卖出全部仓位（含各次加仓买入的部分）。</p>
    <p>碰到 K：本次加仓后价格跌到「位置」里算出的 K 即卖出全部持仓，跳空按开盘价；同一分钟先后不明时优先止损。这一条始终生效。</p>
    <p>否决条件：本次加仓实际成交后开始检查，可添加多条，任一条达标即卖出全部持仓；条件类型与 ④ 硬性终止相同（静态 / 动态回撤、1 / 5 分钟内跌幅、指标、加仓止盈约束）。后面某次加仓没有另设时，继续沿用这里的条件。</p>
@@ -599,20 +627,20 @@ export function FishQualityAdditionEditor({draft:all,setDraft,vetoStages,setVeto
   </div>}>
    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11px]">
     <label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" checked disabled aria-label="碰到K卖出"/><span className="font-medium">碰到 K</span></label>
-    <div className="space-y-1 text-muted-foreground" data-testid="addition-sell-k"><select aria-label="碰到K执行版本" className={field+' h-7 max-w-full'} disabled={!d.enabled} value={all.kStopVersion??'legacy'} onChange={e=>setDraft({...all,kStopVersion:e.target.value===ADDITION_K_TOUCH_VERSION?ADDITION_K_TOUCH_VERSION:undefined})}><option value={ADDITION_K_TOUCH_VERSION}>即时触价新版 · 碰到 K 全仓卖出（最灵敏）</option><option value="legacy">保留原版执行方式</option></select><p>{all.kStopVersion===ADDITION_K_TOUCH_VERSION?'低于或等于 K 即按 K 卖出全部余仓与加仓；开盘越线按开盘价。影线算，不等 1 分钟或 5 分钟收盘确认。':legacyStopNote}</p>{all.kStopVersion===ADDITION_K_TOUCH_VERSION&&<p className="text-[10px] text-primary">各次加仓的 K / K′ 均使用即时触价。保存后运行新轮次；旧轮次和旧版保留，加仓量仍沿用原公式与保本底线设置。</p>}</div>
-   {(()=>{const cut:NonNullable<AdditionDraft['supportReduction']>=all.supportReduction??{enabled:false,minDropAtr:'0.5',maxPct:'80',exitEnabled:false,exitAfterDrops:'3',version:2},set=(next:Partial<typeof cut>)=>setDraft({...all,supportReduction:{...cut,...next}});
+    <div className="space-y-1 text-muted-foreground" data-testid="addition-sell-k"><select aria-label="碰到K执行版本" className={field+' h-7 max-w-full'} disabled={!d.enabled} value={d.kStopVersion??'legacy'} onChange={e=>patch({kStopVersion:e.target.value===ADDITION_K_TOUCH_VERSION?ADDITION_K_TOUCH_VERSION:undefined})}><option value={ADDITION_K_TOUCH_VERSION}>即时触价新版 · 碰到 K 全仓卖出（最灵敏）</option><option value="legacy">保留原版执行方式</option></select><p>{d.kStopVersion===ADDITION_K_TOUCH_VERSION?'低于或等于 K 即按 K 卖出全部余仓与加仓；开盘越线按开盘价。影线算，不等 1 分钟或 5 分钟收盘确认。':legacyStopNote}</p>{d.kStopVersion===ADDITION_K_TOUCH_VERSION&&<p className="text-[10px] text-primary">本次加仓成交后，K / K′ 采用即时触价。</p>}</div>
+   {(()=>{const cut:NonNullable<AdditionDraft['supportReduction']>=d.supportReduction??{enabled:false,minDropAtr:'0.5',maxPct:'80',exitEnabled:false,exitAfterDrops:'3',version:2},set=(next:Partial<typeof cut>)=>patch({supportReduction:{...cut,...next}});
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="支撑线下移时减仓" disabled={!d.enabled} checked={cut.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={cut.enabled?'font-medium':'text-muted-foreground'}>支撑下移减仓</span></label>
-     <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${cut.enabled?'':'opacity-55'}`} data-testid="addition-support-reduction">下移 ≥<input aria-label="支撑下移ATR倍数" type="number" min="0" step="any" disabled={!d.enabled||!cut.enabled} value={cut.minDropAtr} onChange={e=>set({minDropAtr:e.target.value})} className={cell+' w-14'}/>ATR<span className="px-0.5 text-muted-foreground/50">·</span>单次最多减<input aria-label="单次减仓上限" type="number" min="0" max="100" step="any" disabled={!d.enabled||!cut.enabled} value={cut.maxPct} onChange={e=>set({maxPct:e.target.value})} className={cell+' w-14'}/>%<span className="text-[10px] text-muted-foreground/70">各次通用</span>
+     <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${cut.enabled?'':'opacity-55'}`} data-testid="addition-support-reduction">下移 ≥<input aria-label="支撑下移ATR倍数" type="number" min="0" step="any" disabled={!d.enabled||!cut.enabled} value={cut.minDropAtr} onChange={e=>set({minDropAtr:e.target.value})} className={cell+' w-14'}/>ATR<span className="px-0.5 text-muted-foreground/50">·</span>单次最多减<input aria-label="单次减仓上限" type="number" min="0" max="100" step="any" disabled={!d.enabled||!cut.enabled} value={cut.maxPct} onChange={e=>set({maxPct:e.target.value})} className={cell+' w-14'}/>%
       <label className="ml-1 inline-flex items-center gap-1 whitespace-nowrap" title="11-03 修正：减仓后加仓的成本线取整笔真实保本价，减仓所得不再重复计入落袋（不勾＝11-02 原版，已存的方案和模板照旧按原版算，结果不变）"><input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" aria-label="减仓后不重复计落袋" disabled={!d.enabled||!cut.enabled} checked={cut.version===2} onChange={e=>set({version:e.target.checked?2:undefined})}/>减仓后不重复计落袋</label></div>
      <label className={`flex items-center gap-2 whitespace-nowrap ${cut.enabled?'':'opacity-55'}`}><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="K连续下移全仓卖出" disabled={!d.enabled||!cut.enabled} checked={!!cut.exitEnabled} onChange={e=>set({exitEnabled:e.target.checked})}/><span className={cut.exitEnabled&&cut.enabled?'font-medium':'text-muted-foreground'}>连续下移全卖</span></label>
      <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${cut.enabled&&cut.exitEnabled?'':'opacity-55'}`} data-testid="addition-support-drop-exit">K 连续下移<input aria-label="K连续下移次数" type="number" min="1" max="20" step="1" disabled={!d.enabled||!cut.enabled||!cut.exitEnabled} value={cut.exitAfterDrops??'3'} onChange={e=>set({exitAfterDrops:e.target.value})} className={cell+' w-14'}/>次即全仓卖出<span className="text-[10px] text-muted-foreground/70">加仓后重新计数</span></div></>;})()}
-   {(()=>{const g:NonNullable<AdditionDraft['geometricLock']>=all.geometricLock??{enabled:false,multiple:'10',pct:'1'},set=(next:Partial<typeof g>)=>setDraft({...all,geometricLock:{...g,...next}});
+   {(()=>{const g:NonNullable<AdditionDraft['geometricLock']>=d.geometricLock??{enabled:false,multiple:'10',pct:'1'},set=(next:Partial<typeof g>)=>patch({geometricLock:{...g,...next}});
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="几何仓位大时保住有效涨幅" disabled={!d.enabled} checked={g.enabled} onChange={e=>set({enabled:e.target.checked})}/><span className={g.enabled?'font-medium':'text-muted-foreground'}>保住有效涨幅</span></label>
      <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${g.enabled?'':'opacity-55'}`} data-testid="addition-geometric-lock">几何仓位 &gt;<input aria-label="几何仓位门槛" type="number" min="0" step="any" disabled={!d.enabled||!g.enabled} value={g.multiple} onChange={e=>set({multiple:e.target.value})} className={cell+' w-14'}/>时至少保留<input aria-label="保留开仓价有效涨幅百分比" type="number" min="0" max="100" step="any" disabled={!d.enabled||!g.enabled} value={g.pct} onChange={e=>set({pct:e.target.value})} className={cell+' w-14'}/>% 开仓价有效涨幅<span className="text-[10px] text-muted-foreground/70">止损上移到 Kₘ＋x%×E</span></div></>;})()}
-   {(()=>{const f:NonNullable<AdditionDraft['breakevenFloor']>=all.breakevenFloor??{enabled:false,atr:String(defaultBreakevenFloor().atr),version:ADDITION_PROFIT_FLOOR_VERSION},set=(next:Partial<typeof f>)=>setDraft({...all,breakevenFloor:{...f,...next}});
+   {(()=>{const f:NonNullable<AdditionDraft['breakevenFloor']>=d.breakevenFloor??{enabled:false,atr:String(defaultBreakevenFloor().atr),version:ADDITION_PROFIT_FLOOR_VERSION},set=(next:Partial<typeof f>)=>patch({breakevenFloor:{...f,...next}});
     const profitFloor=f.version===ADDITION_PROFIT_FLOOR_VERSION,followPosition=additionFloorFollowsPosition(f.version),intrabarFloor=f.version===ADDITION_POSITION_FLOOR_INTRABAR_VERSION;
     return <><label className="flex items-center gap-2 whitespace-nowrap"><input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" aria-label="防守线保本底线" disabled={!d.enabled} checked={f.enabled}
-      onChange={e=>set({enabled:e.target.checked})}/><span className={f.enabled?'font-medium':'text-muted-foreground'}>保本底线</span><FishQualityInfo label="保本底线说明"><BreakevenFloorNotes immediate={all.kStopVersion===ADDITION_K_TOUCH_VERSION} followPosition={followPosition} intrabarFloor={intrabarFloor} profitFloor={profitFloor}/></FishQualityInfo></label>
+      onChange={e=>set({enabled:e.target.checked})}/><span className={f.enabled?'font-medium':'text-muted-foreground'}>保本底线</span><FishQualityInfo label="保本底线说明"><BreakevenFloorNotes immediate={d.kStopVersion===ADDITION_K_TOUCH_VERSION} followPosition={followPosition} intrabarFloor={intrabarFloor} profitFloor={profitFloor}/></FishQualityInfo></label>
      <div className={`flex flex-wrap items-center gap-1.5 text-muted-foreground ${f.enabled?'':'opacity-55'}`} data-testid="addition-breakeven-floor">
       {f.enabled&&<select aria-label="保本底线基准" className={field+' h-7 max-w-full'} disabled={!d.enabled} value={f.version??'legacy'}
         onChange={e=>set({version:e.target.value===ADDITION_PROFIT_FLOOR_VERSION?ADDITION_PROFIT_FLOOR_VERSION:e.target.value===ADDITION_POSITION_FLOOR_INTRABAR_VERSION?ADDITION_POSITION_FLOOR_INTRABAR_VERSION:e.target.value===ADDITION_POSITION_FLOOR_VERSION?ADDITION_POSITION_FLOOR_VERSION:undefined})}>
