@@ -11,6 +11,7 @@ import { TradingProvider } from "@/contexts/TradingContext";
 import { FishQualityProvider } from "@/contexts/FishQualityContext";
 import { RouteLoadBoundary } from './components/RouteLoadBoundary';
 const Index = lazy(() => import('./pages/Index.tsx'));
+const MiningLibrary = lazy(() => import('./components/FishMiningLibrary').then(module => ({default:module.FishMiningLibrary})));
 const AuthPage = lazy(() => import('./pages/AuthPage.tsx'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage.tsx'));
 const JournalTagsPage = lazy(() => import('./pages/JournalTagsPage.tsx'));
@@ -37,7 +38,8 @@ const queryClient = new QueryClient();
 function AppRoutes() {
   const location = useLocation();
   const { user, profile, loading, bootIssue } = useAuth();
-  const simStateReady = useSimStateHydration(user?.id);
+  const libraryOnly = location.pathname === '/mining-library';
+  const simStateReady = useSimStateHydration(libraryOnly ? undefined : user?.id);
 
   if (loading) {
     // 登录态恢复不出来时不再只转圈：摆出原因、出路与现场读数。
@@ -83,6 +85,9 @@ function AppRoutes() {
       </Routes></RouteLoadBoundary>
     );
   }
+
+  // The account library can open in a second tab without mounting a second trading engine.
+  if (libraryOnly) return <RouteLoadBoundary><MiningLibrary key={user.id} account={user.id} openRequest={{key:1}} /></RouteLoadBoundary>;
 
   // 云端引擎状态尚未水化完成 → 与 auth 同款加载屏。
   // 常驻浏览器几乎瞬时（本地已有数据，比较后放行）；新浏览器等一次全量拉取。

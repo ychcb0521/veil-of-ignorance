@@ -1,4 +1,4 @@
-import {miningLibraryConditions} from './libraryConditions';
+import {miningHitSnapshots,miningFamilySnapshot} from './libraryConditions';
 import {emptyMiningLibrary,miningRecordSignal,type FishMiningLibrary,type FishMiningRecord} from './miningLibrary';
 import {newQualityStudy,importQualityFish,qualityComparisonRows,qualityMembers,qualityGroupId} from './quality';
 import type {FishSnapshot} from './algorithm';
@@ -9,9 +9,9 @@ export function miningAlgorithmFamily(snapshot:Pick<FishSnapshot,'featureId'|'fe
 }
 export function miningAlgorithmDirectories(library:FishMiningLibrary){
  const runs=new Map(library.runs.map(r=>[r.id,r])),groups=new Map<string,FishMiningRecord[]>();
- for(const record of library.records){const saved=miningLibraryConditions(record,runs.get(record.runId));
+ for(const record of library.records){const members=miningHitSnapshots(record,runs.get(record.runId));
   // An OR scan's non-hits never create a directory membership.
-  const families=new Set(saved.conditions.length?saved.conditions.map(c=>miningAlgorithmFamily(c.snapshot)):['未分类']);
+  const families=new Set(members.length?members.map(s=>miningAlgorithmFamily(miningFamilySnapshot(s))):['未分类']);
   for(const family of families){const list=groups.get(family)??[];list.push(record);groups.set(family,list);}
  }
  return [...groups].map(([family,records])=>({id:'mining-family-'+family,family,records})).sort((a,b)=>a.family.localeCompare(b.family));

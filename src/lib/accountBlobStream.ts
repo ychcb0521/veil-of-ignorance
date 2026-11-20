@@ -4,12 +4,13 @@ import { reviveAccountBlobValue, serializeAccountBlob } from './accountBlobCodec
 /** Parse decompressed bytes without allocating one archive-sized JSON string.
  * Values and special tags retain the existing codec's exact semantics.
  */
-export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8Array>, projection?:{record:(value:unknown,path:readonly (string|number|undefined)[])=>unknown;flush:()=>Promise<void>}): Promise<unknown> {
+export async function deserializeAccountBlobStream(stream: ReadableStream<Uint8Array>, projection?:{record:(value:unknown,path:readonly (string|number|undefined)[])=>unknown;flush:()=>Promise<void>}, visit?: (key:string|number|undefined,parent:string|number|undefined,value:unknown)=>void): Promise<unknown> {
   const parser = new JSONParser({ keepStack: true, stringBufferSize: 64 * 1024 });
   const canonical = new Map<string, object>();
   let result: unknown, complete = false;
   parser.onValue = ({ value, key, parent, stack }) => {
     let next = reviveAccountBlobValue(String(key ?? ''), value);
+    if(visit)visit(key,stack[stack.length-1]?.key,next);
     if(projection)next=projection.record(next,[...stack.map(frame=>frame.key),key]);
     // IndexedDB can share these immutable frozen objects, avoiding thousands of
     // identical plan/formula copies after a cloud restore. Content is unchanged.

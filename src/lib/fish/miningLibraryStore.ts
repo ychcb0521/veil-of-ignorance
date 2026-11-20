@@ -3,87 +3,20 @@
  * 写入按账号串行：读 → 合并 → 写在同一个事务里，另一个标签页的写入不会被覆盖。
  */
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, syncAccountBlobFully, type AccountBlobAdapter } from '@/lib/accountBlobSync';
-import {pruneMiningDeletions,mergeSourceDeletions} from './libraryDeletion';
+import {keyOf,readRaw,transform,localMiningMarks,hasDeletions,type MiningDeletions} from './miningDisk';
+import {decodeMiningArchive,containsMiningMerge} from './miningRestore';
+import {prepareAccountBlobEncoding} from '../accountBlobCodec';
 import { emptyMiningLibrary, mergeMiningLibraries, normalizeMiningLibrary, restoreMiningImport, type FishMiningLibrary } from './miningLibrary';
 
 export const MINING_LIBRARY_EVENT = 'fish-mining-library-saved';
-const DATABASE = 'veil-fish-mining-library-v1', STORE = 'libraries';
-const keyOf = (owner: string | null | undefined) => owner ? `user:${owner}` : 'anonymous';
-const deletionKeyOf = (key: string) => `deleted:${key}`;
-type MiningDeletions = Pick<FishMiningLibrary, 'deletedRecords' | 'clearedAt'>;
-
-function mergeDeletions(a?: MiningDeletions, b?: MiningDeletions): MiningDeletions {
-  return {
-    deletedRecords: mergeSourceDeletions(a?.deletedRecords, b?.deletedRecords),
-    clearedAt: Math.max(a?.clearedAt ?? 0, b?.clearedAt ?? 0) || undefined,
-  };
-}
-
-function hasDeletions(value?: MiningDeletions) {
-  return !!(value?.clearedAt || Object.keys(value?.deletedRecords ?? {}).length);
-}
-
-function open(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB unavailable')); return; }
-    const request = indexedDB.open(DATABASE, 1);
-    let expired = false;
-    const timer = setTimeout(() => { expired = true; reject(new Error('捕捞库存储超时')); }, 8_000);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => { clearTimeout(timer); if (expired) request.result.close(); else resolve(request.result); };
-    request.onerror = request.onblocked = () => { clearTimeout(timer); reject(new Error('捕捞库存储不可用')); };
-  });
-}
-async function readRaw(key: string): Promise<FishMiningLibrary | undefined> {
-  const db = await open();
-  try {
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE), store = tx.objectStore(STORE);
-      const request = store.get(key), marks = store.get(deletionKeyOf(key));
-      marks.onsuccess = () => {
-        if (request.result == null && !marks.result) { resolve(undefined); return; }
-        const library = normalizeMiningLibrary(request.result);
-        resolve(pruneMiningDeletions({ ...library, ...mergeDeletions(library, marks.result) }));
-      };
-      request.onerror = marks.onerror = () => reject(tx.error);
-    });
-  } finally { db.close(); }
-}
-/** 在一个事务里读出、变换、写回。apply 原样返回同一个对象 = 没有改动，不写。 */
-async function transform(key: string, apply: (library: FishMiningLibrary) => FishMiningLibrary): Promise<{ changed: boolean; marked: boolean }> {
-  const db = await open();
-  try {
-    return await new Promise((resolve, reject) => {
-      let changed = false, marked = false;
-      const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), read = store.get(key);
-      const marks = store.get(deletionKeyOf(key));
-      marks.onsuccess = () => {
-        try {
-          const original = normalizeMiningLibrary(read.result);
-          const before = pruneMiningDeletions({ ...original, ...mergeDeletions(original, marks.result) }), applied = apply(before);
-          const deletions = mergeDeletions(before, applied);
-          const after = applied === before ? before : pruneMiningDeletions({ ...applied, ...deletions });
-          if (after !== before) { store.put(after, key); changed = true; }
-          if (hasDeletions(deletions) && JSON.stringify(mergeDeletions(marks.result)) !== JSON.stringify(deletions)) {
-            store.put(deletions, deletionKeyOf(key));
-            marked = true;
-          }
-        } catch (error) { tx.abort(); reject(error); }
-      };
-      tx.oncomplete = () => resolve({ changed, marked });
-      tx.onerror = tx.onabort = () => reject(tx.error);
-    });
-  } finally { db.close(); }
-}
-
 const queues = new Map<string, Promise<unknown>>();
 function enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
   const run = (queues.get(key) ?? Promise.resolve()).then(task, task);
   queues.set(key, run.catch(() => undefined));
   return run;
 }
-const announce = (owner: string | null | undefined) => {
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(MINING_LIBRARY_EVENT, { detail: { owner: owner ?? null } }));
+const announce = (owner: string | null | undefined, fromRestore = false) => {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(MINING_LIBRARY_EVENT, { detail: { owner: owner ?? null, fromRestore } }));
 };
 
 /** Old pages write the original library key. New pages keep deletion marks independently of those writes. */
@@ -92,37 +25,49 @@ const miningDeletionsAccountBlob: AccountBlobAdapter<MiningDeletions> = {
   async read(owner) {
     const key = keyOf(owner);
     await queues.get(key);
-    const library = await readRaw(key);
-    return hasDeletions(library) ? mergeDeletions(library) : undefined;
+    return localMiningMarks(key);
   },
   async write(owner, value) {
     if (!hasDeletions(value)) return;
     const key = keyOf(owner);
-    await enqueue(key, () => transform(key, library => ({ ...library, ...mergeDeletions(library, value) })));
-    announce(owner);
+    await enqueue(key, () => localMiningMarks(key,value));
+    announce(owner,true);
   },
-  mergeRemote(owner, value) { return miningDeletionsAccountBlob.write(owner, value); },
+  async mergeRemote(owner,value){
+    if(!hasDeletions(value))return;
+    const key=keyOf(owner);
+    const marks=await enqueue(key,()=>localMiningMarks(key,value));
+    announce(owner,true);
+    if(marks?.clearedAt===value.clearedAt&&Object.keys(marks?.deletedRecords??{}).length===Object.keys(value.deletedRecords??{}).length&&
+      Object.entries(value.deletedRecords??{}).every(([id,at])=>marks?.deletedRecords?.[id]===at))return 'matchesRemote';
+  },
   weight: value => Object.keys(value?.deletedRecords ?? {}).length + Number(!!value?.clearedAt),
 };
 
 async function reconcileMiningLibrary(owner?: string, fresh = false) {
-  await Promise.all([
+  return Promise.all([
     syncAccountBlobOnLoad(miningDeletionsAccountBlob, owner, undefined, fresh),
-    syncAccountBlobOnLoad(miningLibraryAccountBlob, owner, undefined, fresh),
+    syncAccountBlobOnLoad(miningLibraryAccountBlob, owner, 600_000, fresh),
   ]);
 }
 
 /** 读捕捞库（先与账号云端对一次账）。读不到返回空库。 */
-export async function loadMiningLibrary(owner: string | null | undefined): Promise<FishMiningLibrary> {
+export async function loadMiningLibrary(owner: string | null | undefined, onLocal?: (value:FishMiningLibrary)=>void): Promise<FishMiningLibrary> {
   if (typeof indexedDB === 'undefined') return emptyMiningLibrary();
-  await reconcileMiningLibrary(owner ?? undefined);
-  const key = keyOf(owner);
+  const key=keyOf(owner);
+  const local=onLocal?await readRaw(key):undefined;
+  if(local)onLocal?.(local);
+  const states=await reconcileMiningLibrary(owner??undefined,true);
+  if(owner&&states.some(s=>s==='failed'||s==='timed_out'||s==='skipped')) throw Error('账号捕捞库尚未同步，当前显示本机记录');
   await queues.get(key);
-  try { return await readRaw(key) ?? emptyMiningLibrary(); } catch { return emptyMiningLibrary(); }
+  if(local&&states.every(status=>status==='unchanged'))return local;
+  return await readRaw(key) ?? emptyMiningLibrary();
 }
 /** Full downloads must report storage failure instead of quietly exporting an empty library. */
 export async function loadMiningLibraryForTransfer(owner?:string):Promise<FishMiningLibrary>{
- await reconcileMiningLibrary(owner, true);await queues.get(keyOf(owner));return await readRaw(keyOf(owner))??emptyMiningLibrary();
+ const states=await reconcileMiningLibrary(owner,true);
+ if(owner&&states.some(s=>s==='failed'||s==='timed_out'||s==='skipped'))throw Error('完整账号捕捞库尚未同步，请重试');
+ await queues.get(keyOf(owner));return await readRaw(keyOf(owner))??emptyMiningLibrary();
 }
 /** 改捕捞库：排队、在事务里合并写入；成功后通知界面并安排上传。失败不抛（挖掘本身不受影响）。 */
 export function updateMiningLibrary(owner: string | null | undefined, apply: (library: FishMiningLibrary) => FishMiningLibrary): Promise<boolean> {
@@ -140,7 +85,29 @@ export function updateMiningLibrary(owner: string | null | undefined, apply: (li
 
 export const miningLibraryAccountBlob: AccountBlobAdapter<FishMiningLibrary> = {
   name: 'fish-mining-library',
-  async mergeRemote(owner,value){await miningLibraryAccountBlob.write(owner,value);},
+  localReceiptName: 'fish-mining-library-pages-v1',
+  decodeRemote: (_owner,enc,pieces)=>decodeMiningArchive(enc,pieces),
+  async prepareStored(owner,knownHash){
+    if(typeof Worker==='undefined'){const value=await readRaw(keyOf(owner));return value?prepareAccountBlobEncoding(value,knownHash):undefined;}
+    return new Promise((resolve,reject)=>{
+      const worker=new Worker(new URL('../workers/miningBlobEncoder.worker.ts',import.meta.url),{type:'module'});
+      worker.onmessage=e=>{worker.terminate();if(e.data.ok)resolve(e.data.result);else reject(Error('捕捞库编码失败'));};
+      worker.onerror=e=>{worker.terminate();reject(Error(e.message));};
+      worker.postMessage({owner,knownHash});
+    });
+  },
+  async mergeRemote(owner,value){
+    if(!value)return miningLibraryAccountBlob.write(owner,value);
+    const incoming=normalizeMiningLibrary(value);
+    let identical=false;
+    await enqueue(keyOf(owner),()=>transform(keyOf(owner),local=>{
+      const merged=mergeMiningLibraries(local,incoming);
+      identical=containsMiningMerge(incoming,merged);
+      return merged;
+    }));
+    announce(owner,true);
+    return identical?'matchesRemote':undefined;
+  },
   async read(owner) { const key = keyOf(owner); await queues.get(key); try { return await readRaw(key); } catch { return undefined; } },
   write(owner, library) {
     const key = keyOf(owner);

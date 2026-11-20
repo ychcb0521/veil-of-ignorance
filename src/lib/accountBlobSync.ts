@@ -37,6 +37,8 @@ export interface AccountBlobAdapter<T = unknown> {
   decodeRemote?(owner:string,enc:'gzip'|'json',pieces:readonly string[]):Promise<unknown>;
   /** 云端键名（不含前缀），如 fish-quality。 */
   name: string;
+  /** Distinct local representations must not share a receipt with older clients. The cloud key stays the same. */
+  localReceiptName?: string;
   /** 读本机当前那份；没有返回 undefined。 */
   read(owner: string): Promise<T | undefined>;
   /** Encode the durable copy in a worker without returning the full object to the page. */
@@ -44,7 +46,7 @@ export interface AccountBlobAdapter<T = unknown> {
   /** 用云端那份覆盖本机；undefined = 清空本机。须排进该存储自己的写队列。 */
   write(owner: string, value: T | undefined): Promise<void>;
   /** Libraries opt into merging remote history/deletion marks while retaining local settings. */
-  mergeRemote?(owner:string,value:T|undefined,context?:{preferRemote:boolean}):Promise<void>;
+  mergeRemote?(owner:string,value:T|undefined,context?:{preferRemote:boolean}):Promise<void | 'matchesRemote'>;
   /** 内容多少：0 = 空白。只在两边都没有同步记录时用来比较。 */
   weight(value: T | undefined): number;
 }
@@ -126,7 +128,7 @@ function toBase64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(binary);
 }
-function fromBase64(text: string): Uint8Array {
+function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   const binary = atob(text), bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
@@ -175,7 +177,7 @@ export async function decodeAccountBlob(enc: Head['enc'], input: string | readon
   if (enc === 'gzip') {
     const { deserializeAccountBlobStream } = await import('./accountBlobStream');
     const compressed = fromBase64(text);
-    const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(compressed); controller.close(); } });
+    const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({ start(controller) { controller.enqueue(compressed); controller.close(); } });
     return deserializeAccountBlobStream(stream.pipeThrough(new DecompressionStream('gzip')));
   }
   if (typeof Worker === 'function' && text.length > 1_000_000 && text.length <= DECODE_IN_WORKER_MAX_CHARS) {
@@ -305,7 +307,7 @@ function runPush(adapter: AccountBlobAdapter<any>, owner: string, settled = fals
 
 async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: boolean): Promise<boolean> {
   if (!(await signedInAs(owner))) return false;
-  const meta = await readMeta(adapter.name, owner);
+  const meta = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
   let value = adapter.prepareStored ? undefined : await adapter.read(owner);
   let savedAt = meta?.savedAt || Date.now();
   const head = await fetchHead(adapter.name, owner);
@@ -323,14 +325,14 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   const knownHash=head?.rev===meta?.rev?meta?.hash:undefined;
   const prepared=adapter.prepareStored?await adapter.prepareStored(owner,knownHash):value===undefined?undefined:await prepareAccountBlob(value,knownHash);
   if (!head && !prepared) {
-    await writeMeta(adapter.name, owner, { savedAt, syncedAt: savedAt, parts: 0 });
+    await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { savedAt, syncedAt: savedAt, parts: 0 });
     return true;
   }
   const hash=prepared?.hash??'deleted';
   if (head && meta?.rev && head.rev === meta.rev && meta.hash === hash) {
     // 云端仍是上次那一版、内容也一样：只记一笔已同步。
-    const latest = await readMeta(adapter.name, owner);
-    await writeMeta(adapter.name, owner, { ...meta, savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt });
+    const latest = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
+    await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { ...meta, savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt });
     if ((latest?.savedAt ?? 0) > savedAt) schedulePush(adapter, owner);
     return true;
   }
@@ -351,8 +353,8 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
   const previousParts = Math.max(head?.parts ?? 0, meta?.parts ?? 0);
   await deleteRows(owner, Array.from({ length: Math.max(0, previousParts - parts) }, (_, i) => chunkKey(adapter.name, parts + i))).catch(() => {});
   // 上传期间本机又保存过：savedAt 只进不退，那一版仍算「改过未上传」。
-  const latest = await readMeta(adapter.name, owner);
-  await writeMeta(adapter.name, owner, { savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt, rev, parts, hash });
+  const latest = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
+  await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt, rev, parts, hash });
   if ((latest?.savedAt ?? 0) > savedAt) schedulePush(adapter, owner);
   return true;
 }
@@ -363,7 +365,7 @@ async function adopt(adapter: AccountBlobAdapter<any>, owner: string, head: Head
   }
   await adapter.write(owner, value);
   const hash = value === undefined ? 'deleted' : (await fingerprintAccountBlobValue(value)).hash;
-  await writeMeta(adapter.name, owner, { savedAt: head.savedAt, syncedAt: head.savedAt, rev: head.rev, parts: head.parts, hash });
+  await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { savedAt: head.savedAt, syncedAt: head.savedAt, rev: head.rev, parts: head.parts, hash });
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('veil-account-blob-adopted', { detail: { name: adapter.name, owner } }));
 }
 
@@ -375,7 +377,7 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
   if (!(await signedInAs(owner))) return 'skipped';
   // An unchanged head needs metadata only. Reading the whole 400+ MB research
   // archive here would duplicate the campaign worker's read on every page load.
-  const [meta, head] = await Promise.all([readMeta(adapter.name, owner), fetchHead(adapter.name, owner, signal)]);
+  const [meta, head] = await Promise.all([readMeta(adapter.localReceiptName ?? adapter.name, owner), fetchHead(adapter.name, owner, signal)]);
   if (signal.aborted) throw signal.reason;
   const dirty = !!meta?.rev && meta.savedAt > meta.syncedAt;
   if (head && meta?.rev && head.rev === meta.rev) {
@@ -402,11 +404,15 @@ async function reconcile(adapter: AccountBlobAdapter<any>, owner: string, begin:
     cloud??=await fetchValue(adapter.name,owner,head,adapter.decodeRemote,signal);
     if(!cloud.ok)return 'failed';
     if(!begin())return 'skipped';
-    await adapter.mergeRemote(owner,cloud.value,{preferRemote:takeCloud});
+    const merge=await adapter.mergeRemote(owner,cloud.value,{preferRemote:takeCloud});
+    if(merge==='matchesRemote'){
+      await writeMeta(adapter.localReceiptName ?? adapter.name,owner,{rev:head.rev,parts:head.parts,savedAt:head.savedAt,syncedAt:head.savedAt});
+      return 'adopted';
+    }
     // The merged copy includes this head. Mark it dirty against that exact revision;
     // the queued push must not download and merge the same large archive again.
-    const latest=await readMeta(adapter.name,owner);
-    await writeMeta(adapter.name,owner,{rev:head.rev,parts:head.parts,savedAt:Math.max(Date.now(),latest?.savedAt??0,head.savedAt+1),syncedAt:head.savedAt});
+    const latest=await readMeta(adapter.localReceiptName ?? adapter.name,owner);
+    await writeMeta(adapter.localReceiptName ?? adapter.name,owner,{rev:head.rev,parts:head.parts,savedAt:Math.max(Date.now(),latest?.savedAt??0,head.savedAt+1),syncedAt:head.savedAt});
     schedulePush(adapter,owner,0,true);
     return 'adopted';
   }
@@ -492,9 +498,9 @@ export function noteAccountBlobSaved(adapter: AccountBlobAdapter<any>, owner: st
   adapters.set(adapter.name, adapter);
   return enqueue(idOf(adapter.name, owner), async () => {
     if (!(await signedInAs(owner))) return false;
-    const meta = await readMeta(adapter.name, owner);
+    const meta = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
     const savedAt = Math.max(Date.now(), (meta?.savedAt ?? 0) + 1);
-    await writeMeta(adapter.name, owner, { ...(meta ?? { syncedAt: 0 }), savedAt });
+    await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { ...(meta ?? { syncedAt: 0 }), savedAt });
     return true;
   }).then(signed => { if (signed) schedulePush(adapter, owner); }, () => schedulePush(adapter, owner));
 }

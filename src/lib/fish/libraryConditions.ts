@@ -45,11 +45,18 @@ export function libraryCondition(input:Partial<FishSnapshot>,evidence='记录快
 }
 /** Filter execution uses f.metric/f.direction/f.threshold, which take precedence over decorative labels and old snapshot fields. */
 export const filterLibraryCondition=(f:QualityBuyFilter)=>libraryCondition({...f.snapshot,statistic:f.metric,direction:f.direction,threshold:f.threshold,scale:1},'该轮过滤条件快照');
-export function miningLibraryConditions(record:FishMiningRecord,run?:FishMiningRun):{conditions:LibraryCondition[];combination:string;note?:string;identity:string} {
+export function miningHitSnapshots(record:FishMiningRecord,run?:FishMiningRun) {
  const root=record.signal.fish,mode=root?.combination??run?.combination;
- const members=root?.algorithms?.length
+ return root?.algorithms?.length
   ? mode==='or'?(root.hitAlgorithms??[]).map(i=>root.algorithms![i-1]).filter(Boolean):root.algorithms
   : root?[root]:[];
+}
+export function miningFamilySnapshot(input:Partial<FishSnapshot>):Pick<FishSnapshot,'featureId'|'featureShort'|'statistic'>{
+ return {featureId:input.featureId??fromKey(input).featureId,featureShort:input.featureShort,statistic:input.statistic??fromKey(input).statistic} as Pick<FishSnapshot,'featureId'|'featureShort'|'statistic'>;
+}
+export function miningLibraryConditions(record:FishMiningRecord,run?:FishMiningRun):{conditions:LibraryCondition[];combination:string;note?:string;identity:string} {
+ const root=record.signal.fish,mode=root?.combination??run?.combination;
+ const members=miningHitSnapshots(record,run);
  const conditions=members.map(raw=>{
   const s=knownSnapshot(raw),metric=savedFishMetric(s);
   let candidates=(run?.rules??[]).filter(r=>r.featureId===s.featureId);
