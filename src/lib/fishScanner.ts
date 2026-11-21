@@ -21,6 +21,7 @@ import { compileFishProgram, evaluateFishProgram, classifyFishProgram, FISH_STAT
 import { validateFishBars, fishTurnoverCheck, describeTurnoverMiss, FISH_MAX_ALGORITHMS, type FishTurnoverFloor } from '@/lib/fish/shared';
 import { FishTurnoverRejections, type FishTurnoverDetail } from '@/lib/fish/turnoverRejections';
 import { fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
+import {captureLimitText,withinCaptureLimit,type FishRange} from './fish/thresholdRange';
 import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
@@ -57,7 +58,7 @@ export interface FishProgress {
   notice?: string;
   algorithmHits?: number[];
   markets?: Partial<Record<'crypto'|'us_stock', FishProgress>>;
-  venues?: Partial<Record<FishExchange, FishProgress>>; cutoffMs: number | null; anchorMs?: number | null; threshold?: number; total: number; done: number; current: string;
+  venues?: Partial<Record<FishExchange, FishProgress>>; cutoffMs: number | null; anchorMs?: number | null; threshold?: number; range?:FishRange; direction?:'>'|'<'; total: number; done: number; current: string;
   counts: Record<Exclude<FishOutcome,'outside'>, number> & {outside?:number}; status: 'running' | 'complete' | 'cancelled' | 'aborted' | 'skipped'; error?: string; history?: number; /** 未通过成交额检查的标的数，同一交易所和市场内去重。 */ thin?: number; wickSkipped?: number; skippedReason?: string; failures?: {failed: {symbol:string;reason:string}[];readings: {symbol:string;reason:string}[]}; blocked?: number; constraintBlocked?: number[]; rule?: string; bars?: number; constraintTexts?: string[];
 
 }
@@ -164,7 +165,7 @@ export function saveFishMemberRound(round: FishCombinationRound, j: number): voi
   }
   if (!rows.length) return;
   const cutoffMs = Math.floor(round.anchorMs / plan.step) * plan.step;
-  saveFishRound(summarizeFishRound(rows, { algorithmKey: plan.algorithmKey, cutoffMs, anchorMs: round.anchorMs, direction: plan.settings.direction, threshold: plan.settings.threshold, scale: plan.scale, unit: plan.unit, partial: !round.complete }));
+  saveFishRound(summarizeFishRound(rows, { algorithmKey: plan.algorithmKey, cutoffMs, anchorMs: round.anchorMs, direction: plan.settings.direction, threshold: plan.settings.threshold, range:plan.settings.range, scale: plan.scale, unit: plan.unit, partial: !round.complete }));
 }
 /** 按某种合并方式，把一轮的逐币结论合成鱼。并集里有算法没结论的币只在这一轮完整扫完时才合并。 */
 export function combineFishRound(round: FishCombinationRound, mode: FishCombination): { signals: TradeSignal[]; counts: Record<string, number> } {
@@ -552,7 +553,7 @@ export class FishScanner {
     const end = bars.length - 1, first = plan.warm - 1, scale = plan.scale;
     const avgName = fishStatisticName(plan.def, plan.settings.statistic);
     const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
-    const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
+    const rule = captureLimitText(plan.settings.direction,plan.settings.threshold,plan.settings.range);
     const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}${plan.stateHold?`，且（${FISH_STATE_HOLD_TEXT}）`:''}）`;
     if(result.outcome==='outside')return {outcome:'outside',member:result,cutoffMs:cut,lines:[head,`${name}：信号起点 ${t(result.snapshot!.cutoffMs-(result.snapshot!.cutoffIndex!-result.snapshot!.startIndex!)*plan.step)} 不在过去 ${options.lookbackHours} 小时内，本轮不收录`]};
     if (result.outcome === 'hit') {
@@ -588,7 +589,7 @@ export class FishScanner {
     try {
       if(options.algorithms!.length>FISH_MAX_ALGORITHMS)throw new Error(`最多 ${FISH_MAX_ALGORITHMS} 个算法`);
       const plans=options.algorithms!.map(a=>fishProgramForLookback(compileFishProgram(a.feature,a.algorithm),options.lookbackHours,options.turnoverFloors));
-      const algorithmRules = plans.map(plan => fishRuleText(plan.def, plan.settings.direction, plan.settings.threshold, plan.texts.length, plan.settings.statistic));
+      const algorithmRules = plans.map(plan => fishRuleText(plan.def, plan.settings.direction, plan.settings.threshold, plan.texts.length, plan.settings.statistic,plan.settings.range));
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime<=0)throw new Error('服务器时间无效');
       const anchorMs=options.anchorMs??clock.serverTime;
@@ -611,7 +612,7 @@ export class FishScanner {
       const publish=()=>{
         syncMode();
         const base=states[0];if(!base)return;
-        Object.assign(progress,base,{anchorMs,rule:displayPlans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(mode==='or'?' 或 ':' 且 '),algorithmHits:displayIndices.map(i=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
+        Object.assign(progress,base,{anchorMs,rule:displayPlans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic,p.settings.range)).join(mode==='or'?' 或 ':' 且 '),algorithmHits:displayIndices.map(i=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
         // 各算法的币数可能不同（某家在某个算法里整家跳过）：扫完的算法按「已完成」计，进度才能走到头
         const total=Math.max(0,...states.map(p=>p?.total??0));
         progress.done=Math.min(...plans.map((_,i)=>{const st=states[i];return !st?0:st.status==='running'?st.done:total;}));
@@ -686,7 +687,7 @@ export class FishScanner {
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
     const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N,...((plan.compiled.usesPrs6h||plan.compiled.usesAti6h)?{marketEvidence:true}:{})};
     const turnoverRejections = new FishTurnoverRejections();
-    const rule = fishRuleText(plan.def, plan.settings.direction, threshold, plan.texts.length, plan.settings.statistic);
+    const rule = fishRuleText(plan.def, plan.settings.direction, threshold, plan.texts.length, plan.settings.statistic,plan.settings.range);
     let completed = new Map<string, FishMemberResult>();
     const reportResult = (key: string, member: FishMemberResult) => {
       if (options.checkpoint && ['hit', 'below', 'unknown', 'blocked', 'wick', 'thin', 'history', 'outside'].includes(member.outcome)) completed.set(key, member);
@@ -700,7 +701,7 @@ export class FishScanner {
     // 捕捞过程：逐币记下截止读数与结论，扫完存成本轮摘要（只存本机）
     const memberResults=new Map<string,Map<number,FishMemberResult>>();
     const roundRows:FishRoundRow[]=[];let roundCut:number|undefined,roundAnchor=0;
-    const progress = initialFishProgress(); progress.turnoverFloors = options.turnoverFloors; progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=rule;
+    const progress = initialFishProgress(); progress.turnoverFloors = options.turnoverFloors; progress.threshold = threshold; progress.direction=plan.settings.direction; progress.range=plan.settings.range; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=rule;
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
       for(const venue of Object.values(venues)) {
@@ -841,7 +842,7 @@ export class FishScanner {
                 stage=`${plan.def.short}计算`;
                 let readings=evaluateFishProgram(bars,plan);
                 // Optional numerical fixture injection used by transport tests; production always evaluates the composed program.
-                if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:(plan.settings.direction==='>'?a>threshold/plan.scale:a<threshold/plan.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
+                if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:withinCaptureLimit(a,plan.settings,plan.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
                 const result=limitFishLookback(classifyFishProgram(market.symbol,bars,readings,cut,plan),node,options.lookbackHours,cut);
                 if(local.signal.aborted)return;
                 // 命中的币再查「信号前」成交额（截止前达标、起点前没达标 = 起点之后才放量，成不了鱼）；读数仍留着，调严阈值时起点后移可能达标
@@ -916,7 +917,7 @@ export class FishScanner {
       options.signal.removeEventListener('abort',cancel);this.running=false;progress.current='';
       for(const p of Object.values(venues))if(p.status==='running'){p.status=progress.status==='cancelled'?'cancelled':'aborted';p.error??=progress.error;}
       if(roundCut!==undefined)options.onRound?.({plans:[plan],results:memberResults,anchorMs:roundAnchor,complete:progress.status==='complete',memberHits:[progress.counts.hit],lookbackHours:options.lookbackHours});
-      if(options.saveSummary!==false&&roundCut!==undefined&&roundRows.length&&progress.status!=='aborted')saveFishRound(summarizeFishRound(roundRows,{algorithmKey:plan.algorithmKey,cutoffMs:roundCut,anchorMs:roundAnchor,direction:plan.settings.direction,threshold:plan.settings.threshold,scale:plan.scale,unit:plan.unit,partial:progress.status!=='complete'}));
+      if(options.saveSummary!==false&&roundCut!==undefined&&roundRows.length&&progress.status!=='aborted')saveFishRound(summarizeFishRound(roundRows,{algorithmKey:plan.algorithmKey,cutoffMs:roundCut,anchorMs:roundAnchor,direction:plan.settings.direction,threshold:plan.settings.threshold,range:plan.settings.range,scale:plan.scale,unit:plan.unit,partial:progress.status!=='complete'}));
       publish();
     }
     return {...progress,counts:{...progress.counts},venues};

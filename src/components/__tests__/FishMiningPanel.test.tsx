@@ -55,6 +55,24 @@ it('opens with the last saved profile after hydration and preserves a draft thro
   expect(screen.getByLabelText('批量捕捞目标条数')).toHaveValue(50);
 });
 
+it('saves both interval bounds and rejects a reversed interval at the editor',()=>{
+ const base={id:'range',featureId:'cbi2',statistic:'结果',threshold:'0.04'};
+ const m=api({ruleChoices:[{featureId:'cbi2',label:'CBI-2',statistics:[{name:'结果',label:'结果'}]}]},{rules:[base]});
+ render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
+ fireEvent.click(screen.getByRole('button',{name:'批量捕捞设置'}));
+ const change=(name:string,value:string)=>fireEvent.change(screen.getByLabelText('批量捕捞算法 1 '+name),{target:{value}});
+ change('上限','0.01');
+ fireEvent.click(screen.getByRole('button',{name:'保存设置'}));
+ expect(screen.getByRole('alert')).toHaveTextContent('下限不能大于上限');
+ expect(readMiningSettings()).toBeNull();
+ change('下限','0');
+ change('上限','0.08');
+ fireEvent.click(screen.getByRole('button',{name:'保存设置'}));
+ expect(readMiningSettings()?.rules[0].threshold).toBe('[0,0.08]');
+ fireEvent.click(screen.getByRole('button',{name:'批量捕捞设置'}));
+ expect(screen.getByLabelText('批量捕捞算法 1 上限')).toHaveValue(0.08);
+});
+
 it('adds restored DSP·a as a selectable mining algorithm without replacing existing rules',()=>{
  const base={id:'base',featureId:'cbi2',statistic:'avg_CBI2_2',threshold:'0.04'};
  const m=api({ruleChoices:[{featureId:'cbi2',label:'CBI-2',statistics:[{name:'结果',label:'结果'},{name:'avg_CBI2_2',label:'avg₂'}]},

@@ -46,6 +46,17 @@ it('单算法：调严后当场重判 = 按新阈值重扫（含约束）',async
   expect(deriveFishRound(loose.round,[compileFishProgram(cbiDef,set(-0.06,extra))])).toBeNull();
  }
 },600000);
+it('收窄区间的信号与完整扫描一致，扩大区间须重新扫描',async()=>{
+ const range=(min:number,max:number)=>set(min,{range:{min,max}});
+ const base=await scan([{feature:cbiDef,algorithm:range(-0.05,0.2)}]);
+ const target=range(-0.03,0.07), plan=compileFishProgram(cbiDef,target);
+ const fresh=await scan([{feature:cbiDef,algorithm:target}]);
+ expect(fresh.hits.length).toBeGreaterThan(0);
+ const derived=deriveFishRound(base.round,[plan]);
+ expect(derived).not.toBeNull();
+ expect(byId(combineFishRound(derived!,'and').signals)).toEqual(byId(fresh.hits));
+ expect(deriveFishRound(base.round,[compileFishProgram(cbiDef,range(-0.03,0.3))])).toBeNull();
+},60000);
 it('多算法：各卡分别调严后，交集 / 并集都 = 按新阈值重扫；未调的卡原样复用',async()=>{
  const base=await scan([{feature:bssDef,algorithm:set(0)},{feature:cbiDef,algorithm:set(0)}],'or');
  for(const [ta,tb] of [[0.02,0],[0.02,0.03],[0,0.05]]){

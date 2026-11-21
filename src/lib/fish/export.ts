@@ -1,3 +1,4 @@
+import { savedCaptureLimit, rangeLabel } from '@/lib/fish/thresholdRange';
 /** Export the cabin as the same simple table the user sees, using saved capture settings. */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from './algorithm';
@@ -22,6 +23,9 @@ function captureThreshold(m: Partial<FishSnapshot>): string {
   const parts = m.algorithmKey?.split('|');
   const key = parts?.length === 6 ? parts : undefined;
   const direction = m.direction ?? key?.[3];
+  if(m.range)return rangeLabel(m.range);
+  const savedRange=savedCaptureLimit(key?.[4])?.range;
+  if(savedRange)return rangeLabel(savedRange);
   const threshold = m.threshold ?? (key?.[4]?.trim() ? Number(key[4]) : undefined);
   return direction && typeof threshold === 'number' && Number.isFinite(threshold)
     ? `${direction} ${threshold}` : '未记录';

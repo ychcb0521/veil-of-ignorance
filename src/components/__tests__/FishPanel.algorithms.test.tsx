@@ -12,6 +12,15 @@ const save=(defs:DeepDigFeatureDef[])=>{const key=getUserPrefix()+FEATURES_KEY;l
 // 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已给 CBI-2 填过 0.3 测其余流程
 beforeEach(()=>{localStorage.clear();sessionStorage.setItem('veil.fish.open', JSON.stringify({ settings: true }));start.mockReset();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
 describe('渔的通用算法设置',()=>{
+ it('在现有下限旁添加上限，保存并按双边区间开始捕捞',()=>{
+  render(<Harness/>);
+  fireEvent.change(screen.getByLabelText('捕捞上限'),{target:{value:'0.8'}});
+  expect(screen.getByLabelText('捕捞方向')).toHaveValue('range');
+  expect(screen.getByLabelText('捕捞下限')).toHaveValue(0.3);
+  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({algorithm:expect.objectContaining({range:{min:.3,max:.8}})}));
+  expect(readFishPreference('cbi2').threshold).toBe('[0.3,0.8]');
+ });
  it('共享目录：新增项出现，removed消失，错误公式和超12000根置灰并显示原因；默认CBI2缺失选第一项',()=>{
   render(<Harness/>);expect(screen.getByLabelText('捕捞算法')).toHaveValue('cbi2');save([custom,{...custom,id:'bad',name:'错误公式',formula:'missing_name'},{...custom,id:'huge',name:'过长历史',formula:'avg(C,10000)'}]);expect(screen.getByRole('option',{name:/Z · 新增特征/})).toBeEnabled();expect(screen.getByRole('option',{name:/错误公式/})).toBeDisabled();for(const option of screen.getAllByRole('option',{name:/过长历史/})){expect(option).toBeDisabled();expect(option).toHaveTextContent('12000');}save([{...CBI2_DEF,removed:true},{...custom,removed:true}]);expect(screen.queryByRole('option',{name:/新增特征/})).not.toBeInTheDocument();expect(screen.getByLabelText('捕捞算法')).toHaveValue('drift-speed');
  });

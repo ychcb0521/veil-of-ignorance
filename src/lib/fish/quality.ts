@@ -1,3 +1,4 @@
+import { encodeFishRange } from '@/lib/fish/thresholdRange';
 import {
   readHoldingImpulse1115Classification,HOLDING_IMPULSE_1115_CLASSIFICATION_VERSION,
   type HoldingImpulse1115Rule,type HoldingImpulse1115Reading,
@@ -255,7 +256,7 @@ export function qualityMembers(s: TradeSignal): FishSnapshot[] {
     : [f];
 }
 export const qualityGroupId = (f: FishSnapshot) => shortFishHash(JSON.stringify([
-  f.featureId, f.definitionKey, f.statistic, f.interval, f.H, f.scale, f.unit, f.direction, f.threshold, f.constraints,
+  f.featureId, f.definitionKey, f.statistic, f.interval, f.H, f.scale, f.unit, f.direction, f.threshold, f.constraints, ...(f.range?[encodeFishRange(f.range.min,f.range.max)]:[]),
 ]));
 /** A union's displayed start changes when another member joins. Attribute each member's original run once. */
 function memberKey(source: TradeSignal, f: FishSnapshot): string {
@@ -461,7 +462,7 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
   if (additionIdentity(g.addition).length) {
     identity.push(additionIdentity(g.addition));
     identity.push(...additionMirrorIdentity(g.addition,g.mirrorTakeProfit));
-    if(g.addition?.source==='detector') identity.push(Object.entries(s.readings ?? Object.fromEntries(qualityMembers(s.source).map(f=>[qualityGroupId(f),f]))).sort(([a],[b])=>a.localeCompare(b)).map(([id,f])=>[id,f.definitionKey,f.statistic,f.threshold,f.direction,f.H,f.constraints]));
+    if(g.addition?.source==='detector') identity.push(Object.entries(s.readings ?? Object.fromEntries(qualityMembers(s.source).map(f=>[qualityGroupId(f),f]))).sort(([a],[b])=>a.localeCompare(b)).map(([id,f])=>[id,f.definitionKey,f.statistic,f.threshold,f.direction,f.H,f.constraints,...(f.range?[encodeFishRange(f.range.min,f.range.max)]:[])]));
   }
   return shortFishHash(JSON.stringify(identity));
 };
@@ -822,10 +823,10 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
       }else{
         const buildAdditionCandidates=(condition:QualityAdditionRoundRule)=>{
         const candidates: AdditionCandidate[]=[];let unavailable:string|undefined;
-        const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [])=>{
+        const addCandidate=(snapshot:FishSnapshot,metric:string,direction:'<'|'>',threshold:number,label:string, constraints:string[] = [],preserveCaptureRange=false)=>{
           const base=qualityMetricPlan(snapshot,metric);
           const plan=compileFishProgram(base.plan.def,{...base.plan.settings,direction,constraints:constraints.filter(text=>text!==FISH_STATE_HOLD_TEXT).map((text,i)=>({id:'add-'+i,text,enabled:true}))});
-          candidates.push({plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
+          candidates.push({...(preserveCaptureRange&&snapshot.range?{captureRange:snapshot.range}:{}),plan,scale:base.scale,metric,label,direction,threshold,featureId:snapshot.featureId,definitionKey:snapshot.definitionKey});
         };
         if(condition.source==='custom') {
           for(const f of qualityAdditionConditions(condition))addCandidate(f.snapshot,f.metric,f.direction,f.threshold,f.label);
@@ -833,7 +834,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           const detectors=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f])));
           for(const f of detectors) {
             const direction=f.direction??'>';
-            addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,condition.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints);
+            addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,condition.stricterPct),f.featureShort??f.featureName??'原探测算法',f.constraints,true);
           }
           if(!candidates.length) additionNote='没有原探测算法；可选择自定义加仓指标';
         }
@@ -844,7 +845,7 @@ async function evaluateQualityPhase(sample: QualitySample, group: QualityGroup, 
           const dp=activeDetectorPrerequisite(condition);
           if(dp){const all=Object.values(sample.readings ?? Object.fromEntries(qualityMembers(sample.source).map(f=>[qualityGroupId(f),f]))),pick=all.filter(f=>!dp.featureId||f.featureId===dp.featureId);
             if(!pick.length)unavailable=dp.featureId?`这条信号没有所选的探测算法，方向条件无法满足，不加仓`:'这条信号没有原探测算法，方向条件无法满足，不加仓';
-            for(const f of pick){const direction=f.direction??'>';addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,dp.stricterPct),`${f.featureShort??f.featureName??'原探测算法'} 探测值`,f.constraints);}}
+            for(const f of pick){const direction=f.direction??'>';addCandidate(f,'capture',direction,stricterAdditionThreshold(f.threshold,direction,dp.stricterPct),`${f.featureShort??f.featureName??'原探测算法'} 探测值`,f.constraints,true);}}
           if(candidates.length>timing)required=candidates.splice(timing);}
         return {candidates,required,...(unavailable?{unavailable}:{}),structure:condition.source==='structure'?condition.structure:undefined,impulsePosition:condition.impulsePosition,impulse1115Position:condition.impulse1115Position,classifiedImpulsePositions:condition.classifiedImpulsePositions,minGainPct:condition.minGainPct,entryBufferAtr:condition.entryBufferAtr,supportOffsetAtr:condition.supportOffsetAtr,entryDistanceAtr:condition.entryDistanceAtr,gainBasis:condition.gainBasis,entryVetoes:condition.entryVetoes,indicatorIncrease:condition.indicatorIncrease};};
         const {candidates,required,unavailable}=buildAdditionCandidates(config),roundRules=config.rounds?.map((r,i)=>({...buildAdditionCandidates(r),...(config.alternativeRounds?.[i]?{alternative:buildAdditionCandidates(config.alternativeRounds[i])}:{})}));

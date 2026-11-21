@@ -1,3 +1,4 @@
+import { rangeLabel } from '@/lib/fish/thresholdRange';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Download } from 'lucide-react';
 import { FishWickEvidence } from './FishWickDetails';
@@ -47,7 +48,7 @@ function ThresholdDetails({ rows, window }: { rows: FishHitRateThresholdDetail[]
           <td className={`${cellClass} whitespace-nowrap font-mono font-medium`}>{row.maximum ? thresholdValue(row.maximum.value, row.unit) : '窗内无可用读数'}</td>
           <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.maximum ? formatUTC8(row.maximum.timeMs) : '—'}</td>
           <td className={`${cellClass} whitespace-nowrap font-mono`}>{thresholdValue(row.cutoffReading, row.unit)}<div className="text-[10px] text-muted-foreground">{formatUTC8(row.cutoffMs)}</div></td>
-          <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.direction} {thresholdValue(row.threshold, row.unit)}</td>
+          <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.range ? rangeLabel(row.range)+(row.unit && row.unit!=='原值'?' '+row.unit:'') : row.direction+' '+thresholdValue(row.threshold, row.unit)}</td>
         </tr>)}</tbody>
       </table>
     </div>
@@ -69,7 +70,7 @@ function OutsideDetails({ rows, window }: { rows: FishHitRateOutsideDetail[]; wi
             <td className={`${cellClass} whitespace-nowrap font-mono`}>{formatUTC8(row.startMs)}</td>
             <td className={`${cellClass} whitespace-nowrap`}>比窗口{early ? '起点' : '截止'}{offsetText(row.startMs - edgeMs)}</td>
             <td className={`${cellClass} whitespace-nowrap font-mono`}>{thresholdValue(row.cutoffReading, row.unit)}<div className="text-[10px] text-muted-foreground">{formatUTC8(row.cutoffMs)}</div></td>
-            <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.direction} {thresholdValue(row.threshold, row.unit)}</td>
+            <td className={`${cellClass} whitespace-nowrap font-mono`}>{row.range ? rangeLabel(row.range)+(row.unit && row.unit!=='原值'?' '+row.unit:'') : row.direction+' '+thresholdValue(row.threshold, row.unit)}</td>
           </tr>;
         })}</tbody>
       </table>

@@ -1,3 +1,4 @@
+import { fishRangeFields, captureLimitText } from '@/lib/fish/thresholdRange';
 import { useFishAccountSettings } from '@/hooks/useFishAccountSettings';
 import { readFishAccountSettings, type FishAccountSettings } from '@/lib/fish/accountSettings';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
@@ -218,6 +219,7 @@ export function FishPanel(p: FishPanelProps) {
     for(const [j,plan] of multiple.plans.entries()){
       const bases=(p.roundPlans??[]).filter(b=>sameFamily(b,plan));
       if(!bases.length||bases.some(b=>fishTightenable(b,plan)))continue;
+      if(plan.settings.range||bases.some(b=>b.settings.range))return `算法 ${enabledCardNumbers[j]??j+1} 的新数值范围超出了上轮已扫范围，请重新捕捞以覆盖新增区间。`;
       const d=plan.settings.direction,edge=d==='>'?Math.min(...bases.map(b=>b.settings.threshold)):Math.max(...bases.map(b=>b.settings.threshold));
       return `算法 ${enabledCardNumbers[j]??j+1} 本轮按 ${d} ${edge} 扫过：阈值${d==='>'?'调大':'调小'}（${d==='>'?'≥':'≤'} ${edge}）可即时过滤，${d==='>'?'调小':'调大'}要重新捕捞。下面仍是上一轮的结果。`;
     }
@@ -328,7 +330,7 @@ export function FishPanel(p: FishPanelProps) {
   const saveSchedule = (mode: NonNullable<FishPanelProps['auto']>['mode'], hours: number) => {
     setError(auto?.setSchedule({ mode, hours }) ? '' : '捕捞频率未写入浏览器，请保留页面并重试');
   };
-  const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
+  const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic,p.settings.range)).join(combination==='or'?' 或 ':' 且 ');
   const [captureCopyRevision, setCaptureCopyRevision] = useState(0);
   const [captureCopy, setCaptureCopy] = useState<{ owner: string; settings: FishHitRateSettings } | null>(null);
   const [copyError, setCopyError] = useState('');
@@ -436,7 +438,7 @@ export function FishPanel(p: FishPanelProps) {
             <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
             <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「捕捞设置」可调整算法、市场、时间、频率、过滤和提醒。</li>
           </ol></section>
-        {(x?.anchorMs||x?.cutoffMs)&&<p className="border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground/80">{x?.anchorMs?`本轮节点 ${formatUTC8(x.anchorMs)}`:''}{x?.anchorMs&&x?.cutoffMs?' · ':''}{x?.cutoffMs?`本轮阈值 ${plan?.settings.direction??'>'} ${x.threshold??.3}`:''}</p>}
+        {(x?.anchorMs||x?.cutoffMs)&&<p className="border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground/80">{x?.anchorMs?`本轮节点 ${formatUTC8(x.anchorMs)}`:''}{x?.anchorMs&&x?.cutoffMs?' · ':''}{x?.cutoffMs?`本轮阈值 ${captureLimitText(x.direction??plan?.settings.direction??'>',x.threshold??.3,x.range)}`:''}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
       {suggestionProgress&&<p role="status">建议{suggestionProgress.status==='running'?'计算中':suggestionProgress.status==='cancelled'?'已取消':suggestionProgress.status==='aborted'?'已中止':'已完成'} · {suggestionProgress.phase==='signals'?'信号样本':'随机对照'} · {suggestionProgress.done} / {suggestionProgress.total} {suggestionProgress.current}</p>}
       {suggestion&&<><p className="whitespace-pre-wrap break-words">{fishSuggestionTitle(suggestion)}</p>{([['信号',suggestion.samples],['随机',suggestion.random]] as const).map(([label,stats])=>stats.failures.length>0&&<details key={label}><summary className="w-fit cursor-pointer">{label}跳过原因（前{stats.failures.length}项）</summary>{stats.failures.map((row,i)=><p key={i} className="break-words">{row.symbol} · {formatUTC8(row.timeMs)} · {row.reason}</p>)}</details>)}</>}
@@ -563,7 +565,7 @@ export function FishPanel(p: FishPanelProps) {
       {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {suggestionStale?suggestion.samples.attempted:library.length} 条）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
       {!suggestion&&suggestionProgress?.status==='running'&&suggestionRun.current?.target==='first'&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
       </>}
-      onChange={next=>{setFirstEnabled(next.enabled);if(next.frozen===firstFrozen&&next.featureId===selected&&next.pref.direction!==pref.direction){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setFirstFrozen(next.frozen);setPref(cleanPreference(next.pref));if(!next.frozen)saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
+      onChange={next=>{setFirstEnabled(next.enabled);if(next.frozen===firstFrozen&&next.featureId===selected&&next.pref.direction!==pref.direction&&!fishRangeFields(next.pref.threshold)&&!fishRangeFields(pref.threshold)){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setFirstFrozen(next.frozen);setPref(cleanPreference(next.pref));if(!next.frozen)saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
       onDelete={()=>replaceCards(extraCards)}/>
       {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onRecalculate={()=>{const target=extraSuggest[i];if(target)void calculateSuggestion('manual',{id:target.id,plan:target.plan});}} recalculateDisabled={running||!p.onSuggest||!extraSuggest[i]} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
       </div>

@@ -1,3 +1,4 @@
+import { fishRangeFields, savedCaptureLimit } from '@/lib/fish/thresholdRange';
 import { reconstructionDirection } from '@/lib/fish/reconstruction';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFishFeatures } from './useFishFeatures';
@@ -37,8 +38,9 @@ export function useFishReconstruction(account: string | undefined, signals: read
       const plans = cards.map((c, i) => {
         const def = captureCardDefinition(c, defs.find(d => d.id === c.featureId));
         if (!def) throw Error(`算法 ${i + 1} 的定义已不存在`);
-        if (!c.pref.threshold.trim() || !Number.isFinite(Number(c.pref.threshold))) throw Error(`请先填写算法 ${i + 1} 的当前阈值`);
-        const plan = compileFishProgram(def, { statistic: '结果', direction: reconstructionDirection(def.id), threshold: Number(c.pref.threshold), constraints: [] });
+        const limit=savedCaptureLimit(c.pref.threshold,fishRangeFields(c.pref.threshold)?c.pref.direction:reconstructionDirection(def.id));
+        if (!limit) throw Error(`请先填写算法 ${i + 1} 的当前阈值`);
+        const plan = compileFishProgram(def, { statistic: '结果', ...limit, constraints: [] });
         if (plan.unavailable) throw Error(`算法 ${i + 1}：${plan.unavailable}`);
         return plan;
       });

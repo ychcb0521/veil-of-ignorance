@@ -297,7 +297,7 @@ export function useFish(userId: string | undefined, options: { onNewFish?: (fish
     signalsRef.current=list;setSignals(list);saveFishSignals(list,ownerRef.current??null);
     saveFishCombinationRound(selected, mode);
     selected.plans.forEach((p,j)=>{if(!round.data.plans.includes(p))saveFishMemberRound(selected,j);});
-    const rule = selected.plans.map(p => fishRuleText(p.def, p.settings.direction, p.settings.threshold, p.texts.length, p.settings.statistic)).join(mode === 'or' ? ' 或 ' : ' 且 ');
+    const rule = selected.plans.map(p => fishRuleText(p.def, p.settings.direction, p.settings.threshold, p.texts.length, p.settings.statistic,p.settings.range)).join(mode === 'or' ? ' 或 ' : ' 且 ');
     const previous=progressRef.current;
     if(previous){const next={...previous,anchorMs:selected.anchorMs,lookbackHours:selected.lookbackHours,rule,algorithmHits:selected.memberHits,cutoffMs:selected.plans[0]?Math.floor(selected.anchorMs/selected.plans[0].step)*selected.plans[0].step:previous.cutoffMs,counts:{...previous.counts,hit:combined.length,unknown:counts.unknown??0,outside:counts.outside??0}};progressRef.current=next;setProgress(next);}
     persist();return true;

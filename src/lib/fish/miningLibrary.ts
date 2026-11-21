@@ -1,3 +1,4 @@
+import { encodeFishRange } from '@/lib/fish/thresholdRange';
 import {pruneMiningDeletions,mergeSourceDeletions} from './libraryDeletion';
 /**
  * 挖掘库：批量挖掘每一档的扫描记录与挖到的信号，独立于鱼舱保存（在鱼舱里删掉鱼，挖掘库里仍在，并标出「已从鱼舱删除」）。
@@ -107,7 +108,7 @@ export function adoptMinedFish(library: FishMiningLibrary, state: FishMiningStat
   for (const s of mined) {
     const snapshots=s.fish?.algorithms?.length?s.fish.algorithms:s.fish?[s.fish]:[];
     // Backfill using each historical signal's snapshot, never relabel old fish with today's preset.
-    const rules=snapshots.length?snapshots.map((r,i)=>({id:`historical-${i}`,featureId:r.featureId??'cbi2',statistic:r.statistic??'结果',threshold:String(r.threshold)})):state.rules;
+    const rules=snapshots.length?snapshots.map((r,i)=>({id:`historical-${i}`,featureId:r.featureId??'cbi2',statistic:r.statistic??'结果',threshold:r.range?encodeFishRange(r.range.min,r.range.max):String(r.threshold),...(r.direction==='<'?{direction:'<' as const}:{})})):state.rules;
     const combination=s.fish?.combination??(s.fish?.algorithms?.length?'and':'or'),anchorMs=s.mined!.anchorMs,key=JSON.stringify([anchorMs,rules,combination]);
     const group=byAnchor.get(key)??{anchorMs,rules,combination,list:[]};group.list.push(s);byAnchor.set(key,group);
   }

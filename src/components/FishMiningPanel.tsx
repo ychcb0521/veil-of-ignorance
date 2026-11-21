@@ -1,3 +1,5 @@
+import { FishThresholdFields } from './FishThresholdFields';
+import { captureLimit, captureLimitText } from '@/lib/fish/thresholdRange';
 import { FishMetricTimeFields } from './FishMetricTimeFields';
 import type {FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import type {ReactNode} from 'react';
@@ -36,7 +38,7 @@ function MiningTime({ ms }: { ms: number }) {
 }
 
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
-const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} ${r.direction ?? '>'} ${r.threshold}`;
+const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} ${captureLimitText(r.direction??'>',r.threshold)}`;
 type MiningEditorProps = { mining: FishMiningApi; close: () => void; restart?: boolean };
 
 function MiningSettingsContent({ mining, ...editor }: MiningEditorProps) {
@@ -111,9 +113,14 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
   const save=()=>{
     const count=Number(target);if(!Number.isSafeInteger(count)||count<=0){setError('目标条数必须是正整数');return;}
     if (!draft.length || draft.length > FISH_MAX_ALGORITHMS) { setError(`请选择 1 至 ${FISH_MAX_ALGORITHMS} 个算法`); return; }
-    const invalid = draft.findIndex(rule => rule.enabled !== false && (!rule.threshold.trim() || !Number.isFinite(Number(rule.threshold))
-      || !choices.find(choice => choice.featureId === rule.featureId)?.statistics.some(statistic => statistic.name === rule.statistic)));
-    if (invalid >= 0) { setError(`算法 ${invalid + 1}：请选择有效统计量，并填写有限数字门槛`); return; }
+    for (const [index, rule] of draft.entries()) {
+      if (rule.enabled === false) continue;
+      try {
+        if (!choices.find(choice => choice.featureId === rule.featureId)?.statistics.some(stat => stat.name === rule.statistic)) throw Error('请选择有效统计量');
+        if (!rule.threshold.trim()) throw Error('请填写有限数字门槛');
+        captureLimit(rule.threshold, rule.direction ?? '>');
+      } catch (cause) { setError(`算法 ${index + 1}：${cause instanceof Error ? cause.message : String(cause)}`); return; }
+    }
     let configured;
     try {
       configured = continuousMiningSettings({ ...settings, target: count, rules: draft });
@@ -161,10 +168,8 @@ function MiningRuleEditor({ mining, close, restart = false, loaded }: MiningEdit
       <select aria-label={`批量捕捞算法 ${i+1} 特征值`} className="h-7 w-28 min-w-0 rounded bg-muted px-2" value={rule.featureId} onChange={e=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,featureId:e.target.value,time:undefined,statistic:choices.find(c=>c.featureId===e.target.value)?.menuStatistics?.[0]?.name??'结果',threshold:''}:r));}}>
         {!choices.some(c=>c.featureId===rule.featureId)&&<option value={rule.featureId}>{rule.featureId}（已失效）</option>}{choices.map(c=><option key={c.featureId} value={c.featureId}>{c.label}</option>)}
       </select>
-      <select aria-label={`批量捕捞算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value,time:undefined}:r))}>{!menu.some(s=>s.name===rule.statistic)&&<option hidden disabled value={rule.statistic}>{rule.statistic}（{valid?'已保存指标':'已失效'}）</option>}{menu.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><select aria-label={`批量捕捞算法 ${i+1} 方向`} className="h-7 rounded bg-muted px-1" value={rule.direction??'>'}
-        onChange={event=>setDraft(draft.map((r,j)=>i===j?{...r,direction:event.target.value as '>' | '<'}:r))}>
-        <option value=">">&gt;</option><option value="<">&lt;</option>
-      </select><input aria-label={`批量捕捞算法 ${i+1} 门槛`} className="h-7 w-20 rounded bg-muted px-2 font-mono" type="number" step="any" value={rule.threshold} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,threshold:e.target.value}:r))}/>
+      <select aria-label={`批量捕捞算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value,time:undefined}:r))}>{!menu.some(s=>s.name===rule.statistic)&&<option hidden disabled value={rule.statistic}>{rule.statistic}（{valid?'已保存指标':'已失效'}）</option>}{menu.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><FishThresholdFields label={field=>`批量捕捞算法 ${i+1} ${field}`} scalarLabel="门槛" direction={rule.direction??'>'} value={rule.threshold}
+        onChange={(direction,threshold)=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,...(direction!==(r.direction??'>')?{direction}:{}),threshold}:r));}}/>
       <button type="button" aria-label={`移除批量捕捞算法 ${i+1}`} disabled={draft.length<=1} onClick={()=>setDraft(draft.filter((_,j)=>j!==i))} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground disabled:opacity-30"><X aria-hidden className="h-3 w-3"/></button>
       <FishMetricTimeFields label={'批量捕捞算法 '+(i+1)} metric={rule.statistic}
         definition={mining.defs.find(def=>def.id===rule.featureId)} time={rule.time} className="basis-full pl-5"

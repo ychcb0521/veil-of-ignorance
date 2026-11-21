@@ -3,10 +3,10 @@ import {BUILTIN_FEATURES,compileFeatureFormula,evaluateOnBars} from '@/lib/deepD
 import {compileFishProgram,evaluateFishProgram} from '@/lib/fish/algorithm';
 import {mulberry32} from '@/lib/deepRsa/grouping';
 import type {ResearchBar} from '@/lib/deepRsa/window';
-export function fishBars(n:number):ResearchBar[]{const rand=mulberry32(812),step=300000;let p=100,btc=50000;return Array.from({length:n},(_,i)=>{const o=p;p*=Math.exp((rand()-.495)*.01);btc*=Math.exp((rand()-.5)*.004);const q=1e5*(.2+rand());return {openTime:(i+1)*step,open:o,close:p,high:Math.max(o,p)*1.002,low:Math.min(o,p)*.998,volume:q/p,quoteVolume:q,takerBuyQuoteVolume:q*(.1+.8*rand()),takerBuyVolume:null,refClose:btc};});}
+export function fishBars(n:number,step=300000):ResearchBar[]{const rand=mulberry32(812);let p=100,btc=50000;return Array.from({length:n},(_,i)=>{const o=p;p*=Math.exp((rand()-.495)*.01);btc*=Math.exp((rand()-.5)*.004);const q=1e5*(.2+rand());return {openTime:(i+1)*step,open:o,close:p,high:Math.max(o,p)*1.002,low:Math.min(o,p)*.998,volume:q/p,quoteVolume:q,takerBuyQuoteVolume:q*(.1+.8*rand()),takerBuyVolume:null,refClose:btc};});}
 for(const def of BUILTIN_FEATURES)it(`${def.id}:逐根同源且预热满足历史收敛`,{timeout:60000},()=>{
  const plan=compileFishProgram(def,{H:24,direction:'>',threshold:def.id==='cbi2'?.3:0,constraints:[]});console.info(def.id,plan.warm,plan.N,plan.unavailable);
- const bars=fishBars(plan.N+1000),small=bars.slice(1000),a=evaluateFishProgram(small,plan),long=evaluateFishProgram(bars,plan),original=evaluateOnBars(small,compileFeatureFormula(def.formula),def).last;
+ const bars=fishBars(plan.N+1000,plan.step),small=bars.slice(1000),a=evaluateFishProgram(small,plan),long=evaluateFishProgram(bars,plan),original=evaluateOnBars(small,compileFeatureFormula(def.formula),def).last;
  for(let i=0;i<small.length;i++)expect(a.value[i]).toBe(typeof original==='number'?original:original[i]);
  for(let i=plan.warm-1;i<small.length;i++){const x=a.average[i],y=long.average[i+1000];if(Number.isFinite(x)&&Number.isFinite(y))expect(Math.abs(x-y)).toBeLessThanOrEqual(1e-6*Math.max(1,Math.abs(y)));else expect(Number.isFinite(x)).toBe(Number.isFinite(y));expect(a.condition[i]).toBe(long.condition[i+1000]);}
 });

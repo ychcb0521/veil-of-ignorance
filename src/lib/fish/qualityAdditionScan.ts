@@ -1,3 +1,4 @@
+import { type FishRange, withinCaptureLimit } from '@/lib/fish/thresholdRange';
 import { qualityHistoryFrom, qualityInitializationPending } from './qualityInitialization';
 import {createVetoHistoryReader} from './qualityVetoHistory';
 import type {QualityAdditionEntryVeto} from './qualityAdditionVeto';
@@ -8,7 +9,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishDelay, validateFishBars } from './shared';
 import type { AdditionIncreaseObservation, QualityAdditionFill,QualityAdditionObservation } from './qualityAddition';
 import type {ResearchBar} from '@/lib/deepRsa/window';
-export interface AdditionCandidate { plan: FishProgram; scale: number; threshold: number; direction: '<' | '>'; metric: string; label: string; featureId?: string; definitionKey?: string }
+export interface AdditionCandidate { captureRange?: FishRange; plan: FishProgram; scale: number; threshold: number; direction: '<' | '>'; metric: string; label: string; featureId?: string; definitionKey?: string }
 const MINUTE=60000;
 interface ScanOptions {
  candidates:AdditionCandidate[];required?:AdditionCandidate[];checkIncrease?:(at:number)=>Promise<AdditionIncreaseObservation[]|undefined>;row:TradeSignal;entry:number;end:number;notional?:number;quantity?:number;after?:number;
@@ -22,6 +23,7 @@ function observation(candidate:AdditionCandidate,bars:readonly ResearchBar[],val
  if(missing.length){if(missing.every(v=>qualityInitializationPending(load,v,i)))return;throw Error('加仓探测存在缺失读数，不能越过缺口判断加仓');}
  const prsEvidence=values.PRS6H_details?.find(r=>r.PRS6H_at===at);
  if(plan.compiled.usesPrs6h&&!prsEvidence?.PRS6H_event)return;
+ if(candidate.captureRange&&!withinCaptureLimit(reading,{range:candidate.captureRange,threshold:candidate.threshold,direction:candidate.direction},1))return;
  if(!(candidate.direction==='>'?reading>candidate.threshold:reading<candidate.threshold)||values.constraints.some(c=>!c[i]))return;
  if(plan.stateHold&&!(plan.stateHoldAlternatives??[plan.stateHold]).some(route=>at>=first+(route.samples-1)*plan.step&&i>=route.samples-1&&values.average.subarray(i-route.samples+1,i+1).every(v=>Number.isFinite(v)&&v>route.threshold)))return;
  return {...(prsEvidence?{prsEvidence}:{}),at,reading,threshold:candidate.threshold,direction:candidate.direction,metric:candidate.metric,label:candidate.label,featureId:candidate.featureId,definitionKey:candidate.definitionKey,barOpenTime:bars[i].openTime};

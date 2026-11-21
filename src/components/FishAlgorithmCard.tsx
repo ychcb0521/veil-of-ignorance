@@ -1,3 +1,5 @@
+import { FishThresholdFields } from './FishThresholdFields';
+import { captureLimitText, fishRangeFields } from '@/lib/fish/thresholdRange';
 import { algorithmMetricMenu } from '@/lib/fish/algorithmMetricMenu';
 import { FishPopoverContent as PopoverContent } from '@/components/FishPopoverContent';
 import {compileFishProgram,fishStatistics,fishStateHold,FISH_STATE_HOLD_TEXT} from '@/lib/fish/algorithm';
@@ -111,12 +113,15 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
    </select>{chevron}
  </span>
  <span className={`relative w-32 shrink-0 ${dim}`}><select aria-label={label('统计量')} title={stats.find(s=>s.name===(p.statistic??'结果'))?.label} className={cls} value={p.statistic??'结果'} onChange={e=>{const next=withFishDefaultThreshold(card.featureId,{...p,statistic:e.target.value,threshold:'',lastSuggestion:undefined});update({statistic:next.statistic,threshold:next.threshold,lastSuggestion:undefined,time:undefined});}}>{!menuStats.some(s=>s.name===(p.statistic??'结果'))&&<option hidden disabled value={p.statistic??'结果'}>已保存指标：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</option>}{menuStats.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select>{chevron}</span>
- <span className={`relative w-11 shrink-0 ${dim}`}><select aria-label={label('方向')} className={`${cls} pl-2.5 pr-5 font-medium`} value={p.direction} onChange={e=>{const direction=e.target.value as '>'|'<',fill=suggestion?suggestedFishThreshold(suggestion,direction):null;if(fill!==null&&p.lastSuggestion!==undefined&&mayFillFishThreshold(p.threshold,p.lastSuggestion))update({direction,threshold:String(fill),lastSuggestion:String(fill)});else update({direction});}}><option value=">">&gt;</option><option value="<">&lt;</option></select>{chevron}</span>
- <span className={`relative w-24 shrink-0 ${dim}`}><input aria-label={label('阈值')} title={unit} className={`${field} px-2 pt-0.5 font-mono font-medium tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/></span>
+ <FishThresholdFields direction={p.direction} value={p.threshold} label={label} unit={unit} onChange={(direction,threshold)=>{
+   const fill=direction!==p.direction&&!fishRangeFields(p.threshold)&&!fishRangeFields(threshold)&&suggestion?suggestedFishThreshold(suggestion,direction):null;
+   if(fill!==null&&p.lastSuggestion!==undefined&&mayFillFishThreshold(p.threshold,p.lastSuggestion))update({direction,threshold:String(fill),lastSuggestion:String(fill)});
+   else update({direction,threshold,lastSuggestion:undefined});
+ }}/>
  <Popover><PopoverTrigger asChild><button type="button" aria-label={`算法 ${index} 说明`} title="算法说明" className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" sideOffset={6} aria-label={`算法 ${index} 说明`} className="max-h-[min(60dvh,var(--radix-popover-content-available-height))] w-80 max-w-[calc(100vw-2rem)] space-y-2.5 overflow-y-auto p-3 text-[11px] leading-relaxed">
  <p className="font-medium text-foreground">{selectedName||`算法 ${index}`} · 说明</p>
- <div className="space-y-1 text-muted-foreground"><p>所选序列：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</p><p>当前门槛：<span className="font-mono text-foreground/80">{p.direction} {p.threshold||'—'}</span>{unit?`（${unit}）`:''}，以已收盘读数判定。</p></div>
- {stateHold&&<div className="space-y-1.5 border-t border-border/50 pt-2 text-muted-foreground"><p className="font-medium text-foreground/80">持续条件，满足任一条即可</p><p>{FISH_STATE_HOLD_TEXT}</p><p>两条路径分别从首次高于各自门槛的收盘时刻计时；回到对应门槛或以下，该路径重新计时。当前还须超过左侧门槛（默认 0.7），不要求整个持续期间都高于 0.7。</p></div>}
+ <div className="space-y-1 text-muted-foreground"><p>所选序列：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</p><p>当前门槛：<span className="font-mono text-foreground/80">{captureLimitText(p.direction,p.threshold||'—')}</span>{unit?`（${unit}）`:''}，以已收盘读数判定。</p></div>
+ {stateHold&&<div className="space-y-1.5 border-t border-border/50 pt-2 text-muted-foreground"><p className="font-medium text-foreground/80">持续条件，满足任一条即可</p><p>{FISH_STATE_HOLD_TEXT}</p><p>两条路径分别从首次高于各自门槛的收盘时刻计时；回到对应门槛或以下，该路径重新计时。当前读数还须满足所设数值条件，不要求整个持续期间都高于 0.7。</p></div>}
  {def?.definition&&<p className="border-t border-border/50 pt-2 text-muted-foreground">{def.definition}</p>}
  {hasReference&&<div className="space-y-1 border-t border-border/50 pt-2 text-muted-foreground">
  <div className="flex items-center justify-between gap-2"><span className="font-medium text-foreground/80">{recorded?'区间参考':'信号库建议'}</span>{refresh}</div>

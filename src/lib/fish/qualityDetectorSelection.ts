@@ -24,6 +24,7 @@ function defaultIndex(group: QualityGroup): number {
   const snapshot = group.snapshot;
   if ((snapshot.direction ?? '>') !== '>' || snapshot.constraints?.length) return -1;
   const metric = fishMetricLabel(snapshot), featureId = snapshot.featureId ?? snapshot.algorithmKey?.split('|')[0];
+  if(snapshot.range)return -1;
   return DEFAULT_DETECTORS.findIndex(rule => (!featureId || featureId === rule.featureId) && metric === rule.series && snapshot.threshold === rule.threshold);
 }
 

@@ -9,6 +9,7 @@
  *     classifyFishProgram，起点、读数、轨迹、越线次数都与按新阈值重扫一模一样。
  * 往宽里调（> 调小、< 调大）会有原来没命中的币冒出来，做不到，只能重新捕捞。
  */
+import {withinCaptureLimit,captureLimitSubset} from './thresholdRange';
 import { classifyFishProgram, type FishProgram, type FishValues } from './algorithm';
 import { definitionKey } from '@/lib/deepDig/features';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -69,31 +70,30 @@ export function fishTail(bars: readonly ResearchBar[], r: FishValues, plan: Fish
 /** 两套算法只差阈值、且 target 不比 base 宽：target 的结果能由 base 这一轮直接算出。 */
 export function fishTightenable(base: FishProgram, target: FishProgram): boolean {
   if (!sameFamily(base, target)) return false;
-  const d = base.settings.direction;
-  return d === '>' ? target.settings.threshold >= base.settings.threshold : target.settings.threshold <= base.settings.threshold;
+  return captureLimitSubset(base.settings,target.settings);
 }
 /** 只差阈值（同一特征值定义、统计量、方向、约束、倍率）。 */
 export function sameFamily(base: FishProgram, target: FishProgram): boolean {
   return base.def.id === target.def.id && definitionKey(base.def) === definitionKey(target.def) && base.settings.statistic === target.settings.statistic
-    && base.settings.direction === target.settings.direction && base.constraintKey === target.constraintKey && base.scale === target.scale && base.unit === target.unit;
+    && (base.settings.direction === target.settings.direction || !!base.settings.range || !!target.settings.range) && base.constraintKey === target.constraintKey && base.scale === target.scale && base.unit === target.unit;
 }
 
 /** 一个币在新阈值下的结论；需要的读数没留下来就返回 null。 */
 export function tightenFishResult(result: FishMemberResult, target: FishProgram): FishMemberResult | null {
   if (result.outcome === 'blocked') {
-    const t = target.settings.threshold / target.scale, a = result.reading;
-    return a !== undefined && Number.isFinite(a) && !(target.settings.direction === '>' ? a > t : a < t) ? { outcome: 'below', reading: a } : result;
+    const a = result.reading;
+    return a !== undefined && Number.isFinite(a) && !withinCaptureLimit(a,target.settings,target.scale) ? { outcome: 'below', reading: a } : result;
   }
   // thin 且留了读数 = 截止前达标、只是信号前成交额不够：调严后起点可能挪到放量之后，照样重判
   if (result.outcome !== 'hit' && result.outcome !== 'unknown' && result.outcome !== 'outside' && !(result.outcome === 'thin' && result.tail)) return result;
   const tail = result.tail;
   if (!tail) return null;
-  const { length, from, t0, step } = tail, end = length - 1, t = target.settings.threshold / target.scale, above = target.settings.direction === '>';
+  const { length, from, t0, step } = tail, end = length - 1;
   const average = new Float64Array(length).fill(NaN), main = new Float64Array(length).fill(NaN), condition = new Float64Array(length).fill(NaN), ok = new Float64Array(length).fill(NaN), value = new Float64Array(length).fill(NaN);
   average.set(tail.average, from); value[end] = tail.value;
   for (let i = from; i <= end; i++) {
     const a = average[i], s = tail.state[i - from];
-    if (Number.isFinite(a)) main[i] = (above ? a > t : a < t) ? 1 : 0;
+    if (Number.isFinite(a)) main[i] = withinCaptureLimit(a,target.settings,target.scale) ? 1 : 0;
     if (s === 0) continue;
     ok[i] = s === 1 ? 1 : 0;
     condition[i] = s === 1 && main[i] === 1 ? 1 : 0;

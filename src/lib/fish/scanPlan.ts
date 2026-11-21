@@ -10,12 +10,13 @@ import { compileFishProgram, type FishProgram } from './algorithm';
 import { FISH_TURNOVER_FLOORS, type FishTurnoverFloor } from './shared';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings } from '@/lib/fishScanner';
 import { withFishDefinitionTime } from './qualityAdditionMetric';
+import { captureLimit } from './thresholdRange';
 import type { FishPreference } from './preferences';
 import { captureCardDefinition } from './captureDefinition';
 
 export interface FishScanSelection { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }
-export const compileFishPreference = (def: DeepDigFeatureDef, pref: FishPreference, threshold = pref.threshold.trim() ? Number(pref.threshold) : NaN) =>
-  compileFishProgram(withFishDefinitionTime(def, pref.statistic ?? '结果', pref.time), { statistic:pref.statistic ?? '结果', direction:pref.direction, threshold, constraints:[] });
+export const compileFishPreference = (def: DeepDigFeatureDef, pref: FishPreference, fallback?:number) =>
+  compileFishProgram(withFishDefinitionTime(def, pref.statistic ?? '结果', pref.time), { statistic:pref.statistic ?? '结果', ...captureLimit(pref.threshold.trim()||String(fallback??''),pref.direction), constraints:[] });
 
 /** 勾选的卡（参与显示的组合）与全部能用的卡（都扫，扫完可任意切换组合）。 */
 export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDigFeatureDef[]): { plans: FishProgram[]; pool: FishProgram[]; error: string } {

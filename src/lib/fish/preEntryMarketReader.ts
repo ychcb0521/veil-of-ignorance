@@ -1,3 +1,4 @@
+import { withinCaptureLimit } from './thresholdRange';
 import { evaluateOnBars } from '../deepDig/features';
 import { createFormulaEvaluationCache } from '../deepDig/formula';
 import type { ResearchBar } from '../deepRsa/window';
@@ -45,6 +46,10 @@ export async function createPreEntryMarketReader(o:{condition:EntryMarketConditi
     if(isTuringCupSymbol(o.row.symbol)&&completeZeroTradeBar(minute))return {id:c.id,at,value,pending:'零成交分钟暂不准入',zeroTrade:true};
     let met=qualityConditionMet(value,c.direction,c.threshold);
     if(c.originalDetector){
+      if(c.snapshot.range){
+        const inRange=withinCaptureLimit(value,{direction:c.snapshot.direction??'>',threshold:c.snapshot.threshold,range:c.snapshot.range},1);
+        met=inRange&&(c.originalDetector.useOriginalRange||met);
+      }
       const output=evaluateFishProgram(bars,plan),i=bars.length-1,closedAt=bars[i].openTime+plan.step;
       const missing=output.constraints.filter(x=>!Number.isFinite(x[i]));
       if(missing.length){if(missing.every(x=>qualityInitializationPending(o.load,x,i)))return {id:c.id,at,value,pending:'等待原探测约束初始化'};throw Error(c.label+'：原探测约束读数缺失');}

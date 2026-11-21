@@ -1,3 +1,4 @@
+import { captureLimitText } from './thresholdRange';
 import {qualityMonitorEntryAt,qualityRowMonitorTimeBasis,qualitySignalTime} from './qualityAdmissionTime';
 import {effectiveQualitySellPlan} from './qualitySellStages';
 import {holdingVetoLabel} from './qualityVeto';
@@ -40,7 +41,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       if (filters.length && !hasQualityExit(p)) return [qualityEntryValues(row.source,r,p,study.entryReadings),'待设卖出', null, null, null, null, null, null, '待设卖出', qualityDetectorLabel(p,r).label, null,...Array(10).fill(null)];
       const held = r && (r.status === 'closed' || r.status === 'open') && Number.isFinite(r.heldHours) ? r.heldHours! : null;
       return [qualityEntryValues(row.source,r,p,study.entryReadings),r?.status === 'closed' ? r.returnPct ?? null : r?.status === 'open' ? `持有浮盈 ${r.returnPct?.toFixed(2) ?? '—'}%` : r?.status === 'error' ? '缺数据' : '待评估',qualityDrawdownPct(r,'static'),qualityPeakPct(r),qualitySalePriceChangePct(r),qualityHalfMirror(p,r).value,qualityHalfMirror(p,r).label,qualityAdditionSummary(p,r).count,qualityAdditionSummary(p,r).text,qualityDetectorLabel(p,r).label,held,...postExitExportValues(row.source,r,p,study.postExitReadings)]; }),
-    row.detectorId && groups.has(row.detectorId) ? `${groups.get(row.detectorId)!.label} ${groups.get(row.detectorId)!.snapshot.direction ?? '>'} ${groups.get(row.detectorId)!.snapshot.threshold}` : '—', qualityMonitorEntryAt(row, qualityRowMonitorTimeBasis(study, row)) ? formatUTC8(qualityMonitorEntryAt(row, qualityRowMonitorTimeBasis(study, row))!) : null,
+    row.detectorId && groups.has(row.detectorId) ? `${groups.get(row.detectorId)!.label} ${captureLimitText(groups.get(row.detectorId)!.snapshot.direction??'>',groups.get(row.detectorId)!.snapshot.threshold,groups.get(row.detectorId)!.snapshot.range)}` : '—', qualityMonitorEntryAt(row, qualityRowMonitorTimeBasis(study, row)) ? formatUTC8(qualityMonitorEntryAt(row, qualityRowMonitorTimeBasis(study, row))!) : null,
   ]) }];
   const signals = new Set(rows.map(row => row.signalId ?? row.id));
   const allRuns = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => signals.has(run.sample.id));
@@ -55,7 +56,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     const r = run.result;
     const effective=effectiveQualitySellPlan(run.plan,r),definition = qualityDefinition(effective.snapshot);
     return [run.sample.source.symbol, qualitySourceLabel(run.sample), formatUTC8(qualitySignalTime(run.sample.source)),
-      run.detectors.map(d => `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}`).join('；') || '—',
+      run.detectors.map(d => `${d.label} ${captureLimitText(d.snapshot.direction??'>',d.snapshot.threshold,d.snapshot.range)}`).join('；') || '—',
       run.plan.label, effective.rule?.metric ?? effective.metric, effective.rule?.direction ?? '', effective.rule?.threshold ?? null,
       r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设卖出',
       r.entryTime ? formatUTC8(r.entryTime) : null, r.entryPrice ?? null, r.endTime ? formatUTC8(r.endTime) : null, r.endPrice ?? null,

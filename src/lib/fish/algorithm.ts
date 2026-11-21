@@ -11,6 +11,7 @@ import { coreProgram, featureCoreName } from '@/lib/featureSource';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FISH_MAX_HISTORY_BARS } from './shared';
 export interface FishConstraint { id: string; text: string; enabled: boolean }
+import {captureLimitExpression,encodeFishRange,type FishRange} from './thresholdRange';
 export const FISH_STATE_HOLD = { threshold: 0.55, hours: 6 } as const;
 export const FISH_STATE_HOLD_ROUTES = [FISH_STATE_HOLD, { threshold: 0.66, hours: 3 }] as const;
 export const FISH_STATE_HOLD_TEXT = 'S > 0.55 连续至少 6 小时，或 S > 0.66 连续至少 3 小时';
@@ -22,7 +23,7 @@ export const fishStateHold = (featureId: string, statistic: string | undefined, 
  * 【用户要求】2026-10-19：「去除最外层的 avg」——要均值就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它，
  * 与原来「选 CBI2、外层 avg 24h」逐位相同，且不会再出现「均值的均值」。H 只为读旧设置保留，不参与计算。
  */
-export interface FishAlgorithmSettings { statistic?: string; /** @deprecated 旧版外层 avg 的小时数，已不参与计算 */ H?: number; direction: '>' | '<'; threshold: number; constraints: FishConstraint[] }
+export interface FishAlgorithmSettings { range?:FishRange; statistic?: string; /** @deprecated 旧版外层 avg 的小时数，已不参与计算 */ H?: number; direction: '>' | '<'; threshold: number; constraints: FishConstraint[] }
 export const FISH_PRESETS = [
   { name: '多周期为正', lines: [24,12,6,3,1].map(h=>`avg(X,${h}) > 0`) },
   { name: '短期强于长期', lines: ['avg(X,1)>=avg(X,3) and avg(X,3)>=avg(X,6) and avg(X,6)>=avg(X,12) and avg(X,12)>=avg(X,24)'] },
@@ -39,7 +40,7 @@ export function shortFishHash(text: string): string {
 }
 export const constraintFingerprint = (texts: readonly string[]) => shortFishHash(texts.map(normalizeConstraint).join(';'));
 /** 旧记录（外层 avg H 小时）键里第三段是 H；现在没有外层 avg，第三段写「=」，两种口径的记录不会互相去重。 */
-export const fishAlgorithmKey = (id: string,H: number|undefined,direction: string,threshold: number,key: string,statistic = '结果') => `${id}|${statistic}|${H===undefined?'=':H}|${direction}|${threshold}|${key}`;
+export const fishAlgorithmKey = (id: string,H: number|undefined,direction: string,threshold: number,key: string,statistic = '结果',range?:FishRange) => `${id}|${statistic}|${H===undefined?'=':H}|${direction}|${range?encodeFishRange(range.min,range.max):threshold}|${key}`;
 export interface FishStatistic { name: string; label: string }
 /** The evaluator preserves scalar/series types, including aliases and scalar function calls. */
 export function fishStatistics(def: DeepDigFeatureDef): FishStatistic[] {
@@ -130,7 +131,7 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   const known=new Set([...SERIES_VARIABLES.map(v=>v.name),...PARAM_VARIABLES.flatMap(p=>[p.name,p.alias]),...used]);
   const statisticName=statistic==='结果'?last.name!:statistic;
   // 主条件：所选序列本身与阈值比较；__A 只是它的别名（快照里的 average 字段沿用旧名）
-  const tail=parseFormula(`${displayName} = ${result} * ${def.scale}\n${averageName} = ${statisticName}\n${mainName} = ${averageName} ${settings.direction} ${settings.threshold/scale}`,known);
+  const tail=parseFormula(`${displayName} = ${result} * ${def.scale}\n${averageName} = ${statisticName}\n${mainName} = ${captureLimitExpression(averageName,settings,scale)}`,known);
   const inputs=new Set([...base.program.inputs,...tail.inputs].filter(n=>!used.has(n)));
   const enabled=config.constraints.filter(c=>c.enabled),texts=enabled.map(c=>normalizeConstraint(c.text));
   const constraintNames=enabled.map(c=>{
@@ -165,7 +166,7 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   const windowDef=end<full.program.statements.length?{...frozen,formula:frozen.formula.split(/\r?\n/).slice(0,full.program.statements[end-1].line).join('\n')}:frozen;
   const warm=Math.max(programHistoryBars(program,params,step/60000)+1,Math.ceil(featureWindowMs(windowDef)/step),convergenceHistory(program,params,step/60000)+1);
   const N=warm+546, constraintKey=constraintFingerprint(texts);
-  return {usesTaker:inputs.has('B')||inputs.has('S')||(full.usesPrs6h&&frozen.PRS6H_config?.volumeMode==='flow')||(full.usesAti6h&&frozen.ATI6H_volume_mode!=='bar_direction_proxy'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,stateHold,stateHoldAlternatives,unavailable:!Number.isFinite(N)||N>FISH_MAX_HISTORY_BARS?`需要 ${N} 根历史（含平滑收敛预热），超过 ${FISH_MAX_HISTORY_BARS} 根上限，暂不可扫`:undefined};
+  return {usesTaker:inputs.has('B')||inputs.has('S')||(full.usesPrs6h&&frozen.PRS6H_config?.volumeMode==='flow')||(full.usesAti6h&&frozen.ATI6H_volume_mode!=='bar_direction_proxy'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic,settings.range),warm,N,step,stateHold,stateHoldAlternatives,unavailable:!Number.isFinite(N)||N>FISH_MAX_HISTORY_BARS?`需要 ${N} 根历史（含平滑收敛预热），超过 ${FISH_MAX_HISTORY_BARS} 根上限，暂不可扫`:undefined};
 }
 export interface FishValues { DBL5C_details?:import('../impulse1115Classification').Impulse1115ClassificationRow[]; DBL5_details?:import('../dbl5m').Dbl5Row[]; DBL5P_details?:Dbl5GuardPlusRow[]; SBS5M_details?:import('../sbs5m').SbsRow[]; PRS6H_details?:import('../prs6h').PrsRow[]; value: Float64Array; average: Float64Array; main: Float64Array; constraints: Float64Array[]; condition: Float64Array }
 export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgram): FishValues {
@@ -176,6 +177,7 @@ export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgr
   return {value,average,main,constraints,condition,...(out.DBL5C_details?{DBL5C_details:out.DBL5C_details}:{}),...(out.DBL5_details?{DBL5_details:out.DBL5_details}:{}),...(out.DBL5P_details?{DBL5P_details:out.DBL5P_details}:{}),...(out.SBS5M_details?{SBS5M_details:out.SBS5M_details}:{}),...(out.PRS6H_details?{PRS6H_details:out.PRS6H_details}:{})};
 }
 export interface FishSnapshot {
+  range?:FishRange;
   DBL5C_evidence?:import('../impulse1115Classification').Impulse1115ClassificationRow;
   DBL5_evidence?:import('../dbl5m').Dbl5Row;
   DBL5P_evidence?:Dbl5GuardPlusRow;
@@ -218,7 +220,7 @@ export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:
   const prsEvidence=r.PRS6H_details?.find(row=>row.PRS6H_at===bars[end].openTime+plan.step);
   const dblEvidence=r.DBL5_details?.find(row=>row.at===bars[end].openTime+plan.step);
   const sbsEvidence=r.SBS5M_details?.find(row=>row.at===bars[end].openTime+plan.step);
-  const fish:FishSnapshot={...(dblEvidence?{DBL5_evidence:dblEvidence}:{}),...(sbsEvidence?{SBS5M_evidence:sbsEvidence}:{}),...(prsEvidence?{PRS6H_evidence:prsEvidence}:{}),statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
+  const fish:FishSnapshot={...(dblEvidence?{DBL5_evidence:dblEvidence}:{}),...(sbsEvidence?{SBS5M_evidence:sbsEvidence}:{}),...(prsEvidence?{PRS6H_evidence:prsEvidence}:{}),statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,...(settings.range?{range:{...settings.range}}:{}),scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
   const guardPlus=r.DBL5P_details?.find(row=>row.at===bars[end].openTime+plan.step);
   if(guardPlus)fish.DBL5P_evidence=guardPlus;
   const classification=r.DBL5C_details?.find(row=>row.at===bars[end].openTime+plan.step);

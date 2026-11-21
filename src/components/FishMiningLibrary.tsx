@@ -1,3 +1,4 @@
+import { captureLimitText } from '@/lib/fish/thresholdRange';
 import {FishDeferredDetails,FishLibraryTimeDirectory,libraryDirectoryAction,type FishDirectoryItem,type FishDirectoryRequest} from './FishLibraryTimeDirectory';
 import {FishWorkspaceRows} from './FishWorkspaceSource';
 import {FishMiningTransfer} from './FishMiningTransfer';
@@ -21,7 +22,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 const date = (t: number | null | undefined) => t == null ? '—' : formatUTC8(t);
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
-const runText = (run: FishMiningRun) => run.rules.filter(rule => rule.enabled !== false).map(r => `${RULE_NAMES[r.featureId] ?? r.featureId} · ${r.statistic} ${r.direction ?? '>'} ${r.threshold}`).join(run.combination === 'and' ? ' ∩ ' : ' ∪ ');
+const runText = (run: FishMiningRun) => run.rules.filter(rule => rule.enabled !== false).map(r => `${RULE_NAMES[r.featureId] ?? r.featureId} · ${r.statistic} ${captureLimitText(r.direction??'>',r.threshold)}`).join(run.combination === 'and' ? ' ∩ ' : ' ∪ ');
 /** 实际捕到这条信号的探测算法（并集只列命中的，交集列全部）。 */
 
 type FishMiningRow = FishMiningRecord & { ids: string[]; minedAt: number | null };

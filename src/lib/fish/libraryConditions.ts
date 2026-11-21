@@ -1,3 +1,4 @@
+import { savedCaptureLimit, captureLimitText, encodeFishRange } from '@/lib/fish/thresholdRange';
 /** Historical library labels are derived only from stored evidence, never current account defaults. */
 import { CDA_FIVE_MINUTE_LABEL, CDA_HOURLY_ID, CDA_HOURLY_LABEL } from '@/lib/cdaPeriods';
 import { shortFishHash, type FishSnapshot } from './algorithm';
@@ -22,9 +23,9 @@ function capturedDefinition(s:Partial<FishSnapshot>){
 }
 function fromKey(s:Partial<FishSnapshot>):Partial<FishSnapshot>{
  const p=s.algorithmKey?.split('|');if(p?.length!==6)return {};
- const threshold=p[4].trim()?Number(p[4]):NaN,H=p[2]!=='='?Number(p[2]):NaN;
+ const limit=savedCaptureLimit(p[4],p[3]==='<'?'<':'>'),H=p[2]!=='='?Number(p[2]):NaN;
  return {featureId:p[0]||undefined,statistic:p[1]||undefined,direction:p[3]==='>'||p[3]==='<'?p[3]:undefined,
-  threshold:Number.isFinite(threshold)?threshold:undefined,...(Number.isFinite(H)&&H>0?{H}:{})};
+  ...limit,...(Number.isFinite(H)&&H>0?{H}:{})};
 }
 function capturedScale(input:Partial<FishSnapshot>, key:Partial<FishSnapshot>) {
  const statistic=input.statistic??key.statistic, H=input.H??key.H;
@@ -43,16 +44,16 @@ export function capturedReading(snapshot:Partial<FishSnapshot>) {
 export function libraryCondition(input:Partial<FishSnapshot>,evidence='记录快照'):LibraryCondition {
  const snapshot=knownSnapshot(input),def=capturedDefinition(snapshot),label=fishSourceLabel(snapshot),metric=fishMetricLabel(snapshot);
  const direction=snapshot.direction,threshold=snapshot.threshold;
- const rule=direction&&typeof threshold==='number'&&Number.isFinite(threshold)?`${direction} ${threshold}`:'门槛未记录';
+ const rule=direction&&typeof threshold==='number'&&Number.isFinite(threshold)?captureLimitText(direction,threshold,snapshot.range):'门槛未记录';
  const scale=snapshot.scale,unit=scale===undefined?'倍率未记录':scale===1?'原值':`显示值（原值 × ${scale}）`;
  const context=`${def?.interval??snapshot.interval??'周期未记录'} · ${unit} · ${def?`公式 ${shortFishHash(snapshot.definitionKey!)}`:'公式未记录'}`;
  const {rawReading,reading}=capturedReading(snapshot);
  const text=`${label} · ${metric} ${rule}`;
- return {key:JSON.stringify([snapshot.featureId,metric,direction,threshold,snapshot.definitionKey,snapshot.interval,scale,snapshot.H,snapshot.constraints,snapshot.constraintKey]),
+ return {key:JSON.stringify([snapshot.featureId,metric,direction,threshold,snapshot.definitionKey,snapshot.interval,scale,snapshot.H,snapshot.constraints,snapshot.constraintKey,...(snapshot.range?[encodeFishRange(snapshot.range.min,snapshot.range.max)]:[])]),
   label,metric,rule,text,context,snapshot,...(def??{}),rawReading,reading,evidence};
 }
 /** Filter execution uses f.metric/f.direction/f.threshold, which take precedence over decorative labels and old snapshot fields. */
-export const filterLibraryCondition=(f:QualityBuyFilter)=>libraryCondition({...f.snapshot,statistic:f.metric,direction:f.direction,threshold:f.threshold,scale:1},'该轮过滤条件快照');
+export const filterLibraryCondition=(f:QualityBuyFilter)=>libraryCondition({...knownSnapshot(f.snapshot),algorithmKey:undefined,range:undefined,statistic:f.metric,direction:f.direction,threshold:f.threshold,scale:1},'该轮过滤条件快照');
 export function miningHitSnapshots(record:FishMiningRecord,run?:FishMiningRun) {
  const root=record.signal.fish,mode=root?.combination??run?.combination;
  return root?.algorithms?.length
@@ -71,7 +72,8 @@ export function miningLibraryConditions(record:FishMiningRecord,run?:FishMiningR
   if(s.statistic)candidates=candidates.filter(r=>r.statistic===s.statistic||r.statistic===metric);
   const fallback:FishMiningRule|undefined=candidates.length===1?candidates[0]:undefined;
   const missing=!s.statistic||!s.direction||!Number.isFinite(s.threshold);
-  return libraryCondition({...s,statistic:s.statistic??fallback?.statistic,direction:s.direction??(fallback?'>':undefined),threshold:Number.isFinite(s.threshold)?s.threshold:(fallback?Number(fallback.threshold):undefined)},missing&&fallback?'记录快照；缺失参数由所属历史挖掘方案补全':'捕获时的算法快照');
+  const limit=savedCaptureLimit(fallback?.threshold,fallback?.direction);
+  return libraryCondition({...s,...(!Number.isFinite(s.threshold)?limit:{}),statistic:s.statistic??fallback?.statistic,direction:s.direction??limit?.direction},missing&&fallback?'记录快照；缺失参数由所属历史挖掘方案补全':'捕获时的算法快照');
  });
  const note=!members.length?'历史命中成员未记录':!root?.algorithms?.length&&(run?.rules.length??0)>1?'历史记录仅保存主算法，其余命中成员未记录':undefined;
  const combination=mode==='or'?'并集 · 仅列实际命中':root?.algorithms?.length?'交集 · 全部满足':'单算法';

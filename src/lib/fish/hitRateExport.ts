@@ -1,3 +1,4 @@
+import { rangeLabel } from '@/lib/fish/thresholdRange';
 import { buildXlsx, type XlsxCell, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -53,12 +54,12 @@ export function buildFishHitRateSheets(run: FishHitRateExportRun): XlsxSheet[] {
   const evidence = [
     sheet('算法门槛',[...context,'算法','结果序列','窗口内最大值','最大值时间（北京时间）','截止读数','读数时间（北京时间）','比较方向','门槛','单位'],
       rows.flatMap(({row,window})=>(row.thresholds??[]).map(item=>[...prefix(row.sample,window),item.algorithm,item.statistic,
-        item.maximum?.value,timestamp(item.maximum?.timeMs),item.cutoffReading,timestamp(item.cutoffMs),item.direction,item.threshold,item.unit]))),
+        item.maximum?.value,timestamp(item.maximum?.timeMs),item.cutoffReading,timestamp(item.cutoffMs),item.range?'区间':item.direction,item.range?rangeLabel(item.range):item.threshold,item.unit]))),
     sheet('信号起点超窗',[...context,'算法','结果序列','连续达标起点（北京时间）','窗口边界','相对边界（分钟）','截止读数','读数时间（北京时间）','比较方向','门槛','单位'],
       rows.flatMap(({row,window})=>(row.outside??[]).map(item=>{
         const early = item.startMs < window.startMs;
         return [...prefix(row.sample,window),item.algorithm,item.statistic,timestamp(item.startMs),early?'起点':'截止',
-          (item.startMs-(early?window.startMs:window.anchorMs))/60_000,item.cutoffReading,timestamp(item.cutoffMs),item.direction,item.threshold,item.unit];
+          (item.startMs-(early?window.startMs:window.anchorMs))/60_000,item.cutoffReading,timestamp(item.cutoffMs),item.range?'区间':item.direction,item.range?rangeLabel(item.range):item.threshold,item.unit];
       }))),
     sheet('成交额门槛',[...context,'检查阶段','检查时间（北京时间）','回看（小时）','实际成交额（USDT）','门槛（USDT）','判定','涉及规则'],
       rows.flatMap(({row,window})=>(row.turnover??[]).flatMap(item=>item.checks.map(check=>[...prefix(row.sample,window),

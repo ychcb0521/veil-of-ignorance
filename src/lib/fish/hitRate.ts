@@ -1,3 +1,4 @@
+import { type FishRange } from '@/lib/fish/thresholdRange';
 import type { FishCombinationRound, FishProgress, FishScanner, FishScanSettings } from '@/lib/fishScanner';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { AUDITED_EXCHANGES } from './exchanges';
@@ -68,6 +69,7 @@ export interface FishHitRateThresholdDetail {
   algorithm: string;
   statistic: string;
   threshold: number;
+  range?: FishRange;
   direction: '>' | '<';
   unit: string;
   cutoffMs: number;
@@ -210,7 +212,7 @@ export async function runFishHitRate(scanner: Pick<FishScanner, 'scan'>, options
           const statistic = plan.settings.statistic ?? '结果';
           const comparison = {
             algorithm: fishSourceLabel({ featureId: plan.def.id, featureShort: plan.def.short, statistic }),
-            statistic, threshold: plan.settings.threshold, direction: plan.settings.direction, unit: plan.unit,
+            statistic, ...(plan.settings.range?{range:plan.settings.range}:{}), threshold: plan.settings.threshold, direction: plan.settings.direction, unit: plan.unit,
             cutoffReading: member.reading * plan.scale,
           };
           if (member.outcome === 'below' && member.windowPeak) {

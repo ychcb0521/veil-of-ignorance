@@ -33,7 +33,7 @@ export interface EntryMarketCondition {
   id: string; label: string; metric: string; snapshot: FishSnapshot;
   enabled: boolean; direction: QualityOperator; threshold: number;
   timing: 'intrabar' | 'closed';
-  originalDetector?: { constraints:string[] };
+  originalDetector?: { constraints:string[]; useOriginalRange?:boolean };
 }
 export type EntryMarketExpression = { condition: EntryMarketCondition } | { join: 'all' | 'any'; children: EntryMarketExpression[] };
 export interface EntrySellRule {

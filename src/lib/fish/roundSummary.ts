@@ -1,3 +1,4 @@
+import { type FishRange } from '@/lib/fish/thresholdRange';
 /**
  * 每一轮捕捞的过程摘要：这一轮扫了哪些币、各自截止时的读数与结论。用来回答
  * 「凭什么击中」（本币读数在本轮排第几）与「为什么避开了其他噪音」（其余币分别卡在哪一步）。
@@ -19,6 +20,7 @@ export interface FishRoundSummary {
   createdAt: number;
   direction: '>' | '<';
   threshold: number;
+  range?: FishRange;
   scale: number;
   unit: string;
   /** 扫描被取消：只覆盖了一部分币。 */
@@ -49,7 +51,7 @@ function quantile(sorted: readonly number[], q: number): number {
 }
 
 /** 由本轮逐币结果算摘要（纯计算）。 */
-export function summarizeFishRound(rows: readonly FishRoundRow[], meta: Pick<FishRoundSummary, 'algorithmKey' | 'cutoffMs' | 'anchorMs' | 'direction' | 'threshold' | 'scale' | 'unit' | 'partial'> & { createdAt?: number }): FishRoundSummary {
+export function summarizeFishRound(rows: readonly FishRoundRow[], meta: Pick<FishRoundSummary, 'algorithmKey' | 'cutoffMs' | 'anchorMs' | 'direction' | 'threshold' | 'range' | 'scale' | 'unit' | 'partial'> & { createdAt?: number }): FishRoundSummary {
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.outcome] = (counts[r.outcome] ?? 0) + 1;
   const better = (a: number, b: number) => meta.direction === '<' ? a - b : b - a;
@@ -60,7 +62,7 @@ export function summarizeFishRound(rows: readonly FishRoundRow[], meta: Pick<Fis
   const sorted = readable.map(r => r.reading).sort((a, b) => a - b);
   return {
     version: 1, algorithmKey: meta.algorithmKey, cutoffMs: meta.cutoffMs, anchorMs: meta.anchorMs, createdAt: meta.createdAt ?? Date.now(),
-    direction: meta.direction, threshold: meta.threshold, scale: meta.scale, unit: meta.unit, partial: meta.partial,
+    direction: meta.direction, threshold: meta.threshold, ...(meta.range?{range:meta.range}:{}), scale: meta.scale, unit: meta.unit, partial: meta.partial,
     total: rows.length, counts, valid: readable.length,
     quantiles: sorted.length ? { min: sorted[0], p50: quantile(sorted, .5), p90: quantile(sorted, .9), p99: quantile(sorted, .99), max: sorted[sorted.length - 1] } : null,
     top: ordered.slice(0, 10).map(r => ({ symbol: r.symbol, exchange: r.exchange, market: r.market, reading: r.reading, outcome: r.outcome })),

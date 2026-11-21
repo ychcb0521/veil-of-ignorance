@@ -1,3 +1,4 @@
+import { captureLimitText, rangeLabel } from '@/lib/fish/thresholdRange';
 /**
  * 「捕捞过程」：点开一条鱼，看它凭什么被击中、这一轮其它币为什么没进来。
  * 【用户要求】2026-10-20「在捕捉到的信号后面加一列（捕捞过程），点开之后要能够看到凭什么击中到了信号、以及为什么能避开其他噪音」。
@@ -30,7 +31,8 @@ function Trace({ fish }: { fish: FishSnapshot }) {
   if (!tr || tr.values.length < 2) return null;
   const scale = fish.scale ?? 1, raw = fish.thresholdRaw ?? (fish.threshold / scale);
   const values = tr.values.map(v => v * scale), thr = raw * scale;
-  const finite = [...values.filter(Number.isFinite), thr];
+  const bounds = fish.range ? [fish.range.min,fish.range.max].filter((n):n is number=>n!==undefined) : [thr];
+  const finite = [...values.filter(Number.isFinite), ...bounds];
   const lo = Math.min(...finite), hi = Math.max(...finite), span = hi - lo || 1;
   const W = 520, H = 72, x = (i: number) => (i / (values.length - 1)) * W, y = (v: number) => H - 4 - ((v - lo) / span) * (H - 8);
   const path = values.map((v, i) => Number.isFinite(v) ? `${x(i).toFixed(1)},${y(v).toFixed(1)}` : null).filter(Boolean).join(' ');
@@ -39,12 +41,12 @@ function Trace({ fish }: { fish: FishSnapshot }) {
   const startI = fish.startIndex != null && fish.cutoffIndex != null ? Math.round(values.length - 1 - (fish.cutoffIndex - fish.startIndex) / every) : -1;
   return <figure className="space-y-0.5">
     <svg viewBox={`0 0 ${W} ${H}`} className="h-[72px] w-full overflow-visible" role="img" aria-label="读数轨迹">
-      <line x1={0} x2={W} y1={y(thr)} y2={y(thr)} className="stroke-muted-foreground/60" strokeDasharray="3 3" strokeWidth={1} />
+      {Array.from(new Set(bounds)).map(bound=><line key={bound} x1={0} x2={W} y1={y(bound)} y2={y(bound)} className="stroke-muted-foreground/60" strokeDasharray="3 3" strokeWidth={1} />)}
       {startI >= 0 && startI < values.length && <line x1={x(startI)} x2={x(startI)} y1={0} y2={H} className="stroke-primary/50" strokeWidth={1} />}
       <polyline points={path} fill="none" className="stroke-primary" strokeWidth={1.5} />
       <circle cx={x(values.length - 1)} cy={y(values[values.length - 1])} r={2.5} className="fill-primary" />
     </svg>
-    <figcaption className="flex justify-between text-[9.5px] text-muted-foreground"><span>{t(tr.t0)}</span><span>虚线 = 门槛 {num(thr)} · 竖线 = 起点</span><span>{t(tr.t0 + tr.dt * (tr.values.length - 1))}</span></figcaption>
+    <figcaption className="flex justify-between text-[9.5px] text-muted-foreground"><span>{t(tr.t0)}</span><span>虚线 = 门槛 {fish.range?rangeLabel(fish.range):num(thr)} · 竖线 = 起点</span><span>{t(tr.t0 + tr.dt * (tr.values.length - 1))}</span></figcaption>
   </figure>;
 }
 
@@ -54,11 +56,11 @@ function HitEvidence({ fish, signalTime }: { fish: FishSnapshot; signalTime?: nu
   const step = stepOf(fish);
   const start = signalTime ?? (fish.trace && fish.startIndex != null && fish.cutoffIndex != null ? fish.cutoffMs - (fish.cutoffIndex - fish.startIndex) * step : undefined);
   const bars = fish.aboveBars ?? (fish.startIndex != null && fish.cutoffIndex != null ? fish.cutoffIndex - fish.startIndex + 1 : undefined);
-  const margin = Number.isFinite(fish.average) ? (fish.average * scale - thr) * (dir === '<' ? -1 : 1) : NaN;
-  if ((fish as { outcome?: string }).outcome === 'unknown') return <p className="text-muted-foreground">这一算法在截止时满足（{dir} {num(thr)}），但从可用区间开头起就一直满足，找不到这一轮的起点。</p>;
+  const margin = !fish.range && Number.isFinite(fish.average) ? (fish.average * scale - thr) * (dir === '<' ? -1 : 1) : NaN;
+  if ((fish as { outcome?: string }).outcome === 'unknown') return <p className="text-muted-foreground">这一算法在截止时满足（{captureLimitText(dir,thr,fish.range)}），但从可用区间开头起就一直满足，找不到这一轮的起点。</p>;
   return <div className="space-y-1">
     <ol className="list-decimal space-y-0.5 pl-4">
-      <li>越线：{start != null ? <>前一根（{t(start - step)}）读数 <b>{num(fish.previousAverage * scale)}</b>，{fish.stateHold?'尚未同时满足当前门槛与持续时间条件':`还${dir === '>' ? '不到' : '不低于'}门槛`}；{t(start)} 这一根读数 <b>{num(fish.startAverage * scale)}</b>，{fish.stateHold?'开始同时满足两项条件':<>越过门槛 {dir} {num(thr)}</>}。</> : '—'}</li>
+      <li>越线：{start != null ? <>前一根（{t(start - step)}）读数 <b>{num(fish.previousAverage * scale)}</b>，{fish.stateHold?'尚未同时满足当前门槛与持续时间条件':fish.range?'在区间外':`还${dir === '>' ? '不到' : '不低于'}门槛`}；{t(start)} 这一根读数 <b>{num(fish.startAverage * scale)}</b>，{fish.stateHold?'开始同时满足两项条件':<>{fish.range?'进入区间':'越过门槛'} {captureLimitText(dir,thr,fish.range)}</>}。</> : '—'}</li>
       <li>保持：{bars != null ? <>此后连续 {bars} 根（约 {((bars * step) / 3600000).toFixed(1)} 小时）一直满足，这一轮里{dir === '>' ? '最低' : '最高'} {num((fish.runExtreme ?? NaN) * scale)}，没有回落到门槛另一侧。</> : '—'}</li>
       <li>截止：{t(fish.cutoffMs)} 读数 <b>{num(fish.average * scale)}</b>{Number.isFinite(margin) && <>，比门槛{dir === '>' ? '高' : '低'} {num(margin)}</>}。</li>
       {fish.stateHold&&<li>持续核验：{t(fish.stateHold.fromMs)} 至截止，S 连续高于 <b>{num(fish.stateHold.threshold)}</b> 已覆盖 <b>{num(fish.stateHold.verifiedHours)} 小时</b>，期间最低 <b>{num(fish.stateHold.minimum)}</b>；要求至少 {num(fish.stateHold.requiredHours)} 小时。</li>}
@@ -76,7 +78,7 @@ function NoiseEvidence({ fish, round, identity, label }: { fish: FishSnapshot; r
     {round ? <>
       <p>{label ?? '本轮'}共判定 <b>{round.total}</b> 个币，只有 <b>{round.counts.hit ?? 0}</b> 个命中（{pct(round.counts.hit ?? 0, round.total)}）{round.partial && '（这一轮中途取消，只覆盖了一部分币）'}。其余：</p>
       <ul className="list-disc space-y-0.5 pl-4">{ORDER.filter(k => round.counts[k]).map(k => <li key={k}>{OUTCOME[k]}：{round.counts[k]} 个</li>)}</ul>
-      {round.quantiles && Number.isFinite(round.threshold) && <p>本轮截止读数（{round.valid} 个可读）：中位数 {num(round.quantiles.p50 * scale)}、P90 {num(round.quantiles.p90 * scale)}、P99 {num(round.quantiles.p99 * scale)}、{round.direction === '>' ? '最高' : '最低'} {num((round.direction === '>' ? round.quantiles.max : round.quantiles.min) * scale)}；门槛 {num(round.threshold)} 在大多数币的读数之{round.direction === '>' ? '上' : '下'}。</p>}
+      {round.quantiles && Number.isFinite(round.threshold) && <p>本轮截止读数（{round.valid} 个可读）：中位数 {num(round.quantiles.p50 * scale)}、P90 {num(round.quantiles.p90 * scale)}、P99 {num(round.quantiles.p99 * scale)}、{round.direction === '>' ? '最高' : '最低'} {num((round.direction === '>' ? round.quantiles.max : round.quantiles.min) * scale)}；捕捞条件 {captureLimitText(round.direction,round.threshold,round.range)}。</p>}
       {round.ranks[identity] != null && <p>本币截止读数在 {round.valid} 个可读的币里排第 <b>{round.ranks[identity]}</b>（前 {pct(round.ranks[identity], round.valid)}）。</p>}
       {!!round.top.length && Number.isFinite(round.threshold) && <details><summary className="cursor-pointer text-muted-foreground">本轮读数最靠前的 {round.top.length} 个币</summary>
         <table className="mt-1 w-full text-left font-mono text-[10px] tabular-nums"><tbody>{round.top.map(r => <tr key={fishRoundIdentity(r)} className={fishRoundIdentity(r) === identity ? 'text-primary' : ''}><td className="pr-2">{r.symbol}{r.exchange && r.exchange !== 'binance' ? ` · ${r.exchange}` : ''}</td><td className="pr-2">{num(r.reading * scale)}</td><td className="font-sans">{OUTCOME[r.outcome] ?? r.outcome}</td></tr>)}</tbody></table>
@@ -101,7 +103,7 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
     {old && <p className="text-muted-foreground">这条是较早捕到的，当时没有记下过程数据；下面只列快照里有的读数。重新捕捞后会有完整过程。</p>}
     {!multi ? <>
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中</h4>
-        <p className="text-muted-foreground">规则：{fishSourceLabel({ ...fish, featureShort: fish.featureShort ?? 'CBI-2' })} 的「{fishMetricLabel(fish)}」{fish.direction ?? '>'} {fish.threshold}{fish.unit ? ` ${fish.unit}` : ''}；截止时满足，并且是在可用区间里刚越线、一直保持到截止的这一轮。</p>
+        <p className="text-muted-foreground">规则：{fishSourceLabel({ ...fish, featureShort: fish.featureShort ?? 'CBI-2' })} 的「{fishMetricLabel(fish)}」{captureLimitText(fish.direction??'>',fish.threshold,fish.range)}{fish.unit ? ` ${fish.unit}` : ''}；截止时满足，并且是在可用区间里刚越线、一直保持到截止的这一轮。</p>
         <HitEvidence fish={fish} signalTime={signal.timeMs} />
       </section>
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">为什么避开了其他噪音</h4><NoiseEvidence fish={fish} round={round} identity={identity} /></section>
@@ -109,7 +111,7 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中（{fish.combination === 'or' ? '并集：满足任一' : '交集：同时满足'}）</h4>
         <p className="text-muted-foreground">{fish.combination === 'or' ? `命中的是算法 ${(fish.hitAlgorithms ?? []).join('、')}；信号时间取命中算法里最早的起点。` : '每个算法都在截止时满足；信号时间取各算法起点里最晚的那个（从那一刻起全部同时成立）。'}</p>
         {members.map((m, i) => <div key={i} className="space-y-1 border-l border-border/60 pl-2">
-          <p className="font-medium">算法 {i + 1} · {fishSourceLabel(m)} · {fishMetricLabel(m)} {m.direction ?? '>'} {num(m.threshold)}{fish.combination === 'or' && !(fish.hitAlgorithms ?? []).includes(i + 1) ? <span className="ml-1 font-normal text-muted-foreground">（这一算法没命中：{OUTCOME[(m as { outcome?: string }).outcome ?? ''] ?? '—'}）</span> : null}</p>
+          <p className="font-medium">算法 {i + 1} · {fishSourceLabel(m)} · {fishMetricLabel(m)} {captureLimitText(m.direction??'>',num(m.threshold),m.range)}{fish.combination === 'or' && !(fish.hitAlgorithms ?? []).includes(i + 1) ? <span className="ml-1 font-normal text-muted-foreground">（这一算法没命中：{OUTCOME[(m as { outcome?: string }).outcome ?? ''] ?? '—'}）</span> : null}</p>
           {(fish.combination !== 'or' || (fish.hitAlgorithms ?? []).includes(i + 1)) && <HitEvidence fish={m} />}
         </div>)}
       </section>

@@ -187,7 +187,7 @@ export async function collectPreEntryThreeStage(task:PreEntryRun,baseLoad:FishRe
       const originals=Object.values(record.sample.readings??Object.fromEntries(qualityMembers(record.sample.source).map(f=>[qualityGroupId(f),f])));
       const detectorGroups=(requiredEnabled ? config.detectors??[] : []).map(d=>({config:d,conditions:originals.filter(f=>!d.featureId||f.featureId===d.featureId).map((f,i):EntryMarketCondition=>{
         const direction=f.direction??'>';
-        return {id:d.id+':'+i,label:(f.featureShort??f.featureName??'原探测算法')+' 探测值',metric:'capture',snapshot:f,enabled:true,direction,threshold:d.stricterPct===0?f.threshold:stricterAdditionThreshold(f.threshold,direction,d.stricterPct),timing:'closed',originalDetector:{constraints:f.constraints??[]}};
+        return {id:d.id+':'+i,label:(f.featureShort??f.featureName??'原探测算法')+' 探测值',metric:'capture',snapshot:f,enabled:true,direction,threshold:d.stricterPct===0?f.threshold:stricterAdditionThreshold(f.threshold,direction,d.stricterPct),timing:'closed',originalDetector:{constraints:f.constraints??[],...(f.range&&d.stricterPct===0?{useOriginalRange:true}:{})}};
       })}));
       const necessaryConditions = [...required,...detectorGroups.flatMap(group => group.conditions)];
       if (selected.initialization === TURING_SCREENING_INITIALIZATION_VERSION) {
