@@ -14,7 +14,7 @@ it.each(['loading','failed'])('distinguishes an unfinished %s recovery from a tr
   render(<TooltipProvider><FishPreEntryMonitor state={api} selectedCount={1} filtersOn onSelected={vi.fn()}/></TooltipProvider>);
   fireEvent.click(screen.getByLabelText('打开筛选库'));const dialog=screen.getByRole('dialog');
   expect(within(dialog).queryByText('暂无入选记录。满足全部条件后才会进入筛选库。')).toBeNull();
-  fireEvent.keyDown(within(dialog).getByRole('button',{name:'筛选库导入导出'}),{key:'Enter'});
+  fireEvent.keyDown(within(dialog).getByRole('button',{name:'筛选库更多操作'}),{key:'Enter'});
   expect(screen.getByRole('menuitem',{name:'下载备份（JSON）'})).toHaveAttribute('aria-disabled','true');
   fireEvent.keyDown(screen.getByRole('menu'),{key:'Escape'});
   if(state==='loading')expect(within(dialog).getByRole('status')).toHaveTextContent('正在读取筛选库');

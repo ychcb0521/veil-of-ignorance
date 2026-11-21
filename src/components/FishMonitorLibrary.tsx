@@ -19,7 +19,7 @@ export function FishMonitorLibrary({study,ready=true,account,loadError,onRetry,r
  const library=study.monitorLibrary;
  const [recentSession,setRecentSession]=useState(false),[pageSize,setPageSize]=useState(RECENT_MONITOR_PAGE_SIZE);
  const usingLocalRecent=recentSession&&ready&&!!library;
- const recent=useRecentMonitorDirectory(account,recentSession&&!usingLocalRecent),directory=recent.directory;
+ const recent=useRecentMonitorDirectory(account,!ready||recentSession&&!usingLocalRecent),directory=recent.directory;
  const usingCloudRecent=recentSession&&!usingLocalRecent&&!!directory,usingRecent=usingLocalRecent||usingCloudRecent;
  const recentPending=recentSession&&!usingLocalRecent&&!!account&&!directory&&recent.loading;
  const changeOpen=useCallback((open:boolean)=>{setRecentSession(open);if(open)setPageSize(RECENT_MONITOR_PAGE_SIZE);onOpenChange?.(open);},[onOpenChange]);

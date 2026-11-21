@@ -69,8 +69,9 @@ export async function loadMiningLibrary(owner: string | null | undefined, onLoca
   const states=await reconcileMiningLibrary(owner??undefined);
   if(owner&&states.some(s=>s==='failed'||s==='timed_out'||s==='skipped')) throw Error('账号捕捞库尚未同步，当前显示本机记录');
   await queues.get(key);
-  if(local&&states.every(status=>status==='unchanged'))return local;
-  return await readRaw(key) ?? emptyMiningLibrary();
+  const result=local&&states.every(status=>status==='unchanged')?local:await readRaw(key)??emptyMiningLibrary();
+  if(owner&&result.records.length)void import('./libraryBrowsePublisher').then(m=>m.publishMiningBrowse(owner,result)).catch(()=>{});
+  return result;
 }
 /** Full downloads must report storage failure instead of quietly exporting an empty library. */
 export async function loadMiningLibraryForTransfer(owner?:string):Promise<FishMiningLibrary>{

@@ -1,3 +1,5 @@
+import {FishArchiveBrowse} from './FishArchiveBrowse';
+import type {BrowseScope} from '@/lib/fish/libraryBrowse';
 import {FishLibraryTransferMenu} from './FishLibraryDataMenu';
 import {FishLibraryRowExportContext,type FishLibraryRowExport,type FishLibraryExportActions} from './FishLibraryRowExport';
 import {createQualityTemplateTable,type QualityTemplateTable} from '@/lib/fish/qualityTemplateTable';
@@ -86,7 +88,8 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more}:{
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus,notice,more,browseArchive}:{
+  browseArchive?:{owner?:string;scope:BrowseScope};
   notice?:ReactNode;more?:ReactNode;browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
@@ -314,6 +317,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         </div>}
         {!picker&&!compactDirectory&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
         {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
+        {open&&browseArchive?.owner&&!items.length&&(loading||loadError)&&<FishArchiveBrowse key={browseArchive.owner+'-'+browseArchive.scope} owner={browseArchive.owner} scope={browseArchive.scope} query={templateQuery} edits={edits}/>}
         {loading&&(loadingStatus??<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>)}
         {loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">
           {loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}

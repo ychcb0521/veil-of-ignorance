@@ -71,7 +71,10 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
     if (removed.length) void purgeLocalQualityArchives(owner, removed).catch(() => {});
     void syncStoredQualityArchiveBodies(owner, loaded.study);
     if(owner&&!loaded.warning)void syncedImmutableAccountBlobRevision('fish-quality',owner).then(async revision=>{
-      if(revision)await (await import('./qualityRecentLibraryStore')).publishRecentMonitorDirectory(owner,revision,recentMonitorSource(loaded.study));
+      if(revision){
+        void import('./libraryBrowsePublisher').then(m=>m.publishFilterBrowse(owner,revision,loaded.study)).catch(()=>{});
+        await (await import('./qualityRecentLibraryStore')).publishRecentMonitorDirectory(owner,revision,recentMonitorSource(loaded.study));
+      }
     }).catch(()=>{});
   }, () => {});
   const release = () => { if (pendingReads.get(key) === task) pendingReads.delete(key); };

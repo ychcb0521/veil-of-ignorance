@@ -59,6 +59,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
   const setSelected = samplePicker?.setSelected ?? setLocalSelection;
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const rounds = useMemo(() => new Map(archived?.rounds.map(round => [round.id, round])), [archived?.rounds]);
+  const directoryEdits=useMemo(()=>mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived?.directoryEdits),[state.study?.monitorLibrary?.directoryEdits,archived?.directoryEdits]);
   const records = archived?.records ?? [];
   const admittedCount = useMemo(() => archived?.records.reduce((n,r)=>n+Number(r.status==='matched'),0) ?? 0,[archived?.records]);
   if (!monitor || !archived) return null;
@@ -93,7 +94,7 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       </tr>;})}</tbody></table></div></>;
   }}</FishDeferredDetails>;
   const getDirectoryItems = (): FishDirectoryItem[] => {
-    const templates = createQualityTemplateDirectory(state.study,true);
+    const templates = createQualityTemplateDirectory({planTemplates:state.study?.planTemplates},true);
     return templates.withHistoricalNames(entryDirectoryGroups(archived).map(({ round, records, label, summary }) => ({
       id: round.id, at: round.startedAt, label, summary, revision: archived,
       templateGroup: templates.groupPlans(round.plans ?? [], round),
@@ -101,8 +102,8 @@ export function FishPreEntryLibrary({ state, onSelected, onJump, openRequest, on
       study: () => entryDirectoryStudy(archived,round,records), preview:()=>entryDirectoryStudy(archived,round,records,false), details: close => renderEvidence(round.id, close),
     })),'screen');
   };
-  return <FishLibraryTimeDirectory renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
-    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
+  return <FishLibraryTimeDirectory browseArchive={{owner:state.account,scope:'screen'}} renderTemplate={renderTemplate} picker={samplePicker ? { triggerLabel: '从筛选库选择标的', footer: samplePicker.footer } : undefined}
+    onOpenChange={samplePicker?.onOpenChange} openRequest={openRequest} onSelectDirectory={onSelectDirectory} name="筛选库" prefix="pre-entry" kind="template" loading={!monitor.ready&&!monitor.error} loadError={!monitor.ready?monitor.error:undefined} onRetry={monitor.retry} items={getDirectoryItems} edits={directoryEdits} onRename={samplePicker ? undefined : state.renameLibraryEntry} onSetHidden={onSetHidden} onCopyStudy={onCopyStudy} renderStudy={renderStudy} recordCount={admittedCount}
     description={!monitor.ready?(monitor.error?'读取尚未完成，已有筛选历史保留':'正在恢复模板目录与入选记录…'):items=>`${admittedCount} 条入选记录 · ${items.length} 轮${samplePicker ? ' · 勾选后带回漏报测试，按信号时间取样' : ''}`}
     transferMenu={!samplePicker ? actions=><FishEntryLibraryDataActions actions={actions} onReload={monitor.running?undefined:monitor.retry} owner={state.account} ready={monitor.ready} library={{...archived,directoryEdits:mergeLibraryDirectoryEdits(state.study?.monitorLibrary?.directoryEdits,archived.directoryEdits)}} onImport={monitor.importLibrary}/>:undefined}
     download={()=>downloadDirectoryTables('筛选库',getDirectoryItems().map(item=>({id:item.id,study:item.study() as FishQualityStudy})))}

@@ -33,8 +33,13 @@ export function createAuthFetch(fetcher:typeof fetch=(input,init)=>fetch(input,i
   return async(input,init)=>{
     const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
     const parsed = new URL(url);
+    const methodName=(init?.method??(input instanceof Request?input.method:'GET')).toUpperCase();
+    // Library directories and their immutable bodies travel through the same
+    // private, no-store site gateway as other authenticated account reads.
+    const keys=parsed.searchParams.get('key')??'';
+    const libraryRead=methodName==='GET' && /idb:(?:fish-(?:quality|mining-library|mining-deletions|library-browse)|pre-entry-(?:monitor|table-clears))/.test(keys);
     const instantHeaders = parsed.pathname === '/rest/v1/user_sim_state' ? new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)) : undefined;
-    if (instantHeaders?.has(INSTANT_CAMPAIGN_HEADER)) {
+    if (instantHeaders && (libraryRead || instantHeaders.has(INSTANT_CAMPAIGN_HEADER))) {
       const headers = instantHeaders;
       headers.delete(INSTANT_CAMPAIGN_HEADER);
       const gateway = instantCampaignGatewayUrl(url, siteOrigin);

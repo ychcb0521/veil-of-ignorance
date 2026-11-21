@@ -1,0 +1,73 @@
+import {supabase} from '@/integrations/supabase/client';
+
+export type BrowseScope = 'mining' | 'filter' | 'screen';
+const guards: Record<BrowseScope, string[]> = {
+  filter: ['idb:fish-quality'],
+  mining: ['idb:fish-mining-library', 'idb:fish-mining-deletions-v1', 'idb:fish-quality'],
+  screen: ['idb:pre-entry-monitor-v5', 'idb:pre-entry-table-clears-v1', 'idb:fish-quality'],
+};
+export type BrowseRow = [symbol: string, signalTime: number, detail: string, recordId: string];
+export interface BrowseGroup { id: string; title: string; at: number; count: number; pages: string[] }
+export interface BrowseCatalog {
+  recent?: boolean; version: 1; owner: string; scope: BrowseScope; revisions: Record<string,string>; groups: BrowseGroup[];
+}
+const prefix = 'idb:fish-library-browse-v1/';
+export const browseCatalogKey = (scope: BrowseScope) => prefix + scope;
+export const recentBrowseKey=(scope:BrowseScope,revisions:Record<string,string>)=>prefix+'recent/'+scope+'/'+guards[scope].map(key=>encodeURIComponent(revisions[key])).join('/');
+export const browsePageKey = (hash: string) => prefix + 'page/' + hash;
+type Entry = {key: string; revision: string | null; removed: string | null; document: unknown};
+function validGroup(group: BrowseGroup) {
+  return group && typeof group.id === 'string' && typeof group.title === 'string' && Number.isFinite(group.at) &&
+    Number.isSafeInteger(group.count) && group.count >= 0 && Array.isArray(group.pages) &&
+    group.pages.every(hash => /^[a-f0-9]{64}$/.test(hash));
+}
+async function read(owner: string, scope: BrowseScope, key: string, signal: AbortSignal) {
+  // Project only the revision from archive heads. Each directory/page and all its
+  // revision guards are read by one account-scoped PostgREST statement.
+  const columns:string='key,revision:value->>rev,removed:value->>deleted,document:value->browse';
+  const query = supabase.from('user_sim_state').select(columns)
+    .eq('user_id',owner).in('key',[key,...guards[scope]]);
+  const {data,error} = await query.abortSignal(signal);
+  if(error) throw Error('近期记录读取失败，请重试');
+  const rows = new Map(((data ?? []) as unknown as Entry[]).map(row => [row.key,row]));
+  return {rows, doc:rows.get(key)?.document};
+}
+function current(scope: BrowseScope, revisions: Record<string,string>, rows: Map<string,Entry>) {
+  return guards[scope].every(key => typeof revisions?.[key] === 'string' &&
+    revisions[key] === (rows.get(key)?.revision??'') && rows.get(key)?.removed !== 'true');
+}
+function revisionsOf(scope:BrowseScope,rows:Map<string,Entry>){
+  if(!rows.get(guards[scope][0])?.revision||guards[scope].some(key=>rows.get(key)?.removed==='true'))return undefined;
+  return Object.fromEntries(guards[scope].map(key=>[key,rows.get(key)?.revision??'']));
+}
+export async function readBrowseRevisions(owner:string,scope:BrowseScope,signal:AbortSignal){
+  return revisionsOf(scope,(await read(owner,scope,browseCatalogKey(scope),signal)).rows);
+}
+export async function readBrowseCatalog(owner:string,scope:BrowseScope,signal:AbortSignal) {
+  const result=await read(owner,scope,browseCatalogKey(scope),signal);
+  const validate=(doc:unknown,rows:Map<string,Entry>)=>{
+    const catalog=doc as BrowseCatalog|undefined;
+    if(catalog?.owner===owner&&catalog.scope===scope&&catalog.version===1&&current(scope,catalog.revisions,rows)&&
+      Array.isArray(catalog.groups)&&catalog.groups.every(validGroup))return catalog;
+  };
+  const catalog=validate(result.doc,result.rows);
+  const revisions=revisionsOf(scope,result.rows);
+  if(catalog||!revisions)return catalog;
+  const recent=await read(owner,scope,recentBrowseKey(scope,revisions),signal);
+  return validate(recent.doc,recent.rows);
+}
+export async function readBrowsePage(catalog: BrowseCatalog, hash: string, signal: AbortSignal): Promise<BrowseRow[]> {
+  if(!catalog.groups.some(group=>group.pages.includes(hash)))throw Error('该页不在当前目录内');
+  const {rows,doc} = await read(catalog.owner,catalog.scope,browsePageKey(hash),signal);
+  if(!current(catalog.scope,catalog.revisions,rows))throw Error('目录已更新，请重新读取');
+  const packed=(doc as {gzip?:unknown}|null)?.gzip;
+  if(typeof packed!=='string'||packed.length>1_000_000)throw Error('记录页不完整，请重试');
+  const compressed=Uint8Array.from(atob(packed),c=>c.charCodeAt(0));
+  const raw=await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)),byte=>byte.toString(16).padStart(2,'0')).join('');
+  if(digest!==hash)throw Error('记录页校验失败，请重试');
+  const records:unknown=JSON.parse(new TextDecoder().decode(raw));
+  if(!Array.isArray(records) || records.length>500 || !records.every(row=>Array.isArray(row)&&row.length===4&&
+    typeof row[0]==='string'&&Number.isFinite(row[1])&&typeof row[2]==='string'&&typeof row[3]==='string'))throw Error('记录页不完整，请重试');
+  return records as BrowseRow[];
+}

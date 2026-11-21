@@ -219,6 +219,18 @@ async function fetchHead(name: string, owner: string, signal?: AbortSignal): Pro
 async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote'],signal?:AbortSignal,recovery?:RecoveryRead): Promise<{ ok: true; value: unknown } | { ok: false }> {
   if (head.deleted) return { ok: true, value: undefined };
   const keys = Array.from({ length: head.parts }, (_, i) => chunkKey(name, i));
+  // The legacy v6 writer reused part keys. Inspect only revision metadata before
+  // spending hundreds of megabytes on a generation that cannot be assembled.
+  if(name==='pre-entry-monitor-v6'&&head.parts>8){
+    for(let offset=0;offset<keys.length;offset+=60){
+      const expected=keys.slice(offset,offset+60);
+      const query=(table().select('key,revision:value->>rev') as any).eq('user_id',owner).in('key',expected);
+      const {data,error}=await (signal?query.abortSignal(signal):query);
+      if(error)throw Error(error.message);
+      const versions=new Map((data??[]).map((row:{key:string;revision:string})=>[row.key,row.revision]));
+      if(expected.some(key=>versions.get(key)!==head.rev))throw new ArchiveReadFailure('revision');
+    }
+  }
   const fetchRows = (batch: string[], abort?: AbortSignal) => readArchiveBatch(batch, abort, async requested => {
     const query = (table().select('key, value') as any).eq('user_id',owner).in('key',requested);
     const {data,error} = await (abort ? query.abortSignal(abort) : query);

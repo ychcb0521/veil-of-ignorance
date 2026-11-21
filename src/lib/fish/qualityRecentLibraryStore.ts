@@ -18,7 +18,14 @@ async function readRows(owner:string,keys:string[]){
   return new Map((response.data??[]).map(row=>[row.key,row.value]));
  }finally{clearTimeout(timer);}
 }
-export async function readRecentMonitorDirectory(owner:string):Promise<RecentMonitorDirectory|undefined>{
+const directoryReads=new Map<string,Promise<RecentMonitorDirectory|undefined>>();
+export function readRecentMonitorDirectory(owner:string):Promise<RecentMonitorDirectory|undefined>{
+ const pending=directoryReads.get(owner);
+ if(pending)return pending;
+ const task=fetchRecentMonitorDirectory(owner).finally(()=>{directoryReads.delete(owner);});
+ directoryReads.set(owner,task);return task;
+}
+async function fetchRecentMonitorDirectory(owner:string):Promise<RecentMonitorDirectory|undefined>{
  if(!await signedIn(owner))throw Error('账号已切换，请重新打开监测库');
  const rows=await readRows(owner,['idb:fish-quality']);
  const head=rows.get('idb:fish-quality') as {rev?:string;deleted?:boolean}|undefined;
