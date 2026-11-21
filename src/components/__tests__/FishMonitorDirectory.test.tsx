@@ -5,6 +5,21 @@ import {monitorArchiveFixture,ARCHIVE_T as T} from '@/lib/fish/__tests__/monitor
 import {archiveQualityMonitorStudy} from '@/lib/fish/qualityMonitorLibrary';
 import {editMonitorDirectory} from '@/lib/fish/qualityMonitorArchive';
 afterEach(cleanup);
+it('distinguishes recovery, failure and a confirmed empty monitor directory', () => {
+ const study=monitorArchiveFixture();
+ const empty={...study,monitorLibrary:undefined};
+ const retry=vi.fn();
+ const view=render(<FishMonitorLibrary study={empty} ready={false}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ expect(screen.getByRole('status')).toHaveTextContent('正在核对');
+ expect(screen.queryByText(/暂无监测归档/)).toBeNull();
+ view.rerender(<FishMonitorLibrary study={empty} ready={false} loadError="读取失败" onRetry={retry}/>);
+ fireEvent.click(screen.getByRole('button',{name:'重试读取'}));
+ expect(retry).toHaveBeenCalledOnce();
+ expect(screen.queryByText(/暂无监测归档/)).toBeNull();
+ view.rerender(<FishMonitorLibrary study={empty} ready/>);
+ expect(screen.getByText(/暂无监测归档/)).toBeVisible();
+});
 const archived=()=>archiveQualityMonitorStudy(monitorArchiveFixture(),T+4000000);
 const renderStudy=()=> <p>冻结总表</p>;
 it('keeps deletion in the hover menu, confirms before hiding, and offers restoration',async()=>{

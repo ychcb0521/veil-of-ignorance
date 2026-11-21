@@ -1,3 +1,5 @@
+import {ArchiveReadFailure} from './accountArchiveRead';
+
 /** Resume verified, complete batches of the same account revision on this page. */
 export type RecoveryProgress = {phase: 'download' | 'decode' | 'save'; done: number; total: number};
 export interface RecoveryRead {
@@ -44,7 +46,7 @@ export async function readQualityRecoveryParts(
       const values = new Map(rows.map(row => [row.key, row.value]));
       const verified = batch.map(key => {
         const part = values.get(key);
-        if (part?.rev !== rev || typeof part.data !== 'string') throw Error('云端研究分片版本不一致或缺失，请重试。');
+        if (part?.rev !== rev || typeof part.data !== 'string') throw new ArchiveReadFailure('revision');
         return part.data;
       });
       verified.forEach((part, index) => { cache.parts[from + index] = part; });

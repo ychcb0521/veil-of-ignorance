@@ -1,3 +1,4 @@
+import {archiveReadIssue, describeArchiveReadIssue} from '../accountArchiveRead';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import { emptyPreEntryLibrary, type PreEntryLibrary } from './preEntryMonitor';
 
@@ -48,11 +49,16 @@ export async function savePreEntryTableClears(owner: string | undefined, marks: 
   void noteAccountBlobSaved(preEntryTableClearsAccountBlob, owner);
 }
 export async function loadPreEntryLibraryV6(owner?: string,preview?:(library:PreEntryLibrary)=>void,rebuild=false): Promise<PreEntryLibrary> {
-  const [status, clearsStatus] = await Promise.all([syncAccountBlobOnLoad(preEntryV6AccountBlob, owner,300_000), syncAccountBlobOnLoad(preEntryTableClearsAccountBlob, owner,30_000)]);
+  const clearsStatus = await syncAccountBlobOnLoad(preEntryTableClearsAccountBlob, owner,30_000);
   if (clearsStatus === 'failed' || clearsStatus === 'timed_out') throw Error('无法恢复筛选清除标记，请重试');
+  const status = await syncAccountBlobOnLoad(preEntryV6AccountBlob, owner,300_000);
   await Promise.all([queues.get(keyOf(owner)), immediateQueues.get(keyOf(owner))]);
   const local = await read(owner,preview,rebuild);
-  if (!local && (status === 'failed' || status === 'timed_out')) throw Error('无法读取账号入选库，请重试');
+  if (status === 'failed' && archiveReadIssue(owner, preEntryV6AccountBlob.name) === 'revision') {
+    if (local) preview?.(local);
+    throw Error('筛选库云端分片版本不一致。' + (local ? '当前仅展示本机快照。' : '需要同一版本的完整备份才能恢复。'));
+  }
+  if (!local && (status === 'failed' || status === 'timed_out')) throw Error(describeArchiveReadIssue(owner,preEntryV6AccountBlob.name) ?? '无法读取账号入选库，请重试');
   return local ?? emptyPreEntryLibrary();
 }
 export async function savePreEntryLibraryV6(owner: string | undefined, library: PreEntryLibrary, immediate = false): Promise<void> {

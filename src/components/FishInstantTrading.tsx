@@ -39,7 +39,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [localOnly, setLocalOnly] = useState(false);
-  const templates = activeQualityPlanTemplates(state.study)
+  const templates = activeQualityPlanTemplates({planTemplates:state.study.planTemplates ?? state.templateCatalog})
     .filter(template => template.entryHours == null && !template.plan.preEntryThreeStage && !template.plan.preEntryConditions);
   const template = templates.find(value => value.id === id);
   const choice = useMemo<InstantMonitorPlanChoice | undefined>(() => id === selected?.templateId && selected
@@ -97,7 +97,7 @@ function HoldingTemplateSettings({ state, done }: { state: FishQualityState; don
       {choice && !issue && !isLegacyQualityPlan(choice.plan) && <button type="button" className="rounded-md border px-3 py-1.5"
         disabled={saving} onClick={() => setEditing(true)}>编辑持仓监测条件</button>}
       <button type="button" className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:opacity-40"
-      disabled={!monitor || !state.ready || saving || !!issue || (!!id && !choice)} onClick={() => void save()}>{saving ? '保存中…' : '保存设置'}</button></div>
+      disabled={!monitor || !(state.instantPreferenceStatus === 'ready' || state.ready) || saving || !!issue || (!!id && !choice)} onClick={() => void save()}>{saving ? '保存中…' : '保存设置'}</button></div>
     </div>
   </FishConditionSettings>;
 }
@@ -115,11 +115,17 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const [pairIssue, setPairIssue] = useState('');
   const [pairSaving, setPairSaving] = useState(false);
   const automatic = state.automaticScreening, cda = state.cdaTracking;
+  const instantReady = state.instantPreferenceStatus ? state.instantPreferenceStatus === 'ready' : state.ready;
+  const beforeReady = instantReady && (!!automatic?.settings || !!state.preEntry?.ready);
+  const settingsReady = settingsView === 'before' ? beforeReady : instantReady;
+  const settingsIssue = !instantReady && state.instantPreferenceStatus === 'error'
+    ? '即时交易设置读取失败' : instantReady && settingsView === 'before' ? state.preEntry?.error : undefined;
+  const retrySettings = !instantReady ? state.retryInstantPreferences : state.preEntry?.retry;
   const settingsDialog = settingsView === 'before' || settingsView === 'after';
   const closeSettings = () => setSettingsView(null);
   const pending = automatic?.pending ?? 0;
   const screeningPending = automatic?.screeningPending ?? (pending > 0 && !!(automatic?.settings ?? state.preEntry?.library.settings)?.plans.length);
-  const needsSettings = pending > 0 && !screeningPending;
+  const needsSettings = pending > 0 && beforeReady && !screeningPending;
   const screening = !automatic?.paused && (!!state.preEntry?.automaticRunning || screeningPending);
   const realPositions = follow?.connected && !live?.issue ? live?.snapshot?.positions : undefined;
   const liveHolding = !!realPositions?.length;
@@ -129,6 +135,7 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
   const holding = liveHolding || !!instant?.positions.length;
   const verifiedExecutor = follow?.executionSafety === USDT_EXECUTION_SAFETY;
   const { label: stage, icon: StageIcon } = holding ? { label: '持仓中', icon: BriefcaseBusiness }
+    : !automatic?.paused && pending > 0 && !state.preEntry?.ready ? {label: '等待筛选库', icon: Clock3}
     : screening ? { label: '筛选中', icon: Filter }
     : automatic?.paused && pending > 0 ? { label: '筛选已暂停', icon: Pause }
     : capturing ? { label: '捕捞中', icon: Pickaxe } : { label: '等待中', icon: Clock3 };
@@ -165,11 +172,11 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
         className={settingsView === 'live' ? 'w-80 max-w-[calc(100vw-24px)] p-3' : 'w-36 p-1'}
         onCloseAutoFocus={event => { if (settingsDialog) event.preventDefault(); }}>
         {settingsView === 'menu' && <>
-          <button type="button" className={settingsItem} disabled={!state.ready || !state.preEntry?.ready || !automatic?.saveSettings}
+          <button type="button" className={settingsItem} disabled={!state.preEntry || !automatic?.saveSettings}
             title={automatic?.settings?.plans[0]?.label ?? '沿用动态筛选'} onClick={() => setSettingsView('before')}>
             <Settings2 aria-hidden className="h-3 w-3"/>买前设置
           </button>
-          <button type="button" className={settingsItem} disabled={!state.ready || !state.instantMonitor}
+          <button type="button" className={settingsItem} disabled={!state.instantMonitor}
             title={state.instantMonitor?.settings?.name ?? '即时交易默认规则'} onClick={() => setSettingsView('after')}>
             <Settings2 aria-hidden className="h-3 w-3"/>买后设置
           </button>
@@ -214,9 +221,13 @@ export function FishInstantTrading({ state, capturing, children }: { state: Fish
         event.preventDefault();
         settingsTrigger.current?.focus({ preventScroll: true });
       }}>
-        {settingsView === 'before' && automatic?.saveSettings && <FishPreEntrySettings dialog state={state} selectedCount={0}
+        {!settingsReady && <FishConditionSettings dialog description="核对账号保存的设置" title={settingsView === 'before' ? '即时交易 · 买前设置' : '即时交易 · 买后设置'}>
+          <p role={settingsIssue ? 'alert' : 'status'}>{settingsIssue || (instantReady ? '正在读取原买前方案…' : '正在读取即时交易设置…')}</p>
+          {settingsIssue && retrySettings && <button type="button" onClick={retrySettings}>重试读取</button>}
+        </FishConditionSettings>}
+        {settingsReady && settingsView === 'before' && automatic?.saveSettings && <FishPreEntrySettings dialog state={state} selectedCount={0}
           done={closeSettings} automatic={{ settings: automatic.settings, save: automatic.saveSettings }}/>}
-        {settingsView === 'after' && <HoldingTemplateSettings state={state} done={closeSettings}/>}
+        {settingsReady && settingsView === 'after' && <HoldingTemplateSettings state={state} done={closeSettings}/>}
       </FishConditionDialogContent>}
     </Dialog>
     {(automatic || liveHolding) && (liveHolding

@@ -1,3 +1,4 @@
+import {readFishLibrary} from '@/lib/fish/libraryLoadQueue';
 import { useCallback, useEffect, useState } from 'react';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { notifyPersistedStateHydrated, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -24,6 +25,28 @@ export async function persistFishAccountPreference(userId: string, key: string, 
   }
 }
 
+const fishPreferenceKeys = [FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_INSTANT_MONITOR_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY];
+async function hydrateFishPreferences(owner: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try { return await hydrateSimState(owner, fishPreferenceKeys, controller.signal); }
+  finally { clearTimeout(timer); }
+}
+
+const initialReads = new Map<string, Promise<boolean>>();
+export function loadFishAccountPreferences(owner: string) {
+  const pending = initialReads.get(owner);
+  if (pending) return pending;
+  const read = readFishLibrary(owner, 'instant', async () => {
+    if (getUserId() !== owner) return false;
+    const result = await hydrateFishPreferences(owner);
+    return result.status === 'hydrated' || result.status === 'empty';
+  });
+  initialReads.set(owner, read);
+  const release = () => { if (initialReads.get(owner) === read) initialReads.delete(owner); };
+  void read.then(release, release);
+  return read;
+}
 export function useFishAccountSettings(refreshOnFocus = false) {
   const userId = getUserId(), prefix = getUserPrefix();
   const fullKey = prefix + FISH_ACCOUNT_SETTINGS_KEY, wickKey = prefix + FISH_WICK_SETTINGS_KEY, turnoverKey = prefix + FISH_CAPTURE_TURNOVER_KEY;
@@ -74,10 +97,11 @@ export function useFishAccountSettings(refreshOnFocus = false) {
     const refresh = async () => {
       if (pending || document.hidden) return;
       pending = true;
-      try { await hydrateSimState(userId, [FISH_ACCOUNT_SETTINGS_KEY, FISH_CAPTURE_TEMPLATES_KEY, FISH_AUTOMATIC_SCREENING_KEY, FISH_INSTANT_MONITOR_KEY, FISH_LOOKBACK_KEY, FISH_LOOKBACK_POLICY_KEY, FISH_WICK_SETTINGS_KEY, FISH_CAPTURE_TURNOVER_KEY]); }
+      try { await hydrateFishPreferences(userId); }
       finally { pending = false; }
     };
-    void refresh();
+    pending = true;
+    void loadFishAccountPreferences(userId).catch(() => false).finally(() => { pending = false; });
     const timer = setInterval(() => void refresh(), 30_000);
     window.addEventListener('focus', refresh);
     window.addEventListener('online', refresh);

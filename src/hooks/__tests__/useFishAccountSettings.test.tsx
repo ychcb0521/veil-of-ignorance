@@ -9,7 +9,10 @@ vi.mock('@/integrations/supabase/client', () => ({supabase:{from:()=>({
   },
   select:()=>({not:()=>({eq:(_field:string,uid:string)=>{
     const result={data:[...cloud.rows.entries()].filter(([id])=>id.startsWith(uid)).map(([,row])=>row),error:null};
-    return {then:(resolve:(r:unknown)=>void)=>Promise.resolve(result).then(resolve),in:(_key:string,keys:string[])=>Promise.resolve({...result,data:result.data.filter(row=>keys.includes(row.key))})};
+    return {then:(resolve:(r:unknown)=>void)=>Promise.resolve(result).then(resolve),in:(_key:string,keys:string[])=>{
+      const response=Promise.resolve({...result,data:result.data.filter(row=>keys.includes(row.key))});
+      return Object.assign(response,{abortSignal:(signal:AbortSignal)=>signal.aborted?Promise.reject(signal.reason):response});
+    }};
   }})})
 })}}));
 import { useFishAccountSettings } from '../useFishAccountSettings';

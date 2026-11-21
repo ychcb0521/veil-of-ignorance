@@ -14,6 +14,8 @@ import { useUsdtLiveTrading } from '@/hooks/useUsdtLiveTrading';
 import { useBinanceManualMonitor } from '@/hooks/useBinanceManualMonitor';
 import { useFishScreeningAutomation } from '@/hooks/useFishScreeningAutomation';
 
+import {prioritizeInstantScreening} from '@/lib/fish/libraryLoadQueue';
+import {loadFishAccountPreferences} from '@/hooks/useFishAccountSettings';
 import { useInstantMonitorSettings } from '@/hooks/useInstantMonitorSettings';
 
 const EMPTY: readonly TradeSignal[] = [];
@@ -34,6 +36,17 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const [screeningRequested, setScreeningRequested] = useState(false);
   // The mining directory owns its archive and reads it on open.
   const state = useFishQuality(owner, input.fish, run, input.library, EMPTY, requested, input.turing, true, screeningRequested);
+  const [preferenceAttempt, setPreferenceAttempt] = useState(0);
+  const [preferences, setPreferences] = useState<{owner: string; ready: boolean}>();
+  useEffect(() => {
+    if (!owner) return;
+    let active = true;
+    setPreferences(undefined);
+    const finish = (ready: boolean) => { if (active) setPreferences({owner, ready}); };
+    void loadFishAccountPreferences(owner).then(finish, () => finish(false));
+    return () => { active = false; };
+  }, [owner, preferenceAttempt]);
+  const preferenceStatus = preferences && preferences.owner === owner ? (preferences.ready ? 'ready' : 'error') : 'loading';
   const notify = useFishNotify(owner, undefined, undefined, true);
   const instantMonitor = useInstantMonitorSettings(owner);
   const automaticScreening = useFishScreeningAutomation(owner, !!state.preEntry?.ready, state.preEntry, notify);
@@ -48,7 +61,11 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
     return (usdtLive.snapshot?.positions ?? []).some(row => row.symbol.replace(/\//g, '').toUpperCase() === code && Number(row.quantity) > 0);
   }) : undefined, [owner, usdtFollow.connected, usdtLive.snapshot, usdtLive.issue]);
   const hasAutomaticWork = automaticScreening.pending > 0 || automaticScreening.awaitingMail > 0 || (notify.config.enabled && cdaTracking.hasPendingSaleMail) || positions.length > 0;
-  useEffect(() => { if (hasAutomaticWork) setScreeningRequested(true); }, [hasAutomaticWork]);
+  useEffect(() => {
+    if (owner) prioritizeInstantScreening(owner, hasAutomaticWork);
+    if (hasAutomaticWork) setScreeningRequested(true);
+    return () => { if (owner) prioritizeInstantScreening(owner, false); };
+  }, [owner, hasAutomaticWork]);
   const sources = useCallback((fish: readonly TradeSignal[], library: readonly TradeSignal[], turing: readonly TradeSignal[], researchOpen: boolean, screeningOpen: boolean) => {
     if (researchOpen) setRequested(true);
     if (screeningOpen) setScreeningRequested(true);
@@ -58,7 +75,7 @@ export function FishQualityProvider({ owner, children, run = runPageFishQuality 
   const location = useLocation();
   const templates=state.study.planTemplates??state.templateCatalog;
   const names=useMemo(()=>({owner,resolver:qualityTemplateNames({planTemplates:templates})}),[owner,templates]);
-  return <FishQualityContext.Provider value={{ state: { ...state, automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
+  return <FishQualityContext.Provider value={{ state: { ...state, instantPreferenceStatus:preferenceStatus, retryInstantPreferences:()=>setPreferenceAttempt(n=>n+1), automaticScreening, instantMonitor, cdaTracking: { ...cdaTracking, campaignIssue } }, sources, activate, enqueue: automaticScreening.enqueue, notify }}>
     <QualityTemplateNamesContext.Provider value={names}><InstantPositionsContext.Provider value={{ positions, monitorResults: cdaTracking.monitorResults, mirrorFills: cdaTracking.mirrorFills, manualPositions: cdaTracking.manualPositions, usdtFollow, usdtLive: { ...usdtLive, management }, manage: cdaTracking.managePosition }}>{children}</InstantPositionsContext.Provider></QualityTemplateNamesContext.Provider>
     {(state.running || state.filterRunning || state.postExit?.running || state.preEntry?.running) && location.pathname !== '/' && <div role="status" className="fixed bottom-4 right-4 z-50 space-y-1 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
       {state.preEntry?.running && <div>买前筛选后台运行中 · {state.preEntry.progress?.done ?? 0}/{state.preEntry.progress?.total ?? 0}</div>}

@@ -2,7 +2,8 @@
  * 捕捞库的本机存储（IndexedDB，按账号一份）+ 账号云端存档（accountBlobSync，键 idb:fish-mining-library）。
  * 写入按账号串行：读 → 合并 → 写在同一个事务里，另一个标签页的写入不会被覆盖。
  */
-import { noteAccountBlobSaved, syncAccountBlobOnLoad, syncAccountBlobFully, type AccountBlobAdapter } from '@/lib/accountBlobSync';
+import {readFishLibrary} from './libraryLoadQueue';
+import { noteAccountBlobSaved, syncAccountBlobOnLoad, syncAccountBlobFully, type AccountBlobAdapter, type AccountBlobSyncStatus } from '@/lib/accountBlobSync';
 import {keyOf,readRaw,transform,localMiningMarks,hasDeletions,type MiningDeletions} from './miningDisk';
 import {decodeMiningArchive,containsMiningMerge} from './miningRestore';
 import {prepareAccountBlobEncoding} from '../accountBlobCodec';
@@ -44,11 +45,19 @@ const miningDeletionsAccountBlob: AccountBlobAdapter<MiningDeletions> = {
   weight: value => Object.keys(value?.deletedRecords ?? {}).length + Number(!!value?.clearedAt),
 };
 
-async function reconcileMiningLibrary(owner?: string, fresh = false) {
-  return Promise.all([
-    syncAccountBlobOnLoad(miningDeletionsAccountBlob, owner, undefined, fresh),
-    syncAccountBlobOnLoad(miningLibraryAccountBlob, owner, 600_000, fresh),
-  ]);
+const miningReads = new Map<string | undefined, Promise<AccountBlobSyncStatus[]>>();
+function reconcileMiningLibrary(owner?: string) {
+  const pending = miningReads.get(owner);
+  if (pending) return pending;
+  const task = readFishLibrary(owner, 'mining', async () => {
+    const marks = await syncAccountBlobOnLoad(miningDeletionsAccountBlob, owner, undefined, true);
+    const library = await syncAccountBlobOnLoad(miningLibraryAccountBlob, owner, 600_000, true);
+    return [marks, library];
+  });
+  miningReads.set(owner, task);
+  const release = () => { if (miningReads.get(owner) === task) miningReads.delete(owner); };
+  void task.then(release, release);
+  return task;
 }
 
 /** 读捕捞库（先与账号云端对一次账）。读不到返回空库。 */
@@ -57,7 +66,7 @@ export async function loadMiningLibrary(owner: string | null | undefined, onLoca
   const key=keyOf(owner);
   const local=onLocal?await readRaw(key):undefined;
   if(local)onLocal?.(local);
-  const states=await reconcileMiningLibrary(owner??undefined,true);
+  const states=await reconcileMiningLibrary(owner??undefined);
   if(owner&&states.some(s=>s==='failed'||s==='timed_out'||s==='skipped')) throw Error('账号捕捞库尚未同步，当前显示本机记录');
   await queues.get(key);
   if(local&&states.every(status=>status==='unchanged'))return local;
@@ -65,7 +74,7 @@ export async function loadMiningLibrary(owner: string | null | undefined, onLoca
 }
 /** Full downloads must report storage failure instead of quietly exporting an empty library. */
 export async function loadMiningLibraryForTransfer(owner?:string):Promise<FishMiningLibrary>{
- const states=await reconcileMiningLibrary(owner,true);
+ const states=await reconcileMiningLibrary(owner);
  if(owner&&states.some(s=>s==='failed'||s==='timed_out'||s==='skipped'))throw Error('完整账号捕捞库尚未同步，请重试');
  await queues.get(keyOf(owner));return await readRaw(keyOf(owner))??emptyMiningLibrary();
 }
@@ -132,7 +141,7 @@ export async function syncMiningLibraryChange(owner?: string, deleted = false): 
 }
 
 export async function importMiningLibraries(owner: string | undefined, incoming: readonly FishMiningLibrary[]) {
-  await reconcileMiningLibrary(owner, true);
+  await reconcileMiningLibrary(owner);
   if (!await updateMiningLibrary(owner, library => incoming.reduce((current, next) => restoreMiningImport(current, next), library))) {
     throw Error('捕捞库未能保存导入记录，请重试');
   }

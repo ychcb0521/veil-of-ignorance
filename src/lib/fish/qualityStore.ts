@@ -12,6 +12,8 @@ import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
 import { preserveQualityFilterLibrary } from './qualityFilterLibrary';
+import {describeArchiveReadIssue, setArchiveReadIssue} from '../accountArchiveRead';
+import {readFishLibrary} from './libraryLoadQueue';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, prepareAccountBlob, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import {serializeArchiveWork} from '../serializeArchiveWork';
 import {prepareStoredQuality} from './qualityBackup';
@@ -61,7 +63,7 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
   const key = keyOf(owner), pending = pendingReads.get(key);
   if (pending) return pending;
   resetQualityRecovery(owner);
-  const task = loadQualityStudyRaw(owner).then(loaded => ({ ...loaded, study: applyQualitySourceRatings(applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner))) }));
+  const task = readFishLibrary(owner, 'monitor', () => loadQualityStudyRaw(owner)).then(loaded => ({ ...loaded, study: applyQualitySourceRatings(applySavedQualityPlans(stopQualityRepair(loaded.study, Date.now()),readSavedQualityPlans(owner))) }));
   pendingReads.set(key, task);
   void task.then(loaded => {
     const removed = permanentlyDeletedMonitorArchiveIds(loaded.study.monitorLibrary);
@@ -74,11 +76,15 @@ export function loadQualityStudy(owner?: string): Promise<{ study: FishQualitySt
 }
 /** Synchronize before a read; the campaign worker opens the durable copy itself. */
 export async function prepareQualityCampaignRead(owner?: string): Promise<{ durable: boolean; warning?: string }> {
+  return readFishLibrary(owner, 'monitor', () => prepareCampaignRead(owner));
+}
+
+async function prepareCampaignRead(owner?: string) {
   const syncStatus = await syncAccountBlobOnLoad(qualityAccountBlob, owner, 180_000);
   // 持仓监测的 Worker 会整条读这份记录：先确保归档正文已经移出去（旧记录可达 478 MB，超过 Worker 内存上限）。
   await ensureQualityArchivesDetached(owner);
   const warning = syncStatus === 'timed_out' ? '账号研究恢复超时，原数据仍保留，请重试。'
-    : syncStatus === 'failed' ? '账号研究恢复失败，原数据仍保留，请重试。' : undefined;
+    : syncStatus === 'failed' ? describeArchiveReadIssue(owner, qualityAccountBlob.name) ?? '账号研究恢复失败，原数据仍保留，请重试。' : undefined;
   await writes.get(keyOf(owner));
   // Legacy fallback may be newer than IndexedDB; retain its existing merge path.
   let legacy = false;
@@ -88,7 +94,7 @@ export async function prepareQualityCampaignRead(owner?: string): Promise<{ dura
 async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   await loadDurableQualityPlans(owner);
   // 【用户要求】2026-10-27 鱼质量研究跟账号走：先和云端对一次账（换电脑登录也能看到），再读本机。
-  const {warning: recoveryError} = await prepareQualityCampaignRead(owner);
+  const {warning: recoveryError} = await prepareCampaignRead(owner);
   let fallback: unknown;
   try { fallback = JSON.parse(localStorage.getItem(keyOf(owner)) ?? 'null'); } catch { /* durable copy still works */ }
   try {
@@ -214,7 +220,11 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
       try { localStorage.removeItem(key); } catch { /* optional cache cleanup */ }
       if (firstRestore) options?.remote?.onFirstRestore?.();
       return true;
-    } catch {
+    } catch (error) {
+      if (options?.remote && owner && error instanceof DOMException && error.name === 'QuotaExceededError') {
+        setArchiveReadIssue(owner, 'fish-quality', 'quota');
+        return false;
+      }
       try {
         const saved = JSON.parse(localStorage.getItem(key) ?? 'null');
         localStorage.setItem(key, JSON.stringify(merge(valid(saved) ? preserveStudy(durablePrevious,saved) : durablePrevious))); return true;

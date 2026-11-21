@@ -24,6 +24,7 @@ import { runAccountSyncRequest, __resetAccountSyncTransportForTests } from './ac
 import { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlobValue, prepareAccountBlobEncoding } from './accountBlobCodec';
 export { serializeAccountBlob, deserializeAccountBlob, fingerprintAccountBlob } from './accountBlobCodec';
 
+import {ArchiveReadFailure, readArchiveBatch, setArchiveReadIssue} from './accountArchiveRead';
 import {checkRecoverySignal,readQualityRecoveryParts,clearRecoveryParts,type RecoveryRead,type RecoveryProgress} from './qualityRecoveryTransfer';
 
 export const ACCOUNT_BLOB_PREFIX = 'idb:';
@@ -216,12 +217,14 @@ async function fetchHead(name: string, owner: string, signal?: AbortSignal): Pro
 async function fetchValue(name: string, owner: string, head: Head,decode?:AccountBlobAdapter['decodeRemote'],signal?:AbortSignal,recovery?:RecoveryRead): Promise<{ ok: true; value: unknown } | { ok: false }> {
   if (head.deleted) return { ok: true, value: undefined };
   const keys = Array.from({ length: head.parts }, (_, i) => chunkKey(name, i));
+  const fetchRows = (batch: string[], abort?: AbortSignal) => readArchiveBatch(batch, abort, async requested => {
+    const query = (table().select('key, value') as any).eq('user_id',owner).in('key',requested);
+    const {data,error} = await (abort ? query.abortSignal(abort) : query);
+    if (error) throw Error(error.message);
+    return (data ?? []) as {key: string; value: {rev?: string; data?: string}}[];
+  });
   if(recovery && decode){
-    const parts=await readQualityRecoveryParts(idOf(name,owner),head.rev,keys,async(batch,signal)=>{
-      const {data,error}=await (table().select('key, value') as any).eq('user_id',owner).in('key',batch).abortSignal(signal);
-      if(error)throw Error(error.message);
-      return data??[];
-    },recovery);
+    const parts=await readQualityRecoveryParts(idOf(name,owner),head.rev,keys,fetchRows,recovery);
     const value=await decode(owner,head.enc,parts,recovery);
     checkRecoverySignal(recovery.signal);
     const latest = await fetchHead(name, owner, recovery.signal);
@@ -236,13 +239,11 @@ async function fetchValue(name: string, owner: string, head: Head,decode?:Accoun
   for (let offset = 0; offset < keys.length; offset += READ_PARTS_PER_REQUEST) {
     if (signal?.aborted) throw signal.reason;
     const batch = keys.slice(offset, offset + READ_PARTS_PER_REQUEST);
-    const query = (table().select('key, value') as any).eq('user_id', owner).in('key', batch);
-    const { data, error } = await (signal ? query.abortSignal(signal) : query);
-    if (error) throw new Error(error.message);
-    const byKey = new Map(((data ?? []) as { key: string; value: { rev?: string; data?: string } }[]).map(row => [row.key, row.value]));
+    const rows = await fetchRows(batch, signal);
+    const byKey = new Map(rows.map(row => [row.key, row.value]));
     for (const key of batch) {
       const part = byKey.get(key);
-      if (!part || part.rev !== head.rev || typeof part.data !== 'string') return { ok: false };
+      if (!part || part.rev !== head.rev || typeof part.data !== 'string') throw new ArchiveReadFailure('revision');
       parts.push(part.data);
     }
   }
@@ -352,6 +353,10 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
     return true;
   }
   const rev = newRev();
+  // Only these mutable libraries use the atomic publisher. Other adapters retain
+  // their existing storage protocol, including independently immutable bodies.
+  const staged = ['pre-entry-monitor-v6', 'fish-quality', 'fish-mining-library'].includes(adapter.name);
+  const stageName = 'staged/' + adapter.name + '/' + rev;
   let parts = 0, nextHead: Head;
   if (!prepared) {
     nextHead = { v: 1, rev, parts: 0, savedAt, enc: 'json', bytes: 0, deleted: true };
@@ -360,13 +365,20 @@ async function push(adapter: AccountBlobAdapter<any>, owner: string, settled: bo
     if(!encoded)throw new Error('账号研究档案编码未完成');
     parts = Math.max(1, Math.ceil(encoded.text.length / CHUNK_CHARS));
     for (let i = 0; i < parts; i += 1) {
-      await upsertRow(owner, chunkKey(adapter.name, i), { rev, data: encoded.text.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
+      await upsertRow(owner, chunkKey(staged ? stageName : adapter.name, i), { rev, data: encoded.text.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) });
     }
     nextHead = { v: 1, rev, parts, savedAt, enc: encoded.enc, bytes: encoded.bytes };
   }
-  await upsertRow(owner, headKey(adapter.name), nextHead);
-  const previousParts = Math.max(head?.parts ?? 0, meta?.parts ?? 0);
-  await deleteRows(owner, Array.from({ length: Math.max(0, previousParts - parts) }, (_, i) => chunkKey(adapter.name, parts + i))).catch(() => {});
+  if (staged) {
+    const published = await supabase.rpc('publish_fish_archive_v1' as never, {
+      archive_name: adapter.name, expected_rev: head?.rev ?? null, new_head: nextHead,
+    } as never);
+    if (published.error || published.data !== true) return false;
+  } else {
+    await upsertRow(owner, headKey(adapter.name), nextHead);
+    const previousParts = Math.max(head?.parts ?? 0, meta?.parts ?? 0);
+    await deleteRows(owner, Array.from({ length: Math.max(0, previousParts - parts) }, (_, i) => chunkKey(adapter.name, parts + i))).catch(() => {});
+  }
   // 上传期间本机又保存过：savedAt 只进不退，那一版仍算「改过未上传」。
   const latest = await readMeta(adapter.localReceiptName ?? adapter.name, owner);
   await writeMeta(adapter.localReceiptName ?? adapter.name, owner, { savedAt: Math.max(latest?.savedAt ?? 0, savedAt), syncedAt: savedAt, rev, parts, hash });
@@ -454,6 +466,7 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
   let entry = loads.get(id);
   if (refresh && entry?.settled) { loads.delete(id); entry = undefined; }
   if (!entry) {
+    setArchiveReadIssue(owner, adapter.name);
     const gate: { state: 'open' | 'adopting' | 'closed' } = { state: 'open' };
     const controller = new AbortController();
     let lastProgressAt=Date.now();
@@ -465,6 +478,8 @@ export function syncAccountBlobOnLoad(adapter: AccountBlobAdapter<any>, owner: s
     const task = enqueue(id, () => reconcile(adapter, owner, () => { if (gate.state !== 'open') return false; gate.state = 'adopting'; recovery?.report({phase:'save',done:0,total:0}); return true; }, controller.signal,recovery))
       .catch((error): AccountBlobSyncStatus => {
         if (controller.signal.aborted) return 'timed_out';
+        if (error instanceof ArchiveReadFailure) setArchiveReadIssue(owner, adapter.name, error.issue);
+        if (error?.name === 'QuotaExceededError') setArchiveReadIssue(owner, adapter.name, 'quota');
         console.warn('[账号研究] 恢复未完成', adapter.name, error instanceof Error ? error.message : '读取失败');
         return 'failed';
       });

@@ -127,7 +127,7 @@ function MonitorSampleBoard({ study, draft, setDraft, onJump, canJump }: Pick<Mo
 
 export function FishMonitorSamplePicker({ state, selected, onSelect, onJump, canJump }: MonitorPickerProps) {
   const [draft, setDraft] = useState(new Map<string, TradeSignal>());
-  return <FishMonitorLibrary study={state.study} loadArchive={state.loadMonitorArchive}
+  return <FishMonitorLibrary ready={state.ready} account={state.account} loadError={state.ready ? state.studyReadWarning : state.error || undefined} onRetry={state.ready ? undefined : state.retryStudyLoad} study={state.study} loadArchive={state.loadMonitorArchive}
     onOpenChange={open => { if (open) setDraft(new Map(selected.map(sample => [sample.id, sample]))); }}
     renderStudy={study => <MonitorSampleBoard study={study} draft={draft} setDraft={setDraft} onJump={onJump} canJump={canJump}/>}
     picker={{

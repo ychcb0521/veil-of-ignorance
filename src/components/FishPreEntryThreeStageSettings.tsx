@@ -357,14 +357,14 @@ function ThreeStageSettings({state,selectedCount,done,onUseTemplate,automatic,di
     {!readOnly&&!active&&<label className="screening-form-label mt-4">单标的筛选时限<span className="screening-time-field"><input aria-label="单标的筛选时限（小时）" className={field} type="number" min="0.016666666666666666" max="8784" step="any" value={hours} onChange={e=>setHours(e.target.value)}/>小时</span></label>}
     {!readOnly&&<p className="mt-4 text-muted-foreground">首次满足即停止；到达时限仍未满足则结束。{automatic ? '保存后供新捕到的鱼使用。' : '修改时限后，从头重新筛选生效。'}</p>}
     {error&&<p role="alert" className="text-[11px] text-destructive">{error}</p>}
-    {!readOnly&&monitor&&!monitor.ready && <div className="flex flex-wrap items-center gap-2 text-[11px]">
+    {!readOnly&&!automatic&&monitor&&!monitor.ready && <div className="flex flex-wrap items-center gap-2 text-[11px]">
       <p role={monitor.error ? 'alert' : 'status'} className={monitor.error ? 'text-destructive' : 'text-muted-foreground'}>
         {monitor.error || '正在读取筛选库，完成后可保存方案或开始筛选。'}
       </p>
       {monitor.error && <button type="button" className={button} onClick={monitor.retry}>重试读取筛选库</button>}
     </div>}
     {!readOnly&&monitor&&state&&<div className="screening-footer"><span className="screening-footer-meta">{!automatic && <>已选择 {selectedCount} 个标的</>}</span><div className="screening-footer-actions"><SettingsImageButton/>
-      <button type="button" disabled={!state.ready||!monitor.ready||savingAutomatic} className={automatic ? button+' screening-save-primary' : button} onClick={()=>save(false)}>
+      <button type="button" disabled={(automatic && state.instantPreferenceStatus ? state.instantPreferenceStatus !== 'ready' : !state.ready || !monitor.ready) || savingAutomatic} className={automatic ? button+' screening-save-primary' : button} onClick={()=>save(false)}>
         {automatic ? savingAutomatic ? '保存中…' : '保存筛选鱼条件' : '保存三阶方案'}
       </button>
       {!automatic && <button type="button" disabled={!state.ready||!monitor.ready||!selectedCount} className={button+' screening-save-primary'} onClick={()=>save(true)}>保存并开始三阶筛选</button>}

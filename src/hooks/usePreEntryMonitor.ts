@@ -1,3 +1,4 @@
+import {readFishLibrary} from '@/lib/fish/libraryLoadQueue';
 import { reserveInstantAdmission } from '@/lib/fish/instantAdmission';
 import { readInstantMonitorSettings } from '@/lib/fish/instantMonitorSettings';
 import { createPreEntryCheckpoint } from '@/lib/fish/preEntryCheckpoint';
@@ -54,7 +55,17 @@ export function usePreEntryMonitor(owner: string | undefined, enabled: boolean, 
     tableClearLock.current=false;savingDraft.current=false;setSavingWorkspaceDraft(false);commit(emptyPreEntryLibrary());
     if (!enabled) return;
     let loaded = false;
-    void Promise.all([loadPreEntryLibraryV6(owner,preview=>{if(epoch.current===generation)commit(preview);},reload>0), loadPreEntryLibraryV5(owner), loadPreEntryLibraryV4(owner), loadPreEntryLibraryV3(owner).catch(() => undefined), loadPreEntryLibraryV2(owner).catch(() => undefined), loadPreEntryLibrary(owner).catch(() => undefined),workspaceMode ? loadPreEntryWorkspaceDraft(owner) : undefined]).then(async([newLibrary, v5, v4, v3, v2, legacy, draft]) => {
+    void readFishLibrary(owner, 'screening', async () => {
+      if (epoch.current !== generation) return;
+      const newLibrary = await loadPreEntryLibraryV6(owner, preview => {
+        if (epoch.current === generation) commit(preview);
+      }, reload > 0);
+      const v5 = await loadPreEntryLibraryV5(owner);
+      const v4 = await loadPreEntryLibraryV4(owner);
+      const v3 = await loadPreEntryLibraryV3(owner);
+      const v2 = await loadPreEntryLibraryV2(owner);
+      const legacy = await loadPreEntryLibrary(owner);
+      const draft = workspaceMode ? await loadPreEntryWorkspaceDraft(owner) : undefined;
       const old = mergePreEntryLibraries(mergePreEntryLibraries(mergePreEntryLibraries(legacy ?? emptyPreEntryLibrary(), v2 ?? emptyPreEntryLibrary()), v3 ?? emptyPreEntryLibrary()), v4);
       if(v4.settings) old.settings=v4.settings;
       const oldV5=mergePreEntryLibraries(old,v5);if(v5.settings)oldV5.settings=v5.settings;
