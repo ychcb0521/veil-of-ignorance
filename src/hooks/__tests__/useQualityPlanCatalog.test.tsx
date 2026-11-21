@@ -12,6 +12,6 @@ it('adopts cloud templates without uploading defaults, and clears them across ac
  act(()=>{writePersistedStateRaw('sim_a_quality_plan_templates_v1',JSON.stringify([t]),{source:'remote'});notifyPersistedStateHydrated('sim_a_quality_plan_templates_v1');});
  await waitFor(()=>expect(h.result.current[0]).toEqual([t]));expect(push).not.toHaveBeenCalled();
  h.rerender({owner:'b'});await waitFor(()=>expect(h.result.current[0]).toEqual([]));
- act(()=>h.result.current[1]([{...t,name:'B模板'}]));expect(push).toHaveBeenCalledExactlyOnceWith('b','quality_plan_templates_v1',[{...t,name:'B模板'}]);
+ act(()=>h.result.current[1]([{...t,name:'B模板'}]));expect(push).toHaveBeenCalledExactlyOnceWith('b','quality_plan_templates_v1',[{...t,name:'B模板'}],JSON.stringify([{...t,name:'B模板'}]));
  expect(JSON.parse(readPersistedStateRaw('sim_a_quality_plan_templates_v1')!)).toEqual([t]);
 });

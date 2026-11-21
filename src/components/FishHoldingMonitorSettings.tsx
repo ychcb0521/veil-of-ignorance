@@ -226,11 +226,25 @@ export function MonitorTimePicker({ trigger, onChoose, restart = false, running 
 
 export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCount,outsideHint,instant,templateName}:{state:FishQualityState;activeId:string|null;onSelect:(id:string)=>void;done:()=>void;selectedCount:number;outsideHint?:ReactNode;instant?:boolean;templateName?:QualityTemplateName}) {
   const imageCapture=useSettingsImageCapture();
-  const definitions=useFeatureDefinitions(),plans=state.study.sellPlans??EMPTY_PLANS;
+  const settingsStudy=!instant&&state.monitorSettings?state.monitorSettings.study:state.study;
+  const settingsReady=!instant&&state.monitorSettings?state.monitorSettings.ready:state.ready;
+  const definitions=useFeatureDefinitions(),plans=settingsStudy.sellPlans??EMPTY_PLANS;
+  const [visitedPlans,setVisitedPlans]=useState<ReadonlySet<string>>(()=>new Set());
+  const choosePlan=(id:string)=>{
+    setVisitedPlans(previous=>new Set([...previous,id,activeId??plans[0]?.id].filter((value):value is string=>!!value)));
+    onSelect(id);
+  };
   const [positions, setPositions] = useState<Record<string, PositionManagementDraft>>({});
   const [drafts,setDrafts]=useState<Record<string,{base:string;draft:MonitorDraft}>>({});
-  const forPlan=(p:QualityGroup)=>drafts[p.id]?.base===monitorBaseKey(p)?drafts[p.id].draft:monitorDraftOf(p);
-  const changed=(p:QualityGroup)=>JSON.stringify(forPlan(p))!==JSON.stringify(monitorDraftOf(p));
+  const baselines=useRef(new Map<string,{base:string;draft:MonitorDraft;serialized:string}>());
+  const baselineFor=(p:QualityGroup)=>{
+    const base=monitorBaseKey(p),old=baselines.current.get(p.id);
+    if(old?.base===base)return old;
+    const draft=monitorDraftOf(p),value={base,draft,serialized:JSON.stringify(draft)};
+    baselines.current.set(p.id,value);return value;
+  };
+  const forPlan=(p:QualityGroup)=>{const baseline=baselineFor(p);return drafts[p.id]?.base===baseline.base?drafts[p.id].draft:baseline.draft;};
+  const changed=(p:QualityGroup)=>JSON.stringify(forPlan(p))!==baselineFor(p).serialized;
   const controllers=useRef<Record<string,{current:RouterDraftHandle|null}>>({});
   const [routerDirty,setRouterDirty]=useState<Record<string,boolean>>({});
   const setRouterDirtyFlag=useCallback((id:string,dirty:boolean)=>setRouterDirty(old=>old[id]===dirty?old:{...old,[id]:dirty}),[]);
@@ -249,21 +263,24 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
     if(!changed(p)||isLegacyQualityPlan(p))return p;
     try { return {...p,...parseChangedMonitorDraft(p,forPlan(p),definitions)}; } catch(cause) { throw new Error(`${p.label}：${cause instanceof Error?cause.message:'监测条件无效'}`); }
   });
-  const recoverablePlans=instant?undefined:recoverableQualityPlans(state.study,readSavedQualityPlans(state.account));
+  const recoverablePlans=useMemo(()=>instant?undefined:recoverableQualityPlans(settingsStudy,readSavedQualityPlans(state.account)),
+    [instant,state.account,settingsStudy.sellPlans,settingsStudy.monitorLibrary,settingsStudy.campaignRuns]);
   const templates=!instant&&state.savePlanTemplate&&state.deletePlanTemplate?{
     owner:state.account,restore:state.restorePlanTemplate,
-    templates:activeQualityPlanTemplates(state.ready?state.study:{planTemplates:state.templateCatalog}),
+    templates:activeQualityPlanTemplates(settingsReady?settingsStudy:{planTemplates:state.templateCatalog}),
     save:state.savePlanTemplate,remove:state.deletePlanTemplate,
   }:undefined;
-  if(!instant&&!state.ready) return <div className="space-y-2 text-[11px]">
+  if(!instant&&!settingsReady) return <div className="space-y-2 text-[11px]">
     <div className="flex flex-wrap items-center justify-between gap-2">
       {state.error?<p role="alert" className="text-destructive">{state.error}</p>:<p role="status">正在读取持仓监测方案…</p>}
       {templates&&<TemplatePicker actions={templates} disabled={false} browseOnly/>}
     </div>
-    <p className="text-muted-foreground">账号研究就绪后可新建、编辑或找回方案。{recoverablePlans?.length? `已找到 ${recoverablePlans.length} 套保存记录。`:''}</p>
+    <p className="text-muted-foreground">已保存的方案读取完成后即可编辑，历史记录继续后台恢复。{recoverablePlans?.length? `已找到 ${recoverablePlans.length} 套保存记录。`:''}</p>
     {state.error&&state.retryStudyLoad&&<button type="button" className={button} onClick={state.retryStudyLoad}>重试加载</button>}
   </div>;
-  return <FishQualitySellPlansEditor plans={plans} ready={state.ready} singlePlan={instant} templateName={templateName} onSave={next => { state.setSellPlans(next); if (!instant) setPositions({}); }} onSelectPlan={onSelect} recoverablePlans={recoverablePlans} templates={templates} onCopyPlan={(source,copy)=>{
+  return <>
+  {!instant&&!state.ready&&<p role="status" className="mb-2 text-[10.5px] text-muted-foreground">已保存方案可先编辑；历史记录仍在恢复，完成后可开始监测。</p>}
+  <FishQualitySellPlansEditor plans={plans} ready={settingsReady} singlePlan={instant} templateName={templateName} onSave={next => { state.setSellPlans(next); if (!instant) setPositions({}); }} onSelectPlan={choosePlan} recoverablePlans={recoverablePlans} templates={templates} onCopyPlan={(source,copy)=>{
     const position = positions[source.id];
     if (position) setPositions(current => ({ ...current, [copy.id]: { ...position } }));
     if(copy.router){copy.router=structuredClone(controllers.current[source.id]?.current?.build()??copy.router);return;}
@@ -276,38 +293,38 @@ export function HoldingMonitorSettings({state,activeId,onSelect,done,selectedCou
       <p className="mb-2 text-[10.5px] text-muted-foreground" data-testid="monitor-plan-draft-count">监测方案 {view.plans.length} 套 · 与上方按编号一一对应{view.dirty?' · 有待保存设置':''}</p>
       {view.plans.length>0&&<div role="tablist" aria-label="选择要设置持仓监测的卖出方案" className="mb-3 flex flex-wrap gap-1 rounded-md bg-muted/60 p-1 text-[10.5px]">{view.plans.map((p,i)=>{
         const d=forPlan(p),n=d.vetoes.filter(v=>v.enabled).length+(d.mirror.enabled?1:0)+(d.addition.enabled?1:0)+[d.addition,...d.addition.otherRounds].slice(0,Math.max(1,Number(d.addition.maxRounds)||1)).filter(r=>r.sellSwitch?.enabled).length+(d.vetoStages.enabled?d.vetoStages.stages.length:0);
-        return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>onSelect(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{planName(p)}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
+        return <button type="button" role="tab" key={p.id} data-plan-id={p.id} aria-selected={active?.id===p.id} onClick={()=>choosePlan(p.id)} className={`inline-flex min-h-6 items-center gap-1 rounded px-2 py-1 ${active?.id===p.id?'bg-background font-medium shadow-sm':'text-muted-foreground hover:text-foreground'}`}><span className="text-muted-foreground">{i+1}.</span>{planName(p)}<span title="当前填写中已启用的监测条件数" className="rounded bg-primary/15 px-1 text-[9px] tabular-nums text-primary">{n} 项条件</span></button>;
       })}</div>}
       {!instant&&savedPlan&&hasQualityExit(savedPlan)&&<button type="button" className={button+' mb-2'} disabled={!state.ready} aria-pressed={state.study.selectedSellId===savedPlan.id} onClick={()=>state.selectSell(savedPlan.id)}>固定此方案，比较探测算法</button>}
       {active && !isLegacyQualityPlan(active) && <div className="mb-3">
         <FishQualityPositionManagement
           draft={positions[active.id] ?? positionManagementDraft(active.positionManagement ?? (!savedPlan ? undefined : instant ? { leverage: INSTANT_POSITION.leverage, notional: INSTANT_POSITION.leverage * INSTANT_POSITION.marginUsdt } : qualityPositionSize(active)))}
-          onChange={state.ready ? draft => setPositions(current => ({ ...current, [active.id]: draft })) : undefined}
+          onChange={settingsReady ? draft => setPositions(current => ({ ...current, [active.id]: draft })) : undefined}
           note={savedPlan && !savedPlan.positionManagement && !positions[active.id]
             ? '保存后应用于新运行。' : undefined}/>
         {savedPlan && !savedPlan.positionManagement && !positions[active.id] && <button type="button" className={button}
-          disabled={!state.ready} onClick={() => setPositions(current => ({ ...current, [active.id]: positionManagementDraft() }))}>采用默认仓位</button>}
+          disabled={!settingsReady} onClick={() => setPositions(current => ({ ...current, [active.id]: positionManagementDraft() }))}>采用默认仓位</button>}
       </div>}
-      {view.plans.filter(p=>p.router).map(p=><div key={p.id+':'+JSON.stringify(p.router)} hidden={active?.id!==p.id} data-settings-image-include="">
-        <EditableQualityRouter plan={p} ready={state.ready} controller={controllers.current[p.id]??(controllers.current[p.id]={current:null})} onDirtyChange={setRouterDirtyFlag}/>
+      {view.plans.filter(p=>p.router&&(imageCapture||active?.id===p.id||visitedPlans.has(p.id))).map(p=><div key={p.id+':'+JSON.stringify(p.router)} hidden={active?.id!==p.id} data-settings-image-include="">
+        <EditableQualityRouter plan={p} ready={settingsReady} controller={controllers.current[p.id]??(controllers.current[p.id]={current:null})} onDirtyChange={setRouterDirtyFlag}/>
       </div>)}
       {active&&isLegacyQualityPlan(active)?<div className="space-y-3" data-testid="quality-monitor-legacy" data-plan-id={active.id}>
         <p className="text-xs font-medium">持仓监测 · {planName(active)}</p>
         <FishQualityMonitorSettingsView plan={active} holdingOnly/>
-        <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
+        <div className="sticky bottom-0 -mx-4 flex flex-wrap justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5"><SettingsImageButton/><button type="button" disabled={!settingsReady} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">{`保存全部 ${view.plans.length} 套方案`}</button></div>
         {view.error&&<p role="alert" className="text-[11px] text-destructive">{view.error}</p>}
       </div>:active?.router?<div className="contents" data-testid="quality-monitor-router-settings">
         <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border/50 bg-popover px-4 py-2.5">
           {view.error&&<p role="alert" className="w-full text-[11px] text-destructive">{view.error}</p>}
           <span className="mr-auto text-[10.5px] text-muted-foreground">{view.dirty?'方案尚未保存':'当前方案已保存'} · 本轮已勾选 {selectedCount} 条{outsideHint&&<> · {outsideHint}</>}</span>
           <SettingsImageButton/>
-          <button type="button" disabled={!state.ready} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md border border-primary/30 px-2.5 text-[11px] text-primary disabled:opacity-40">保存方案</button>
+          <button type="button" disabled={!settingsReady} onClick={()=>{if(view.save())done();}} className="h-7 rounded-md border border-primary/30 px-2.5 text-[11px] text-primary disabled:opacity-40">保存方案</button>
           {!instant && <MonitorTimePicker onChoose={basis => { if (view.save()) { done(); void state.start(false, undefined, false, basis); } }}
             trigger={<button type="button" disabled={!state.ready || !selectedCount} title={selectedCount ? '选择起点后保存方案并开始监测' : '请先在组合表中勾选本轮要监测的信号'} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">保存并开始监测</button>}/> }
         </div>
-      </div>:active?<HoldingMonitorEditor key={active.id} ready={state.ready} plan={active} displayName={planName(active)} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
+      </div>:active?<HoldingMonitorEditor key={active.id} ready={settingsReady} plan={active} displayName={planName(active)} draft={forPlan(active)} setDraft={draft=>setDrafts(current=>({...current,[active.id]:{base:monitorBaseKey(active),draft}}))}
         allDirty={view.algorithmsDirty || view.plans.some(p=>p.id!==active.id&&changed(p))} count={view.plans.length} error={view.error} save={()=>{if(view.save())done();}}/>:<p className="pb-3 text-[11px] text-muted-foreground">暂无监测方案；新增上方算法后即可设置加仓条件。<SettingsImageButton className="ml-2"/></p>}
       {imageCapture&&<div hidden data-settings-image-include="">{view.plans.filter(p=>p.id!==active?.id&&!p.router).map(p=><div key={p.id}><h3>持仓监测 · {planName(p)}</h3>{isLegacyQualityPlan(p)?<FishQualityMonitorSettingsView plan={p} holdingOnly/>:<HoldingMonitorEditor ready={false} plan={p} displayName={planName(p)} draft={forPlan(p)} setDraft={()=>{}} save={()=>{}} error="" allDirty={false} count={view.plans.length} hideSave/>}</div>)}</div>}
     </>;
-  }}/>;
+  }}/></>;
 }

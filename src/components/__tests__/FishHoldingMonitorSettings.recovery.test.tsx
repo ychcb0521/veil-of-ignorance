@@ -1,0 +1,31 @@
+import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {afterEach,expect,it,vi} from 'vitest';
+import {HoldingMonitorSettings} from '../FishHoldingMonitorSettings';
+import {enableQualityComparison} from '@/lib/fish/qualityComparison';
+import {newQualityStudy} from '@/lib/fish/quality';
+import {makeQualitySellPlan} from '@/lib/fish/qualitySellPlans';
+import {freezeQualityPlan} from '@/lib/fish/qualityPlanVersions';
+import {STATIC_DRAWDOWN_SELL_CHOICE} from '@/lib/fish/qualityStaticDrawdownSell';
+import type {FishQualityState} from '@/hooks/useFishQuality';
+afterEach(cleanup);
+it('opens and saves independently restored conditions while the historical study is still blocked',()=>{
+ const settings={...newQualityStudy(),sellPlansConfigured:true,sellPlans:[freezeQualityPlan(makeQualitySellPlan(STATIC_DRAWDOWN_SELL_CHOICE,'>=',3,[],undefined,'saved-plan'))]},saved=JSON.stringify(settings.sellPlans);
+ const state={study:newQualityStudy(),ready:false,monitorSettings:{study:settings,ready:true},setSellPlans:vi.fn(),selectSell:vi.fn(),start:vi.fn()} as unknown as FishQualityState;
+ render(<HoldingMonitorSettings state={state} activeId={null} onSelect={()=>{}} done={()=>{}} selectedCount={0}/>);
+ expect(screen.queryByText('正在读取持仓监测方案…')).toBeNull();
+ fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value:'3.25'}});
+ expect(screen.getByRole('button',{name:'保存全部方案'})).toBeEnabled();
+ fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
+ expect(state.setSellPlans).toHaveBeenCalledOnce();
+ expect(JSON.stringify(settings.sellPlans)).toBe(saved);
+ expect(state.start).not.toHaveBeenCalled();
+});
+it('does not rescan historical recovery records for every form keystroke',()=>{
+ const settings=enableQualityComparison(newQualityStudy()),records=vi.fn(()=>[]);
+ settings.monitorLibrary={version:1,importedLegacy:false,settings:[],rounds:[],get records(){return records();}};
+ const state={study:settings,ready:true,setSellPlans:vi.fn(),selectSell:vi.fn(),start:vi.fn()} as unknown as FishQualityState;
+ render(<HoldingMonitorSettings state={state} activeId={null} onSelect={()=>{}} done={()=>{}} selectedCount={0}/>);
+ const reads=records.mock.calls.length;
+ for(const value of ['1','1.2','1.25'])fireEvent.change(screen.getByLabelText('卖出算法 1 门槛'),{target:{value}});
+ expect(records).toHaveBeenCalledTimes(reads);
+});

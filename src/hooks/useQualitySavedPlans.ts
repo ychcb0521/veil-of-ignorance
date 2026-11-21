@@ -6,6 +6,7 @@ import {loadDurableQualityPlans,saveDurableQualityPlans} from '@/lib/fish/qualit
 const EMPTY:SavedQualityPlan[]=[];
 export function useQualitySavedPlans(owner?:string){
  const [state,setState]=useState(()=>({owner,value:readSavedQualityPlans(owner)}));
+ const [loaded,setLoaded]=useState<{owner?:string}>();
  const current=useRef(state);
  useEffect(()=>{
   const refresh=()=>{
@@ -18,7 +19,7 @@ export function useQualitySavedPlans(owner?:string){
   let active=true;
   const off=subscribePersistedStateHydration(qualitySavedPlansKey(owner),()=>{refresh();void saveDurableQualityPlans(owner,readSavedQualityPlans(owner)).catch(()=>undefined);});window.addEventListener('storage',storage);refresh();
   const before=readSavedQualityPlans(owner);
-  void loadDurableQualityPlans(owner).then(value=>{if(active){refresh();if(owner&&JSON.stringify(before)!==JSON.stringify(value))queueSimStatePush(owner,QUALITY_SAVED_PLANS_KEY,value);}});
+  void loadDurableQualityPlans(owner).then(value=>{if(active){refresh();setLoaded({owner});if(owner&&JSON.stringify(before)!==JSON.stringify(value))queueSimStatePush(owner,QUALITY_SAVED_PLANS_KEY,value);}});
   return()=>{active=false;off();window.removeEventListener('storage',storage);};
  },[owner]);
  const save=useCallback((entries:SavedQualityPlan[])=>{
@@ -26,5 +27,5 @@ export function useQualitySavedPlans(owner?:string){
   void saveDurableQualityPlans(owner,value).then(merged=>{writeSavedQualityPlans(owner,merged);if(owner&&JSON.stringify(value)!==JSON.stringify(merged))queueSimStatePush(owner,QUALITY_SAVED_PLANS_KEY,merged);}).catch(()=>undefined);
   if(owner)queueSimStatePush(owner,QUALITY_SAVED_PLANS_KEY,value);return value;
  },[owner]);
- return [state.owner===owner?state.value:EMPTY,save] as const;
+ return [state.owner===owner?state.value:EMPTY,save,state.owner===owner&&(state.value.length>0||!!loaded&&loaded.owner===owner)] as const;
 }

@@ -100,7 +100,7 @@ it('shows the original signal first-match buy time and links only the recomputed
  const old={key:qualityResultKey(original,plan,0),sampleId:original.id,groupId:plan.id,status:'closed' as const,entryTime:SIGNAL_AT,entryPrice:100,endTime:SIGNAL_AT+60000,endPrice:95,pnl:-5,returnPct:-5,evaluatedAt:MATCHED_AT};
  const s=state();s.study=withQualityScreeningEntries({...study,results:[old],screeningResults:library.records,screeningRounds:library.rounds});
  const view=render(<FishQuality state={s}/>),table=screen.getByTestId('quality-fish-table');
- expect(within(table).getByText('2026-04-12 00:26:00')).toHaveAttribute('title','模拟买入：2026-04-13 19:40:00（动态筛选首次满足）');
+ expect(within(table).getByText('2026-04-12 00:26:00').closest('td')).toHaveAttribute('title','模拟买入：2026-04-13 19:40:00（动态筛选首次满足）');
  expect(within(table).getByText('2026-04-13 19:40:00')).toBeInTheDocument();
  expect(table.querySelector(`a[href*="${old.key}"]`)).toBeNull();
  const row=qualityComparisonRows(s.study)[0],result={...old,key:qualityResultKey(row,plan,0),entryTime:MATCHED_AT,entryPrice:104,endTime:MATCHED_AT+60000,endPrice:105,pnl:100/104,returnPct:100/104};
@@ -602,7 +602,8 @@ it('shift-click selects (or clears) the whole run of rows between the last click
 });
 it('provides two unconfigured drawdown vetoes, validates the user threshold, and can add an account indicator veto', () => {
  const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'持仓监测条件'}));
- const editor=within(screen.getByTestId('quality-hard-stop')).getByTestId('quality-holding-veto-editor');
+ const legacy=screen.getByTestId('quality-hard-stop-legacy');fireEvent.click(legacy.querySelector('summary')!);
+ const editor=within(legacy).getByTestId('quality-holding-veto-editor');
  expect(within(editor).getByLabelText('持仓否决 1 指标')).toHaveValue('static-drawdown');
  expect(within(editor).getByLabelText('持仓否决 2 指标')).toHaveValue('dynamic-drawdown');
  expect(within(editor).getByLabelText('持仓否决 1 阈值')).toHaveValue(null);expect(within(editor).getByLabelText('启用持仓否决 1')).not.toBeChecked();
@@ -1058,7 +1059,8 @@ it('saves renamed algorithms and edited addition conditions together from the up
  fireEvent.click(screen.getByLabelText('启用条件加仓'));fireEvent.click(screen.getByLabelText('启用加仓涨幅门槛'));fireEvent.change(screen.getByLabelText('加仓涨幅门槛'),{target:{value:'7.5'}});
  fireEvent.change(screen.getByLabelText('箱体支撑冗余'),{target:{value:'2'}});
  fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 2 次'}));fireEvent.click(screen.getByLabelText('第 2 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 2 次加仓后卖出 指标门槛'),{target:{value:'.5'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 3 次'}));fireEvent.click(screen.getByLabelText('第 3 次加仓后改用卖出算法'));fireEvent.change(screen.getByLabelText('第 3 次加仓后卖出 指标门槛'),{target:{value:'.8'}});fireEvent.click(within(screen.getByRole('tablist',{name:'选择加仓轮次'})).getByRole('tab',{name:'第 1 次'}));
- fireEvent.click(within(screen.getByTestId('quality-hard-stop')).getByRole('button',{name:'添加加仓止盈约束'}));fireEvent.click(screen.getAllByLabelText(/^启用持仓否决/).at(-1)!);fireEvent.change(screen.getByLabelText(/几何仓位倍数/),{target:{value:'125'}});fireEvent.change(screen.getByLabelText(/均衡价涨幅/),{target:{value:'6'}});
+ const legacy=screen.getByTestId('quality-hard-stop-legacy');fireEvent.click(legacy.querySelector('summary')!);
+ fireEvent.click(within(legacy).getByRole('button',{name:'添加加仓止盈约束'}));fireEvent.click(screen.getAllByLabelText(/^启用持仓否决/).at(-1)!);fireEvent.change(screen.getByLabelText(/几何仓位倍数/),{target:{value:'125'}});fireEvent.change(screen.getByLabelText(/均衡价涨幅/),{target:{value:'6'}});
  fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'改名并保留加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存全部方案'}));
  expect(s.setSellPlans).toHaveBeenCalledOnce();expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0]).toMatchObject({id:s.study.sellPlans![0].id,label:'改名并保留加仓',addition:{enabled:true,quantityMode:'calculator',minGainPct:7.5,source:'structure',structure:{buffer:2},rounds:[{source:'structure',structure:{buffer:2}},{source:'structure',structure:{buffer:0}},{source:'structure',structure:{buffer:0}}]}});expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].holdingVetoes).toEqual(expect.arrayContaining([expect.objectContaining({kind:'addition-geometric-profit',geometricMultiple:125,threshold:6,enabled:true})]));expect(vi.mocked(s.setSellPlans).mock.calls[0][0][0].sellStages).toMatchObject([{afterAdditions:2,rule:{threshold:.5}},{afterAdditions:3,rule:{threshold:.8}}]);expect(s.start).not.toHaveBeenCalled();
 });

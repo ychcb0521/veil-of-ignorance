@@ -42,7 +42,7 @@ it('keeps concurrent holdings prioritized independently and relays caller cancel
       tasks.push({ signal, fail: reject });
       signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true });
     }));
-  const input = { source: { symbol: 'AAAUSDT' }, buyAt: 60000 };
+  const input = { source: { id:'priority-test',symbol: 'AAAUSDT',timeMs:60000 }, buyAt: 60000 };
   const first = scanner.markInstantPosition(input, parent.signal);
   const second = scanner.markInstantPosition(input, parent.signal);
   expect(tasks[0].signal).not.toBe(tasks[1].signal);

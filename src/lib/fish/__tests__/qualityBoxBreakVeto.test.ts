@@ -65,7 +65,7 @@ it.each(['primary','attack'] as const)('actually vetoes the %s lane independentl
  g.addition={...g.addition!,maxRounds:1,rounds:[lane==='primary'?round:{...round,condition:{...condition,threshold:10000},entryVetoes:[]}],alternativeRounds:lane==='attack'?[round]:undefined};
  const late=load(at=>({...bar(at,at<=T?100:150),takerBuyQuoteVolume:at>=T+4*M?1:0,...(at===T?{high:106}:{})}));
  const frozen=freezeQualityPlan(g),saved=saveQualityPlanTemplate(newQualityStudy(T),frozen,'原资产',T),original=JSON.stringify(saved.planTemplates);
- const copy=qualityPlanFromTemplate(saved.planTemplates![0],'副本');
+ const template=saved.planTemplates![0],copy=qualityPlanFromTemplate({...template,plan:template.plan!},'副本');
  expect(planVersionChanges(copy)).toEqual([]);
  const result=await run(copy,late);
  expect(result.additionFills).toBeUndefined();expect(result.additionVetoes?.some(v=>v.kind==='box-break')).toBe(true);expect(result.status).toBe('open');

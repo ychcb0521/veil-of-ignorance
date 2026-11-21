@@ -92,7 +92,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [lockedBatch, setLockedBatchState] = useState(() => workspaceMode ? null : readQualityBatchLock(owner));
   const screeningScope = useRef<QualityScreeningScope>(lockedBatch ?? {});
   const [templateCatalog,setTemplateCatalog] = useQualityPlanCatalog(owner);
-  const [savedPlans,setSavedPlans]=useQualitySavedPlans(owner);
+  const [savedPlans,setSavedPlans,savedPlansReady]=useQualitySavedPlans(owner);
   const savedPlansWriter=useRef(setSavedPlans);savedPlansWriter.current=setSavedPlans;
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [studyLoadAttempt, setStudyLoadAttempt] = useState(0);
@@ -103,6 +103,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [studyReadWarning, setStudyReadWarning] = useState('');
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
   const current = useRef(study), account = useRef(owner), generation = useRef(0), controller = useRef<AbortController | null>(null);
+  // Settings have their own small, account-scoped store. Do not wait for the
+  // historical research archive, or write a partial study back while it loads.
+  const settingsStudy = useMemo(() => applySavedQualityPlans({
+    ...newQualityStudy(), sellPlans: [], sellPlansConfigured: true, planTemplates: templateCatalog,
+  }, savedPlans), [savedPlans, templateCatalog]);
+  const settingsSnapshot = useRef({owner, study: settingsStudy, ready: savedPlansReady});
+  settingsSnapshot.current = {owner, study: settingsStudy, ready: savedPlansReady};
   /**
    * 【用户要求】2026-11-01「点进战役后持仓监测停了」：每次暂停都记下原因（写进那一轮监测记录的 error，并打到控制台），
    * 便于查清是谁中断了监测。只记正在跑的那一轮；同一轮只记第一个原因。
@@ -185,7 +192,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!sameQualityPlanTemplates(templateCatalog, merged)) setTemplateCatalog(merged);
   }, [templateCatalog, owner, ready, setTemplateCatalog]);
   const changeTemplates = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
-    const previous = current.current;
+    const previous = readyRef.current ? current.current : settingsSnapshot.current.study;
     const next = apply(previous);
     if (next === previous) return;
     // Template edits leave samples, ratings and source deletion marks intact.
@@ -235,6 +242,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       }
       // Preserve the existing startup formula/version migration in the small catalog too.
       // Later background writes must not revert that already-authorized account formula sync.
+      // An explicit settings save may have completed during the archive read.
+      // Overlay only catalog IDs; retain every unknown historical plan/result.
+      restored = applySavedQualityPlans(restored, readSavedQualityPlans(owner));
       if(restored.sellPlansConfigured){
         const entries=readSavedQualityPlans(owner),updated=editSavedQualityPlans(entries,value.study.sellPlans??[],restored.sellPlans??[]);
         if(JSON.stringify(updated)!==JSON.stringify(entries))savedPlansWriter.current(updated);
@@ -869,10 +879,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       changeTemplates(previous => saveQualityPlanTemplate(previous, plan, name));
       return;
     }
-    const settings=preEntry.library.settings,entryPlan=settings?.plans.find(p=>p.id===planId),plan=current.current.sellPlans?.find(p=>p.id===planId)??entryPlan;
+    const planStudy=readyRef.current?current.current:settingsSnapshot.current.study;
+    const settings=preEntry.library.settings,entryPlan=settings?.plans.find(p=>p.id===planId),plan=planStudy.sellPlans?.find(p=>p.id===planId)??entryPlan;
     if (!plan) throw new Error('请先保存这套方案，再存为模板');
     const scope=entryPlan&&plan===entryPlan?{entryHours:settings!.hours}:undefined,at=Date.now();
-    saveQualityPlanTemplate(current.current,plan,name,at,scope);
+    saveQualityPlanTemplate(planStudy,plan,name,at,scope);
     changeTemplates(s=>{const p=s.sellPlans?.find(x=>x.id===planId)??entryPlan;return p?saveQualityPlanTemplate(s,p,name,at,scope):s;});
   }, [changeTemplates,preEntry.library.settings]);
   /** 保存战役冻结快照，不按方案 id 查当前设置，也不触发重算。 */
@@ -885,16 +896,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (epoch !== generation.current || savedOwner !== account.current) throw new Error('账号已切换，请回到原账号查看模板');
   }, [changeTemplates]);
   const restorePlanTemplate = useCallback(async (template: QualityPlanTemplate) => {
-    if (!readyRef.current) throw Error('模板目录尚在读取，请稍后重试');
+    if (!readyRef.current && !settingsSnapshot.current.ready) throw Error('模板目录尚在读取，请稍后重试');
     const savedOwner = account.current, epoch = generation.current;
-    const copy = restoreQualityPlanTemplate(current.current, template).planTemplates!.at(-1)!;
+    const copy = restoreQualityPlanTemplate(readyRef.current?current.current:settingsSnapshot.current.study, template).planTemplates!.at(-1)!;
     try { await saveDurableQualityPlanCatalog(savedOwner, [copy]); }
     catch { throw Error('浏览器数据库暂未保存这份模板，请重试'); }
     if (epoch !== generation.current || savedOwner !== account.current) throw Error('账号已切换，请回到原账号查看恢复的模板');
     changeTemplates(study => ({...study, planTemplates: mergeQualityPlanTemplates(study.planTemplates, [copy])}));
   }, [changeTemplates]);
   const deletePlanTemplate = useCallback((id: string) => changeTemplates(s => deleteQualityPlanTemplate(s, id)), [changeTemplates]);
-  const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(current.current, id, name); changeTemplates(s => renameQualityPlanTemplate(s, id, name)); }, [changeTemplates]);
+  const renamePlanTemplate = useCallback((id: string, name: string) => { renameQualityPlanTemplate(readyRef.current?current.current:settingsSnapshot.current.study, id, name); changeTemplates(s => renameQualityPlanTemplate(s, id, name)); }, [changeTemplates]);
   /** Save this plan’s holding settings without starting or restarting monitoring. */
   const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[], mirror?: QualityMirrorTakeProfit, addition?: QualityAdditionRule) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
@@ -908,7 +919,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
   }, [change,pauseForSettings]);
   const setSellPlans = useCallback((plans: import('@/lib/fish/quality').QualityGroup[]) => {
-    if (!readyRef.current) throw Error('账号方案尚未恢复完成，请稍后保存');
+    if (!readyRef.current) {
+      const snapshot=settingsSnapshot.current;
+      if(snapshot.owner!==account.current||!snapshot.ready)throw Error('账号方案尚未恢复完成，请稍后保存');
+      const checked=replaceQualitySellPlans(snapshot.study,plans);
+      if(checked!==snapshot.study){
+        const entries=editSavedQualityPlans(readSavedQualityPlans(account.current),snapshot.study.sellPlans??[],checked.sellPlans??[]);
+        savedPlansWriter.current(entries);
+      }
+      return;
+    }
     // Validate first, then finalize the old round before replacing its active configuration.
     const checked = replaceQualitySellPlans(current.current, plans);
     if (checked === current.current) return;
@@ -1016,9 +1036,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     start: (hours: number) => preEntry.start(scoped(current.current), hours),
     restart: (hours: number) => preEntry.restart(scoped(current.current), hours),
     resume: async (roundId: string) => { if (canResumeScreening(roundId)) await preEntry.resume(roundId, current.current); } };
-  return {...(studyReadWarning ? {studyReadWarning} : {}),retryStudyLoad,templateCatalog,workspace: workspaceMode ? {sources:workspaceSources,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,purgeMonitorEntries,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
+  return {monitorSettings:{study:readyRef.current?study:settingsStudy,ready:readyRef.current||savedPlansReady},...(studyReadWarning ? {studyReadWarning} : {}),retryStudyLoad,templateCatalog,workspace: workspaceMode ? {sources:workspaceSources,importRows:importWorkspaceRows,removeRows:removeWorkspaceRows,saveMonitoring:saveWorkspaceMonitoring,saveFiltering:saveWorkspaceFiltering} : undefined,signalValues,saveStaticSettings,runStaticSettings,cancelSignalValues,lockedBatch,setLockedBatch,canResumeScreening,setSourceQuality, preEntry: preEntryState, selectPreEntryRecords, account:owner,archiving,loadMonitorArchive,restoreMonitorStudy,purgeMonitorEntries,setLibraryEntryHidden,setMonitorEntryHidden,renameLibraryEntry,deleteSources,entry, postExit, study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, resumeMonitoring: monitorBatch.current?.paused && canResumeBatch(monitorBatch.current.frozen) ? () => start(false, undefined, true) : undefined, resumeFiltering: filterBatch.current?.paused && canResumeBatch(filterBatch.current.frozen) ? () => startFilter(true) : undefined, clearFilterResults, clearScreeningResults, clearMonitorResults, savePlanSnapshot, savePlanTemplate, restorePlanTemplate, deletePlanTemplate, renamePlanTemplate, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans, selectMiningRecords };
 }
-type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'|'retryStudyLoad'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'|'retryStudyLoad'>>;
+type CompleteFishQualityState=Omit<ReturnType<typeof useFishQuality>,'setSourceQuality'|'retryStudyLoad'|'monitorSettings'>&Partial<Pick<ReturnType<typeof useFishQuality>,'setSourceQuality'|'retryStudyLoad'|'monitorSettings'>>;
 type AutomationMonitorFields = 'startAutomatic' | 'pauseAutomatic' | 'automaticRunning' | 'automaticError' | 'savedLibrary' | 'saveWorkspaceScreening' | 'savingWorkspaceDraft';
 type QualityPreEntryView = Omit<CompleteFishQualityState['preEntry'], AutomationMonitorFields> & Partial<Pick<CompleteFishQualityState['preEntry'], AutomationMonitorFields>>;
 export type FishQualityState=Omit<CompleteFishQualityState,'templateCatalog'|'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'preEntry'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'purgeMonitorEntries'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'> & Partial<Pick<CompleteFishQualityState,'templateCatalog'|'workspace'|'signalValues'|'saveStaticSettings'|'runStaticSettings'|'cancelSignalValues'|'selectPreEntryRecords'|'postExit'|'entry'|'account'|'deleteSources'|'archiving'|'loadMonitorArchive'|'restoreMonitorStudy'|'purgeMonitorEntries'|'setMonitorEntryHidden'|'setLibraryEntryHidden'|'renameLibraryEntry'|'clearFilterResults'|'clearScreeningResults'|'clearMonitorResults'|'savePlanSnapshot'|'restorePlanTemplate'|'savePlanTemplate'|'deletePlanTemplate'|'renamePlanTemplate'|'selectMiningRecords'|'resumeMonitoring'|'resumeFiltering'|'lockedBatch'|'setLockedBatch'|'canResumeScreening'>> & { instantPreferenceStatus?: 'loading'|'ready'|'error'; retryInstantPreferences?:()=>void; preEntry?: QualityPreEntryView; cdaTracking?: FishCdaTracking; instantMonitor?: ReturnType<typeof import('./useInstantMonitorSettings').useInstantMonitorSettings>; automaticScreening?: { paused: boolean; pending: number; screeningPending?: boolean; awaitingMail: number; storageIssue: boolean; attemptIssue?: string; settings?: PreEntrySettings; saveSettings?: (plans: QualityGroup[], hours: number) => Promise<void>; setAutoPaused: (paused: boolean) => void } };
