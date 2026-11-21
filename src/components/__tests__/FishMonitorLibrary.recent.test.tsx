@@ -45,3 +45,11 @@ it('keeps recent entries usable after full-history recovery fails and offers its
  fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));await waitFor(()=>expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(12));
  fireEvent.click(screen.getByRole('button',{name:'重试完整研究'}));expect(retry).toHaveBeenCalledOnce();expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(12);
 });
+it('still opens recent-first after the whole study is ready and keeps full-library management available',async()=>{
+ store.directory.mockResolvedValue(directory());const rename=vi.fn();
+ render(<FishMonitorLibrary study={newQualityStudy(at)} ready account="alice" onRename={rename}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));await waitFor(()=>expect(screen.getAllByTestId('monitor-archive-item')).toHaveLength(12));
+ expect(store.body).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'管理监测归档 round-0'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'查看全部轮次'}));expect(screen.queryAllByTestId('monitor-archive-item')).toHaveLength(0);
+ expect(screen.getByText(/暂无监测归档/)).toBeInTheDocument();expect(rename).not.toHaveBeenCalled();
+});
