@@ -154,3 +154,14 @@ it('keeps a restarted round isolated from subsequent writes by an older app buil
   saveMiningState({ ...legacy, cursorMs: legacy.cursorMs + MINING_STEP_MS, mined: 150 });
   expect(readMiningState()).toMatchObject({ round: restart.round, cursorMs: restart.startMs, mined: 0 });
 });
+
+it('keeps a manual stop through stale checkpoints in either merge order, but allows a newer round', () => {
+  const active = {...newMiningState(), enabled:true, savedAt:30, retryAt:200, round:{id:'same',startedAt:1}};
+  const stopped = {...active, enabled:false, stopped:true as const, savedAt:20};
+  for (const [a,b] of [[active,stopped],[stopped,active]]) {
+    expect(mergeMiningStates(a,b)).toMatchObject({enabled:false,stopped:true,retryAt:null});
+  }
+  const next = {...active,round:{id:'new',startedAt:40}};
+  expect(mergeMiningStates(stopped,next)).toMatchObject({enabled:true, round:next.round});
+  expect((mergeMiningStates(stopped,next) as FishMiningState).stopped).toBeUndefined();
+});

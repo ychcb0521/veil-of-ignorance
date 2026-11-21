@@ -213,6 +213,44 @@ it('recovers invalid saved settings with defaults without erasing already-mined 
  act(()=>h.result.current.resetConfiguration!());await flush(10);
  expect(mine).toHaveBeenCalled();expect(mine.mock.calls[0][0].anchorMs).toBe(MINING_START_MS+MINING_STEP_MS);expect(readMiningState().mined).toBeGreaterThanOrEqual(220);expect(readMiningState().anchorsDone).toBeGreaterThanOrEqual(1);
 });
+it('ends the round while a scan is pending, rejects late results and requires an explicit new round', async () => {
+  let finish!: (rows: TradeSignal[]) => void;
+  let scans = 0;
+  const {h,mine,stop,commit} = setup({mine:async s => ++scans === 1 ? [sig('SAVED',s.anchorMs)] : new Promise(r => {finish=r;})});
+  act(() => h.result.current.start());
+  await flush(20);
+  expect(mine).toHaveBeenCalledTimes(2);
+  const previous = readMiningState();
+  stop.mockClear();
+  act(() => h.result.current.stop());
+  await flush(10);
+  expect(stop).toHaveBeenCalledOnce();
+  expect(h.result.current.running).toBe(false);
+  finish([sig('LATE',previous.cursorMs)]);
+  await flush(10);
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(readMiningState()).toMatchObject({enabled:false, stopped:true, mined:1, anchorsDone:1, cursorMs:previous.cursorMs});
+  h.unmount();
+  const next = setup();
+  act(() => { window.dispatchEvent(new Event('online')); next.h.result.current.retry!(); next.h.result.current.start(); });
+  await flush(120000);
+  expect(next.mine).not.toHaveBeenCalled();
+  act(() => next.h.result.current.restart({startMs:previous.cursorMs, target:1, rules:currentDefaultRulesForRange()}));
+  await flush(20);
+  expect(next.mine).toHaveBeenCalledOnce();
+  expect(readMiningState().stopped).toBeUndefined();
+  expect(readMiningState().round?.id).toBeDefined();
+});
+it('cancels a scheduled retry without disturbing a different task using the scanner', async () => {
+  saveMiningState({...newMiningState(),enabled:true,retryAt:Date.now()+120000,errorKind:'transient',lastError:'行情超时',mined:4});
+  const {h,mine,stop} = setup();
+  act(() => h.result.current.stop());
+  await flush(180000);
+  expect(readMiningState()).toMatchObject({enabled:false,stopped:true,retryAt:null,mined:4});
+  expect(mine).not.toHaveBeenCalled();
+  expect(stop).not.toHaveBeenCalled();
+});
+
 it('pauses immediately even when a request ignores abort, and never accepts its late result',async()=>{
  let release!:(value:TradeSignal[])=>void;const {h,commit}=setup({mine:()=>new Promise(resolve=>{release=resolve;})});
  act(()=>h.result.current.start());await flush(10);act(()=>h.result.current.pause());await flush(10);

@@ -21,6 +21,8 @@ export interface FishMiningScanConfig {
 }
 export interface FishMiningState {
   version: 1; enabled: boolean; startMs: number; stepMs: number;
+  /** Explicitly ended by the user. Only a new round can clear this flag. */
+  stopped?: true;
   /** Inclusive last scan anchor, only set by explicit bounded restarts. */
   endMs?: number;
   /** Absent on rounds created before explicit restarts were supported. */
@@ -66,11 +68,11 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
   if (!v || typeof v !== 'object' || v.version !== 1 || !Number.isFinite(v.cursorMs) || !Array.isArray(v.minedKeys)) return null;
   const base = newMiningState();
   const upgrade = (v.presetRevision ?? 0) < MINING_PRESET_REVISION;
-  const normalized = { ...base, ...v, version: 1, enabled: !!v.enabled, target: Number.isInteger(v.target) && v.target! > 0 ? v.target! : base.target,
+  const normalized = { ...base, ...v, version: 1, enabled: !!v.enabled && v.stopped !== true, stopped: v.stopped === true ? true : undefined, target: Number.isInteger(v.target) && v.target! > 0 ? v.target! : base.target,
     round: typeof v.round?.id === 'string' && v.round.id && Number.isFinite(v.round.startedAt) ? v.round : undefined,
     minedKeys: v.minedKeys.filter((k): k is string => typeof k === 'string'),
     rules: Array.isArray(v.rules) ? v.rules : [], lastError: typeof v.lastError === 'string' ? v.lastError : '',
-    retryAt: Number.isFinite(v.retryAt) && v.retryAt! > 0 ? v.retryAt : null,
+    retryAt: v.stopped !== true && Number.isFinite(v.retryAt) && v.retryAt! > 0 ? v.retryAt : null,
     retryCount: Number.isInteger(v.retryCount) && v.retryCount! > 0 ? Math.min(v.retryCount!,100) : 0,
     lastErrorAt: Number.isFinite(v.lastErrorAt) && v.lastErrorAt! > 0 ? v.lastErrorAt : null,
     errorKind: v.errorKind === 'configuration' || v.errorKind === 'transient' ? v.errorKind : undefined } as FishMiningState;
@@ -97,8 +99,9 @@ export function mergeMiningStates(localRaw: unknown, remoteRaw: unknown): FishMi
   const far = b.cursorMs > a.cursorMs ? b : a;
   const failure = a.cursorMs === b.cursorMs ? settings : far;
   const minedKeys = [...new Set([...a.minedKeys, ...b.minedKeys])];
-  return { ...settings, cursorMs: far.cursorMs, anchorsDone: Math.max(a.anchorsDone, b.anchorsDone), lastAnchorMs: far.lastAnchorMs,
-    lastRunAt: Math.max(a.lastRunAt ?? 0, b.lastRunAt ?? 0) || null, lastError: failure.lastError, retryAt: failure.retryAt, retryCount: failure.retryCount, lastErrorAt: failure.lastErrorAt, errorKind: failure.errorKind,
+  const stopped = a.stopped || b.stopped;
+  return { ...settings, ...(stopped ? {stopped, enabled: false} : {}), cursorMs: far.cursorMs, anchorsDone: Math.max(a.anchorsDone, b.anchorsDone), lastAnchorMs: far.lastAnchorMs,
+    lastRunAt: Math.max(a.lastRunAt ?? 0, b.lastRunAt ?? 0) || null, lastError: failure.lastError, retryAt: stopped ? null : failure.retryAt, retryCount: failure.retryCount, lastErrorAt: failure.lastErrorAt, errorKind: failure.errorKind,
     rules: settings.rules.length ? settings.rules : far.rules, selection: settings.selection ?? far.selection,
     minedKeys, mined: Math.max(a.mined, b.mined, minedKeys.length), savedAt: Math.max(a.savedAt ?? 0, b.savedAt ?? 0) || undefined };
 }

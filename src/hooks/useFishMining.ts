@@ -30,7 +30,7 @@ const hasMiningWork = (s: FishMiningState) => s.enabled && s.mined < s.target &&
 type MiningRestart = Pick<FishMiningState, 'startMs' | 'target' | 'rules' | 'endMs'> & { settings?: FishMiningSettings };
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
-  start: () => void; pause: () => void; setTarget: (target: number) => void;
+  start: () => void; pause: () => void; stop: () => void; setTarget: (target: number) => void;
   restart: (settings: MiningRestart) => void;
   /** 挖掘库按账号独立保存。 */
   ruleChoices?: {featureId:string;label:string;statistics:{name:string;label:string}[];menuStatistics?:{name:string;label:string}[]}[];
@@ -71,8 +71,11 @@ export function useFishMining(o: {
   }, [o.account]);
 
   const cancelScan = useCallback(() => {
-    cancelTask.current?.();
-    runningStop.current?.();
+    const cancel = cancelTask.current, abort = runningStop.current;
+    cancelTask.current = null;
+    runningStop.current = null;
+    cancel?.();
+    abort?.();
   }, []);
   const tick = useCallback(async (): Promise<void> => {
     const persisted = readMiningState();
@@ -171,7 +174,7 @@ export function useFishMining(o: {
     const refresh = () => {
       const fresh = readMiningState();
       const local = stateRef.current;
-      if (fresh.savedAt !== local.savedAt || fresh.enabled !== local.enabled || fresh.round?.id !== local.round?.id
+      if (fresh.savedAt !== local.savedAt || fresh.enabled !== local.enabled || fresh.stopped !== local.stopped || fresh.round?.id !== local.round?.id
         || fresh.cursorMs !== local.cursorMs || fresh.target !== local.target) run();
     };
     const unlisten = keys.map(key => subscribePersistedStateHydration(key, refresh));
@@ -209,6 +212,7 @@ export function useFishMining(o: {
 
   const start = useCallback(() => {
     const s = load(latest.current.signalsRef.current);
+    if (s.stopped) return;
     const fresh = !s.round && !s.enabled && !s.selection && !s.anchorsDone && !s.mined && !s.lastRunAt && !s.lastError;
     const saved = fresh ? readMiningSettings() : null;
     if (saved) {
@@ -225,6 +229,13 @@ export function useFishMining(o: {
     setState({ ...s, enabled: true, rules: s.rules.length ? s.rules : currentDefaultRules(), selection: s.selection ?? { ...latest.current.selection, exchanges: [...latest.current.selection.exchanges] }, retryAt:null,errorKind:undefined }); setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
   const pause = useCallback(() => { setState({ ...readMiningState(), enabled: false }); cancelScan(); }, [cancelScan, setState]);
+  const stop = useCallback(() => {
+    const current = readMiningState();
+    if (current.round?.id !== stateRef.current.round?.id || current.stopped) return;
+    setState({ ...current, enabled: false, stopped: true, retryAt: null });
+    cancelScan();
+    setWaiting('');
+  }, [cancelScan, setState]);
   const restart = useCallback(({ startMs, endMs, target, rules, settings }: MiningRestart) => {
     if(!Number.isFinite(startMs)||startMs<=0||startMs>Date.now()||endMs!=null&&(!Number.isFinite(endMs)||endMs<=startMs||endMs>Date.now()))return;
     const previous = readMiningState();
@@ -247,30 +258,32 @@ export function useFishMining(o: {
   }, [cancelScan, setState]);
   const setTarget = useCallback((target: number) => {
     if (!Number.isSafeInteger(target) || target <= 0) return;
-    setState({ ...readMiningState(), target }); setTimeout(() => void tickRef.current(), 0);
+    const current = readMiningState();
+    if (current.stopped) return;
+    setState({ ...current, target }); setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
   const retry=useCallback(()=>{if(runningRef.current)return;start();},[start]);
   const useCurrentScope=useCallback(()=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
-    if (s.scan) return;
+    if (s.scan || s.stopped) return;
     setState({...s,selection:structuredClone(latest.current.selection),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
   const resetConfiguration=useCallback(()=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
-    if (s.scan) return;
+    if (s.scan || s.stopped) return;
     const rules=currentDefaultRules();
     setState({...s,rules,selection:structuredClone(latest.current.selection),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
   const configure=useCallback((rules:FishMiningState['rules'])=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
-    if (s.scan) return;
+    if (s.scan || s.stopped) return;
     setState({...s,rules:structuredClone(rules),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
   const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{const statistics=fishStatistics(def);return {featureId:def.id,label,statistics,menuStatistics:algorithmMetricMenu(def,statistics)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
   // 算法编号修过别名后同一条鱼的键会变：再按整行内容（标的、时间、命中算法）认一次
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).flatMap(s => [fishCatchKey(s), fishVisibleCatchKey(s)])), []);
-  return { state, running, anchorMs, progress, waiting, start, pause, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys, captureSelection: o.selection, defs: o.defs };
+  return { state, running, anchorMs, progress, waiting, start, pause, stop, restart, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys, captureSelection: o.selection, defs: o.defs };
 }

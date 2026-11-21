@@ -15,7 +15,7 @@ vi.mock('@/lib/simStateSync', async original => ({
 }));
 beforeEach(() => { localStorage.clear(); hydrate.mockReset(); });
 afterEach(cleanup);
-const api = (patch: object = {}, state: object = {}) => ({ state: { ...newMiningState(), ...state }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn(), defs: fishFeatureDefinitions(BUILTIN_FEATURES), captureSelection: { exchanges: ['binance'], includeDuplicates: false }, ...patch });
+const api = (patch: object = {}, state: object = {}) => ({ state: { ...newMiningState(), ...state }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), stop: vi.fn(), setTarget: vi.fn(), defs: fishFeatureDefinitions(BUILTIN_FEATURES), captureSelection: { exchanges: ['binance'], includeDuplicates: false }, ...patch });
 
 it('opens with the last saved profile after hydration and preserves a draft through mining progress', async () => {
   const account = 'mining-settings-owner';
@@ -150,6 +150,22 @@ it('shows the running anchor, reached target, caught-up and error states', () =>
   expect(screen.getByRole('status')).toHaveAccessibleName('出错：网络中断（2 分钟后原地重试）');
   rerender(<FishMiningPanel mining={api({}, { enabled: false, rules, anchorsDone: 3 }) as never} sellFixed campaignHref="#"/>);
   expect(screen.getByRole('button', { name: '继续批量捕捞' })).toBeVisible();
+});
+it('lets the user stop a reached round in the toolbar and opens a new round only on request', () => {
+  const cursor = Date.parse('2026-04-02T12:00:00+08:00');
+  const mining = api({}, {enabled:true, mined:105, target:100, anchorsDone:7, cursorMs:cursor});
+  const view = render(<FishMiningPanel mining={mining as never} sellFixed campaignHref="#"/>);
+  fireEvent.click(screen.getByRole('button', {name:'停止本轮'}));
+  expect(mining.stop).toHaveBeenCalledOnce();
+  expect(mining.start).not.toHaveBeenCalled();
+  view.rerender(<FishMiningPanel mining={{...mining,state:{...mining.state,stopped:true,enabled:false}} as never} sellFixed campaignHref="#"/>);
+  expect(screen.getByRole('status')).toHaveTextContent('已停止105/100');
+  expect(screen.queryByRole('button', {name:'继续批量捕捞'})).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name:'开始新一轮'}));
+  const dialog = within(screen.getByRole('dialog', {name:'重新开始批量捕捞'}));
+  expect(dialog.getByLabelText('扫描起点（北京时间）')).toHaveValue('2026-04-02T12:00');
+  fireEvent.click(dialog.getByRole('button', {name:'取消'}));
+  expect(mining.start).not.toHaveBeenCalled();
 });
 it('shows a target stop even if the saved run was enabled and allows adding to the same round',()=>{
   const m=api({}, {enabled:true,rules:currentDefaultRules(),target:100,mined:106,anchorsDone:13,
