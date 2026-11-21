@@ -86,8 +86,8 @@ export interface FishDirectoryPicker {
   footer: (close: () => void) => ReactNode;
 }
 export const libraryDirectoryAction=`${qualityRowItem} rounded-md transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40`;
-export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker}:{
-  loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
+export function FishLibraryTimeDirectory({name,prefix,description,info,dataActions,transferMenu,items:itemsSource,edits,recordCount,download,renderStudy,renderTemplate,onCopyStudy,onSetHidden,onDeleteRecords,onPurgeDirectory,onRename,empty,kind='time',onOpenChange,openRequest,onSelectDirectory,loading=false,loadError,onRetry,picker,browseRounds=false,loadingStatus}:{
+  browseRounds?:boolean;loadingStatus?:ReactNode;loading?:boolean;loadError?:string;onRetry?:()=>void;name:string;prefix:string;description:string|((items:FishDirectoryItem[])=>string);info:ReactNode;dataActions?:ReactNode;transferMenu?:(actions:FishLibraryExportActions)=>ReactNode;items:FishDirectoryItem[]|(()=>FishDirectoryItem[]);
   edits?:LibraryDirectoryEdits;recordCount:number;download:()=>unknown|Promise<unknown>;
   picker?:FishDirectoryPicker;
   onRename?:(id:string,name:string)=>Promise<boolean>;
@@ -107,7 +107,8 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const [manage,setManage]=useState(false),[activeTemplate,setActiveTemplate]=useState('');
   const [importSelection,setImportSelection]=useState(false);
   const [templateQuery,setTemplateQuery]=useState('');
-  const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted;
+  const [browseByRound,setBrowseByRound]=useState<boolean>();
+  const canSwitchView=browseRounds&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted;
   const [selectedExport,setSelectedExport]=useState<FishLibraryRowExport>();
   const registerExport=useCallback((action:FishLibraryRowExport)=>{
     setSelectedExport(action);
@@ -120,6 +121,10 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const selectionEpoch=useRef(0);
   useEffect(()=>()=>{selectionEpoch.current++;},[]);
   const items = useMemo(() => open ? (typeof itemsSource === 'function' ? itemsSource() : itemsSource) : NO_DIRECTORY_ITEMS, [open,itemsSource]);
+  // Named rounds may share a template, or have no corresponding saved template at all.
+  const roundsView=canSwitchView&&(browseByRound??items.some(item=>!edits?.[item.id]?.hidden&&
+    (!!edits?.[item.id]?.name||!item.templateGroup?.savedTemplate)));
+  const templateView=kind==='template'&&!!renderTemplate&&!picker&&!manage&&!purgeMode&&!showDeleted&&!roundsView;
   const selected=items.find(item=>item.id===selectedId),itemRef=useRef(selected);itemRef.current=selected;
   const openCallback=useRef(onOpenChange);openCallback.current=onOpenChange;const requestRef=useRef(openRequest);requestRef.current=openRequest;
   useEffect(()=>{const request=requestRef.current;if(request){selectionEpoch.current++;setOpen(true);setImportSelection(!!request.importSelection);if(request.selectedId||request.selectedIds!==undefined)setManage(true);setSelectedId(request.selectedId??'');setCheckedIds(request.selectedIds??(request.selectedId?[request.selectedId]:[]));openCallback.current?.(true);}},[openRequest?.key]);
@@ -137,18 +142,22 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const currentLoad=loaded?.id===selectedId?loaded:undefined;
   const snapshot=currentLoad?.study;
   const archiveError=currentLoad?.error;
+  const query=normalizeTemplateQuery(templateQuery);
   const visible=useMemo(()=>items.filter(item=>{
     const hidden=!!edits?.[item.id]?.hidden;
     const group=item.templateGroup;
     if(templateView&&!group?.savedTemplate)return false;
+    if(roundsView&&query){
+      const fields=[edits?.[item.id]?.name,item.label,formatUTC8(item.at),group?.title,group?.originalTitle];
+      if(!fields.some(field=>field&&normalizeTemplateQuery(field).includes(query)))return false;
+    }
     return compactDirectory ? hidden===showDeleted : showDeleted||!hidden;
-  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,compactDirectory,templateView]);
+  }).sort((a,b)=>kind==='algorithm'?a.label.localeCompare(b.label):b.at-a.at||b.id.localeCompare(a.id)),[items,showDeleted,edits,kind,compactDirectory,templateView,roundsView,query]);
   const deleted=items.filter(item=>edits?.[item.id]?.hidden).length,action=libraryDirectoryAction,noun=name.slice(0,-1)+'归档';
   const selectable=visible.filter(item=>purgeMode ? item.purgeable : !edits?.[item.id]?.hidden);
   const checkedSet=new Set(checkedIds),checked=selectable.filter(item=>checkedSet.has(item.id));
-  const query=normalizeTemplateQuery(templateQuery);
   const grouping = useMemo(() => {
-    if (kind !== 'template') return [];
+    if (kind !== 'template' || roundsView) return [];
     const groups = new Map<string,{group:QualityTemplateDirectoryGroup;items:FishDirectoryItem[]}>();
     for (const item of visible) {
       const group = item.templateGroup ?? unknownTemplateGroup;
@@ -158,7 +167,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       else groups.set(group.id,{group,items:[item]});
     }
     return [...groups.values()];
-  },[kind,visible,templateView,query]);
+  },[kind,visible,templateView,query,roundsView]);
   const purge = async () => {
     if (!onPurgeDirectory || busy || !checked.length) return;
     setBusy('purge'); setError(''); setPurgeMessage('');
@@ -199,7 +208,7 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
   const changeOpen=(value:boolean)=>{
     if(!value&&busy==='purge')return;
     selectionEpoch.current++;setOpen(value);onOpenChange?.(value);
-    if(!value){setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
+    if(!value){setBrowseByRound(undefined);setTemplateQuery('');setImportSelection(false);setShowDeleted(false);setActiveTemplate('');setManage(false);setSelectedId('');setCheckedIds([]);setPurgeMode(false);setConfirmPurge(false);setPurgeMessage('');}
   };
   const canExport=!!recordCount&&!busy&&!loading&&!loadError&&!selectedExport?.busy;
   const handleExport=()=>{
@@ -224,6 +233,12 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
       setShowDeleted(!showDeleted);setManage(false);setPurgeMode(false);resetDirectorySelection();
     }}><Undo2 aria-hidden className="mr-2 h-3.5 w-3.5"/>{showDeleted?'返回模板汇总':`已删除目录（${deleted}）`}</DropdownMenuItem>}
   </> : undefined;
+  let emptyMessage=empty;
+  if(showDeleted&&compactDirectory)emptyMessage='没有已删除的目录。';
+  else if(roundsView&&query)emptyMessage='没有匹配的过滤轮次。';
+  else if(browseRounds&&items.length&&deleted===items.length)emptyMessage='过滤目录均已删除，可在右上角菜单查看。';
+  else if(templateView&&items.length)emptyMessage='暂无与已保存模板对应的记录。';
+
   const exportActions={exportLibrary:handleExport,canExportLibrary:canExport,selected:selectedExport,busy:!!busy,directoryActions};
   const settingsEntry = (item: FishDirectoryItem): DirectorySettingsEntry[] => item.settings ? [{
     id:item.id, name:formatUTC8(item.at)+' '+(edits?.[item.id]?.name||item.label), load:item.settings,
@@ -258,12 +273,18 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
             <button type="button" className={action+' ml-auto'} aria-label={'导出'+name+'数据'} title={'导出'+name+'中已保存的记录'} disabled={!canExport} onClick={handleExport}><Download aria-hidden className="h-3 w-3"/>{busy==='export'?'正在导出…':'导出数据'} <span className="font-mono tabular-nums">{recordCount}</span></button>}
         </div>
         {(managedExports&&(busy==='export'||selectedExport?.busy))&&<p role="status" className="text-xs text-muted-foreground">正在导出…</p>}
-        {templateView&&<div className="relative mt-1 max-w-md">
-          <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"/>
-          <input type="search" value={templateQuery} onChange={event=>setTemplateQuery(event.target.value)} aria-label={'搜索'+name+'模板'}
-            placeholder="搜索模板编号、原名或日期…" className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
+        {canSwitchView&&!!items.length&&<div role="group" aria-label="过滤库查看方式" className="flex gap-1 text-xs">
+          {(['按模板','按轮次'] as const).map(label=><button key={label} type="button" aria-pressed={roundsView===(label==='按轮次')}
+            className={action+(roundsView===(label==='按轮次')?' bg-muted text-foreground':'')} disabled={!!busy} onClick={()=>{
+              setBrowseByRound(label==='按轮次');setTemplateQuery('');resetDirectorySelection();
+            }}>{label}</button>)}
         </div>}
-        <DialogDescription className={compactDirectory?"sr-only":"text-[11px]"}>{typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
+        {(templateView||roundsView)&&<div className="relative mt-1 max-w-md">
+          <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"/>
+          <input type="search" value={templateQuery} onChange={event=>setTemplateQuery(event.target.value)} aria-label={'搜索'+name+(roundsView?'轮次':'模板')}
+            placeholder={roundsView?"搜索轮次名称或日期…":"搜索模板编号、原名或日期…"} className="h-8 w-full rounded-md border border-border/60 bg-background pl-8 pr-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"/>
+        </div>}
+        <DialogDescription className={compactDirectory&&(!browseRounds||loading||loadError)?"sr-only":"text-[11px] text-muted-foreground"}>{browseRounds&&(loading||loadError) ? '读取账号保存的过滤轮次' : typeof description==='function' ? open ? description(items) : '' : description}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain" data-testid={prefix+'-directory-scroll'}>
       <h3 className={compactDirectory?"sr-only":"shrink-0 rounded-lg bg-muted/50 px-3 py-2 text-[11px] font-medium"}>{kind==='algorithm'?'算法目录':kind==='template'?'模板目录':'时间目录'}</h3>
@@ -292,9 +313,13 @@ export function FishLibraryTimeDirectory({name,prefix,description,info,dataActio
         </div>}
         {!picker&&!compactDirectory&&!!deleted&&<label className="inline-flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/>显示已删除目录（{deleted}）</label>}
         {error&&<p role="alert" className="text-xs text-destructive">{error}</p>}
-        {loading&&<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>}{loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">{loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}</p>}{!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{showDeleted&&compactDirectory?'没有已删除的目录。':templateView&&items.length?'暂无与已保存模板对应的记录。':empty}</p>}
+        {loading&&(loadingStatus??<p role="status" className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">正在读取{name}，已有数据仍保留…</p>)}
+        {loadError&&<p role="alert" className="rounded-lg border border-destructive/30 p-4 text-xs text-destructive">
+          {loadError}{onRetry&&<button type="button" className="ml-2 underline" onClick={onRetry}>重试读取</button>}
+        </p>}
+        {!loading&&!loadError&&!visible.length&&<p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{emptyMessage}</p>}
         {templateView&&visible.length>0&&!grouping.length&&query&&<p role="status" className="py-5 text-center text-xs text-muted-foreground">没有匹配的模板。</p>}
-        {kind==='template'?grouping.map(({group,items:members},index)=>{
+        {kind==='template'&&!roundsView?grouping.map(({group,items:members},index)=>{
           const containsSelection=members.some(item=>item.id===selectedId);
           const expanded=templateView?activeTemplate===group.id:containsSelection||(expandedGroups[group.id]??index===0);
           const checkedCount=templateView?0:members.filter(item=>checkedSet.has(item.id)).length;
